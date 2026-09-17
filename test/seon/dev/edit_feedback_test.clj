@@ -23,6 +23,19 @@
      ::stdout (:seon.operator.subprocess/output result)
      ::stderr (:seon.operator.subprocess/error-output result)}))
 
+(defn- hook-exit-honest?
+  "The hook exits 0, or 2 with its refusal on stderr — never anything else.
+
+  Exit 2 blocks unconditionally and is the one channel a harness cannot
+  silently drop; codex proved on 2026-09-17 that it surfaces nothing from a
+  PostToolUse `decision: block` alone."
+  [result]
+  (or (zero? (::exit result))
+      (and (= 2 (::exit result))
+           (let [stderr (str (::stderr result))]
+             (or (str/includes? stderr "BLOCKED")
+                 (str/includes? stderr "REFUSED"))))))
+
 (defn- fixture-directory []
   (doto (io/file repo-root "tmp" (str "edit-feedback-" (random-uuid)))
     (.mkdirs)))
@@ -51,7 +64,7 @@
     (try
       (let [result (run-process {::command ["bb" "-e" program]
                                  ::directory repo-root})]
-        (is (zero? (::exit result)) (::stderr result))
+        (is (hook-exit-honest? result) (::stderr result))
         (is (= failure (edn/read-string (::stdout result)))))
       (finally (test-support/delete-recursively! directory)))))
 
@@ -108,7 +121,7 @@
                      ::directory repo-root
                      ::environment {"SEON_HOOK_STATE_DIR" (str directory)}
                      ::deadline-ms (* 1000 test-support/event-backstop-seconds)})
-            _ (is (zero? (::exit result)) (::stderr result))
+            _ (is (hook-exit-honest? result) (::stderr result))
             observed (edn/read-string (::stdout result))
             paths (:seon.probe/paths observed)
             publications (:seon.probe/publications observed)
@@ -154,7 +167,7 @@
                 :tool_input {:file_path (str source)
                              :content "(ns prospective\n"}})})
             response (json/parse-string (str/trim (::stdout result)) true)]
-        (is (zero? (::exit result)) (::stderr result))
+        (is (hook-exit-honest? result) (::stderr result))
         (is (= "block" (:decision response)))
         (is (str/includes? (:reason response) "[error/syntax]")))
       (finally
@@ -186,20 +199,20 @@
       (testing "one exact occurrence is reconstructed and checked"
         (let [result (invoke "(def value 1)" "(def value")
               response (json/parse-string (str/trim (::stdout result)) true)]
-          (is (zero? (::exit result)) (::stderr result))
+          (is (hook-exit-honest? result) (::stderr result))
           (is (= "block" (:decision response)))
           (is (str/includes? (:reason response) "[error/syntax]"))))
       (testing "an ambiguous exact occurrence produces no invented first edit"
         (let [result (invoke " 1)" "")
               response (json/parse-string (str/trim (::stdout result)) true)]
-          (is (zero? (::exit result)) (::stderr result))
+          (is (hook-exit-honest? result) (::stderr result))
           (is (true? (:continue response)))
           (is (nil? (:decision response)))))
       (testing "a reconstruction failure carries its actual exception message"
         (.delete source)
         (let [result (invoke "(def value 1)" "(def value")
               response (json/parse-string (str/trim (::stdout result)) true)]
-          (is (zero? (::exit result)) (::stderr result))
+          (is (hook-exit-honest? result) (::stderr result))
           (is (= "block" (:decision response)))
           (is (str/includes? (:reason response) "prospective.clj"))))
       (finally
@@ -241,7 +254,7 @@
                  :content
                  "{:wrong.namespace/value [:map {:closed true}]}"}})
               response (json/parse-string (str/trim (::stdout result)) true)]
-          (is (zero? (::exit result)) (::stderr result))
+          (is (hook-exit-honest? result) (::stderr result))
           (is (= "block" (:decision response)))
           (is (str/includes? (:reason response)
                              "[error/schema-misplaced-key]"))
@@ -259,7 +272,7 @@
               response (json/parse-string (str/trim (::stdout result)) true)
               feedback
               (get-in response [:hookSpecificOutput :additionalContext])]
-          (is (zero? (::exit result)) (::stderr result))
+          (is (hook-exit-honest? result) (::stderr result))
           (is (true? (:continue response)))
           (is (str/includes? feedback
                              "[warning/schema-exact-reuse]"))
@@ -306,7 +319,7 @@
             response (json/parse-string (str/trim (::stdout result)) true)
             feedback (get-in response
                              [:hookSpecificOutput :additionalContext])]
-        (is (zero? (::exit result)) (::stderr result))
+        (is (hook-exit-honest? result) (::stderr result))
         (is (true? (:continue response)))
         (is (= "block" (:decision response))
             "Unreadable Clojure on disk is a refusal, never an advisory line.")
@@ -353,7 +366,7 @@
             response (json/parse-string (str/trim (::stdout result)) true)
             feedback (get-in response
                              [:hookSpecificOutput :additionalContext])]
-        (is (zero? (::exit result)) (::stderr result))
+        (is (hook-exit-honest? result) (::stderr result))
         (is (true? (:continue response)))
         (is (str/includes? feedback "clj-kondo analysis failed")))
       (finally
@@ -443,7 +456,7 @@
                          "--deps-root" (str repo-root) "-e" expression]
               ::directory repo-root})
             analysis (edn/read-string (str/trim (::stdout result)))]
-        (is (zero? (::exit result)) (::stderr result))
+        (is (hook-exit-honest? result) (::stderr result))
         (is (= :available (:seon.dev.changed-test/host-status analysis)))
         (is (= 'valid
                (get-in analysis
@@ -493,6 +506,13 @@
               (str "*** Begin Patch\n*** Update File: " (relative "nowhere.clj")
                    "\n@@\n-(def a 1)\n+(def a 2)\n*** End Patch")
               (relative "nowhere.clj"))
+             :seon.probe/out-of-order
+             (reconstruct-patched-file
+              (str "*** Begin Patch\n*** Update File: " (relative "updated.clj")
+                   "\n@@ -2,1 +2,1 @@\n-(def value 1)\n+(def value 2)\n"
+                   "@@ -1,1 +1,1 @@\n-(ns updated)\n+(ns renamed)\n"
+                   "*** End Patch")
+              (relative "updated.clj"))
              :seon.probe/unapplicable
              (reconstruct-patched-file
               (str "*** Begin Patch\n*** Update File: " (relative "updated.clj")
@@ -512,7 +532,7 @@
                      ::directory repo-root
                      ::environment {"SEON_PROBE_DIRECTORY" relative}})
             observed (edn/read-string (::stdout result))]
-        (is (zero? (::exit result)) (::stderr result))
+        (is (hook-exit-honest? result) (::stderr result))
         (testing "every header form contributes its exact declared path"
           (is (= (mapv #(str relative "/" %)
                        ["added.clj" "updated.clj" "moved.clj"
@@ -535,6 +555,11 @@
         (testing "a Delete File header needs no prospective content"
           (is (= {:seon.hook.reconstruction/status :deleted}
                  (:seon.probe/deleted observed))))
+        (testing "hunks in any order apply, because the tool accepts any order"
+          (is (= {:seon.hook.reconstruction/status :available
+                  :seon.hook.reconstruction/source "(ns renamed)\n(def value 2)\n"}
+                 (:seon.probe/out-of-order observed))
+              "Refusing an out-of-order hunk is a veto apply_patch would not issue."))
         (testing "an unbuildable prospective file is named, never passed"
           (doseq [key [:seon.probe/unnamed :seon.probe/absent
                        :seon.probe/unapplicable]]
@@ -571,9 +596,17 @@
                                absent "\n@@\n-(def a 1)\n+(def a 2)\n"
                                "*** End Patch")}})})
             response (json/parse-string (str/trim (::stdout result)) true)]
-        (is (zero? (::exit result)) (::stderr result))
+        (is (hook-exit-honest? result) (::stderr result))
         (is (= "block" (:decision response))
             "A path the hook cannot lint is refused, never waved through.")
+        (is (= 2 (::exit result))
+            "A refusal also exits 2, which no harness may silently drop.")
+        (is (str/includes? (::stderr result) (str absent))
+            "The reason reaches stderr, where exit 2 tells the harness to read it.")
+        (is (= (:reason response)
+               (get-in response [:hookSpecificOutput :permissionDecisionReason]))
+            "Both refusal shapes carry the same text for the agent to act on.")
+        (is (= "deny" (get-in response [:hookSpecificOutput :permissionDecision])))
         (is (str/includes? (:reason response) (str absent))))
       (finally (delete-files! [config directory])))))
 
@@ -601,7 +634,7 @@
                                source "\n@@\n-(def value 1)\n"
                                "+(def value (inc 1)\n*** End Patch")}})})
             response (json/parse-string (str/trim (::stdout result)) true)]
-        (is (zero? (::exit result)) (::stderr result))
+        (is (hook-exit-honest? result) (::stderr result))
         (is (= "block" (:decision response))
             "An unmatched delimiter is refused before the bytes land.")
         (is (str/includes? (:reason response) "[error/syntax]")))
@@ -618,7 +651,7 @@
             :tool_name "apply_patch"
             :tool_input {:command "*** Begin Patch\n*** End Patch"}})})
         response (json/parse-string (str/trim (::stdout result)) true)]
-    (is (zero? (::exit result)) (::stderr result))
+    (is (hook-exit-honest? result) (::stderr result))
     (is (= "block" (:decision response))
         "An edit naming no path is an edit the hook cannot check.")
     (is (str/includes? (:reason response) "no file path"))))
@@ -662,7 +695,7 @@
                           :tool_name "exec"
                           :session_id "shell-write-regression"
                           :tool_input {:command command}})})]
-                  (is (zero? (::exit result)) (::stderr result))
+                  (is (hook-exit-honest? result) (::stderr result))
                   (json/parse-string (str/trim (::stdout result)) true)))]
     (try
       (spit config (shell-write-config root))
@@ -693,6 +726,37 @@
           (let [response (event command)]
             (is (= "block" (:decision response)))
             (is (str/includes? (:reason response) "[error/syntax]")))))
+      (testing "a payload-named edit still reports an unnamed shell write"
+        ;; a codex lane fires this hook for `apply_patch` and for nothing
+        ;; else, so its next patch is the first moment an earlier shell
+        ;; write of its own can reach it at all
+        (spit source "(ns probe)\n(def value 1)\n")
+        (is (true? (:continue (event "repair"))))
+        (let [other (io/file directory "sibling.clj")
+              command (str "printf '(ns probe)\\n(def value (inc 1)\\n' > "
+                           (.getPath source))]
+          (spit other "(ns sibling)\n")
+          (is (zero? (::exit (shell command))))
+          (let [result
+                (run-process
+                 {::command [(str (io/file repo-root "bin/seon-hook"))]
+                  ::directory repo-root
+                  ::environment {"SEON_HOOK_CONFIG" (str config)
+                                 "SEON_HOOK_STATE_DIR" (str state)}
+                  ::input
+                  (json/generate-string
+                   {:hook_event_name "PostToolUse"
+                    :tool_name "apply_patch"
+                    :session_id "shell-write-regression"
+                    :tool_input {:command (str "*** Begin Patch\n*** Add File: "
+                                               root "/sibling.clj\n+(ns sibling)\n"
+                                               "*** End Patch")}})})
+                response (json/parse-string (str/trim (::stdout result)) true)]
+            (is (hook-exit-honest? result) (::stderr result))
+            (is (= "block" (:decision response))
+                "The patch was fine; the shell write it never named was not.")
+            (is (str/includes? (:reason response) "probe.clj")))))
+
       (testing "a command that touches no Clojure file costs only the scan"
         (spit source "(ns probe)\n(def value 1)\n")
         (is (true? (:continue (event "repair"))))
@@ -705,3 +769,17 @@
               (str "One derived scan must stay well inside a second of work; "
                    "measured " elapsed-ms " ms including process startup."))))
       (finally (test-support/delete-recursively! directory)))))
+
+(deftest the-development-hook-config-keeps-the-derived-scan
+  ;; The derived scan is off for a config that declares no `:shell-writes`,
+  ;; which is how a fixture opts out. The one checked-in development config
+  ;; is not a fixture: if this key ever disappears, every shell write goes
+  ;; unchecked again and nothing else would say so.
+  (let [config (edn/read-string
+                (slurp (io/file repo-root ".claude/seon-hook.edn")))
+        settings (:shell-writes config)]
+    (is (map? settings)
+        "The development hook config declares the derived shell-write scan.")
+    (is (not (false? (:enabled settings))))
+    (is (= ["src" "test" "resources" "script" "bin"] (:roots settings))
+        "Every first-party source root is scanned; a missing root is a hole.")))

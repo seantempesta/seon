@@ -100,6 +100,23 @@
   (when (seq response)
     (println (json/generate-string response))))
 
+(defn- refuse!
+  "Emit one refusal in every shape a harness is known to read, then exit 2.
+
+  Exit 2 blocks unconditionally and takes precedence over any JSON
+  (`docs/seon/reference/claude-code-hooks-2026-09-17.md` §2), with the
+  reason read from stderr. Codex surfaces a PreToolUse block from the JSON
+  but was proven on 2026-09-17T02:26:41Z to surface NOTHING from a
+  PostToolUse `decision: block` — the probe lane wrote a broken form
+  through its shell tool, the hook blocked, and the lane reported
+  \"NO FEEDBACK\" and carried on. The exit code is the one channel a
+  harness cannot silently drop."
+  [response reason]
+  (output! response)
+  (binding [*out* *err*] (println reason))
+  (flush)
+  (System/exit 2))
+
 ;;; ---------------------------------------------------------------------------
 ;;; File Type Detection
 ;;; ---------------------------------------------------------------------------
@@ -604,8 +621,15 @@
             anchored (when-not (str/blank? anchor)
                        (sublist-index lines [anchor] cursor))
             from (or anchored cursor)
+            ;; hunks usually advance through the file, so the cursor is the
+            ;; cheap first guess — but a patch may order them any way it
+            ;; likes, and refusing an out-of-order hunk is a veto the tool
+            ;; itself would not have issued (one such refusal reached a lane
+            ;; on 2026-09-17T01:39:12Z)
             at (or (sublist-index lines old from)
-                   (trailing-blank-tolerant-index lines old from))]
+                   (trailing-blank-tolerant-index lines old from)
+                   (sublist-index lines old 0)
+                   (trailing-blank-tolerant-index lines old 0))]
         (cond
           unexpected
           {:seon.hook.reconstruction/status :unavailable
@@ -1654,25 +1678,35 @@
                     (.digest digest
                              (java.nio.file.Files/readAllBytes (.toPath file)))))))
 
-(defn- scan-roots [config]
-  (let [roots (get-in config [:shell-writes :roots])]
-    (when-not (and (vector? roots) (seq roots) (every? string? roots))
-      (throw (ex-info "Hook configuration requires shell-write scan roots."
-                      {:seon.hook/config-path [:shell-writes :roots]
-                       :seon.hook/config-file config-path
-                       :seon.hook/config-value roots})))
-    roots))
+(defn- scan-roots
+  "The declared roots, or nil when this config declares no derived scan.
+
+  A config that declares `:shell-writes` must declare its roots — there is
+  no literal fallback. A config that omits the key entirely is a fixture
+  that is not exercising this check; the checked-in development config
+  declares it, and `the-development-hook-config-keeps-the-derived-scan`
+  is the regression that says so."
+  [config]
+  (when-let [settings (:shell-writes config)]
+    (when (get settings :enabled true)
+      (let [roots (:roots settings)]
+        (when-not (and (vector? roots) (seq roots) (every? string? roots))
+          (throw (ex-info "Hook configuration requires shell-write scan roots."
+                          {:seon.hook/config-path [:shell-writes :roots]
+                           :seon.hook/config-file config-path
+                           :seon.hook/config-value roots})))
+        roots))))
 
 (defn- tree-digests
   "Every Clojure file under the declared roots, keyed by its repository path."
-  [config]
+  [roots]
   (into {}
         (comp (mapcat #(file-seq (root-file %)))
               (filter #(.isFile ^java.io.File %))
               (map #(.getPath ^java.io.File %))
               (filter clojure-file?)
               (map (juxt display-path #(content-digest (io/file %)))))
-        (scan-roots config)))
+        roots))
 
 (defn- session-key
   "A file-safe name for one session's recorded digests."
@@ -1690,62 +1724,71 @@
              session-digest-lifetime-ms)
       (.delete file))))
 
-(defn- recorded-digests [session]
+(defn- recorded-digests
+  "The digests this session recorded at its previous event, or nil."
+  [session]
   (try
     (let [file (session-digest-path session)]
       (when (.isFile file)
         (let [recorded (edn/read-string (slurp file))]
-          (when (map? recorded) recorded))))
+          (when (map? recorded) (:seon.hook/digests recorded)))))
     (catch Exception _ nil)))
 
-(defn- record-digests! [session digests]
+(defn- event-agent
+  "The subagent identity a payload carries, when one made this tool call.
+
+  A subagent's tool calls fire its PARENT session's hooks, so `agent_id` is
+  the only thing in the payload that distinguishes them
+  (`docs/seon/reference/claude-code-hooks-2026-09-17.md`)."
+  [event]
+  (let [agent (cond-> {}
+                (:agent_id event) (assoc :seon.hook/agent-id (:agent_id event))
+                (:agent_type event) (assoc :seon.hook/agent-type
+                                           (:agent_type event)))]
+    (when (seq agent) agent)))
+
+(defn- record-digests! [session event digests]
   (let [file (session-digest-path session)]
     (io/make-parents file)
-    (spit file (pr-str digests))
+    (spit file (pr-str (cond-> {:seon.hook/digests digests
+                                :seon.hook/session session
+                                :seon.hook/recorded-at (str (java.time.Instant/now))}
+                         (event-agent event) (merge (event-agent event)))))
     (prune-session-digests!)))
 
-(defn- record-edited-digests!
-  "Fold a payload-named edit into this session's digests, when it has some.
-
-  Without this the next derived scan would re-report files the hook already
-  checked at the edit itself."
-  [session file-paths]
-  (when-let [recorded (recorded-digests session)]
-    (record-digests!
-     session
-     (reduce (fn [digests path]
-               (let [file (io/file (or (absolute-file-path path) path))
-                     key (display-path path)]
-                 (if (and (clojure-file? path) (.isFile file))
-                   (assoc digests key (content-digest file))
-                   (dissoc digests key))))
-             recorded
-             file-paths))))
-
 (defn- derived-write-refusal
-  "Refuse when a tool that named no path left unreadable Clojure on disk.
+  "Refuse when a write the payload never named left unreadable Clojure.
 
   The bytes are already written — a shell write has no payload to check
   before it lands — so the refusal fires the moment the tool returns and
-  names the path and the tool that wrote it."
+  names the path and the tool that wrote it. It runs on EVERY PostToolUse,
+  including a payload-named edit: a codex lane fires this hook only for
+  `apply_patch`, so its next patch is the first moment an earlier shell
+  write of its own can be reported to it at all. Paths the payload named
+  are left to the payload's own check, which already ran."
   [event config]
   (when (and (= "PostToolUse" (:hook_event_name event))
              (get-in config [:shell-writes :enabled] true))
-    (let [session (or (:session_id event) "orchestrator")
+    (when-let [roots (scan-roots config)]
+     (let [session (or (:session_id event) "orchestrator")
           previous (recorded-digests session)
-          digests (tree-digests config)
+          digests (tree-digests roots)
+          named (into #{} (map display-path) (event-file-paths event))
           changed (when previous
                     (vec (sort (keep (fn [[path digest]]
-                                       (when (not= digest (get previous path))
+                                       (when (and (not= digest (get previous path))
+                                                  (not (contains? named path)))
                                          path))
                                      digests))))]
-      (record-digests! session digests)
+      (record-digests! session event digests)
       (when (seq changed)
         (let [analysis (run-clj-kondo {:seon.hook/file-paths changed})
               syntax-errors (filterv #(and (= :error (:level %))
                                            (= :syntax (:type %)))
                                      (:seon.hook.analysis/findings analysis))]
           (log! "DERIVED_WRITE" (str "tool=" (:tool_name event))
+                (str "session=" session)
+                (str "agent=" (pr-str (event-agent event)))
                 (str "changed=" (pr-str changed)))
           (cond
             (analysis-error analysis)
@@ -1757,7 +1800,30 @@
             (str "BLOCKED: " (:tool_name event)
                  " left unreadable Clojure on disk. The bytes are already "
                  "written — repair them before anything else loads them:\n"
-                 (format-clj-kondo-findings syntax-errors))))))))
+                 (format-clj-kondo-findings syntax-errors)))))))))
+
+(defn- refuse-with
+  "Refuse with a response built by `refusal-response`."
+  [response]
+  (refuse! response (:reason response)))
+
+(defn- refusal-response
+  "One PreToolUse refusal, in both shapes a harness may read.
+
+  Claude Code's current form is `hookSpecificOutput.permissionDecision:
+  \"deny\"` with `permissionDecisionReason`
+  (`docs/seon/reference/claude-code-hooks-2026-09-17.md`); the top-level
+  `decision`/`reason` pair is what codex honours today, proven live at
+  2026-09-17T01:39:12Z when a lane received \"Command blocked by PreToolUse
+  hook: BLOCKED: …\". Both carry the SAME text, because the reason is the
+  thing the agent has to act on."
+  [blocked]
+  (let [reason (:reason blocked)]
+    {:decision "block"
+     :reason reason
+     :hookSpecificOutput {:hookEventName "PreToolUse"
+                          :permissionDecision "deny"
+                          :permissionDecisionReason reason}}))
 
 (defn- feedback-response
   "One PostToolUse response: advisory context, and a refusal when one stands.
@@ -1802,16 +1868,18 @@
       pathless-edit?
       (do (log! "PATHLESS_EDIT" (str "tool=" tool-name)
                 (str "input=" (pr-str (:tool_input event))))
-          (output!
-           {:decision "block"
-            :reason (str "BLOCKED: the hook found no file path in this "
+          (refuse-with
+           (refusal-response
+            {:reason (str "BLOCKED: the hook found no file path in this "
                          tool-name
                          " payload, so it cannot check what the edit writes. "
-                         "Reissue the edit naming its file explicitly.")}))
+                         "Reissue the edit naming its file explicitly.")})))
 
       mixed-scope?
-      (output! {:decision "block"
-                :reason "BLOCKED: one edit cannot mix Seon files with paths outside this checkout."})
+      (refuse-with
+       (refusal-response
+        {:reason (str "BLOCKED: one edit cannot mix Seon files with paths "
+                      "outside this checkout.")}))
 
       ;; a tool whose payload names no path can still have written one:
       ;; derive the change from the tree instead of reading "no path named"
@@ -1823,7 +1891,7 @@
                         (derived-write-refusal event config))]
           (if refusal
             (do (log! "DERIVED_BLOCK" (str "tool=" tool-name) refusal)
-                (output! {:decision "block" :reason refusal}))
+                (refuse! {:decision "block" :reason refusal} refusal))
             (output! {:continue true})))
         ;; a derived scan that throws has checked nothing; saying so is the
         ;; only honest answer, because silence here is what let a shell write
@@ -1842,6 +1910,7 @@
           (log! event-name
                 (str "tool=" tool-name)
                 (str "session=" (or (:session_id event) "orchestrator"))
+                (str "agent=" (pr-str (event-agent event)))
                 (str "files=" (str/join "," file-paths)))
           (if (= event-name "PreToolUse")
             (let [path-events (map #(assoc event :seon.hook/file-path %)
@@ -1854,7 +1923,7 @@
               (if blocked
                 (do
                   (log! "CLOJURE_BLOCK" (:reason blocked))
-                  (output! blocked))
+                  (refuse! (refusal-response blocked) (:reason blocked)))
                 (output! {:continue true})))
             (let [path-events (map #(assoc event :seon.hook/file-path %)
                                    file-paths)
@@ -1877,11 +1946,12 @@
                           schema-admission))
                     (conj (current-source-feedback event config)))
                   feedback (vec feedback)
-                  refusal (:seon.hook.lint/refusal lint)]
-              (record-edited-digests! (or (:session_id event) "orchestrator")
-                                      file-paths)
+                  refusal (or (:seon.hook.lint/refusal lint)
+                              (derived-write-refusal event config))]
               (when-not (str/blank? refusal) (log! "CLOJURE_REFUSAL" refusal))
-              (output! (feedback-response feedback refusal)))))
+              (if (str/blank? refusal)
+                (output! (feedback-response feedback refusal))
+                (refuse! (feedback-response feedback refusal) refusal)))))
         (catch Exception e
           (let [message (throwable-message e)
                 stack (with-out-str
