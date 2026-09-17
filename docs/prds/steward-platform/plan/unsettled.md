@@ -2856,3 +2856,11 @@ working tree, never Sonnet.
   section rewritten to that order. Four read-only Opus audits launched (one
   per domain) for the critical private functions: facts, contract
   candidates, breakage, triage order, easy-first list.
+- **First LIVE TRIAL of the loop launched (Opus driver, 17:05Z):** one
+  `public-without-contract` issue generated as an entity on default, started
+  with budget 8 on deepseek-flash; the driver records the opening bytes, every
+  turn, the settlement's test run (does `run-owned` prove completion?), and
+  files every platform defect it meets. Note:
+  `research/live-trial-1-2026-09-17.md`. The loop's pieces exist today
+  (`generate!`, `start!`, `settle-call` runs the task's tests, unchanged-green
+  reuse); the trial finds the cracks before the test system is complete.
