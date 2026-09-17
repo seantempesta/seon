@@ -3554,3 +3554,11 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   error is the cold-worker arm leak (`kernel.clj:307` via `with-arm`,
   foreign interpreter armed at `new-armed`), in the arm-leak lane's hands;
   the plan landing itself is clean.
+- `error-wrapper-enforcement` stopped at a real dependency (`5ac0256b8`):
+  under `:record` a wrapper must record a fault but is armed with no
+  recorder (live probe: invalid input and wrong arity execute the body
+  today). Orchestrator decision: option 2 scoped — the recording operation
+  is acquired at ARM time from the environment's existing fault committer;
+  arming under `:record` refuses without one; `:panic` needs none; the
+  fixture supplies its own committer. Lane resumed with expanded ownership
+  (cluster.clj arming call site, env member if needed).
