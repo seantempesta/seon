@@ -711,3 +711,27 @@
     (is (= ["/outside/reported.clj"]
            (changed published published ["/outside/reported.clj"]))
         "reported paths absent from both digest maps remain analysis inputs")))
+
+(deftest an-activation-closure-with-empty-member-collections-seals
+  ;; A cardinality-many attribute with NO members emits no datoms, so the
+  ;; resulting entity cannot carry the key at all. A closure whose config
+  ;; dials, executable symbols and lookup refs are honestly empty must seal;
+  ;; emptiness is decided at the authority that still sees the supplied
+  ;; value, never by a required key the medium cannot represent.
+  (with-store
+    (fn [opened]
+      (let [published (publish opened digest-a)
+            database (source/database opened (:seon.source/commit-id published))
+            closure (db/pull database
+                             '[* {:seon.source/activation-closure [*]}]
+                             [:seon.source/digest digest-a])
+            stored (:seon.source/activation-closure closure)]
+        (is (true? (:seon.source/built? published)))
+        (is (= digest-a (:seon.activation/source-digest stored)))
+        (is (= #{:seon.source/digest} (set (:seon.activation/schema-keys stored))))
+        (doseq [absent [:seon.activation/config-defaults
+                        :seon.activation/config-required
+                        :seon.activation/executable-symbols
+                        :seon.activation/lookup-refs]]
+          (is (= ::absent (get stored absent ::absent))
+              (str "an empty member collection stores no datom: " absent)))))))

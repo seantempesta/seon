@@ -21,21 +21,37 @@
                     :seon.activation/requested-symbols]],
                   :lookup-refs
                   [:vector {:seon.db/component true} :seon.db/ref],
+                  ;; The STORED closure entity. Every member collection is
+                  ;; optional because a cardinality-many attribute with no
+                  ;; members has NO datoms: `#{}` in transaction data emits
+                  ;; nothing, so "empty" and "absent" are byte-identical in
+                  ;; the resulting entity and a required key here could never
+                  ;; be satisfied by an honest empty closure. The closure is
+                  ;; non-empty by decision at the authority that can still see
+                  ;; the difference: `seon.cluster.source/activation-seal-tx`
+                  ;; refuses `::activation-empty` from the SUPPLIED value
+                  ;; before it becomes datoms.
                   :closure
                   [:map {:seon.db/attributes true}
                    [:seon.activation/source-digest
                     :seon.activation/source-digest]
                    [:seon.activation/schema-keys
+                    {:optional true}
                     :seon.activation/schema-keys]
                    [:seon.activation/required-attributes
+                    {:optional true}
                     :seon.activation/required-attributes]
                    [:seon.activation/config-defaults
+                    {:optional true}
                     :seon.activation/config-defaults]
                    [:seon.activation/config-required
+                    {:optional true}
                     :seon.activation/config-required]
                    [:seon.activation/executable-symbols
+                    {:optional true}
                     :seon.activation/executable-symbols]
                    [:seon.activation/lookup-refs
+                    {:optional true}
                     :seon.activation/lookup-refs]],
                   :missing-fact
                   [:or
