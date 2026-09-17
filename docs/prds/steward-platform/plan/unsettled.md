@@ -3420,3 +3420,23 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   measurements; wedge vs slow is the question.
 - `publication-report-projection` landed `ac13b8b4d` (db.clj projection
   world completed; source fixtures) and continues.
+
+## 2026-09-18 ~02:45Z — revert gate: 11F/5E, three classes, none the predicate's
+
+- `predicate-revert-gate-2.log` (HEAD `ad5af129f` + the nine reverted
+  files, 120 tests): 11F/5E — the 25F/5E consolidation regression is
+  confirmed gone. What remains is ours, three classes:
+  (1) `seon.instrument-test/refusal-value-projection…` — 940f4b426 moved
+  the offending value to the LEAF (the ruled PRD direction); the test
+  asserts the container shape → Opus agent updating it to the ruled
+  behaviour while keeping the "HTML keeps the whole value" guarantee;
+  (2) "A different SCI context is already armed on this thread" now in
+  `seon.cluster.message-test` (2) and `seon.instrument-test` (1) with NO
+  source-test in the worker — the arm leak is a standalone defect, not a
+  cascade; a sol lane takes it at the next free slot (kernel/eval owner);
+  (3) `my.plan-test` (4): two post-reset fixture refusals ("Agents retain
+  their identities"; `:my.plan/agent` required shape) and
+  `seon.plan/ready-subjects` returning an error map where an int is
+  declared (triage #7 territory) — a lane at the next free slot.
+  Recording refused (`test-definition-absent`) — the stage-1 lane's
+  runner-test symbol work.
