@@ -541,6 +541,25 @@ transaction metadata every admitted `transact!` already carries — root or a
 system process: no per-write bound; an agent user: the dial. No new
 access-control mechanism.
 
+### 1s. Ruling 2026-09-18 ~07:40Z — acquisition decides by digest equality, not authorship
+
+Owner: "It isn't really about 'agent authored'; it really is: is there a
+functional difference between symbols? … do what you think is correct and
+is simple and powerful." Ruling (orchestrator, on that authority): when the
+cluster's base SCI context is derived, a function row references the loaded
+JVM Var whenever its `:seon.program/analyzed-source-digest` equals the core
+row's digest for that name (the override changed nothing → native
+execution), and is interpreted in SCI only when the digest differs or no core
+row exists (the interrupt bound is the price of code the runtime has not
+shipped). Provenance (`:core`/`:agent`) remains the admission fact; it no
+longer decides execution by itself. Consequences: many clusters on one base
+run native for everything identical to the runtime and interpret only their
+own genuine changes; the accepted-row install path applies the same rule.
+Measure first: how many agent rows are digest-equal to a core row today, and
+the per-call cost of an interpreted function vs its JVM twin. Slice owner:
+`seon.sci.eval/base-ctx` and the accepted-row install (eval.clj), launched
+when the wrapper lane releases the file.
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
