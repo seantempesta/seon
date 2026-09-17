@@ -3319,3 +3319,20 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   B1 and the error-entities slices.**
 - `2a8a61612` (predictable-reset item 1): clusters boot without test
   namespaces (§1n); lane continues on the HEAD-exact gate snapshot.
+
+## 2026-09-18 ~00:50Z — transaction-report contracts landed; B6 launched
+
+- `transaction-report-schema` landed `d9e109b18` (sol died at capacity
+  mid-task with 552k tokens; resumed on astra low per the owner's fallback
+  rule, session intact): `seon.db/transact!` and `transact-call` outputs
+  declared from Datahike's report shape; seon.db-test 57 tests green; the
+  four-namespace sweep (turn, message, issue) shows 9F/10E, all
+  pre-existing consumer reds recorded as findings in the landing note, no
+  new output-contract refusals. db.clj free again.
+- Launched `dead-turn-proc-visible` (B6, sol): agent procs in
+  runtime_status; a proc death is a fault naming the agent and a durable
+  failed state (1m); the mailbox→turn drop counted; partitioned
+  fault-evidence admission so classifying keys survive the cap.
+- Owner (00:35Z): the error-entities implementation starts when the revised
+  PRD lands (manifest slice, wrapper enforcement, B1 alongside); render
+  pairs stay schema properties (1p).
