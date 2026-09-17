@@ -2565,3 +2565,16 @@ working tree, never Sonnet.
   reload. Retrying the adoption, timed (`adopt-0525Z.log`). Owner for the
   cut: astra, the moment an editing slot frees (the integrator owns the
   validator cost and is mid-rebase; do not fold it there).
+- **Adoption retry timed out again at 181 s** (`init-lifecycle-97908.log`).
+  Root: `lifecycle-lock-bound-ms` = the request's
+  `:seon.config.operator/event-silence-backstop-ms` (never carried) or the
+  constant `state/lifecycle-lock-timeout-ms`, applied as a TOTAL hold bound
+  to an operation that legitimately holds the lock for its whole duration;
+  the adoption itself is the "stuck holder". Default (pid 94566) is up but
+  UNADOPTED — no live proofs until this lands. S3 stopped (its live proof is
+  blocked anyway; session preserved) to keep the cap; astra
+  `adoption-margin` launched at high effort: (A) hold bound = per-phase
+  liveness from the declared silence backstop, request carries the config
+  fact; (B) per-phase elapsed instrumentation + cut the biggest costs;
+  deliverable = a converged adoption on pid 94566 with phase timings.
+  Editing lanes: integrator, guardrails, stage 2, adoption-margin.
