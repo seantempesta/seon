@@ -109,9 +109,9 @@ a published graph 32 commits behind HEAD.
 - `seon.oversight-test`: **5 tests, 46 assertions, 0 failures, 0 errors**.
 - `seon.oversight-test seon.cluster.mcp-test`: the owned oversight and runtime
   observation regressions passed. The namespace run ended at **16 tests, 99
-  assertions, 4 failures, 1 error** in unrelated pre-existing MCP rendering,
-  symbol-expectation, and config-reconciliation cases. None reaches the
-  observation change.
+  assertions, 4 failures, 1 error** in MCP rendering, symbol-expectation, and
+  config-reconciliation cases outside the observation assertions. The lane
+  did not establish their cause and makes no attribution for them.
 - `seon.cluster.armed-test`: the existing first-proc-fault regression reached
   the injected durable fault, then found `:seon.error/proc` and
   `:seon.error/process` absent from the root error pull. Those values now live
