@@ -373,13 +373,12 @@
 (deftest a-sci-only-arity-miss-names-its-program-graph-arglists
   (test-support/with-database
    (fn [connection]
-     (let [function-symbol 'my.agents.reporter/largest
-           registration (db/transact!
+     (let [function-symbol 'seon.instrument-test/agent-largest
+           registration (test-support/transacted!
               connection
-              [{:seon.fn/sym (str function-symbol)
-                :seon.schema.admission/source :agent
-                :seon.fn/ns {:seon.ns/name 'my.agents.reporter}
-                :seon.fn/arglists "([rows])"}])
+              [(test-support/program-fn-row
+                (db/db connection) function-symbol
+                "(defn agent-largest [rows] rows)")])
            projection (schema/build-projection (schema/snapshot))
            wrapped (instrument/wrap-interpreted
                     function-symbol
