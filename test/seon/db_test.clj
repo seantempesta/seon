@@ -65,8 +65,7 @@
 (def ^:private schema-family-query
   '[:find [?key ...]
     :where
-    [?reference :seon.schema/key :seon.message/id]
-    [?schema :seon.schema/references ?reference]
+    [?schema :seon.schema/references :seon.message/id]
     [?schema :seon.db/attributes true]
     [?schema :seon.schema/key ?key]])
 
@@ -74,8 +73,7 @@
   '[:find [?key ...]
     :in $ ?sample
     :where
-    [?reference :seon.schema/key :seon.message/id]
-    [?schema :seon.schema/references ?reference]
+    [?schema :seon.schema/references :seon.message/id]
     [?schema :seon.db/attributes true]
     [?schema :seon.schema/key ?key]])
 
@@ -157,7 +155,7 @@
    (fn [connection]
      (let [database @connection
            ids (d/q '[:find [?function ...]
-                      :where [?function :seon.fn/sym "my.message/send"]]
+                      :where [?function :seon.fn/sym my.message/send]]
                     database)]
        (is (seq ids))
        (without-handed-projection
@@ -204,7 +202,11 @@
      (without-handed-projection
       (fn []
         (let [expected [:seon.message/message]
-              _ (db/q schema-family-query database)
+              ;; Warm the exact query plan being measured on both paths.
+              ;; Warming schema-family-query leaves the wrapped decode plan
+              ;; for this different :in form cold on its first timed sample.
+              _ (db/q uncached-schema-family-query database -1)
+              _ (d/q uncached-schema-family-query database -2)
               raw
               (mapv
                (fn [sample]
@@ -1534,7 +1536,7 @@
 (deftest final-entity-keyword-sets-are-not-lookup-refs
   (test-support/with-database
    (fn [connection]
-     (let [row (test-support/program-fn-row "seon.db/final-keyword-set-fixture")
+     (let [row (test-support/program-fn-row (db/db connection) 'seon.db/final-keyword-set-fixture "(defn final-keyword-set-fixture [] true)")
            function-id [:seon.fn/sym (:seon.fn/sym row)]
            keywords #{:seon.agent/id :seon.db/db}]
        (test-support/transacted!
@@ -1620,25 +1622,25 @@
 (deftest a-create-is-validated-complete-while-an-upsert-validates-the-merged-row
   (test-support/with-database
    (fn [connection]
-     (let [existing (db/pull (db/db connection) '[*] [:seon.fn/sym "seon.id/id"])]
+     (let [existing (db/pull (db/db connection) '[*] [:seon.fn/sym (quote seon.id/id)])]
        (is (some? (:db/id existing)) "the canonical fixture carries a complete program row")
        (test-support/transacted! connection
-                                 [{:seon.fn/sym "seon.id/id"
+                                 [{:seon.fn/sym (quote seon.id/id)
                                    :seon.fn/doc "updated documentation"}])
-       (let [updated (db/pull (db/db connection) '[*] [:seon.fn/sym "seon.id/id"])]
+       (let [updated (db/pull (db/db connection) '[*] [:seon.fn/sym (quote seon.id/id)])]
          (is (= "updated documentation" (:seon.fn/doc updated))
              "a sparse upsert of an existing row is the ruled partial-upsert behaviour")
          (is (= (:db/id (:seon.fn/ns existing)) (:db/id (:seon.fn/ns updated)))
              "the merged row still carries the keys the submission omitted")))
      (doseq [[entity identities]
-             [[{:seon.fn/sym "seon.source.test/incomplete" :seon.fn/doc "incomplete"}
-               {:seon.fn/sym "seon.source.test/incomplete"}]
-              [{:seon.test/sym "seon.source.test/incomplete-test"}
-               {:seon.test/sym "seon.source.test/incomplete-test"}]]]
+             [[{:seon.fn/sym (quote seon.source.test/incomplete) :seon.fn/doc "incomplete"}
+               {:seon.fn/sym (quote seon.source.test/incomplete)}]
+              [{:seon.test/sym (quote seon.source.test/incomplete-test)}
+               {:seon.test/sym (quote seon.source.test/incomplete-test)}]]]
        (let [basis (db/basis-t (db/db connection))
              refusal (db/transact! connection [entity])]
          (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
-         (is (= :seon.schema.admission/source (:seon.db/attribute refusal))
+         (is (= :seon.program/analyzed-source-digest (:seon.db/attribute refusal))
              "the refusal names the missing required key")
          (is (= :seon.error/unknown (:seon.db/offending refusal)))
          (is (= identities (get-in refusal [:seon.error/data :seon.db/entity]))
@@ -1661,47 +1663,40 @@
 (deftest required-program-relations-name-the-surviving-referrer
   (test-support/with-database
    (fn [connection]
-     (test-support/transacted!
-      connection [{:seon.agent/id "root"}
-                  [:db.fn/call #'schedule/root-maintenance-seed-call]])
-     (let [database (db/db connection)
-           [task-id function]
-           (first (sort (db/q '[:find ?task-id ?function
-                                :where
-                                [?task :seon.schedule.task/id ?task-id]
-                                [?task :seon.schedule.task/function ?f]
-                                [?f :seon.fn/sym ?function]] database)))
-           namespace-name 'seon.id
-           functions (set (db/q '[:find [?symbol ...]
-                                  :in $ ?name
-                                  :where
-                                  [?ns :seon.ns/name ?name]
-                                  [?fn :seon.fn/ns ?ns]
-                                  [?fn :seon.fn/sym ?symbol]]
-                                database namespace-name))]
-       (is (seq functions))
-       (is (some? task-id))
-       (doseq [[target attribute expected]
-               [[[:seon.ns/name namespace-name] :seon.fn/ns functions]
-                [[:seon.fn/sym function] :seon.schedule.task/function #{task-id}]]]
-         (let [basis (:max-tx @connection)
-               refusal (db/transact! connection [[:db/retractEntity target]])
-               entity (get-in refusal [:seon.error/data :seon.db/entity])]
-           (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
-           (is (= attribute (:seon.db/attribute refusal)))
-           (is (some expected (vals entity)) (pr-str refusal))
-           (is (= basis (:max-tx @connection)))))))))
+     (let [namespace-name (symbol "reset.required")
+           function (symbol (str namespace-name) "target")]
+       (test-support/transacted!
+        connection [{:seon.agent/id "root"}
+                    {:seon.ns/name namespace-name}
+                    (test-support/program-fn-row (db/db connection) function "(defn target [] nil)")
+                    [:db.fn/call #'schedule/root-maintenance-seed-call]])
+       (let [task-id (first (sort (db/q '[:find [?id ...] :where [_ :seon.schedule.task/id ?id]]
+                                        (db/db connection))))]
+         (is (some? task-id))
+         (test-support/transacted!
+          connection [[:db/add [:seon.schedule.task/id task-id]
+                       :seon.schedule.task/function [:seon.fn/sym function]]])
+         (doseq [[target attribute expected]
+                 [[[:seon.ns/name namespace-name] :seon.fn/ns function]
+                  [[:seon.fn/sym function] :seon.schedule.task/function task-id]]]
+           (let [basis (db/basis-t (db/db connection))
+                 refusal (db/transact! connection [[:db/retractEntity target]])
+                 entity (get-in refusal [:seon.error/data :seon.db/entity])]
+             (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+             (is (= attribute (:seon.db/attribute refusal)))
+             (is (some #{expected} (vals entity)) (pr-str refusal))
+             (is (= basis (db/basis-t (db/db connection)))))))))))
 
 (deftest arity-components-and-callers-are-checked-in-the-final-state
   (test-support/with-database
    (fn [connection]
      (let [projection (db/carried-projection (db/db connection))
            forms (:seon.schema.projection/forms projection)
-           callee "sample.arity/target"
-           caller "sample.arity/caller"
+           callee 'sample.arity/target
+           caller 'sample.arity/caller
            row (program/with-contract-facts
                 {:seon.program/row
-                 (assoc (test-support/program-fn-row callee)
+                 (assoc (test-support/program-fn-row (db/db connection) callee "(defn target [x] x)")
                         :seon.schema.admission/source :agent
                         :seon.fn/source "(defn target [x] x)"
                         :seon.fn/arglists "([x])"
@@ -1716,7 +1711,7 @@
         connection
         [{:seon.ns/name 'sample.arity}
          row
-         (assoc (test-support/program-fn-row caller)
+         (assoc (test-support/program-fn-row (db/db connection) caller "(defn caller [x] (target x))")
                 :seon.schema.admission/source :agent
                 :seon.fn/source "(defn caller [x] (target x))"
                 :seon.fn/arglists "([x])"
@@ -1746,7 +1741,7 @@
 (deftest render-declarations-require-their-final-function-row
   (test-support/with-database
    (fn [connection]
-     (let [renderer 'sample.render/ai
+     (let [renderer (symbol "sample.render" "ai")
            schema-key ::render-target
            definition [:map {:seon.render/ai renderer}]
            row (first (schema/canonical-schema-rows {schema-key definition}))
@@ -1761,21 +1756,21 @@
        (test-support/transacted!
         connection
         [{:seon.ns/name 'sample.render}
-         (assoc (test-support/program-fn-row renderer)
+         (assoc (test-support/program-fn-row (db/db connection) renderer "(defn ai [value] value)")
                 :seon.schema.admission/source :agent
                 :seon.fn/source "(defn ai [value] value)"
                 :seon.fn/arglists "([value])"
                 :seon.fn/private? false)
          row])
-       (let [refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym (str renderer)]]])]
+       (let [refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym renderer]]])]
          (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
          (is (= expected (get-in refusal [:seon.error/data :seon.render/declarations]))))
        (test-support/transacted!
         connection
         [[:db/retractEntity [:seon.schema/key schema-key]]
-         [:db/retractEntity [:seon.fn/sym (str renderer)]]])
+         [:db/retractEntity [:seon.fn/sym renderer]]])
        (is (nil? (:db/id (db/pull (db/db connection) [:db/id]
-                                 [:seon.fn/sym (str renderer)]))))))))
+                                 [:seon.fn/sym renderer]))))))))
 
 (def ^:private wide-attribute-count 1001)
 

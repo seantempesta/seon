@@ -2257,9 +2257,11 @@
 
 (def ^:private external-sink-reach-rules
   '[[(reaches-external-sink ?function ?sink)
-     [?function :seon.fn/calls ?sink]]
+     [?function :seon.fn/calls ?sink-symbol]
+       [?sink :seon.fn/sym ?sink-symbol]]
     [(reaches-external-sink ?function ?sink)
-     [?function :seon.fn/calls ?called]
+     [?function :seon.fn/calls ?called-symbol]
+       [?called :seon.fn/sym ?called-symbol]
      (reaches-external-sink ?called ?sink)]])
 
 (defn- diff-refusal
@@ -2280,7 +2282,7 @@
   [callee]
   (let [{namespace-value :ns name-value :name} (meta callee)]
     (when (and namespace-value name-value)
-      (str namespace-value "/" name-value))))
+      (symbol (str namespace-value) (str name-value)))))
 
 (defn- external-sinks
   [database function-symbol]
@@ -2386,8 +2388,7 @@
        [?function :seon.fn/sym ?function-symbol]
        [?function :seon.fn/arities ?arity]
        [?arity :seon.fn.arity/order ?arity-order]
-       [?arity :seon.fn.arity/output-refs ?schema]
-       [?schema :seon.schema/key ?schema-key]]
+       [?arity :seon.fn.arity/output-refs ?schema-key]]
      database function-symbol arity-order))
 
 (defn- terminal-schema-key
@@ -2858,7 +2859,9 @@
   "Datahike map syntax admits a collection or one scalar/identity lookup ref."
   [database attribute value]
   (if (and (coll? value) (not (map? value))
-           (not (and (= 2 (count value))
+           (not (and (db.utils/ref? database attribute)
+                     (sequential? value)
+                     (= 2 (count value))
                      (keyword? (first value))
                      (db.utils/is-attr? database (first value) :db.unique/identity)
                      (not (datahike.schema/entity-spec-attr? attribute)))))
@@ -3028,38 +3031,9 @@
       (update :seon.error/message #(str % " Entity: " (pr-str identities) "."))
       (assoc-in [:seon.error/data ::entity] identities)))
 
-(defn- write-tombstone-validator
-  "A retained program identity has no indexer-owned definition facts.
-   Runtime-owned attributes remain declared and validated by their own entries."
-  [projection schema-key]
-  (schema/projection-cache-value
-   projection [::write-tombstone-validator schema-key]
-   (fn []
-     (let [forms (:seon.schema.projection/forms projection)
-           identity-attrs (into #{}
-                                (keep (fn [[attribute form]]
-                                        (when (= schema-key
-                                                 (:seon.program/row-schema
-                                                  (schema.form/attr-form-properties form)))
-                                          attribute)))
-                                forms)
-           entries (schema.form/map-entries
-                    (schema.datahike/resolve-malli-form-in projection schema-key))
-           owned (into #{}
-                       (comp (remove #(or (identity-attrs (first %))
-                                          (:seon.program/written-by
-                                           (when (map? (second %)) (second %)))))
-                             (map first))
-                       entries)]
-       (when (seq identity-attrs)
-         (m/validator
-          [:and (into [:map] (remove #(owned (first %))) entries)
-           [:fn (fn [row] (not-any? #(contains? row %) owned))]]
-          {:registry (:seon.schema.projection/registry projection)}))))))
-
 (defn- write-entity-error
   "Validate the whole resulting entity, including identities present before a retraction."
-  [database projection attribute-plans entity-id identities row before]
+  [database projection attribute-plans entity-id identities row]
   (when (seq row)
     (let [forms (:seon.schema.projection/forms projection)
           schemas (write-entity-schemas projection)
@@ -3075,16 +3049,7 @@
       (some
        (fn [schema-key]
          (when-not
-          (or ((write-validator projection schema-key) normalized)
-              (when-let [validate-tombstone
-                         (write-tombstone-validator projection schema-key)]
-                (and (some (fn [[attribute value]]
-                             (and (= schema-key
-                                     (:seon.program/row-schema
-                                      (schema.form/attr-form-properties (get forms attribute))))
-                                  (seq (d/datoms before :eavt entity-id attribute value))))
-                           identities)
-                     (validate-tombstone normalized))))
+          ((write-validator projection schema-key) normalized)
            (let [explain (schema/projection-cache-value
                           projection [::write-explainer schema-key]
                           #(schema/projection-explainer projection schema-key))
@@ -3202,7 +3167,7 @@
                    (keep (fn [property]
                            (let [renderer (get properties property)]
                              (when (and (qualified-symbol? renderer)
-                                        (not (db.utils/entid database [:seon.fn/sym (str renderer)])))
+                                        (not (db.utils/entid database [:seon.fn/sym renderer])))
                                {:seon.schema/key schema-key
                                 :seon.render/property property
                                 :seon.render/function renderer})))
@@ -3224,6 +3189,117 @@
         :seon.error/diagnostic-cause :seon.render/function
         :seon.error/diagnostic-evidence {:seon.render/declarations missing}
         :seon.error/data {:seon.render/declarations missing}}))))
+
+(defn- removed-definition-error
+  "Check surviving names against the identities removed by an admitted change."
+  [database removed identity-attrs]
+  (let [breaks
+        (into []
+              (mapcat
+               (fn [identities]
+                 (let [function-symbol (:seon.fn/sym identities)
+                       namespace-symbol (:seon.ns/name identities)
+                       schema-key (:seon.schema/key identities)
+                       obligations (concat
+                                    (when function-symbol
+                                      (map #(vector % function-symbol)
+                                           [:seon.fn/calls :seon.fn/references :seon.test/subject
+                                            :seon.effect/capability]))
+                                    (when namespace-symbol
+                                      [[:seon.ns/requires namespace-symbol]])
+                                    (when schema-key
+                                      (map #(vector % schema-key)
+                                           [:seon.fn/writes :seon.schema/references
+                                            :seon.fn.arity/input-refs :seon.fn.arity/output-refs
+                                            :seon.fn.arity/guard-refs])))]
+                   (for [[attribute target] obligations
+                         datom (d/datoms database :avet attribute target)
+                         :when (or (not= :seon.effect/capability attribute)
+                                   (seq (d/datoms database :eavt (:e datom) :seon.fn/sym)))]
+                     {:seon.program/subject target
+                      :seon.program/relation attribute
+                      :seon.program/referrer
+                      (into {}
+                            (keep (fn [fact]
+                                    (when (identity-attrs (:a fact))
+                                      [(:a fact) (:v fact)])))
+                            (mapcat #(d/datoms database :eavt %)
+                                    (cons (:e datom)
+                                          (map :e (d/datoms database :avet :seon.fn/arities (:e datom))))))
+                      :db/id (:e datom)}))))
+              removed)]
+    (when (seq breaks)
+      (let [breaks (vec (sort-by pr-str breaks))]
+        (diagnostic
+         {:seon.error/kind ::invalid-write
+          ::transaction-refused true
+          :seon.error/message "Program deletion leaves surviving referrers. Repair or retract every named referrer in the same transaction."
+          :seon.error/diagnostic-layer :database-write
+          :seon.error/diagnostic-operation 'seon.db/transact!
+          :seon.error/diagnostic-member :seon.program/referrer
+          :seon.error/diagnostic-expected :seon.program/deletion-row
+          :seon.error/diagnostic-offending breaks
+          :seon.error/diagnostic-cause :seon.program/referrer
+          :seon.error/diagnostic-evidence {:seon.program/referrers breaks}
+          :seon.error/data {:seon.program/referrers breaks}})))))
+
+(defn deletion-error
+  "Refuse a publication removing definitions still named in its final database.
+   The publisher compares its immutable expected head with the completed candidate;
+   its branch compare-and-set must still verify that expected head when publishing."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
+                  [:maybe :seon.error/value]]}
+  [before database]
+  (let [identity-attrs (set/union (set (identity-attributes before))
+                                  (set (identity-attributes database)))
+        removed (into []
+                      (mapcat (fn [attribute]
+                                (keep (fn [datom]
+                                        (when-not (db.utils/entid database [attribute (:v datom)])
+                                          {attribute (:v datom)}))
+                                      (d/datoms before :avet attribute))))
+                      [:seon.fn/sym :seon.ns/name :seon.schema/key])]
+    (removed-definition-error database removed identity-attrs)))
+
+(defn- write-agent-retraction-error
+  [effective-datoms]
+  (let [removed
+        (into []
+              (comp (filter #(and (= :seon.agent/id (:a %))
+                                  (false? (:added %))))
+                    (map #(hash-map :seon.agent/id (:v %) :db/id (:e %)))
+                    (distinct))
+              effective-datoms)]
+    (when (seq removed)
+      (diagnostic
+       {:seon.error/kind ::invalid-write
+        ::transaction-refused true
+        :seon.error/message "Agents retain their identities. Archive the agent instead of retracting or renaming it."
+        :seon.error/diagnostic-layer :database-write
+        :seon.error/diagnostic-operation 'seon.db/transact!
+        :seon.error/diagnostic-member :seon.agent/id
+        :seon.error/diagnostic-expected :seon.agent/archived-tx
+        :seon.error/diagnostic-offending removed
+        :seon.error/diagnostic-cause :seon.agent/id
+        :seon.error/diagnostic-evidence {:seon.program/referrers removed}
+        :seon.error/data {:seon.program/referrers removed}}))))
+
+(defn- write-deletion-error
+  [before database affected identity-attrs]
+  (let [removed
+        (into []
+              (keep (fn [entity-id]
+                      (let [identities
+                            (into {}
+                                  (keep (fn [datom]
+                                          (when (and (identity-attrs (:a datom))
+                                                     (not (db.utils/entid database
+                                                                          [(:a datom) (:v datom)])))
+                                            [(:a datom) (:v datom)])))
+                                  (d/datoms before :eavt entity-id))]
+                        (when (seq identities) identities))))
+              affected)]
+    (removed-definition-error database removed identity-attrs)))
 
 (defn- write-report-error
   "One final check for native operations and all expanded transaction-function output."
@@ -3262,6 +3338,8 @@
                       (select-keys (write-entity-value database projection attribute-plans (:e datom))
                                    identity-attrs)))))))
            attempted)
+     (write-agent-retraction-error (:tx-data report))
+     (write-deletion-error before database affected identity-attrs)
      (some (fn [entity-id]
              (let [row (write-entity-value database projection attribute-plans entity-id)
                    prior-identities (into {}
@@ -3270,7 +3348,7 @@
                                                     [(:a datom) (:v datom)])))
                                           (d/datoms before :eavt entity-id))
                    identities (merge prior-identities (select-keys row identity-attrs))]
-               (write-entity-error database projection attribute-plans entity-id identities row before)))
+               (write-entity-error database projection attribute-plans entity-id identities row)))
            affected)
      (when (some (comp #{:seon.schema/form :seon.schema/key :seon.fn/sym} :a)
                  (concat attempted (:tx-data report)))

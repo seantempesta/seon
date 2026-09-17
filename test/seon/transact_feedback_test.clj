@@ -3,12 +3,24 @@
             [datahike.api :as d]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
+            [seon.cluster.agent :as agent]
+            [seon.turn :as turn]
+            [seon.sci.eval :as evaluation]
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
 
 (deftest raw-write-maps-select-only-their-asserted-required-identity
   (test-support/with-database
    (fn [connection]
+     (test-support/seed-cluster! connection "feedback")
+     (test-support/transacted! connection
+                              (agent/creation-tx {:seon.agent/id "feedback"
+                                                  :seon.cluster/name "feedback"
+                                                  :seon.ns/name 'feedback.agent}))
+     (test-support/transacted! connection
+                              (turn/open-tx {:seon.turn/id "reverse-turn"
+                                             :seon.turn/agent [:seon.agent/id "feedback"]
+                                             :seon.turn/opened-tx "datomic.tx"}))
      (let [accepted (db/transact! connection
                                  [{:seon.problems/id "x"}
                                   [:db/add "reverse-turn" :seon.turn/id "reverse-turn"]
@@ -36,7 +48,8 @@
                                 [{:seon.problems/id "nested"
                                   :seon.turn/_attempts [{:seon.turn/id 42}]}])]
        (is (= :seon.db/invalid-write (:seon.error/kind refused)))
-       (is (= [0 :seon.cluster.eval/run] (:seon.db/path refused)))
+       (is (= [:seon.cluster.eval/run] (vec (rest (:seon.db/path refused)))))
+       (is (int? (first (:seon.db/path refused))))
        (is (str/includes? (:seon.error/message refused) ":seon.cluster.eval/run"))
        (is (= :seon.db/invalid-write (:seon.error/kind wrong)))
        (is (= [0 :my.plan.item/title] (:seon.db/path wrong)))
@@ -50,7 +63,10 @@
     (is (= :seon.db/invalid-write (:seon.error/kind result)) (pr-str result))
     (is (= attribute (:seon.db/attribute result)))
     (is (= offending (:seon.db/offending result)))
-    (is (= path (:seon.db/path result)))
+    (if (= :seon.error/unknown offending)
+      (do (is (int? (first (:seon.db/path result))))
+          (is (= (rest path) (rest (:seon.db/path result)))))
+      (is (= path (:seon.db/path result))))
     (is (= before (:t @connection)) "a refusal commits nothing")
     (is (= :database-write (get-in result [:seon.error/data :seon.error/diagnostic-layer])))
     result))
@@ -72,6 +88,8 @@
        (let [forms (:seon.schema.projection/forms (schema/handed-projection))
              projection (schema/declaration-projection
                          (assoc forms :my.plan.item/title [:string {:min 8}]))]
+         (db/carry-connection-projection-state!
+          connection (evaluation/projection-state @connection projection))
          (schema/call-with-projection
           projection
           #(refused connection [[:db/add "feedback/projected" :my.plan.item/title "short"]]

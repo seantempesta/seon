@@ -11,7 +11,7 @@
 (defn render-owner [definition] (:seon.render/ai definition))
 (defn task-target [x] x)
 (defn task-owner [task] (:seon.fn/sym task))
-(def task {:seon.fn/sym "sample.call-declarations/task-target"})
+(def task {:seon.fn/sym 'sample.call-declarations/task-target})
 (deftest reaches-declarations
   (is (graph))
   (is (render-owner {}))

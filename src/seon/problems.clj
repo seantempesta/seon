@@ -109,7 +109,7 @@
   "Errors ordered by the sum of their occurrence counts."
   [database]
   (->> (db/q '[:find [(pull ?error
-                            [* {:seon.error/fn [:db/id :seon.fn/sym]}
+                            [*
                              {:seon.error/occurrences
                               [* {:seon.error.occurrence/turn [:db/id :seon.turn/id]}
                                  {:seon.error.occurrence/agent [:db/id :seon.agent/id]}]}]) ...]

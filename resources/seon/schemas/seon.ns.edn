@@ -29,7 +29,7 @@
              :seon.program/written-by seon.cluster.agent/steward-call}
             :seon.ns/steward]],
           :refers [:set #:seon.db{:component true} :seon.db/ref],
-          :requires [:set :seon.db/ref],
+          :requires [:set {:seon.db/index true} :symbol],
           :source [:string {:min 1}],
           :steward
           [:and

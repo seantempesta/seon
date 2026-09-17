@@ -236,7 +236,7 @@
         arity? (= :malli.core/invalid-arity kind)]
     (error/diagnostic
      {:seon.error/kind ::contract-violated
-      :seon.instrument/contract-violated (str function-symbol)
+      :seon.instrument/contract-violated function-symbol
       :seon.error/message
       (if arity?
         (str "Wrong number of args (" (:arity data) ") passed to: "
@@ -256,7 +256,7 @@
       (cond-> {::malli kind
                ::arm (if (= :malli.core/invalid-output kind) :output :input)}
         arity? (assoc ::arity (:arity data))
-        function-symbol (assoc ::fn (str function-symbol)))})))
+        function-symbol (assoc ::fn function-symbol))})))
 
 (defn- supplied-entry-problems
   [function-symbol]
@@ -400,7 +400,7 @@
                                           (contains? supplied-entries (vec (:in %))))
                                     (:errors explanation))
                             ::missing-supplied-key ::contract-violated)
-         :seon.instrument/contract-violated (str function-symbol)
+         :seon.instrument/contract-violated function-symbol
          :seon.error/message
          (str (error/problem-sentence
                function-symbol first-problem nil
@@ -421,7 +421,7 @@
            (cond-> {::problem-count (count problems)}
              caller (assoc ::caller caller)))
          :seon.error/data
-         (cond-> {::malli kind ::arm arm ::fn (str function-symbol)
+         (cond-> {::malli kind ::arm arm ::fn function-symbol
                   ::problem-count (count problems)
                   :seon.error/problems problems}
            arity? (assoc ::arity (:arity data))
@@ -527,7 +527,7 @@
        (ex-info
         (str "Cannot arm the contract of " function-symbol
              " under :panic: " (:seon.error/message caps))
-        (assoc caps :seon.instrument/fn (str function-symbol)))))
+        (assoc caps :seon.instrument/fn function-symbol))))
     (case mode
       :panic
       (let [contract (->> (edn/read-string spec-edn)

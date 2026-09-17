@@ -130,8 +130,8 @@
                          (:seon.fn/references row)
                          (when-let [subject (:seon.test/subject row)]
                            [subject]))
-          :when (vector? called)]
-      [caller called])))
+          :when (qualified-symbol? called)]
+      [caller [:seon.fn/sym called]])))
 
 (defn reaching-tests
   "Test symbols reaching any identity defined in `changed-paths`.
@@ -147,7 +147,7 @@
                        [:vector [:map
                                  [:seon.fn.file/relative-path [:string {:min 1}]]]]
                        [:sequential [:string {:min 1}]]]
-                  [:vector [:string {:min 1}]]]}
+                  [:vector :seon.test/sym]]}
   [artifacts changed-paths]
   (let [changed (set changed-paths)
         rows (mapcat :seon.fn.file/rows artifacts)

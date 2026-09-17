@@ -54,7 +54,7 @@
           (binding [*out* *err*]
             (println "bin/test-fast: initialization or execution failed:"
                      (ex-message failure))
-            (prn (ex-data failure)))
+            (prn (Throwable->map failure)))
           1)
         (finally (.shutdownNow backstop)))]
     (shutdown-agents)

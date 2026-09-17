@@ -1,7 +1,19 @@
 {:seon.program/analyzed-source-digest
- [:and {:seon.db/identity false
-        :description "Digest of the exact source whose program relations were analyzed; absence is unknown analysis, never an empty relation."}
-  :seon.source/digest]
+ [:string {:min 64 :max 64
+           :description "Digest of the exact analyzed input, including resolver context. Its presence records completed analysis even when the computed relations have no members."}]
+ :seon.program/analyzed-count [:int {:min 0}]
+ :seon.program/unresolved-callers
+ [:vector [:map
+           [:seon.program/identity :seon.program/identity]
+           [:seon.fn/callee :seon.fn/callee]]]
+ :seon.program/stale-test-reach
+ [:vector [:map [:seon.test/sym :seon.test/sym]
+                [:seon.fn/callee :seon.fn/callee]]]
+ :seon.program/unresolved-report
+ [:map [:seon.db/basis-t :seon.db/basis-t]
+  [:seon.program/analyzed-count :seon.program/analyzed-count]
+  [:seon.program/unresolved-callers :seon.program/unresolved-callers]
+  [:seon.program/stale-test-reach :seon.program/stale-test-reach]]
  :seon.program/identity-attribute
  [:enum :seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym
   :seon.fn.file/relative-path :seon.lint/id]
@@ -35,11 +47,24 @@
  :seon.program/identity
  [:tuple :seon.program/identity-attribute :seon.schema/value]
  :seon.program/declaration-row
- [:or :seon.ns/ns :seon.fn/fn
+ [:or {:description "A reader-stage declaration before analysis. Complete stored entity contracts are enforced at the final writer; this stage cannot claim analysis provenance that has not been produced."}
+  :seon.ns/ns
+  [:map
+   [:seon.fn/sym :seon.fn/sym]
+   [:seon.fn/ns :seon.fn/ns]
+   [:seon.fn/source :seon.fn/source]
+   [:seon.fn/arglists :seon.fn/arglists]
+   [:seon.fn/private? :seon.fn/private?]
+   [:seon.schema.admission/source :seon.schema.admission/source]]
   [:map
    [:seon.schema/key :seon.schema/key]
    [:seon.schema/form :seon.schema/form]]
-  :seon.test/test :seon.fn.file/file :seon.lint/finding]
+  [:map
+   [:seon.test/sym :seon.test/sym]
+   [:seon.test/ns :seon.test/ns]
+   [:seon.test/source :seon.test/source]
+   [:seon.schema.admission/source :seon.schema.admission/source]]
+  :seon.fn.file/file :seon.lint/finding]
  :seon.program/delete-identities [:vector :seon.program/identity]
  :seon.program/source [:string {:min 1}]
  :seon.program/ns [:tuple [:= :seon.ns/name] :seon.ns/name]

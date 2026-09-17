@@ -19,7 +19,7 @@
                   :actual-size [:int {:min 0}],
                   :arm [:enum :input :output],
                   :expected [:string {:min 1}],
-                  :fn [:string {:min 1}],
+                  :fn [:qualified-symbol {:seon.db/index true :description "The observed function identity, including historical fault attribution. It never requires or creates a definition row."}],
                   :instrumented [:int {:min 0}],
                   :registered [:int {:min 0}],
                   :request

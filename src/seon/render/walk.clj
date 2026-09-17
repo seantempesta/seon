@@ -143,7 +143,9 @@
                         (when (not= :db/id attribute)
                           (if (= :db.type/ref (:db/valueType properties))
                             {(selector-key attribute width) leaf}
-                            attribute))))
+                            (if (= :db.cardinality/many (:db/cardinality properties))
+                              (selector-key attribute width)
+                              attribute)))))
                 installed)))
 
 (defn- stable-lookup
@@ -375,6 +377,25 @@
                    candidate)]
     (assoc @acquired :seon.render/distance distance :seon.sci.admit/caps caps)))
 
+(defn- namespace-connections
+  "Resolve observed namespace names for this walk without changing stored facts."
+  [database entity width]
+  (if-let [namespace-name (:seon.ns/name entity)]
+    (let [names (:seon.ns/requires entity)
+          requirers (db/q '[:find [?entity ...] :in $ ?name
+                             :where [?entity :seon.ns/requires ?name]]
+                           database namespace-name)]
+      (if (:seon.error/kind requirers)
+        requirers
+        (assoc entity
+               :seon.ns/requires
+               (db/pull-many database [:db/id :seon.ns/name]
+                             (mapv #(vector :seon.ns/name %) (take (inc width) names)))
+               :seon.ns/_requires
+               (db/pull-many database [:db/id :seon.ns/name]
+                             (vec (take (inc width) (sort > requirers)))))))
+    entity))
+
 (defn- acquire-entity
   "Reuse one entity pull only while its recorded read evidence is current."
   [projection database installed plan lookup cache]
@@ -401,17 +422,19 @@
                     (when (:db/id entity)
                       (into []
                             (keep (fn [[attribute reverse?]]
-                                    (when reverse?
+                                    (when (and reverse? (not= :seon.ns/requires attribute))
                                       {(selector-key (reverse-attribute attribute)
                                                      (pull-width (:seon.sci.admit/caps plan)))
                                        [:db/id]})))
                             (connection-attributes projection installed entity)))]
-                (if (seq reverse-selector)
+                (if (:seon.ns/name entity)
+                  (namespace-connections database entity (pull-width (:seon.sci.admit/caps plan)))
+                  (if (seq reverse-selector)
                   (let [reverse-values (db/pull database reverse-selector lookup)]
                     (if (:seon.error/kind reverse-values)
                       reverse-values
                       (merge entity reverse-values)))
-                  entity)))
+                  entity))))
             entry {:datahike.pull/plan (:datahike.pull/plan plan)
                    :seon.render.call/output value
                    :seon.render.call/basis-transaction (db/basis-t database)

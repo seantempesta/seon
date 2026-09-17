@@ -1,5 +1,5 @@
 #:seon.test{:ns :seon.db/ref,
-            :reach [:vector {:seon.db/cardinality :many} :seon.db/ref],
+            :reach [:set {:seon.db/index true} :qualified-symbol],
             :reaches [:map-of :seon.test/sym :seon.test/reach],
             :reach-unknown [:string {:min 1 :description "Typed unknown for a result whose tested closure could not be retained. Replaced on every run; absence of both membership and this marker is legacy unknown, never proof of an empty closure."}],
             :reach-digest [:and {:seon.db/identity false} :seon.source/digest],
@@ -7,8 +7,7 @@
             :skipped-count [:int {:min 0}],
             :skip-reason :string,
             :source :string,
-            :subject :seon.db/ref,
-            :pending-subject :string,
+            :subject [:qualified-symbol {:seon.db/index true}],
             :usage :boolean,
             :fixture-observation
             [:string {:min 1
@@ -55,8 +54,8 @@
              [:seon.test/not-runnable :seon.test/not-runnable]
              [:seon.error/message :seon.error/message]],
             :sym
-            [:string
-             {:min 1, :seon.db/identity true, :seon.search/index :symbol,
+            [:qualified-symbol
+             { :seon.db/identity true, :seon.search/index :symbol,
               :seon.program/row-schema :seon.test/test,
               :seon.program/source-attribute :seon.test/source}],
             :result
@@ -89,15 +88,14 @@
               :seon.render/ai seon.render.test/render-ai
               :seon.render/html seon.render.test/render-html}
              [:seon.test/sym :seon.test/sym]
+           [:seon.program/analyzed-source-digest :seon.program/analyzed-source-digest]
              [:seon.schema.admission/source
               :seon.schema.admission/source]
-             [:seon.test/ns {:optional true} :seon.test/ns]
+             [:seon.test/ns :seon.test/ns]
              [:seon.test/failures
               {:optional true :seon.program/written-by seon.test.runner/record-tx}
               :seon.test/failures]
-             [:seon.test/source {:optional true} :seon.test/source]
-             [:seon.program/analyzed-source-digest {:optional true}
-              :seon.program/analyzed-source-digest]
+             [:seon.test/source :seon.test/source]
              [:seon.fn/file {:optional true} :seon.fn/file]
              [:seon.fn/form-span {:optional true} :seon.fn/form-span]
              [:seon.test/reach-digest
@@ -113,7 +111,6 @@
              [:seon.fn/references {:optional true} :seon.fn/references]
              [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
              [:seon.fn/writes {:optional true} :seon.fn/writes]
-             [:seon.fn/pending-calls {:optional true} :seon.fn/pending-calls]
              [:seon.fn/keywords {:optional true} :seon.fn/keywords]
              [:seon.test/usage {:optional true} :seon.test/usage]
              [:seon.test/fixture-observation {:optional true}
@@ -123,10 +120,6 @@
              [:seon.test/platform {:optional true} :seon.test/platform]
              [:seon.test/fixture {:optional true} :seon.test/fixture]
              [:seon.test/subject {:optional true} :seon.test/subject]
-             [:seon.test/pending-subject
-              {:optional true
-               :seon.program/written-by seon.turn/relation-assertions}
-              :seon.test/pending-subject]
              [:seon.test/pass-count
               {:optional true :seon.program/written-by seon.test.runner/record-tx}
               :seon.test/pass-count]
@@ -176,7 +169,7 @@
   [:seon.schema/projection :seon.schema/projection]
   [:seon.test/class-loader :seon.test/class-loader]]
 :seon.test/changed
- [:vector [:or :qualified-symbol [:string {:min 1}] :seon.program/identity]]
+ [:vector [:or :qualified-symbol :seon.program/identity]]
  :seon.test/paths [:vector [:string {:min 1}]]
  :seon.test/namespaces [:vector :seon.ns/name]
  :seon.test/check-time-limit-ms
@@ -224,7 +217,7 @@
            :description "The operator root the caller genuinely holds; absent means this JVM's own declaration is read."}]
  :seon.test/destructive-path
  [:vector {:min 1 :description "The declared call path from a test down to the destructive owner it reaches."}
-  [:string {:min 1}]]
+  :qualified-symbol]
  :seon.test/destructive-excluded
  [:vector [:map [:seon.test/sym :seon.test/sym]
            [:seon.fn/sym :seon.fn/sym]
@@ -291,5 +284,5 @@
  :seon.test/adoption
  [:map {:seon.db/attributes true}
   [:seon.test/adoption-cluster :seon.test/adoption-cluster]
-  [:seon.test/adoption-identities :seon.test/adoption-identities]
-  [:seon.test/adoption-inputs :seon.test/adoption-inputs]]}
+  [:seon.test/adoption-identities {:optional true} :seon.test/adoption-identities]
+  [:seon.test/adoption-inputs {:optional true} :seon.test/adoption-inputs]]}

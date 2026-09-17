@@ -324,12 +324,12 @@
   {:malli/schema [:=> [:cat :seon.db/db]
                   [:or [:set :qualified-keyword] :seon.error/value]]}
   [database]
-  (let [row (db/pull database '[{:seon.schema/references [:seon.schema/key]}]
+  (let [row (db/pull database '[(limit :seon.schema/references nil)]
                      [:seon.schema/key :seon.config/agent-overlay])]
     (cond
       (:seon.error/kind row) row
       (seq (:seon.schema/references row))
-      (into #{} (map :seon.schema/key) (:seon.schema/references row))
+      (set (:seon.schema/references row))
       :else
       {:seon.schema/unknown-shape :seon.config/agent-overlay
        :seon.error/kind :seon.schema/unknown-shape

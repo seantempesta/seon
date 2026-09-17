@@ -96,8 +96,7 @@
                  :where
                  [?test :seon.test/usage true]
                  [?test :seon.test/sym ?test-symbol]
-                 [?test :seon.fn/calls ?function]
-                 [?function :seon.fn/sym "seon.run/walkthrough"]]
+                 [?test :seon.fn/calls seon.run/walkthrough]]
                database))]
     (when (and database (nil? usage-test))
       (throw

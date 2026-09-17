@@ -24,7 +24,7 @@
            refusal (test-support/refusal-data
                     #(apply schedule/fire-due! [connection "root" (Date.)]))]
        (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
-       (is (= "seon.schedule/fire-due!" (:seon.instrument/contract-violated refusal)))
+       (is (= (quote seon.schedule/fire-due!) (:seon.instrument/contract-violated refusal)))
        (is (= basis (:max-tx @connection)))))))
 
 (deftest root-maintenance-seed-is-complete-and-has-no-minute-task
@@ -53,7 +53,7 @@
        (is (seq expected))
        (is (= expected (set rows)))
        (is (every? #(not= "* * * * *" (nth % 2)) rows))
-       (is (some #(= "seon.operator/collect!" (second %)) rows))
+       (is (some #(= (quote seon.operator/collect!) (second %)) rows))
        (is (empty? (schedule/root-maintenance-seed-call database)))))))
 
 (defn- instant
@@ -153,7 +153,7 @@
   (test-support/with-database
    (fn [connection]
      (seed-task! connection "schedule-test/page"
-                 "seon.schedule-test/successful-handler")
+                 (quote seon.schedule-test/successful-handler))
      (let [ctx (test-support/fork-cluster-ctx connection)
            request {:seon.db/db @connection
                     :seon.sci.eval/ctx ctx
@@ -226,7 +226,7 @@
     (fn [connection]
       (reset! handler-calls [])
       (seed-task! connection "schedule-test/success"
-                  "seon.schedule-test/successful-handler")
+                  (quote seon.schedule-test/successful-handler))
       (let [observed-at (observed-after-seed)]
         (is (= 1 (schedule/fire-due! connection "root" observed-at
                                      (execution-context))))
@@ -265,7 +265,7 @@
     (fn [connection]
       (reset! handler-calls [])
       (seed-task! connection "schedule-test/firing-wake"
-                  "seon.schedule-test/successful-handler")
+                  (quote seon.schedule-test/successful-handler))
       (let [database (db/db connection)]
         (is (contains? (wake/wake-attributes database)
                        :seon.schedule.fire/agent)
@@ -306,7 +306,7 @@
     (fn [connection]
       (reset! handler-calls [])
       (seed-task! connection "schedule-test/preexisting-nominal"
-                  "seon.schedule-test/successful-handler")
+                  (quote seon.schedule-test/successful-handler))
       (is (= 0 (schedule/fire-due! connection "root"
                                    (instant "2025-04-05T12:34:45Z")
                                    (execution-context)))
@@ -327,11 +327,11 @@
                    {:seon.schedule.task/id task-id
                     :seon.schedule.fire/id fire-id
                     :seon.agent/id "root"
-                    :seon.fn/sym "seon.schedule-test/successful-handler"
+                    :seon.fn/sym (quote seon.schedule-test/successful-handler)
                     :seon.schedule.fire/nominal-at nominal-at
                     :seon.schedule.fire/observed-at observed-at})]
         (seed-task! connection task-id
-                    "seon.schedule-test/successful-handler")
+                    (quote seon.schedule-test/successful-handler))
         (test-support/transacted! connection
                                   {:tx-data [[:db.fn/call #'schedule/fire-call request]]})
         (#'cluster/recover-runs! connection)
@@ -345,9 +345,9 @@
 
 (deftest returned-and-thrown-handler-errors-use-the-existing-root-wake
   (doseq [[task-id handler expected-kind]
-          [["schedule-test/returned" "seon.schedule-test/flat-error-handler"
+          [["schedule-test/returned" (quote seon.schedule-test/flat-error-handler)
             :seon.schedule-test/returned-error]
-           ["schedule-test/thrown" "seon.schedule-test/throwing-handler"
+           ["schedule-test/thrown" (quote seon.schedule-test/throwing-handler)
             :seon.schedule-test/thrown-failure]]]
     (testing handler
       (test-support/with-database

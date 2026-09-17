@@ -1,4 +1,5 @@
-#:seon.agent{:runtime [:and {:seon.db/component true :description "The agent owns its runtime and turn history."} :seon.db/ref]
+#:seon.agent{:archived-tx [:and {:description "The transaction that archived this retained agent identity. Archival only filters presentation; it does not stop its graph, detach ownership or disable resumption."} :seon.db/ref]
+:runtime [:and {:seon.db/component true :description "The agent owns its runtime and turn history."} :seon.db/ref]
 :agent
                      [:map
                       {:seon.db/attributes true,
@@ -16,6 +17,7 @@
                        :seon.render/html
                        seon.cluster.agent/render-identity-html}
                       [:seon.agent/id :seon.agent/id]
+                      [:seon.agent/archived-tx {:optional true} :seon.agent/archived-tx]
                       [:seon.agent/namespace
                        {:optional true}
                        :seon.agent/namespace]

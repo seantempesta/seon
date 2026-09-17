@@ -8,6 +8,7 @@
   (:require [clojure.edn :as edn]
             [clojure.walk :as walk]
             [seon.schema :as schema]
+            [seon.id :as id]
             [seon.schema.form :as schema.form]))
 
 (defn- packaged-forms []
@@ -487,25 +488,55 @@
    projection
    (apply f (vary-meta db assoc :seon.schema/projection projection) args)))
 
+(defn- explicit-value-members
+  "Avoid Datahike treating two keyword members as one identity lookup ref."
+  [projection entity]
+  (let [operations (volatile! [])
+        entity
+        (walk/postwalk
+         (fn [value]
+           (if-not (map? value)
+             value
+             (let [members
+                   (into {}
+                         (filter
+                          (fn [[attribute members]]
+                            (and (coll? members) (not (map? members))
+                                 (= 2 (count members)) (keyword? (first members))
+                                 (get (:seon.schema.projection/forms projection) attribute)
+                                 (let [installed (malli->datahike-attr-in projection attribute)]
+                                   (and (= :db.cardinality/many (:db/cardinality installed))
+                                        (not= :db.type/ref (:db/valueType installed)))))))
+                         value)]
+               (if (empty? members)
+                 value
+                 (let [entity-id (or (:db/id value) (str "seon.schema.datahike/" (id/id)))]
+                   (vswap! operations into
+                           (for [[attribute values] members member values]
+                             (mark-encoded [:db/add entity-id attribute member])))
+                   (assoc (apply dissoc value (keys members)) :db/id entity-id))))))
+         entity)]
+    (into [(mark-encoded entity)] @operations)))
+
 (defn- encode-transaction-data-in
   [projection transaction-data]
-  (mapv
+  (into [] (mapcat
    (fn [operation]
      (cond
        (encoded-operation? operation)
-       operation
+       [operation]
 
        (map? operation)
-       (mark-encoded (encode-entity-in projection operation))
+       (explicit-value-members projection (encode-entity-in projection operation))
 
        (and (vector? operation)
             (= :db/add (first operation))
             (edn-encoded-attr-in? projection (nth operation 2 nil)))
-       (mark-encoded
+       [(mark-encoded
         (update operation 3
                 #(storage-string
                   (validate-logical-slot-in!
-                   projection (nth operation 2) %))))
+                   projection (nth operation 2) %))))]
 
        (and (vector? operation)
             (= :db.fn/call (first operation)))
@@ -515,12 +546,12 @@
        ;; Datahike interprets it. The metadata marker is process-local and
        ;; prevents a nested owner that already called this codec from being
        ;; encoded twice; Datahike stores only the operation's ordinary data.
-       (mark-encoded
+       [(mark-encoded
         (into [:db.fn/call #'encode-call-output-in
                projection (second operation)]
-              (nnext operation)))
+              (nnext operation)))]
 
-       :else operation))
+       :else [operation])))
    transaction-data))
 
 (defn encode-transaction-in

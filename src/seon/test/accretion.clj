@@ -84,7 +84,7 @@
          (mapcat
           (fn [call-ref]
             (effect/capabilities database
-                                 (symbol (second call-ref)))))
+                                 call-ref)))
          (:seon.fn/calls row))
     (:seon.effect/capability row)
     (conj (:seon.fn/sym row))))

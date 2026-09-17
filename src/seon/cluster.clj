@@ -2220,8 +2220,7 @@
                       :in $ [?name ...]
                       :where
                       [?namespace :seon.ns/name ?name]
-                      [?namespace :seon.ns/requires ?required]
-                      [?required :seon.ns/name ?required-name]]
+                      [?namespace :seon.ns/requires ?required-name]]
                     database (vec namespaces))]
     (when (:seon.error/kind edges)
       (refused! "Development reload could not read namespace requires." edges))

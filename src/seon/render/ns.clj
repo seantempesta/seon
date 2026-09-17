@@ -24,7 +24,7 @@
   [:seon.ns/name
    :seon.ns/source
    :seon.ns/doc
-   {:seon.ns/requires [:seon.ns/name]}
+   :seon.ns/requires
    {:seon.ns/aliases
     [:seon.ns.alias/local :seon.ns.alias/target-ns]}])
 
@@ -286,7 +286,7 @@
 
 (defn- require-specs
   [{:seon.ns/keys [requires aliases]}]
-  (let [required-names (into #{} (keep :seon.ns/name) requires)
+  (let [required-names (set requires)
         aliases-by-target (group-by :seon.ns.alias/target-ns aliases)
         targets (sort-by str (into required-names (keys aliases-by-target)))]
     (mapcat
@@ -841,17 +841,27 @@
         lookup [:seon.fn/sym function-name]
         installed (when-let [database (:seon.db/db unit)]
                     (:schema (db/schema-database database)))
-        links (cond-> [[:seon.fn/_calls :seon.fn/sym]]
-                (get installed :seon.lint/fn) (conj [:seon.lint/_fn :seon.lint/id])
-                (get installed :seon.error/fn) (conj [:seon.error/_fn :seon.error/signature]))]
+        links (cond-> []
+                (get installed :seon.lint/fn) (conj [:seon.lint/_fn :seon.lint/id]))]
     (str ";; Function " function-name ". Read its contract and docstring.\n"
          (str/join "\n"
            (for [[attribute identity-attribute] links]
              (str ";; " attribute " (run to inspect): "
                   (pr-str (list 'seon.db/pull
-                                (list 'quote [{attribute [identity-attribute]}]) lookup)))))
+                                (list 'quote [{attribute [identity-attribute]}]) (list 'quote lookup))))))
+         "\n;; Historical faults (run to inspect): "
+         (pr-str (list 'seon.db/q
+                       (list 'quote '[:find ?signature :in $ ?target
+                                      :where [?fault :seon.instrument/fn ?target]
+                                             [?fault :seon.error/signature ?signature]])
+                       (list 'seon.db/db) (list 'quote function-name)))
+         "\n;; Callers (run to inspect): "
+         (pr-str (list 'seon.db/q
+                       (list 'quote '[:find ?caller :in $ ?target
+                                      :where [?caller :seon.fn/calls ?target]])
+                       (list 'seon.db/db) (list 'quote function-name)))
          "\n;; Reaching tests (run to inspect): "
-         (pr-str (list 'seon.fn/tests-reaching (list 'seon.db/db) function-name))
+         (pr-str (list 'seon.fn/tests-reaching (list 'seon.db/db) (list 'quote function-name)))
          "\n" (repl/source-text (list 'doc (symbol function-name))))))
 
 (defn function-html
@@ -884,7 +894,8 @@
                    (db/q '[:find ?id . :in $ ?name
                            :where [?namespace :seon.ns/name ?name]
                                   [?agent :seon.agent/namespace ?namespace]
-                                  [?agent :seon.agent/id ?id]] database namespace-name))]
+                                  [?agent :seon.agent/id ?id]
+                                  (not [?agent :seon.agent/archived-tx])] database namespace-name))]
     (if agent-id
       (let [installed (:schema (db/schema-database database))
             attributes (sort (filter #(contains? installed %)

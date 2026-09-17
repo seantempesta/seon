@@ -22,27 +22,27 @@
     :seon.schedule/id "root/maintenance/footprint-schedule"
     :seon.schedule/expression "0 2 * * *"
     :seon.schedule/zone-id "UTC"
-    :seon.fn/sym "seon.operator/observe-footprint!"}
+    :seon.fn/sym 'seon.operator/observe-footprint!}
    {:seon.schedule.task/id "root/maintenance/reap-dead-roots"
     :seon.schedule/id "root/maintenance/reap-dead-roots-schedule"
     :seon.schedule/expression "15 2 * * *"
     :seon.schedule/zone-id "UTC"
-    :seon.fn/sym "seon.operator/reap-dead-roots!"}
+    :seon.fn/sym 'seon.operator/reap-dead-roots!}
    {:seon.schedule.task/id "root/maintenance/rotate-logs"
     :seon.schedule/id "root/maintenance/rotate-logs-schedule"
     :seon.schedule/expression "30 2 * * *"
     :seon.schedule/zone-id "UTC"
-    :seon.fn/sym "seon.operator/rotate-logs!"}
+    :seon.fn/sym 'seon.operator/rotate-logs!}
    {:seon.schedule.task/id "root/maintenance/process-census"
     :seon.schedule/id "root/maintenance/process-census-schedule"
     :seon.schedule/expression "5 * * * *"
     :seon.schedule/zone-id "UTC"
-    :seon.fn/sym "seon.operator/census-processes!"}
+    :seon.fn/sym 'seon.operator/census-processes!}
    {:seon.schedule.task/id "root/maintenance/compact"
     :seon.schedule/id "root/maintenance/compact-schedule"
     :seon.schedule/expression "0 3 * * 0"
     :seon.schedule/zone-id "UTC"
-    :seon.fn/sym "seon.operator/collect!"}])
+    :seon.fn/sym 'seon.operator/collect!}])
 
 (deftest maintenance-maps-are-open-and-components-are-owned
   (let [nominal-at (instant "2026-08-05T02:00:00Z")
@@ -73,7 +73,7 @@
          :seon.maintenance.receipt/task
          [:seon.schedule.task/id "root/maintenance/footprint"]
          :seon.maintenance.receipt/handler
-         [:seon.fn/sym "seon.operator/observe-footprint!"]
+         [:seon.fn/sym 'seon.operator/observe-footprint!]
          :seon.maintenance.receipt/request
          [:seon.maintenance.request/id
           "root/maintenance/footprint@1785895200000"]
@@ -103,7 +103,7 @@
             fire-id "maintenance-schema-test/fire"
             ;; The fn row refs its namespace row, and only namespaces the
             ;; canonical population already holds can be referenced.
-            handler "seon.operator/observe-footprint!"
+            handler 'seon.operator/observe-footprint!
             receipt-id "maintenance-schema-test/receipt"
             nominal-at (instant "2026-08-05T02:00:00Z")
             observed-at (instant "2026-08-05T02:00:01Z")]
@@ -315,3 +315,73 @@
                  :seon.maintenance.result/cluster-cleanup-collection-component
                  {:seon.maintenance-schema-test/only-unrelated true}))
         "neither arm admits a value carrying no collection evidence")))
+
+(deftest empty-maintenance-memberships-retain-their-positive-observation
+  (test-support/with-database
+   (fn [connection]
+     (let [observed (Date. 0)
+           census {:seon.operator.process-census/observed-at observed
+                   :seon.operator.process-census/roots []
+                   :seon.operator.process-census/processes []
+                   :seon.operator.process-census/dead []
+                   :seon.operator.process-census/unresponsive []
+                   :seon.operator.process-census/unclaimed []
+                   :seon.operator.process-census/claim-errors []
+                   :seon.operator.process-census/complete? true}
+           reap {:seon.operator.reap/observed-at observed
+                 :seon.operator.reap/census census
+                 :seon.operator.reap/eligible-root-claims []
+                 :seon.operator.reap/stopped-processes []
+                 :seon.operator.reap/roots [] :seon.operator.reap/refused []
+                 :seon.operator.reap/reclaimed-bytes 0 :seon.operator.reap/complete? true}
+           collect {:seon.operator.collect/store-id (UUID/randomUUID)
+                    :seon.operator.collect/managed-root "/unused"
+                    :seon.operator.collect/branches []
+                    :seon.operator.collect/objects-before 0 :seon.operator.collect/objects-after 0
+                    :seon.operator.collect/swept-objects 0
+                    :seon.operator.collect/bytes-before 0 :seon.operator.collect/bytes-after 0
+                    :seon.operator.collect/reclaimed-bytes 0
+                    :seon.operator.collect/verification-pass-swept 0
+                    :seon.operator.collect/roots-verified? true
+                    :seon.operator.collect/complete? true}
+           cleanup {:seon.operator.cluster-cleanup/managed-root "/unused"
+                    :seon.boot/cluster-name "empty" :seon.store/branch :cluster-empty
+                    :seon.operator.cluster-cleanup/live-instance-stopped? false
+                    :seon.operator.cluster-cleanup/branch-retired? true
+                    :seon.operator.cluster-cleanup/removed []
+                    :seon.operator.cluster-cleanup/remaining []
+                    :seon.operator.cluster-cleanup/collection collect
+                    :seon.operator.cluster-cleanup/reclaimed-bytes 0
+                    :seon.operator.cluster-cleanup/complete? true}]
+       (doseq [[name producer value positive membership]
+               [["census" maintenance/project-process-census-result census
+                 :seon.operator.process-census/observed-at :seon.maintenance.result/process-census-roots]
+                ["reap" maintenance/project-reap-result reap
+                 :seon.operator.reap/observed-at :seon.maintenance.result/reap-roots]
+                ["collect" maintenance/project-collect-result collect
+                 :seon.operator.collect/store-id :seon.maintenance.result/collect-branches]
+                ["cleanup" maintenance/project-cluster-cleanup-result cleanup
+                 :seon.operator.cluster-cleanup/managed-root :seon.operator.cluster-cleanup/removed]]]
+         (let [identity (str "empty-maintenance/" name)
+               row (assoc (producer value) :seon.maintenance.result/id identity)]
+           (test-support/transacted! connection [row])
+           (let [stored (db/pull @connection '[*] [:seon.maintenance.result/id identity])]
+             (is (= (get value positive) (get stored positive)))
+             (is (not (contains? stored membership)))
+             (is (nil? (db/pull @connection [:db/id]
+                                [:seon.maintenance.result/id (str identity "/not-observed")]))))))
+       (let [partial (assoc cleanup
+                            :seon.operator.cluster-cleanup/complete? false
+                            :seon.operator.cluster-cleanup/collection
+                            {:seon.error/kind :seon.operator/collection-incomplete
+                             :seon.error/message "Collection did not finish."})
+             row (assoc (maintenance/project-cluster-cleanup-result partial)
+                        :seon.maintenance.result/id "empty-maintenance/partial")]
+         (test-support/transacted! connection [row])
+         (let [stored (db/pull @connection '[*]
+                              [:seon.maintenance.result/id "empty-maintenance/partial"])]
+           (is (false? (:seon.operator.cluster-cleanup/complete? stored)))
+           (is (= :seon.operator/collection-incomplete
+                  (get-in stored [:seon.maintenance.result/cluster-cleanup-collection :seon.error/kind])))
+           (is (nil? (get-in stored [:seon.maintenance.result/cluster-cleanup-collection
+                                    :seon.operator.collect/store-id])))))))))

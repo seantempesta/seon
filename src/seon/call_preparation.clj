@@ -220,7 +220,7 @@
     fingerprint :seon.call-preparation/shape
     supplier :seon.call-preparation/supplier-symbol}
    environment-fingerprint error-fingerprint]
-  (let [shapes (db/q database supplier-shape-query (str supplier))]
+  (let [shapes (db/q database supplier-shape-query supplier)]
     (cond
       (error-value? shapes) shapes
 
@@ -237,7 +237,7 @@
             arms (into #{}
                        (map first)
                        (db/q database supplier-return-arms-query
-                             (str supplier)))]
+                             supplier))]
         (cond
           (not (and (zero? (long order)) (= 1 (long argument-count))))
           (incoherent default-key
@@ -1026,8 +1026,7 @@
   "The program identity of a resolved callee, or nil when it has none.
 
   The database's own `:seon.fn/sym` spelling, because that is what every
-  plan and every gate is keyed by; deriving a symbol here and stringifying
-  it at each use would be two spellings of one identity. Both
+  plan and every gate is keyed by. Both
   `clojure.lang.Var` and `sci.lang.Var` carry `:ns`/`:name` metadata;
   anything else — a closure, a computed callee — has no provable identity
   and is left untouched."
@@ -1035,7 +1034,7 @@
   [callee]
   (let [{ns-value :ns name-value :name} (meta callee)]
     (when (and ns-value name-value)
-      (str ns-value "/" name-value))))
+      (symbol (str ns-value) (str name-value)))))
 
 (defn- decided
   "Resolve a predicate dispatch against the call's actual first argument.

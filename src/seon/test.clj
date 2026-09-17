@@ -57,16 +57,16 @@
   last green result. Includes retractions. Missing history or closure evidence
   is unknown. This names changed dependencies, not proof of causation."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym]
-                  [:or [:vector [:and :seon.db/ref [:map [:seon.fn/sym :seon.fn/sym]]]]
+                  [:or [:vector :seon.fn/sym]
                    :seon.error/value]]}
   [database test-symbol]
-  (let [row (db/pull database [:db/id :seon.test/reach-unknown {:seon.test/reach [:db/id]}]
+  (let [row (db/pull database [:db/id :seon.test/reach-unknown :seon.test/reach-digest '(limit :seon.test/reach nil)]
                      [:seon.test/sym test-symbol])]
     (cond
       (:seon.error/kind row) row
       (not (:db/id row)) (unknown test-symbol "The test has no recorded identity.")
       (:seon.test/reach-unknown row) (unknown test-symbol (:seon.test/reach-unknown row))
-      (not (seq (:seon.test/reach row)))
+      (not (:seon.test/reach-digest row))
       (unknown test-symbol "The test has no retained function closure evidence.")
       :else
       (let [history (db/history database)
@@ -93,16 +93,15 @@
                     {} (sort-by first (group-by #(nth % 2) events)))]
               (if-not green
                 (unknown test-symbol "No green result is retained in this test's history.")
-                (let [changed (db/q '[:find ?f ?sym
-                                      :in $ $since [?f ...] [?a ...]
-                                      :where [$since ?f ?a]
-                                             [?f :seon.fn/sym ?sym]]
-                                    database (db/since history green)
-                                    (mapv :db/id (:seon.test/reach row))
-                                    [:seon.fn/source :seon.fn/spec])]
+                (let [changed (db/q '[:find [?sym ...]
+                                      :in $history $since [?sym ...] [?a ...]
+                                      :where [$history ?f :seon.fn/sym ?sym]
+                                             [$since ?f ?a]]
+                                    history (db/since history green)
+                                    (vec (:seon.test/reach row))
+                                    [:seon.fn/source :seon.fn/spec :seon.fn/sym])]
                   (if (:seon.error/kind changed) changed
-                      (mapv (fn [[e s]] {:db/id e :seon.fn/sym s})
-                            (sort-by second changed)))))))))))
+                      (vec (sort changed)))))))))))
 
 (defn test-loader
   "Build a loader from the tool owner's ordered, resolved test classpath."
@@ -148,7 +147,7 @@
     #(long (* 1000 @(requiring-resolve 'seon.test-support/event-backstop-seconds)))))
 
 (defn- bounded-result [test-var timeout-ms custody]
-  (let [test-symbol (str (:ns (meta test-var)) "/" (:name (meta test-var)))
+  (let [test-symbol (symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))
         task (FutureTask.
               (bound-fn []
                 (with-test-loader
@@ -267,42 +266,27 @@
        (sort (keys owners))))))
 
 (defn- destructive-path
-  "The shortest declared call path from one test down to its destructive owner.
-  Evidence for the refusal, walked only when one is being constructed."
+  "Shortest named call path to a destructive declaration."
   [database test-symbol owner-symbol]
-  (let [callees (fn [entity]
-                  (let [row (db/pull database
-                                     [{:seon.fn/calls [:db/id :seon.fn/sym]}
-                                      {:seon.test/subject [:db/id :seon.fn/sym]}]
-                                     entity)]
-                    (when-not (:seon.error/kind row)
-                      (let [subject (:seon.test/subject row)]
-                        (concat (:seon.fn/calls row)
-                                (cond (nil? subject) nil
-                                      (sequential? subject) subject
-                                      :else [subject]))))))
-        start (:db/id (db/pull database [:db/id] [:seon.test/sym test-symbol]))]
-    (loop [frontier (if start [[start [test-symbol]]] [])
-           seen (if start #{start} #{})]
-      (if (empty? frontier)
-        [test-symbol owner-symbol]
-        (let [edges (for [[entity path] frontier
-                          row (callees entity)]
-                      [row path])]
-          (if-let [found (some (fn [[row path]]
-                                 (when (= owner-symbol (:seon.fn/sym row))
-                                   (conj path owner-symbol)))
-                               edges)]
-            found
-            (let [next-frontier (reduce (fn [acc [row path]]
-                                          (let [entity (:db/id row)]
-                                            (if (or (contains? seen entity)
-                                                    (some #(= entity (first %)) acc))
-                                              acc
-                                              (conj acc [entity (conj path (:seon.fn/sym row))]))))
-                                        []
-                                        edges)]
-              (recur next-frontier (into seen (map first) next-frontier)))))))))
+  (loop [frontier [[test-symbol]] seen #{}]
+    (when (seq frontier)
+      (if-let [found (first (filter #(= owner-symbol (peek %)) frontier))]
+        found
+        (let [paths
+              (into []
+                    (mapcat (fn [path]
+                              (let [name (peek path)
+                                    identity-attribute (if (= name test-symbol) :seon.test/sym :seon.fn/sym)
+                                    row (db/pull database
+                                                 '[(limit :seon.fn/calls nil) :seon.test/subject]
+                                                 [identity-attribute name])]
+                                (when (:seon.error/kind row)
+                                  (throw (ex-info "Destructive path unavailable." row)))
+                                (for [target (concat (:seon.fn/calls row)
+                                                     (when-let [subject (:seon.test/subject row)] [subject]))
+                                      :when (not (seen target))]
+                                  (conj path target))))) frontier)]
+          (recur paths (into seen (map peek) frontier)))))))
 
 (defn- destructive-exclusion
   "One selected test's destructive evidence, or nil when it reaches no owner."
@@ -450,7 +434,7 @@
                          (store/declared-operator-root))
               refusal (destructive-refusal
                         database declared
-                        (str (:ns (meta test-var)) "/" (:name (meta test-var))))
+                        (symbol (str (:ns (meta test-var))) (str (:name (meta test-var)))))
               ;; AN IN-PROCESS RUN HAPPENS INSIDE A LIVE CLUSTER'S JVM.
               ;; Whatever a test leaves in that cluster's schema projection
               ;; refuses every later write it attempts, so afterwards the
@@ -546,7 +530,7 @@
 (defn- identity-tests [database changed]
   (let [[attribute value :as program-identity]
         (if (vector? changed) changed
-            (let [s (str changed)]
+            (let [s changed]
               (if (:db/id (db/pull database [:db/id] [:seon.test/sym s]))
                 [:seon.test/sym s] [:seon.fn/sym s])))
         row (db/pull database [:db/id] program-identity)]

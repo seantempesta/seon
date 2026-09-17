@@ -2,13 +2,6 @@
           :source-path [:string {:min 1}],
           :arglists :string,
           :reference-to [:qualified-keyword {:description "Identity attribute of the function named by a declared reference value; enables call-graph joins from attribute consumers to the referenced identity."}]
-          :capability-fn
-          [:and
-           {:description
-            "The function that executes this capability's requests: a ref to the handler's own declaration, beside the `:seon.effect/capability` symbol the metadata carries."
-            :seon.db/index true
-            :seon.fn/reference-to :seon.fn/sym}
-           :seon.db/ref],
           :file [:and {:description "Indexed source file shared by function and test declarations; absent on agent-admitted definitions."} :seon.db/ref],
           :form-span [:tuple {:description "Half-open UTF-8 byte offsets of this declaration's exact source within its indexed file."} :int :int],
           :internal? [:boolean {:description "Omit this implementation helper from the Tools summary; callability is unchanged."}],
@@ -32,8 +25,7 @@
   had the fact from `:seon.fn.analyzer/defined-by` — the row simply keeps
   it, so the question is a Datalog clause."}],
           :arities [:vector #:seon.db{:component true} :seon.db/ref],
-          :ast [:and #:seon.db{:component true} :seon.db/ref],
-          :calls [:set :seon.db/ref],
+          :calls [:set {:seon.db/index true} :qualified-symbol],
           :destroys
           [:string
            {:min 1
@@ -52,21 +44,12 @@
   single line naming the thing destroyed (\"an operator root's whole data/
   directory\"), never the mechanism and never wrapped source prose: a newline
   reaches the reader escaped inside the rendered form."}],
-          :references [:set {:description "Function references without a resolved call shape. Selection follows these conservatively; no invocation or arity is asserted."} :seon.db/ref],
+          :references [:set {:seon.db/index true :description "Source-observed function names without a resolved call shape. Names survive target retraction; selection follows them conservatively."} :qualified-symbol],
           :unresolved-references [:set {:description "Known function targets mentioned outside an attributable definition. A changed target widens selection; absence of a caller never proves no test is needed."} :seon.fn/sym],
           :writes
-          [:set
-           {:description
-            "Declared attributes this declaration asserts at a database write.
-
-  Derived by span containment at indexing: a qualified keyword whose
-  position lies inside the span of a `seon.db/transact!` usage is
-  transaction data that call carries. Each value is a `:seon.schema/key`
-  row, never a keyword literal, so the writers of an attribute are one
-  join. It over-reports nothing the call does not lexically contain, and
-  under-reports transaction data assembled in a helper — which the
-  `:seon.fn/calls` closure already reaches."}
-           :seon.db/ref],
+          [:set {:seon.db/index true
+                 :description "Qualified attributes the analyzed declaration writes. Values survive schema-row retraction; literal mentions remain a separate relation."}
+           :qualified-keyword],
           :call-arities
           [:set
            {:description
@@ -81,9 +64,9 @@
   unresolvable vector. `:seon.fn/calls` remains the reach index; this set
   only refines calls whose argument count is known. Declared function values
   carry reach without claiming an arity."}
-           [:tuple [:string {:min 1}] [:int {:min 0}]]],
-          :caller [:string {:min 1}],
-          :callee [:string {:min 1}],
+           [:tuple :qualified-symbol [:int {:min 0}]]],
+          :caller :qualified-symbol,
+          :callee :qualified-symbol,
           :call-arity [:int {:min 0}],
           :declared-arities
           [:vector
@@ -111,9 +94,7 @@
            [:seon.fn/arity-mismatches :seon.fn/arity-mismatches]
            [:seon.fn/arity-checked :seon.fn/arity-checked]
            [:seon.fn/arity-unchecked :seon.fn/arity-unchecked]],
-          :pending-calls
-          [:set {:description "Analyzer-observed call targets whose program identity is not yet admitted. The declaration writer resolves them when that identity arrives."}
-           [:string {:min 1}]],
+
           :external-sink
           [:enum :ai-visible-text :html-response :codec-storage],
           :doc [:string #:seon.search{:index :text}],
@@ -123,26 +104,26 @@
             "Qualified keywords written literally in this declaration's indexed source. clj-kondo resolves ::kw and ::alias/kw before reporting, so the set holds real namespaced keywords. It is honest membership only, never a read-versus-write claim: a keyword built at runtime is invisible, unqualified keywords are excluded as destructuring and option noise, and a keyword in a var's metadata (its :malli/schema) attributes to the namespace rather than to the var."}
            :qualified-keyword],
           :fn
-          [:map
+          [:and
            {:seon.db/attributes true,
             :seon.render/ai seon.render.ns/function-ai
             :seon.render/html seon.render.ns/function-html}
+           [:map
            [:seon.fn/sym :seon.fn/sym]
+           [:seon.program/analyzed-source-digest :seon.program/analyzed-source-digest]
            [:seon.test/subject {:optional true} :seon.test/subject]
            [:seon.schema.admission/source
             :seon.schema.admission/source]
            [:seon.fn/ns :seon.fn/ns]
-           [:seon.fn/source {:optional true} :seon.fn/source]
-           [:seon.program/analyzed-source-digest {:optional true}
-            :seon.program/analyzed-source-digest]
+           [:seon.fn/source :seon.fn/source]
            [:seon.fn/file {:optional true} :seon.fn/file]
            [:seon.fn/form-span {:optional true} :seon.fn/form-span]
-           [:seon.fn/arglists {:optional true} :seon.fn/arglists]
+           [:seon.fn/arglists :seon.fn/arglists]
            [:seon.fn/arglists-override?
             {:optional true}
             :seon.fn/arglists-override?]
            [:seon.fn/doc {:optional true} :seon.fn/doc]
-           [:seon.fn/private? {:optional true} :seon.fn/private?]
+           [:seon.fn/private? :seon.fn/private?]
            [:seon.fn/internal? {:optional true} :seon.fn/internal?]
            [:seon.fn/doc-order {:optional true} :seon.fn/doc-order]
            [:seon.fn/macro? {:optional true} :seon.fn/macro?]
@@ -153,10 +134,8 @@
            [:seon.fn/references {:optional true} :seon.fn/references]
            [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
            [:seon.fn/writes {:optional true} :seon.fn/writes]
-           [:seon.fn/pending-calls {:optional true} :seon.fn/pending-calls]
            [:seon.fn/keywords {:optional true} :seon.fn/keywords]
            [:seon.fn/arities {:optional true} :seon.fn/arities]
-           [:seon.fn/ast {:optional true} :seon.fn/ast]
            [:seon.fn/workload {:optional true} :seon.fn/workload]
            [:seon.fn/external-sink
             {:optional true}
@@ -166,10 +145,10 @@
             :seon.fn/projection-boundary]
            [:seon.effect/capability
             {:optional true}
-            :seon.effect/capability]
-           [:seon.fn/capability-fn
-            {:optional true}
-            :seon.fn/capability-fn]],
+            :seon.effect/capability]]
+           [:or
+            [:map [:seon.schema.admission/source [:= :agent]]]
+            [:map [:seon.fn/file :seon.fn/file]]]],
           :index-request
           [:map
            [:seon.db/connection
@@ -191,8 +170,8 @@
           :source [:string {:min 1}],
           :spec :string,
           :sym
-          [:string
-           {:min 1, :seon.db/identity true, :seon.search/index :symbol,
+          [:qualified-symbol
+           { :seon.db/identity true, :seon.search/index :symbol,
             :seon.program/row-schema :seon.fn/fn,
             :seon.program/source-attribute :seon.fn/source}],
           :workload [:enum :io :compute],

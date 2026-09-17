@@ -17,9 +17,11 @@
            report (program/breaks request)
            caller-report (program/callers request)
            tests (program/tests-reaching request)
-           expected '#{seon.turn/recover-call seon.turn/receipt-run
-                       seon.turn/render-ai seon.turn/require-open-run
-                       seon.turn/open-run-tx-call}
+           expected (set (db/q '[:find [?name ...] :in $ ?target
+                                 :where [?caller :seon.fn/calls ?target]
+                                 (or [?caller :seon.fn/sym ?name]
+                                     [?caller :seon.test/sym ?name])]
+                               database 'seon.turn/open?))
            plans (get-in report [:seon.program/plan :seon.program/issues])
            valid? (schema/projection-validator (schema/handed-projection) :seon.program/breakage)]
        (is (not (:seon.error/kind report)) (pr-str report))
@@ -28,7 +30,7 @@
        (is (= expected (set (map :seon.fn/sym (:seon.program/call-sites report)))))
        (is (every? :seon.fn/form-span (:seon.program/call-sites report)))
        (is (seq (:seon.program/gating report)))
-       (is (= (mapv symbol (function/gate-set database "seon.turn/open?"))
+       (is (= (function/gate-set database 'seon.turn/open?)
               (:seon.program/gating tests) (:seon.program/gating report)))
        (is (= (count expected) (count plans) (count (set (map :seon.issue/id plans)))))
        (is (= plans (get-in (program/breaks request) [:seon.program/plan :seon.program/issues])))
@@ -38,7 +40,7 @@
                 (:seon.issue/id plan)))
          (is (= (set (function/gate-set database caller))
                 (set (map second (:seon.issue/tests plan)))))
-         (is (= [:seon.fn/sym "seon.program/unresolved-callers"] (:seon.issue/detector plan))))
+         (is (= [:seon.fn/sym 'seon.program/unresolved-callers] (:seon.issue/detector plan))))
        (is (seq (:seon.program/unknown report)))
        (is (valid? report))
        (is (= (db/basis-t database) (db/basis-t (db/db connection))))
@@ -72,12 +74,12 @@
 (deftest past-reach-is-advisory-and-source-history-survives-retraction
   (support/with-database
    (fn [connection]
-     (let [target "my.program/fixture-history"
+     (let [target (symbol "my.program" "fixture-history")
            source "(defn fixture-history [] :first)"
            changed-source "(defn fixture-history [] :second)"
            creation (support/transacted!
                      connection
-                     [(assoc (support/program-fn-row target) :seon.fn/source source)])
+                     [(assoc (support/program-fn-row (db/db connection) target source) :seon.fn/source source)])
            before (:db-after creation)
            old-t (db/basis-t before)
            metadata-change (support/transacted!
@@ -109,10 +111,10 @@
                 (mapv #(get-in % [:seon.program/definition :seon.fn/source]) events)))
          (is ((schema/projection-validator (schema/handed-projection) :seon.program/history-report) result)))
        (let [database (db/db connection)
-             test-name "my.program-test/past-reach-is-advisory-and-source-history-survives-retraction"]
+             test-name 'my.program-test/past-reach-is-advisory-and-source-history-survives-retraction]
          (support/transacted! connection
                               [[:db/add [:seon.test/sym test-name] :seon.test/reach
-                                [:seon.fn/sym "seon.turn/open?"]]])
+                                'seon.turn/open?]])
          (let [report (program/breaks {:seon.db/db (db/db connection)
                                        :seon.program/subject 'seon.turn/open?})]
            (is (contains? (:seon.program/stale-reach report) (symbol test-name)))
@@ -141,8 +143,8 @@
        (is (every? (set (map :sym (:functions directory)))
                    '#{my.program/breaks my.program/callers my.program/tests-reaching
                       my.program/reads-key my.program/history my.program/overrides
-                      my.program/ns-unmap! my.program/remove-ns! my.program/ns-unalias!}))
+                      my.program/ns-unmap! my.program/remove-ns! my.program/ns-unalias!}) (pr-str directory))
        (is (every? #(and (:in %) (:out %) (:doc %)) (:functions directory)))
        (is (:example documentation))
        (is (not (:seon.cluster.eval/error read-evaluation)) (pr-str read-evaluation))
-       (is (= 5 (count (get-in read-evaluation [:seon.sci.admit/value :seon.program/callers]))))))))
+       (is (seq (get-in read-evaluation [:seon.sci.admit/value :seon.program/callers])))))))

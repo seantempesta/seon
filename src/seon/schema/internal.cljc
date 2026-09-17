@@ -249,7 +249,7 @@
                     (not (contains? visited form)))
                (required (get schemas form) (conj visited form))
 
-               (form/map-shape? form)
+               (and (vector? form) (= :map (first form)))
                (into #{}
                      (keep (fn [entry]
                              (when (vector? entry)

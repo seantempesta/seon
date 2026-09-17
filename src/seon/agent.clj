@@ -30,6 +30,48 @@
         (get-in row [:seon.agent/namespace :seon.ns/steward :seon.agent/id])
         (assoc :my.agent/steward (get-in row [:seon.agent/namespace :seon.ns/steward :seon.agent/id]))))))
 
+(defn archived?
+  "Whether this retained agent has a positive archival transaction."
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+                  [:or :boolean :seon.error/value]]}
+  [database agent-id]
+  (let [row (db/pull database [:seon.agent/id :seon.agent/archived-tx]
+                     [:seon.agent/id agent-id])]
+    (cond
+      (:seon.error/kind row) row
+      (:seon.agent/id row) (boolean (:seon.agent/archived-tx row))
+      :else {:seon.agent/no-such-agent agent-id
+             :seon.error/kind :seon.agent/no-such-agent
+             :seon.error/message (str "No agent has id " (pr-str agent-id) ".")})))
+
+(defn open?
+  "Whether this existing agent is not archived; this does not describe graph liveness."
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+                  [:or :boolean :seon.error/value]]}
+  [database agent-id]
+  (let [archived (archived? database agent-id)]
+    (if (map? archived) archived (not archived))))
+
+(defn- archive-call
+  [database agent-id]
+  (let [row (db/pull database [:db/id :seon.agent/archived-tx]
+                     [:seon.agent/id agent-id])]
+    (cond
+      (:seon.error/kind row) (throw (ex-info (:seon.error/message row) row))
+      (nil? (:db/id row))
+      (throw (ex-info "The agent to archive does not exist."
+                      {:seon.error/kind :seon.agent/no-such-agent
+                       :seon.agent/no-such-agent agent-id}))
+      (:seon.agent/archived-tx row) []
+      :else [[:db/add (:db/id row) :seon.agent/archived-tx :db/current-tx]])))
+
+(defn archive!
+  "Archive an agent for presentation, retaining its identity and all live machinery."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id]
+                  [:or :seon.db/transaction-report :seon.error/value]]}
+  [connection agent-id]
+  (db/transact! connection [[:db.fn/call #'archive-call agent-id]]))
+
 (defn settings
   "Read your setting overrides; omitted settings inherit the cluster defaults."
   {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]

@@ -104,7 +104,7 @@
       (assoc :seon.eval/origin (:seon.eval/origin settlement-evaluation))
       (:seon.eval/renderer settlement-evaluation)
       (assoc :seon.eval/renderer (:seon.eval/renderer settlement-evaluation)
-             :seon.eval/renderer-fn [:seon.fn/sym (str (:seon.eval/renderer settlement-evaluation))])
+             :seon.eval/renderer-fn [:seon.fn/sym (:seon.eval/renderer settlement-evaluation)])
       (:seon.eval/shown settlement-evaluation)
       (assoc :seon.eval/shown
              (:seon.eval/shown settlement-evaluation))
@@ -904,36 +904,16 @@
            (:seon.cluster.eval/source form)
            (:seon.cluster.eval/ns form)
            (:seon.program/row request))
-          subject (:seon.test/subject program-row)
-          subject-present?
-          (or (nil? subject)
-              (:db/id (db/pull database [:db/id] subject)))
-          form-facts (cond-> form-facts
-                       (not subject-present?) (dissoc :seon.test/subject))
-          required-namespace-rows
-          (into []
-                (comp
-                 (map second)
-                 (remove (fn [namespace-name]
-                           (:db/id (db/pull database [:db/id]
-                                            [:seon.ns/name namespace-name]))))
-                 (map (fn [namespace-name]
-                        {:seon.ns/name namespace-name})))
-                (:seon.ns/requires program-row))]
+]
       (cond-> (assoc request ::form-facts
                      (assoc form-facts :db/id (:db/id form)))
-        (seq required-namespace-rows)
-        (assoc ::required-namespace-rows required-namespace-rows)
         program-row (assoc :seon.program/row program-row)))
     request))
 
 (defn- receipt-settle-tx*
-  "Build receipt settlement transaction data without crossing a contract seam."
+  "Build evaluation settlement transaction data at its writer authority."
   [request]
-  (let [required-namespace-rows (::required-namespace-rows request)
-        request (dissoc request ::required-namespace-rows)]
-    (into (vec required-namespace-rows)
-          [[:db.fn/call #'receipt-settle-call request]])))
+  [[:db.fn/call #'receipt-settle-call request]])
 
 (defn receipt-settle-tx
   "Transaction data settling one running receipt exactly once.
@@ -1112,11 +1092,11 @@
 
 (defn- declared-content
   [db value]
-  ;; Contract AST and arity rows are deterministic projections of the
+  ;; Contract arity rows are deterministic projections of the
   ;; declaration's `:seon.fn/spec`. Their component entity ids are database
   ;; mechanics, not declared content.
   (when-some [canonical (program/canonical-row value)]
-    (declared-map db (dissoc canonical :seon.fn/arities :seon.fn/ast))))
+    (declared-map db (dissoc canonical :seon.fn/arities))))
 
 (defn- declaration-written-by-run?
   "True when the declaration identified by `identity-attribute`/`identity-value`
@@ -1161,44 +1141,15 @@
                    db identity-attribute identity-value run-id)))))
     false))
 
-(def ^:private program-relation-attributes
-  [:seon.fn/calls :seon.fn/pending-calls :seon.fn/keywords
-   :seon.test/subject :seon.test/pending-subject])
-
 (defn- relation-assertions
   [entity row]
   (into []
         (concat
-         (map (fn [target] [:db/add entity :seon.fn/calls target])
-              (:seon.fn/calls row))
-         (map (fn [target] [:db/add entity :seon.fn/pending-calls target])
-              (:seon.fn/pending-calls row))
-         (map (fn [used] [:db/add entity :seon.fn/keywords used])
-              (:seon.fn/keywords row))
+         (for [attribute [:seon.fn/calls :seon.fn/references :seon.fn/keywords]
+               target (get row attribute)]
+           [:db/add entity attribute target])
          (when-let [subject (:seon.test/subject row)]
-           [[:db/add entity :seon.test/subject subject]])
-         (when-let [pending-subject (:seon.test/pending-subject row)]
-           [[:db/add entity :seon.test/pending-subject pending-subject]]))))
-
-(defn- pending-relation-resolution-tx
-  [db identity identity-value existing]
-  (when (= :seon.fn/sym identity)
-    (let [target (or (:db/id existing) (str "sym:" identity-value))]
-      (into [] cat
-            [(into []
-                   (mapcat (fn [test-eid]
-                             [[:db/retract test-eid :seon.test/pending-subject identity-value]
-                              [:db/add test-eid :seon.test/subject target]]))
-                   (db/q '[:find [?test ...] :in $ ?subject
-                           :where [?test :seon.test/pending-subject ?subject]]
-                         db identity-value))
-             (into []
-                   (mapcat (fn [caller]
-                             [[:db/retract caller :seon.fn/pending-calls identity-value]
-                              [:db/add caller :seon.fn/calls target]]))
-                   (db/q '[:find [?caller ...] :in $ ?symbol
-                           :where [?caller :seon.fn/pending-calls ?symbol]]
-                         db identity-value))]))))
+           [[:db/add entity :seon.test/subject subject]]))))
 
 (defn- declaration-projection
   "The projection ONE declaration validates against, derived at the writer.
@@ -1270,21 +1221,7 @@
           namespace-ref (or (:seon.fn/ns row)
                             (:seon.test/ns row))
           existing (when identity (db/pull db '[*] [identity identity-value]))
-          subject-symbol
-          (or (second (:seon.test/subject row))
-              (:seon.test/pending-subject row))
-          row
-          (if (and (= :seon.test/sym identity) subject-symbol)
-            (if (:db/id (db/pull db [:db/id]
-                                 [:seon.fn/sym subject-symbol]))
-              (-> row
-                  (dissoc :seon.test/pending-subject)
-                  (assoc :seon.test/subject
-                         [:seon.fn/sym subject-symbol]))
-              (-> row
-                  (dissoc :seon.test/subject)
-                  (assoc :seon.test/pending-subject subject-symbol)))
-            row)]
+]
       (when (and namespace-ref
                  (not (:db/id (db/pull db [:db/id] namespace-ref))))
         (refuse! `receipt-settle-call ::program-namespace-missing request))
@@ -1333,30 +1270,6 @@
                {:seon.schema.admission/source :agent}))
 
               nil)
-            ; Decide target existence at the writer, including earlier batch rows.
-            unresolved-calls
-            (into #{}
-                  (comp (filter #(and (vector? %) (= :seon.fn/sym (first %))))
-                        (remove #(or (= [identity identity-value] %)
-                                     (:db/id (db/pull db [:db/id] %))))
-                        (map second))
-                  (:seon.fn/calls row))
-            pending-calls (into (set (:seon.fn/pending-calls row)) unresolved-calls)
-            resolved-pending
-            (into #{} (filter #(or (= [identity identity-value] [:seon.fn/sym %])
-                                  (:db/id (db/pull db [:db/id] [:seon.fn/sym %]))))
-                  pending-calls)
-            row (cond-> (dissoc row :seon.fn/pending-calls)
-                  (seq pending-calls)
-                  (assoc :seon.fn/pending-calls (into #{} (remove resolved-pending) pending-calls))
-                  (or (seq (:seon.fn/calls row)) (seq resolved-pending))
-                  (assoc :seon.fn/calls
-                         (into (into #{} (remove #(and (vector? %)
-                                                      (unresolved-calls (second %))))
-                                     (:seon.fn/calls row))
-                               (map #(vector :seon.fn/sym %)) resolved-pending)))
-            relation-row (select-keys row program-relation-attributes)
-            base-row (apply dissoc row program-relation-attributes)
             schema-declarations
             (if (= identity :seon.schema/key)
               (if schema-redefinition?
@@ -1381,18 +1294,15 @@
               (concat
                (cond
                  (nil? existing)
-                 [(assoc base-row :db/id
+                 [(assoc row :db/id
                          (str (name identity) ":" identity-value))]
 
                  (= (declared-content db existing) (declared-content db row))
                  []
 
                  :else
-                 (program/exact-replacement-tx existing base-row))
-               (relation-assertions [identity identity-value]
-                                    relation-row)
-               (pending-relation-resolution-tx
-                db identity identity-value existing)))))))
+                 (program/exact-replacement-tx existing row))
+               ))))))
 
 (def ^:private receipt-terminal-attributes
   [:seon.eval/shown
@@ -3537,17 +3447,6 @@
                          (assoc % :seon.turn.loop/batch? true
                                   :seon.db.process/id process))
                        requests)
-        namespace-rows
-        (into []
-              (comp
-               (map :seon.turn.loop/receipt)
-               (map :seon.program/row)
-               (mapcat :seon.ns/requires)
-               (map second)
-               (remove nil?)
-               (distinct)
-               (map (fn [namespace-name] {:seon.ns/name namespace-name})))
-              prepared)
         ;; The batch settles every generated opening form as well as the
         ;; agent's own. Only the settlement that CLOSES the turn asks whether
         ;; the issue is done, so an opening pass runs no issue tests at all.
@@ -3563,8 +3462,7 @@
          (into [] (mapcat :seon.blob/staged-writes) prepared)
          :seon.db/tx-data
          (into
-          (into (into namespace-rows
-                      (receipt-settle-batch-tx (mapv :seon.turn.loop/receipt prepared)))
+          (into (receipt-settle-batch-tx (mapv :seon.turn.loop/receipt prepared))
                 (mapcat :seon.db/tx-data)
                 prepared)
           (map (fn [agent-id] [:db.fn/call #'plan/settle-call agent-id]))

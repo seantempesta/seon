@@ -42,8 +42,8 @@ Query directly with:
                     :seon.issue/status :open})
 ```
 
-The indexer replaces current note facts and preserves an identity tombstone
-when a note disappears. It reports unresolved qualified symbols rather than
+The indexer replaces current note facts and retracts the issue entity
+when a note disappears; retained history answers what existed before. It reports unresolved qualified symbols rather than
 storing them as function refs. Function and test identities must already be
 installed. Nine-character Git citations are strings, not Datahike commit IDs.
 

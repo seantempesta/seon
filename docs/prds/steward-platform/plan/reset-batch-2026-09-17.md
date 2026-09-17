@@ -1284,19 +1284,19 @@ refusal. G5 closes the different identity-less entity coverage hole.
 
 | Study table row | Change to this batch and implementation obligation | Current reset-worktree evidence |
 |---|---|---|
-| Symbol edges | Explicit indexes on calls/references/reach; no redundant identity index flags. Preserve advisory reach separately. | Already in schema edits; equal-population reverse-walk timing still owed. |
+| Symbol edges | Explicit indexes on calls/references/reach; no redundant identity index flags. Preserve advisory reach separately. | Schema edits implemented; fast 26 measured equal-population closure parity (table below). |
 | Strict deletion | Compare affected prior identity values to final names, including retraction/rename on surviving eids; no escape for complete republish. Fresh population reports unresolved tokens positively. | Detection widened; final-state and publication refusal regressions passed fast 22. |
 | G4 digest | Writer derives digest from exact analyzed bytes including resolver prelude. Complete definition required; core-file and agent provenance separate arms. Retain publication provenance; no compactable evaluation dependency. | Digest and separate provenance arms present; exact-input regression passed in fast 22. |
-| Nineteen required-many keys | Optional stored memberships: cluster 2, arity 1, adoption 2, maintenance 14. Positive existing construction facts replace false required collections. No marker booleans; activation six already landed separately. | Optionality implemented; constructor proof still owed. |
-| Maintenance evidence | Parent completion cannot prove a skipped child operation. Validate four actual constructors, empty success, partial/error and absent result using their own scalar evidence. | Plan sharpened; proof incomplete. |
+| Nineteen required-many keys | Optional stored memberships: cluster 2, arity 1, adoption 2, maintenance 14. Positive existing construction facts replace false required collections. No marker booleans; activation six already landed separately. | Optionality implemented; the four actual maintenance constructors and empty/partial outcomes passed fast 26. |
+| Maintenance evidence | Parent completion cannot prove a skipped child operation. Validate four actual constructors, empty success, partial/error and absent result using their own scalar evidence. | Canonical constructor proof passed fast 26; no marker booleans added. |
 | G5 components | Discover roots through before AND after; complete traversal under declared bound, not wildcard pull. Test 1,001 children, child-only edit/unlink, multiple parents, cycles and identity-less orphan rows. Owned occurrence links differ from shared shape refs. | New explicit obligations; implementation incomplete. |
 | Archived agents | Install archived-tx and lifecycle writer; derive archived?/open? for UI. Never retract agents, even coordinated removal of their incoming refs. Archive does not stop graphs or detach ownership. | Co-deletion proof deleted; archive writer and derived open?/archived? passed fast 22. Namespace agent listings omit archived identities; historical direct reads remain available. |
 | Capability handler | Delete declaration capability-fn; existing handler symbol is a final deletion obligation. | In worktree schema and final validator; declared handler reach regression passed fast 22. |
 | Message subject/sender/protocol | §1h in one publication; option A accepted: preserve existing token grammar, remove resolution/inside-about classification; from marks inside; assignment/declination separate facts. | message-wake-model owns seon.message.edn/seon.wake.edn; do not edit. Record its landing before integration. |
 | Message handling | Delete inbox-move pattern; listened to plus handling-turn claim and answering-t rule. Final authority decides claims; listeners are notifications, not claims. | Same foreign message-wake-model boundary; no substitute mechanism here. |
-| Origin | eval/origin becomes issue/id value; retain generated-by display. No generic ref carrier. | Issue-ID value and reader changes implemented; deletion-survival regression awaits the current run. |
+| Origin | eval/origin becomes issue/id value; retain generated-by display. No generic ref carrier. | Issue-ID value and reader changes implemented; deletion-survival regression passed fast 26. |
 | Refreshes | Delete attribute and both refresh-call functions; latest-read derivation remains ordinal-based. No new digest/index. | Attribute deletion and regression replacement now also landed upstream; obsolete functions removed here, no remaining production references. |
-| fn.ast | Option A authorized: preserve reconciliation/backfill via canonical schema.shape plus provenance/arity facts, then delete AST writers/resources. Shared shape roots remain ordinary refs. | Historical grep found maintenance consumers; new integration-HEAD grep and behavior regressions required. |
+| fn.ast | Option A authorized: preserve reconciliation/backfill via canonical schema.shape plus provenance/arity facts, then delete AST writers/resources. Shared shape roots remain ordinary refs. | Historical grep found maintenance consumers; the pinned production grep is empty and reconciliation/backfill regressions passed fast 22 and 27. |
 | Optional refs | “Required when present” supplies no deletion guarantee. A surviving outcome/provenance condition or observation value must establish the requirement. Attempts need not have error/failover facts. | Replaces blanket recommendation; audit affected family rows before implementation. |
 | Issue status | Keep authoritative status until positive writers cover imported resolved AND superseded notes. | Already retained. |
 | -at→-tx | Recording/transition time only. Preserve distinct external occurrence time and never infer asynchronous success solely from transaction provenance. | Qualifies earlier rename inventory. |
@@ -1357,3 +1357,85 @@ Reconciliation/backfill behavior passed in fast 22. G5's complete owning-root
 validator and its traversal budget are still outstanding, as are the
 reverse-walk timing and reset-boundary live proofs. **RESET NEEDED; not yet
 ready to merge.**
+
+### Fast 26 evidence and remaining query-cost decision
+
+Fast 26: **125 tests, 900 assertions, one failure, zero errors**. The sole
+failure is `seon.db-test/ten-carried-queries-stay-within-twice-raw-query-cost`:
+ten raw queries took **481,540 ns**, ten armed Seon queries **1,178,209 ns**
+after warming the exact measured query on both paths. The existing absolute
+five-millisecond query check passes. The reset's schema-reference query is now
+a direct keyword-value relation instead of a join through schema entity refs.
+Do not call this a green run or attribute the ratio to a foreign lane.
+
+The owner was asked which performance contract controls: retain the existing
+absolute budget and report the ratio (recommended, about 15 minutes); optimize
+the wrapper to retain the two-times-raw ratio (about 1–3 hours, a separate
+query-owner change); or retain this failing assertion as a landing boundary.
+No threshold has been relaxed. The G5 budget-location question also remains
+unanswered; no partial universal/component validator is enabled to hide that
+missing work.
+
+The reproducible equal-population regression is
+`test/seon/reset_edge_parity_test.clj`. Both representations carry the same
+29,584 call/reference/subject edges; each timed walk acquires its identity map
+and scans three indexed relations. All three complete closures matched:
+
+| Seed | Reached identities | Reference ms | Symbol ms |
+|---|---:|---:|---:|
+| `seon.turn/open?` | 2,093 | 40.738917 | 43.133041 |
+| `seon.db/q` | 2,702 | 43.999125 | 46.434416 |
+| `seon.id/id` | 2,220 | 33.821709 | 36.169542 |
+
+These are fast-26 snapshot measurements, not live default counts or the final
+post-merge gate. The initial experiment's per-node pulls were replaced with
+the identity map the production gate-set owner already acquires; the table
+above measures that actual arrangement.
+
+N10 is now being completed in this same unpublished group: effect receipts
+require `:seon.effect/capability`, captured from the exact handler selected for
+dispatch before entering the writer. `:seon.effect/capability-fn` and its
+writer-side re-resolution are deleted. The symbol attribute is indexed;
+only function declarations carrying it participate in deletion refusal.
+Historical effect observations do not prevent handler deletion. Fast 27 passed its targeted armed proof: 152 tests, 1,500 assertions, zero
+failures and zero errors. This is not a cold gate or reset-boundary proof.
+
+
+### G5 decision boundary at the implementation checkpoint
+
+G5 is not enabled by this checkpoint. AGENTS §2.5 requires an owner design
+choice before introducing hours of cross-owner work; the unresolved choice is
+where the complete traversal obtains its declared work budget:
+
+1. **Projection-carried node budget (recommended; about 1–2 hours).** Declare
+   the bound with the schema projection and hand it to the final validator.
+   Every writer shares one bound and a typed refusal when completeness cannot
+   be established. It requires the projection/config acquisition seam to carry
+   the value; no constructor-specific escape exists.
+2. **Every transaction constructor supplies the budget (about 3–5 hours).**
+   Work is bounded per request and callers may choose smaller bounds. Every
+   constructor and transaction-function expansion must preserve the value;
+   missing bounds must refuse. This adds a cross-writer contract and gives up
+   a single projection-owned policy.
+3. **Bound by the supplied database population (under one hour for the bound,
+   component regressions additional).** A visited set and finite population
+   ensure termination without a new configuration value. This gives up an
+   independent latency/work ceiling as the database grows, so it is not the
+   recommended implementation of the declared-work-bound requirement.
+
+The traversal itself must discover all before/after owners via indexed
+attribute/value seeks (Datahike has no VAET), expand complete EAVT child values,
+validate typed owned children, and refuse incomplete/cyclic ownership rather
+than accept id-only placeholders. No budget or validator is silently chosen
+in this checkpoint. The identity-less-entity issue stays open. The query-cost
+boundary is also recorded in
+[its issue](../../../seon/issues/the-carried-query-ratio-fails-after-symbol-edge-retyping.md).
+
+
+Fast 28: **32 tests / 180 assertions / zero failures / zero errors** for the
+complete reset-edge regression namespace, equal-population reverse-walk proof,
+and effect owner. Both newest deletion cases passed. Exact parity timings and
+current fixture referrer counts are in the integration landing note. The
+message/wake follow-up `57581f12f` landed during this run and must be incorporated
+before the final publication. G5 and the query-cost assertion remain explicit
+review boundaries; this checkpoint is not permission to reset.

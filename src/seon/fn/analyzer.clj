@@ -334,7 +334,9 @@
                                         :reference true))))
                      (:symbols analysis))
         usages (into (vec (:var-usages analysis)) quoted)
-        definitions (group-by :filename (:var-definitions analysis))
+        definitions (group-by :filename
+                              (remove #(= 'clojure.core/declare (:defined-by->lint-as %))
+                                      (:var-definitions analysis)))
         calls (group-by :filename (filter :arity usages))
         methods (keep (fn [usage]
                         (when (:defmethod usage)

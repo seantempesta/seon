@@ -55,7 +55,8 @@
                [:seon.source/branch :seon.source/branch]
                [:seon.source/commit-id :seon.source/commit-id]
                [:seon.source/digest :seon.source/digest]
-               [:seon.source/built? :seon.source/built?]],
+               [:seon.source/built? :seon.source/built?]
+               [:seon.program/unresolved-report {:optional true} :seon.program/unresolved-report]],
               :roots [:vector [:string {:min 1}]],
               :snapshot
               [:map

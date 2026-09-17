@@ -26,7 +26,7 @@
   ;; The fixed prose belongs to this definition; the source read records
   ;; its code version in the same dependency evidence as every other read.
   (db/pull database [:seon.fn/source]
-           [:seon.fn/sym "seon.bootstrap/help-value"])
+           [:seon.fn/sym 'seon.bootstrap/help-value])
   (let [namespace-name
         (db/q '[:find ?name . :in $ ?id
                 :where [?agent :seon.agent/id ?id]
@@ -40,7 +40,7 @@
                 :in $ ?agent-id
                 :where [?agent :seon.agent/id ?agent-id]
                        [?agent :seon.agent/namespace ?session]
-                       [?session :seon.ns/requires ?namespace]
+                       [?session :seon.ns/requires ?name]
                        [?namespace :seon.ns/name ?name]
                        [?function :seon.fn/ns ?namespace]
                        [?function :seon.fn/private? false]
@@ -110,7 +110,7 @@
                  '[:seon.agent/id
                    {:seon.agent/namespace
                     [:db/id :seon.ns/name
-                     {:seon.ns/requires [:seon.ns/name]}]}]
+                     :seon.ns/requires]}]
                  [:seon.agent/id agent-id])]
     (if-not (:seon.agent/id agent)
       {:seon.agent/no-such-agent agent-id
@@ -149,7 +149,6 @@
           (long (max 0 (- (or turn-limit 0) turns-used)))
           :seon.agent/protocol-namespaces
           (->> (:seon.ns/requires namespace)
-               (map :seon.ns/name)
                sort
                vec)}
           run
@@ -269,7 +268,8 @@
            :where
            [?namespace :seon.ns/name ?namespace-name]
            [?function :seon.fn/ns ?namespace]
-           [?test :seon.fn/calls ?function]
+           [?test :seon.fn/calls ?function-symbol]
+       [?function :seon.fn/sym ?function-symbol]
            [?test :seon.test/usage true]]
          database)))
 
@@ -397,7 +397,8 @@
             [?artifact :seon.fn/ns ?own-namespace]
             [?artifact :seon.fn/private? false]
             [?artifact :seon.fn/spec]
-            [?artifact :seon.fn/calls ?target]
+            [?artifact :seon.fn/calls ?target-symbol]
+       [?target :seon.fn/sym ?target-symbol]
             [?target :seon.fn/ns ?target-namespace]
             [?target-namespace :seon.ns/name ?target-name]]
           database agent-id)
@@ -412,7 +413,8 @@
             [(< 0 ?passes)]
             [?artifact :seon.test/fail-count 0]
             [?artifact :seon.test/error-count 0]
-            [?artifact :seon.fn/calls ?target]
+            [?artifact :seon.fn/calls ?target-symbol]
+       [?target :seon.fn/sym ?target-symbol]
             [?target :seon.fn/ns ?target-namespace]
             [?target-namespace :seon.ns/name ?target-name]]
           database agent-id))))
@@ -453,7 +455,8 @@
                 :where
                 [?test :seon.test/usage true]
                 [?test :seon.test/sym ?test-symbol]
-                [?test :seon.fn/calls ?subject]
+                [?test :seon.fn/calls ?subject-symbol]
+       [?subject :seon.fn/sym ?subject-symbol]
                 [?test :seon.test/pass-count ?passes]
                 [(< 0 ?passes)]
                 [?test :seon.test/fail-count 0]
@@ -855,10 +858,7 @@
         namespace-row
         {:seon.ns/name namespace-name
          :seon.ns/requires
-         [[:seon.ns/name 'my.turn]
-          [:seon.ns/name 'my.message]
-          [:seon.ns/name 'clojure.test]
-          [:seon.ns/name 'seon.bootstrap]]
+         #{'my.turn 'my.message 'clojure.test 'seon.bootstrap}
          :seon.ns/refers
          [{:seon.ns.refer/local 'help
            :seon.ns.refer/target-ns 'seon.bootstrap

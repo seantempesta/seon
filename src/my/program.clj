@@ -7,7 +7,6 @@
   Example:
   (my.program/breaks {:seon.program/subject 'seon.turn/open?})"
   (:require [seon.db :as db]
-            [sci.core :as sci]
             [clojure.set :as set]
             [seon.error :as error]
             [seon.fn :as function]
@@ -35,13 +34,6 @@
              :seon.error/diagnostic-cause (ex-message failure)
              :seon.error/diagnostic-evidence (ex-data failure)})))))
 
-(defn- stored-name
-  "Use the installed identity type until the symbols-everywhere reset."
-  [database attribute subject]
-  (if (= :db.type/string (get-in (db/schema-database database) [:schema attribute :db/valueType]))
-    (str subject)
-    subject))
-
 (defn- subject-identities [subject]
   (cond
     (keyword? subject) [:seon.schema/key]
@@ -50,7 +42,7 @@
 
 (defn- locate [database subject]
   (or (some (fn [attribute]
-              (let [value (stored-name database attribute subject)
+              (let [value subject
                     entities (checked
                               (db/q database
                                     '[:find [?entity ...] :in $ ?attribute ?value
@@ -96,7 +88,8 @@
      "This supplied database value answers; callers outside its program graph are unknown."}]})
 
 (defn- caller-data [database subject entity]
-  (let [callers (symbols (names-through database :seon.fn/calls entity :seon.fn/sym))
+  (let [callers (into (set (names-through database :seon.fn/calls subject :seon.fn/sym))
+                      (names-through database :seon.fn/calls subject :seon.test/sym))
         arities (checked
                  (db/q database
                        '[:find [?arity ...] :in $ ?entity
@@ -108,16 +101,18 @@
         (into []
               (mapcat
                (fn [caller]
-                 (let [stored (stored-name database :seon.fn/sym caller)
-                       row (checked (db/pull database [:db/id :seon.fn/form-span]
-                                             [:seon.fn/sym stored]))
+                 (let [stored caller
+                       row (or (checked (db/pull database [:db/id :seon.fn/form-span]
+                                                 [:seon.fn/sym stored]))
+                               (checked (db/pull database [:db/id :seon.fn/form-span]
+                                                 [:seon.test/sym stored])))
                        tuples (checked
                                (db/q database
                                      '[:find [?tuple ...] :in $ ?entity
                                        :where [?entity :seon.fn/call-arities ?tuple]]
                                      (:db/id row)))
                        counts (keep (fn [[callee arity]]
-                                      (when (= subject (symbol callee)) arity)) tuples)
+                                      (when (= subject callee) arity)) tuples)
                        site (cond-> {:seon.fn/sym caller}
                               (:seon.fn/form-span row)
                               (assoc :seon.fn/form-span (:seon.fn/form-span row))
@@ -158,7 +153,7 @@
                          (present-groups
                           {:seon.program/gating
                            (mapv symbol (checked (function/gate-set
-                                                  database (stored-name database :seon.fn/sym subject))))})))))
+                                                  database subject)))})))))
 
 (defn- key-data [database schema-key entity]
   (let [contracts
@@ -169,15 +164,15 @@
                  :where [?arity ?attribute ?key]
                  [?function :seon.fn/arities ?arity]
                  [?function :seon.fn/sym ?name]]
-               entity [:seon.fn.arity/input-refs :seon.fn.arity/output-refs
+               schema-key [:seon.fn.arity/input-refs :seon.fn.arity/output-refs
                        :seon.fn.arity/guard-refs]))
         datoms (if (get-in (db/schema-database database) [:schema schema-key])
                  (checked (db/datoms database :aevt schema-key)) [])]
     (present-groups
      {:seon.program/contract-refs (symbols contracts)
-      :seon.program/writes-of (symbols (names-through database :seon.fn/writes entity :seon.fn/sym))
+      :seon.program/writes-of (symbols (names-through database :seon.fn/writes schema-key :seon.fn/sym))
       :seon.program/schema-references
-      (set (names-through database :seon.schema/references entity :seon.schema/key))
+      (set (names-through database :seon.schema/references schema-key :seon.schema/key))
       :seon.program/mentions (symbols (checked (function/functions-using database schema-key)))
       :seon.program/data-in-use (when (seq datoms)
                                  {:seon.schema/key schema-key :seon.schema/datoms (count datoms)})})))
@@ -215,7 +210,7 @@
 
 (defn- proposed-plan [database subject caller-symbols sites]
   (let [names (sort caller-symbols)
-        stored (mapv #(stored-name database :seon.fn/sym %) names)
+        stored (vec names)
         gates (checked (function/gate-sets database stored))
         detector 'seon.program/unresolved-callers]
     {:seon.program/issues
@@ -229,7 +224,7 @@
                     (pr-str (filterv #(= caller (:seon.fn/sym %)) sites)))
                :seon.issue/status :open :seon.issue/severity :friction
                :seon.issue/functions #{[:seon.fn/sym value]}
-               :seon.issue/detector [:seon.fn/sym (stored-name database :seon.fn/sym detector)]}
+               :seon.issue/detector [:seon.fn/sym detector]}
                (seq (get gates value))
                (assoc :seon.issue/tests (into #{} (map #(vector :seon.test/sym %)) (get gates value)))))
            names stored)
@@ -264,22 +259,22 @@
                         (names-through database :seon.schema/ns entity :seon.schema/key)))
           gate-names (if (= :seon.ns/name kind) owned-functions
                          (when (qualified-symbol? subject)
-                           [(stored-name database :seon.fn/sym subject)]))
+                           [subject]))
           gates (checked (function/gate-sets database (vec gate-names)))
           report
           (merge (observation database subject kind) calls
                  (present-groups
-                  {:seon.program/references (symbols (names-through database :seon.fn/references entity :seon.fn/sym))
-                   :seon.program/subject-of (symbols (names-through database :seon.test/subject entity :seon.test/sym))
-                   :seon.program/stale-reach (symbols (names-through database :seon.test/reach entity :seon.test/sym))
+                  {:seon.program/references (symbols (names-through database :seon.fn/references subject :seon.fn/sym))
+                   :seon.program/subject-of (symbols (names-through database :seon.test/subject subject :seon.test/sym))
+                   :seon.program/stale-reach (symbols (names-through database :seon.test/reach subject :seon.test/sym))
                    :seon.program/gating (vec (sort (symbols (mapcat val gates))))
-                   :seon.program/capability-of (symbols (names-through database :seon.fn/capability-fn entity :seon.fn/sym))
+                   :seon.program/capability-of (symbols (names-through database :seon.effect/capability subject :seon.fn/sym))
                    :seon.program/schedule-tasks (set (names-through database :seon.schedule.task/function entity :seon.schedule.task/id))
                    :seon.program/render-declared-by (render-referrers database subject)
                    :seon.program/owned-declarations owned
                    :seon.program/requiring-namespaces
                    (when (= :seon.ns/name kind)
-                     (set (names-through database :seon.ns/requires entity :seon.ns/name)))})
+                     (set (names-through database :seon.ns/requires subject :seon.ns/name)))})
                  (when (= :seon.schema/key kind) (key-data database subject entity)))
           unknown-arities (count (remove :seon.fn/call-arity (:seon.program/call-sites report)))]
       (-> report
@@ -440,8 +435,7 @@
     [report affected]))
 
 (defn- native! [ctx form]
-  ; Only this already-admitted native call skips preparation, never agent code.
-  (sci/eval-form (assoc ctx :call-preparation-hook nil) form))
+  ((requiring-resolve 'seon.sci.eval/evaluate-native!) ctx form))
 
 (defn- retract-operation! [context subject operation native-form]
   (read-result

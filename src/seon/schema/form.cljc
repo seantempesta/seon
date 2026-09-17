@@ -21,28 +21,37 @@
   (when (vector? form)
     (some (fn [x] (when (map? x) x)) (rest form))))
 
+(defn- entity-map-form
+  "The structural map in a map declaration with additional constraints."
+  [form]
+  (when (vector? form)
+    (case (first form)
+      :map form
+      :and (some #(when (and (vector? %) (= :map (first %))) %) (rest form))
+      nil)))
+
 (defn map-shape?
-  "True if `v` looks like a Malli `:map` schema form."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [v]
-  (and (vector? v) (= :map (first v))))
+  "True for a map, including a map constrained by an enclosing conjunction."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [form]
+  (boolean (entity-map-form form)))
 
 (defn map-entries
-  "Entries of a `:map` form with its head and optional properties stripped."
-  {:malli/schema [:=> [:cat [:or :nil [:sequential :seon.schema/value]]] [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A raw Malli map entry contains a key, optional property map and schema form; this inspection preserves those heterogeneous values.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
-  [v]
-  (let [body (rest v)
-        body (if (and (seq body) (map? (first body))) (rest body) body)]
-    (vec body)))
+  "Entries of the structural map, without its head and properties."
+  {:malli/schema [:=> [:cat [:or :nil [:sequential :seon.schema/value]]]
+                  [:vector :seon.schema/value]]}
+  [form]
+  (let [body (rest (or (entity-map-form form) form))]
+    (vec (if (map? (first body)) (rest body) body))))
 
 (defn schema-properties
-  "The `:map` schema's properties map between its head and entries, or nil."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :map]]}
-  [v]
-  (when (map-shape? v)
-    (let [body (rest v)]
-      (when (and (seq body) (map? (first body)))
-        (first body)))))
+  "Properties of the entity declaration, including a constrained map."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:maybe :map]]}
+  [form]
+  (when-let [value-map (entity-map-form form)]
+    (let [properties (merge (attr-form-properties value-map)
+                            (attr-form-properties form))]
+      (when (seq properties) properties))))
 
 (defn namespaced-properties
   "Qualified Malli properties carried by one authored schema form."

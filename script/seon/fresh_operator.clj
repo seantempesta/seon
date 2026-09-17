@@ -2793,6 +2793,11 @@
       (println (str "● " source-branch
                     " commit " source-commit
                     " digest " digest)))
+    (when-let [report (:seon.program/unresolved-report result)]
+      (println (str "Program analysis: " (:seon.program/analyzed-count report)
+                    " declarations; " (count (:seon.program/unresolved-callers report))
+                    " unresolved named calls. Complete work list: "
+                    "(seon.fn/unresolved-callers (seon.db/db)).")))
     (when (and force? live-target)
       (stop-empty-jvm!
        root

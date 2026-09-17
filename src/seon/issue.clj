@@ -928,7 +928,7 @@
                   {:seon.issue/id issue-id :seon.issue/agent [:seon.agent/id agent-id]
                    :seon.issue/budget (:seon.issue/budget request)}
                   {:seon.ns/name namespace-name
-                   :seon.ns/requires [[:seon.ns/name 'my.issue] [:seon.ns/name 'my.test]]})
+                   :seon.ns/requires #{'my.issue 'my.test}})
             (@turn-generated-run-tx
              database {:seon.agent/id agent-id :seon.turn/id (id/id [:seon.issue/opening issue-id])
                        :seon.turn/opened-tx "datomic.tx"

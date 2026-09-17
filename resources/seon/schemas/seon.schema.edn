@@ -50,8 +50,9 @@
               :references
               [:set
                {:description
-                "Canonical schema rows directly referenced by this schema."}
-               :seon.db/ref],
+                "Canonical schema keys directly referenced by this schema. Names survive retraction."
+                :seon.db/index true}
+               :qualified-keyword],
               :identity :qualified-keyword,
               :identity-only :boolean,
               :generatable? :boolean,

@@ -151,7 +151,6 @@
             [seon.id :as id]
             [seon.error.refusal :as error.refusal]
             [seon.print :as print]
-            [seon.program :as program]
             [seon.repl :as repl]
             [seon.render.route :as render.route]
             [seon.render.value :as render.value]
@@ -290,7 +289,7 @@
   (id/id (into (sorted-map)
                (cond-> {:seon.error/kind error-kind}
                  class-name (assoc :seon.error/throwable-class (symbol class-name))
-                 function (assoc :seon.error/fn (symbol function))
+                 function (assoc :seon.instrument/fn (symbol function))
                  frame (assoc :seon.error/frame frame)))
          64))
 
@@ -473,7 +472,7 @@
                              (not (some #(.startsWith ^String frame-ns
                                                       ^String %)
                                         machinery-namespace-prefixes)))
-                    (str frame-ns "/" simple))))))
+                    (symbol frame-ns simple))))))
           (.getStackTrace failure))))
 
 (defn- contract-violation-data
@@ -622,7 +621,7 @@
           class-name (assoc :seon.error/throwable-class class-name
                             :seon.error/exception-class (symbol class-name))
           frame (assoc :seon.error/frame frame)
-          function (assoc :seon.error/fn [:seon.fn/sym (str function)])
+          function (assoc :seon.instrument/fn function)
           (and flow? (::flow/pid source))
           (assoc :seon.error/proc (::flow/pid source))
           (and flow? (::flow/op source)) (assoc :seon.error/op (::flow/op source))
@@ -920,10 +919,10 @@
     (when-let [operation (:seon.sci.reader/call evidence)]
       (let [spec (db/q '[:find ?spec . :in $ ?sym
                         :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]]
-                      database (str operation))
+                      database operation)
             position (:seon.sci.reader/argument-index evidence)
             supplied (call-preparation/supplied-map-entries
-                      database (str operation))
+                      database operation)
             supplied-keys (into #{} (map #(nth % 2)) (when (vector? supplied) supplied))
             container (first (:seon.sci.reader/containers evidence))
             present (set (take-nth 2 (:edamame/elements container)))]
@@ -1034,7 +1033,7 @@
                       (let [doc (db/q '[:find ?doc . :in $ ?sym
                                         :where [?f :seon.fn/sym ?sym]
                                                [?f :seon.fn/doc ?doc]]
-                                      (:seon.db/db unit) (str operation))]
+                                      (:seon.db/db unit) operation)]
                         (when (string? doc)
                           (not-empty
                            (:example
@@ -1365,17 +1364,16 @@
               db attribute value)))
 
 (defn steward
-  "The steward reached through the error's function ref and namespace."
+  "The steward of the currently defined function named by a historical fault."
   {:malli/schema [:=> [:cat :seon.db/database-value :map] [:maybe :seon.agent/id]]}
   [database fact]
-  (when-let [function (:seon.error/fn fact)]
-    (db/q '[:find ?id . :in $ ?function
-            :where [?function :seon.fn/ns ?namespace]
+  (when-let [function (:seon.instrument/fn fact)]
+    (db/q '[:find ?id . :in $ ?symbol
+            :where [?function :seon.fn/sym ?symbol]
+                   [?function :seon.fn/ns ?namespace]
                    [?namespace :seon.ns/steward ?agent]
                    [?agent :seon.agent/id ?id]]
-          database (if (map? function)
-                     (or (:db/id function) [:seon.fn/sym (:seon.fn/sym function)])
-                     function))))
+          database function)))
 
 (defn- recurrence
   [database signature process]
@@ -1451,7 +1449,7 @@
                      digest (assoc :seon.error.occurrence/data-blob
                                    [:seon.error.occurrence/blob-digest digest]))
         error-row (assoc (select-keys fact [:seon.error/signature :seon.error/id
-                                          :seon.error/kind :seon.error/fn :seon.error/frame
+                                          :seon.error/kind :seon.instrument/fn :seon.error/frame
                                           :seon.error/exception-class])
                          :seon.error/occurrences #{occurrence})
         notification (cond-> {:seon.error/notification-id (:seon.error/id request)}
@@ -1479,41 +1477,6 @@
                                          steward-id) recipient reason notification))))
           recipients)))
 
-(defn function-identity-call
-  "Inside the transaction: the rows that make the failing function's
-  `:seon.fn/sym` identity resolvable, or nothing when it already is.
-
-  `:seon.error/fn` is a REF, so the fault cannot be recorded unless that
-  identity exists (the POPULATION INVARIANT). `:seon.fn/fn` REQUIRES
-  `:seon.schema.admission/source`, and that value belongs to whoever
-  admitted the declaration: asserting one here would overwrite the
-  publication's answer for every function the graph already knows, and
-  omitting it refuses the whole fault transaction for every function it
-  does not. So the question is asked of the MID-TRANSACTION database,
-  where the writer is about to decide it, instead of being pre-read and
-  re-decided: an existing identity gets nothing, and an absent one is
-  minted with the source its namespace declares — `:agent` when the
-  namespace declares none, because a name no publication admitted was
-  learned from a running agent."
-  {:malli/schema [:=> [:cat :seon.db/database-value :symbol]
-                  :seon.store/transaction-data]}
-  [database function]
-  (let [sym (str function)
-        namespace-name (some-> (namespace function) symbol)]
-    (if (or (nil? namespace-name)
-            (entity-exists? database :seon.fn/sym sym))
-      []
-      [{:seon.fn/sym sym
-        :seon.fn/ns [:seon.ns/name namespace-name]
-        :seon.schema.admission/source
-        (or (db/q '[:find ?source .
-                    :in $ ?name
-                    :where
-                    [?namespace :seon.ns/name ?name]
-                    [?namespace :seon.schema.admission/source ?source]]
-                  database namespace-name)
-            :agent)}])))
-
 (defn recording
   "Prepared identities, flat value and transaction data for one error.
 
@@ -1534,20 +1497,9 @@
                                      agent-id (assoc :seon.agent/id agent-id)
                                      turn-id (assoc :seon.turn/id turn-id)
                                      (nil? turn-id) (assoc :seon.db.process/id (:seon.error/process fact)))))
-         function (some-> (:seon.error/fn fact) second symbol)
-         namespace-name (some-> function namespace symbol)
-         identity-row {:db/id (fact-tempid (:seon.error/id request))
-                       :seon.error/id signature :seon.error/signature signature
-                       :seon.error/kind (:seon.error/kind fact)}
-         rows (cond-> [identity-row]
-                namespace-name (conj (program/canonical-row {:seon.ns/name namespace-name})))
-         rows (into [identity-row]
-                    (mapcat (fn [row]
-                              (let [tempid (pr-str (program/row-identity row))]
-                                (map (fn [[attribute value]] [:db/add tempid attribute value]) row))))
-                    (rest rows))
-         rows (cond-> rows
-                function (conj [:db.fn/call #'function-identity-call function]))
+         rows [{:db/id (fact-tempid (:seon.error/id request))
+                :seon.error/id signature :seon.error/signature signature
+                :seon.error/kind (:seon.error/kind fact)}]
          tx (conj rows [:db.fn/call #'commit-call
                         (assoc request :seon.error/fact fact :seon.error.occurrence/id occurrence-id)])]
      {:seon.error/fact fact
@@ -1606,8 +1558,6 @@
                     :seon.error/message (:seon.error.occurrence/message occurrence)
                     :seon.error/occurrence-count
                     (reduce + 0 (map :seon.error.occurrence/count (:seon.error/occurrences error)))})
-      (map? (:seon.error/fn error))
-      (assoc :seon.error/fn [:seon.fn/sym (get-in error [:seon.error/fn :seon.fn/sym])])
       (:seon.error.occurrence/agent occurrence)
       (assoc :seon.error/agent (:seon.error.occurrence/agent occurrence))
       (:seon.error.occurrence/turn occurrence)
@@ -1740,9 +1690,8 @@
           [[:time {:class "seon-error-at" :datetime instant :title instant
                    :data-text (str "new Date('" instant "').toLocaleString()")}
             (if (inst? at) (.format (java.text.SimpleDateFormat. "MMM d, HH:mm:ss") at) instant)]]))
-      (when-let [function (:seon.error/fn value)]
-        (let [reference (if (map? function)
-                          [:seon.fn/sym (:seon.fn/sym function)] function)]
+      (when-let [function (:seon.instrument/fn value)]
+        (let [reference [:seon.fn/sym function]]
           [[:p {:class "seon-error-function"}
             [:a {:href (render.route/path :seon.render.route/data {}
                                            {:entity (pr-str reference)})}
@@ -1794,20 +1743,22 @@
 (def ^:private agent-faults-query
   "Errors this agent must be able to read, by the two refs that name it.
 
-  A fault in a namespace it stewards names it through the function ref. A
+  A fault in a namespace it stewards names its current function by symbol. A
   fault recorded WHILE IT WAS WORKING — a lost model call is the founding
-  case — carries no `:seon.error/fn` at all and names the agent only through
+  case — carries no `:seon.instrument/fn` at all and names the agent only through
   its occurrence. Selecting only the first read the absence of the second as
   health: the turn closed, the reason was durable, and the agent's next
   prompt said nothing about it."
-  '[:find [(pull ?error [* {:seon.error/fn [:db/id :seon.fn/sym]}
+  '[:find [(pull ?error [*
                           {:seon.error/occurrences [*]}]) ...]
     :in $ ?id
     :where [?agent :seon.agent/id ?id]
+           [?error :seon.error/signature]
            (or-join [?error ?agent]
                     (and [?namespace :seon.ns/steward ?agent]
                          [?function :seon.fn/ns ?namespace]
-                         [?error :seon.error/fn ?function])
+                         [?function :seon.fn/sym ?function-symbol]
+                         [?error :seon.instrument/fn ?function-symbol])
                     (and [?occurrence :seon.error.occurrence/agent ?agent]
                          [?error :seon.error/occurrences ?occurrence]))])
 
@@ -1852,14 +1803,16 @@
   ([faults database]
   (let [acquired? (and (sequential? faults) (not (keyword? (first faults))))
         row (when-not acquired?
-              (db/q '[:find [(pull ?error [* {:seon.error/fn [:db/id :seon.fn/sym]}
+              (db/q '[:find [(pull ?error [*
                                              {:seon.error/occurrences [* {:seon.error.occurrence/turn [:seon.turn/id]}]}]) ...]
                       :in $ ?agent
                       :where
+                      [?error :seon.error/signature]
                       (or-join [?error ?agent]
                                (and [?namespace :seon.ns/steward ?agent]
                                     [?function :seon.fn/ns ?namespace]
-                                    [?error :seon.error/fn ?function])
+                                    [?function :seon.fn/sym ?function-symbol]
+                         [?error :seon.instrument/fn ?function-symbol])
                                (and [?occurrence :seon.error.occurrence/agent ?agent]
                                     [?error :seon.error/occurrences ?occurrence]))]
                     database faults))

@@ -18,6 +18,7 @@
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
             [seon.operator.runtime :as operator.runtime]
+            [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test.cache :as cache])
@@ -1047,18 +1048,31 @@
                    [:seon.turn/id turn-id])
           [:seon.turn/closed-tx :db/txInstant]))
 
-(defn program-fn-row
-  "One first-party program row for a fixture that needs only the identity.
+(defn program-row
+  "Analyze an explicit synthetic declaration through the production source path."
+  [database identity source]
+  (let [projection (db/carried-projection database)
+        [attribute declaration-symbol] identity
+        rows (seon.fn/source-rows
+              database (program/shapes-in (:seon.schema.projection/forms projection))
+              {:seon.ns/name (symbol (namespace declaration-symbol))}
+              source (set (keys (:seon.schema.projection/forms projection))))]
+    (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
+        (throw (ex-info "The fixture source did not define the requested declaration."
+                        {:seon.program/identity identity :seon.program/source source})))))
 
-   A bare `{:seon.fn/sym \"ns/name\"}` is refused: the fn schema requires
-   `:seon.schema.admission/source` (where the definition was admitted from)
-   and `:seon.fn/ns`, so a fixture writing the bare row has been seeding
-   nothing. The namespace must already exist — in the canonical fixture every
-   first-party namespace does."
-  [function-symbol]
-  {:seon.fn/sym (str function-symbol)
-   :seon.fn/ns [:seon.ns/name (symbol (namespace (symbol (str function-symbol))))]
-   :seon.schema.admission/source :core})
+(defn program-fn-row
+  "A complete indexed declaration, or an explicitly analyzed agent fixture.
+   The one-argument form returns the canonical source artifact's actual row.
+   Synthetic definitions require the database so the production analyzer owns
+   their resolver context and producing digest."
+  ([function-symbol]
+   (or (some #(when (= function-symbol (:seon.fn/sym %)) %)
+             (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts @source-manifest)))
+       (throw (ex-info "A synthetic fixture definition requires its database and source."
+                       {:seon.fn/sym function-symbol}))))
+  ([database function-symbol source]
+   (program-row database [:seon.fn/sym function-symbol] source)))
 
 (defn apply-config!
   "Set one cluster's config dials through the production path.

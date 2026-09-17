@@ -572,7 +572,7 @@
         "a declared but non-storable property remains compile-time Malli data")
     (is (not (contains? row :seon.unknown/property))
         "an undeclared property remains compile-time Malli data")
-    (is (= #{[:seon.schema/key :seon.error/message]}
+    (is (= #{:seon.error/message}
            (:seon.schema/references row))
         "an external canonical reference remains a persisted direct edge")
     (is (= (pr-str definition) (:seon.schema/form row)))))
@@ -799,18 +799,13 @@
       (is (false? (schema/valid-candidate-value? forms :seon.db/ref entity))
           ":seon.db/ref requires :db/id on a reference map")
       (is (false? (schema/valid-candidate-value?
-                   forms :seon.fn.arity/input entity))
+                   forms :seon.fn.arity/input-schema entity))
           "a non-component ref requires :db/id on a reference map")
       (is (false? (schema/valid-candidate-value? forms :seon.fn/arities [{}]))
           "an empty map is not a component entity"))
-    (testing "the row an agent's contracted defn builds validates"
+    (testing "the canonical indexed function row validates"
       (is (schema/valid-candidate-value?
-           forms :seon.fn/fn
-           {:seon.fn/sym "my.agents.probe/probe-fn"
-            :seon.schema.admission/source :agent
-            :seon.fn/ns [:seon.ns/name 'my.agents.probe]
-            :seon.fn/source "(defn probe-fn [x] x)"
-            :seon.fn/arities [{:seon.fn.arity/order 0}]})))
+           forms :seon.fn/fn (test-support/program-fn-row 'seon.id/id))))
     (testing "shape selection still picks each row's own family"
       (let [projection (schema/build-projection forms)
             matches (fn [value]
@@ -921,7 +916,7 @@
                                       [?arity :seon.fn.arity/arguments ?argument]
                                       [?argument :seon.fn.argument/index ?index]
                                       [?argument :seon.fn.argument/schema _]]
-                                    (str function-symbol)))))
+                                    function-symbol))))
                     (take 25))]
            (is (seq with-slots)
                "the canonical program graph declares argument shapes")
@@ -933,7 +928,7 @@
                                             #(#'call-preparation/argument-validators
                                               database
                                               {:seon.schema/projection bare}
-                                              (str function-symbol)))]
+                                              function-symbol))]
                                   [function-symbol message])))
                         with-slots)))))))))
 
@@ -957,8 +952,8 @@
                    [?file :seon.fn.file/relative-root "src"]]
                  @connection
                  :seon.schema.projection/predicate-functions))]
-       (is (= #{"seon.schema/predicate-functions-in"
-                "seon.schema/with-predicate-functions"}
+       (is (= #{(quote seon.schema/predicate-functions-in)
+                (quote seon.schema/with-predicate-functions)}
               named)
            (str "Only the reader and the writer may name "
                 ":seon.schema.projection/predicate-functions under src. "
@@ -968,7 +963,7 @@
        (is (seq (seon.db/q
                  '[:find [?caller-symbol ...]
                    :where
-                   [?callee :seon.fn/sym "seon.schema/predicate-functions-in"]
+                   [?callee :seon.fn/sym seon.schema/predicate-functions-in]
                    [?caller :seon.fn/calls ?callee]
                    [?caller :seon.fn/sym ?caller-symbol]]
                  @connection))

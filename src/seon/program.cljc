@@ -493,154 +493,7 @@
 
 (defn- schema-references
   [compiled canonical-keys]
-  (into #{}
-        (map (fn [reference] [:seon.schema/key reference]))
-        (schema-reference-keys compiled canonical-keys)))
-
-(declare ast-node)
-
-(defn- property-entries
-  [function-symbol path properties]
-  (into []
-        (map-indexed
-         (fn [order [k value]]
-           {:db/id (component-id function-symbol
-                                 (conj path :properties order))
-            :seon.fn.ast.entry/order (long order)
-            :seon.fn.ast.entry/key (pr-str k)
-            :seon.fn.ast.entry/value-edn (pr-str value)}))
-        (sort-by (comp pr-str key) properties)))
-
-(defn- ast-entry
-  [function-symbol path order entry-key ast properties references]
-  (cond->
-   {:db/id (component-id function-symbol path)
-    :seon.fn.ast.entry/value
-    (ast-node function-symbol (conj path :value) ast references)}
-    (some? order) (assoc :seon.fn.ast.entry/order (long order))
-    (some? entry-key) (assoc :seon.fn.ast.entry/key (pr-str entry-key))
-    (seq properties)
-    (assoc :seon.fn.ast.entry/properties
-           (property-entries function-symbol path properties))))
-
-(defn- scalar-entry
-  [function-symbol path order entry-key value]
-  (cond->
-   {:db/id (component-id function-symbol path)
-    :seon.fn.ast.entry/value-edn (pr-str value)}
-    (some? order) (assoc :seon.fn.ast.entry/order (long order))
-    (some? entry-key)
-    (assoc :seon.fn.ast.entry/key (pr-str entry-key))))
-
-(defn- ordered-ast-entries
-  [function-symbol path asts references]
-  (mapv (fn [order ast]
-          (ast-entry function-symbol
-                     (conj path order)
-                     order nil ast nil references))
-        (range)
-        asts))
-
-(defn- keyed-ast-entries
-  [function-symbol path entries references]
-  (->> entries
-       (sort-by (fn [[k entry]] [(:order entry) (pr-str k)]))
-       (mapv (fn [[k {:keys [order value properties]}]]
-               (ast-entry function-symbol
-                          (conj path order (pr-str k))
-                          order k value properties references)))))
-
-(defn- registry-entries
-  [function-symbol path registry references]
-  (->> registry
-       (sort-by (comp pr-str key))
-       (map-indexed
-        (fn [order [k ast]]
-          (ast-entry function-symbol
-                     (conj path order (pr-str k))
-                     order k ast nil references)))
-       vec))
-
-(defn- scalar-entries
-  [function-symbol path values]
-  (mapv (fn [order value]
-          (scalar-entry function-symbol (conj path order) order nil value))
-        (range)
-        values))
-
-(defn- ast-node
-  [function-symbol path ast references]
-  (let [properties (:properties ast)
-        children (:children ast)
-        ast-keys (:keys ast)
-        registry (:registry ast)
-        values (:values ast)
-        scalar-or-schema-value (:value ast)]
-    (cond->
-     {:db/id (component-id function-symbol path)
-      :seon.fn.ast/type (pr-str (:type ast))}
-      (contains? ast :value)
-      (assoc :seon.fn.ast/value
-             (if (and (map? scalar-or-schema-value)
-                      (contains? scalar-or-schema-value :type))
-               (ast-entry function-symbol
-                          (conj path :value)
-                          nil nil scalar-or-schema-value nil references)
-               (scalar-entry function-symbol
-                             (conj path :value)
-                             nil nil scalar-or-schema-value)))
-      (:input ast)
-      (assoc :seon.fn.ast/input
-             (ast-node function-symbol (conj path :input)
-                       (:input ast) references))
-      (:output ast)
-      (assoc :seon.fn.ast/output
-             (ast-node function-symbol (conj path :output)
-                       (:output ast) references))
-      (:guard ast)
-      (assoc :seon.fn.ast/guard
-             (ast-node function-symbol (conj path :guard)
-                       (:guard ast) references))
-      (:child ast)
-      (assoc :seon.fn.ast/child
-             (ast-node function-symbol (conj path :child)
-                       (:child ast) references))
-      (:key ast)
-      (assoc :seon.fn.ast/key
-             (ast-node function-symbol (conj path :key)
-                       (:key ast) references))
-      (and (= :malli.core/schema (:type ast))
-           (contains? references (:value ast)))
-      (assoc :seon.fn.ast/ref [:seon.schema/key (:value ast)])
-      (seq properties)
-      (assoc :seon.fn.ast/properties
-             (property-entries function-symbol path properties))
-      (seq children)
-      (assoc :seon.fn.ast/children
-             (ordered-ast-entries function-symbol
-                                  (conj path :children)
-                                  children references))
-      (seq ast-keys)
-      (assoc :seon.fn.ast/keys
-             (keyed-ast-entries function-symbol
-                                (conj path :keys)
-                                ast-keys references))
-      (seq registry)
-      (assoc :seon.fn.ast/registry
-             (registry-entries function-symbol
-                               (conj path :registry)
-                               registry references))
-      (seq values)
-      (assoc :seon.fn.ast/values
-             (scalar-entries function-symbol
-                             (conj path :values)
-                             values)))))
-
-(defn- arity-ast-path
-  [root-ast order]
-  (if (= :function (:type root-ast))
-    [:children order :value]
-    []))
+  (schema-reference-keys compiled canonical-keys))
 
 (defn- signature-key
   [signature]
@@ -728,10 +581,9 @@
       (some? label) (merge (label-facts label)))))
 
 (defn- arity-row
-  [function-symbol order root-ast info canonical-keys source-signature
+  [function-symbol order info canonical-keys source-signature
    schema-forms predicate-functions]
-  (let [ast-path (arity-ast-path root-ast order)
-        input-refs (schema-references (:input info) canonical-keys)
+  (let [input-refs (schema-references (:input info) canonical-keys)
         output-refs (schema-references (:output info) canonical-keys)
         guard-refs (when-let [guard (:guard info)]
                      (schema-references guard canonical-keys))
@@ -754,19 +606,15 @@
       :seon.fn.arity/order (long order)
       :seon.fn.arity/arity (pr-str (:arity info))
       :seon.fn.arity/min (long (:min info))
-      :seon.fn.arity/input
-      (component-id function-symbol (conj ast-path :input))
-      :seon.fn.arity/output
-      (component-id function-symbol (conj ast-path :output))
+      :seon.fn.arity/input-schema
+      (schema-shape/shape-row (:input info) schema-forms predicate-functions)
       :seon.fn.arity/arguments arguments
       :seon.fn.arity/argument-count (long (count arguments))
       :seon.fn.arity/return-schema
       (schema-shape/shape-row (:output info) schema-forms predicate-functions)}
       (contains? info :max) (assoc :seon.fn.arity/max (long (:max info)))
       (:guard info)
-      (assoc :seon.fn.arity/guard
-             (component-id function-symbol (conj ast-path :guard))
-             :seon.fn.arity/guard-schema
+      (assoc :seon.fn.arity/guard-schema
              (schema-shape/shape-row (:guard info) schema-forms
                                      predicate-functions))
       (seq input-refs) (assoc :seon.fn.arity/input-refs input-refs)
@@ -779,7 +627,7 @@
    [:=>
     [:cat
      [:map
-      [:seon.program/function-symbol [:string {:min 1}]]
+      [:seon.program/function-symbol :qualified-symbol]
       [:seon.program/spec [:string {:min 1}]]
       [:seon.program/source [:string {:min 1}]]
       [:seon.program/arglists {:optional true} :string]
@@ -802,8 +650,6 @@
                                           predicate-functions)
                   compile-options)
         arities (m/-function-schema-arities compiled)
-        root-ast (m/ast compiled)
-        references (schema-reference-keys compiled canonical-keys)
         {source-signatures :seon.fn.signature/signatures
          override? :seon.fn.signature/arglists-override?}
         (signature/function-signatures
@@ -828,12 +674,11 @@
      {:seon.fn/arities
       (mapv (fn [order arity]
               (let [info (m/-function-info arity)]
-                (arity-row function-symbol order root-ast info canonical-keys
+                (arity-row function-symbol order info canonical-keys
                            (get source-by-key (malli-arity-key info))
                            schema-forms predicate-functions)))
             (range)
-            arities)
-      :seon.fn/ast (ast-node function-symbol [] root-ast references)}
+            arities)}
       override? (assoc :seon.fn/arglists-override? true))))
 
 (defn with-contract-facts
@@ -932,23 +777,10 @@
   [row]
   (cond-> row
     (:seon.ns/requires row)
-    (assoc :seon.ns/requires
-           (into #{}
-                 (map (fn [required]
-                        (if (symbol? required)
-                          [:seon.ns/name required]
-                          required)))
-                 (:seon.ns/requires row)))
+    (update :seon.ns/requires set)
     (:seon.ns/aliases row) (update :seon.ns/aliases set)
     (:seon.ns/imports row) (update :seon.ns/imports set)
     (:seon.ns/refers row) (update :seon.ns/refers set)))
-
-(def ^:private declaration-required-attributes
-  {:seon.ns/name [:seon.ns/source]
-   :seon.fn/sym [:seon.fn/ns :seon.fn/source :seon.fn/arglists
-                 :seon.fn/private?]
-   :seon.schema/key [:seon.schema/form]
-   :seon.test/sym [:seon.test/ns :seon.test/source]})
 
 (defn declaration-row
   "Canonical declaration row for a reader event under a function policy.
@@ -1006,15 +838,13 @@
         row (canonical-row candidate)]
     (when row
       (let [[identity-attribute _ :as program-identity] (row-identity row)
-            missing
-            (into []
-                  (remove #(contains? row %))
-                  (get declaration-required-attributes identity-attribute))]
-        (when (seq missing)
+            source-attribute (:seon.program/source-attribute
+                              (shape (shapes) identity-attribute))]
+        (when-not (get row source-attribute)
           (declaration-refused!
-           "A declaration row is missing required attributes."
+           "A reader declaration has no source. Analysis has not run at this stage."
            [program-identity]
-           {:seon.program/missing-attributes missing}))))
+           {:seon.program/missing-attributes [source-attribute]}))))
     row))
 
 (defn- changed-attributes-in
@@ -1128,8 +958,8 @@
                  (= 3 (count form)))
         (when-let [namespace-name (quoted-symbol (second form))]
           (when-let [declaration-name (quoted-symbol (nth form 2))]
-            (let [qualified (str (symbol (str namespace-name)
-                                         (str declaration-name)))]
+            (let [qualified (symbol (str namespace-name)
+                                    (str declaration-name))]
               {:seon.program/delete-identities
                [[:seon.fn/sym qualified]
                 [:seon.test/sym qualified]]

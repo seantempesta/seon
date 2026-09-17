@@ -15,22 +15,21 @@
   (support/with-database
    (fn [connection]
      (let [report
-           (db/transact! connection
+           (support/transacted! connection
              [{:seon.ns/name 'entity-pairs.fixture}
               {:seon.agent/id "entity-pairs-agent"}
-              {:seon.fn/sym "entity-pairs.fixture/function"
-               :seon.schema.admission/source :core
-               :seon.fn/ns [:seon.ns/name 'entity-pairs.fixture]}
-              {:seon.test/sym "entity-pairs.fixture/test"
-               :seon.schema.admission/source :core
-               :seon.fn/calls [[:seon.fn/sym "entity-pairs.fixture/function"]]}
+              (support/program-fn-row (db/db connection) 'entity-pairs.fixture/function
+                                      "(defn function [] true)")
+              (assoc (support/program-row (db/db connection) [:seon.test/sym 'entity-pairs.fixture/test]
+                                          "(clojure.test/deftest test (clojure.test/is true))")
+                     :seon.fn/calls #{'entity-pairs.fixture/function})
               {:seon.issue/id "entity-pairs-issue"
                :seon.issue/title "Render linked entities"
                :seon.issue/problem "Verify the entity pairs"
                :seon.issue/status :open :seon.issue/severity :cleanup
                :seon.issue/agent [:seon.agent/id "entity-pairs-agent"]
-               :seon.issue/functions [[:seon.fn/sym "entity-pairs.fixture/function"]]
-               :seon.issue/tests [[:seon.test/sym "entity-pairs.fixture/test"]]}])]
+               :seon.issue/functions [[:seon.fn/sym (quote entity-pairs.fixture/function)]]
+               :seon.issue/tests [[:seon.test/sym (quote entity-pairs.fixture/test)]]}])]
        (is (:db-after report) (pr-str report)))
      (let [database (db/db connection)
            entity (db/pull database '[*] entity-lookup)
@@ -68,7 +67,7 @@
            (is (= '(do (doc entity-pairs.fixture/function))
                   (read-string (str "(do\n" source "\n)"))))
            (is (str/includes? source "seon.fn/tests-reaching"))
-           (is (str/includes? source ":_calls"))
+           (is (str/includes? source ":seon.fn/calls"))
            (is (not (str/includes? source "defn")))))
        (when (= :seon.test/sym (first entity-lookup))
          (doseq [[facts expected] [[{} "unrun or incomplete"]
@@ -86,15 +85,15 @@
                     (first (str/split-lines (second summary))))
                  (pr-str summary))
              (is (= 'seon.db/pull (first evidence)) (pr-str evidence))
-             (is (= [:seon.test/sym test-name] (last evidence)) (pr-str evidence))
-             (is (= (list 'seon.test/changed-since-green (list 'seon.db/db) test-name) changed)
+             (is (= (list 'quote [:seon.test/sym test-name]) (last evidence)) (pr-str evidence))
+             (is (= (list 'seon.test/changed-since-green (list 'seon.db/db) (list 'quote test-name)) changed)
                  (pr-str changed))
              (is (hiccup/hiccup? (render.test/render-html {:seon.render/value value}))))))))))
 
 (deftest function-entity-pair-is-selected-through-the-issue-walk
-  (exercise-pair [:seon.fn/sym "entity-pairs.fixture/function"]
+  (exercise-pair [:seon.fn/sym (quote entity-pairs.fixture/function)]
                  'seon.render.ns/function-ai 'seon.render.ns/function-html))
 
 (deftest test-entity-pair-is-total-through-the-issue-walk
-  (exercise-pair [:seon.test/sym "entity-pairs.fixture/test"]
+  (exercise-pair [:seon.test/sym (quote entity-pairs.fixture/test)]
                  'seon.render.test/render-ai 'seon.render.test/render-html))

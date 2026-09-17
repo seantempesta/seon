@@ -68,12 +68,14 @@
                                            {:seon.agent/id "error-graph-steward"}
                                            {:seon.ns/name 'my.error-graph
                                             :seon.ns/steward [:seon.agent/id "error-graph-steward"]}
+                                           (test-support/program-fn-row
+                                            (db/db connection) 'my.error-graph/raise
+                                            "(defn raise [] nil)")
                                            {:seon.turn/id "error-graph-turn" :seon.turn/agent [:seon.agent/id "error-graph-a"] :seon.turn/opened-tx "datomic.tx"}])))
             a (error/recording (db/db connection) (request "error-graph-a" "error-graph-process-1" at))
             b (error/recording (db/db connection) (request "error-graph-b" "error-graph-process-1" at))
             read-error #(db/pull (db/db connection)
-                                 '[* {:seon.error/fn [:seon.fn/sym {:seon.fn/ns [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]}
-                                   {:seon.error/occurrences [* {:seon.error.occurrence/agent [:seon.agent/id]}]}]
+                                 '[* {:seon.error/occurrences [* {:seon.error.occurrence/agent [:seon.agent/id]}]}]
                                  (:seon.error/ref a))]
         (is (= (:seon.error/ref a) (:seon.error/ref b)))
         (is (not= (:seon.error.occurrence/ref a) (:seon.error.occurrence/ref b)))
@@ -82,9 +84,7 @@
         (let [row (read-error)]
           (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))))
           (is (= [1 1] (sort (map :seon.error.occurrence/count (:seon.error/occurrences row)))))
-          (is (= "my.error-graph/raise" (get-in row [:seon.error/fn :seon.fn/sym])))
-          (is (= 'my.error-graph (get-in row [:seon.error/fn :seon.fn/ns :seon.ns/name])))
-          (is (= "error-graph-steward" (get-in row [:seon.error/fn :seon.fn/ns :seon.ns/steward :seon.agent/id])))
+          (is (= 'my.error-graph/raise (:seon.instrument/fn row)))
           (is (= "error-graph-steward" (error/steward (db/db connection) row)))
           (is (nil? (:seon.error/steward row))))
         (let [again (error/recording (db/db connection) (request "error-graph-a" "error-graph-process-1" later))]
@@ -116,7 +116,8 @@
           (is (str/includes? (error/log-line (error/notice {:seon.error/fact (:seon.error/fact summary) :seon.error/occurrence-count 6})) "occurrences=6"))
           (is (str/includes? (error/render-ai row) "Occurrences: 6"))
           (is (str/includes? (pr-str (error/render-html row)) "Open"))
-          (is (= 1 (count (db/q (second (second read-form)) database (last read-form)))))
+          (let [observed (db/q (second (second read-form)) database (last read-form))]
+            (is (= 1 (count observed)) (pr-str observed)))
           (is (str/includes? (pr-str (error/render-faults-html [:seon.agent/id "error-graph-steward"] database)) "same error"))
           (is (= 6 (:seon.render.transcript/count (first (#'seon.render.transcript/fault-problems database "error-graph-steward" [])))))
           (is (:db-after (db/transact! connection [[:db/add (:seon.error/ref a) :seon.error/resolved-tx "datomic.tx"]])))
@@ -127,7 +128,7 @@
                                                    :seon.error/message "flat error"
                                                    :seon.error/data {:seon.error/diagnostic-operation 'seon.id/valid?}} {}))]
           (is (:seon.error/ref flat))
-          (is (= [:seon.fn/sym "seon.id/valid?"] (:seon.error/fn (:seon.error/fact flat))))
+          (is (= 'seon.id/valid? (:seon.instrument/fn (:seon.error/fact flat))))
           (is (not (contains? (:seon.error/fact flat) :seon.error/exception-class)))
           (is (:db-after (db/transact! connection (:seon.db/tx-data flat)))))))))
 
@@ -273,7 +274,7 @@
           {:seon.db/transaction-outcome-unknown true
           :seon.error/kind :seon.db/unknown-failure
            :seon.error/message "outcome unknown"}
-          {:seon.instrument/contract-violated "sample/fn"
+          {:seon.instrument/contract-violated 'sample/fn
           :seon.error/kind :seon.instrument/contract-violated
            :seon.error/message "contract violated"}
           {:seon.render.walk/elided true
@@ -549,7 +550,7 @@
         (ex-info large
                  {:seon.error/kind :seon.instrument/contract-violated
                   :seon.error/data
-                  {:seon.instrument/fn "seon.render.data/at"
+                  {:seon.instrument/fn 'seon.render.data/at
                    :seon.instrument/arm :input
                    :seon.instrument/schema large
                    :seon.instrument/args large}})
@@ -763,14 +764,14 @@
   (let [violation {:seon.error/kind :seon.instrument/contract-violated
                    :seon.error/message "bad call"
                    :seon.error/data
-                   {:seon.instrument/fn "seon.error/value"
+                   {:seon.instrument/fn 'seon.error/value
                     :seon.instrument/arm :input
                     :seon.instrument/schema ":seon.error/fact"
                     :seon.instrument/args "[\"not a fact\"]"}}
         fact (error/normalize
               (request (transform-error
                         (ex-info "bad call" violation))))]
-    (is (= "seon.error/value" (:seon.instrument/fn fact)))
+    (is (= 'seon.error/value (:seon.instrument/fn fact)))
     (is (= :input (:seon.instrument/arm fact)))
     (is (= ":seon.error/fact" (:seon.instrument/expected fact)))
     (is (= "[\"not a fact\"]" (:seon.instrument/args fact)))
@@ -806,7 +807,7 @@
   (testing "instrumentation names the failed arm and received value"
     (let [prose (error/instrumentation-prose
                  {:seon.instrument/contract-violated true
-                  :seon.instrument/fn "my.fs/read"
+                  :seon.instrument/fn 'my.fs/read
                   :seon.instrument/arm :input
                   :seon.instrument/expected ":my.fs/read-request"
                   :seon.instrument/args "[{:my.fs/path 42}]"
@@ -1075,51 +1076,21 @@
         (is (some? about)
             "the tempid resolved: fact and message land in ONE transaction")))))
 
-(deftest a-fault-mints-the-failing-functions-identity-without-inventing-its-admission
-  ;; THE CLASS: the fault-committing path refers to the failing function by
-  ;; REF, so it mints `[:seon.fn/sym …]` when the program graph has no row
-  ;; for it. `:seon.fn/fn` REQUIRES `:seon.schema.admission/source`, and the
-  ;; minted row carried none, so the whole-entity validator rejected every
-  ;; such fault transaction — `:db-after` nil, the steward never woken, and
-  ;; the writer's only signal a `:transaction/validation-rejected` log line.
-  ;; The admission source is equally not this seam's to assert for a function
-  ;; the graph already knows, so the decision is made at the writer's own
-  ;; database rather than pre-read here.
+(deftest a-fault-observes-the-function-name-without-minting-an-identity
   (with-db
     (fn [connection]
-      (test-support/transacted! connection
-                                [{:seon.agent/id "mint-steward"}
-                                 {:seon.ns/name 'my.mint
-                                  :seon.ns/steward [:seon.agent/id "mint-steward"]}])
-      (let [failure (doto (IllegalStateException. "a real Java class")
+      (let [target (symbol "my.mint" "broken")
+            failure (doto (IllegalStateException. "a real Java class")
                       (.setStackTrace
                        (into-array StackTraceElement
                                    [(StackTraceElement. "my.mint$broken" "invokeStatic"
                                                         "mint.clj" 11)])))
             recording (error/recording (db/db connection)
                                        (commit-request (transform-error failure) {}))]
-        (is (:db-after (db/transact! connection (:seon.db/tx-data recording)))
-            "the fault transaction is accepted")
+        (test-support/transacted! connection (:seon.db/tx-data recording))
         (let [database (db/db connection)
-              stored (db/pull database '[*] (:seon.error/ref recording))
-              minted (db/pull database '[*] [:seon.fn/sym "my.mint/broken"])]
-          (testing "the exception class is stored as a symbol, never a string"
-            (is (= 'java.lang.IllegalStateException
-                   (:seon.error/exception-class stored)))
-            (is (symbol? (:seon.error/exception-class stored))))
-          (testing "the minted identity is a complete `:seon.fn/fn` row"
-            (is (= :agent (:seon.schema.admission/source minted)))
-            (is (= 'my.mint (:seon.ns/name (db/pull database '[:seon.ns/name]
-                                                    (:db/id (:seon.fn/ns minted)))))))
-          (testing "the steward of the failing function's namespace is derived"
-            (is (= "mint-steward" (error/steward database stored)))))
-        (testing "a second fault never re-decides an admitted function's source"
-          (test-support/transacted! connection
-                                    [{:seon.fn/sym "my.mint/broken"
-                                      :seon.schema.admission/source :core}])
-          (let [again (error/recording (db/db connection)
-                                       (commit-request (transform-error failure) {}))]
-            (is (:db-after (db/transact! connection (:seon.db/tx-data again))))
-            (is (= :core (:seon.schema.admission/source
-                          (db/pull (db/db connection) '[*]
-                                   [:seon.fn/sym "my.mint/broken"]))))))))))
+              stored (db/pull database '[*] (:seon.error/ref recording))]
+          (is (= 'java.lang.IllegalStateException (:seon.error/exception-class stored)))
+          (is (= target (:seon.instrument/fn stored)))
+          (is (nil? (db/pull database [:db/id] [:seon.fn/sym target])))
+          (is (nil? (db/pull database [:db/id] [:seon.ns/name 'my.mint]))))))))

@@ -199,10 +199,7 @@
             :expected-value #{direct-key}}
            {:label "function dependency"
             :selected-forms {base-key :int}
-            :extra-row (assoc (test-support/program-fn-row
-                                "seon.schema-usage-guard/accept")
-                               :seon.fn/spec
-                               (pr-str [:=> [:cat base-key] :int]))
+            :extra-row true
             :expected-key :seon.schema.blockers/function-symbols
             :expected-value #{'seon.schema-usage-guard/accept}}]]
     (testing label
@@ -216,7 +213,11 @@
           (when extra-row
             (test-support/transacted!
              connection
-             [{:seon.ns/name 'seon.schema-usage-guard} extra-row])
+             [{:seon.ns/name 'seon.schema-usage-guard}
+              (assoc (test-support/program-fn-row
+                      (db/db connection) 'seon.schema-usage-guard/accept
+                      "(defn accept [value] value)")
+                     :seon.fn/spec (pr-str [:=> [:cat base-key] :int]))])
             ;; The fn contract this row declares is what BLOCKS the deletion
             ;; below. It has to be in the projection the writer compiles, not
             ;; only in the datoms.

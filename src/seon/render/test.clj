@@ -14,7 +14,7 @@
     :seon.fn/form-span
     {:seon.test/failures [* {:seon.test.failure/file [:db/id :seon.fn.file/relative-path]}]}
     {:seon.test/run [:seon.test.run/id :seon.test.run/branch]}
-    {:seon.fn/calls [:seon.fn/sym]}])
+    :seon.fn/calls])
 
 (defn- evidence [unit]
   (let [entity (or (:seon.render/value unit) unit)]
@@ -44,7 +44,7 @@
   [unit]
   (let [entity (evidence unit) test-name (:seon.test/sym entity)
         text (str "Test " test-name ": " (state entity)
-                  (when (and (:seon.db/db unit) (string? test-name) (seq test-name))
+                  (when (and (:seon.db/db unit) (qualified-symbol? test-name))
                     (str "\n" (test/host-text (:seon.db/db unit) test-name)))
                   (if (seq (:seon.test/failures entity))
                     (str "\n" (str/join "\n\n" (map test/failure-text (failures entity))))
@@ -57,9 +57,9 @@
                                             :seon.test/run-basis-t]))) "\n"))
          (repl/source-text (list 'clojure.core/identity text)) "\n"
          (repl/source-text (list 'seon.db/pull (list 'quote evidence-selector)
-                                [:seon.test/sym test-name])) "\n"
-         (repl/source-text (list 'seon.test/changed-since-green (list 'seon.db/db) test-name)) "\n"
-         (repl/source-text (list 'seon.test/host (list 'seon.db/db) test-name)))))
+                                (list 'quote [:seon.test/sym test-name]))) "\n"
+         (repl/source-text (list 'seon.test/changed-since-green (list 'seon.db/db) (list 'quote test-name))) "\n"
+         (repl/source-text (list 'seon.test/host (list 'seon.db/db) (list 'quote test-name))))))
 
 (defn- function-link [target]
   [:a {:href (str (route/path :seon.render.route/namespace
@@ -100,17 +100,17 @@
        [:p "Unchanged; reused the result recorded at :t "
         (or (:seon.test/recorded-basis-t entity) "unavailable")
         ", tested basis :t " (or (:seon.test/run-basis-t entity) "unavailable") "."])
-     (when (and (:seon.db/db unit) (string? test-name) (seq test-name))
+     (when (and (:seon.db/db unit) (qualified-symbol? test-name))
        [:p {:class "seon-test-host"} (test/host-text (:seon.db/db unit) test-name)])
      (into [:div {:class "seon-test-failures"}]
        (map #(failure-html entity %) (failures entity)))
      (when (and (empty? (:seon.test/failures entity)) (:seon.test/failure-message entity))
        [:pre (:seon.test/failure-message entity)])
      (into [:ul]
-       (keep (fn [{target :seon.fn/sym}] (when target [:li (function-link target)]))
+       (map (fn [target] [:li (function-link target)])
              (:seon.fn/calls entity)))
      (when-let [database (:seon.db/db unit)]
        (let [changed (test/changed-since-green database test-name)]
          [:section [:h4 "Changed since last green"]
           (if (:seon.error/kind changed) [:p (:seon.error/message changed)]
-              (into [:ul] (map (fn [{target :seon.fn/sym}] [:li (function-link target)]) changed)))]))]))
+              (into [:ul] (map (fn [target] [:li (function-link target)]) changed)))]))]))

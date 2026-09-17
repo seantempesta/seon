@@ -137,9 +137,7 @@
     [{:db/id namespace-tempid
       :seon.ns/name namespace-name
       :seon.ns/requires
-      [[:seon.ns/name 'my.message]
-       [:seon.ns/name 'my.turn]
-       [:seon.ns/name 'seon.db]]}
+      #{'my.message 'my.turn 'seon.db}}
      {:db/id (str "agent:" agent-id)
       :seon.agent/id agent-id
       :seon.agent/namespace namespace-tempid

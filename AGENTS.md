@@ -108,14 +108,15 @@ is the evidence — hand-rostered fixtures vs the config compiler,
 existence pre-reads vs the writer's upsert, a reply pipe vs the
 process's own exit, a lint cache vs canonical analysis: one disease).
 A pre-read is legitimate only when its answer cannot change before the
-authority acts. Two ruled corollaries (ruling 47, context-generation
-ledger): PROGRAM IDENTITY ROWS NEVER RETRACT — deletion retracts
-definition facts, the identity survives as a tombstone, so refs to
-identities are stable forever; and THE POPULATION INVARIANT — every
-name the SCI context can resolve has a program row, minted where the
-context learns it, so call edges cannot dangle by construction.
-Retired by owner ruling 2026-09-16 (program-facts PRD §1f G1/G2);
-replaced when the edge schema lands.
+authority acts. Program deletion retracts the entity with `:db/retractEntity`; history,
+as-of and since retain its past. Calls, references and recorded test reach
+store qualified-symbol values. Deletion refuses when surviving declarations
+still name the removed identity; every repair must be present in the same
+transaction's final database. The complete refusal is the refactoring input.
+A name without a current function row is reported by the unresolved-call
+query, never repaired by minting an identity. Every function and test carries
+the required digest produced by analysis; that fact plus no call datoms means
+“analyzed, calls nothing.” No program tombstone or retirement sentinel is stored.
 
 **The recurring failure class of this whole project is a check that reads
 ABSENCE OF SIGNAL as health** — a query against a descriptor that no longer
@@ -492,23 +493,24 @@ never validated at all.
 `[:set :qualified-symbol]`; a symbol denotes itself, so deleting the named
 function touches no caller's datom and "A calls a name with no row" is one
 Datalog clause instead of an impossibility. Refs stay where a genuine
-entity relation exists (`:seon.fn/ns`, `/file`, `/ast`, `/arities`). TARGET
-until the `edges-are-symbols-deletion-is-retraction` lane lands the schema
-change: `:seon.fn/calls` is still `[:set :seon.db/ref]`
-(`resources/seon/schemas/seon.fn.edn:23`) and `:seon.test/reach` still a
-ref vector (`resources/seon/schemas/seon.test.edn:2`).
+entity relation exists (`:seon.fn/ns`, `/file`, `/arities`). Calls and
+references are indexed qualified-symbol sets, as is recorded test reach.
+Canonical arity inputs/returns link to shared `seon.schema.shape` facts; the
+old `seon.fn.ast` family is deleted.
 
 **The discriminator is one question: does the fact STATE something about a living entity, or OBSERVE a
-TOKEN?** A statement is a ref — a component when the target contains the
-referrer, otherwise a peer whose deletion policy is the required/optional dial
+TOKEN?** A statement is a ref — a component when the referrer owns the
+target, otherwise a peer whose deletion policy is the required/optional dial
 above. An observation — a name the analyzer, the author or the reporter saw —
 is a VALUE, and whether anything by that name exists is a separate derivable
-question. [TARGET] **A function with live callers is not deletable until the
+question. **A function with live callers is not deletable until the
 callers are fixed** (owner, 2026-09-16): edges surviving as values is what
 makes the breaking call graph readable, not permission to drop the function
 silently. The retraction and the repair belong in one transaction, or the
 deletion refuses and hands the agent the breakage to fix first — equally for
-an SCI evaluation, an edit-hook file deletion, and a complete republish.
+an SCI evaluation and an edit-hook publication. A fresh reset publication
+has no prior definitions to retract and reports unresolved names positively.
+A complete publication that removes a prior live identity has no exemption.
 
 **If a reader will ever need to distinguish "we looked and found nothing"
 from "we never looked", the looking is an event and the event is a datom**
@@ -668,7 +670,7 @@ writing.
 | `my.program/history` | Source assertion/retraction events with exact root datom values and transaction provenance; optional `:seon.db/tx` selects the requested as-of definition, including metadata changed after its source assertion (`src/my/program.clj:311`; `reference-code/datahike/src/datahike/db.cljc`, `as-of-pred`). | definition archive |
 | referrer; caller; reference; subject; reach | Referrer is a live entity naming the subject; caller means `:seon.fn/calls`, reference means `:seon.fn/references`, test subject is a present claim, and reach is advisory evidence from a past run. The program read preserves these relations separately (`resources/seon/schemas/seon.program.edn`). | dependency (without its attribute) |
 | plan of a refusal; detector; `seon.issue/subject-id` | One prospective issue per caller, identified by the detector plus the caller's installed identity value using the generator's same `seon.issue/subject-id`; tests come from the caller's gate set (`src/seon/issue.clj`, `src/my/program.clj`). `seon.program/unresolved-callers` is the target done condition. Launch is unavailable until the detector can truthfully represent the repair subjects; the read states that limitation. | work packet, separate task registry |
-| redefinition; retraction | Redefinition replaces definition facts at one identity; retraction removes facts and leaves the past to history/as-of (`seon.program/exact-replacement-tx`, Datahike `retractEntity`). Identity-only tombstones remain legacy until the deletion owner lands the new semantics. | soft delete, retirement |
+| redefinition; retraction | Redefinition replaces definition facts at one identity; retraction removes facts and leaves the past to history/as-of (`seon.program/exact-replacement-tx`, Datahike `retractEntity`). Surviving named referrers refuse deletion unless repaired in the same transaction. | soft delete, retirement |
 | proc, step-fn, conns, graph-def | `clojure.core.async.flow`'s own vocabulary (`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:78`, `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:165`) | invented scheduler nouns |
 | `(sliding-buffer 1)` tap | core.async's own newest-only delivery | latest-wins mailbox |
 | tuple (`:db/tupleType`) | Datahike's single-value ordered construct; cardinality-many is a SET (`reference-code/datahike/src/datahike/index/persistent_set.cljc`) | small limited vector |

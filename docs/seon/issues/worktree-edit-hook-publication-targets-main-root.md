@@ -30,3 +30,12 @@ currently held by the tooling lane; this lane preserved that file.
 Acceptance: a regression applies an edit inside a worktree and observes either
 publication scoped to that worktree or a typed, explicit skipped-publication
 result, with no main-root publication job.
+
+A second observation from `reset-batch` in the same date: read-only `sed`
+commands with explicit workdir `tmp/reset-batch-wt` received derived-write
+refusals naming unmatched parentheses in the main checkout's concurrently
+edited `test/seon/render/web_debug_test.clj` (line 1, end lines 1080 and 1098).
+That path was clean in the selected worktree at the time; subsequent reads
+succeeded. The same acceptance must cover attribution: a returning reader
+must not be blamed for another checkout's writer. The hook was not edited or
+disabled by this lane.

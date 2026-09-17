@@ -217,7 +217,11 @@
          ;; also carries `seon.call-preparation/install`'s state plus an
          ;; environment — so a scratch base ctx behaves exactly as it did
          ;; before, and a cluster ctx prepares every direct Var call.
-         :call-preparation-hook call-preparation/hook
+         :call-preparation-hook
+         (fn [ctx callee arguments]
+           (or ((requiring-resolve 'my.program/native-call-refusal)
+                ctx callee arguments)
+               (call-preparation/hook ctx callee arguments)))
          ;; the interrupt-aware core: a lazy sequence built by NATIVE
          ;; clojure.core enters no interpreted body, so `(range)` inside
          ;; `reduce` would never hit the interrupt-fn. Sci ships drop-in
@@ -320,8 +324,8 @@
         (mapcat
          (fn [[namespace-name intern-names]]
            (mapcat (fn [intern-name]
-                     (let [qualified (str (symbol (str namespace-name)
-                                                  (str intern-name)))]
+                     (let [qualified (symbol (str namespace-name)
+                                             (str intern-name))]
                        [[:seon.fn/sym qualified]
                         [:seon.test/sym qualified]]))
                    (sort-by str
@@ -406,7 +410,7 @@
        (let [metadata (meta sci-var)
              analysed-row
              (when (or (:test metadata) (fn? value))
-               (some #(when (= (str qualified)
+               (some #(when (= qualified
                                (or (:seon.fn/sym %) (:seon.test/sym %))) %)
                      (seon.fn/source-rows
                       database
@@ -538,10 +542,7 @@
     refers :seon.sci.reader/refers
     requires ::requires}]
   {:seon.ns/requires
-   (into #{}
-         (map (fn [namespace-name]
-                [:seon.ns/name namespace-name]))
-         requires)
+   (set requires)
    :seon.ns/aliases
    (into #{}
          (map (fn [[local target-ns]]
@@ -581,9 +582,7 @@
                 [local (symbol (str target-ns) (str target-name))]))
          (:seon.ns/refers row))
    :requires
-   (into #{}
-         (map :seon.ns/name)
-         (:seon.ns/requires row))})
+   (set (:seon.ns/requires row))})
 
 (defn- program-row-identity
   "The declared identity carried by one program row, or nil."
@@ -698,7 +697,7 @@
        (ex-info "Selected function is missing from the acquired SCI program snapshot."
                 {:seon.error/kind ::missing-function-row
                  ::missing-function-row function-symbol
-                 :seon.fn/sym (str function-symbol)})))
+                 :seon.fn/sym function-symbol})))
     (let [namespace-row (kernel/program-namespace ctx namespace-name)]
       (install-declared-classes! ctx [namespace-row])
       (sci/install-namespace-bindings!
@@ -709,7 +708,7 @@
         (sci/binding [sci/ns (sci/create-ns namespace-name)]
           (sci/eval-form ctx (:seon.sci.reader/form event)))
         (install-function-contract!
-         ctx (db/pull db '[*] [:seon.fn/sym (str function-symbol)])
+         ctx (db/pull db '[*] [:seon.fn/sym function-symbol])
          (context-projection ctx) db)))
     (kernel/mark-installed! ctx function-symbol)
     function-symbol))
@@ -821,7 +820,7 @@
                                :seon.program/delete-identities)
                     (db/pull db
                             (if (= identity-attribute :seon.ns/name)
-                              '[* {:seon.ns/requires [:seon.ns/name]}
+                              '[* :seon.ns/requires
                                   {:seon.ns/aliases [*]}
                                   {:seon.ns/imports [*]}
                                   {:seon.ns/refers [*]}]
@@ -949,6 +948,12 @@
       (advance-context-projection!
        ctx db (:seon.schema/projection installed))
       installed)))
+
+(defn- evaluate-native!
+  "Execute an already-admitted program operation in its supplied SCI context.
+   Only this native operation skips preparation, never an agent evaluation."
+  [ctx form]
+  (sci/eval-form (assoc ctx :call-preparation-hook nil) form))
 
 (defn- transfer-evaluated-roots!
   [ctx installations]
@@ -1279,8 +1284,8 @@
    :seon.schema.admission/source
    {:seon.fn/arities
     [:seon.fn.arity/order :seon.fn.arity/arity
-     {:seon.fn.arity/input-refs [:seon.schema/key :seon.schema/form]}
-     {:seon.fn.arity/output-refs [:seon.schema/key :seon.schema/form]}]}])
+     '(limit :seon.fn.arity/input-refs nil)
+     '(limit :seon.fn.arity/output-refs nil)]}])
 
 (defn- program-documentation
   "Read one namespace's public functions at the evaluation's database basis."
@@ -1328,12 +1333,16 @@
                 (str/trim (str/join "\n" (subvec lines (inc example-index)))) "")}))
 
 (defn- documentation-schemas
-  [row]
-  (into (sorted-map)
-        (map (fn [reference]
-               [(:seon.schema/key reference) (edn/read-string (:seon.schema/form reference))]))
-        (mapcat #(concat (:seon.fn.arity/input-refs %) (:seon.fn.arity/output-refs %))
-                (:seon.fn/arities row))))
+  [database row]
+  (let [keys (into #{} (mapcat #(concat (:seon.fn.arity/input-refs %)
+                                       (:seon.fn.arity/output-refs %)))
+                   (:seon.fn/arities row))
+        definitions (db/q '[:find ?key ?form :in $ [?key ...]
+                            :where [?schema :seon.schema/key ?key]
+                                   [?schema :seon.schema/form ?form]] database keys)]
+    (when (:seon.error/kind definitions)
+      (throw (ex-info "Documentation schema references unavailable." definitions)))
+    (into (sorted-map) (map (fn [[key form]] [key (edn/read-string form)])) definitions)))
 
 (defn- documentation-contract
   [database row]
@@ -1359,7 +1368,7 @@
   [database row]
   (let [entries (call-preparation/supplied-map-entries database (:seon.fn/sym row))
         contract (documentation-contract database row)
-        expanded (walk/postwalk-replace (into {} (documentation-schemas row)) contract)
+        expanded (walk/postwalk-replace (into {} (documentation-schemas database row)) contract)
         spec (:seon.fn/spec row)
         arities (if (and spec (= :function (first (edn/read-string spec))))
                   (:in expanded) [(:in expanded)])]
@@ -1419,7 +1428,7 @@
       (or (:seon.ns/name namespace-row) present? (seq functions))
       (let [functions (sort-by (juxt #(get % :seon.fn/doc-order Long/MAX_VALUE)
                                     :seon.fn/sym) functions)]
-        {:schemas (into (into (sorted-map) (mapcat documentation-schemas) functions)
+        {:schemas (into (into (sorted-map) (mapcat #(documentation-schemas database %)) functions)
                         (map (fn [row]
                                [(:seon.schema/key row)
                                 (edn/read-string (:seon.schema/form row))]))
@@ -1443,10 +1452,10 @@
   (if (namespace qualified)
     (let [row (db/pull database
                        (conj program-documentation-selector :seon.fn/private?)
-                       [:seon.fn/sym (str qualified)])
+                       [:seon.fn/sym qualified])
           overrides (when (= :agent (:seon.schema.admission/source row))
                       (program/overrides database))
-          overridden? (boolean (some #{(str qualified)} overrides))]
+          overridden? (boolean (some #{qualified} overrides))]
       (cond
         (:seon.error/kind row) row
         (:seon.error/kind overrides) overrides
@@ -1678,7 +1687,7 @@
                       (get namespace-source-by-name namespace-name)]
                   (assoc
                    (db/pull db
-                            '[* {:seon.ns/requires [:seon.ns/name]}
+                            '[* :seon.ns/requires
                                 {:seon.ns/aliases [*]}
                                 {:seon.ns/imports [*]}
                                 {:seon.ns/refers [*]}]

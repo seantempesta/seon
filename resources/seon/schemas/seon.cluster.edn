@@ -5,8 +5,8 @@
                  :seon.render/html seon.cluster/render-html}
                 [:seon.cluster/name :seon.cluster/name]
                 [:seon.cluster/config :seon.cluster/config]
-                [:seon.cluster/instructions :seon.cluster/instructions]
-                [:seon.cluster/toolkit :seon.cluster/toolkit]],
+                [:seon.cluster/instructions {:optional true} :seon.cluster/instructions]
+                [:seon.cluster/toolkit {:optional true} :seon.cluster/toolkit]],
                :config :seon.db/ref,
                :created? :boolean,
                :instructions [:set :seon.db/ref],

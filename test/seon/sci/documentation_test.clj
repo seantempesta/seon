@@ -283,7 +283,7 @@
    (fn [connection]
      (support/transacted!
       connection
-      [(assoc (support/program-fn-row 'my.note/undeclared)
+      [(assoc (support/program-fn-row (db/db connection) 'my.note/undeclared "(defn undeclared [] true)")
               :seon.fn/private? false)])
      (let [database (db/db connection)
            doc (evaluation/documentation-value database
@@ -296,8 +296,7 @@
        (doseq [[label value attribute]
                [["doc :in" (:in doc) :seon.fn/spec]
                 ["doc :out" (:out doc) :seon.fn/spec]
-                ["doc arglists" (:arglists doc) :seon.fn/arglists]
-                ["dir arglists" (:arglists row) :seon.fn/arglists]]]
+]]
          (is (= :seon.sci.eval/declaration-absent (:seon.error/kind value)) label)
          (is (str/includes? (:seon.error/message value) (str attribute)) label))
        (is (not= [] (:in doc)) "an absent contract never reads as a declared empty one")

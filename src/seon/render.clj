@@ -685,20 +685,20 @@
 (defn- render-program-evidence
   "Follow recorded call edges once; retained calls carry these program rows."
   [database snapshot selected]
-  (loop [pending #{(str selected)} visited #{}]
+  (loop [pending #{selected} visited #{}]
     (if (empty? pending)
       (let [symbols (map symbol visited)
             namespaces (set (map #(symbol (namespace %)) symbols))]
         {:functions (into {} (map #(vector % (get (:functions snapshot) %))) symbols)
          :namespaces (into {} (map #(vector % (get (:namespaces snapshot) %))) namespaces)})
       (let [rows (db/pull-many database
-                              '[:seon.fn/sym {:seon.fn/calls [:seon.fn/sym]}]
+                              '[:seon.fn/sym (limit :seon.fn/calls nil)]
                               (mapv #(vector :seon.fn/sym %) pending))
             visited (into visited pending)]
         (if (:seon.error/kind rows)
           nil
           (recur (into #{} (comp (mapcat :seon.fn/calls)
-                                (map :seon.fn/sym) (remove visited)) rows)
+                                (remove visited)) rows)
                  visited))))))
 
 (defn call-cache-evidence
@@ -1017,7 +1017,7 @@
        (cond->
         {:seon.sci.eval/ctx ctx
          :seon.db/db (:seon.db/db request)
-         :seon.fn/sym (str selected)
+         :seon.fn/sym selected
          :seon.sci.eval/args [argument]
          :seon.sci.admit/unbounded? true
          :seon.sci.eval/time-limit-ms time-limit-ms

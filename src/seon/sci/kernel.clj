@@ -172,7 +172,7 @@
       (throw
        (ex-info "SCI context has no database-program installer."
                 {:seon.error/kind ::missing-function-installer
-                 :seon.fn/sym (str function-symbol) :seon.sci.kernel/missing-function-installer (str function-symbol)}))))
+                 :seon.fn/sym function-symbol :seon.sci.kernel/missing-function-installer function-symbol}))))
   function-symbol)
 
 (defn context-projection
@@ -545,7 +545,7 @@
                   :seon.sci.eval/invocation-result]}
   [{ctx :seon.sci.eval/ctx
     database :seon.db/db
-    function-symbol-string :seon.fn/sym
+    function-symbol :seon.fn/sym
     arguments :seon.sci.eval/args
     time-limit-ms :seon.sci.eval/time-limit-ms
     caps :seon.sci.admit/caps
@@ -553,8 +553,7 @@
     read-evidence-sink :seon.db/read-evidence-sink
     on-core-error :seon.config/on-core-error}]
   (let [started-at (System/nanoTime)
-        arm-state (volatile! nil)
-        function-symbol (symbol function-symbol-string)]
+        arm-state (volatile! nil)]
     (try
       (let [{:keys [interrupt-fn] record-fn ::record :as armed}
             (arm ctx time-limit-ms)]
@@ -571,7 +570,7 @@
               (throw
                (ex-info (str function-symbol " is not an installed SCI Var.")
                         {:seon.error/kind ::unresolved-invocation
-                         :seon.fn/sym function-symbol-string :seon.sci.kernel/unresolved-invocation function-symbol-string})))
+                         :seon.fn/sym function-symbol :seon.sci.kernel/unresolved-invocation function-symbol})))
             (let [;; The SECOND of the two ruled call-preparation
                   ;; entrances. SCI's analyzed call path hooks itself; a
                   ;; named invocation applies the Var directly, so it
@@ -603,7 +602,7 @@
                 (record-fn (if (interrupted? throwable) :time :error))
                 (unarmed-record started-at))
               failure (failure-value
-                       {:seon.fn/sym function-symbol-string
+                       {:seon.fn/sym function-symbol
                         ::time-limit-kind ::time-limit
                         ::failure-kind ::invocation-failed}
                        throwable record-value)]

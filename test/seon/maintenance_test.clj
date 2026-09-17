@@ -286,9 +286,9 @@
 (defn- seed-report!
   [connection]
   (let [footprint-task "root/maintenance/footprint"
-        footprint-handler "seon.operator/observe-footprint!"
+        footprint-handler 'seon.operator/observe-footprint!
         census-task "root/maintenance/process-census"
-        census-handler "seon.operator/census-processes!"]
+        census-handler 'seon.operator/census-processes!]
     (test-support/transacted!
                  connection
                  (into [{:seon.agent/id "root"}]
@@ -516,9 +516,9 @@
   (test-support/with-database
     (fn [connection]
       (let [collect-task "root/maintenance/compact"
-            collect-handler "seon.operator/collect!"
+            collect-handler 'seon.operator/collect!
             cleanup-task "root/maintenance/cleanup"
-            cleanup-handler "seon.operator/cleanup-cluster!"]
+            cleanup-handler 'seon.operator/cleanup-cluster!]
         (test-support/transacted!
          connection
          (into [{:seon.agent/id "root"}]

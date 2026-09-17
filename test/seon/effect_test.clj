@@ -125,7 +125,7 @@
        (pr-str [:map
                 [:seon.effect-test/iterations :int]
                 [:seon.effect-test/gated? {:optional true} :boolean]])}
-      {:seon.fn/sym "seon.effect-test/arm-probe-owner"
+      {:seon.fn/sym 'seon.effect-test/arm-probe-owner
        :seon.schema.admission/source :core
        :seon.fn/ns [:seon.ns/name 'seon.effect-test]
        :seon.fn/spec
@@ -145,7 +145,7 @@
        :seon.schema.admission/source :core
        :seon.schema/form
        (pr-str [:map [:seon.effect-test/value :int]])}
-      {:seon.fn/sym "seon.effect-test/capability-owner"
+      {:seon.fn/sym 'seon.effect-test/capability-owner
        :seon.schema.admission/source :core
        :seon.fn/ns [:seon.ns/name 'seon.effect-test]
        :seon.fn/spec
@@ -160,9 +160,9 @@
   (test-support/with-database
     (fn [connection]
       (doseq [[install! owner request-schema]
-              [[install-capability! "seon.effect-test/capability-owner"
+              [[install-capability! 'seon.effect-test/capability-owner
                 :seon.effect-test/request]
-               [install-arm-probe! "seon.effect-test/arm-probe-owner"
+               [install-arm-probe! 'seon.effect-test/arm-probe-owner
                 :seon.effect-test/arm-probe-request]]]
         (is (some? (:db-after (install! connection))))
         (let [declaration (db/pull (db/db connection)
@@ -618,16 +618,14 @@
       (install-capability! connection)
       (transact-fixture!
        connection
-       [{:seon.fn/sym "seon.effect-test/pure-caller"
-         :seon.schema.admission/source :core
-         :seon.fn/ns [:seon.ns/name 'seon.effect-test]
-         :seon.fn/calls
-         [[:seon.fn/sym "seon.effect-test/capability-owner"]]}])
+       [(test-support/program-fn-row
+         (db/db connection) 'seon.effect-test/pure-caller
+         "(defn pure-caller [request] (capability-owner request))")])
       (let [database (db/db connection)]
-        (is (= #{"seon.effect-test/capability-owner"}
+        (is (= #{'seon.effect-test/capability-owner}
                (effect/capabilities database
                                     'seon.effect-test/capability-owner)))
-        (is (= #{"seon.effect-test/capability-owner"}
+        (is (= #{'seon.effect-test/capability-owner}
                (effect/capabilities database
                                     'seon.effect-test/pure-caller)))
         (is (= #{}
@@ -655,7 +653,7 @@
           (is (true? (:seon.effect-test/virtual-thread? first-result)))
           (is (= [{:seon.effect-test/value 7}] @handler-calls)))
         (testing "one open-before-dispatch receipt settled with bounded data"
-          (is (= "seon.effect-test/capability-owner"
+          (is (= 'seon.effect-test/capability-owner
                  (get-in receipt [:seon.effect/owner :seon.fn/sym])))
           (is (= 0 (:seon.effect/ordinal receipt)))
           (is (= 3 (:seon.effect/form-ordinal receipt)))
@@ -799,7 +797,8 @@
          connection
          [{:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])
            :seon.effect/run [:seon.turn/id "effect-run"]
-           :seon.effect/owner [:seon.fn/sym "seon.effect-test/capability-owner"]
+           :seon.effect/owner [:seon.fn/sym 'seon.effect-test/capability-owner]
+           :seon.effect/capability 'seon.effect-test/test-handler
            :seon.effect/form-ordinal 3
            :seon.effect/ordinal 0
            :seon.effect/request-edn "{}"
@@ -909,7 +908,7 @@
                   [:seon.cluster.eval/ordinal
                    {:seon.cluster.eval/run
                     [:seon.turn/id {:seon.turn/agent [:seon.agent/id]}]}]}
-                 {:seon.effect/capability-fn [:seon.fn/sym]}
+                 :seon.effect/capability
                  {:seon.effect/owner [:seon.fn/sym]}])]
           (testing "agent, turn, evaluation and effect are one walk"
             (is (= "effect-agent"
@@ -917,12 +916,11 @@
                                     :seon.turn/agent :seon.agent/id])))
             (is (= 3 (get-in receipt [:seon.effect/eval
                                       :seon.cluster.eval/ordinal]))))
-          (testing "the code that ran the request is a ref, not a symbol"
-            (is (= "my.fs/write!"
+          (testing "the exact dispatched handler survives as an observed symbol"
+            (is (= 'my.fs/write!
                    (get-in receipt [:seon.effect/owner :seon.fn/sym])))
-            (is (= "seon.fs.jvm/write"
-                   (get-in receipt [:seon.effect/capability-fn
-                                    :seon.fn/sym]))))
+            (is (= 'seon.fs.jvm/write
+                   (:seon.effect/capability receipt))))
           (.delete (java.io.File. path))
           (.delete (.getParentFile (java.io.File. path))))))))
 
@@ -935,7 +933,7 @@
   ;; capability there is, because a handler takes the request AND the
   ;; effective config the executor hands it; ask nothing and every malformed
   ;; request reaches the handler. Neither mistake shows up in one capability's
-  ;; own test, so the population is derived from `:seon.fn/capability-fn`
+  ;; own test, so the population is derived from `:seon.effect/capability`
   ;; facts and each request is GENERATED from that owner's own declared input
   ;; schema: a capability declared tomorrow is covered on the day it declares.
   (test-support/with-database
@@ -945,7 +943,7 @@
             registry (:seon.schema.projection/registry projection)
             owners (db/q '[:find ?symbol ?spec
                            :where
-                           [?owner :seon.fn/capability-fn _]
+                           [?owner :seon.effect/capability _]
                            [?owner :seon.fn/sym ?symbol]
                            [?owner :seon.fn/spec ?spec]]
                          database)
@@ -955,11 +953,10 @@
                            [?owner :seon.fn/sym ?symbol]]
                          database)]
         (is (seq owners)
-            (str "no capability owner carries :seon.fn/capability-fn — this "
+            (str "no capability owner carries :seon.effect/capability — this "
                  "check would otherwise pass by examining nothing"))
         (is (= (set marked) (set (map first owners)))
-            (str "the symbol and the ref must name the same population; a "
-                 "marked owner missing its ref is an indexer defect"))
+            (str "every marked declaration must carry the request contract used for dispatch"))
         (doseq [[owner-symbol spec] (sort-by first owners)]
           (let [request-schema (second (second (edn/read-string spec)))
                 request (mg/generate

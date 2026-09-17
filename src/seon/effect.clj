@@ -138,9 +138,11 @@
 
 (def ^:private reach-rules
   '[[(reachable ?function ?target)
-     [?function :seon.fn/calls ?target]]
+     [?function :seon.fn/calls ?target-symbol]
+       [?target :seon.fn/sym ?target-symbol]]
     [(reachable ?function ?target)
-     [?function :seon.fn/calls ?called]
+     [?function :seon.fn/calls ?called-symbol]
+       [?called :seon.fn/sym ?called-symbol]
      (reachable ?called ?target)]])
 
 (defn capabilities
@@ -150,7 +152,7 @@
   [database function-symbol]
   (let [root (db/pull database
                       [:db/id :seon.fn/sym :seon.effect/capability]
-                      [:seon.fn/sym (str function-symbol)])
+                      [:seon.fn/sym function-symbol])
         reached
         (db/q '[:find [?owner-symbol ...]
                 :in $ % ?root
@@ -246,14 +248,6 @@
                        [:seon.cluster.eval/id
                         (id/evaluation turn-id ordinal)])))))
 
-(defn- capability-fn-eid
-  "The handler declaration that runs this request, read off its owner."
-  [database receipt]
-  (some-> (db/pull database [{:seon.fn/capability-fn [:db/id]}]
-                   (:seon.effect/owner receipt))
-          :seon.fn/capability-fn
-          :db/id))
-
 (defn open-call
   "Open one never-before-recorded effect identity inside the writer."
   {:malli/schema [:=> [:cat :seon.db/database-value
@@ -269,13 +263,11 @@
          :seon.error/message
          "This effect request was already recorded and was not dispatched again."
          :seon.error/data {:seon.effect/id (:seon.effect/id receipt)} :seon.effect/already-recorded true}))
-      (let [evaluation (evaluation-eid database receipt)
-            capability-fn (capability-fn-eid database receipt)]
+      (let [evaluation (evaluation-eid database receipt)]
         [(cond-> (merge receipt
                         (declared-datoms database
                                          (:seon.effect/arguments request)))
-           evaluation (assoc :seon.effect/eval evaluation)
-           capability-fn (assoc :seon.effect/capability-fn capability-fn))]))))
+           evaluation (assoc :seon.effect/eval evaluation))]))))
 
 (defn- write-back-adds
   "The write-back provenance a handler reported, resolved at the writer.
@@ -492,7 +484,7 @@
                :seon.error/diagnostic-operation ::handler-completion
                :seon.error/diagnostic-member
                {:seon.effect/id effect-id
-                :seon.fn/sym (str owner-sym)}
+                :seon.fn/sym owner-sym}
                :seon.error/diagnostic-expected ::handler-result
                :seon.error/diagnostic-offending ::pending
                :seon.error/diagnostic-evidence
@@ -596,7 +588,7 @@
   [owner-sym]
   (flat-error :seon.effect/handler-failed
               "The capability handler failed."
-              {:seon.fn/sym (str owner-sym)}))
+              {:seon.fn/sym owner-sym}))
 
 (defn- background-settlement-request
   "Capture everything background settlement needs on the requesting thread."
@@ -697,7 +689,7 @@
              (db/pull database
                       [:db/id :seon.fn/sym :seon.fn/spec
                        :seon.effect/capability]
-                      [:seon.fn/sym (str owner-sym)])
+                      [:seon.fn/sym owner-sym])
              handler-symbol (:seon.effect/capability owner-row)
              handler (some-> handler-symbol requiring-resolve deref)
              effective
@@ -714,19 +706,19 @@
            (flat-error
             :seon.effect/undeclared-owner
             "Declare :seon.effect/capability on the capability owner."
-            {:seon.fn/sym (str owner-sym)})
+            {:seon.fn/sym owner-sym})
 
            (nil? handler)
            (flat-error
             :seon.effect/unavailable-handler
             "The declared capability handler is unavailable."
-            {:seon.fn/sym (str owner-sym)})
+            {:seon.fn/sym owner-sym})
 
            (not (accepts-request? database owner-sym request))
            (flat-error
             :seon.effect/invalid-request
             "The capability request does not satisfy its owner contract."
-            {:seon.fn/sym (str owner-sym)})
+            {:seon.fn/sym owner-sym})
 
            (:seon.error/kind background-limit)
            background-limit
@@ -747,7 +739,7 @@
                 (str "The capability request was not admitted under "
                      :seon.config.eval.result/max-bytes
                      " and was refused rather than dispatched.")
-                (merge {:seon.fn/sym (str owner-sym)
+                (merge {:seon.fn/sym owner-sym
                         :seon.config.eval.result/max-bytes
                         (:seon.config.eval.result/max-bytes
                          (:seon.sci.admit/caps dials))}
@@ -764,7 +756,8 @@
                        :seon.effect/run
                        [:seon.turn/id
                         (:seon.turn/id *request-context*)]
-                       :seon.effect/owner [:seon.fn/sym (str owner-sym)]
+                       :seon.effect/owner [:seon.fn/sym owner-sym]
+                       :seon.effect/capability handler-symbol
                        :seon.effect/form-ordinal
                        (:seon.cluster.eval/ordinal *request-context*)
                        :seon.effect/ordinal effect-ordinal

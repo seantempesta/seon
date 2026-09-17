@@ -1,10 +1,4 @@
-#:seon.effect{:capability :qualified-symbol,
-              :capability-fn
-              [:and
-               {:description
-                "The function that executed this request: a ref to the handler's own `seon.fn` entity, so \"which code ran this effect\" is a join rather than a symbol to re-resolve."
-                :seon.db/index true}
-               :seon.db/ref],
+#:seon.effect{:capability [:qualified-symbol {:seon.db/index true :description "Declared handler on a function; the exact dispatched handler observed on an effect. Only function declarations are live deletion obligations."}],
               :eval
               [:and
                {:description
@@ -72,9 +66,7 @@
                [:seon.effect/run :seon.effect/run]
                [:seon.effect/eval {:optional true} :seon.effect/eval]
                [:seon.effect/owner :seon.effect/owner]
-               [:seon.effect/capability-fn
-                {:optional true}
-                :seon.effect/capability-fn]
+               [:seon.effect/capability :seon.effect/capability]
                [:seon.effect/file {:optional true} :seon.effect/file]
                [:seon.effect/form-span
                 {:optional true}

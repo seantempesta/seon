@@ -964,7 +964,7 @@
 
 (defn- debug-renderer-link
   [debug-request producer]
-  (debug-subject-link debug-request [:seon.fn/sym (str producer)] producer))
+  (debug-subject-link debug-request [:seon.fn/sym producer] producer))
 
 (defn- debug-renderer-contract
   [call-entry producer]

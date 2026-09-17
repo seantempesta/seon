@@ -47,7 +47,7 @@
   (let [projection (schema/build-projection forms
                                             {(symbol function-symbol) spec})]
     (program/contract-facts
-     {:seon.program/function-symbol function-symbol
+     {:seon.program/function-symbol (symbol function-symbol)
       :seon.program/spec (pr-str spec)
       :seon.program/source source
       :seon.program/arglists (pr-str arglists)
@@ -89,6 +89,17 @@
   [value]
   (filter map? (tree-seq coll? seq value)))
 
+(defn- analyzed-row-tx
+  "Runtime settlement receives the analyzer's completed row, as production does."
+  [database options row]
+  (let [source (or (:seon.fn/source row) (:seon.test/source row))
+        analyzed (if source
+                   (second (seon.fn/analyze-form database source
+                                                (or (:seon.fn/ns row) (:seon.test/ns row))
+                                                row))
+                   row)]
+    ((ns-resolve 'seon.turn 'row-tx) database options analyzed)))
+
 (deftest empty-composite-schema-shapes-remain-canonical-and-queryable
   (let [forms
         {:seon.db/connection :map
@@ -106,7 +117,7 @@
         [:=> [:cat :seon.db/connection :seon.reconcile/request] :boolean]
         facts
         (source-contract
-         "seon.reconcile/reconcile!" spec forms
+         (quote seon.reconcile/reconcile!) spec forms
          "(defn reconcile! [connection request] nil)"
          '([connection request]))
         request-shape
@@ -157,9 +168,10 @@
              :sample/ambient]
             row
             (fn [function-symbol source arglists spec]
-              (merge {:seon.fn/sym function-symbol
+              (merge (test-support/program-fn-row (db/db connection) function-symbol source)
+                     {:seon.fn/sym function-symbol
                       :seon.fn/ns [:seon.ns/name 'sample]
-                      :seon.schema.admission/source :core
+                      :seon.schema.admission/source :agent
                       :seon.fn/source source
                       :seon.fn/arglists (pr-str arglists)
                       :seon.fn/private? false
@@ -167,10 +179,10 @@
                      (source-contract function-symbol spec forms source
                                       arglists)))
             positional
-            (row "sample/positional" "(defn positional [ambient] ambient)"
+            (row (quote sample/positional) "(defn positional [ambient] ambient)"
                  '([ambient]) positional-spec)
             mapped
-            (row "sample/mapped"
+            (row (quote sample/mapped)
                  "(defn mapped [{:sample/keys [ambient]}] ambient)"
                  '([{:sample/keys [ambient]}]) map-spec)]
         (test-support/transacted! connection
@@ -193,7 +205,7 @@
                       [?arity :seon.fn.arity/return-schema ?return-shape]
                       [?return-shape :seon.schema.shape/fingerprint
                        ?return-fingerprint]]
-                    @connection "sample/positional")
+                    @connection (quote sample/positional))
               map-address
               (db/q '[:find ?index ?binding-shape ?key ?value-fingerprint
                       ?return-fingerprint
@@ -216,7 +228,7 @@
                       [?arity :seon.fn.arity/return-schema ?return-shape]
                       [?return-shape :seon.schema.shape/fingerprint
                        ?return-fingerprint]]
-                    @connection "sample/mapped")]
+                    @connection (quote sample/mapped))]
           (is (= 1 (count positional-address)))
           (is (= 1 (count map-address)))
           (let [[pos-index pos-binding value-fingerprint pos-return]
@@ -233,12 +245,12 @@
 
 (deftest regex-rest-tail-is-complete-and-element-is-only-derived-when-proven
   (let [repeated
-        (source-contract "sample/repeated"
+        (source-contract (quote sample/repeated)
                          [:=> [:cat :int [:* :string]] :keyword]
                          {} "(defn repeated [x & xs] [x xs])" '([x & xs]))
         composed
         (source-contract
-         "sample/composed"
+         (quote sample/composed)
          [:=> [:cat [:alt [:cat] [:cat :int]]] :keyword]
          {} "(defn composed [& xs] xs)" '([& xs]))
         repeated-rest (second (get-in repeated [:seon.fn/arities 0
@@ -262,7 +274,7 @@
 (deftest source-contract-join-refuses-disagreement-and-records-overrides
   (let [spec [:=> [:cat :int] :int]
         request (fn [source arglists]
-                  #(source-contract "sample/join" spec {} source arglists))]
+                  #(source-contract (quote sample/join) spec {} source arglists))]
     (is (= :analyzer-disagreement
            (:seon.fn.signature/reason
             (refusal-data
@@ -278,7 +290,7 @@
     (is (true?
          (:seon.fn/arglists-override?
           (source-contract
-           "sample/join" spec {}
+           (quote sample/join) spec {}
            "(defn ^{:arglists '([public-x])} join [x] x)"
            '([public-x])))))))
 
@@ -322,7 +334,7 @@
                       source-descriptors)
                 source (pr-str (list* 'defn 'generated declarations))
                 arglists (apply list (map :bindings source-descriptors))
-                facts (source-contract "sample/generated" spec {} source
+                facts (source-contract (quote sample/generated) spec {} source
                                        arglists)
                 arities (:seon.fn/arities facts)
                 actual-keys
@@ -367,13 +379,13 @@
          [:=> [:cat :sample/value
                [:repeat {:min 0 :max 1} :sample/value]]
           [:enum :sample/enum-value :other]]]
-        facts (parsed-contract "sample/complete" spec forms)
+        facts (parsed-contract (quote sample/complete) spec forms)
         arities (:seon.fn/arities facts)
-        nodes (nested-maps (:seon.fn/ast facts))
-        map-of-node (first (filter #(= ":map-of"
-                                      (:seon.fn.ast/type %))
+        nodes (nested-maps facts)
+        map-of-node (first (filter #(= :map-of
+                                      (:seon.schema.shape/type %))
                                    nodes))
-        enum-node (first (filter #(= ":enum" (:seon.fn.ast/type %))
+        enum-node (first (filter #(= :enum (:seon.schema.shape/type %))
                                  nodes))]
     (testing "one compiled contract yields Malli's exact ordered arities"
       (is (= [{:seon.fn.arity/order 0
@@ -390,61 +402,57 @@
                                   :seon.fn.arity/min
                                   :seon.fn.arity/max])
                    arities))))
-    (testing "the complete Malli AST vocabulary preserves key and enum values"
-      (is (= {:seon.fn.ast/type ":malli.core/schema"
-              :seon.fn.ast/ref [:seon.schema/key :sample/key]}
-             (select-keys (:seon.fn.ast/key map-of-node)
-                          [:seon.fn.ast/type :seon.fn.ast/ref])))
-      (is (= [":sample/enum-value" ":other"]
-             (mapv :seon.fn.ast.entry/value-edn
-                   (sort-by :seon.fn.ast.entry/order
-                            (:seon.fn.ast/values enum-node))))))
+    (testing "canonical shapes preserve map-of and enum semantics"
+      (is (= :map-of (first (schema-shape/row-form map-of-node))))
+      (is (= [:enum :sample/enum-value :other]
+             (schema-shape/row-form enum-node))))
     (testing "role refs come only from RefSchema observations"
-      (is (= #{[:seon.schema/key :sample/key]
-               [:seon.schema/key :sample/value]}
+      (is (= #{:sample/key :sample/value}
              (:seon.fn.arity/input-refs (first arities))))
-      (is (= #{[:seon.schema/key :sample/value]}
+      (is (= #{:sample/value}
              (:seon.fn.arity/output-refs (first arities))))
-      (is (= #{[:seon.schema/key :sample/value]}
+      (is (= #{:sample/value}
              (:seon.fn.arity/input-refs (second arities))))
       (is (nil? (:seon.fn.arity/output-refs (second arities)))
           "an enum scalar equal to a schema key is not a reference"))
     (testing "the expansion is deterministic"
-      (is (= facts (parsed-contract "sample/complete" spec forms))))))
+      (is (= facts (parsed-contract (quote sample/complete) spec forms))))))
 
 (deftest function-contract-role-refs-follow-local-registries
   (let [forms {:sample/value :int}
         spec [:=> {:registry {:local/value :sample/value}}
               [:cat :local/value]
               :sample/value]
-        facts (parsed-contract "sample/local-registry" spec forms)
+        facts (parsed-contract (quote sample/local-registry) spec forms)
         arity (first (:seon.fn/arities facts))
-        direct-ref-nodes
-        (filter :seon.fn.ast/ref (nested-maps (:seon.fn/ast facts)))]
-    (is (= #{[:seon.schema/key :sample/value]}
+        input-shape (:seon.fn.arity/input-schema arity)]
+    (is (= #{:sample/value}
            (:seon.fn.arity/input-refs arity)))
-    (is (= #{[:seon.schema/key :sample/value]}
+    (is (= #{:sample/value}
            (:seon.fn.arity/output-refs arity)))
-    (is (= #{[:seon.schema/key :sample/value]}
-           (into #{} (map :seon.fn.ast/ref) direct-ref-nodes)))))
+    (is (= :cat (first (schema-shape/row-form input-shape))))))
 
 (deftest function-contract-redefinition-replaces-component-facts-exactly
   (test-support/with-database
     (fn [connection]
-      (let [function-symbol "seon.program/provenance-redefined"
+      (let [function-symbol (quote seon.program/provenance-redefined)
             old-spec [:function
                       [:=> [:cat :int] :int]
                       [:=> [:cat :int :int] :int]]
             new-spec [:=> [:cat :string] :string]
             old-row
-            (merge {:seon.fn/sym function-symbol
-                    :seon.schema.admission/source :core
+            (merge (test-support/program-fn-row (db/db connection) function-symbol
+                       "(defn provenance-redefined ([x] x) ([x y] x))")
+                   {:seon.fn/sym function-symbol
+                    :seon.schema.admission/source :agent
                     :seon.fn/ns [:seon.ns/name 'seon.program]
                     :seon.fn/spec (pr-str old-spec)}
                    (parsed-contract function-symbol old-spec {}))
             new-row
-            (merge {:seon.fn/sym function-symbol
-                    :seon.schema.admission/source :core
+            (merge (test-support/program-fn-row (db/db connection) function-symbol
+                       "(defn provenance-redefined [x] x)")
+                   {:seon.fn/sym function-symbol
+                    :seon.schema.admission/source :agent
                     :seon.fn/ns [:seon.ns/name 'seon.program]
                     :seon.fn/spec (pr-str new-spec)}
                    (parsed-contract function-symbol new-spec {}))]
@@ -458,7 +466,7 @@
                              {:seon.fn.arity/return-schema [:db/id]}]}]
                               [:seon.fn/sym function-symbol])
               old-components
-              (into #{(get-in current [:seon.fn/ast :db/id])}
+              (into #{}
                     (mapcat
                      (fn [arity]
                        (into [(:db/id arity)]
@@ -511,13 +519,13 @@
             (is (every? #(seq (db/datoms @connection :eavt %)) old-shapes)
                 "shared content-addressed shapes survive arity replacement")))))))
 
-(deftest runtime-deletion-retracts-identity-and-tuples
+(deftest runtime-deletion-refuses-surviving-callers-without-changing-the-definition
   (test-support/with-database
     (fn [connection]
-      (let [identity [:seon.fn/sym "seon.test/changed-since-green"]
+      (let [identity [:seon.fn/sym (quote seon.test/changed-since-green)]
             database (db/db connection)
             before (db/pull database '[*] identity)
-            row-tx (ns-resolve 'seon.turn 'row-tx)
+            row-tx analyzed-row-tx
             result (db/transact!
                     connection
                     [[:db.fn/call
@@ -525,40 +533,30 @@
                         (row-tx current {} {:seon.program/delete-identities [identity]}))]])]
         (is (seq (:seon.fn/form-span before)))
         (is (seq (:seon.fn/call-arities before)))
-        (is (some? (:db-after result)) (pr-str result))
-        (is (nil? (db/pull (db/db connection) '[*] identity)))
-        (is (empty? (db/datoms (db/db connection) :eavt (:db/id before))))))))
+        (is (= :seon.db/invalid-write (:seon.error/kind result)) (pr-str result))
+        (is (= before
+               (db/pull (db/db connection) '[*] identity)))))))
 
 (deftest identical-runtime-redeclaration-builds-no-datoms
   (test-support/with-database
     (fn [connection]
-      (let [function-symbol "sample/idempotent"
-            spec [:=> [:cat :int] :int]
-            row (merge {:seon.fn/sym function-symbol
-                        :seon.fn/ns [:seon.ns/name 'sample]
-                        :seon.schema.admission/source :agent
-                        :seon.fn/source
-                        "(defn idempotent {:malli/schema [:=> [:cat :int] :int]} [x] x)"
-                        :seon.fn/arglists "([x])"
-                        :seon.fn/private? false
-                        :seon.fn/spec (pr-str spec)}
-                       (parsed-contract function-symbol spec {}))
+      (test-support/transacted! connection [{:seon.ns/name 'sample
+                                             :seon.ns/source "(ns sample)"}])
+      (let [function-symbol 'sample/idempotent
+            source "(defn idempotent {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+            row (merge (test-support/program-fn-row (db/db connection) function-symbol source)
+                       (parsed-contract function-symbol [:=> [:cat :int] :int] {}))
             row-tx (ns-resolve 'seon.turn 'row-tx)]
-        (test-support/transacted! connection [{:seon.ns/name 'sample
-                                               :seon.ns/source "(ns sample)"}])
         (test-support/transacted! connection (row-tx (db/db connection) {} row))
-        (let [before (db/pull @connection '[*]
-                              [:seon.fn/sym function-symbol])
+        (let [before (db/pull (db/db connection) '[*] [:seon.fn/sym function-symbol])
               replacement (row-tx (db/db connection) {} row)]
           (is (empty? replacement))
-          (is (= before
-                 (db/pull @connection '[*]
-                          [:seon.fn/sym function-symbol]))))))))
+          (is (= before (db/pull (db/db connection) '[*] [:seon.fn/sym function-symbol]))))))))
 
 (deftest changed-runtime-redeclaration-builds-a-real-replacement
   (test-support/with-database
     (fn [connection]
-      (let [function-symbol "sample/redefined"
+      (let [function-symbol (quote sample/redefined)
             spec [:=> [:cat :int] :int]
             original
             (merge {:seon.fn/sym function-symbol
@@ -573,7 +571,7 @@
             changed
             (assoc original :seon.fn/source
                    "(defn redefined {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
-            row-tx (ns-resolve 'seon.turn 'row-tx)
+            row-tx analyzed-row-tx
             declared-content (ns-resolve 'seon.turn 'declared-content)]
         (test-support/transacted! connection [{:seon.ns/name 'sample
                                                :seon.ns/source "(ns sample)"}])
@@ -600,7 +598,7 @@
   ;; no concurrent run had touched.
   (test-support/with-database
     (fn [connection]
-      (let [function-symbol "sample/unmeasured"
+      (let [function-symbol (quote sample/unmeasured)
             spec [:=> [:cat :int] :int]
             original
             (merge {:seon.fn/sym function-symbol
@@ -615,7 +613,7 @@
             changed
             (assoc original :seon.fn/source
                    "(defn unmeasured {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
-            row-tx (ns-resolve 'seon.turn 'row-tx)]
+            row-tx analyzed-row-tx]
         (test-support/transacted! connection [{:seon.ns/name 'sample
                                                :seon.ns/source "(ns sample)"}])
         (test-support/transacted! connection (row-tx (db/db connection) {} original))
@@ -640,7 +638,7 @@
           :source
           "(defn ^{:malli/schema [:=> [:cat :int] :int]} plus-one [x] (inc x))"
           :expected
-          {:seon.fn/sym "sample/plus-one"
+          {:seon.fn/sym (quote sample/plus-one)
            :seon.fn/ns [:seon.ns/name 'sample]
            :seon.fn/source
            "(defn ^{:malli/schema [:=> [:cat :int] :int]} plus-one [x] (inc x))"
@@ -651,7 +649,7 @@
          {:label "private uncontracted function"
           :source "(defn- helper [x] x)"
           :expected
-          {:seon.fn/sym "sample/helper"
+          {:seon.fn/sym (quote sample/helper)
            :seon.fn/ns [:seon.ns/name 'sample]
            :seon.fn/source "(defn- helper [x] x)"
            :seon.fn/arglists "([x])"
@@ -667,7 +665,7 @@
          {:label "test"
           :source "(clojure.test/deftest smoke (clojure.test/is true))"
           :expected
-          {:seon.test/sym "sample/smoke"
+          {:seon.test/sym (quote sample/smoke)
            :seon.test/ns [:seon.ns/name 'sample]
            :seon.test/source
            "(clojure.test/deftest smoke (clojure.test/is true))"
@@ -714,8 +712,8 @@
             "the row records who admitted it")
         (is (schema/valid-candidate-value? :seon.program/declaration-row row)
             (str "row refused by its own output contract: " (pr-str row))))))
-  (testing "a reader event's bare required symbols become lookup refs"
-    (is (= #{[:seon.ns/name 'clojure.set]}
+  (testing "a reader event preserves required namespace symbols"
+    (is (= #{'clojure.set}
            (:seon.ns/requires
             (program/declaration-row
              (one-event "(ns sample (:require clojure.set))")
@@ -726,21 +724,21 @@
     (let [data
           (refusal-data
            #(program/canonical-row
-             {:seon.fn/sym "sample/f"
+             {:seon.fn/sym (quote sample/f)
               :seon.fn/ns [:seon.ns/name 'sample]
               :seon.fn/source "(defn f [] 1)"
               :seon.fn/arglists "([])"
               :seon.fn/private? false
-              :seon.test/sym "sample/f"
+              :seon.test/sym (quote sample/f)
               :seon.test/ns [:seon.ns/name 'sample]
               :seon.test/source "(deftest f)"}))]
       (is (= :seon.program/declaration-refused (:seon.error/kind data)))
-      (is (= [[:seon.fn/sym "sample/f"]
-              [:seon.test/sym "sample/f"]]
+      (is (= [[:seon.fn/sym (quote sample/f)]
+              [:seon.test/sym (quote sample/f)]]
              (:seon.program/identities data)))))
   (testing "a recognized family without its reader-required data is loud"
     (doseq [event [{:seon.schema/key :sample/missing-form}
-                   {:seon.test/sym "sample/missing-source"
+                   {:seon.test/sym (quote sample/missing-source)
                     :seon.test/ns [:seon.ns/name 'sample]}]]
       (let [data (refusal-data #(program/declaration-row event :all :agent))]
         (is (= :seon.program/declaration-refused
@@ -749,16 +747,16 @@
                (:seon.program/identities data)))))))
 
 (deftest optional-attributes-are-replaced-exactly
-  (let [current {:seon.fn/sym "sample/f"
+  (let [current {:seon.fn/sym (quote sample/f)
                  :seon.fn/ns [:seon.ns/name 'sample]
                  :seon.fn/source "(defn f [] 1)"
                  :seon.fn/arglists "([])"
                  :seon.fn/private? false
                  :seon.fn/doc "old"
                  :seon.fn/spec "[:=> [:cat] :int]"
-                 :seon.fn/calls [[:seon.fn/sym "sample/old"]]
+                 :seon.fn/calls [[:seon.fn/sym (quote sample/old)]]
                  :seon.fn/workload :compute}
-        desired {:seon.fn/sym "sample/f"
+        desired {:seon.fn/sym (quote sample/f)
                  :seon.fn/ns [:seon.ns/name 'sample]
                  :seon.fn/source "(defn f [] 2)"
                  :seon.fn/arglists "([])"
@@ -766,27 +764,27 @@
     (is (= #{:seon.fn/source :seon.fn/doc :seon.fn/spec
              :seon.fn/calls :seon.fn/workload}
            (set (program/changed-attributes current desired)))))
-  (is (= {:seon.test/sym "sample/property"
+  (is (= {:seon.test/sym (quote sample/property)
           :seon.test/ns [:seon.ns/name 'sample]
           :seon.test/source "(deftest property)"
-          :seon.fn/calls [[:seon.fn/sym "sample/helper"]]
-          :seon.test/subject [:seon.fn/sym "sample/subject"]}
+          :seon.fn/calls [[:seon.fn/sym (quote sample/helper)]]
+          :seon.test/subject [:seon.fn/sym (quote sample/subject)]}
          (program/canonical-row
-          {:seon.test/sym "sample/property"
+          {:seon.test/sym (quote sample/property)
            :seon.test/ns [:seon.ns/name 'sample]
            :seon.test/source "(deftest property)"
-           :seon.fn/calls [[:seon.fn/sym "sample/helper"]]
-           :seon.test/subject [:seon.fn/sym "sample/subject"]
+           :seon.fn/calls [[:seon.fn/sym (quote sample/helper)]]
+           :seon.test/subject [:seon.fn/sym (quote sample/subject)]
            :unowned/value :ignored})))
-  (is (= [:seon.fn/sym "sample/subject"]
+  (is (= [:seon.fn/sym (quote sample/subject)]
          (:seon.test/subject
           (program/canonical-row
-           {:seon.fn/sym "sample/f"
+           {:seon.fn/sym (quote sample/f)
             :seon.fn/ns [:seon.ns/name 'sample]
             :seon.fn/source "(defn f [] 1)"
             :seon.fn/arglists "([])"
             :seon.fn/private? false
-            :seon.test/subject [:seon.fn/sym "sample/subject"]})))
+            :seon.test/subject [:seon.fn/sym (quote sample/subject)]})))
       "function rows retain their declared test subject during canonicalization"))
 
 (deftest schema-row-properties-survive-and-retract-exactly
@@ -817,7 +815,7 @@
                 {:seon.sci.reader/text source
                  :seon.config.eval.result/max-source (count source)})]
     (is (vector? events))
-    (is (= #{"sample/real-test"}
+    (is (= #{'sample/real-test}
            (into #{} (keep :seon.test/sym) events)))))
 
 (deftest typed-cross-namespace-deletion-retracts-function-and-test
@@ -826,7 +824,7 @@
       (let [now (java.util.Date.)
             namespace-name 'my.agents.registration-test
             namespace-ref [:seon.ns/name namespace-name]
-            function-sym "my.agents.registration-test/same-name"
+            function-sym (symbol "my.agents.registration-test" "same-name")
             deletion
             (program/deletion-row
              (one-event
@@ -838,25 +836,21 @@
              :seon.cluster.eval/ns
              [:seon.ns/name 'my.agents.someone-else]
              :seon.program/row deletion}]
+        (test-support/seed-cluster! connection "registration-test")
         (test-support/transacted!
-                     connection
-                     [{:seon.ns/name namespace-name
-                       :seon.ns/source "(ns my.agents.registration-test)"}
-                      {:seon.ns/name 'my.agents.someone-else
-                       :seon.ns/source "(ns my.agents.someone-else)"}
-                      {:seon.agent/id "registration-test"
-                       :seon.agent/namespace namespace-ref}
-                      {:seon.fn/sym function-sym
-                       :seon.fn/ns namespace-ref
-                       :seon.schema.admission/source :agent
-                       :seon.fn/source "(defn same-name [] 1)"
-                       :seon.fn/arglists "([])"
-                       :seon.fn/private? false
-                       :seon.fn/spec "[:=> [:cat] :int]"}
-                      {:seon.test/sym function-sym
-                       :seon.test/ns namespace-ref
-                       :seon.schema.admission/source :agent
-                       :seon.test/source "(clojure.test/deftest same-name)"}])
+         connection
+         (into [{:seon.ns/name 'my.agents.someone-else
+                 :seon.ns/source "(ns my.agents.someone-else)"}]
+               (agent/creation-tx {:seon.agent/id "registration-test"
+                                   :seon.ns/name namespace-name
+                                   :seon.cluster/name "registration-test"})))
+        (test-support/transacted!
+         connection
+         (into [(test-support/program-fn-row (db/db connection) function-sym
+                  "(defn same-name {:malli/schema [:=> [:cat] :int]} [] 1)")]
+               (seon.fn/source-rows (db/db connection) (program/shapes)
+                                     {:seon.ns/name namespace-name}
+                                     "(clojure.test/deftest same-name)" #{})))
         (test-support/transacted!
                      connection
                      (turn/open-tx {:seon.turn/id "registration-delete" :seon.turn/agent [:seon.agent/id "registration-test"] :seon.turn/opened-tx "datomic.tx"}))
@@ -879,7 +873,6 @@
                                [identity-attribute function-sym])
                       identity-attribute))))
         (test-support/transacted! connection (turn/receipt-settle-tx settlement))
-        ;; Deletion retracts identities; prior definitions remain in history.
         (doseq [identity-attribute [:seon.fn/sym :seon.test/sym]]
           (is (nil? (db/pull (db/db connection) '[*]
                              [identity-attribute function-sym]))))))))
@@ -911,13 +904,13 @@
   ;; row schema, emitted by the indexer, and silently dropped because a second
   ;; literal list did not name it. Declaration is now the whole requirement.
   (let [forms (schema/registered-schemas)
-        row {:seon.fn/sym "sample/f"
+        row {:seon.fn/sym (quote sample/f)
              :seon.fn/ns [:seon.ns/name 'sample]
              :seon.fn/source "(defn f [] 1)"
              :seon.fn/arglists "([])"
              :seon.fn/private? false
              :sample/facet "carried"}
-        declared (update forms :seon.fn/fn conj
+        declared (update-in forms [:seon.fn/fn 2] conj
                          [:sample/facet {:optional true} :string])]
     (is (nil? (:sample/facet
                (program/canonical-row (program/shapes-in forms) row)))
@@ -932,12 +925,12 @@
         "and an exact replacement retracts it when the source stops carrying it"))
   (testing "an entry naming another writer stays out of the indexer's hands"
     (let [forms (schema/registered-schemas)
-          foreign (update forms :seon.fn/fn conj
+          foreign (update-in forms [:seon.fn/fn 2] conj
                           [:sample/outcome
                            {:optional true
                             :seon.program/written-by 'sample/writer}
                            :string])
-          row {:seon.fn/sym "sample/f"
+          row {:seon.fn/sym (quote sample/f)
                :seon.fn/ns [:seon.ns/name 'sample]
                :seon.fn/source "(defn f [] 1)"
                :seon.fn/arglists "([])"
@@ -1067,9 +1060,9 @@
                        (#'schema.edn/resource-population
                         "test/fixtures/program_facts_s1/schema.edn"))
         identities [[:seon.ns/name 'sample.s1]
-                    [:seon.fn/sym "sample.s1/left"]
-                    [:seon.fn/sym "sample.s1/right"]
-                    [:seon.test/sym "sample.s1/paired"]
+                    [:seon.fn/sym (quote sample.s1/left)]
+                    [:seon.fn/sym (quote sample.s1/right)]
+                    [:seon.test/sym (quote sample.s1/paired)]
                     [:seon.schema/key :sample.s1/value]]
         rows-from
         (fn [connection]
@@ -1088,8 +1081,9 @@
                                               (vec (keys pulled)))
                                     database pulled identity-attributes
                                     #(db/pull database '[*] %))
-                                   (into [:db/id :seon.schema.admission/source
-                                          :seon.fn/file :seon.fn/form-span]
+                                   (into [:db/id :seon.schema.admission/source :seon.schema/ns
+                                          :seon.fn/file :seon.fn/form-span
+                                          :seon.program/analyzed-source-digest]
                                          (filter #(= "seon.fn.file" (namespace %)))
                                          (keys pulled)))])))
                   identities)))
@@ -1184,7 +1178,7 @@
           (pr-str {:seon.program/identity identity
                    :seon.program/indexed (get indexed identity)
                    :seon.program/evaluated (get evaluated identity)})))
-    (doseq [identity [[:seon.fn/sym "sample.s1/left"]
-                      [:seon.fn/sym "sample.s1/right"]
-                      [:seon.test/sym "sample.s1/paired"]]]
+    (doseq [identity [[:seon.fn/sym (quote sample.s1/left)]
+                      [:seon.fn/sym (quote sample.s1/right)]
+                      [:seon.test/sym (quote sample.s1/paired)]]]
       (is (seq (:seon.fn/calls (get evaluated identity))) (pr-str identity)))))

@@ -76,6 +76,7 @@
                            [:seon.operator.process-census/responsive?
                             :seon.operator.process-census/responsive?]
                            [:seon.operator.process-census/advertisements
+                            {:optional true}
                             :seon.operator.process-census/advertisements]],
                           :process-census-identity
                           [:map
@@ -105,16 +106,22 @@
                            [:seon.operator.process-census/complete?
                             :seon.operator.process-census/complete?]
                            [:seon.maintenance.result/process-census-roots
+                            {:optional true}
                             :seon.maintenance.result/process-census-roots]
                            [:seon.maintenance.result/process-census-processes
+                            {:optional true}
                             :seon.maintenance.result/process-census-processes]
                            [:seon.maintenance.result/process-census-dead
+                            {:optional true}
                             :seon.maintenance.result/process-census-dead]
                            [:seon.maintenance.result/process-census-unresponsive
+                            {:optional true}
                             :seon.maintenance.result/process-census-unresponsive]
                            [:seon.maintenance.result/process-census-unclaimed
+                            {:optional true}
                             :seon.maintenance.result/process-census-unclaimed]
                            [:seon.maintenance.result/process-census-claim-errors
+                            {:optional true}
                             :seon.maintenance.result/process-census-claim-errors]],
                           :reap-stopped-process
                           [:map
@@ -166,12 +173,16 @@
                            [:seon.maintenance.result/reap-census
                             :seon.maintenance.result/reap-census]
                            [:seon.operator.reap/eligible-root-claims
+                            {:optional true}
                             :seon.operator.reap/eligible-root-claims]
                            [:seon.maintenance.result/reap-stopped-processes
+                            {:optional true}
                             :seon.maintenance.result/reap-stopped-processes]
                            [:seon.maintenance.result/reap-roots
+                            {:optional true}
                             :seon.maintenance.result/reap-roots]
                            [:seon.maintenance.result/reap-refused
+                            {:optional true}
                             :seon.maintenance.result/reap-refused]
                            [:seon.operator.reap/reclaimed-bytes
                             :seon.operator.reap/reclaimed-bytes]
@@ -190,10 +201,12 @@
                            [:seon.operator.cluster-cleanup/branch-retired?
                             :seon.operator.cluster-cleanup/branch-retired?]
                            [:seon.operator.cluster-cleanup/removed
+                            {:optional true}
                             :seon.operator.cluster-cleanup/removed]
                            [:seon.maintenance.result/cluster-cleanup-collection
                             :seon.maintenance.result/cluster-cleanup-collection]
                            [:seon.operator.cluster-cleanup/remaining
+                            {:optional true}
                             :seon.operator.cluster-cleanup/remaining]
                            [:seon.operator.cluster-cleanup/reclaimed-bytes
                             :seon.operator.cluster-cleanup/reclaimed-bytes]
@@ -212,6 +225,7 @@
                            [:seon.operator.collect/managed-root
                             :seon.operator.collect/managed-root]
                            [:seon.maintenance.result/collect-branches
+                            {:optional true}
                             :seon.maintenance.result/collect-branches]
                            [:seon.operator.collect/objects-before
                             :seon.operator.collect/objects-before]

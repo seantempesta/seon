@@ -275,7 +275,7 @@
             (boolean (or (= 'clojure.core/defn-
                             (resolved-operation operation context))
                          (:private metadata)))}
-            qualified (assoc :seon.fn/sym (str qualified))
+            qualified (assoc :seon.fn/sym qualified)
             namespace-name
             (assoc :seon.fn/ns [:seon.ns/name namespace-name])
             doc (assoc :seon.fn/doc doc)
@@ -294,7 +294,7 @@
                 (resolved-operation (first form) context))
              (symbol? (second form)))
     (when-let [qualified (qualified-symbol namespace-name (second form))]
-      {:seon.test/sym (str qualified)
+      {:seon.test/sym qualified
        :seon.test/ns [:seon.ns/name namespace-name]})))
 
 (defn- resolved-operation

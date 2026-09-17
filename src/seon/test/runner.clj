@@ -236,7 +236,7 @@
     (-> capture
         (update ::order conj test-symbol)
         (assoc-in [::results test-symbol]
-                  {:seon.test/sym (str test-symbol)
+                  {:seon.test/sym test-symbol
                    :seon.test/pass-count 0
                    :seon.test/fail-count 0
                    :seon.test/error-count 0
@@ -718,7 +718,7 @@
          (ex-info
           (str marker-attribute " must contain a non-blank reason.")
           {:seon.error/kind ::invalid-marker-reason
-           :seon.test/sym (str (var-symbol test-var))
+           :seon.test/sym (var-symbol test-var)
            ::marker marker-attribute
            ::value marker :seon.test.runner/invalid-marker-reason true})))
       marker)))
@@ -827,7 +827,7 @@
   (let [drifted
         (into []
               (keep (fn [test-var]
-                      (let [test-symbol (str (var-symbol test-var))
+                      (let [test-symbol (var-symbol test-var)
                             declared (get declarations test-symbol)
                             var-reason (marker-reason test-var :seon.test/platform)]
                         ;; Only the dangerous direction refuses, exactly as the
@@ -863,7 +863,7 @@
   (let [drifted
         (into []
               (keep (fn [test-var]
-                      (let [test-symbol (str (var-symbol test-var))
+                      (let [test-symbol (var-symbol test-var)
                             declared (get declarations test-symbol)
                             metadata (meta test-var)
                             var-reason (marker-reason test-var :seon.test/long)
@@ -913,7 +913,7 @@
       (throw (ex-info "Expensive fixture requires a nonblank observation an ordinary branch cannot prove."
                       {:seon.error/kind ::missing-fixture-observation
                        ::fixture fixture
-                       :seon.test/sym (str (var-symbol (first test/*testing-vars*)))})))
+                       :seon.test/sym (var-symbol (first test/*testing-vars*))})))
     reason))
 
 (defn- test-selection
@@ -936,9 +936,9 @@
    (fn [selection test-var]
      (let [test-symbol (var-symbol test-var)
            long-marker (get-in declarations
-                               [(str test-symbol) :seon.test/long])
+                               [test-symbol :seon.test/long])
            platform (get-in platform-declarations*
-                            [(str test-symbol) :seon.test/platform])]
+                            [test-symbol :seon.test/platform])]
        (cond
          (and (not include-long?) long-marker)
          (update selection ::skipped conj
@@ -948,7 +948,7 @@
          (update selection ::platform conj test-var)
 
          (or (= :all selected-symbols)
-             (contains? selected-symbols (str test-symbol)))
+             (contains? selected-symbols test-symbol))
          (update selection ::selected conj test-var)
 
          :else
@@ -964,7 +964,7 @@
 (defn- test-tasks
   "Derived worker tasks preserving namespace-wide fixture boundaries."
   [all-vars selected-vars declarations]
-  (let [declared #(get declarations (str (var-symbol %)))
+  (let [declared #(get declarations (var-symbol %))
         ordinal-by-symbol
         (into {} (map-indexed (fn [ordinal test-var]
                                [(var-symbol test-var) ordinal])) all-vars)
@@ -1064,8 +1064,7 @@
   (let [callees (into {}
                       (map (fn [row]
                              [(or (:seon.fn/sym row) (:seon.test/sym row))
-                              (into #{} (map second)
-                                    (concat (:seon.fn/calls row) (:seon.fn/references row)))]))
+                              (into (set (:seon.fn/calls row)) (:seon.fn/references row))]))
                       rows)]
     (loop [frontier [[test-symbol]]
            seen #{test-symbol}]
@@ -1097,7 +1096,7 @@
           owner-symbols (set (map :seon.fn/sym owner-rows))
           destructive (tests-reaching-rows (:seon.fn.manifest/artifacts manifest) (set owner-rows))
           offenders (vec (for [test-var platform-vars
-                               :let [test-symbol (str (var-symbol test-var))]
+                               :let [test-symbol (var-symbol test-var)]
                                :when (destructive test-symbol)]
                            {:seon.test/sym test-symbol
                             ::destructive-path
@@ -1124,9 +1123,9 @@
   [manifest]
   (let [rows (vec (mapcat :seon.fn.file/rows
                           (:seon.fn.manifest/artifacts manifest)))
-        owners #{"seon.test-support/populate-published-root!"
-                 "seon.test-support/populate-published-operator-root!"
-                 "seon.test-support/with-fresh-database"}
+        owners #{'seon.test-support/populate-published-root!
+                 'seon.test-support/populate-published-operator-root!
+                 'seon.test-support/with-fresh-database}
         owner-rows (filterv #(owners (:seon.fn/sym %)) rows)
         missing (set/difference owners (set (map :seon.fn/sym owner-rows)))]
     (when (seq missing)
@@ -1137,9 +1136,9 @@
                   (update artifact :seon.fn.file/rows
                           (fn [rows]
                             (mapv (fn [row]
-                                    (if (= "seon.test-support/with-database" (:seon.fn/sym row))
+                                    (if (= 'seon.test-support/with-database (:seon.fn/sym row))
                                       (update row :seon.fn/calls disj
-                                              [:seon.fn/sym "seon.test-support/with-fresh-database"])
+                                              'seon.test-support/with-fresh-database)
                                       row)) rows))))
                 (:seon.fn.manifest/artifacts manifest))
           rows (mapcat :seon.fn.file/rows artifacts)
@@ -1152,11 +1151,12 @@
                         artifacts)
           branch-callers (tests-reaching-rows
                           callers
-                          (set (filter #(= "seon.test-support/with-database"
+                          (set (filter #(= 'seon.test-support/with-database
                                            (:seon.fn/sym %))
                                        (mapcat :seon.fn.file/rows callers))))
+
           request-rows
-          (filterv #(and (not= "seon.test-support/with-database" (:seon.fn/sym %))
+          (filterv #(and (not= 'seon.test-support/with-database (:seon.fn/sym %))
                          (branch-callers (or (:seon.test/sym %) (:seon.fn/sym %)))
                          (some #{:seon.test-support/fresh-store?
                                  :seon.test-support/database-id}
@@ -1170,11 +1170,11 @@
   (when (seq selected-vars)
     (let [expensive (expensive-fixture-tests manifest)]
       (doseq [test-var selected-vars
-              :when (expensive (str (var-symbol test-var)))]
+              :when (expensive (var-symbol test-var))]
         (when-not (marker-reason test-var :seon.test/fixture-observation)
           (throw (ex-info "Selected test reaches an expensive fixture without a declared observation."
                           {:seon.error/kind ::missing-fixture-observation
-                           :seon.test/sym (str (var-symbol test-var))}))))))
+                           :seon.test/sym (var-symbol test-var)}))))))
   nil)
 
 (defn- run-selected-tests
@@ -1947,7 +1947,7 @@
 
 (def ^:private reach-attributes
  [:seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references :seon.fn/keywords
-  :seon.test/sym :seon.test/source :seon.test/subject :seon.test/pending-subject
+  :seon.test/sym :seon.test/source :seon.test/subject
   :seon.schema/key :seon.schema/form])
 (defn- reach-keywords [form]
  (into #{} (filter qualified-keyword?) (tree-seq coll? seq form)))
@@ -1987,8 +1987,8 @@
        pulled (if (seq ids)
                 (db/pull-many database
                  '[:db/id :seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/keywords
-                   {:seon.fn/calls [:db/id]} {:seon.fn/references [:db/id]} :seon.test/sym :seon.test/source
-                   {:seon.test/subject [:db/id]} :seon.test/pending-subject
+                   (limit :seon.fn/calls nil) (limit :seon.fn/references nil) :seon.test/sym :seon.test/source
+                   :seon.test/subject
                    :seon.schema/key :seon.schema/form] ids) [])
        _ (when (:seon.error/kind pulled) (throw (ex-info "Reach rows unavailable." pulled)))
        old-rows (::reach-rows previous {})
@@ -2025,35 +2025,36 @@
     ::reach-digests kept
     ::reach-updated (count changed) ::reach-invalidated (- (count (::reach-digests previous)) (count kept)))))
 (defn- reach-entry [index test-symbol]
- (let [rows (::reach-rows index)
-       symbols (::reach-symbols index)
-       schemas (::reach-schemas index)
-       start (get symbols test-symbol)
-       nodes (loop [pending (if start [start] []) seen #{} missing #{}]
-               (if-let [e (peek pending)]
-                (if (seen e) (recur (pop pending) seen missing)
-                 (let [r (get rows e)
-                       subject (:db/id (:seon.test/subject r))
-                       named (:seon.test/pending-subject r)
-                       target (get symbols named)]
-                  (recur (into (pop pending)
-                               (concat (map :db/id (:seon.fn/calls r))
-                                       (map :db/id (:seon.fn/references r))
-                                       (when subject [subject]) (when target [target])))
-                         (conj seen e) (cond-> missing named (conj [::reach-symbol named])))))
-                {::reach-ids seen ::reach-missing missing}))
-       keyword-seeds (reduce into #{} (map #(get-in rows [% ::reach-keys]) (::reach-ids nodes)))
-       schema-keys (reduce into #{}
-                     (map #(get (::reach-schema-closures index) % #{%}) keyword-seeds))
-       node-parts (sort-by first (map (fn [e] (let [r (get rows e)] [(or (::reach-symbol r) (str e)) (::reach-leaf r)])) (::reach-ids nodes)))
-       schema-parts (sort-by first (map (fn [k] [k (get-in rows [(get schemas k) ::reach-leaf])]) schema-keys))]
-  {::reach-digest (id/digest 64 [test-symbol (vec node-parts) (vec schema-parts)])
-   ::reach-refs (when start (into [] (comp (keep #(get-in rows [% :seon.fn/sym]))
-                              (map #(vector :seon.fn/sym %)))
-                      (sort (::reach-ids nodes))))
-   ::reach-dependencies (into (into (::reach-ids nodes) (::reach-missing nodes))
-                             (concat [[::reach-symbol test-symbol]] (map #(vector ::reach-schema %) schema-keys)))
-   ::reach-function-count (count (::reach-ids nodes))}))
+  (let [rows (::reach-rows index)
+        symbols (::reach-symbols index)
+        schemas (::reach-schemas index)
+        start (get symbols test-symbol)
+        names (loop [pending (if start [test-symbol] []) seen #{}]
+                (if-let [target (peek pending)]
+                  (if (seen target)
+                    (recur (pop pending) seen)
+                    (let [row (get rows (get symbols target))]
+                      (recur (into (pop pending)
+                                   (concat (:seon.fn/calls row)
+                                           (:seon.fn/references row)
+                                           (when-let [subject (:seon.test/subject row)] [subject])))
+                             (conj seen target))))
+                  seen))
+        entities (into #{} (keep symbols) names)
+        keyword-seeds (reduce into #{} (map #(get-in rows [% ::reach-keys]) entities))
+        schema-keys (reduce into #{}
+                            (map #(get (::reach-schema-closures index) % #{%}) keyword-seeds))
+        node-parts (mapv (fn [name] [name (get-in rows [(get symbols name) ::reach-leaf]
+                                                  :seon.error/unknown)]) (sort names))
+        schema-parts (mapv (fn [key] [key (get-in rows [(get schemas key) ::reach-leaf])])
+                           (sort schema-keys))]
+    {::reach-digest (id/digest 64 [test-symbol node-parts schema-parts])
+     ::reach-refs (when start
+                    (into #{} (remove #(= % test-symbol)) names))
+     ::reach-dependencies (into entities
+                                (concat (map #(vector ::reach-symbol %) names)
+                                        (map #(vector ::reach-schema %) schema-keys)))
+     ::reach-function-count (count names)}))
 (defn- reach-cache [database]
  (or (:seon.sci.eval/projection-state (meta database))
      (when-let [projection (db/carried-projection database)]
@@ -2100,13 +2101,13 @@
         (into {} (map (fn [[s entry]] [s (::reach-digest entry)])) entries))))
 
 (defn reach-memberships
-  "The tested closure's function identities as portable lookup refs."
+  "The tested closure's function names, including unresolved targets."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
                   [:or :seon.test/reaches :seon.error/value]]}
   [database test-symbols]
   (let [entries (reach-entries database test-symbols)]
     (if (:seon.error/kind entries) entries
-        (into {} (keep (fn [[s entry]] (when (vector? (::reach-refs entry))
+        (into {} (keep (fn [[s entry]] (when (set? (::reach-refs entry))
                                        [s (::reach-refs entry)]))) entries))))
 
 (defn program-digest
@@ -2742,23 +2743,10 @@
         reaches (if (:seon.error/kind derived-reaches)
                   (or carried-reaches derived-reaches)
                   (merge derived-reaches carried-reaches))
-        namespace-names
-        (distinct
-         (map #(symbol (namespace (symbol (:seon.test/sym %)))) results))
-        namespace-tempid #(str "test-result-namespace:" %)
         run-id (:seon.test.run/id run)
         basis-t (:seon.test.run/basis-t run)
         at (:seon.test.run/at run)
         run-ref [:seon.test.run/id run-id]
-        ;; The reach members were derived from the TESTED value; this
-        ;; transaction lands in the writer's own database, which a
-        ;; publication may have rebuilt without the identity a member
-        ;; names. The absence decision is made here, against the value
-        ;; actually written into, and an absent identity is minted as a
-        ;; tombstone rather than rejecting the whole completion.
-        ;; One pull per result answers existence AND the row's current
-        ;; latest result, so the delta below never re-reads the database
-        ;; per member.
         current-by-symbol
         (into {}
               (keep (fn [{test-symbol :seon.test/sym}]
@@ -2768,32 +2756,10 @@
                                                :seon.test/reach-unknown
                                                :seon.test/failure-message
                                                :seon.test/failing-assertions
-                                               {:seon.test/reach
-                                                [:db/id :seon.fn/sym]}]
+                                               '(limit :seon.test/reach nil)]
                                               [:seon.test/sym test-symbol])]
                         [test-symbol row])))
               results)
-        ;; A member this database already holds is present BY CONSTRUCTION:
-        ;; it was pulled back from the value being written into. Only the
-        ;; members no recorded row names still need an existence read.
-        known-present
-        (into #{}
-              (comp (mapcat (comp :seon.test/reach val))
-                    (keep (fn [member]
-                            (when-let [member-symbol (:seon.fn/sym member)]
-                              [:seon.fn/sym member-symbol]))))
-              current-by-symbol)
-        absent-identities
-        (source/absent-program-identities
-         database
-         (into [] (comp (filter (fn [[_ refs]] (vector? refs)))
-                        (mapcat val)
-                        (remove known-present))
-               reaches))
-        packaged-forms (schema.edn/packaged-forms)
-        portable-reach
-        (fn [refs]
-          (into [] (keep (partial source/identity-ref packaged-forms absent-identities)) refs))
         file-present?
         (memoize #(some? (db/pull database [:db/id] [:seon.fn.file/relative-path %])))
         ;; A file identity cannot be minted honestly: `:seon.fn.file/file`
@@ -2827,45 +2793,31 @@
                       :seon.test.run/id run-id
                       :seon.test.run/immutable run-id})]
         (throw (ex-info (:seon.error/message failure) failure))))
-    (into
-     (into (into (source/identity-tombstone-rows packaged-forms absent-identities)
-                 [(assoc run :db/id "test-run")])
-           (map (fn [namespace-name]
-                  {:db/id (namespace-tempid namespace-name)
-                   :seon.ns/name namespace-name}))
-           namespace-names)
+    (let [missing (into [] (comp (map :seon.test/sym) (remove current-by-symbol)) results)]
+      (when (seq missing)
+        (throw (ex-info "Test completion has no surviving test definition."
+                        {:seon.error/kind ::test-definition-absent
+                         :seon.test/symbols missing}))))
+    (into [(assoc run :db/id "test-run")]
      (mapcat
       (fn [{test-symbol :seon.test/sym :as result}]
-        (let [namespace-name (symbol (namespace (symbol test-symbol)))
-              test-ref [:seon.test/sym test-symbol]
+        (let [test-ref [:seon.test/sym test-symbol]
               current (get current-by-symbol test-symbol)
               exists? (some? current)
-              test-row-id (if exists? test-ref (str "test-result:" test-symbol))
+              test-row-id test-ref
               failures (mapv portable-failure (:seon.test/failures result))
-              wanted-reach (when (vector? (get reaches test-symbol))
-                             (portable-reach (get reaches test-symbol)))
+              wanted-reach (when (set? (get reaches test-symbol))
+                             (get reaches test-symbol))
               wanted-members (set wanted-reach)
               ;; The reach is replaced member by member: an unchanged
               ;; membership emits nothing, a dropped member emits its own
               ;; retraction, a new member its own assertion. Retracting the
               ;; whole attribute first cost 149,436 datoms for 93 identical
               ;; results (measured 2026-09-17 on `default`).
-              held-members
-              (into {}
-                    (map (fn [member]
-                           [(:db/id member)
-                            (when-let [member-symbol (:seon.fn/sym member)]
-                              [:seon.fn/sym member-symbol])]))
-                    (:seon.test/reach current))
-              retracted-members
-              (into [] (comp (remove (fn [[_ member-ref]]
-                                       (contains? wanted-members member-ref)))
-                             (map (fn [[member-id _]]
-                                    [:db/retract test-ref :seon.test/reach
-                                     member-id])))
-                    held-members)
-              held-refs (into #{} (remove nil?) (vals held-members))
-              added-members (into [] (remove held-refs) wanted-reach)
+              held-members (set (:seon.test/reach current))
+              retracted-members (mapv #(vector :db/retract test-ref :seon.test/reach %)
+                                      (remove wanted-members held-members))
+              added-members (into #{} (remove held-members) wanted-reach)
               wanted-digest (get digests test-symbol)
               wanted-assertions (set (:seon.test/failing-assertions result))
               result-row
@@ -2890,16 +2842,7 @@
                                                               [:seon.test.failure/id failure-id]))
                                                     (str "test-failure:" failure-id))))
                                             failures))
-                (not exists?)
-                (assoc :seon.test/ns (namespace-tempid namespace-name)
-                       :seon.schema.admission/source
-                       (or (db/q '[:find ?source .
-                                   :in $ ?name
-                                   :where
-                                   [?namespace :seon.ns/name ?name]
-                                   [?namespace :seon.schema.admission/source ?source]]
-                                 database namespace-name)
-                           :agent)))]
+)]
           (into (cond-> []
             ;; An attribute is retracted ONLY when this result does not
             ;; assert it: a cardinality-one add replaces its own value, and
@@ -4055,7 +3998,7 @@
                              ::error-count (count (::task-symbols task-result))}
              ::task-results
              (mapv (fn [test-symbol]
-                     {:seon.test/sym (str test-symbol)
+                     {:seon.test/sym test-symbol
                       :seon.test/pass-count 0 :seon.test/fail-count 0
                       :seon.test/error-count 1
                       :seon.test/failing-assertions [(id/id [test-symbol failure-fact] 64)]
