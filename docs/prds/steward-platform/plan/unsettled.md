@@ -2780,3 +2780,17 @@ working tree, never Sonnet.
   issue raised to blocker with this evidence (a typed refusal before any
   load, and no manifest in the exception). B relaunched with verified
   namespaces (`batch-123b.log`).
+- **Batch 123 B (HEAD 312f60560, 15 namespaces): 382/2,654/22F/1E.** By
+  class: transact-feedback 12F (the unowned validation-boundary issue —
+  every gate since seam 4; owner decided: an astra low lane after the
+  reset, since the reset batch touches that test too); eval_test
+  `an-instrumented-multi-arity-miss…` 6F cold in three gates — NOT flaky:
+  `evaluation-failed` (time-limit) instead of `contract-violated` under the
+  cold worker → the Opus agent resumed to reproduce under the worker's
+  arming (an already-expired deadline is the prime suspect); documentation
+  `a-contract-mistake…` 3F: the inner `seon.cluster.message/send!` refuses
+  before the outer `my.message/send` under canonical arming → message-wake
+  resumed; dependency-cache test error ("test seam is absent" after
+  312f60560) → guardrails resumed; the open indexed-vs-evaluated row issue.
+  Green cold: instrument, error, db, my.message, cluster.message, operator,
+  runner, test-runner, fresh-operator-reset, selection.
