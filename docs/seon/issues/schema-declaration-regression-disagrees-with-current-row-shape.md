@@ -79,3 +79,21 @@ does not reverse the resource-versus-evaluation ruling in the archived parity
 note or decide what namespace a resource schema should name. Logs and the
 bounded verification scope are recorded in
 [the adoption landing note](../../prds/steward-platform/research/adoption-margin-2026-09-17.md).
+
+## Batch 122 B review — 2026-09-17
+
+The raw failure at `program_test.clj:1183` has the same canonical shape
+fingerprint `0448f7805c0c1a5a2a18b9ead43c42688fd522274ac08246271ceccf7db052d2`
+on **both** rows. Only the evaluated row carries namespace ref
+`[:seon.ns/name sample.s1]`. This is not a missing shape. The exact
+`ad75bab51` test diff only supplies the normalized-row helper its explicit
+entity reader; it changes no parity expectation and neither deletion test.
+The earlier unchanged-indexer counterfactual above already reproduced this
+namespace difference. Its owners remain the resource constructor
+`seon.schema/canonical-schema-rows`, the evaluated declaration constructor
+`seon.sci.eval/row`, and the S1 parity comparison; changing memoization cannot
+supply missing resource provenance.
+
+The review retry at `6108f27f5` ran 68 tests / 519 assertions; this exact
+namespace-only mismatch was its sole failure (zero errors). The cleanup and
+deletion-expectation changes passed in that same armed JVM.

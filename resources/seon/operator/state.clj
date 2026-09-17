@@ -1378,11 +1378,11 @@
                   (map #(get (footprint %)
                              :seon.operator.footprint/file-bytes)
                        present))
-          _ (println "seon recursive deletion:"
+          _ (owned-fs/log-deletion!
              {:seon.cluster.store/root managed-root
               :seon.cluster.store/targets admitted
               :seon.cluster.store/file-bytes (long removed-file-bytes)
-              :seon.cluster.store/pid (.pid (java.lang.ProcessHandle/current))
+              :seon.cluster.store/caller "seon.operator.state/cleanup-root-under-lock!"
               :seon.cluster.store/operation
               "seon.operator.state/cleanup-root-under-lock!"})
           _ (doseq [path admitted]

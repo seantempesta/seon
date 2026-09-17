@@ -28,3 +28,24 @@ A successful gate either confirms its durable result facts or retains
 replayable result evidence with a typed persistence failure. Verify this
 while development adoption is active; elapsed silence is not confirmation
 that a write succeeded or failed.
+
+## Batch 122 B review — 2026-09-17
+
+`tmp/orchestrator/gate-results/batch-122.log` repeats the 30,000 ms
+`:seon.fresh-operator/prepl-response-silent` refusal, phase `:prepl-response`.
+`eca2d87a7` changes only the source callback's Malli schema plus documentation;
+it changes no transport or reply function. The actual recording transport,
+`seon.fresh-operator/live-root-value!`, returned a read-only map from PID
+94566 in a 119 ms BB invocation during this review. MCP independently
+returned the same PID with a 1 ms evaluation. These probes establish current
+reply delivery, not the duration or cause of the historical recording wait.
+
+The recording owner is `seon.test.runner/persistent-results-form` →
+`commit-staged-completion!` → `seon.cluster.source/record-results!` →
+`record-results-at-head!`. It requires the runner, derives projections and
+commits a complete result population without emitting prepl progress. The
+source recorder can retry stale-head conflicts under the declared test
+allowance; the transport independently refuses a 30 s silence. The exact
+phase that consumed batch 122's window remains unmeasured. No speculative
+transport change or bound widening was made. The runner remains the stage-2
+lane's live boundary and was not edited.

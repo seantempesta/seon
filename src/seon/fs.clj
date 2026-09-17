@@ -1,7 +1,8 @@
 (ns seon.fs
   "Filesystem operations whose safety depends on path ownership."
   (:require [clojure.java.io :as io]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [taoensso.timbre :as log])
   (:import [java.nio.file Files LinkOption NoSuchFileException Path]
            [java.nio.file.attribute BasicFileAttributes]
            [java.util.concurrent TimeUnit]))
@@ -106,6 +107,54 @@
                   :seon.cluster.store/declared-root declared
                   :seon.cluster.store/working-directory working}))
       resolved)))
+
+(defn- caller-frame
+  []
+  ;; the deletion owners are not the caller, and neither is the plumbing
+  ;; between them (contract wrappers, apply, the JDK): the first FIRST-PARTY
+  ;; frame outside the owners is who asked for this deletion
+  (let [owners ["seon.cluster.store" "seon.fs" "seon.instrument"]
+        frames (map str (.getStackTrace (Thread/currentThread)))
+        outside (remove (fn [frame]
+                          (some #(str/starts-with? frame %) owners))
+                        frames)]
+    (or (first (filter #(str/starts-with? % "seon.") outside))
+        (first (remove (fn [frame]
+                         (some #(str/starts-with? frame %)
+                               ["clojure." "malli." "java." "jdk."]))
+                       outside))
+        "unknown")))
+
+(defn log-deletion!
+  "Record one admitted recursive deletion BEFORE it runs.
+
+  Takes the deletion root, targets, byte count and operation under
+  `:seon.cluster.store`; logs every canonical target and deletion authority,
+  the calling frame, and this process's pid, so a future wipe names itself
+  instead of leaving the recurring absence-of-signal. Interpreted callers
+  supply their caller explicitly because JVM stack frames name SCI internals.
+  Returns the recorded report."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.cluster.store/root :string]
+               [:seon.cluster.store/targets [:vector :string]]
+               [:seon.cluster.store/file-bytes :int]
+               [:seon.cluster.store/operation :string]
+               [:seon.cluster.store/caller {:optional true} :string]]]
+    [:map
+     [:seon.cluster.store/root :string]
+     [:seon.cluster.store/targets [:vector :string]]
+     [:seon.cluster.store/file-bytes :int]
+     [:seon.cluster.store/operation :string]
+     [:seon.cluster.store/caller :string]
+     [:seon.cluster.store/pid :int]]]}
+  [request]
+  (let [report (assoc request
+                      :seon.cluster.store/caller (or (:seon.cluster.store/caller request)
+                                                    (caller-frame))
+                      :seon.cluster.store/pid (.pid (java.lang.ProcessHandle/current)))]
+    (log/warn (str "seon recursive deletion: " (pr-str report)))
+    report))
 
 (defn source-directory
   "The checkout directory supplying the loaded filesystem owner."

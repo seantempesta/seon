@@ -657,7 +657,11 @@
                         {::capture
                          {:enabled? true
                           :fn (fn [data]
-                                (swap! lines conj (str (force (:msg_ data)))))}}}
+                                (let [message (str (force (:msg_ data)))]
+                                  (when (str/includes? message "recursive deletion")
+                                    (is (.exists store-dir) "admission precedes store deletion")
+                                    (is (.exists cluster-root) "admission precedes cluster deletion"))
+                                  (swap! lines conj message)))}}}
                        (operator/cleanup-root!
                         {:seon.operator/repository-root repository-root
                          :seon.operator/managed-root managed-root}))

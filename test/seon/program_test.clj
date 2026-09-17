@@ -511,7 +511,7 @@
             (is (every? #(seq (db/datoms @connection :eavt %)) old-shapes)
                 "shared content-addressed shapes survive arity replacement")))))))
 
-(deftest runtime-deletion-preserves-identity-through-tuple-retractions
+(deftest runtime-deletion-retracts-identity-and-tuples
   (test-support/with-database
     (fn [connection]
       (let [identity [:seon.fn/sym "seon.test/changed-since-green"]
@@ -526,8 +526,8 @@
         (is (seq (:seon.fn/form-span before)))
         (is (seq (:seon.fn/call-arities before)))
         (is (some? (:db-after result)) (pr-str result))
-        (is (= (select-keys before [:db/id :seon.fn/sym])
-               (db/pull (db/db connection) '[*] identity)))))))
+        (is (nil? (db/pull (db/db connection) '[*] identity)))
+        (is (empty? (db/datoms (db/db connection) :eavt (:db/id before))))))))
 
 (deftest identical-runtime-redeclaration-builds-no-datoms
   (test-support/with-database
@@ -873,16 +873,16 @@
                 "(ns-unmap 'my.agents.registration-test 'same-name)"
                 :seon.program/ns namespace-ref}
                deletion))
+        (doseq [identity-attribute [:seon.fn/sym :seon.test/sym]]
+          (is (= function-sym
+                 (get (db/pull (db/db connection) '[*]
+                               [identity-attribute function-sym])
+                      identity-attribute))))
         (test-support/transacted! connection (turn/receipt-settle-tx settlement))
-        ;; Ruling 47 makes program identities permanent: ns-unmap retracts
-        ;; definition facts, including namespace membership, not the identity row.
-        (doseq [identity-attribute [:seon.fn/sym :seon.test/sym]
-                :let [row (db/pull @connection '[*]
-                                   [identity-attribute function-sym])]]
-          (is (= function-sym (get row identity-attribute)))
-          (is (every? #{:db/id identity-attribute}
-                      (keys row))
-              (pr-str row)))))))
+        ;; Deletion retracts identities; prior definitions remain in history.
+        (doseq [identity-attribute [:seon.fn/sym :seon.test/sym]]
+          (is (nil? (db/pull (db/db connection) '[*]
+                             [identity-attribute function-sym]))))))))
 
 (deftest schema-unregister-is-one-global-typed-deletion
   (let [event (one-event

@@ -278,3 +278,94 @@ unlinked before removing the worktree. `tmp/adoption-margin-wt`,
 `tmp/adoption-margin` were deleted. Measured phase/profile data were already
 extracted into the linked durable research files. The raw temporary paths
 above are historical provenance, not retained files.
+
+
+## Batch 122 B review slice — 2026-09-17
+
+Reviewed the raw failures in `tmp/orchestrator/gate-results/batch-122.log`
+(HEAD `5dd6ef7cc`), the named commit diffs, and the current cleanup,
+declaration and result-recording owners. The authorities and skills named
+above were read end to end in the original slice; this review reread the
+Clojure design and testing skills and the existing schema-parity and
+recording-silence issue notes.
+
+### Findings and changes
+
+- Cleanup **did print before deleting**, contrary to the proposed ordering
+  attribution. `c4d1be3ac` replaced the prior Timbre call with plain printing
+  and omitted caller provenance. Move that existing logger to `seon.fs` so
+  the BB/JVM state owner can use it without loading the cluster program.
+  `seon.cluster.store/log-deletion!` delegates to the same owner. The regression
+  observes the store and cluster paths present at admission, before deletion.
+- The three deletion failures assert retired permanent-identity semantics.
+  `seon.turn/row-tx` emits `:db/retractEntity`; Datahike's
+  `reference-code/datahike/src/datahike/db/transaction.cljc` dispatches it to
+  `retract-entity` (1082), including tuple retractions. Update the two tests to
+  assert absent identities and absent entity datoms, with positive evidence
+  of the declarations before removal. No production deletion change.
+- Schema parity attribution to `ad75bab51` is refuted by the earlier armed
+  counterfactual recorded above: unchanged indexer and original test,
+  27 tests / 227 assertions / 1 failure / 0 errors, same namespace mismatch.
+  Batch 122 also contains **shape on both rows**. The evaluated schema has
+  `:seon.schema/ns [:seon.ns/name sample.s1]`; the resource schema lacks it.
+  The owners are `schema/canonical-schema-rows`, `sci.eval/row`, and the S1
+  parity assertion. The prior resource-versus-evaluation ruling remains
+  intact; this slice does not invent namespace provenance for a resource.
+- `eca2d87a7` modifies the callback schema only, not prepl transport. The
+  actual runner transport returned `{.../pid 94566, .../prepl-reply :returned}`
+  in 119 ms; MCP's independent read took 1 ms. The historical 30,000 ms
+  recording silence is still unlocalized within runner loading, projection,
+  writer work or stale-head retry. Existing recording issue updated; the
+  protected stage-2 runner was not edited.
+
+### Verification
+
+`bb -cp src:resources docs/prds/steward-platform/research/adoption_margin_cleanup_probe_2026_09_17.clj`
+passed: one admission, 6 bytes, target present during admission, caller
+`seon.operator.state/cleanup-root-under-lock!`, complete removal afterward.
+The probe creates and removes only `tmp/adoption-review-cleanup-root`.
+Timbre's `with-merged-config` is a binding of `*config*`
+(`reference-code/timbre/src/taoensso/timbre.cljc:33`); lifecycle work preserves
+bindings with the existing bound function. BB supplies a direct config binding
+because its bundled Timbre surface omits that macro.
+
+Requested armed iteration (foreground bound 2400, no overrides):
+
+```
+timeout 2400 bin/test-fast --paths src/seon/fs.clj src/seon/cluster/store.clj resources/seon/operator/state.clj test/seon/operator_test.clj test/seon/program_test.clj -- seon.operator-test seon.program-test seon.dev.fresh-operator-reset-test
+```
+
+At HEAD `1b6fb159829ae302d16efd9c0c42b7f973134ed7` it refused before launching
+any JVM: “No published program graph matches the source snapshot;
+orchestrator must run: bin/test --prepare-head-base”. Exit 64, zero tests
+executed. The preparation belongs to the orchestrator; requested through the
+owner while independent probes continued. This is the exact verification
+boundary, not a passing test result. Cold proof remains orchestrator-owned.
+Default PID 94566 was only read; no stop, start, reset or refork was run.
+
+
+The serial retry at HEAD `6108f27f5703ada7fcb857a27e58218a13d9d233`
+was admitted after the launcher's concurrent graph-selection correction.
+It selected graph `43b5b8b95f5041b4266bc5c1d17c1f4c6d5810165de5cf6d56d91343b8e35810`
+with the explicit notice “unknown (legacy base has no Git provenance) commits
+behind HEAD”. No foreign code path was included in the five-file overlay.
+Foreign `bin/test`, `src/seon/test/cache.clj`, and `test/seon/test_runner_test.clj`
+edits were observed and left untouched; the launcher itself necessarily ran
+its current admission code. This is fast iteration, not cold proof.
+
+Contracts armed at `2026-09-17T06:39:22.956302Z` in PID 64655: 1,130 registered
+and instrumented functions, panic mode. Terminal tally: **68 tests / 519
+assertions / 1 failure / 0 errors**, exit 1. All operator and reset tests,
+and both changed deletion tests passed. The only failure remains
+`indexed-and-evaluated-declarations-are-the-same-entities`, with the exact
+namespace-only difference above. Its current failure again carries the
+same shape fingerprint on both sides. No second run was needed after the
+terminal tally; no source changes followed it.
+
+The selected scratch snapshot `tmp/test-runs/run.RUwgXo` was automatically
+removed after exit; the standalone probe root was also removed. This slice
+owns `src/seon/fs.clj`, `src/seon/cluster/store.clj`,
+`resources/seon/operator/state.clj`, the operator/program test changes,
+this note, the cleanup probe, and the three issue-note updates. No foreign
+session was resumed, messaged or modified. Stop for review; cold verification
+and the schema parity owner decision remain with the orchestrator.

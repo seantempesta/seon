@@ -265,23 +265,6 @@
   [request]
   (fs/admit-destructive-path! request))
 
-(defn- caller-frame
-  []
-  ;; the deletion owners are not the caller, and neither is the plumbing
-  ;; between them (contract wrappers, apply, the JDK): the first FIRST-PARTY
-  ;; frame outside the owners is who asked for this deletion
-  (let [owners ["seon.cluster.store" "seon.fs" "seon.instrument"]
-        frames (map str (.getStackTrace (Thread/currentThread)))
-        outside (remove (fn [frame]
-                          (some #(str/starts-with? frame %) owners))
-                        frames)]
-    (or (first (filter #(str/starts-with? % "seon.") outside))
-        (first (remove (fn [frame]
-                         (some #(str/starts-with? frame %)
-                               ["clojure." "malli." "java." "jdk."]))
-                       outside))
-        "unknown")))
-
 (defn log-deletion!
   "Record one admitted recursive deletion BEFORE it runs.
 
@@ -304,11 +287,7 @@
      [::caller :string]
      [::pid :int]]]}
   [request]
-  (let [report (assoc request
-                      ::caller (caller-frame)
-                      ::pid (.pid (java.lang.ProcessHandle/current)))]
-    (log/warn (str "seon recursive deletion: " (pr-str report)))
-    report))
+  (fs/log-deletion! request))
 
 ;;; The flock. Non-blocking and exclusive: a foreign holder makes
 ;;; `.tryLock` return nil.
