@@ -16,7 +16,7 @@ cold gates after the one reset. No migration or compatibility population.
 
 ## Message publication — §1h applied together under §1i
 
-**RESET NEEDED.** The message lane prepares one publication containing permanent
+**RESET NEEDED.** The message lane's three integrated seams provide one publication containing permanent
 listened `:seon.message/to`, settlement claims at `:seon.turn/handled`, subject
 `:seon.message/about` as the existing nonempty-string token grammar, sender-only
 inside classification, and separate `:seon.message/assignment` evaluation-ID
@@ -29,7 +29,7 @@ The older message inventory's inbox-move and about-as-inside wording below is
 superseded by this ruling. Refreshes/refresh-call were already integrated at
 `78cc3b9b7`; they are not reapplied.
 
-Default PID 66052 is read-only for this lane. The orchestrator owns publication,
+This lane does not operate default. The orchestrator owns publication,
 reset, reseed, cold gates and the deployed unanswered-wakes after-proof. See
 [the lane's evidence and exact boundary](../research/message-wake-model-2026-09-17.md).
 
@@ -1372,9 +1372,8 @@ The owner was asked which performance contract controls: retain the existing
 absolute budget and report the ratio (recommended, about 15 minutes); optimize
 the wrapper to retain the two-times-raw ratio (about 1–3 hours, a separate
 query-owner change); or retain this failing assertion as a landing boundary.
-No threshold has been relaxed. The G5 budget-location question also remains
-unanswered; no partial universal/component validator is enabled to hide that
-missing work.
+No threshold has been relaxed. At that checkpoint the G5 budget-location question was unanswered. The accepted
+projection-carried bound and G5 implementation below supersede that boundary.
 
 The reproducible equal-population regression is
 `test/seon/reset_edge_parity_test.clj`. Both representations carry the same
@@ -1491,6 +1490,16 @@ with diagnostic data. Empty retracted children are permitted only when no
 surviving component edge requires them. No wildcard pull, 1,000-member cap,
 id-only placeholder or invented component identity is involved.
 
-Verification is still in progress in the isolated worktree. The final landing
-note must record the green fast tally, measured query ratio and rebased head
-before this batch is considered ready for orchestrator review/merge.
+The pre-rebase G5 fast proof passed 89 tests / 948 assertions, with zero failures
+and errors. The branch is rebased onto `ad75bab51`; final fast verification
+is in progress. The final landing note records the exact head and result.
+
+The rebase retained upstream batched evidence lookups, adoption phase reporting,
+agent-only override lookup and immutable reconciliation reads while preserving
+the reset's symbol values and deletion obligations. One foreign verification
+boundary is named explicitly: the main tree's `bin/test` and
+`src/seon/test/selection.clj` are held by the runner lane. This branch alone
+fixes exact-HEAD fast snapshots being refused for a missing cold publication;
+it preserves admission for changed overlays. The orchestrator reconciles that
+narrow launcher condition with the runner lane before the final merge. No
+foreign uncommitted bytes were copied or edited.

@@ -8,8 +8,8 @@ tags: [reset, datahike, schema, integration]
 # Reset edge integration — worktree checkpoint
 
 **Not ready to merge. RESET NEEDED.** The implementation checkpoint is retained in
-`tmp/reset-batch-wt`, branch `reset-batch`. The current base includes
-`b6562f1ce`; the checkpoint has been rebased onto it. The
+`tmp/reset-batch-wt`, branch `reset-batch`. The current base is
+`ad75bab51`; the G5 checkpoint has been rebased onto it. The
 orchestrator owns merge, the cold gate, platform proof and the reset. Default
 was not restarted, reset, adopted or otherwise mutated by this lane.
 
@@ -22,7 +22,8 @@ optional empty memberships; agent archive facts and a writer refusal of agent
 identity retraction; canonical arity shape links replacing AST maintenance; and
 the capability symbol as a final deletion obligation. Indexed symbol edges and
 preserving issue status were already selected. G5 complete owning values and
-the query-cost contract remain outstanding. The four
+the accepted absolute query-cost contract are implemented; their current
+verification is recorded in the final section below. The four
 maintenance constructors and their empty/partial outcomes now have armed proof.
 
 ## Iteration evidence
@@ -358,3 +359,34 @@ checks are green in fast 7. Both the identity-less entity issue and mistaken
 query-ratio issue are resolved and archived in this slice. The two subsequent
 edits only clarify error/config description text; final rebased verification
 will include them. Cold/platform/live proof remains the orchestrator's boundary.
+
+
+### Rebase and launcher boundary
+
+The branch rebased onto `ad75bab51`. Conflict resolution preserved upstream
+batched `identity-rows` reads and publication progress reports while deleting
+stub/tombstone minting; only real evidence identities need resolution now that
+reach is a value. SCI documentation retains the upstream agent-only override
+lookup with symbol identities. The program regression keeps the upstream
+injected immutable row reader and excludes the reset provenance facts from its
+semantic comparison. No foreign uncommitted changes were copied.
+
+The rebased overlay admission (`6f80d1a4d`) refused a byte-identical HEAD fast
+snapshot before any JVM/slot: no matching cold HEAD manifest. The isolated
+launcher fix proves the actual snapshot has no tracked or untracked differences
+and skips only that vacuous overlay check. Changed overlays retain the original
+admission. The actual fast launcher now reaches its slot and armed JVM. The
+main tree's `bin/test` and `src/seon/test/selection.clj` remain the runner lane's
+held boundary, verified with git status; neither was edited. See
+[the resolved launcher issue](../../../seon/issues/archive/a-clean-fast-snapshot-demands-a-cold-head-publication.md).
+The orchestrator must reconcile the narrow launcher condition with that lane's
+landing before merge. No cold preparation or default operation was run.
+
+
+The rebased schema contract sweep found one missing predicate diagnostic in the
+new upstream `:seon.source/progress!` declaration (`be9c90e2f`). The existing
+`every-predicate-schema-declares-what-it-accepts` regression names exactly
+`[:fn clojure.core/ifn?]`. This branch adds the required callable-progress
+`:error/message`; it changes no accepted value or callback behavior. Other
+inline function predicates are outside this registered-schema sweep and are
+not attributed to this failure. The schema namespace is rerun after the patch.
