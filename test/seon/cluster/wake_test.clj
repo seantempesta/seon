@@ -457,7 +457,8 @@
             (is (= "agent-a" (error/steward (db/db connection) fact)))
             (is (nil? (:seon.error/steward fact))))
           (is (some? (test-support/await-event! mailbox "derived steward notification")))
-          (is (contains? (wake/inside-attributes (db/db connection)) :seon.message/about))
+          (is (contains? (wake/inside-attributes (db/db connection)) :seon.message/from))
+          (is (not (contains? (wake/inside-attributes (db/db connection)) :seon.message/about)))
           (is (not (contains? (wake/wake-attributes (db/db connection)) :seon.error/steward)))
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key key})

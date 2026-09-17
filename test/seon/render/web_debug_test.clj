@@ -286,7 +286,7 @@
                         (db/transact! connection
                           [{:seon.message/id "panel-fault-message" :seon.message/to [:seon.agent/id "juniper"]
                             :seon.message/content "A known fixture fault was delivered."
-                            :seon.message/about (:seon.error/ref recorded)}]))))
+                            :seon.message/about (second (:seon.error/ref recorded))}]))))
                  (seed-turn! :call "" [] (attempt "panel-attempt-3" 7100 7000 100)
                              [:seon.message/id "panel-fault-message"])
                  (let [after (snapshot)

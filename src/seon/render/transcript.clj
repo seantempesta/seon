@@ -34,7 +34,7 @@
    :my.message/reason
    {:seon.message/to [:db/id :seon.agent/id]}
    {:seon.message/from [:db/id :seon.agent/id]}
-   {:seon.message/about [:db/id]}])
+   :seon.message/about])
 
 (def ^:private receipt-selector
   [:db/id
@@ -209,54 +209,6 @@
        (sort-by str)
        vec))
 
-(defn- about-identities
-  [db messages]
-  (let [about-eids
-        (into [] (comp (keep #(get-in % [:seon.message/about :db/id]))
-                       (distinct))
-              messages)
-        attributes (identity-attributes db)
-        selector (into [:db/id] attributes)
-        candidates
-        (if (seq about-eids)
-          (into
-           []
-           (mapcat
-            (fn [entity]
-              (keep (fn [attribute]
-                      (let [identity-value (get entity attribute)]
-                        (when (string? identity-value)
-                          [(:db/id entity) attribute identity-value])))
-                    attributes)))
-           (db/pull-many db selector about-eids))
-          [])
-        candidate-values (into #{} (map #(nth % 2)) candidates)
-        identified
-        (into
-         {}
-         (map
-          (fn [identity-value]
-            [identity-value
-             (into
-              #{}
-              (keep (fn [attribute]
-                      (some-> (db/pull db [:db/id]
-                                      [attribute identity-value])
-                              :db/id)))
-              attributes)]))
-         candidate-values)]
-    (reduce
-     (fn [result [entity attribute identity-value]]
-       (if (= #{entity} (get identified identity-value))
-         (update result entity
-                 (fn [current]
-                   (first (sort-by (juxt (comp str first) second)
-                                   (cond-> [[attribute identity-value]]
-                                     current (conj current))))))
-         result))
-     {}
-     candidates)))
-
 (defn- message-order-facts
   [db message-ids]
   (if (seq message-ids)
@@ -273,8 +225,8 @@
     {}))
 
 (defn- message-entry
-  [database run-id agent-id identities orders message]
-  (let [about-eid (get-in message [:seon.message/about :db/id])]
+  [database run-id agent-id orders message]
+  (let [subject (:seon.message/about message)]
     (merge
      {::kind :message
       ::entity message
@@ -284,8 +236,7 @@
                               :seon.agent/id])
       ::to (get-in message [:seon.message/to
                             :seon.agent/id])
-      ::about (get identities about-eid)
-      ::about-ref? (some? about-eid)
+      ::about subject
       ::reason (:my.message/reason message)}
      (when (= (bootstrap/task-message-id database agent-id)
               (:seon.message/id message))
@@ -391,11 +342,10 @@
                :else (candidate-entity-ids db agent-id limit))
         messages (pulled-many db message-selector (:message ids))
         receipts (pulled-many db receipt-selector (:eval ids))
-        identities (about-identities db messages)
         identity-attrs (identity-attributes db)
         message-orders (message-order-facts db (:message ids))]
     (->> (concat (map (partial message-entry db run-id agent-id
-                               identities message-orders)
+                               message-orders)
                       messages)
                  (map receipt-entry receipts)
                  [])
@@ -442,8 +392,6 @@
         extra (cond-> {}
                 (::about entry)
                 (assoc :seon.message/about (::about entry))
-                (and (::about-ref? entry) (nil? (::about entry)))
-                (assoc :seon.transcript/unresolved-about? true)
                 (::reason entry) (assoc :my.message/reason (::reason entry)))]
     (str (case (::custody entry)
            :seon.context/current-trigger "Current run instruction:\n"
@@ -2088,7 +2036,7 @@
   [database agent-id rows]
   (let [messages (db/q '[:find ?mid ?error (sum ?count) :with ?occurrence :in $ ?agent-id
                          :where [?a :seon.agent/id ?agent-id] [?m :seon.message/to ?a]
-                                [?m :seon.message/about ?f] [?f :seon.error/signature ?error]
+                                [?m :seon.message/about ?error] [?f :seon.error/signature ?error]
                                 [?m :seon.message/id ?mid]
                                 [?f :seon.error/occurrences ?occurrence]
                                 [?occurrence :seon.error.occurrence/count ?count]] database agent-id)]

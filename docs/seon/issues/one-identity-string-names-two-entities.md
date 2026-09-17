@@ -1,11 +1,22 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, config, schema, wave/config-cluster-identity]
 ---
 
 # Stop two identity attributes from naming one string
+
+## Superseded by §1h–§1i, 2026-09-17
+
+Message subjects now store the supplied token without resolving any identity
+family. Assignment correlation names its evaluation on a separate attribute.
+Consequently distinct families may legitimately observe the same string; the
+cross-family uniqueness query below is no longer an admission invariant.
+`resolve-about` and the run-scoped collision assertion are removed by the
+[message model seam](../../prds/steward-platform/research/message-wake-model-2026-09-17.md).
+The original evidence below remains historical; it does not authorize changing
+cluster/config/digest identities merely to make that query empty.
 
 ## Problem
 

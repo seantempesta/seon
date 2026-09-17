@@ -495,16 +495,8 @@
 ;;; The one identity a (run, ordinal) pair mints
 ;;; ---------------------------------------------------------------------------
 
-;;; ONE (run, ordinal) PAIR NAMES ONE ENTITY. It used to name two — the
-;;; frozen form and its receipt — with two `:db.unique/identity`
-;;; attributes, and an agent holds only the ordinary string, so
-;;; `seon.cluster.message/resolve-about` resolves it against EVERY
-;;; installed identity attribute and makes a tie a refusal rather than a
-;;; guess. Minting a string for both families therefore made
-;;; `my.message/decline` (and any `my.message/send` naming a problem)
-;;; refuse `:seon.message/ambiguous-about` for every problem that
-;;; ever existed. The families are merged; the ambiguity class is
-;;; unwritable, not qualified away.
+;;; One turn and ordinal identify one evaluation. Message assignment
+;;; correlation stores that evaluation identity independently of its subject.
 
 (defn next-id
   "Identify the next turn from branch, agent, and its ordinal.
@@ -2297,9 +2289,10 @@
                                   (fn [current]
                                     ;; Compaction or another system pass may
                                     ;; have changed history during evaluation.
-                                    ;; The writer admits this append only against
-                                    ;; the history from which it was derived.
-                                    (if (= latest (latest-evaluations current agent-id))
+                                    ;; The writer admits this append only while idle,
+                                    ;; against the history from which it was derived.
+                                    (if (and (nil? (open-for-agent current [:seon.agent/id agent-id]))
+                                             (= latest (latest-evaluations current agent-id)))
                                       (conj (into refresh-tx (:seon.db/tx-data prepared))
                                             [:db.fn/call #'plan/settle-call agent-id])
                                       []))]]))]
@@ -2551,21 +2544,21 @@
               (db/q '[:find ?assignment .
                      :in $ ?problem ?author ?owner
                      :where
-                     [?assignment :seon.message/about ?problem]
+                     [?assignment :seon.message/assignment ?problem]
                      [?assignment :seon.message/from ?author]
                      [?assignment :seon.message/to ?owner]]
-                   db evaluation-eid author-eid owner-eid)))
+                   db (:seon.cluster.eval/id evaluation) author-eid owner-eid)))
         declination?
         (boolean
          (and assignment?
               (db/q '[:find ?declination .
                      :in $ ?problem ?author ?owner
                      :where
-                     [?declination :seon.message/about ?problem]
+                     [?declination :seon.message/assignment ?problem]
                      [?declination :seon.message/from ?owner]
                      [?declination :seon.message/to ?author]
                      [?declination :my.message/reason _]]
-                   db evaluation-eid author-eid owner-eid)))]
+                   db (:seon.cluster.eval/id evaluation) author-eid owner-eid)))]
     {:seon.turn.work/assignment? assignment?
      :seon.turn.work/declination? declination?}))
 
@@ -3393,28 +3386,15 @@
     run-id :seon.turn/id
     ordinal :seon.cluster.eval/ordinal
     now :seon.turn.loop/now
-    problem :seon.problems/form-problem
     trigger :seon.message/trigger}]
-  (let [receipt-eid
-        (when problem
-          (db/q '[:find ?receipt .
-                  :in $ ?run-id ?ordinal
-                  :where
-                  [?run :seon.turn/id ?run-id]
-                  [?receipt :seon.cluster.eval/run ?run]
-                  [?receipt :seon.cluster.eval/ordinal ?ordinal]]
-                db run-id ordinal))
-        delivery
+  (let [delivery
         (when asked
           (message/delivery
            db
-           (cond-> {:my.message/value (if problem
-                      (dissoc asked :my.message/about)
-                      asked) :seon.agent/id agent-id :seon.turn/id run-id :seon.cluster.eval/ordinal ordinal :seon.config.message/max-chain (:seon.config.message/max-chain cluster)}
+           (cond-> {:my.message/value asked :seon.agent/id agent-id :seon.turn/id run-id :seon.cluster.eval/ordinal ordinal :seon.config.message/max-chain (:seon.config.message/max-chain cluster)}
              trigger (assoc :seon.message/trigger trigger))))]
     {:seon.message/rows
-     (cond->> (:seon.message/rows delivery)
-       problem (mapv #(assoc % :seon.message/about receipt-eid)))
+     (:seon.message/rows delivery)
      :seon.error/values-tx
      (into []
            (mapcat

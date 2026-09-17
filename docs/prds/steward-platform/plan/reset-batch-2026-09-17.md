@@ -14,6 +14,25 @@ never restarts or resets default. The explicit step-2 restriction overrides
 the assignment's later generic cold-gate paragraph. The orchestrator runs the
 cold gates after the one reset. No migration or compatibility population.
 
+## Message publication — §1h applied together under §1i
+
+**RESET NEEDED.** The message lane prepares one publication containing permanent
+listened `:seon.message/to`, settlement claims at `:seon.turn/handled`, subject
+`:seon.message/about` as the existing nonempty-string token grammar, sender-only
+inside classification, and separate `:seon.message/assignment` evaluation-ID
+values. `resolve-about`, inbox moves and read-tx are deleted. The same publication
+retypes `:seon.eval/origin` to an issue-ID value with its writer, turn carry-forward
+and outline consumers. The read-only census at basis 536871060 found about/origin/inbox zero and
+read-tx two current datoms. The installed about ref type and removal of those
+read-tx facts belong to the coordinated reset. No migration is introduced.
+The older message inventory's inbox-move and about-as-inside wording below is
+superseded by this ruling. Refreshes/refresh-call were already integrated at
+`78cc3b9b7`; they are not reapplied.
+
+Default PID 66052 is read-only for this lane. The orchestrator owns publication,
+reset, reseed, cold gates and the deployed unanswered-wakes after-proof. See
+[the lane's evidence and exact boundary](../research/message-wake-model-2026-09-17.md).
+
 ## Current owner correction — program deletion admission
 
 Read end to end: **J**, [program-graph deletion semantics](../research/deletion-semantics-program-graph-2026-09-16.md)

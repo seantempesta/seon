@@ -1313,10 +1313,9 @@
         (outside-trigger! connection "alice" "h1" "human asks")
         (opened-run! connection "alice" "e1" "h1" now)
         (is (= 1 (turn/episode-runs @connection "alice")))
-        ;; A message about an earlier entity is an inside wake. The
-        ;; classification depends on the about ref, not the target's family.
+        ;; The recorder attributes population activity to its sending agent.
         (test-support/transacted! connection
-                                [{:seon.message/id "r1" :seon.message/to [:seon.agent/id "alice"] :seon.message/about [:seon.message/id "h1"] :seon.message/content "about a fault"}])
+                                [{:seon.message/id "r1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "alice"] :seon.message/about "h1" :seon.message/content "about a fault"}])
         (opened-run! connection "alice" "e2" "r1" now)
         (is (= 2 (turn/episode-runs @connection "alice"))
             "the recorder's message did not reset the episode (R3)")

@@ -899,7 +899,8 @@
                 (is (empty?
                      (db/q '[:find ?message
                             :where
-                            [?message :seon.message/about ?error]
+                            [?message :seon.message/about ?signature]
+                             [?error :seon.error/signature ?signature]
                             [?error :seon.error/id _]]
                           @connection))
                     "a returned error value creates no delivery wake")
@@ -1730,8 +1731,7 @@
           (is (empty?
                (db/q '[:find ?assignment
                       :where
-                      [?assignment :seon.message/about ?problem]
-                      [?problem :seon.cluster.eval/id _]]
+                      [?assignment :seon.message/assignment _]]
                     @connection))
               "no message is written on the agent's behalf: an error is a
                value the agent sees; routing it to an owner is a later
@@ -3227,7 +3227,8 @@
               faults (db/q '[:find ?to ?signature
                              :keys :seon.agent/id :seon.error/signature
                              :where
-                             [?message :seon.message/about ?error]
+                             [?message :seon.message/about ?signature]
+                             [?error :seon.error/signature ?signature]
                              [?message :seon.message/to ?agent]
                              [?agent :seon.agent/id ?to]
                              [?error :seon.error/signature ?signature]]

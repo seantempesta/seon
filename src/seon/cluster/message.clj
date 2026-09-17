@@ -146,53 +146,6 @@
 
 
 
-(defn- identified-entities
-  "Entities whose installed unique identity attribute equals `identity`.
-
-  An agent holds the ordinary string identity, never an entity id or an
-  attribute-specific lookup ref. Resolve against every installed
-  `:db.unique/identity` attribute, then make ambiguity a value instead of
-  guessing which fact the agent meant."
-  [db identity]
-  (into
-   #{}
-   (keep
-    (fn [[entity attribute]]
-      (when (= :db.unique/identity
-               (get-in db [:schema attribute :db/unique]))
-        entity)))
-   (db/q '[:find ?entity ?attribute
-          :in $ ?identity
-          :where [?entity ?attribute ?identity]]
-        db identity)))
-
-(defn- resolve-about
-  [db identity]
-  (let [entities (identified-entities db identity)]
-    (cond
-      (empty? entities)
-      {:seon.error/kind :seon.message/unknown-about
-       :seon.message/unknown-about identity
-       :seon.error/message
-       (str "There is no identified fact named \"" identity
-            "\", so nothing was assigned about it.")
-       :seon.error/data {:my.message/about identity}}
-
-      (< 1 (count entities))
-      {:seon.error/kind :seon.message/ambiguous-about
-       :seon.message/ambiguous-about identity
-       :seon.error/message
-       (str "More than one identified fact is named \"" identity
-            "\", so the assignment target is ambiguous.")
-       :seon.error/data {:my.message/about identity}}
-
-      :else
-      {:seon.message/about (first entities)})))
-
-
-
-
-
 (defn inbound-tx
   "Admit one outside message and mint its event identity at the writer."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.message/inbound-request]
@@ -243,16 +196,15 @@
        (fn [delivered candidate]
          (let [recipient (:my.message/to candidate)
                about-id (:my.message/about candidate)
-               about (when about-id (resolve-about database about-id))
                failure (cond
                          (not (agent-exists? database recipient))
                          {:seon.error/kind :seon.message/unknown-recipient
                           :seon.message/unknown-recipient recipient
                           :seon.error/message (str "There is no agent named " (pr-str recipient) ".")}
-                         (:seon.error/kind about) about)]
+                         :else nil)]
            (if failure
              (update delivered :seon.error/values conj failure)
-             (let [subject (:seon.message/about about)
+             (let [subject about-id
                    row (cond-> {:seon.message/id (or (:seon.message/id candidate)
                                                       (id/id))
                                 :seon.message/to [:seon.agent/id recipient]
@@ -260,7 +212,11 @@
                                 :seon.message/content (or (:my.message/content candidate)
                                                           (:my.message/reason candidate))}
                          trigger (assoc :seon.message/caused-by [:seon.message/id trigger])
-                         subject (assoc :seon.message/about subject))]
+                         subject (assoc :seon.message/about subject)
+                         (:my.message/assignment candidate)
+                         (assoc :seon.message/assignment (:my.message/assignment candidate))
+                         (:my.message/reason candidate)
+                         (assoc :my.message/reason (:my.message/reason candidate)))]
                (update delivered :seon.message/rows conj row)))))
        {:seon.message/rows [] :seon.error/values []}
        candidates))))
@@ -333,8 +289,8 @@
 
   ABSENCE OF `from` IS THE OTHER HALF OF THE CONTRACT and it is read
   here exactly as the schema states it: a message with no sender came
-  from outside the agent population — the human, or the system's own
-  error recorder — so this says so rather than inventing a sender. That
+  from outside the agent population — a human — so this says so rather than
+  inventing a sender. That
   is the same rule the retired prompt prose applied, moved to the
   family that owns the fact.
 
@@ -381,7 +337,7 @@
         from-ref (get unit :seon.message/from)
         to-ref (get unit :seon.message/to)
         at (message-instant database unit)
-        about (identity-reference database (get unit :seon.message/about))
+        about (get unit :seon.message/about)
         caused-by-id (some-> (get unit :seon.message/caused-by)
                              (get :seon.message/id))
         caused-by-ref (when caused-by-id [:seon.message/id caused-by-id])]
@@ -432,7 +388,7 @@
             [:p {:class "seon-message-links"}]
              about
              (conj [:span {:class "seon-message-about"}
-                    (data-link (str "About " (second about)) about)])
+                    (str "About " about)])
              (and about caused-by-ref) (conj " · ")
              caused-by-ref
              (conj [:span {:class "seon-message-caused-by"}
@@ -448,7 +404,7 @@
 ;;; agent. One producer per projection answers both, because both are the same
 ;;; question asked from the two ends of one ref.
 ;;;
-;;; A forward inbox attribute supplies a recipient reference; its reverse
+;;; The forward route supplies a recipient reference; its reverse
 ;;; supplies acquired message maps. Both input alternatives are declared.
 ;;; ---------------------------------------------------------------------------
 
@@ -524,6 +480,7 @@
     {:seon.message/from [:seon.agent/id]}
     {:seon.message/caused-by [:seon.message/id]}
     :seon.message/about
+    :seon.message/assignment
     :my.message/reason])
 
 (defn- error-value?
@@ -552,10 +509,7 @@
       (update :seon.message/caused-by
               (fn [cause]
                 [:seon.message/id
-                 (:seon.message/id cause)]))
-
-      (:seon.message/about message)
-      (update :seon.message/about :db/id))))
+                 (:seon.message/id cause)])))))
 
 (defn- listing-entry
   [database message]
@@ -719,7 +673,7 @@
   "Write a message and its permanent recipient atomically; return the stored message.
 
   The writer resolves recipients, the active turn's cause, and the configured
-  conversation bound against its current database, just as it resolves about."
+  conversation bound against its current database. Subject tokens need no target."
   {:malli/schema [:=> [:cat :my.message/message :seon.db/connection :seon.agent/id]
                   [:or :seon.message/message :seon.error/value]]}
   [request connection agent-id]
@@ -727,7 +681,8 @@
                               (some? (:my.message/about request)) (:my.message/about request))]
     (if (error-value? candidate)
       candidate
-      (let [result (db/transact!
+      (let [candidate (merge candidate (select-keys request [:my.message/assignment :my.message/reason]))
+            result (db/transact!
                     connection
                     {:tx-data [[:db.fn/call #'send-call candidate agent-id]]
                      :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
@@ -740,9 +695,9 @@
   Takes the sender id, assignment identity, and reader-facing reason. Returns
   transaction input or a flat error; `my.message/decline` writes it directly."
   {:malli/schema
-   [:=> [:cat :my.message/to :my.message/about :my.message/reason]
+   [:=> [:cat :my.message/to :my.message/assignment :my.message/reason]
     [:or :my.message/declination :seon.error/value]]}
-  [to about reason]
+  [to assignment reason]
   (cond
     (or (not (string? to)) (str/blank? to))
     {:seon.error/kind :my.message/no-recipient
@@ -750,11 +705,11 @@
      :seon.error/message
      "decline needs the id of the assigning agent, as a string."}
 
-    (or (not (string? about)) (str/blank? about))
-    {:seon.error/kind :my.message/no-about
-     :my.message/no-about true
+    (or (not (string? assignment)) (str/blank? assignment))
+    {:seon.error/kind :my.message/no-assignment
+     :my.message/no-assignment true
      :seon.error/message
-     "decline's about argument must be a non-blank identity string."}
+     "decline's assignment argument must be a non-blank identity string."}
 
     (or (not (string? reason)) (str/blank? reason))
     {:seon.error/kind :my.message/no-reason
@@ -765,5 +720,5 @@
     :else
     {:seon.message/id (id/id)
      :my.message/to to
-     :my.message/about about
+     :my.message/assignment assignment
      :my.message/reason reason}))

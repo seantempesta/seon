@@ -1,0 +1,650 @@
+bin/test: snapshot differences from HEAD c9c914c8cf5f6efba9c493b564cca7e0e9d5908a:
+bin/test:   M	AGENTS.md
+bin/test:   M	docs/prds/steward-platform/plan/reset-batch-2026-09-17.md
+bin/test:   M	docs/prds/steward-platform/research/message-wake-model-2026-09-17.md
+bin/test:   M	docs/seon/issues/one-identity-string-names-two-entities.md
+bin/test:   M	resources/seon/schemas/my.message.edn
+bin/test:   M	resources/seon/schemas/seon.eval.edn
+bin/test:   M	resources/seon/schemas/seon.message.edn
+bin/test:   M	src/my/message.clj
+bin/test:   M	src/seon/cluster/agent.clj
+bin/test:   M	src/seon/cluster/message.clj
+bin/test:   M	src/seon/cluster/wake.clj
+bin/test:   M	src/seon/error.clj
+bin/test:   M	src/seon/problems.clj
+bin/test:   M	src/seon/render/transcript.clj
+bin/test:   M	src/seon/turn.clj
+bin/test:   M	test/my/message_test.clj
+bin/test:   M	test/seon/cluster/agent_test.clj
+bin/test:   M	test/seon/cluster/armed_test.clj
+bin/test:   M	test/seon/cluster/message_assignment_test.clj
+bin/test:   M	test/seon/cluster/message_test.clj
+bin/test:   M	test/seon/cluster/problem_routing_test.clj
+bin/test:   M	test/seon/cluster/turn_test.clj
+bin/test:   M	test/seon/cluster/wake_test.clj
+bin/test:   M	test/seon/context_blocks_fixture.clj
+bin/test:   M	test/seon/error_test.clj
+bin/test:   M	test/seon/gen/loop_test.clj
+bin/test:   M	test/seon/issue_test.clj
+bin/test:   M	test/seon/plan_completion_test.clj
+bin/test:   M	test/seon/render/transcript_test.clj
+bin/test:   M	test/seon/render/web_debug_test.clj
+bin/test:   M	test/seon/turn_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=2
+bin/test: PHASE test-slot elapsed-seconds=1
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/test-runs/run.Y0jyjd
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-17T04:54:30.247703Z pid= 88366 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-17T04:54:37.581237Z worker= test-fast mode= :panic namespaces= 9 program-namespaces= 109 registered= 1123 instrumented= 1123 program-armable= 1118
+bin/test: 2026-09-17T04:54:37.642379Z BEGIN namespace seon.turn-test
+
+Testing seon.turn-test
+bin/test: 2026-09-17T04:54:37.660845Z BEGIN test seon.turn-test/a-wake-meeting-an-open-turn-releases-without-a-fault
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-17T04:55:25.849831Z END test seon.turn-test/a-wake-meeting-an-open-turn-releases-without-a-fault
+bin/test: 2026-09-17T04:55:25.850054Z BEGIN test seon.turn-test/open-turn-is-derived-without-an-agent-pointer
+bin/test: 2026-09-17T04:55:26.021147Z END test seon.turn-test/open-turn-is-derived-without-an-agent-pointer
+bin/test: 2026-09-17T04:55:26.021251Z BEGIN test seon.turn-test/recovery-cannot-stamp-a-settled-receipt
+bin/test: 2026-09-17T04:55:26.357883Z END test seon.turn-test/recovery-cannot-stamp-a-settled-receipt
+bin/test: 2026-09-17T04:55:26.357971Z BEGIN test seon.turn-test/a-terminal-refusal-settles-when-its-run-has-vanished
+bin/test: 2026-09-17T04:55:28.415122Z END test seon.turn-test/a-terminal-refusal-settles-when-its-run-has-vanished
+bin/test: 2026-09-17T04:55:28.418783Z BEGIN test seon.turn-test/generated-read-evidence-rejects-turn-activity
+bin/test: 2026-09-17T04:55:30.604874Z END test seon.turn-test/generated-read-evidence-rejects-turn-activity
+bin/test: 2026-09-17T04:55:30.606825Z BEGIN test seon.turn-test/recovery-closes-a-turn-with-no-evaluations
+bin/test: 2026-09-17T04:55:30.774250Z END test seon.turn-test/recovery-closes-a-turn-with-no-evaluations
+bin/test: 2026-09-17T04:55:30.775488Z BEGIN test seon.turn-test/settlement-refuses-a-divergent-program-change-since-opening
+2026-09-17T04:55:31.282489Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: program-row-changed-after-open"}
+bin/test: 2026-09-17T04:55:31.347505Z END test seon.turn-test/settlement-refuses-a-divergent-program-change-since-opening
+bin/test: 2026-09-17T04:55:31.347590Z BEGIN test seon.turn-test/a-frozen-run-holds-exactly-one-evaluation-per-ordinal-and-no-form-entity
+bin/test: 2026-09-17T04:55:31.506899Z END test seon.turn-test/a-frozen-run-holds-exactly-one-evaluation-per-ordinal-and-no-form-entity
+bin/test: 2026-09-17T04:55:31.506987Z BEGIN test seon.turn-test/open-run-tx-call-emits-only-while-its-run-is-open
+bin/test: 2026-09-17T04:55:31.605302Z END test seon.turn-test/open-run-tx-call-emits-only-while-its-run-is-open
+bin/test: 2026-09-17T04:55:31.605390Z BEGIN test seon.turn-test/a-refused-generated-form-records-its-refusal
+bin/test: 2026-09-17T04:55:33.742607Z END test seon.turn-test/a-refused-generated-form-records-its-refusal
+bin/test: 2026-09-17T04:55:33.742703Z BEGIN test seon.turn-test/one-run-lifecycle-teaches-the-call-shapes
+bin/test: 2026-09-17T04:55:33.936220Z END test seon.turn-test/one-run-lifecycle-teaches-the-call-shapes
+bin/test: 2026-09-17T04:55:33.938705Z BEGIN test seon.turn-test/state-is-derived-from-primitives
+bin/test: 2026-09-17T04:55:33.938935Z END test seon.turn-test/state-is-derived-from-primitives
+bin/test: 2026-09-17T04:55:33.939099Z BEGIN test seon.turn-test/fault-unit-lists-agent-faults-newest-first-with-run-links
+bin/test: 2026-09-17T04:55:34.153626Z END test seon.turn-test/fault-unit-lists-agent-faults-newest-first-with-run-links
+bin/test: 2026-09-17T04:55:34.155765Z BEGIN test seon.turn-test/transitions-agree-with-the-model
+2026-09-17T04:55:34.364979Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:34.417741Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.419071Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.420019Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.421204Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.422077Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.422936Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.473646Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.474927Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.475831Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.476596Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.477337Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.478088Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.478835Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.523702Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.524637Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.571709Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.572871Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.573683Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.680166Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.733858Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:34.736223Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:35.049988Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:35.109649Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.162772Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.213462Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.216503Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.220579Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.224346Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.228692Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-receipt"}
+2026-09-17T04:55:35.283168Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.285136Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.288681Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.292657Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.346170Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.449549Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-exists"}
+2026-09-17T04:55:35.453468Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.510530Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.613776Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-receipt"}
+2026-09-17T04:55:35.618300Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:35.673112Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-receipt"}
+2026-09-17T04:55:35.915650Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:35.970131Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.974027Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:35.977500Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.030893Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.034629Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.086348Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.088589Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.352401Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:36.449632Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.450884Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.454527Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.598737Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.649792Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.652519Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.656263Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:36.805931Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-exists"}
+2026-09-17T04:55:36.807888Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.920685Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.925024Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.928596Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.929418Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.932580Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.936493Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:36.990580Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-receipt"}
+2026-09-17T04:55:37.041979Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.045644Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.049642Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-receipt"}
+2026-09-17T04:55:37.165563Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.280236Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.281357Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.331807Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.333642Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.384577Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:37.389680Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.393327Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.449547Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.502835Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.505283Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:37.713783Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:37.864925Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.869833Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.874675Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: plan-frozen"}
+2026-09-17T04:55:37.926914Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.982994Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:37.986722Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:37.990438Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:37.994411Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:38.246350Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:38.298654Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.300770Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.508263Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:38.718827Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:38.772123Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.773496Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.825386Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.829134Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.832545Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.836757Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.840736Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.844610Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.848676Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.852505Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:38.961679Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.409343Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.412105Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.415435Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.419665Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.423533Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.427718Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.431502Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.532444Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.534758Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.538546Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.542647Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.546469Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.550591Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.554649Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.558718Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.562570Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.566431Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.570575Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.574581Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.578564Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.631020Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.634889Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.638640Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.642567Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.646711Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.868113Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:39.922688Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.923927Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.924805Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.925621Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.926397Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.927141Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.927981Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:39.981823Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:40.226315Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:40.440975Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:40.670067Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:40.897689Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:40.957409Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.012035Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.231874Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:41.283013Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.284251Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.285133Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.286019Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.546114Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:41.772268Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:41.832252Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.833601Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.889827Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.890889Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.948709Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.952535Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.954300Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:41.956187Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:42.012210Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:42.065441Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:42.117646Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:42.338022Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:42.552273Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:42.658653Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:42.884271Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:43.049326Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:43.106385Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:43.272643Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:43.274845Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:43.276786Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:43.278364Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:43.279963Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:43.491438Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:43.545426Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:43.546705Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:43.766218Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:43.984740Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:44.043769Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.045001Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.045999Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.046876Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.162014Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.164051Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:44.222911Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.225677Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:44.389977Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:44.452598Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.509283Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.511288Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.567052Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:44.569251Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:44.571242Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:44.573021Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.630450Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:44.687589Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:44.748744Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.750162Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.751100Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.806467Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.807554Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.986044Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:44.988149Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:45.223510Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:45.278621Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:45.335535Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:45.336634Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:45.337506Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:45.393400Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:45.499123Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: receipt-exists"}
+2026-09-17T04:55:45.501315Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:45.765551Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:45.869586Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:45.922105Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:45.923340Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:45.924322Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:46.031628Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:46.200495Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:46.203156Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:46.258985Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:46.260205Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:46.488216Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+bin/test: 2026-09-17T04:55:46.490160Z END test seon.turn-test/transitions-agree-with-the-model
+bin/test: 2026-09-17T04:55:46.490244Z BEGIN test seon.turn-test/test-first-subjects-resolve-when-the-function-arrives
+bin/test: 2026-09-17T04:55:47.657431Z END test seon.turn-test/test-first-subjects-resolve-when-the-function-arrives
+bin/test: 2026-09-17T04:55:47.657542Z BEGIN test seon.turn-test/a-refused-turn-write-is-bounded-and-commits-exactly-one-fault
+2026-09-17T04:55:47.750751Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+2026-09-17T04:55:47.812118Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-such-run"}
+bin/test: 2026-09-17T04:55:47.874215Z END test seon.turn-test/a-refused-turn-write-is-bounded-and-commits-exactly-one-fault
+bin/test: 2026-09-17T04:55:47.874296Z BEGIN test seon.turn-test/settlement-claims-covered-messages-without-removing-their-wakes
+bin/test: 2026-09-17T04:55:48.881014Z END test seon.turn-test/settlement-claims-covered-messages-without-removing-their-wakes
+bin/test: 2026-09-17T04:55:48.881092Z BEGIN test seon.turn-test/batch-settlement-preserves-declaration-order
+bin/test: 2026-09-17T04:55:49.659304Z END test seon.turn-test/batch-settlement-preserves-declaration-order
+bin/test: 2026-09-17T04:55:49.659392Z BEGIN test seon.turn-test/settlement-mints-rows-for-unindexed-call-targets
+bin/test: 2026-09-17T04:55:49.993963Z END test seon.turn-test/settlement-mints-rows-for-unindexed-call-targets
+bin/test: 2026-09-17T04:55:49.994050Z BEGIN test seon.turn-test/run-derives-its-opening-database-and-starting-namespace
+bin/test: 2026-09-17T04:55:50.184706Z END test seon.turn-test/run-derives-its-opening-database-and-starting-namespace
+bin/test: 2026-09-17T04:55:50.184783Z BEGIN test seon.turn-test/receipt-transitions-preserve-one-terminal-outcome
+2026-09-17T04:55:50.359566Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: receipt-exists"}
+2026-09-17T04:55:50.361731Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: no-terminal-fact"}
+2026-09-17T04:55:50.416901Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: receipt-terminal"}
+2026-09-17T04:55:50.418191Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: receipt-terminal"}
+2026-09-17T04:55:50.532983Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+2026-09-17T04:55:50.534016Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: run-closed"}
+bin/test: 2026-09-17T04:55:50.534549Z END test seon.turn-test/receipt-transitions-preserve-one-terminal-outcome
+bin/test: 2026-09-17T04:55:50.534599Z BEGIN test seon.turn-test/evaluation-ai-is-only-the-repl-session
+bin/test: 2026-09-17T04:55:50.538249Z END test seon.turn-test/evaluation-ai-is-only-the-repl-session
+bin/test: 2026-09-17T04:55:50.538301Z BEGIN test seon.turn-test/system-run-refuses-a-concurrent-namespace-reassignment
+2026-09-17T04:55:50.606807Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: starting-namespace-changed"}
+bin/test: 2026-09-17T04:55:50.609794Z END test seon.turn-test/system-run-refuses-a-concurrent-namespace-reassignment
+bin/test: 2026-09-17T04:55:50.609870Z BEGIN test seon.turn-test/run-schema-admits-and-refuses
+bin/test: 2026-09-17T04:55:50.621912Z END test seon.turn-test/run-schema-admits-and-refuses
+bin/test: 2026-09-17T04:55:50.621983Z BEGIN test seon.turn-test/recovery-preserves-terminal-receipts-exactly
+bin/test: 2026-09-17T04:56:00.114005Z END test seon.turn-test/recovery-preserves-terminal-receipts-exactly
+bin/test: 2026-09-17T04:56:00.114124Z BEGIN test seon.turn-test/interrupted-warning-is-one-derived-value
+bin/test: 2026-09-17T04:56:00.114725Z END test seon.turn-test/interrupted-warning-is-one-derived-value
+bin/test: 2026-09-17T04:56:00.114760Z BEGIN test seon.turn-test/virtual-turns-use-the-proc-and-compaction-is-agent-scoped
+#:seon.test{:virtual-turn-transactions 3, :virtual-turn-datoms [#:seon.test{:datoms 16, :attributes #{:seon.turn.work/situation :seon.cluster.eval/source :seon.cluster.eval/author :seon.turn/agent :seon.cluster.eval/id :db/txInstant :seon.turn/starting-ns :seon.cluster.eval/ns :seon.turn/reply :seon.cluster.eval/run :seon.cluster.eval/ordinal :seon.turn/opened-tx :seon.turn/id :seon.cluster.eval/at :seon.turn/reply-size :seon.runtime/turns}} #:seon.test{:datoms 6, :attributes #{:seon.cluster.eval/read-basis-transaction :seon.eval/duration-ms :db/txInstant :seon.sci.eval/ending-ns :seon.eval/shown :seon.fn/calls}} #:seon.test{:datoms 2, :attributes #{:db/txInstant :seon.turn/closed-tx}}]}
+#:seon.test{:three-form-turn 41f02f439ca9, :transactions [#:seon.test{:datoms 30, :attributes #{:seon.turn.work/situation :seon.cluster.eval/source :seon.cluster.eval/author :seon.turn/agent :seon.cluster.eval/id :db/txInstant :seon.turn/starting-ns :seon.cluster.eval/ns :seon.turn/reply :seon.cluster.eval/run :seon.cluster.eval/ordinal :seon.turn/opened-tx :seon.turn/id :seon.cluster.eval/at :seon.turn/reply-size :seon.runtime/turns}} #:seon.test{:datoms 16, :attributes #{:seon.cluster.eval/read-basis-transaction :seon.eval/duration-ms :db/txInstant :seon.sci.eval/ending-ns :seon.eval/shown :seon.fn/calls}} #:seon.test{:datoms 2, :attributes #{:db/txInstant :seon.turn/closed-tx}}], :transaction-count 3, :datom-count 48}
+#:seon.test{:virtual-turn-transactions 3, :virtual-turn-datoms [#:seon.test{:datoms 16, :attributes #{:seon.turn.work/situation :seon.cluster.eval/source :seon.cluster.eval/author :seon.turn/agent :seon.cluster.eval/id :db/txInstant :seon.turn/starting-ns :seon.cluster.eval/ns :seon.turn/reply :seon.cluster.eval/run :seon.cluster.eval/ordinal :seon.turn/opened-tx :seon.turn/id :seon.cluster.eval/at :seon.turn/reply-size :seon.runtime/turns}} #:seon.test{:datoms 6, :attributes #{:seon.cluster.eval/read-basis-transaction :seon.eval/duration-ms :db/txInstant :seon.sci.eval/ending-ns :seon.eval/shown :seon.fn/calls}} #:seon.test{:datoms 2, :attributes #{:db/txInstant :seon.turn/closed-tx}}]}
+#:seon.test{:three-form-turn 41f02f439ca9, :transactions [#:seon.test{:datoms 30, :attributes #{:seon.turn.work/situation :seon.cluster.eval/source :seon.cluster.eval/author :seon.turn/agent :seon.cluster.eval/id :db/txInstant :seon.turn/starting-ns :seon.cluster.eval/ns :seon.turn/reply :seon.cluster.eval/run :seon.cluster.eval/ordinal :seon.turn/opened-tx :seon.turn/id :seon.cluster.eval/at :seon.turn/reply-size :seon.runtime/turns}} #:seon.test{:datoms 16, :attributes #{:seon.cluster.eval/read-basis-transaction :seon.eval/duration-ms :db/txInstant :seon.sci.eval/ending-ns :seon.eval/shown :seon.fn/calls}} #:seon.test{:datoms 2, :attributes #{:db/txInstant :seon.turn/closed-tx}}], :transaction-count 3, :datom-count 48}
+bin/test: 2026-09-17T04:56:23.434241Z END test seon.turn-test/virtual-turns-use-the-proc-and-compaction-is-agent-scoped
+bin/test: 2026-09-17T04:56:23.434993Z BEGIN test seon.turn-test/generated-system-runs-grow-only-after-their-settled-prefix
+2026-09-17T04:56:23.593811Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/refused, :cause "run transition refused: generated-prefix-unsettled"}
+bin/test: 2026-09-17T04:56:23.714366Z END test seon.turn-test/generated-system-runs-grow-only-after-their-settled-prefix
+bin/test: 2026-09-17T04:56:23.714458Z BEGIN test seon.turn-test/issue-budget-counts-a-call-that-closes-before-the-provider
+bin/test: 2026-09-17T04:56:24.545632Z END test seon.turn-test/issue-budget-counts-a-call-that-closes-before-the-provider
+bin/test: 2026-09-17T04:56:24.546896Z BEGIN test seon.turn-test/compaction-refuses-an-open-turn-at-the-writer
+2026-09-17T04:56:24.604388Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.turn/compaction-refused, :cause "Compaction requires the agent's current turn to close."}
+bin/test: 2026-09-17T04:56:24.608854Z END test seon.turn-test/compaction-refuses-an-open-turn-at-the-writer
+bin/test: 2026-09-17T04:56:24.611255Z END namespace seon.turn-test
+bin/test: 2026-09-17T04:56:24.611772Z BEGIN namespace my.message-test
+
+Testing my.message-test
+bin/test: 2026-09-17T04:56:24.638929Z BEGIN test my.message-test/send-preserves-routing-until-turn-settlement
+2026-09-17T04:56:25.093713Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :seon.message/unknown-recipient, :cause "There is no agent named \"absent\"."}
+bin/test: 2026-09-17T04:56:25.097857Z END test my.message-test/send-preserves-routing-until-turn-settlement
+bin/test: 2026-09-17T04:56:25.100908Z BEGIN test my.message-test/the-surface-is-exactly-four-functions
+bin/test: 2026-09-17T04:56:25.101378Z END test my.message-test/the-surface-is-exactly-four-functions
+bin/test: 2026-09-17T04:56:25.101410Z BEGIN test my.message-test/a-declination-is-an-ordinary-value
+bin/test: 2026-09-17T04:56:25.102349Z END test my.message-test/a-declination-is-an-ordinary-value
+bin/test: 2026-09-17T04:56:25.104916Z BEGIN test my.message-test/read-pulls-one-admitted-message-row
+bin/test: 2026-09-17T04:56:25.207576Z END test my.message-test/read-pulls-one-admitted-message-row
+bin/test: 2026-09-17T04:56:25.209058Z BEGIN test my.message-test/the-error-value-is-the-registered-one
+bin/test: 2026-09-17T04:56:25.209774Z END test my.message-test/the-error-value-is-the-registered-one
+bin/test: 2026-09-17T04:56:25.212989Z BEGIN test my.message-test/a-message-is-an-ordinary-value
+bin/test: 2026-09-17T04:56:25.214522Z END test my.message-test/a-message-is-an-ordinary-value
+bin/test: 2026-09-17T04:56:25.216869Z BEGIN test my.message-test/inbox-lists-this-agents-messages-newest-last
+bin/test: 2026-09-17T04:56:25.318310Z END test my.message-test/inbox-lists-this-agents-messages-newest-last
+bin/test: 2026-09-17T04:56:25.319837Z BEGIN test my.message-test/a-contract-forbidden-argument-is-a-value-the-agent-reads
+bin/test: 2026-09-17T04:56:26.993999Z END test my.message-test/a-contract-forbidden-argument-is-a-value-the-agent-reads
+bin/test: 2026-09-17T04:56:26.994062Z BEGIN test my.message-test/delivery-preserves-the-returned-message-identity
+bin/test: 2026-09-17T04:56:27.192710Z END test my.message-test/delivery-preserves-the-returned-message-identity
+bin/test: 2026-09-17T04:56:27.193716Z BEGIN test my.message-test/a-bad-argument-is-an-error-value-never-a-throw
+bin/test: 2026-09-17T04:56:27.195800Z END test my.message-test/a-bad-argument-is-an-error-value-never-a-throw
+bin/test: 2026-09-17T04:56:27.197833Z END namespace my.message-test
+bin/test: 2026-09-17T04:56:27.197876Z BEGIN namespace seon.cluster.message-assignment-test
+
+Testing seon.cluster.message-assignment-test
+bin/test: 2026-09-17T04:56:27.221857Z BEGIN test seon.cluster.message-assignment-test/an-unknown-subject-is-an-ordinary-observation
+bin/test: 2026-09-17T04:56:27.278690Z END test seon.cluster.message-assignment-test/an-unknown-subject-is-an-ordinary-observation
+bin/test: 2026-09-17T04:56:27.281784Z BEGIN test seon.cluster.message-assignment-test/a-declination-settles-without-retiring-the-red-fact
+bin/test: 2026-09-17T04:56:27.515815Z END test seon.cluster.message-assignment-test/a-declination-settles-without-retiring-the-red-fact
+bin/test: 2026-09-17T04:56:27.518924Z BEGIN test seon.cluster.message-assignment-test/delivery-preserves-the-supplied-subject-token
+bin/test: 2026-09-17T04:56:27.705357Z END test seon.cluster.message-assignment-test/delivery-preserves-the-supplied-subject-token
+bin/test: 2026-09-17T04:56:27.706866Z BEGIN test seon.cluster.message-assignment-test/sender-alone-determines-inside-after-subject-deletion
+bin/test: 2026-09-17T04:56:27.864676Z END test seon.cluster.message-assignment-test/sender-alone-determines-inside-after-subject-deletion
+bin/test: 2026-09-17T04:56:27.866938Z END namespace seon.cluster.message-assignment-test
+bin/test: 2026-09-17T04:56:27.866977Z BEGIN namespace seon.cluster.problem-routing-test
+
+Testing seon.cluster.problem-routing-test
+bin/test: 2026-09-17T04:56:27.890952Z BEGIN test seon.cluster.problem-routing-test/every-form-has-exactly-one-of-the-seven-derived-states
+2026-09-17T04:56:28.050043Z :error datahike.writer [157 41] :datahike/write-rejected {:kind :transaction/validation-rejected, :cause "Transaction report validation rejected."}
+
+ERROR in (every-form-has-exactly-one-of-the-seven-derived-states) (test_support.clj:330)
+Uncaught exception, not in assertion.
+expected: nil
+actual: clojure.lang.ExceptionInfo: Fixture write was refused at the write: seon.db/transact! refused transaction data at [45188 :seon.cluster.eval/at]: expected the required key :seon.cluster.eval/at with a value satisfying should be an inst, got a map missing :seon.cluster.eval/at. Fix: Supply :seon.cluster.eval/at with a value satisfying should be an inst. Entity: #:seon.cluster.eval{:id "form-0"}.
+    at [seon.test_support$transacted_BANG_ invokeStatic test_support.clj 330]
+    at [seon.test_support$transacted_BANG_ invoke test_support.clj 308]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__91211$fn__91214 doInvoke instrument.clj 666]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.cluster.problem_routing_test$fn__126040$fn__126041 invoke problem_routing_test.clj 199]
+    at [seon.cluster.problem_routing_test$with_routing_database$fn__125978 invoke problem_routing_test.clj 37]
+    at [seon.test_support$run_database_body$fn__123912 invoke test_support.clj 946]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 1039]
+    at [seon.schema$call_with_projection_state invoke schema.clj 1032]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__91211$fn__91214 doInvoke instrument.clj 666]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.test_support$run_database_body invokeStatic test_support.clj 941]
+bin/test: 2026-09-17T04:56:28.057521Z END test seon.cluster.problem-routing-test/every-form-has-exactly-one-of-the-seven-derived-states
+bin/test: 2026-09-17T04:56:28.057574Z BEGIN test seon.cluster.problem-routing-test/parse-time-owner-wins-and-absence-falls-back-to-the-author
+bin/test: 2026-09-17T04:56:28.277818Z END test seon.cluster.problem-routing-test/parse-time-owner-wins-and-absence-falls-back-to-the-author
+bin/test: 2026-09-17T04:56:28.279805Z BEGIN test seon.cluster.problem-routing-test/historical-reds-are-outside-the-live-attempt-chain
+bin/test: 2026-09-17T04:56:28.503018Z END test seon.cluster.problem-routing-test/historical-reds-are-outside-the-live-attempt-chain
+bin/test: 2026-09-17T04:56:28.503937Z BEGIN test seon.cluster.problem-routing-test/an-author-owned-red-form-remains-unsettled-without-self-assignment
+bin/test: 2026-09-17T04:56:28.742290Z END test seon.cluster.problem-routing-test/an-author-owned-red-form-remains-unsettled-without-self-assignment
+bin/test: 2026-09-17T04:56:28.742905Z END namespace seon.cluster.problem-routing-test
+bin/test: 2026-09-17T04:56:28.742940Z BEGIN namespace seon.render.web-debug-test
+
+Testing seon.render.web-debug-test
+bin/test: 2026-09-17T04:56:28.764760Z BEGIN test seon.render.web-debug-test/the-debug-outline-is-one-line-per-turn-and-one-line-per-unit
+bin/test: 2026-09-17T04:56:29.737227Z END test seon.render.web-debug-test/the-debug-outline-is-one-line-per-turn-and-one-line-per-unit
+bin/test: 2026-09-17T04:56:29.737330Z BEGIN test seon.render.web-debug-test/every-declared-attribute-has-an-ordered-pair-even-when-absent
+bin/test: 2026-09-17T04:56:31.121980Z END test seon.render.web-debug-test/every-declared-attribute-has-an-ordered-pair-even-when-absent
+bin/test: 2026-09-17T04:56:31.124056Z BEGIN test seon.render.web-debug-test/the-outline-toggle-serves-the-exact-stored-shown-text
+bin/test: 2026-09-17T04:56:31.993838Z END test seon.render.web-debug-test/the-outline-toggle-serves-the-exact-stored-shown-text
+bin/test: 2026-09-17T04:56:31.996472Z BEGIN test seon.render.web-debug-test/blocks-use-the-values-schema-documentation
+bin/test: 2026-09-17T04:56:33.331218Z END test seon.render.web-debug-test/blocks-use-the-values-schema-documentation
+bin/test: 2026-09-17T04:56:33.332139Z BEGIN test seon.render.web-debug-test/debug-links-omit-defaults-and-round-trip-every-override
+bin/test: 2026-09-17T04:56:33.333731Z END test seon.render.web-debug-test/debug-links-omit-defaults-and-round-trip-every-override
+bin/test: 2026-09-17T04:56:33.335683Z BEGIN test seon.render.web-debug-test/a-refused-selection-is-not-reported-as-an-empty-render
+bin/test: 2026-09-17T04:56:33.336016Z END test seon.render.web-debug-test/a-refused-selection-is-not-reported-as-an-empty-render
+bin/test: 2026-09-17T04:56:33.336045Z BEGIN test seon.render.web-debug-test/passive-ledger-never-reconstructs-directory
+bin/test: 2026-09-17T04:56:34.305722Z END test seon.render.web-debug-test/passive-ledger-never-reconstructs-directory
+bin/test: 2026-09-17T04:56:34.305971Z BEGIN test seon.render.web-debug-test/reverse-blocks-do-not-depend-on-the-graph-page
+bin/test: 2026-09-17T04:56:35.724902Z END test seon.render.web-debug-test/reverse-blocks-do-not-depend-on-the-graph-page
+bin/test: 2026-09-17T04:56:35.724979Z BEGIN test seon.render.web-debug-test/outline-origin-survives-the-issues-deletion
+bin/test: 2026-09-17T04:56:36.906521Z END test seon.render.web-debug-test/outline-origin-survives-the-issues-deletion
+bin/test: 2026-09-17T04:56:36.906601Z BEGIN test seon.render.web-debug-test/the-outlines-show-everything-is-the-composed-prompt
+bin/test: 2026-09-17T04:56:37.787998Z END test seon.render.web-debug-test/the-outlines-show-everything-is-the-composed-prompt
+bin/test: 2026-09-17T04:56:37.788077Z BEGIN test seon.render.web-debug-test/the-agent-page-shows-a-comment-as-thinking-and-a-result-through-its-pair
+bin/test: 2026-09-17T04:56:37.975115Z END test seon.render.web-debug-test/the-agent-page-shows-a-comment-as-thinking-and-a-result-through-its-pair
+bin/test: 2026-09-17T04:56:37.975197Z BEGIN test seon.render.web-debug-test/block-reference-headers-link-identities-and-omit-unidentified-entities
+bin/test: 2026-09-17T04:56:40.932434Z END test seon.render.web-debug-test/block-reference-headers-link-identities-and-omit-unidentified-entities
+bin/test: 2026-09-17T04:56:40.932517Z BEGIN test seon.render.web-debug-test/reverse-declarations-receive-the-actual-relationship-value
+bin/test: 2026-09-17T04:56:41.466220Z END test seon.render.web-debug-test/reverse-declarations-receive-the-actual-relationship-value
+bin/test: 2026-09-17T04:56:41.466296Z BEGIN test seon.render.web-debug-test/agent-identity-groups-scalars-and-keeps-declared-components
+bin/test: 2026-09-17T04:56:43.197834Z END test seon.render.web-debug-test/agent-identity-groups-scalars-and-keeps-declared-components
+bin/test: 2026-09-17T04:56:43.197916Z BEGIN test seon.render.web-debug-test/ledger-derives-shared-data-once
+bin/test: 2026-09-17T04:56:44.215620Z END test seon.render.web-debug-test/ledger-derives-shared-data-once
+bin/test: 2026-09-17T04:56:44.215722Z BEGIN test seon.render.web-debug-test/saved-history-preserves-shown-text-with-numeric-lookups
+bin/test: 2026-09-17T04:56:44.569202Z END test seon.render.web-debug-test/saved-history-preserves-shown-text-with-numeric-lookups
+bin/test: 2026-09-17T04:56:44.569302Z BEGIN test seon.render.web-debug-test/turn-details-use-the-loop-opening-and-exact-segments
+bin/test: 2026-09-17T04:57:05.655976Z END test seon.render.web-debug-test/turn-details-use-the-loop-opening-and-exact-segments
+bin/test: 2026-09-17T04:57:05.657410Z END namespace seon.render.web-debug-test
+bin/test: 2026-09-17T04:57:05.657432Z BEGIN namespace seon.gen.loop-test
+
+Testing seon.gen.loop-test
+bin/test: 2026-09-17T04:57:05.680560Z BEGIN test seon.gen.loop-test/a-goal-is-a-message-and-the-attempt-routes-its-own-failures
+
+ERROR in (a-goal-is-a-message-and-the-attempt-routes-its-own-failures) (core_deftype.clj:585)
+Uncaught exception, not in assertion.
+expected: nil
+actual: java.lang.IllegalArgumentException: No implementation of method: :inst-ms* of protocol: #'clojure.core/Inst found for class: java.lang.Long
+    at [clojure.core$_cache_protocol_fn invokeStatic core_deftype.clj 585]
+    at [clojure.core$fn__8524$G__8519__8529 invoke core.clj 6913]
+    at [clojure.core$inst_ms invokeStatic core.clj 6924]
+    at [clojure.core$inst_ms invoke core.clj 6920]
+    at [clojure.core$comp$fn__5897 invoke core.clj 2590]
+    at [clojure.core$sort_by$fn__6067 invoke core.clj 3143]
+    at [clojure.lang.AFunction compare AFunction.java 53]
+    at [java.util.TimSort countRunAndMakeAscending TimSort.java 355]
+    at [java.util.TimSort sort TimSort.java 220]
+    at [java.util.Arrays sort Arrays.java 1230]
+    at [clojure.core$sort invokeStatic core.clj 3127]
+    at [clojure.core$sort_by invokeStatic core.clj 3131]
+    at [clojure.core$sort_by invokeStatic core.clj 3131]
+    at [clojure.core$sort_by invoke core.clj 3131]
+    at [seon.gen.loop_test$planner_census invokeStatic loop_test.clj 186]
+    at [seon.gen.loop_test$planner_census invoke loop_test.clj 176]
+    at [seon.gen.loop_test$drive_BANG_ invokeStatic loop_test.clj 256]
+    at [seon.gen.loop_test$drive_BANG_ invoke loop_test.clj 224]
+    at [seon.gen.loop_test$fn__129615$fn__129616$fn__129617 invoke loop_test.clj 398]
+    at [clojure.core$with_redefs_fn invokeStatic core.clj 7710]
+    at [clojure.core$with_redefs_fn invoke core.clj 7694]
+    at [seon.gen.loop_test$fn__129615$fn__129616 invoke loop_test.clj 397]
+    at [seon.gen.loop_test$with_render_context_proc invokeStatic loop_test.clj 117]
+    at [seon.gen.loop_test$with_render_context_proc invoke loop_test.clj 78]
+    at [seon.gen.loop_test$with_gen_cluster$fn__129572 invoke loop_test.clj 149]
+    at [seon.test_support$run_database_body$fn__123912 invoke test_support.clj 946]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 1039]
+    at [seon.schema$call_with_projection_state invoke schema.clj 1032]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+bin/test: 2026-09-17T04:57:07.990469Z END test seon.gen.loop-test/a-goal-is-a-message-and-the-attempt-routes-its-own-failures
+bin/test: 2026-09-17T04:57:07.990681Z BEGIN test seon.gen.loop-test/a-result-built-on-a-failed-form-is-red-and-routes
+
+ERROR in (a-result-built-on-a-failed-form-is-red-and-routes) (core_deftype.clj:585)
+Uncaught exception, not in assertion.
+expected: nil
+actual: java.lang.IllegalArgumentException: No implementation of method: :inst-ms* of protocol: #'clojure.core/Inst found for class: java.lang.Long
+    at [clojure.core$_cache_protocol_fn invokeStatic core_deftype.clj 585]
+    at [clojure.core$fn__8524$G__8519__8529 invoke core.clj 6913]
+    at [clojure.core$inst_ms invokeStatic core.clj 6924]
+    at [clojure.core$inst_ms invoke core.clj 6920]
+    at [clojure.core$comp$fn__5897 invoke core.clj 2590]
+    at [clojure.core$sort_by$fn__6067 invoke core.clj 3143]
+    at [clojure.lang.AFunction compare AFunction.java 53]
+    at [java.util.TimSort countRunAndMakeAscending TimSort.java 355]
+    at [java.util.TimSort sort TimSort.java 220]
+    at [java.util.Arrays sort Arrays.java 1230]
+    at [clojure.core$sort invokeStatic core.clj 3127]
+    at [clojure.core$sort_by invokeStatic core.clj 3131]
+    at [clojure.core$sort_by invokeStatic core.clj 3131]
+    at [clojure.core$sort_by invoke core.clj 3131]
+    at [seon.gen.loop_test$planner_census invokeStatic loop_test.clj 186]
+    at [seon.gen.loop_test$planner_census invoke loop_test.clj 176]
+    at [seon.gen.loop_test$drive_BANG_ invokeStatic loop_test.clj 256]
+    at [seon.gen.loop_test$drive_BANG_ invoke loop_test.clj 224]
+    at [seon.gen.loop_test$fn__129672$fn__129673$fn__129678 invoke loop_test.clj 556]
+    at [clojure.core$with_redefs_fn invokeStatic core.clj 7710]
+    at [clojure.core$with_redefs_fn invoke core.clj 7694]
+    at [seon.gen.loop_test$fn__129672$fn__129673 invoke loop_test.clj 545]
+    at [seon.gen.loop_test$with_render_context_proc invokeStatic loop_test.clj 117]
+    at [seon.gen.loop_test$with_render_context_proc invoke loop_test.clj 78]
+    at [seon.gen.loop_test$with_gen_cluster$fn__129572 invoke loop_test.clj 149]
+    at [seon.test_support$run_database_body$fn__123912 invoke test_support.clj 946]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 1039]
+    at [seon.schema$call_with_projection_state invoke schema.clj 1032]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+bin/test: 2026-09-17T04:57:11.944639Z END test seon.gen.loop-test/a-result-built-on-a-failed-form-is-red-and-routes
+bin/test: 2026-09-17T04:57:11.944673Z BEGIN test seon.gen.loop-test/a-silent-owner-leaves-the-plan-unsettled-forever
+
+ERROR in (a-silent-owner-leaves-the-plan-unsettled-forever) (core_deftype.clj:585)
+Uncaught exception, not in assertion.
+expected: nil
+actual: java.lang.IllegalArgumentException: No implementation of method: :inst-ms* of protocol: #'clojure.core/Inst found for class: java.lang.Long
+    at [clojure.core$_cache_protocol_fn invokeStatic core_deftype.clj 585]
+    at [clojure.core$fn__8524$G__8519__8529 invoke core.clj 6913]
+    at [clojure.core$inst_ms invokeStatic core.clj 6924]
+    at [clojure.core$inst_ms invoke core.clj 6920]
+    at [clojure.core$comp$fn__5897 invoke core.clj 2590]
+    at [clojure.core$sort_by$fn__6067 invoke core.clj 3143]
+    at [clojure.lang.AFunction compare AFunction.java 53]
+    at [java.util.TimSort countRunAndMakeAscending TimSort.java 355]
+    at [java.util.TimSort sort TimSort.java 220]
+    at [java.util.Arrays sort Arrays.java 1230]
+    at [clojure.core$sort invokeStatic core.clj 3127]
+    at [clojure.core$sort_by invokeStatic core.clj 3131]
+    at [clojure.core$sort_by invokeStatic core.clj 3131]
+    at [clojure.core$sort_by invoke core.clj 3131]
+    at [seon.gen.loop_test$planner_census invokeStatic loop_test.clj 186]
+    at [seon.gen.loop_test$planner_census invoke loop_test.clj 176]
+    at [seon.gen.loop_test$drive_BANG_ invokeStatic loop_test.clj 256]
+    at [seon.gen.loop_test$drive_BANG_ invoke loop_test.clj 224]
+    at [seon.gen.loop_test$fn__129693$fn__129694$fn__129699 invoke loop_test.clj 587]
+    at [clojure.core$with_redefs_fn invokeStatic core.clj 7710]
+    at [clojure.core$with_redefs_fn invoke core.clj 7694]
+    at [seon.gen.loop_test$fn__129693$fn__129694 invoke loop_test.clj 580]
+    at [seon.gen.loop_test$with_render_context_proc invokeStatic loop_test.clj 117]
+    at [seon.gen.loop_test$with_render_context_proc invoke loop_test.clj 78]
+    at [seon.gen.loop_test$with_gen_cluster$fn__129572 invoke loop_test.clj 149]
+    at [seon.test_support$run_database_body$fn__123912 invoke test_support.clj 946]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 1039]
+    at [seon.schema$call_with_projection_state invoke schema.clj 1032]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+bin/test: 2026-09-17T04:57:15.854469Z END test seon.gen.loop-test/a-silent-owner-leaves-the-plan-unsettled-forever
+bin/test: 2026-09-17T04:57:15.854499Z END namespace seon.gen.loop-test
+bin/test: 2026-09-17T04:57:15.854512Z BEGIN namespace seon.data-shapes-test
+
+Testing seon.data-shapes-test
+bin/test: 2026-09-17T04:57:15.876130Z BEGIN test seon.data-shapes-test/attempt-settings-and-model-are-related-entities
+bin/test: 2026-09-17T04:57:16.222848Z END test seon.data-shapes-test/attempt-settings-and-model-are-related-entities
+bin/test: 2026-09-17T04:57:16.222908Z BEGIN test seon.data-shapes-test/messages-and-turns-have-one-owning-edge-and-transaction-time
+bin/test: 2026-09-17T04:57:16.230854Z END test seon.data-shapes-test/messages-and-turns-have-one-owning-edge-and-transaction-time
+bin/test: 2026-09-17T04:57:16.230900Z BEGIN test seon.data-shapes-test/raw-plan-forms-preserve-the-component-and-use-transaction-time
+bin/test: 2026-09-17T04:57:17.648476Z END test seon.data-shapes-test/raw-plan-forms-preserve-the-component-and-use-transaction-time
+bin/test: 2026-09-17T04:57:17.648548Z BEGIN test seon.data-shapes-test/listen-patterns-retain-optional-entity-and-logical-value
+bin/test: 2026-09-17T04:57:17.761858Z END test seon.data-shapes-test/listen-patterns-retain-optional-entity-and-logical-value
+bin/test: 2026-09-17T04:57:17.761919Z BEGIN test seon.data-shapes-test/handling-an-outside-message-retains-its-budget-basis
+bin/test: 2026-09-17T04:57:17.768107Z END test seon.data-shapes-test/handling-an-outside-message-retains-its-budget-basis
+bin/test: 2026-09-17T04:57:17.768169Z BEGIN test seon.data-shapes-test/provider-reasoning-is-retained-only-by-an-explicit-setting
+bin/test: 2026-09-17T04:57:18.413040Z END test seon.data-shapes-test/provider-reasoning-is-retained-only-by-an-explicit-setting
+bin/test: 2026-09-17T04:57:18.413233Z BEGIN test seon.data-shapes-test/attempt-usage-is-queryable
+bin/test: 2026-09-17T04:57:18.817738Z END test seon.data-shapes-test/attempt-usage-is-queryable
+bin/test: 2026-09-17T04:57:18.817817Z BEGIN test seon.data-shapes-test/evaluation-renderer-is-a-program-reference
+bin/test: 2026-09-17T04:57:19.657765Z END test seon.data-shapes-test/evaluation-renderer-is-a-program-reference
+bin/test: 2026-09-17T04:57:19.657838Z BEGIN test seon.data-shapes-test/a-system-turn-leaves-the-inbox-edge-unhandled
+bin/test: 2026-09-17T04:57:19.665041Z END test seon.data-shapes-test/a-system-turn-leaves-the-inbox-edge-unhandled
+bin/test: 2026-09-17T04:57:19.665099Z END namespace seon.data-shapes-test
+bin/test: 2026-09-17T04:57:19.665116Z BEGIN namespace seon.read-evidence-test
+
+Testing seon.read-evidence-test
+bin/test: 2026-09-17T04:57:19.687059Z BEGIN test seon.read-evidence-test/nested-patterns-and-find-pulls-retain-scoped-index-evidence
+bin/test: 2026-09-17T04:57:20.361149Z END test seon.read-evidence-test/nested-patterns-and-find-pulls-retain-scoped-index-evidence
+bin/test: 2026-09-17T04:57:20.361218Z BEGIN test seon.read-evidence-test/another-recipients-message-keeps-junipers-inbox-current
+bin/test: 2026-09-17T04:57:20.504043Z END test seon.read-evidence-test/another-recipients-message-keeps-junipers-inbox-current
+bin/test: 2026-09-17T04:57:20.504108Z BEGIN test seon.read-evidence-test/junipers-message-invalidates-junipers-inbox
+bin/test: 2026-09-17T04:57:20.646254Z END test seon.read-evidence-test/junipers-message-invalidates-junipers-inbox
+bin/test: 2026-09-17T04:57:20.646314Z END namespace seon.read-evidence-test
+bin/test: 2026-09-17T04:57:20.646331Z BEGIN namespace seon.html-views-test
+
+Testing seon.html-views-test
+bin/test: 2026-09-17T04:57:20.667379Z BEGIN test seon.html-views-test/maintenance-pair-preserves-ai
+bin/test: 2026-09-17T04:57:20.670351Z END test seon.html-views-test/maintenance-pair-preserves-ai
+bin/test: 2026-09-17T04:57:20.670388Z BEGIN test seon.html-views-test/settings-pair-omits-absences-and-preserves-ai
+bin/test: 2026-09-17T04:57:20.954652Z END test seon.html-views-test/settings-pair-omits-absences-and-preserves-ai
+bin/test: 2026-09-17T04:57:20.954717Z BEGIN test seon.html-views-test/plan-pairs-are-readable-with-unchanged-ai
+bin/test: 2026-09-17T04:57:21.178687Z END test seon.html-views-test/plan-pairs-are-readable-with-unchanged-ai
+bin/test: 2026-09-17T04:57:21.178754Z BEGIN test seon.html-views-test/transactions-render-values-without-entity-id-dumps
+bin/test: 2026-09-17T04:57:21.229955Z END test seon.html-views-test/transactions-render-values-without-entity-id-dumps
+bin/test: 2026-09-17T04:57:21.230021Z BEGIN test seon.html-views-test/help-preserves-lines-and-ai
+bin/test: 2026-09-17T04:57:21.231712Z END test seon.html-views-test/help-preserves-lines-and-ai
+bin/test: 2026-09-17T04:57:21.231735Z BEGIN test seon.html-views-test/identity-pairs-preserve-ai
+bin/test: 2026-09-17T04:57:21.282573Z END test seon.html-views-test/identity-pairs-preserve-ai
+bin/test: 2026-09-17T04:57:21.282632Z BEGIN test seon.html-views-test/note-pairs-link-titles-and-preserve-ai
+bin/test: 2026-09-17T04:57:21.381305Z END test seon.html-views-test/note-pairs-link-titles-and-preserve-ai
+bin/test: 2026-09-17T04:57:21.381356Z BEGIN test seon.html-views-test/fault-pairs-preserve-ai
+bin/test: 2026-09-17T04:57:21.383297Z END test seon.html-views-test/fault-pairs-preserve-ai
+bin/test: 2026-09-17T04:57:21.383325Z BEGIN test seon.html-views-test/settings-display-follows-declarations-without-name-based-units
+bin/test: 2026-09-17T04:57:21.385096Z END test seon.html-views-test/settings-display-follows-declarations-without-name-based-units
+bin/test: 2026-09-17T04:57:21.385142Z BEGIN test seon.html-views-test/message-pairs-derive-unread-and-preserve-ai
+bin/test: 2026-09-17T04:57:21.538922Z END test seon.html-views-test/message-pairs-derive-unread-and-preserve-ai
+bin/test: 2026-09-17T04:57:21.538988Z BEGIN test seon.html-views-test/namespace-binding-pairs-preserve-ai
+bin/test: 2026-09-17T04:57:21.541994Z END test seon.html-views-test/namespace-binding-pairs-preserve-ai
+bin/test: 2026-09-17T04:57:21.542043Z END namespace seon.html-views-test
+
+Ran 91 tests containing 1207 assertions.
+0 failures, 4 errors.

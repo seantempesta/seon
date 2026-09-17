@@ -7,7 +7,8 @@
 
 (def message-query
   '[:find ?message :in $ ?subject
-    :where [?message :seon.message/about ?subject]
+    :where [?subject :seon.message/id ?subject-id]
+                   [?message :seon.message/about ?subject-id]
            [?message :seon.message/from ?sender]
            [?sender :seon.agent/id "worker"]])
 
@@ -44,7 +45,7 @@
                        :seon.message/from [:seon.agent/id "worker"]
                        :seon.message/to [:seon.agent/id "requester"]
                        :seon.message/content "Verified."
-                       :seon.message/about [:seon.message/id "request"]}
+                       :seon.message/about "request"}
                       [:db.fn/call #'plan/settle-call "worker"]])
             completed (db/pull (:db-after written)
                                '[{:my.plan.item/completed-tx [:db/id :db/txInstant]}]

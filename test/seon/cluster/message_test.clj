@@ -251,7 +251,7 @@
       (let [database @connection
             rendered
             (message/render-html
-             {:seon.db/db database :seon.message/id "message-1" :seon.message/content "first line\nsecond line" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/about [:seon.agent/id "alice"] :seon.message/caused-by {:seon.message/id "message-0"}})]
+             {:seon.db/db database :seon.message/id "message-1" :seon.message/content "first line\nsecond line" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/about "alice" :seon.message/caused-by {:seon.message/id "message-0"}})]
         (is (str/includes? (pr-str rendered) "first line\\nsecond line"))
         (is (str/includes? (pr-str rendered) "unread"))
         (is (str/includes? (pr-str rendered) "2023-11-14T22:13:20Z"))

@@ -112,7 +112,8 @@
           '[:find ?message :in $ ?subject
             :where [?subject :seon.message/from ?root] [?subject :seon.message/to ?juniper]
                    [?message :seon.message/from ?juniper] [?message :seon.message/to ?root]
-                   [?message :seon.message/about ?subject] [?message :seon.message/content ?content]
+                   [?subject :seon.message/id ?subject-id]
+                   [?message :seon.message/about ?subject-id] [?message :seon.message/content ?content]
                    [(clojure.string/includes? ?content "Ada")]
                    [(clojure.string/includes? ?content "115")]
                    [(clojure.string/includes? ?content "155")]]]]]

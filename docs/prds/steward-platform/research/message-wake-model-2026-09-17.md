@@ -236,3 +236,88 @@ before opening and one during it: only the former two are claimed at first
 settlement, all three stay visible, and the next turn covers the third.
 Reader syntax and diff whitespace pass. Fast iteration is pending completion
 of the coupled §1h publication; no live implementation proof is claimed.
+
+
+### Coupled subject and origin preparation
+
+The subject/protocol seam removes target resolution and stores the supplied
+nonempty string. `:seon.message/from` alone marks inside; error notifications
+now supply their population sender. `:seon.message/assignment` stores the
+assigned evaluation identity and joins declinations independently of subjects.
+The canonical regressions exercise absent subjects, subject deletion, sender-only
+classification and protocol correlation. The origin seam stores the issue ID
+unchanged through generation, recording and carry-forward; the outline labels
+that value without resolving the issue. Its regression renders before and after
+issue deletion.
+
+**RESET NEEDED** is folded into the reset batch. These are review commits for
+one orchestrator publication, not successive live adoptions. The default
+read-only form is retained in
+[the route probe](message-wake-route-probe-2026-09-17.clj).
+Static clj-kondo inspection reported zero errors. The first combined fast run
+uses a HEAD-plus-owned-paths snapshot and a 2,400-second foreground bound;
+no slot/silence override, cold gate or default mutation was used.
+
+That run exposed an additional path in the owned opening class: the automatic
+system-read pass attempted recording while the agent was already open, before
+`open-call` could return normally. The existing system-turn writer now declines
+that stale append at its final history/open-state decision. Explicit submitted
+source retains its busy refusal. The state-machine oracle now expects duplicate
+opens to commit no change; genuinely conflicting identities still refuse.
+No since-diff selection, comparison or supersession algorithm is changed.
+
+Foreign source boundary during preparation: `src/seon/sci/eval.clj` and
+`test/seon/sci/eval_test.clj` are held and excluded from the snapshot. The stage-2
+runner/test changes landed while this lane was working; none was edited or
+operated here. Final tallies and review commits follow below.
+
+A second read-only census at basis **536871060** (3 ms) measured current datoms:
+about **0**, origin **0**, inbox **0**, read-tx **2**. Thus read-tx deletion is
+also explicitly in the coordinated reset batch; it is not a zero-datom deletion
+on this reseeded cluster. The query was `(into {} (map (fn [attribute]
+[attribute (count (seon.db/datoms database :aevt attribute))])
+[:seon.message/about :seon.eval/origin :seon.message/inbox :seon.message/read-tx]))`.
+
+### First combined remaining-seam iteration
+
+**225 tests / 2,037 assertions / 16 failures / 0 errors**, exit 1. Exact output:
+[remaining-seam first run](message-wake-model-remaining-first-2026-09-17.txt).
+The message owner (20 tests), agent message surface (10), wake (17), transcript
+(18), assignment/subject (4), error notification (36) and plan completion (1)
+namespaces had zero failures/errors. The new settlement/history and
+subject-deletion/inside-marker regressions passed. Issue opening also retained
+the new origin value.
+
+Six failed assertions are addressed in the next serial iteration: the automatic
+system append while busy (2), duplicate-open model oracle (1), outline's old
+agent-origin expectation (1), and the routing fixture's old about/protocol and
+started-at shapes (2). Ten remaining assertions are outside the changed
+mechanisms: eight program deletion/admission-provenance assertions, the existing
+installation bound (**414.536458 ms** against 300 ms), and the existing issue
+AI requery-form expectation. See [retained identities](../../../seon/issues/retained-identities-have-no-declared-retirement-state.md),
+[installation timing](../../../seon/issues/turn-bookkeeping-exceeds-recorded-regression-bound.md),
+and [issue render expectation](../../../seon/issues/the-issue-ai-render-no-longer-teaches-its-requery-form.md).
+No baseline run establishes a new attribution for those failures.
+
+The obsolete cross-family string-uniqueness regression is removed: subject
+observations no longer resolve across identity families. Its issue is marked
+superseded by the ruling, and the subject regression now admits a token shared
+by two distinct identity families.
+
+### Second serial iteration
+
+**91 tests / 1,207 assertions / 0 failures / 4 errors**, exit 1. Exact output:
+[second run](message-wake-model-remaining-second-2026-09-17.txt). Turn (30),
+agent message surface (10), subject/assignment (4), web debug/outline (17),
+data shapes (9), read evidence (3), and HTML views (11) complete without
+failures/errors. This proves the busy-turn correction, writer no-op state
+machine, permanent handling history, subject deletion independence, and the
+outline origin label surviving actual issue retraction under armed contracts.
+
+Three errors occur in the pre-existing generative fixture's `inst-ms` on a
+transaction ID, before its routing assertions. The fourth is the routing
+fixture's attempted `/at` omission, refused by the canonical schema. It is
+corrected to cover the six constructible stored states; a final focused run
+follows. The unresolved fixture/state-reader mismatch is recorded in
+[one lifecycle-fixture issue](../../../seon/issues/evaluation-fixtures-still-read-retired-lifecycle-shapes.md).
+These observations do not change the production evaluation lifecycle.

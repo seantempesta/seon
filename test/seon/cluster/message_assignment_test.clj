@@ -1,13 +1,12 @@
 (ns seon.cluster.message-assignment-test
-  "About-carrying sends resolve facts and upsert one assignment."
+  "Subject tokens, sender classification and assignment correlation are independent."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
-            [seon.cluster.message :as my.message]
             [seon.cluster.message :as message]
             [seon.problems :as problems]
+            [seon.cluster.wake :as wake]
             [seon.test-support :as test-support])
-  (:import [java.util Date]
-           [java.util.concurrent CountDownLatch]))
+  (:import [java.util Date]))
 
 (def ^:private now (Date. 1785283200000))
 
@@ -35,9 +34,14 @@
   [run-id content]
   {:my.message/value (seon.cluster.message/send "bob" content "failure-17") :seon.agent/id "alice" :seon.turn/id run-id :seon.cluster.eval/ordinal 0 :seon.config.message/max-chain 16})
 
-(deftest delivery-resolves-about-to-the-identified-fact
+(deftest delivery-preserves-the-supplied-subject-token
   (with-assignment-database
    (fn [connection]
+     (test-support/transacted! connection
+       (:seon.message/rows
+        (message/delivery @connection
+          (assoc (request "subject-row" "A different family shares this token")
+                 :my.message/value (assoc (message/send "bob" "Subject") :seon.message/id "failure-17")))))
      (let [delivery (message/delivery @connection
                                       (request "run-1" "repair this"))
            rows (:seon.message/rows delivery)]
@@ -48,12 +52,11 @@
               (db/q '[:find ?failure-id .
                      :where
                      [?message :seon.message/content "repair this"]
-                     [?message :seon.message/about ?failure]
-                     [?failure :seon.error/id ?failure-id]]
+                     [?message :seon.message/about ?failure-id]]
                    @connection))
-           "the driver resolves the string identity and commits the ref")))))
+           "the driver stores the supplied token without resolving an entity")))))
 
-(deftest an-unknown-about-identity-is-a-refusal-value
+(deftest an-unknown-subject-is-an-ordinary-observation
   (with-assignment-database
    (fn [connection]
      (let [delivery
@@ -62,9 +65,8 @@
             (assoc (request "run-1" "repair this")
                    :my.message/value
                    (seon.cluster.message/send "bob" "repair this" "missing-fact")))]
-       (is (empty? (:seon.message/rows delivery)))
-       (is (= [:seon.message/unknown-about]
-              (mapv :seon.error/kind (:seon.error/values delivery))))))))
+       (is (= "missing-fact" (:seon.message/about (first (:seon.message/rows delivery)))))
+       (is (empty? (:seon.error/values delivery)))))))
 
 (deftest a-declination-settles-without-retiring-the-red-fact
   (with-assignment-database
@@ -74,7 +76,7 @@
             @connection
             (assoc (request "assignment-run" "repair this")
                    :my.message/value
-                   (seon.cluster.message/send "bob" "repair this" "receipt-17")))
+                   (assoc (message/send "bob" "repair this") :my.message/assignment "receipt-17")))
            _ (test-support/transacted! connection
                                      (:seon.message/rows assignment))
            red-before
@@ -94,13 +96,13 @@
          (is (= 1
                 (db/q '[:find (count ?declination) .
                        :where
-                       [?problem :seon.cluster.eval/id "receipt-17"]
+
                        [?planner :seon.agent/id "alice"]
                        [?owner :seon.agent/id "bob"]
-                       [?assignment :seon.message/about ?problem]
+                       [?assignment :seon.message/assignment "receipt-17"]
                        [?assignment :seon.message/from ?planner]
                        [?assignment :seon.message/to ?owner]
-                       [?declination :seon.message/about ?problem]
+                       [?declination :seon.message/assignment "receipt-17"]
                        [?declination :seon.message/from ?owner]
                        [?declination :seon.message/to ?planner]
                        [?declination :my.message/reason _]]
@@ -121,38 +123,19 @@
                      @connection))
              "the reason is a reader-facing fact, not parsed prose"))))))
 
-(deftest concurrent-terminal-deliveries-upsert-one-assignment
+
+(deftest sender-alone-determines-inside-after-subject-deletion
   (with-assignment-database
-   (fn [connection]
-     (let [ready (CountDownLatch. 2)
-           release (CountDownLatch. 1)
-           transact
-           (fn [run-id content]
-             (future
-               (let [rows
-                     (:seon.message/rows
-                      (message/delivery @connection
-                                        (request run-id content)))]
-                 (.countDown ready)
-                 (.await release)
-                 (db/transact! connection rows))))
-           transactions [(transact "run-1" "first assignment")
-                         (transact "run-2" "second assignment")]]
-       (try
-         (test-support/await-event! ready
-                                    ::both-deliveries-derived-before-commit)
-         (finally
-           (.countDown release)))
-       (doseq [transaction transactions]
-         (test-support/await-event! transaction
-                                    ::terminal-delivery-committed))
-       (testing "the schema identity fences the race at commit"
-         (is (= 1
-                (db/q '[:find (count ?message) .
-                       :where
-                       [?failure :seon.error/id "failure-17"]
-                       [?recipient :seon.agent/id "bob"]
-                       [?message :seon.message/about ?failure]
-                       [?message :seon.message/to ?recipient]]
-                     @connection))
-             "both stale derivations upsert the same assignment entity"))))))
+    (fn [connection]
+      (test-support/transacted! connection
+       [{:seon.message/id "subject" :seon.message/to [:seon.agent/id "bob"] :seon.message/content "Subject"}
+        {:seon.message/id "inside-subject" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/about "subject" :seon.message/content "Inside"}
+        {:seon.message/id "inside-only" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "Inside without subject"}
+        {:seon.message/id "outside-subject" :seon.message/to [:seon.agent/id "bob"] :seon.message/about "subject" :seon.message/content "Outside"}])
+      (doseq [delete? [false true]]
+        (when delete? (test-support/transacted! connection [[:db/retractEntity [:seon.message/id "subject"]]]))
+        (let [database @connection
+              inside (wake/inside-attributes database)]
+          (doseq [[id expected] [["inside-subject" true] ["inside-only" true] ["outside-subject" false]]]
+            (is (= expected (wake/inside-wake? database (:db/id (db/pull database [:db/id] [:seon.message/id id])) inside))))
+          (is (= "subject" (:seon.message/about (db/pull database [:seon.message/about] [:seon.message/id "inside-subject"])))))))))

@@ -1300,14 +1300,15 @@
                      database signature process))))
 
 (defn- message-tx
-  [fact recipient reason notification]
+  [fact sender recipient reason notification]
   {:seon.message/id (id/id [(:seon.error/notification-id notification) recipient reason])
    :seon.message/to [:seon.agent/id recipient]
+   :seon.message/from [:seon.agent/id sender]
    :seon.message/content (ai-prose (notice (merge {:seon.error/fact fact
                                                  :seon.error/reason reason
                                                  :seon.agent/id recipient}
                                                 notification)))
-   :seon.message/about [:seon.error/signature (:seon.error/signature fact)]})
+   :seon.message/about (:seon.error/signature fact)})
 
 (defn commit-call
   "Upsert one error occurrence and its bounded notifications at the writer."
@@ -1381,7 +1382,9 @@
             true (conj error-row))
           (keep (fn [[recipient reason]]
                   (when (agent-exists? database recipient)
-                    (message-tx fact recipient reason notification))))
+                    (message-tx fact (or agent-id
+                                         (when (and escalate-to (agent-exists? database escalate-to)) escalate-to)
+                                         steward-id) recipient reason notification))))
           recipients)))
 
 (defn function-identity-call

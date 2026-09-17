@@ -232,7 +232,7 @@
   (when-not (= (:seon.agent/id problem)
                (:seon.problems/author problem))
     {:my.message/to (:seon.agent/id problem)
-     :my.message/about (:seon.problems/id problem)
+     :my.message/assignment (:seon.cluster.eval/id problem)
      :my.message/content
      (str "Repair problem " (:seon.problems/id problem)
           " from run " (:seon.turn/id problem)

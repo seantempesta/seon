@@ -1,5 +1,5 @@
 (ns seon.cluster.problem-routing-test
-  "Owner routing and the seven-state plan-settlement derivation."
+  "Owner routing and stored evaluation settlement."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.cluster.message :as my.message]
@@ -72,9 +72,8 @@
   (deliver! connection
             "planner"
             (str "assignment-" ordinal)
-            (seon.cluster.message/send "alpha"
-                             (str "repair " ordinal)
-                             (str "problem-" ordinal))))
+            (assoc (message/send "alpha" (str "repair " ordinal))
+                   :my.message/assignment (str "form-" ordinal))))
 
 (defn- evaluation-error
   "One failed evaluation, carrying every member `:seon.sci.eval/evaluation`
@@ -157,8 +156,7 @@
             (db/q '[:find ?message
                    :in $ ?problem-id
                    :where
-                   [?message :seon.message/about ?problem]
-                   [?problem :seon.problems/id ?problem-id]]
+                   [?message :seon.message/assignment ?problem-id]]
                  @connection
                  (:seon.problems/id problem)))
            "the ordinary loop shape emits no author-to-author message")
@@ -191,18 +189,16 @@
      (is (empty?
           (db/q '[:find ?assignment
                  :where
-                 [?assignment :seon.message/about _]]
+                 [?assignment :seon.message/assignment _]]
                @connection))
          "a newly assigned owner has no historical problem to deliver"))))
 
-(deftest every-form-has-exactly-one-of-the-seven-derived-states
+(deftest stored-evaluations-derive-routing-and-settlement
   (with-routing-database
    (fn [connection]
      (test-support/transacted!
                   connection
-                  (into
-                   [(form-row 0)]
-                   [(receipt-row 1 {})
+                  [(receipt-row 1 {})
                     (receipt-row 2 {:seon.eval/shown "2"})
                     (receipt-row 3 {:seon.eval/shown
                                     (pr-str {:seon.error/kind :probe/red})
@@ -216,7 +212,7 @@
                     (receipt-row 6 {:seon.eval/shown
                                     (pr-str {:seon.error/kind :probe/red})
                                     :seon.cluster.eval/error "red 6"
-                                    :seon.error/kind :probe/red})]))
+                                    :seon.error/kind :probe/red})])
      (assign! connection 3)
      (assign! connection 5)
      (assign! connection 6)
@@ -224,18 +220,17 @@
                "alpha"
                "declination-6"
                (my.message/decline
-                "planner" "problem-6" "The required contract is absent."))
+                "planner" "form-6" "The required contract is absent."))
      (let [settlement (turn/plan-settlement @connection run-id)
            forms (:seon.turn.work/forms settlement)]
-       (is (= [:unevaluated
-               :running
+       (is (= [:running
                :succeeded
                :routed
                :unrouted-red
                :owner-fixed
                :owner-declared-cant]
               (mapv :seon.turn.work/form-state forms)))
-       (is (= [false false true false false true true]
+       (is (= [false true false false true true]
               (mapv :seon.turn.work/settled? forms)))
        (is (false? (:seon.turn.work/settled? settlement))
            "one unsettled form keeps the plan unsettled regardless of run state")

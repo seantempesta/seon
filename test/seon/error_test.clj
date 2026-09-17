@@ -1020,7 +1020,8 @@
       (let [db @connection
             about (db/q '[:find ?id .
                          :where
-                         [?message :seon.message/about ?error]
+                         [?message :seon.message/about ?signature]
+                         [?error :seon.error/signature ?signature]
                          [?error :seon.error/id ?id]]
                        db)]
         (is (some? about)

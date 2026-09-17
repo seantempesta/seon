@@ -47,11 +47,11 @@
   "Send a reason for declining an assignment to its sender.
 
   Returns the written message, including :seon.message/id and endpoint refs.
-  :my.message/about identifies the assignment message being answered.
+  :my.message/assignment identifies the evaluation assigned for repair.
 
   Example:
   (my.message/decline {:my.message/to \"root\"
-                       :my.message/about \"example-message\"
+                       :my.message/assignment \"evaluation-id\"
                        :my.message/reason \"The required input is unavailable.\"})"
   {:malli/schema [:=> [:cat :my.message/decline-request]
                   [:or :seon.message/message :seon.error/value]]}

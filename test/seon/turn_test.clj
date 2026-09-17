@@ -1484,8 +1484,9 @@
   (let [run-of #(get-in model [:runs %])]
     (case op
       :open (let [[run-id agent-id] args]
-              (and (nil? (run-of run-id))
-                   (nil? (get-in model [:pointers agent-id]))))
+              (or (some? (get-in model [:pointers agent-id]))
+                  (nil? (run-of run-id))
+                  (= agent-id (:agent (run-of run-id)))))
 
       :close
       (let [[run-id] args
@@ -1534,9 +1535,12 @@
   [model [op & args]]
   (case op
     :open (let [[run-id agent-id] args]
-            (-> model
-                (assoc-in [:runs run-id] {:agent agent-id})
-                (assoc-in [:pointers agent-id] run-id)))
+            (if (or (get-in model [:pointers agent-id])
+                    (get-in model [:runs run-id]))
+              model
+              (-> model
+                  (assoc-in [:runs run-id] {:agent agent-id})
+                  (assoc-in [:pointers agent-id] run-id))))
 
     :close (let [[run-id] args
                  agent-id (get-in model [:runs run-id :agent])]

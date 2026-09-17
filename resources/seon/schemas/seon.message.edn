@@ -8,7 +8,6 @@
                 [:seon.message/blank-content
                  :seon.message/blank-content]
                 [:seon.error/message :seon.error/message]],
-               :ambiguous-about :seon.message/id,
                :reply-request
                [:map
                 [:my.turn/result :my.turn/result]
@@ -30,24 +29,12 @@
                  :seon.render/form seon.render.transcript/inbox-form}
                 :seon.db/ref],
                :about
-               [:and
-                {:description
-                 "The entity this message concerns when one was named. Its presence marks the message an INSIDE wake: an agent in an error loop must not have its turn bound reset by its own failure notifications.",
-                 :seon.db/index true,
-                 :seon.wake/inside true}
-                :seon.db/ref],
-               :unknown-about :seon.message/id,
+               [:and {:description "The supplied subject identity token. A value that survives target deletion; naming a subject never marks a message inside." :seon.db/index true}
+                :my.message/about],
+               :assignment
+               [:and {:description "The evaluation identity assigned or declined for repair. A protocol value that survives evaluation deletion, independent of a subject mention." :seon.db/index true}
+                :seon.cluster.eval/id],
                :inbound-content :string,
-               :unknown-about-error
-               [:map
-                {:seon.error/class true,
-                 :seon.render/ai seon.error/render-ai,
-                 :seon.render/html seon.error/render-html,
-                 :error/message
-                 "must identify the unknown message named as context"}
-                [:seon.message/unknown-about
-                 :seon.message/unknown-about]
-                [:seon.error/message :seon.error/message]],
                :no-limit [:= true],
                :inbound-request
                [:map
@@ -89,6 +76,7 @@
                 [:seon.message/about
                  {:optional true}
                  :seon.message/about]
+                [:seon.message/assignment {:optional true} :seon.message/assignment]
                 [:my.message/reason
                  {:optional true}
                  :my.message/reason]],
@@ -107,7 +95,8 @@
                  :seon.db/ref]
                 [:seon.message/about
                  {:optional true}
-                 :seon.db/ref]
+                 :seon.message/about]
+                [:seon.message/assignment {:optional true} :seon.message/assignment]
                 [:seon.message/caused-by
                  {:optional true}
                  :seon.db/ref]],
@@ -161,16 +150,6 @@
                 [:seon.error/message :seon.error/message]],
                :blank-content [:= true],
                :unknown-recipient :seon.agent/id,
-               :ambiguous-about-error
-               [:map
-                {:seon.error/class true,
-                 :seon.render/ai seon.error/render-ai,
-                 :seon.render/html seon.error/render-html,
-                 :error/message
-                 "must identify the ambiguous message context"}
-                [:seon.message/ambiguous-about
-                 :seon.message/ambiguous-about]
-                [:seon.error/message :seon.error/message]],
                :delivery
                [:map
                 [:seon.message/rows :seon.db/tx-data]

@@ -181,8 +181,7 @@
   "Attributes whose presence on a wake entity marks it the population's OWN.
 
   An inside wake never resets an agent's turn bound: an agent-sent
-  message carries `:seon.message/from`, an error recorder's
-  notification carries `:seon.message/about`, a fault routed for
+  message or error notification carries `:seon.message/from`, a fault routed for
   repair carries `:seon.error/steward`, and an effect the agent itself
   requested carries `:seon.effect/to`. One query over
   `:seon.wake/inside`, so the rule that used to be a hard-coded

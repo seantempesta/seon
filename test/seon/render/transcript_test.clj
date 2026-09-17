@@ -344,9 +344,9 @@
         (mapv (fn [message]
                 (transaction-instant (support/transacted! connection [message])))
               [{:seon.message/id "outside-0" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Start with the failed deployment." :my.message/reason "An external observation, not this agent's decline."}
-               {:seon.message/id "peer-1" :seon.message/from [:seon.agent/id peer-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "Repair the owning namespace."}
+               {:seon.message/id "peer-1" :seon.message/from [:seon.agent/id peer-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/about "problem-transcript" :seon.message/content "Repair the owning namespace."}
                {:seon.message/id "send-2" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/content "Check the repaired namespace."}
-               {:seon.message/id "decline-3" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "I cannot make the requested edit." :my.message/reason "The namespace is owned by another agent."}
+               {:seon.message/id "decline-3" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about "problem-transcript" :seon.message/content "I cannot make the requested edit." :my.message/reason "The namespace is owned by another agent."}
                {:seon.message/id "self-4" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/content "A self-addressed continuity note."}])]
     ;; A BOUND THAT FIRES IS A BUG REPORT. Distinct instants are what the
     ;; interleaving is derived from; if two fixture transactions landed in
@@ -718,7 +718,7 @@
         ;; seed is lost with it. The entity here is only a unique `about`
         ;; target; what matters is that it is a REAL one.
         {:seon.test/sym "target-fact" :seon.schema.admission/source :core}
-        {:seon.message/id "about-test" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.test/sym "target-fact"] :seon.message/content "Inspect the test fact."}
+        {:seon.message/id "about-test" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about "target-fact" :seon.message/content "Inspect the test fact."}
         {:seon.turn/id "run-malformed" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
         {:seon.cluster.eval/id "eval-malformed"
          :seon.cluster.eval/run [:seon.turn/id "run-malformed"]
@@ -738,43 +738,17 @@
         (is (str/includes? ai ":value {"))
         (assert-no-session-narration ai)))))
 
-(deftest about-identity-resolution-pulls-one-deterministic-ordered-id-vector
+(deftest message-subject-tokens-render-without-target-entities
   (support/with-database
     (fn [connection]
-      (support/transacted!
-       connection
+      (support/transacted! connection
        [{:seon.agent/id agent-id}
-        {:seon.problems/id "about-first"}
-        {:seon.problems/id "about-second"}
-        {:seon.message/id "about-message-first" :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "about-first"] :seon.message/content "Inspect the first problem."}
-        {:seon.message/id "about-message-second" :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "about-second"] :seon.message/content "Inspect the second problem."}])
-      (let [database @connection
-            basis-before (:max-tx database)
-            pull-many db/pull-many
-            calls (atom [])]
-        (with-redefs [db/pull-many
-                      (fn [db-value selector entity-ids]
-                        (swap! calls conj [selector entity-ids])
-                        (pull-many db-value selector entity-ids))]
-          (dotimes [_ 2]
-            (let [rendered (transcript/render-ai (unit connection))]
-              (is (str/includes? rendered "about-first"))
-              (is (str/includes? rendered "about-second"))
-              (is (str/includes? rendered ":seon.problems/id")))))
-        (let [about-id-vectors
-              (into []
-                    (keep (fn [[selector entity-ids]]
-                            (when (some #{:seon.problems/id} selector)
-                              entity-ids)))
-                    @calls)]
-          (is (= 2 (count about-id-vectors))
-              "each render resolves all about refs in one pull-many call")
-          (is (every? vector? about-id-vectors)
-              "pull-many receives its declared ordered collection")
-          (is (apply = about-id-vectors)
-              "the same transcript produces the same entity-id order"))
-        (is (= basis-before (:max-tx @connection))
-            "rendering twice commits no fault or other transaction")))))
+        {:seon.message/id "about-message" :seon.message/to [:seon.agent/id agent-id]
+         :seon.message/about "absent-subject" :seon.message/content "Inspect this."}])
+      (let [basis-before (:max-tx @connection)
+            rendered (transcript/render-ai (unit connection))]
+        (is (str/includes? rendered "absent-subject"))
+        (is (= basis-before (:max-tx @connection)))))))
 
 ;;; `receipt-content-enters-the-shared-capped-floor` asserted that the
 ;;; transcript re-applied the caller's caps to a STORED result — a second
@@ -932,7 +906,7 @@
        (= :message-self event-kind)
        (assoc :seon.message/to [:seon.agent/id agent-id])
        (contains? #{:message-about :message-decline} event-kind)
-       (assoc :seon.message/about [:seon.test/sym "generated-target"])
+       (assoc :seon.message/about "generated-target")
        (= :message-decline event-kind)
        (assoc :my.message/reason (str "declined: " content)))]
     (let [run-id (str "run-" id)

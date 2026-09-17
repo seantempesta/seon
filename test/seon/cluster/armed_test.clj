@@ -399,10 +399,9 @@
                                     (:seon.error/id fact)))
                                  (messages-to db "root")))))]
                 (is (some? message) "the message names the evidence")
-                (is (some? (:seon.message/about message))
-                    "and points at the fact — the absence of `about` on an
-                     ordinary user message is what makes the storm fence
-                     computable without a flag")))))
+                (is (some? (:seon.message/about message)) "the notification names its evidence")
+                (is (some? (:seon.message/from message))
+                    "the population sender marks the notification inside")))))
         (testing "THE STORM IS BOUNDED, and this is the falsifier for the
         cycle the live probe found: an explanation message is a commit,
         a commit wakes the loop through :seon.message/to, and a

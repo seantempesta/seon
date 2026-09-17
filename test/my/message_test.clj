@@ -83,7 +83,7 @@
   (let [value (message/decline "planner" "failure-17"
                                "The dependency contract is missing.")]
     (is (= {:my.message/to "planner"
-            :my.message/about "failure-17"
+            :my.message/assignment "failure-17"
             :my.message/reason "The dependency contract is missing."}
            (dissoc value :seon.message/id)))
     (is (seq (:seon.message/id value)))
@@ -159,9 +159,9 @@
           [["recipient"
             #(message/decline % "failure-17" "Cannot repair.")
             :my.message/no-recipient]
-           ["about"
+           ["assignment"
             #(message/decline "planner" % "Cannot repair.")
-            :my.message/no-about]
+            :my.message/no-assignment]
            ["reason"
             #(message/decline "planner" "failure-17" %)
             :my.message/no-reason]]
