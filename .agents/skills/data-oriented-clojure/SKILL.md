@@ -45,10 +45,12 @@ Optional stored values are absent; stored nilable shapes refuse at
 `src/seon/schema/datahike.clj:165`. Use the data-modeling skill for
 shape choices and datahike for transaction/query mechanics.
 
-Public functions require complete Malli contracts under repository law.
+Every function, private included, requires a complete Malli contract under
+AGENTS.md §2.4. `collect-contracts!` in `src/seon/instrument.clj:687` walks
+`ns-interns`, so private declarations are armed too.
 Authored incomplete slots and predicate-contract omissions are checked
 at `src/seon/schema/internal.cljc:60`; live instrumentation's owner
-is `src/seon/instrument.clj:685`. Named schemas describe genuinely
+is `src/seon/instrument.clj:698`. Named schemas describe genuinely
 polymorphic values; do not use an undefined contract to suppress a refusal.
 Map keys are fully namespaced. Failures at agent boundaries are flat
 error values, not a second success/failure envelope.

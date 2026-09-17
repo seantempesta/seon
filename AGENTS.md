@@ -350,7 +350,9 @@ Every failure at an agent or runtime boundary is a flat `:seon.error`
 value — nothing throws into the loop. EVERY function carries a complete
 Malli contract, private included (owner ruling 2026-09-17, program-facts PRD
 §1j; public-only was the previous rule and left 352 private database-read
-consumers unchecked), and is instrumented from the program graph; a function
+consumers unchecked). Arming selects loaded contracted Vars, private included
+(`src/seon/instrument.clj:687`, `collect-contracts!` walks `ns-interns`;
+the supplied projection provides program-graph contracts). A function
 whose declared contract fails does not run — the violation is a typed value
 naming the function and the offending argument. A refusal names what was
 missing: the layer, the member, the expected shape, the offending value
@@ -431,7 +433,7 @@ Clojure — at design time, not only before the edit. The compact invariants:
 - errors as values at agent/runtime boundaries;
 - one namespaced map in/out for API-like functions, or fully named
   positional arguments for ordinary functions;
-- every public function has a correct Malli input/output schema — no
+- every function, private included, has a correct Malli input/output schema — no
   `:any`/`:some`/`[:maybe X]` without a proven genuinely polymorphic
   boundary; absent = no key, never stored nil.
 - **anything that IS a symbol is stored as a symbol, never as a string**
@@ -865,7 +867,8 @@ commit with `bin/test --paths <owned files…> -- <namespaces…>` and
 names a lane, before taking a slot or creating a run root, and prints the
 `bin/test-fast --paths <your files> -- <namespaces>` replacement. An
 orchestrator flag does not override lane identity. The fast loop uses the
-worker's same contract arming in one JVM, with the canonical in-memory
+worker's same contract arming in one JVM, including private functions with
+declared contracts (`seon.test.arm/arm-contracts!`), with the canonical in-memory
 fixture base built once on demand. Plain namespaces use the working tree;
 `bin/test-fast --paths <your files…> -- <namespaces…>` reuses the gate's
 HEAD-plus-selected-files snapshot and removes it after the JVM exits,

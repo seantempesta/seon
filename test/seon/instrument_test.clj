@@ -3,7 +3,7 @@
   re-`defn` silently undoes it.
 
   THIS SUITE LEAVES THE JVM AS IT FOUND IT. Instrumentation is
-  process-global — `alter-var-root` on every schema'd public var — so a
+  process-global — `alter-var-root` on every schema'd var, private included — so a
   test that turned it on and walked away would change how every LATER
   suite behaves, and the gate's result would depend on test order. Every
   test here restores the entering callable roots in a `finally`, and that discipline is the reason
@@ -893,24 +893,51 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest the-selection-is-declared-vars-with-schemas-and-nothing-else
-  (instrumented!
-   (fn [_]
-     (let [wrapped (instrument/instrumented)]
-       (is (contains? wrapped #'error/value) "a public var with a schema")
-       (is (contains? wrapped #'private-integer-boundary)
-           "a private callable with a declared contract is also a boundary")
-       (is (every? (fn [candidate]
-                     (some? (mi/-schema candidate)))
-                   wrapped)
-           "and every wrapped var carries a schema: the selection is the
-            computation, not a roster")
-       (doseq [[kind call]
-               [[:input #(apply private-integer-boundary ["not an integer"])]
-                [:output #(private-integer-boundary 0)]]]
-         (let [failure (try (call) (catch Exception thrown thrown))]
-           (is (= :seon.instrument/contract-violated
-                  (:seon.error/kind (ex-data failure)))
-               (str "private boundary rejects invalid " (name kind)))))))))
+  ;; Exercise the worker's actual arming owner against the canonical fixture
+  ;; projection. Removing this one wrapper makes selection observable even
+  ;; when the launcher already armed the namespace before running the test.
+  (let [projection (schema/handed-projection)
+        decision (#'seon.test.arm/arming-decision)
+        boundary #'private-integer-boundary]
+    (alter-var-root boundary mi/-f->original)
+    (is (not (contains? (instrument/instrumented) boundary)))
+    (let [measurements
+          (mapv
+           (fn [phase]
+             (let [started (System/nanoTime)
+                   result (seon.test.arm/arm-contracts!
+                           decision projection "private-contracts"
+                           ['seon.instrument-test])]
+               {:seon.instrument-test/phase phase
+                :seon.instrument-test/elapsed-ms
+                (/ (double (- (System/nanoTime) started)) 1000000.0)
+                :seon.instrument-test/applied result}))
+           [:rearm-private :unchanged])
+          wrapped (instrument/instrumented)
+          original-error {:seon.error/kind ::failed-read
+                          :seon.error/message "The read was refused."}]
+      (prn {:seon.instrument-test/arming measurements})
+      (is (every? #(pos? (get-in % [:seon.instrument-test/applied
+                                    :seon.instrument/instrumented])) measurements))
+      (is (= (mapv :seon.instrument-test/applied measurements)
+             (vec (repeat 2 (:seon.instrument-test/applied (first measurements))))))
+      (is (true? (:private (meta boundary))))
+      (is (contains? wrapped #'error/value) "a public var with a schema")
+      (is (contains? wrapped boundary)
+          "canonical worker arming includes a private declared contract")
+      (is (every? #(some? (mi/-schema %)) wrapped))
+      (is (= 7 (private-integer-boundary 7)))
+      (doseq [[kind call]
+              [[:input #(private-integer-boundary "not an integer")]
+               [:output #(private-integer-boundary 0)]]]
+        (let [refusal (test-support/refusal-data call)]
+          (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+          (is (= kind (get-in refusal [:seon.error/data :seon.instrument/arm])))
+          (is (= 'seon.instrument-test/private-integer-boundary
+                 (get-in refusal [:seon.error/data :seon.error/diagnostic-operation])))))
+      (is (= original-error
+             (test-support/refusal-data #(private-integer-boundary original-error)))
+          "a refused read survives the private consumer's shape refusal unchanged"))))
 
 (deftest the-work-launcher-api-is-collected-without-an-allowlist
   (instrumented!
