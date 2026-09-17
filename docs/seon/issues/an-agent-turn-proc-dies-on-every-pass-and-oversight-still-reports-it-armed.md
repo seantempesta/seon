@@ -117,3 +117,18 @@ The trial could not work around this: a bounded lane may not stop, reset,
 refork or adopt `default`. The orchestrator's reset scheduled for 2026-09-17
 will clear the instance, but the class survives a reset — the silence is the
 defect, not the stale projection.
+
+## 2026-09-18 implementation checkpoint
+
+The bounded visibility lane landed agent-proc enumeration in runtime status
+(`f4b9e007c`), counted sliding-one wake overwrites (`647694741`), and
+partitioned error evidence admission (`b78936144`). Evidence and the live-proof
+plan are in
+[`dead-turn-proc-visible-2026-09-18.md`](../../prds/steward-platform/research/dead-turn-proc-visible-2026-09-18.md).
+
+The issue remains open. Durable FAILED state and the `:panic` stop belong at
+the existing cluster fault committer callback, which is the first seam that
+knows both that the fact committed and which agent owns the failed proc. That
+callback was outside this lane's observation-only ownership of
+`src/seon/cluster.clj`; implementing the behavior agent-side would duplicate
+or race the central fault fanout.
