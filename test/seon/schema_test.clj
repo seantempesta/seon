@@ -68,6 +68,18 @@
           value))
       (:seon.schema.projection/forms projection)))))
 
+(defn- conjunctive-map-entries
+  "Include map entries inherited through every named conjunction arm."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value]
+                  [:vector :seon.schema/value]]}
+  [projection form]
+  (let [resolved (schema.datahike/resolve-malli-form-in projection form)]
+    (case (schema.datahike/form-head resolved)
+      :map (schema.form/map-entries resolved)
+      :and (into [] (mapcat #(conjunctive-map-entries projection %))
+                 (schema.datahike/form-children resolved))
+      [])))
+
 (deftest declared-reference-maps-accept-the-pull-reference-grammar
   (test-support/with-database
    (fn [connection]
@@ -86,7 +98,7 @@
            subjects (into (sorted-map)
                           (keep (fn [[schema-key form]]
                                   (when (schema.form/map-shape? form)
-                                   (let [entries (schema.form/map-entries form)]
+                                   (let [entries (conjunctive-map-entries projection form)]
                                     (when (some #(reference-entry? projection %) entries)
                                       [schema-key entries])))))
                           forms)
