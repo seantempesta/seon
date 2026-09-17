@@ -114,3 +114,21 @@ Keep this issue open for the orchestrator's cold/reset-boundary confirmation:
 the measurement is not `bin/seon reset` wall time, and the algorithm still has
 cost proportional to admitted datoms. This change neither introduces an
 arbitrary-transaction latency guarantee nor moves validation off the writer.
+
+## Source investigation, 2026-09-18
+
+[The writer investigation](../../prds/steward-platform/research/writer-hang-root-cause-2026-09-18.md)
+separates caller preparation, serial application/final validation, durable
+commit, and post-commit listener completion. Its isolated armed population
+completes; it also reproduces a distinct listener exception that strands a
+committed transaction's promise while subsequent writes still succeed.
+The original stale-fixture transcript preserves only the writer stack's
+tail, so it cannot establish that writer's state or progress.
+
+The 75,941.046542 → 41,644.180417 ms measurements above are complete
+publication-call times, not isolated final-validator durations. The new
+note measures the phases separately. Its recommendations retain attempted
+assertions, swept referrers and whole owned values; the earlier proposal
+to select only identity assertions is not a correctness-preserving fix.
+The current owner ruling is program-facts PRD §1r: provenance selects
+agent per-write bounds versus root/system operation lifecycle bounds.
