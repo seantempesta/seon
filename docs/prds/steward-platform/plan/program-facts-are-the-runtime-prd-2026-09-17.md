@@ -443,6 +443,20 @@ offending value, fix, evidence, provenance) and which errors are critical
 - **The one-predicate consolidation (B1) waits until the owner has read the
   design note.**
 
+### 1n. Owner ruling 2026-09-17 ~21:50Z — boot carries no test namespaces
+
+Asked whether the cluster JVM should keep booting with the test classpath
+(`research/boot-and-load-sequence-2026-09-17.md` §4): "We are indexing the
+tests into the database and building our own runner so yeah I think the
+platform tests need their own testing using the system and once it's booted
+we do our own thing." Ruling: the cluster boots from `src/` alone (option A,
+now: drop the test classpath from the cluster launch,
+`script/seon/fresh_operator.clj:2078`, `:469-473`); tests are program facts
+resolved by identity through `seon.test/resolve-test` after boot (test-system
+stage 2), never required at boot; the platform/destructive tier tests the
+system from isolated snapshots (test-system PRD §0b). Option C (the graph
+declares admission per namespace) is the model fix, folded into stage 2.
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
