@@ -643,6 +643,15 @@ writing.
 | `seon.effect`, `effect/request!` | the system-side owner for declared capability requests (fs, web, llm); database writes enter `seon.db/transact!` (`src/seon/db.clj:3213`) — about effects crossing out, never about which functions an agent may call | the door, capability dispatch |
 | every function is callable | an agent may call ANY function in its cluster's program graph; what differs per agent is only what is RENDERED into its context, which never gates execution | toolkit, grants, allowlist |
 | program graph | the collective `:seon.fn`/`:seon.ns`/`:seon.schema`/`:seon.test` facts | corpus |
+| `my.program` | Agent-facing program reads over one supplied database value; the existing `seon.fn`, `seon.db` and `seon.issue` owners supply selection, facts and detected issue identity (`src/my/program.clj`). | my.refactor, my.code |
+| `my.program/breaks` | Pure read of a subject's referrers, declaration spans, current gate set, advisory past reach and explicit unknowns, with a computed plan (`src/my/program.clj`; Datahike reverse index: `reference-code/datahike/src/datahike/query.cljc`). No write or launch. | impact, blast radius |
+| `my.program/callers` | Direct `:seon.fn/calls` referrers with the caller declaration's byte span and recorded argument counts (`src/my/program.clj`). `:seon.fn/references` stays a separate relation. | usages, dependents |
+| `my.program/tests-reaching`; gate set | Current test selection through `seon.fn/gate-set`, including call, reference and declared-subject edges (`src/seon/fn.clj`). This differs from a test's recorded past `:seon.test/reach`. | test closure |
+| `my.program/reads-key` | Contract references, declared writes and literal keyword mentions, as separate groups; mentions do not assert a read or block retraction (`src/my/program.clj`; `seon.fn/functions-using`). | keyword consumers |
+| `my.program/history` | Source assertion/retraction events with exact root datom values and transaction provenance; optional `:seon.db/tx` selects an as-of view (`src/my/program.clj`; `reference-code/datahike/src/datahike/db.cljc`, `as-of-pred`). | definition archive |
+| referrer; caller; reference; subject; reach | Referrer is a live entity naming the subject; caller means `:seon.fn/calls`, reference means `:seon.fn/references`, test subject is a present claim, and reach is advisory evidence from a past run. The program read preserves these relations separately (`resources/seon/schemas/seon.program.edn`). | dependency (without its attribute) |
+| plan of a refusal; detector; `seon.issue/subject-id` | One prospective issue per caller, identified by the detector plus the caller's installed identity value using the generator's same `seon.issue/subject-id`; tests come from the caller's gate set (`src/seon/issue.clj`, `src/my/program.clj`). `seon.program/unresolved-callers` is the target done condition. Launch is unavailable until the detector can truthfully represent the repair subjects; the read states that limitation. | work packet, separate task registry |
+| redefinition; retraction | Redefinition replaces definition facts at one identity; retraction removes facts and leaves the past to history/as-of (`seon.program/exact-replacement-tx`, Datahike `retractEntity`). Identity-only tombstones remain legacy until the coordinated reset. | soft delete, retirement |
 | proc, step-fn, conns, graph-def | `clojure.core.async.flow`'s own vocabulary (`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:78`, `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:165`) | invented scheduler nouns |
 | `(sliding-buffer 1)` tap | core.async's own newest-only delivery | latest-wins mailbox |
 | tuple (`:db/tupleType`) | Datahike's single-value ordered construct; cardinality-many is a SET (`reference-code/datahike/src/datahike/index/persistent_set.cljc`) | small limited vector |
@@ -910,7 +919,7 @@ bin/seon config apply [CLUSTER] PATH
 bin/seon status | open [NAME]
 bin/seon init [--changed PATH] | init NAME [--force]
 bin/seon stop [--force] [NAME] | down [--force]
-bin/seon reset --force           # down all, destroy, republish, refork
+bin/seon reset --force           # preflight (syntax, lock holder), down all, destroy, republish, refork, start, adopt
 ```
 
 Absent cluster means `default` for `start`/`config apply`; bare `init`
