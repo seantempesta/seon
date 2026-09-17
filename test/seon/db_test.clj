@@ -1233,10 +1233,20 @@
              (.countDown release))))))))
 
 (deftest a-throwing-datahike-listener-cannot-strand-a-committed-write
+  ;; THE PROPERTY IS A COMPLETION EVENT, NOT A DEADLINE. Datahike delivers the
+  ;; result promise BEFORE it notifies any listener
+  ;; (`reference-code/datahike/src/datahike/writer.cljc:410` delivers, `:427`
+  ;; notifies), so a throwing listener structurally cannot strand the write.
+  ;; An earlier shape asserted the report beat a tuned 250 ms
+  ;; `:seon.config.db/write-time-limit-ms` this test applied itself; the cold
+  ;; gate's first write took 254 ms and the tuned constant — standing in for
+  ;; the observable event, which AGENTS §2.3 forbids — reported a bound
+  ;; refusal instead of a defect. The shipped write bound now governs and the
+  ;; ONE clock is the fixture's declared `event-backstop-seconds`, which names
+  ;; the wait it failed.
   (test-support/with-database
    (fn [connection]
-     (let [cluster-name "throwing-listener-completion"
-           listener-key ::throwing-listener
+     (let [listener-key ::throwing-listener
            listener-error (ex-info "synthetic listener failure"
                                    {:seon.test/failure :throwing-listener})
            diagnostic (atom nil)
@@ -1247,27 +1257,30 @@
                (when (= :datahike/listener-error id)
                  (reset! diagnostic {:seon.test/level level
                                      :seon.test/payload payload}))))]
-       (test-support/apply-config!
-        connection cluster-name
-        {:seon.config.db/write-time-limit-ms 250})
        (datahike/listen! connection listener-key
                          (fn [_] (throw listener-error)))
        (try
          (binding [trove/*log-fn* log-fn]
-           (let [report (db/transact!
-                         connection
-                         [{:seon.agent/id "throwing-listener-agent"}])
+           (let [submission
+                 (future
+                   (db/transact!
+                    connection
+                    [{:seon.agent/id "throwing-listener-agent"}]))
+                 report
+                 (test-support/await-event!
+                  submission
+                  "seon.db/transact! to realize its answer while a listener throws")
                  logged
                  (test-support/await-event!
                   diagnostic
                   "Datahike's throwing-listener diagnostic"
                   some?)]
              (is (contains? report :db-after)
-                 (str "the committed report must win the 250 ms write bound: "
+                 (str "the realized answer is the committed report: "
                       (pr-str report)))
              (is (not= :seon.db/write-bound-exceeded
                        (:seon.error/kind report))
-                 "the write bound does not fire after the commit is durable")
+                 "the declared write bound never stands in for the completion event")
              (is (= :error (:seon.test/level logged)))
              (is (= listener-key
                     (get-in logged
@@ -1280,7 +1293,16 @@
                      (db/pull @connection
                               [:seon.agent/id]
                               [:seon.agent/id "throwing-listener-agent"])))
-                 "the report and durable fact describe the same commit")))
+                 "the report and durable fact describe the same commit")
+             (let [next-report
+                   (test-support/transacted!
+                    connection
+                    [{:seon.agent/id "after-throwing-listener-agent"}])]
+               (is (contains? next-report :db-after)
+                   "the write after a thrown listener commits through the same writer")
+               (is (< (db/basis-t (:db-before next-report))
+                      (db/basis-t (:db-after next-report)))
+                   "the following write advanced the branch head"))))
          (finally
            (datahike/unlisten! connection listener-key)))))))
 
