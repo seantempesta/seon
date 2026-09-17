@@ -2593,3 +2593,10 @@ working tree, never Sonnet.
   requery render (open issue), rereads (S3). Message-test, my.message,
   wake, transcript, cluster.turn, error, plan-completion, web-debug,
   sci.eval (except the arity parity), eval: GREEN cold.
+- Stage 2 stopped a second time at held `script/seon/fresh_operator.clj`
+  (adoption-margin holds it) after preserving its resolution draft
+  (`b6562f1ce`); 5/28/1E fast on a `fork-cluster-ctx` arity delegation.
+  Resume when adoption-margin lands. Message-wake resumed on its batch-119
+  residue (`inst-ms` on a Long in its edited `planner-census`; the
+  situation-totality property after the about split). Editing lanes:
+  integrator, guardrails, adoption-margin, message-wake.
