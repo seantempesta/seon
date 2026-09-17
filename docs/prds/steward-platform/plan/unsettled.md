@@ -3786,3 +3786,10 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   scratch-root publication from a clean worktree at HEAD
   (`scratch-republish-head.log`). Population also shrank 87,639 → 74,303
   datoms — to explain.
+- The clean-worktree scratch republish could not discriminate (it failed
+  earlier: "The dependency class cache could not be prepared" — the worktree
+  has no `target/` cache; removed). Opus agent launched to reproduce in an
+  isolated root from THIS tree, instrument the readiness loop (does it read
+  a refused wave write as committed? does `pull` on a missing lookup ref now
+  return an error instead of nil?), fix the root, and prove a scratch init
+  converges. Default stays down until then.
