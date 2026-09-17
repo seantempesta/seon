@@ -1658,6 +1658,16 @@ launched. Also seen: 17 foreign reds in the pulled-shape class
 (`pulled-references-satisfy-every-declared-entity-contract`, `:my.plan/*`)
 — the pulled-form derivation (step B) is the owner.
 
+**REFORK of default (~01:05Z, log `tmp/orchestrator/refork/refork-2026-09-17T0100Z.log`):**
+the stop/start booted to the branch phase and refused ("cannot reopen in
+place: `:seon.context.capture/prompt` changed :db/noHistory from true to nil,
+which Datahike does not apply to an installed attribute" — the schema-change
+RESET NEEDED from `79c106925`); `stop --force; init default --force`
+(reforked from current-src `6aab37ac`); `start` → pid 28164 alive, web
+7994, prepl 62666. First `init --dev` refused "source changed while
+analyzed; retry" (lanes editing) — JVM booted from the tree, only the
+recorded commit lags; retry running. Juniper reseed issued via MCP.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
