@@ -279,9 +279,9 @@
    (fn [connection]
      (let [basis (:max-tx @connection)]
        (doseq [[caller invoke]
-               [["seon.config/compile-manifest" #(config/compile-manifest {})]
-                ["seon.config/apply!" #(config/apply! {:seon.db/connection connection})]
-                ["seon.config/effective" #(apply config/effective [(db/db connection)])]]]
+               [['seon.config/compile-manifest #(config/compile-manifest {})]
+                ['seon.config/apply! #(config/apply! {:seon.db/connection connection})]
+                ['seon.config/effective #(apply config/effective [(db/db connection)])]]]
          (let [refusal (test-support/refusal-data invoke)]
            (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
            (is (= caller (:seon.instrument/contract-violated refusal)))))
@@ -417,7 +417,7 @@
              {:seon.boot/cluster-name "default" :seon.config/environment
               {:seon.config.flow.compute/queue-depth 0}}))]
       (is (= :seon.instrument/contract-violated (:seon.error/kind data)))
-      (is (= "seon.config/compile-manifest"
+      (is (= 'seon.config/compile-manifest
              (:seon.instrument/contract-violated data)))
       (is (= #{[:seon.config/environment
                 :seon.config.flow.compute/queue-depth]}
