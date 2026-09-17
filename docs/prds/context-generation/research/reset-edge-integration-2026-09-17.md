@@ -9,13 +9,13 @@ tags: [reset, datahike, schema, integration]
 
 **Not ready to merge. RESET NEEDED.** Implementation remains uncommitted in
 `tmp/reset-batch-wt`, branch `reset-batch`. The current base includes
-`684f185f8`; the three documentation commits have been rebased onto it. The
+`024991490`; the documentation commits have been rebased onto it. The
 orchestrator owns merge, the cold gate, platform proof and the reset. Default
 was not restarted, reset, adopted or otherwise mutated by this lane.
 
 The complete named Datahike modeling study was read end to end, including its
 correction table and standing patterns. Its row-by-row disposition is maintained
-in [the reset plan](../../steward-platform/plan/reset-batch-2026-09-17.md#datahike-modeling-study-corrections--owner-1i),
+in [the reset plan](../../steward-platform/plan/reset-batch-2026-09-17.md#modeling-study-correction-ledger--bd5923a8c-1i-controls),
 not a second edit schedule here. The changes to the implementation include
 identity-only removal and rename detection; exact analyzer-input provenance;
 optional empty memberships; agent archive facts and a writer refusal of agent
@@ -42,6 +42,10 @@ Commands use `SEON_TEST_SLOTS=3 bin/test-fast --paths <owned paths> --` from thi
 worktree, one invocation at a time. `tmp/test-slots` points at the main checkout's
 slots. No cold gate was run. The logs above are local iteration records; retain
 final evidence under this research directory before landing.
+
+Fast 22 completed 189 tests and 1,811 assertions with zero failures and zero
+errors. It predates the subsequent §1h edits and rebase, so it does not prove
+the current complete worktree.
 
 ## Corrections discovered by the iteration
 
@@ -71,7 +75,8 @@ this does not introduce another evaluation path or bypass the database writer.
 ## Boundaries and remaining proof
 
 The message-wake-model lane owns `seon.message.edn` and `seon.wake.edn`; neither
-was edited here. Its landing must join §1h in the same publication. The original
+was edited here. Seam 1 at `a50424f6b` is now incorporated by rebase; its remaining work must
+join §1h in the same publication. The original
 `context_capture_history_test.clj` residue is tracked, clean and already landed
 at `79c106925`; there is no unfinished test to discard.
 

@@ -1285,17 +1285,17 @@ refusal. G5 closes the different identity-less entity coverage hole.
 | Study table row | Change to this batch and implementation obligation | Current reset-worktree evidence |
 |---|---|---|
 | Symbol edges | Explicit indexes on calls/references/reach; no redundant identity index flags. Preserve advisory reach separately. | Already in schema edits; equal-population reverse-walk timing still owed. |
-| Strict deletion | Compare affected prior identity values to final names, including retraction/rename on surviving eids; no escape for complete republish. Fresh population reports unresolved tokens positively. | Detection widened; final-state and publication checks present, regressions pending green. |
-| G4 digest | Writer derives digest from exact analyzed bytes including resolver prelude. Complete definition required; core-file and agent provenance separate arms. Retain publication provenance; no compactable evaluation dependency. | Digest and separate provenance arms present; exact-input regression still owed. |
+| Strict deletion | Compare affected prior identity values to final names, including retraction/rename on surviving eids; no escape for complete republish. Fresh population reports unresolved tokens positively. | Detection widened; final-state and publication refusal regressions passed fast 22. |
+| G4 digest | Writer derives digest from exact analyzed bytes including resolver prelude. Complete definition required; core-file and agent provenance separate arms. Retain publication provenance; no compactable evaluation dependency. | Digest and separate provenance arms present; exact-input regression passed in fast 22. |
 | Nineteen required-many keys | Optional stored memberships: cluster 2, arity 1, adoption 2, maintenance 14. Positive existing construction facts replace false required collections. No marker booleans; activation six already landed separately. | Optionality implemented; constructor proof still owed. |
 | Maintenance evidence | Parent completion cannot prove a skipped child operation. Validate four actual constructors, empty success, partial/error and absent result using their own scalar evidence. | Plan sharpened; proof incomplete. |
 | G5 components | Discover roots through before AND after; complete traversal under declared bound, not wildcard pull. Test 1,001 children, child-only edit/unlink, multiple parents, cycles and identity-less orphan rows. Owned occurrence links differ from shared shape refs. | New explicit obligations; implementation incomplete. |
-| Archived agents | Install archived-tx and lifecycle writer; derive archived?/open? for UI. Never retract agents, even coordinated removal of their incoming refs. Archive does not stop graphs or detach ownership. | Co-deletion proof deleted; lifecycle implementation still owed. |
-| Capability handler | Delete declaration capability-fn; existing handler symbol is a final deletion obligation. | Already in worktree schema and validator; regression pending. |
+| Archived agents | Install archived-tx and lifecycle writer; derive archived?/open? for UI. Never retract agents, even coordinated removal of their incoming refs. Archive does not stop graphs or detach ownership. | Co-deletion proof deleted; archive writer and derived open?/archived? passed fast 22. Namespace agent listings omit archived identities; historical direct reads remain available. |
+| Capability handler | Delete declaration capability-fn; existing handler symbol is a final deletion obligation. | In worktree schema and final validator; declared handler reach regression passed fast 22. |
 | Message subject/sender/protocol | §1h in one publication; option A accepted: preserve existing token grammar, remove resolution/inside-about classification; from marks inside; assignment/declination separate facts. | message-wake-model owns seon.message.edn/seon.wake.edn; do not edit. Record its landing before integration. |
 | Message handling | Delete inbox-move pattern; listened to plus handling-turn claim and answering-t rule. Final authority decides claims; listeners are notifications, not claims. | Same foreign message-wake-model boundary; no substitute mechanism here. |
-| Origin | eval/origin becomes issue/id value; retain generated-by display. No generic ref carrier. | Implementation still owed. |
-| Refreshes | Delete attribute and both refresh-call functions; latest-read derivation remains ordinal-based. No new digest/index. | Implementation still owed. |
+| Origin | eval/origin becomes issue/id value; retain generated-by display. No generic ref carrier. | Issue-ID value and reader changes implemented; deletion-survival regression awaits the current run. |
+| Refreshes | Delete attribute and both refresh-call functions; latest-read derivation remains ordinal-based. No new digest/index. | Attribute deletion and regression replacement now also landed upstream; obsolete functions removed here, no remaining production references. |
 | fn.ast | Option A authorized: preserve reconciliation/backfill via canonical schema.shape plus provenance/arity facts, then delete AST writers/resources. Shared shape roots remain ordinary refs. | Historical grep found maintenance consumers; new integration-HEAD grep and behavior regressions required. |
 | Optional refs | “Required when present” supplies no deletion guarantee. A surviving outcome/provenance condition or observation value must establish the requirement. Attempts need not have error/failover facts. | Replaces blanket recommendation; audit affected family rows before implementation. |
 | Issue status | Keep authoritative status until positive writers cover imported resolved AND superseded notes. | Already retained. |
@@ -1333,3 +1333,27 @@ publication. No default process operation or live schema adoption was performed.
 **RESET NEEDED.** Preserve this worktree until the group is green and reviewed;
 the orchestrator then runs `git merge --ff-only reset-batch` from
 `steward-platform` and owns the reset and cold proof.
+
+### Rebased integration checkpoint — 2026-09-17
+
+The worktree now incorporates `024991490`, including message-wake seam 1
+`a50424f6b`. This branch did not edit `seon.message.edn` or `seon.wake.edn`;
+that owner's complete §1h publication remains the foreign boundary. The
+upstream invalid-note fix superseded this branch's duplicate classifier, and
+upstream immutable test-run diagnostics were preserved while removing stub
+minting. The upstream uniqueness regression now exercises a real identity
+conflict, so no synthetic replacement attribute is needed.
+
+Fast 22, before this rebase and the origin/refresh follow-up: **189 tests,
+1,811 assertions, zero failures and zero errors**. This is fast iteration,
+not a cold gate or reset proof. Fast 23 runs the subsequent origin,
+maintenance, fault-recording and program-operation changes against its captured
+pre-rebase snapshot; another integration run is required after the rebase.
+
+Pinned production grep after the rebase found **zero matches** for
+`identity-tombstone`, `write-tombstone`, `function-identity-call`, `seon.fn.ast`,
+`:seon.fn/ast`, or `:seon.fn/capability-fn` under `src` and `resources`.
+Reconciliation/backfill behavior passed in fast 22. G5's complete owning-root
+validator and its traversal budget are still outstanding, as are the
+reverse-walk timing and reset-boundary live proofs. **RESET NEEDED; not yet
+ready to merge.**
