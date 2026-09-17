@@ -739,10 +739,8 @@
             function-symbol 'fixture.pending/target
             now (java.util.Date. 1785000000000)
             settle-source!
-            (fn [run-id agent-id source]
-              (let [[_ row] (seon.fn/analyze-form
-                             @connection source
-                             [:seon.ns/name namespace-name] nil)]
+            (fn [run-id agent-id program-identity source]
+              (let [row (support/program-row @connection program-identity source)]
                 (support/transacted!
                         connection
                         [{:seon.agent/id agent-id}
@@ -763,6 +761,7 @@
         (support/transacted! connection [{:seon.ns/name namespace-name}])
         (settle-source!
          "pending-test-run" "pending-test-agent"
+         [:seon.test/sym test-symbol]
          (str "(clojure.test/deftest ^{:seon.test/subject " function-symbol
               "} target-test (clojure.test/is true))"))
         (let [pending (db/pull @connection '[*]
@@ -776,6 +775,7 @@
                     (seon.fn/gate-set @connection function-symbol))))
         (settle-source!
          "pending-function-run" "pending-function-agent"
+         [:seon.fn/sym function-symbol]
          "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)")
         (let [resolved (db/pull @connection '[:seon.test/subject]
                                 [:seon.test/sym test-symbol])]
@@ -801,12 +801,13 @@
                            "^{:seon.test/subject fixture.batch/target} "
                            "target-test (clojure.test/is true))")
                       "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"]
-             rows (mapv (fn [source]
-                          (second
-                           (seon.fn/analyze-form
-                            @connection source
-                            [:seon.ns/name 'fixture.batch] nil)))
-                        sources)
+             rows [(support/program-row
+                    @connection
+                    [:seon.test/sym 'fixture.batch/target-test]
+                    (first sources))
+                   (support/program-fn-row
+                    @connection 'fixture.batch/target
+                    (second sources))]
              result (db/transact!
                      connection
                      (turn/receipt-settle-batch-tx
@@ -1333,9 +1334,8 @@
                             [:seon.ns/name 'my.macro-caller])))))
       (let [source (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
                         "unresolved-caller [] (missing.target/nope))")
-            [_ row] (seon.fn/analyze-form
-                     @connection source
-                     [:seon.ns/name 'my.macro-caller] nil)
+            row (support/program-fn-row
+                 @connection 'my.macro-caller/unresolved-caller source)
             result (db/transact!
                     connection
                     (turn/receipt-settle-tx
@@ -1460,12 +1460,10 @@
                         [:seon.agent/id agent-id])
             function-row
             (fn [result]
-              (second
-               (seon.fn/analyze-form
-                @connection
-                (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
-                     "scratch [] " result ")")
-                [:seon.ns/name namespace-name] nil)))
+              (support/program-fn-row
+               @connection qualified-id
+               (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
+                    "scratch [] " result ")")))
             start!
             (fn [run-id ordinal]
               (db/transact!
