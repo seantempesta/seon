@@ -1086,19 +1086,27 @@
     (schema/canonical-database-attributes forms))))
 
 (defn- missing-process-rows
+  "Return required process rows absent from `db`, or its read refusal."
+  {:malli/schema [:=> [:cat
+                       [:or :seon.db/database-value :seon.error/value]]
+                  [:or [:vector [:map
+                                 [:seon.db.process/id
+                                  :seon.db.process/id]]]
+                   :seon.error/value]]}
   [db]
-  (let [present
-        (into
-         #{}
-         (db/q '[:find [?id ...]
+  (let [read-result
+        (db/q '[:find [?id ...]
                 :where [_ :seon.db.process/id ?id]]
-              db))]
-    (into
-     []
-     (comp
-      (remove present)
-      (map (fn [process-id] {:seon.db.process/id process-id})))
-     [boot-process-identity config/managing-process-identity])))
+              db)]
+    (if (error/error? read-result)
+      read-result
+      (let [present (set read-result)]
+        (into
+         []
+         (comp
+          (remove present)
+          (map (fn [process-id] {:seon.db.process/id process-id})))
+         [boot-process-identity config/managing-process-identity])))))
 
 (defn- schema-lookup-ref?
   [value]
@@ -1471,6 +1479,12 @@
        :seon.activation/lookup-rows lookup-rows})))
 
 (defn- closure-fact-missing
+  "Return missing stored activation facts, or the first refused read."
+  {:malli/schema [:=> [:cat
+                       [:or :seon.db/database-value :seon.error/value]
+                       :seon.activation/closure
+                       :seon.activation/lookup-rows]
+                  [:or :seon.activation/missing :seon.error/value]]}
   [database closure lookup-rows]
   (let [schema-keys (set (:seon.activation/schema-keys closure))
         required-attributes
@@ -1479,40 +1493,49 @@
         config-required (set (:seon.activation/config-required closure))
         executable-symbols
         (set (:seon.activation/executable-symbols closure))
-        database-schemas
-        (into #{}
-              (db/q '[:find [?key ...]
-                      :where [?schema :seon.schema/key ?key]]
-                    database))
-        installed-attributes (set (keys (:schema database)))
-        database-symbols
-        (into #{}
-              (db/q '[:find [?symbol ...]
-                      :where [?function :seon.fn/sym ?symbol]]
-                    database))]
-    (into []
-          cat
-          [(map (fn [schema-key]
-                  {:seon.activation/schema-key schema-key})
-                (sort (set/difference schema-keys database-schemas)))
-           (map (fn [attribute]
-                  {:seon.activation/required-attribute attribute})
-                (sort
-                 (set/difference required-attributes installed-attributes)))
-           (map (fn [dial]
-                  {:seon.activation/config-dial dial})
-                (sort (set/intersection config-defaults config-required)))
-           (keep
-            (fn [{attribute :seon.activation.lookup/attribute
-                  value :seon.activation.lookup/value}]
-              (when-not (:db/id (db/pull database [:db/id] [attribute value]))
-                {:seon.activation/lookup-attribute attribute
-                 :seon.activation/lookup-value value}))
-            (sort-by pr-str lookup-rows))
-           (map (fn [executable-symbol]
-                  {:seon.activation/executable-symbol executable-symbol})
-                (sort
-                 (set/difference executable-symbols database-symbols)))])))
+        schema-read
+        (db/q '[:find [?key ...]
+                :where [?schema :seon.schema/key ?key]]
+              database)]
+    (if (error/error? schema-read)
+      schema-read
+      (let [symbol-read
+            (db/q '[:find [?symbol ...]
+                    :where [?function :seon.fn/sym ?symbol]]
+                  database)]
+        (if (error/error? symbol-read)
+          symbol-read
+          (let [database-schemas (set schema-read)
+                installed-attributes (set (keys (:schema database)))
+                database-symbols (set symbol-read)]
+            (into []
+                  cat
+                  [(map (fn [schema-key]
+                          {:seon.activation/schema-key schema-key})
+                        (sort (set/difference schema-keys database-schemas)))
+                   (map (fn [attribute]
+                          {:seon.activation/required-attribute attribute})
+                        (sort
+                         (set/difference required-attributes
+                                         installed-attributes)))
+                   (map (fn [dial]
+                          {:seon.activation/config-dial dial})
+                        (sort
+                         (set/intersection config-defaults config-required)))
+                   (keep
+                    (fn [{attribute :seon.activation.lookup/attribute
+                          value :seon.activation.lookup/value}]
+                      (when-not (:db/id (db/pull database [:db/id]
+                                                 [attribute value]))
+                        {:seon.activation/lookup-attribute attribute
+                         :seon.activation/lookup-value value}))
+                    (sort-by pr-str lookup-rows))
+                   (map (fn [executable-symbol]
+                          {:seon.activation/executable-symbol
+                           executable-symbol})
+                        (sort
+                         (set/difference executable-symbols
+                                         database-symbols)))])))))))
 
 (defn require-activation!
   "Return the stored closure or refuse with every missing activation fact."
@@ -1528,6 +1551,8 @@
         (if closure
           (closure-fact-missing database closure lookup-rows)
           [{:seon.activation/schema-key :seon.activation/closure}])]
+    (when (error/error? missing)
+      (throw (ex-info (:seon.error/message missing) missing)))
     (when (seq missing)
       (let [refusal (source/activation-refusal missing)]
         (refused! (:seon.error/message refusal) refusal)))
@@ -1605,6 +1630,9 @@
                (db/transact! connection {:tx-data declarations})
                {:seon.boot/population :seon.schema/declarations})))
           (let [process-rows (missing-process-rows (db/db connection))]
+            (when (error/error? process-rows)
+              (throw (ex-info (:seon.error/message process-rows)
+                              process-rows)))
             (when (seq process-rows)
               (require-committed!
                (db/transact! connection {:tx-data process-rows})

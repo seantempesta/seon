@@ -29,6 +29,35 @@
         (is (= before (db/basis-t (db/db connection)))
             "an unreadable recovery decision commits nothing")))))
 
+(deftest process-identity-set-building-refuses-an-unreadable-query
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            refusal (db/q '[:find ?entity .
+                            :where [?entity :seon.audit/poison _]]
+                          database)
+            missing-process-rows
+            (#'cluster/missing-process-rows refusal)]
+        (is (error/error? refusal) (pr-str refusal))
+        (is (= refusal missing-process-rows)
+            "process identities are not rebuilt from error-map entries")))))
+
+(deftest activation-fact-set-building-refuses-an-unreadable-query
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            refusal (db/q '[:find ?entity .
+                            :where [?entity :seon.audit/poison _]]
+                          database)
+            closure-fact-missing
+            (#'cluster/closure-fact-missing
+             refusal
+             {:seon.activation/source-digest (apply str (repeat 64 "a"))}
+             [])]
+        (is (error/error? refusal) (pr-str refusal))
+        (is (= refusal closure-fact-missing)
+            "activation facts are not reported missing when their read refused")))))
+
 (deftest schema-row-convergence-uses-the-stores-own-semantics
   (test-support/with-database
     {::test-support/extra-schema
