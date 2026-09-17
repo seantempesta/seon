@@ -456,6 +456,12 @@ resolved by identity through `seon.test/resolve-test` after boot (test-system
 stage 2), never required at boot; the platform/destructive tier tests the
 system from isolated snapshots (test-system PRD §0b). Option C (the graph
 declares admission per namespace) is the model fix, folded into stage 2.
+Owner, ~22:05Z: "Once the system is up and running most of the tests and
+software should be at runtime." The boot is the platform from `src/` only;
+everything after — tests, agent-authored definitions, repairs — is program
+facts executed by the running system (the in-process runner, resolution by
+identity, `run-owned`), with isolated snapshot workers reserved for the
+platform and destructive tier.
 
 ## 2. What exists today, with the seams named
 
