@@ -1119,9 +1119,10 @@
   conflating them refused every cluster boot on 2026-08-08. The program graph
   is indexed from both source roots (`seon.fn/source-roots` — `src` and
   `test`), so `my.background-test` is an ordinary core-provenanced program
-  row; a cluster JVM runs `-M:dev`, whose classpath carries no `test/`, so
-  that row names source this process genuinely cannot load. Requiring it was
-  a correct refusal of a wrong premise.
+  row; cluster launch deliberately omits the resolved test classpath, so that
+  row names source this process genuinely cannot load. The in-process test
+  runner installs its resolved test loader only after boot. Requiring a test
+  row during boot was a correct refusal of a wrong premise.
 
   The loader is the PROCESS's launch classpath, never the calling thread's.
   `io/resource`'s one-argument arity asks `clojure.lang.RT/baseLoader`, which
@@ -1176,13 +1177,52 @@
         (try
           (require namespace-name)
           (catch Throwable failure
-            (throw
-             (ex-info
-              (str "First-party program namespace " namespace-name
-                   " could not be loaded for the evaluation context.")
-              {:seon.error/kind ::namespace-unloadable
-               :seon.ns/name namespace-name :seon.sci.eval/namespace-unloadable true}
-              failure))))
+            (let [causes (take-while some? (iterate ex-cause failure))
+                  underlying (last causes)
+                  cause-message (or (ex-message underlying)
+                                    (ex-message failure)
+                                    "The namespace loader reported no message.")
+                  location-data
+                  (some (fn [cause]
+                          (let [data (ex-data cause)]
+                            (when (or (:clojure.error/source data)
+                                      (:clojure.error/line data)
+                                      (:clojure.error/column data))
+                              (select-keys data
+                                           [:clojure.error/source
+                                            :clojure.error/line
+                                            :clojure.error/column]))))
+                        causes)
+                  location
+                  (when (seq location-data)
+                    (str (:clojure.error/source location-data)
+                         (when-let [line (:clojure.error/line location-data)]
+                           (str ":" line))
+                         (when-let [column (:clojure.error/column location-data)]
+                           (str ":" column))))
+                  message
+                  (str "First-party program namespace " namespace-name
+                       " could not be loaded for the evaluation context. Cause: "
+                       cause-message
+                       (when location (str " at " location)) ".")
+                  diagnostic
+                  (error/diagnostic
+                   {:seon.error/kind ::namespace-unloadable
+                    :seon.error/message message
+                    :seon.error/diagnostic-layer ::acquisition
+                    :seon.error/diagnostic-operation
+                    'seon.sci.eval/host-namespace!
+                    :seon.error/diagnostic-member namespace-name
+                    :seon.error/diagnostic-expected ::loaded-host-namespace
+                    :seon.error/diagnostic-offending namespace-name
+                    :seon.error/diagnostic-cause cause-message
+                    :seon.error/diagnostic-evidence
+                    {:seon.sci.eval/cause-class
+                     (symbol (.getName (class underlying)))
+                     :seon.sci.eval/cause-location location-data}
+                    :seon.ns/name namespace-name
+                    :seon.sci.eval/namespace-unloadable true})]
+              (throw (ex-info message diagnostic failure)))))
         (or (find-ns namespace-name)
             (throw
              (ex-info

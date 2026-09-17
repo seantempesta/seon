@@ -887,6 +887,39 @@
     (is (some? (host-namespace! 'my.web))
         "a row it can serve is loaded rather than skipped")))
 
+(deftest unloadable-host-namespace-carries-the-cause-message-and-location
+  (let [host-namespace! (ns-resolve 'seon.sci.eval 'host-namespace!)
+        probe-namespace 'seon.sci.eval-test.unresolved-var-probe
+        test-root (-> (io/resource "seon/sci/eval_test.clj")
+                      .toURI io/file .getParentFile)
+        source (io/file test-root "eval_test" "unresolved_var_probe.clj")]
+    (try
+      (io/make-parents source)
+      (spit source
+            (str "(ns " probe-namespace ")\n"
+                 "(def value absent.namespace/value)\n"))
+      (let [failure (try
+                      (host-namespace! probe-namespace)
+                      nil
+                      (catch clojure.lang.ExceptionInfo error error))
+            data (ex-data failure)
+            diagnostic-data (:seon.error/data data)
+            evidence (:seon.error/diagnostic-evidence diagnostic-data)
+            location (:seon.sci.eval/cause-location evidence)
+            cause-message (:seon.error/diagnostic-cause diagnostic-data)]
+        (is (= :seon.sci.eval/namespace-unloadable (:seon.error/kind data)))
+        (is (str/includes? cause-message "absent.namespace"))
+        (is (str/ends-with? (:clojure.error/source location)
+                            "unresolved_var_probe.clj"))
+        (is (pos-int? (:clojure.error/line location)))
+        (is (str/includes? (:seon.error/message data) cause-message))
+        (is (str/includes? (:seon.error/message data)
+                           (str "unresolved_var_probe.clj:"
+                                (:clojure.error/line location)))))
+      (finally
+        (when (find-ns probe-namespace) (remove-ns probe-namespace))
+        (io/delete-file source true)))))
+
 (deftest process-membership-ignores-a-thread-context-classloader
   ;; The same seam, one level down: "what can this process serve" must be a
   ;; property of the PROCESS, not of whoever is on the stack. `io/resource`'s

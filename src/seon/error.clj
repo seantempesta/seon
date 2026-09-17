@@ -809,6 +809,23 @@
       :fn (or declared-message "the declared predicate")
       (str "a value satisfying " (or declared-message "the declared schema")))))
 
+(defn- collection-member-problem
+  [problem]
+  (let [schema (m/deref-all (:schema problem))
+        schema-type (m/type schema)
+        child (when (#{:set :vector :sequential} schema-type)
+                (first (m/children schema)))
+        value (:value problem)]
+    (when (and child (coll? value))
+      (when-let [[member]
+                 (reduce (fn [_ member]
+                           (when-not (m/validate child member)
+                             (reduced [member])))
+                         nil value)]
+        {:schema child
+         :value member
+         ::collection-type schema-type}))))
+
 (defn explain-problem
   "Translate Malli's structured problem into semantic refusal evidence.
    No message parsing or value printing occurs at this seam."
@@ -822,6 +839,9 @@
         problem (if checked-output
                   {:schema (:schema checked-output) :value (:value checked-output)}
                   problem)
+        member-problem (collection-member-problem problem)
+        problem (or member-problem problem)
+        member? (boolean member-problem)
         missing? (= :malli.core/missing-key (:type problem))
         entry-schema (when (and missing?
                                 (= :map (m/type (m/deref-all (:schema problem)))))
@@ -838,10 +858,16 @@
      :seon.error/argument argument
      :seon.error/expected (m/form (:schema problem))
      :seon.error/expected-description
-     (if missing? (str "the required key " (pr-str (last path)) " with " expected) expected)
+     (cond
+       missing? (str "the required key " (pr-str (last path)) " with " expected)
+       member? (str "a collection member satisfying " expected)
+       :else expected)
      :seon.error/offending (if (and missing? (map? parent)) parent (:value problem))
      :seon.error/actual-description
-     (if missing? (str "a map missing " (pr-str (last path))) (value-description (:value problem)))
+     (cond
+       missing? (str "a map missing " (pr-str (last path)))
+       member? (str "a collection member that is " (value-description (:value problem)))
+       :else (value-description (:value problem)))
      :seon.error/fix
      (cond
        missing? (str "Supply " (pr-str (last path)) " with " expected ".")

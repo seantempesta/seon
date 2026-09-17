@@ -26,6 +26,21 @@
         (is (not (str/includes? (:seon.error/expected-description description)
                                 "unknown error")))))))
 
+(deftest collection-refusals-name-the-failing-member-and-element-form
+  (let [description
+        (error/explain-problem
+         {:seon.error/problem
+          {:schema (m/schema [:set :qualified-keyword])
+           :value #{"seon.fn.index/17904"}}
+          :seon.error/path [0 :seon.schema/references]
+          :seon.error/argument "transaction data"})]
+    (is (= :qualified-keyword (:seon.error/expected description)))
+    (is (= "seon.fn.index/17904" (:seon.error/offending description)))
+    (is (= "a collection member satisfying a namespaced keyword"
+           (:seon.error/expected-description description)))
+    (is (= "a collection member that is a string"
+           (:seon.error/actual-description description)))))
+
 (deftest structured-refusals-share-one-actionable-rendering
   (support/with-database
     (fn [connection]
