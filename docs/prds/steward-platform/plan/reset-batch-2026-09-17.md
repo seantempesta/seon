@@ -26,7 +26,7 @@ Datahike fork extension belongs to this implementation. Existing required refs
 already refuse a sweep through whole-entity validation; optional refs sweep.
 Components must validate with their parents (G5), not acquire invented identities.
 
-The authorized first production seam is the indexed symbol-edge retype plus
+The next reset-gated production seam is the indexed symbol-edge retype plus
 `seon.db/write-report-error` refusal and canonical regressions. Calls,
 references, namespace requirements and declared test subjects are current
 obligations; reach is historical evidence, reported stale and never a blocker.
@@ -71,6 +71,43 @@ publication. Do not infer a new generic deletion policy from this inventory.
 The evaluation author deletion also waits for a proven derivation: X measured
 24 renderer facts versus 69 system stamps, a 45-row disagreement. Its deletion
 cannot be justified by renderer presence alone.
+
+## Tier 1 integration correction — unbreakable connections
+
+Read [unbreakable connections](../research/unbreakable-connections-2026-09-16.md)
+end to end (owner inventory `b4c7e86c9`). Its Tier 1 is authorized before the
+reset; none of these checks introduces a stored fact or universal deletion rule.
+
+| Item | Integration order and evidence |
+|---|---|
+| Core file requirement | **Prerequisite discovered:** 802 live core function rows have no file, including manufactured external stubs. `fn/desired-rows` stamps these core. Remove them in G1/G2 first; do not impose the requirement on agent `definition-row`, which deliberately removes file coordinates. The held canonical `program-fn-row` helper also needs a writer fix. [Evidence and boundary](../../../seon/issues/core-program-stubs-prevent-required-file-provenance.md). |
+| Required namespace/task refs | Canonical regression must name the surviving function/task in the existing whole-entity refusal and prove no commit. No deletion-policy property. |
+| Call-site arity | **Unlanded candidate:** one shared mismatch query at final report admission. Changes to caller tuples, function identities, arity ownership or min/max trigger it; child-only edits and same-transaction repairs are included. Default read-only observation: 8,939 checked, 46,999 unchecked, zero mismatches, 395 ms. These are current measurements, not the inventory's older 3,412/31,020 census. |
+| Render target admission | **Unlanded candidate:** check final stored schema forms for named AI/HTML renderers and require their function rows. Complete bootstrap currently writes schemas before functions; move those canonical rows into `index!`'s existing combined population transaction before enabling refusal. Incremental schema-only publication and branch acquisition retain their existing canonical-schema reconciliation. |
+
+**Arity publication boundary discovered during verification:** the raw source
+count is not the prepared invocation count. The complete read-only probe for
+`(my.message/inbox)` reports declared arity 1, supported source counts `[0 1]`,
+and analyzer tuple `["my.message/inbox" 0]`. The strict candidate would reject
+a supported agent definition. Hold that enforcement until the owner chooses
+preparation-aware admission, explicit core-only coverage, or deferral; the
+[reproduction and three priced options](../../../seon/issues/source-call-arity-is-not-prepared-call-arity.md)
+are the decision text. This corrects the inventory's claim that a clean
+indexed census alone proves the invariant ready for all writers.
+
+`src/seon/test/selection.clj` was released at `d6659f21a`; its earlier hold
+is no longer a boundary. `test/seon/test_support.clj` and `src/seon/schema.clj`
+remain held at the observed integration boundary. Do not edit their hunks.
+The requested `seon.render-test` namespace does not exist at this HEAD;
+use `seon.render.entity-pairs-test` for the render-pair regression surface.
+
+**Stop for owner review:** [Tier 1 boundary and exact candidate patches](../../context-generation/research/reset-tier1-admission-boundary-2026-09-17.md).
+No production commit landed and no source/schema hunk remains from this
+attempt. The new canonical regressions passed in the candidate run, but the
+full six-namespace run did not finish green; its timing/watchdog results are
+recorded in the landing note. Do not apply the raw-arity patch until the
+preparation counterexample is resolved.
+
 
 ## Previous review correction — superseded on deletion by J/K/X above
 

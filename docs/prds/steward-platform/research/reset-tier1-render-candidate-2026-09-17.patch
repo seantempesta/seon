@@ -1,0 +1,215 @@
+diff --git a/src/seon/cluster.clj b/src/seon/cluster.clj
+index c2ca4aeb1..251cf6799 100644
+--- a/src/seon/cluster.clj
++++ b/src/seon/cluster.clj
+@@ -1564,7 +1564,9 @@
+   `:seon.schema/missing-projection`. A projection the caller already handed
+   (`refresh-source!`'s declaration projection, a cluster's advanceable
+   projection state) wins, so this derives one only when nothing supplied it."
+-  [connection cluster-name]
++  ([connection cluster-name]
++   (accrete-schema-population! connection cluster-name true))
++  ([connection cluster-name publish-schema-rows?]
+   (let [forms (schema.edn/packaged-forms)]
+     (schema/call-with-forms
+      forms
+@@ -1584,7 +1586,8 @@
+               (require-committed!
+                (db/transact! connection {:tx-data process-rows})
+                {:seon.boot/population :seon.db/processes})))
+-          (let [schema-rows (schema-row-changes (db/db connection) forms)]
++          (let [schema-rows (when publish-schema-rows?
++                              (schema-row-changes (db/db connection) forms))]
+             (when (seq schema-rows)
+               (require-committed!
+                (db/transact! connection
+@@ -1593,7 +1596,7 @@
+                               {:seon.db/process
+                                [:seon.db.process/id boot-process-identity]}})
+                {:seon.boot/population :seon.schema/rows}))))))))
+-  nil)
++  nil))
+ 
+ (defn populate-source!
+   "The default `current-src` content: this code's schema and program rows.
+@@ -1633,7 +1636,9 @@
+           ;; document never re-accretes the schema.
+           (when (or (nil? classes) (classes :schema-resource))
+           (report-source-progress! "schema population started")
+-          (accrete-schema-population! connection nil)
++          ;; Complete publication admits schema rows with their renderer
++          ;; definitions in index!'s one final transaction.
++          (accrete-schema-population! connection nil (some? classes))
+           (report-source-progress! "schema population complete"))
+           (when (nil? classes)
+           (report-source-progress! "instruction rows")
+diff --git a/src/seon/db.clj b/src/seon/db.clj
+index 6756c7d0a..062e043c4 100644
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -4,6 +4,7 @@
+   elided, the current connection of the calling agent's cluster (`*conn*`,
+   bound per evaluation). Failures return flat `:seon.error` values."
+   (:require [clojure.data :as data]
++            [clojure.edn :as edn]
+             [clojure.set :as set]
+             [clojure.string :as str]
+             [clojure.walk :as walk]
+@@ -2395,7 +2396,7 @@
+        :seon.fn/sym :seon.fn/fn (callee-symbol function-var)
+        ::function-threw
+        {:seon.db/basis-t (basis-t database)
+-        :seon.error/exception-class (.getName (class cause))
++        :seon.error/exception-class (symbol (.getName (class cause)))
+         :seon.error/dependency-data (ex-data cause)}))))
+ 
+ (defn- identity-diff
+@@ -3006,6 +3007,39 @@
+                            {::entity identities ::entity-value row ::path (into [entity-id] in)})))))
+        schema-keys))))
+ 
++(defn- write-render-target-error
++  [database]
++  (let [missing
++        (into []
++              (mapcat
++               (fn [[schema-key encoded]]
++                 (let [properties (schema.form/attr-form-properties (edn/read-string encoded))]
++                   (keep (fn [property]
++                           (let [renderer (get properties property)]
++                             (when (and (qualified-symbol? renderer)
++                                        (not (db.utils/entid database [:seon.fn/sym (str renderer)])))
++                               {:seon.schema/key schema-key
++                                :seon.render/property property
++                                :seon.render/function renderer})))
++                         [:seon.render/ai :seon.render/html]))))
++              (sort-by first
++                       (d/q '[:find ?key ?form :where
++                              [?schema :seon.schema/key ?key]
++                              [?schema :seon.schema/form ?form]] database)))]
++    (when (seq missing)
++      (diagnostic
++       {:seon.error/kind ::invalid-write
++        ::transaction-refused true
++        :seon.error/message "Render declarations name functions absent from the final program. Admit the definitions or repair the declarations in the same transaction."
++        :seon.error/diagnostic-layer :database-write
++        :seon.error/diagnostic-operation 'seon.db/transact!
++        :seon.error/diagnostic-member :seon.schema/form
++        :seon.error/diagnostic-expected :seon.fn/sym
++        :seon.error/diagnostic-offending missing
++        :seon.error/diagnostic-cause :seon.render/function
++        :seon.error/diagnostic-evidence {:seon.render/declarations missing}
++        :seon.error/data {:seon.render/declarations missing}}))))
++
+ (defn- write-report-error
+   "One final check for native operations and all expanded transaction-function output."
+   [projection report]
+@@ -3038,7 +3072,10 @@
+                                           (d/datoms before :eavt entity-id))
+                    identities (merge prior-identities (select-keys row identity-attrs))]
+                (write-entity-error database projection entity-id identities row before)))
+-           affected))))
++           affected)
++     (when (some (comp #{:seon.schema/form :seon.schema/key :seon.fn/sym} :a)
++                 (concat attempted (:tx-data report)))
++       (write-render-target-error database)))))
+ 
+ (defn- write-report-validator
+   "Acquire the callback on its immutable projection, primed when the connection acquires it."
+diff --git a/test/seon/db_test.clj b/test/seon/db_test.clj
+index 7c3b4b0c7..993743c46 100644
+--- a/test/seon/db_test.clj
++++ b/test/seon/db_test.clj
+@@ -13,6 +13,7 @@
+             [seon.instrument :as instrument]
+             [seon.render :as render]
+             [seon.render.value :as render.value]
++            [seon.schedule :as schedule]
+             [seon.sci.admit :as admit]
+             [seon.sci.eval :as sci.eval]
+             [seon.schema :as schema]
+@@ -1592,3 +1593,71 @@
+          (is (= "UTC" (:seon.schedule/zone-id
+                         (db/pull (db/db connection) '[*]
+                                  [:seon.schedule/id "f2-composed"])))))))))
++
++(deftest required-program-relations-name-the-surviving-referrer
++  (test-support/with-database
++   (fn [connection]
++     (test-support/transacted!
++      connection [{:seon.agent/id "root"}
++                  [:db.fn/call #'schedule/root-maintenance-seed-call]])
++     (let [database (db/db connection)
++           [task-id function]
++           (first (sort (db/q '[:find ?task-id ?function
++                                :where
++                                [?task :seon.schedule.task/id ?task-id]
++                                [?task :seon.schedule.task/function ?f]
++                                [?f :seon.fn/sym ?function]] database)))
++           namespace-name 'seon.id
++           functions (set (db/q '[:find [?symbol ...]
++                                  :in $ ?name
++                                  :where
++                                  [?ns :seon.ns/name ?name]
++                                  [?fn :seon.fn/ns ?ns]
++                                  [?fn :seon.fn/sym ?symbol]]
++                                database namespace-name))]
++       (is (seq functions))
++       (is (some? task-id))
++       (doseq [[target attribute expected]
++               [[[:seon.ns/name namespace-name] :seon.fn/ns functions]
++                [[:seon.fn/sym function] :seon.schedule.task/function #{task-id}]]]
++         (let [basis (:max-tx @connection)
++               refusal (db/transact! connection [[:db/retractEntity target]])
++               entity (get-in refusal [:seon.error/data :seon.db/entity])]
++           (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
++           (is (= attribute (:seon.db/attribute refusal)))
++           (is (some expected (vals entity)) (pr-str refusal))
++           (is (= basis (:max-tx @connection)))))))))
++
++(deftest render-declarations-require-their-final-function-row
++  (test-support/with-database
++   (fn [connection]
++     (let [renderer 'sample.render/ai
++           schema-key ::render-target
++           definition [:map {:seon.render/ai renderer}]
++           row (first (schema/canonical-schema-rows {schema-key definition}))
++           basis (:max-tx @connection)
++           refusal (db/transact! connection [row])
++           expected [{:seon.schema/key schema-key
++                      :seon.render/property :seon.render/ai
++                      :seon.render/function renderer}]]
++       (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
++       (is (= expected (get-in refusal [:seon.error/data :seon.render/declarations])))
++       (is (= basis (:max-tx @connection)))
++       (test-support/transacted!
++        connection
++        [{:seon.ns/name 'sample.render}
++         (assoc (test-support/program-fn-row renderer)
++                :seon.schema.admission/source :agent
++                :seon.fn/source "(defn ai [value] value)"
++                :seon.fn/arglists "([value])"
++                :seon.fn/private? false)
++         row])
++       (let [refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym (str renderer)]]])]
++         (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
++         (is (= expected (get-in refusal [:seon.error/data :seon.render/declarations]))))
++       (test-support/transacted!
++        connection
++        [[:db/retractEntity [:seon.schema/key schema-key]]
++         [:db/retractEntity [:seon.fn/sym (str renderer)]]])
++       (is (nil? (:db/id (db/pull (db/db connection) [:db/id]
++                                 [:seon.fn/sym (str renderer)]))))))))
+diff --git a/test/seon/fn_test.clj b/test/seon/fn_test.clj
+index 71ef43cb8..dc8800642 100644
+--- a/test/seon/fn_test.clj
++++ b/test/seon/fn_test.clj
+@@ -126,7 +126,7 @@
+       (let [namespace-ref [:seon.ns/name 'sample.evaluation-edges]
+             function-symbol "sample.evaluation-edges/observed"
+             test-symbol "sample.evaluation-edges/observed-test"
+-            source "(do (seon.db/q '[:find ?e :where [?e :seon.agent/id]]) (my.turn/wait))"
++            source "(do (seon.db/q '[:find ?e :where [?e :seon.agent/id]]) (my.turn/wait {:my.turn/note \"Waiting for input.\"}))"
+             definition (str "(defn observed [] " source ")")
+             test-source "(clojure.test/deftest observed-test (observed))"
+             function-row {:seon.fn/sym function-symbol
