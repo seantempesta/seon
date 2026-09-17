@@ -3747,3 +3747,24 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   from its partial edits; `acquisition-by-digest` resumes when an Opus agent
   finishes (load). The serial-worker and db slices stay with the Opus agents
   that already hold those files.
+
+## 2026-09-18 ~10:20Z — preflight fixed; reset 3 for the accumulated RESET NEEDED
+
+- `4133085b3` (Opus): the preflight bound is declared (20 s, measured
+  basis) and covers the lint only; the kondo dependency cache is keyed on
+  the dependency-set digest (deps.edn + pins; `script/seon/dev/dependency_digest.clj`,
+  shared with dev_cache byte-identically) and ensured once (440 → 90 ms
+  when current); THIRD defect fixed: the preflight refused on kondo's exit
+  code, and kondo exits 2 for WARNINGS, so any warned file refused naming
+  nothing. Measured: lint of 11 files ≈ 0.9-1.2 s; stale-cache population
+  10.8 s. Preflight now passes; adoption then refuses "The JVM loaded a
+  different dependency cache" (default's JVM on `b87685a9…`, current
+  `25e1db91…`) — RESET NEEDED, together with the manifest, the write-bound
+  fact and the operator move. `bin/seon reset --force` running
+  (`reset-2026-09-18-third.log`); the new preflight lints the dirty tree
+  before destroying anything. Its one red
+  (`cluster-boot-omits-test-namespaces…`) failed on a lane's in-flight
+  cluster.clj (`:seon.ai.model/provider-id` lookup) — a finding, not the
+  agent's.
+- `acquisition-by-digest` resumed (codex). Running: stage 1 (codex),
+  acquisition-by-digest (codex), serial-worker (Opus), db (Opus).
