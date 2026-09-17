@@ -8,8 +8,7 @@
            [java.nio.file AtomicMoveNotSupportedException DirectoryNotEmptyException
             FileAlreadyExistsException
             Files StandardCopyOption]
-           [java.security MessageDigest]
-           [java.util.concurrent TimeUnit]))
+           [java.security MessageDigest]))
 
 (def cache-root "target/dev-dependency-classes")
 (def staging-root "target/dev-dependency-classes.next")
@@ -189,115 +188,21 @@
     (.update digest ^bytes value-bytes)
     (.update digest (byte-array [(byte 0)]))))
 
-(defn- digest-file!
-  [^MessageDigest digest file]
-  ;; Checkout location is not an input: identical source bytes in two
-  ;; isolated run roots must select the same dependency classes.
-  (with-open [input (io/input-stream file)]
-    (let [buffer (byte-array 65536)]
-      (loop []
-        (let [read-count (.read input buffer)]
-          (when (pos? read-count)
-            (.update digest buffer 0 read-count)
-            (recur))))))
-  (.update digest (byte-array [(byte 0)])))
-
-(defn- git-dependency-pins
-  "The submodule pins `root`'s own git index states, or nothing.
-
-  `git ls-files` answers for the PREFIX it runs in: a directory nested inside
-  the repository but without its own work tree answers exit 0 with ZERO
-  bytes, which digests exactly like a tree whose forks all sit at different
-  commits. Empty output is therefore not an answer here — it is the absence
-  of one, and the caller falls through to the recorded pins."
-  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
-  [root]
-  (let [command ["git" "-C" (str root) "ls-files" "--stage" "--" "reference-code"]
-        child (.start (doto (ProcessBuilder. ^java.util.List command)
-                        (.redirectErrorStream true)))
-        output (future (slurp (.getInputStream child)))]
-    (try
-      (when-not (.waitFor child 10 TimeUnit/SECONDS)
-        (throw (ex-info "Dependency pin query exceeded its execution bound."
-                        {:seon.dev-cache/command command})))
-      (let [text (deref output 1000 ::unavailable)]
-        (when (and (zero? (.exitValue child))
-                   (string? text)
-                   (not (str/blank? text)))
-          text))
-      (finally
-        (when (.isAlive child)
-          (.destroyForcibly child)
-          (.waitFor child 10 TimeUnit/SECONDS))))))
-
-(defn- recorded-dependency-pins
-  "The pins `bin/test` recorded into this root at snapshot time, or nothing.
-
-  A gate run root is an extraction, not a checkout: its dependency identity
-  travels WITH it instead of being re-derived from a source index that can
-  move while the gate runs. The recorded bytes are the source repository's
-  own `ls-files --stage` output, so a recorded root and its source repository
-  digest identically."
-  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
-  [root]
-  (let [file (io/file root dependency-pins-file)]
-    (when (.isFile file)
-      (let [text (slurp file)]
-        (when-not (str/blank? text)
-          text)))))
-
-(defn- pins-unavailable
-  "The flat refusal for a root whose dependency pins no source can state."
-  {:malli/schema [:=> [:cat :any] :map]}
-  [root]
-  (let [directory (canonical-file root)]
-    {:seon.error/kind :seon.dev-cache/dependency-pins-unavailable
-     :seon.error/message
-     (str "The dependency pins of " (.getCanonicalPath directory)
-          " cannot be read: it is not a git work tree that states them, and it"
-          " carries no " dependency-pins-file " recorded by bin/test. An empty"
-          " pin set would key the dependency-class cache to every fork commit"
-          " at once, so no cache is reused or created here.")
-     :seon.error/data
-     {:seon.error/diagnostic-layer :seon.dev-cache/dependency-configuration
-      :seon.error/diagnostic-operation 'dev-cache/dependency-pins
-      :seon.error/diagnostic-member :seon.dev-cache/dependency-pins
-      :seon.error/diagnostic-expected
-      {:seon.dev-cache/git-command
-       ["git" "-C" (.getCanonicalPath directory) "ls-files" "--stage" "--"
-        "reference-code"]
-       :seon.dev-cache/recorded-pins-file dependency-pins-file}
-      :seon.error/diagnostic-offending (.getCanonicalPath directory)
-      :seon.error/diagnostic-cause :seon.dev-cache/no-pin-source
-      :seon.error/diagnostic-evidence-availability :seon.error/known
-      :seon.error/diagnostic-evidence
-      {:seon.dev-cache/git-pins-stated false
-       :seon.dev-cache/recorded-pins-present
-       (.isFile (io/file directory dependency-pins-file))}}}))
-
-(defn- dependency-pins
-  "The submodule pins this root's dependency classes are keyed on.
-
-  The recorded snapshot pins win when present: they are the bytes this root
-  was built from. Otherwise the root's own git index states them. When
-  neither source answers, this REFUSES — a cache keyed on unknown pins is
-  worse than no cache, because it silently outlives every fork commit."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [root]
-  (or (recorded-dependency-pins root)
-      (git-dependency-pins root)
-      (let [refusal (pins-unavailable root)]
-        (throw (ex-info (:seon.error/message refusal) refusal)))))
-
 (defn- dependency-configuration-digest
+  "The hex digest of this root's declared dependency SET.
+
+  `seon.dev.dependency-digest` owns it: the development class cache and the
+  clj-kondo dependency analysis cache key on the same bytes, so they agree on
+  what a dependency change is. It is loaded by path because this file runs on
+  tools.deps' tool classpath, where only the root directory is present. The
+  file is this CHECKOUT's — the working directory every `-T:dev-cache`
+  invocation runs in — while `root` names the tree whose digest is wanted,
+  which for a recorded snapshot root is `deps.edn` and its pins alone."
   {:malli/schema [:=> [:cat :any] :string]}
   [root]
-  (let [digest (MessageDigest/getInstance "SHA-256")]
-    (digest-file! digest (io/file root "deps.edn"))
-    (digest-bytes! digest (dependency-pins root))
-    (doseq [property ["java.runtime.version" "java.vendor" "java.vm.name" "os.arch"]]
-      (digest-bytes! digest (System/getProperty property)))
-    (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
+  (when-not (resolve 'seon.dev.dependency-digest/configuration-digest)
+    (load-file "script/seon/dev/dependency_digest.clj"))
+  ((resolve 'seon.dev.dependency-digest/configuration-digest) root))
 
 (defn- sha-256
   [rows]
@@ -542,9 +447,10 @@
 
 (defn- test-inputs
   [root dependency-digest]
-  (when-not (resolve 'seon.test.selection/input-digests)
-    (load-file (str (io/file root "src/seon/test/selection.clj"))))
-  [((resolve 'seon.test.selection/input-digests) root)
+  (when-not (resolve 'seon.test.cache/input-digests)
+    (load-file (str (io/file root "src/seon/test/bounds.clj")))
+    (load-file (str (io/file root "src/seon/test/cache.clj"))))
+  [(into (sorted-map) ((resolve 'seon.test.cache/input-digests) root))
    (slurp (io/file root "dev_cache.clj")) dependency-digest])
 
 (defn- test-digest

@@ -241,7 +241,24 @@
             handle))))
     (catch Throwable _ nil)))
 
-(def ^:private syntax-preflight-bound-ms 5000)
+(def source-preflight-bound-ms
+  "The bound on ONE source preflight: enumerating the changed source files and
+  linting them for syntax and unresolved names.
+
+  It covers the two `git` enumerations and the clj-kondo run over the changed
+  set, and NOTHING else. The clj-kondo dependency-analysis population is not
+  under it: that work carries `seon.dev.clj-kondo/population-bound-ms`, runs
+  only when the declared dependency set changed, and its elapsed time is
+  subtracted here. Sizing one bound for both is what refused every adoption on
+  2026-09-17, when a 5,000 ms bound sized for the lint measured 5,319 ms with
+  a population inside it.
+
+  Measured 2026-09-17 on this checkout, warm: 870-1,170 ms for a dirty set of
+  11 files, 80 ms for a single file, 200 ms for a single file against an empty
+  cache, and 14 ms for the git enumerations. The bound carries load headroom
+  over the worst of those; its firing names the phase, the subprocess and the
+  elapsed milliseconds, and is a bug report about work that never arrived."
+  20000)
 
 (def ^:private source-pathspecs
   ["src" "script" "resources" "test" "config" ".claude/seon-hook.edn"])
@@ -312,13 +329,18 @@
    (source-preflight! source-root nil))
   ([source-root baseline]
   (let [started (System/nanoTime)
+        ;; The dependency-analysis population is the lint's INPUT, not part of
+        ;; it: it runs at most once per dependency-set change and carries its
+        ;; own bound, so its elapsed time never eats this preflight's.
+        cache-ms (atom 0)
+        elapsed-ms (fn [] (long (/ (- (System/nanoTime) started) 1000000)))
+        preflight-ms (fn [] (- (elapsed-ms) @cache-ms))
         run-bounded! (fn [argv]
                (operator.state/run-process!
                 {:seon.operator.subprocess/argv argv
                  :seon.operator.subprocess/directory (str source-root)
                  :seon.operator.subprocess/deadline-ms
-                 (max 1 (- syntax-preflight-bound-ms
-                           (long (/ (- (System/nanoTime) started) 1000000))))
+                 (max 1 (- source-preflight-bound-ms (preflight-ms)))
                  :seon.operator.subprocess/merge-error? true}))
         changes (run-bounded! (into ["git" "diff" "--name-only"
                                      "--ignore-submodules=all" "-z" "HEAD" "--"]
@@ -347,26 +369,24 @@
         lint-paths (if baseline
                      (filterv #(not= (get baseline %) (get snapshot %)) changed)
                      changed)
+        cache (atom nil)
+        ensure-cache! (fn []
+                        ;; In this process: the operator already holds the
+                        ;; owner, and a `bb` subprocess to reach it cost a JVM
+                        ;; spawn per edit for a check that is now 55 ms.
+                        (let [at (System/nanoTime)
+                              result (dev.kondo/ensure-dependency-cache!
+                                      (str source-root))]
+                          (swap! cache-ms +
+                                 (long (/ (- (System/nanoTime) at) 1000000)))
+                          (reset! cache result)
+                          (when (= :unavailable
+                                   (:seon.dev.clj-kondo/status result))
+                            (fail! "The clj-kondo dependency cache could not be prepared."
+                                   result))
+                          result))
         lint! (fn [paths]
-                (let [cache-result
-                      (run-bounded!
-                       ["bb" "--config" (str (io/file source-root "bb.edn"))
-                        "--deps-root" (str source-root)
-                        "--classpath"
-                        (str (io/file source-root "script") java.io.File/pathSeparator
-                             (io/file source-root "src") java.io.File/pathSeparator
-                             (io/file source-root "resources"))
-                        "-e"
-                        (str "(require 'seon.dev.clj-kondo) "
-                             "(let [result (seon.dev.clj-kondo/ensure-dependency-cache! "
-                             (pr-str (str source-root)) ")] "
-                             "(prn result) "
-                             "(when (= :unavailable (:seon.dev.clj-kondo/status result)) "
-                             "(System/exit 1)))")])
-                      _ (when-not (zero? (:seon.operator.subprocess/exit cache-result))
-                          (fail! "The clj-kondo dependency cache could not be prepared."
-                                 cache-result))
-                      result (run-bounded! (into ["clj-kondo" "--cache" "false"
+                (let [result (run-bounded! (into ["clj-kondo" "--cache" "false"
                                                   "--parallel" "--config"
                                                   dev.kondo/clj-kondo-output-config
                                                   "--config" boot-refusing-linter-config
@@ -378,23 +398,42 @@
                       errors (filterv #(= :error (:level %)) findings)]
                   (when-not (and (map? report) (vector? findings))
                     (fail! "Source preflight returned no readable findings." result))
-                  (when (or (seq errors)
-                            (not (zero? (:seon.operator.subprocess/exit result))))
+                  (when (seq errors)
                     (fail! (str "Source preflight refused: "
                                 (str/join "; "
                                           (map #(str (:filename %) ":" (:row %) ":"
                                                      (:col %) " [" (name (:type %)) "] "
                                                      (:message %)) errors)))
+                           result))
+                  ;; clj-kondo answers 0 for a clean run and 2 when it found
+                  ;; warnings; the errors it refuses on are the report's own
+                  ;; findings, read above. Any OTHER exit is clj-kondo failing
+                  ;; to lint at all, and it is named rather than reported as an
+                  ;; empty refusal that says nothing about what was wrong.
+                  (when-not (contains? #{0 2}
+                                       (:seon.operator.subprocess/exit result))
+                    (fail! (str "Source preflight could not lint the changed"
+                                " source: clj-kondo exited "
+                                (:seon.operator.subprocess/exit result)
+                                " with no error findings.")
                            result))))]
-    (when (seq lint-paths) (lint! lint-paths))
-    (let [elapsed (long (/ (- (System/nanoTime) started) 1000000))]
-      (when (> elapsed syntax-preflight-bound-ms)
+    (when (seq lint-paths)
+      (ensure-cache!)
+      (lint! lint-paths))
+    (let [elapsed (preflight-ms)]
+      (when (> elapsed source-preflight-bound-ms)
         (fail! "Source preflight exceeded its declared bound."
                {:seon.fresh-operator/elapsed-ms elapsed
-                :seon.fresh-operator/bound-ms syntax-preflight-bound-ms}))
+                :seon.fresh-operator/bound-ms source-preflight-bound-ms
+                :seon.fresh-operator/dependency-cache-ms @cache-ms}))
       (println (str "● changed-source boot lint checked: " (count lint-paths)
-                    " files in " elapsed " ms"))
+                    " files in " elapsed " ms; dependency cache "
+                    (name (or (:seon.dev.clj-kondo/status @cache) :unchecked))
+                    " in " @cache-ms " ms"))
       {:seon.fresh-operator/elapsed-ms elapsed
+       :seon.fresh-operator/dependency-cache-ms @cache-ms
+       :seon.fresh-operator/dependency-cache-status
+       (or (:seon.dev.clj-kondo/status @cache) :unchecked)
        :seon.fresh-operator/source-snapshot snapshot
        :seon.fresh-operator/linted-paths lint-paths}))))
 

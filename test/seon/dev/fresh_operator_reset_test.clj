@@ -9,7 +9,9 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.dev.clj-kondo :as dev.kondo]
+            [seon.dev.dependency-digest :as dependency-digest]
             [seon.dev.fresh-operator-test :as operator-test]
+            [seon.fresh-operator]
             [seon.operator.state :as operator.state])
   (:import [java.util Date]))
 
@@ -73,9 +75,151 @@
       (is (< (/ (- (System/nanoTime) started) 1000000) immediate-refusal-bound-ms))
       (finally (deliver release :done) (delete-recursively! root)))))
 
+(defn- record-current-dependency-cache!
+  "Record `source`'s clj-kondo cache as current, keyed the way the owner keys it.
+
+  The key is `seon.dev.dependency-digest/dependency-set-digest`, so a fixture
+  never has to resolve a classpath or hash one to say \"this dependency set is
+  unchanged\" — and it records the same bytes the operator's own babashka
+  process derives, which a runtime-identity digest could not."
+  [source]
+  (operator.state/write-edn!
+   (io/file source "tmp/test-changed/dependency-cache.edn")
+   {::dev.kondo/input-digest (dependency-digest/dependency-set-digest (str source))
+    ::dev.kondo/contents ((var-get (ns-resolve 'seon.dev.clj-kondo 'cache-contents))
+                          (str source))}))
+
+(defn- preflight-source-checkout!
+  "A committed source checkout the operator preflight can run against.
+
+  It carries the operator's own sources, this checkout's clj-kondo
+  configuration and populated cache, and its own git work tree, so
+  `source-preflight!` enumerates and lints exactly what the fixture changes."
+  []
+  (let [source (fresh-root)
+        project @#'operator-test/project-root
+        subprocess! (fn [argv directory]
+               (let [result (operator.state/run-process!
+                             {:seon.operator.subprocess/argv argv
+                              :seon.operator.subprocess/directory (str directory)
+                              :seon.operator.subprocess/deadline-ms
+                              real-boot-bound-ms
+                              :seon.operator.subprocess/merge-error? true})]
+                 (is (zero? (:seon.operator.subprocess/exit result))
+                     (pr-str result))
+                 result))]
+    (doseq [path ["bin/seon" "bb.edn" "deps.edn"
+                  ".clj-kondo/config.edn"
+                  "script/seon/fresh_operator.clj"
+                  "script/seon/dev/clj_kondo.clj" "script/seon/dev/state.clj"
+                  "script/seon/dev/dependency_digest.clj"
+                  "src/seon/operator/state.clj" "src/seon/fs.clj"
+                  "src/seon/id.clj" "src/seon/db.clj" ".claude/seon-hook.edn"
+                  "config/default.edn"]]
+      (let [target (io/file source path)]
+        (io/make-parents target)
+        (io/copy (io/file project path) target)))
+    (doseq [path ["reference-code" "src/seon/test"]]
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath (io/file source path))
+       (.toPath (io/file project path))
+       (make-array java.nio.file.attribute.FileAttribute 0)))
+    (let [git-common (subprocess! ["git" "rev-parse" "--git-common-dir"] project)
+          checkout (-> (io/file project
+                                (str/trim (:seon.operator.subprocess/output
+                                           git-common)))
+                       .getCanonicalFile
+                       .getParentFile)]
+      (subprocess! ["cp" "-R" (str (io/file checkout ".clj-kondo/.cache"))
+             (str (io/file source ".clj-kondo/.cache"))]
+            source))
+    (subprocess! ["git" "init" "-q"] source)
+    (subprocess! ["git" "add" "."] source)
+    (subprocess! ["git" "-c" "core.hooksPath=/dev/null" "-c" "commit.gpgsign=false"
+           "-c" "user.name=Test" "-c" "user.email=test@example.invalid"
+           "commit" "-qm" "fixture"]
+          source)
+    source))
+
+;;; ---------------------------------------------------------------------------
+;;; The preflight bound covers the LINT, and the dependency cache is ensured
+;;; once per dependency-set change.
+;;;
+;;; On 2026-09-17 one 5,000 ms constant bounded both the changed-source lint
+;;; and a clj-kondo dependency-analysis population run inside it. Under load
+;;; the population alone measured 5,319 ms and EVERY development adoption
+;;; refused. The two are separate decisions: the population runs only when the
+;;; declared dependency set changed, carries its own bound, and its elapsed
+;;; time is subtracted from the preflight's.
+
+(deftest ^{:seon.test/long "Builds a committed source checkout with a copied clj-kondo cache."
+           :seon.test/long-ms 600000}
+  an-unchanged-dependency-digest-preflights-without-a-cache-population
+  (let [source (preflight-source-checkout!)
+        state-file (io/file source "tmp/test-changed/dependency-cache.edn")
+        edited (io/file source "src/seon/id.clj")]
+    (try
+      (record-current-dependency-cache! source)
+      (let [recorded (slurp state-file)
+            recorded-modified (.lastModified state-file)
+            commands (atom [])
+            run-process! (var-get #'operator.state/run-process!)
+            result (with-redefs [operator.state/run-process!
+                                 (fn [request]
+                                   (swap! commands conj
+                                          (vec (:seon.operator.subprocess/argv
+                                                request)))
+                                   (run-process! request))]
+                     (spit edited "\n;; preflight fixture edit\n" :append true)
+                     ((var-get (ns-resolve 'seon.fresh-operator 'source-preflight!))
+                      source))
+            argv-text (str/join " " (map #(str/join " " %) @commands))]
+        (is (= ["src/seon/id.clj"] (:seon.fresh-operator/linted-paths result))
+            (pr-str result))
+        (is (= :current (:seon.fresh-operator/dependency-cache-status result))
+            (pr-str result))
+        (is (not (str/includes? argv-text "--copy-configs"))
+            (str "a current dependency set populates nothing: " argv-text))
+        (is (not (str/includes? argv-text "-Spath"))
+            (str "a current dependency set resolves no classpath: " argv-text))
+        (is (= recorded (slurp state-file))
+            "no population means the recorded key is left exactly as it was")
+        (is (= recorded-modified (.lastModified state-file))
+            "no population means the recorded key is not rewritten"))
+      (finally
+        (delete-recursively! source)))))
+
+(deftest ^{:seon.test/long "Builds a committed source checkout with a copied clj-kondo cache."
+           :seon.test/long-ms 600000}
+  an-exceeded-preflight-bound-names-its-phase-and-subprocess
+  (let [root (fresh-root)
+        source (preflight-source-checkout!)]
+    (try
+      (record-current-dependency-cache! source)
+      (spit (io/file source "src/seon/id.clj") "\n;; preflight fixture edit\n"
+            :append true)
+      (let [outcome
+            (with-redefs [seon.fresh-operator/source-preflight-bound-ms 0]
+              (operator-private-outcome
+               'phase! (str root) "init" :preflight
+               #((var-get (ns-resolve 'seon.fresh-operator 'source-preflight!))
+                 source)))
+            data (::data outcome)]
+        (is (= :preflight (:seon.fresh-operator/phase data)) (pr-str outcome))
+        (is (str/includes? (::message outcome) "init phase=preflight failed")
+            (pr-str outcome))
+        (is (inst? (:seon.operator.subprocess/start-instant data))
+            (str "the refusal names the subprocess it bounded: " (pr-str data)))
+        (is (str/includes? (slurp (:seon.fresh-operator/log data))
+                           "phase=preflight elapsed-ms=")
+            "the phase log records the elapsed milliseconds"))
+      (finally
+        (delete-recursively! source)
+        (delete-recursively! root)))))
+
 (deftest source-syntax-refuses-before-lock-or-destruction
   (let [root (fresh-root)
-        source (fresh-root)
+        source (preflight-source-checkout!)
         sentinel (io/file root "data/store/sentinel")
         acquired (promise)
         release (promise)
@@ -87,77 +231,9 @@
                    :seon.operator.lock/hold-timeout-ms 30000}
                   #(do (deliver acquired true) (deref release 30000 :expired))))]
     (try
-      (doseq [path ["bin/seon" "bb.edn" "deps.edn"
-                    ".clj-kondo/config.edn"
-                    "script/seon/fresh_operator.clj"
-                    "script/seon/dev/clj_kondo.clj" "script/seon/dev/state.clj"
-                    "src/seon/operator/state.clj" "src/seon/fs.clj"
-                    "src/seon/id.clj" "src/seon/db.clj" ".claude/seon-hook.edn"
-                    "config/default.edn"]]
-        (let [target (io/file source path)]
-          (io/make-parents target)
-          (io/copy (io/file @#'operator-test/project-root path) target)))
-      (java.nio.file.Files/createSymbolicLink
-       (.toPath (io/file source "reference-code"))
-       (.toPath (io/file @#'operator-test/project-root "reference-code"))
-       (make-array java.nio.file.attribute.FileAttribute 0))
-      (java.nio.file.Files/createSymbolicLink
-       (.toPath (io/file source "src/seon/test"))
-       (.toPath (io/file @#'operator-test/project-root "src/seon/test"))
-       (make-array java.nio.file.attribute.FileAttribute 0))
-      (let [git-common
-            (operator.state/run-process!
-             {:seon.operator.subprocess/argv ["git" "rev-parse" "--git-common-dir"]
-              :seon.operator.subprocess/directory (str @#'operator-test/project-root)
-              :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})
-            common-file (io/file @#'operator-test/project-root
-                                 (str/trim (:seon.operator.subprocess/output git-common)))
-            checkout (.getParentFile (.getCanonicalFile common-file))
-            result
-            (operator.state/run-process!
-             {:seon.operator.subprocess/argv
-              ["cp" "-R"
-               (str (io/file checkout ".clj-kondo/.cache"))
-               (str (io/file source ".clj-kondo/.cache"))]
-              :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})]
-        (is (zero? (:seon.operator.subprocess/exit git-common)) (pr-str git-common))
-        (is (zero? (:seon.operator.subprocess/exit result)) (pr-str result)))
       (io/make-parents sentinel)
       (spit sentinel "preserved")
-      (let [result (operator.state/run-process!
-                    {:seon.operator.subprocess/argv ["git" "init" "-q"]
-                     :seon.operator.subprocess/directory (str source)
-                     :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})]
-        (is (zero? (:seon.operator.subprocess/exit result)) (pr-str result)))
-      (let [result (operator.state/run-process!
-                    {:seon.operator.subprocess/argv ["git" "add" "."]
-                     :seon.operator.subprocess/directory (str source)
-                     :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})]
-        (is (zero? (:seon.operator.subprocess/exit result)) (pr-str result)))
-      (let [result (operator.state/run-process!
-                    {:seon.operator.subprocess/argv
-                     ["git" "-c" "core.hooksPath=/dev/null" "-c" "commit.gpgsign=false"
-                      "-c" "user.name=Test" "-c" "user.email=test@example.invalid"
-                      "commit" "-qm" "fixture"]
-                     :seon.operator.subprocess/directory (str source)
-                     :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})]
-        (is (zero? (:seon.operator.subprocess/exit result)) (pr-str result)))
-      (let [classpath-result
-            (operator.state/run-process!
-             {:seon.operator.subprocess/argv ["clojure" "-Spath"]
-              :seon.operator.subprocess/directory (str source)
-              :seon.operator.subprocess/deadline-ms immediate-refusal-bound-ms})
-            classpath (str/trim (:seon.operator.subprocess/output classpath-result))
-            input-digest ((var-get (ns-resolve 'seon.dev.clj-kondo 'input-digest))
-                          (str source) classpath)
-            contents ((var-get (ns-resolve 'seon.dev.clj-kondo 'cache-contents))
-                      (str source))]
-        (is (zero? (:seon.operator.subprocess/exit classpath-result))
-            (pr-str classpath-result))
-        (operator.state/write-edn!
-         (io/file source "tmp/test-changed/dependency-cache.edn")
-         {::dev.kondo/input-digest input-digest
-          ::dev.kondo/contents contents}))
+      (record-current-dependency-cache! source)
       (is (= true (deref acquired immediate-refusal-bound-ms :expired)))
       (spit (io/file source "src/seon/db.clj") "\n)\n" :append true)
       (doseq [arguments [["reset" "--force"] ["start"] ["init"]]]
