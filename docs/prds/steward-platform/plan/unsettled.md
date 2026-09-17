@@ -3145,3 +3145,32 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
 - Fast runs under load 12 hung twice in fixture setup for lanes (290 s bound):
   once in a Datahike transaction in the registry fixture, once in repeated
   schema canonicalization. Treated as load until reproduced on a quiet machine.
+
+## 2026-09-17 ~21:30Z — default adopted on HEAD; the data model is the priority
+
+- `bin/seon start default` + `init --dev default` converged on HEAD `91c85a0cd`
+  (`tmp/orchestrator/adopt-head-3.log`, exit 0); the earlier adoption
+  refusal at `:seon.schema/references` (`#{"seon.fn.index/17904"}`) came
+  from the dirty in-flight tree, not HEAD. HEAD base published for lanes'
+  `--paths` overlays (`prepare-head-base-1.log`).
+- Landed: `864e1a2d8` (schema reconciliation idempotence — writes
+  `:seon.schema/references` members as `[:seon.schema/key k]` lookup refs
+  while the live declaration is `db.type/keyword` with keyword members
+  (`seon.schema.edn:50`, "Names survive retraction"); the lane could not run
+  its regression; fast verification running: `fast-idempotence-verify.log`)
+  and `91c85a0cd` (the launcher announces the stale base for exact-HEAD
+  snapshots). The design note `374ecd95f` landed (808 lines).
+- Owner rulings 21:10Z recorded in the PRD §1m: panic = stop the affected
+  graph, keep the JVM; db down = panic, every other error is stored data;
+  schemas ARE the kinds (shared base + required per-kind members); B1 waits
+  for the owner's read. Owner: "focus on the data modeling and schemas as
+  everything downstream depends on us nailing this"; "keep launching fixes".
+- Running: sol `predictable-reset` (preflight lints the boot-refusing class,
+  re-lint before start/adopt, continuation commands), sol
+  `publication-report-projection` (`source/database` carries its projection;
+  publish! never embeds an error), sol `contract-findings-query`
+  (`seon.fn/contract-findings` over program facts: `:any`/`:some`/bare
+  `:map`/`[:maybe]`/unstorable/no-spec, ranked by callers — the owner's
+  "schemas not doing their job" list as a query), astra `error-and-data-model-design`
+  resumed to re-express the error family as entity schemas per §1m, Opus
+  boot-and-load-sequence investigation (read-only).
