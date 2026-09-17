@@ -236,37 +236,43 @@
            (is (fn? (:test (meta (sci/resolve updated 'retained-arithmetic)))))))))))
 
 (deftest a-contract-mistake-carries-the-same-documentation-as-doc
-  (support/with-database
-   (fn [connection]
-     ;; SCI contracts read their cluster's config, not the evaluation request's
-     ;; dial. Seed the same armed cluster boundary that an agent runs under.
-     (support/seed-cluster! connection "documentation"
-                            {:seon.config/on-core-error :panic})
-     (let [ctx (support/fork-cluster-ctx connection)
-           run (fn [source]
-                 (evaluation/evaluate
-                  {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
-                   :seon.db/connection connection :seon.agent/id "documentation"
-                   :seon.cluster.eval/source source
-                   :seon.sci.admit/caps (config/result-caps (config/defaults))
-                   :seon.sci.eval/time-limit-ms 10000
-                   :seon.config/on-core-error :panic}))
-           documentation (:seon.sci.admit/value (run "(doc my.message/send)"))
-           failed (run "(my.message/send {:my.message/to 42 :my.message/content \"Hello\"})")
-           value (:seon.sci.admit/value failed)]
-       (is (= :seon.instrument/contract-violated (:seon.error/kind value)) (pr-str failed))
-       (is (= "my.message/send" (:seon.instrument/contract-violated value)))
-       (is (= documentation (:seon.error/doc value)) (pr-str failed))
-       (doseq [term ["nonempty string subject identity token"
-                     ":my.message/assignment" ":seon.message/from"]]
-         (is (str/includes? (:body documentation) term)))
-       (is (schema/valid-candidate-value? :seon.error/value value))
-       (is (str/includes? (:seon.eval/shown failed) "Example:"))
-       (is (str/includes? (:seon.eval/shown failed) (:example documentation)))
-       (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] (db/db connection))))
-       (let [unrelated (run "(/ 1 0)")]
-         (is (:seon.cluster.eval/error unrelated))
-         (is (not (find (:seon.sci.admit/value unrelated) :seon.error/doc))))))))
+  (support/preserving-instrumentation-state
+   (fn []
+    (support/with-database
+     (fn [connection]
+       ;; No self-arming: the runner must arm before the canonical SCI base
+       ;; copies core JVM callables. Cluster configuration alone cannot repair
+       ;; a callable already copied into the cached base.
+       (support/seed-cluster! connection "documentation"
+                              {:seon.config/on-core-error :panic})
+       (let [ctx (support/fork-cluster-ctx connection)
+             run (fn [source]
+                   (evaluation/evaluate
+                    {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                     :seon.db/connection connection :seon.agent/id "documentation"
+                     :seon.cluster.eval/source source
+                     :seon.sci.admit/caps (config/result-caps (config/defaults))
+                     :seon.sci.eval/time-limit-ms 10000
+                     :seon.config/on-core-error :panic}))
+             documentation (:seon.sci.admit/value (run "(doc my.message/send)"))
+             failed (run "(my.message/send {:my.message/to 42 :my.message/content \"Hello\"})")
+             value (:seon.sci.admit/value failed)]
+         (is (= (resolve 'my.message/send)
+                (:seon.instrument/var (meta @(sci/resolve ctx 'my.message/send))))
+             "SCI must acquire the canonical armed host callable, not a pre-arming copy")
+         (is (= :seon.instrument/contract-violated (:seon.error/kind value)) (pr-str failed))
+         (is (= "my.message/send" (:seon.instrument/contract-violated value)))
+         (is (= documentation (:seon.error/doc value)) (pr-str failed))
+         (doseq [term ["nonempty string subject identity token"
+                       ":my.message/assignment" ":seon.message/from"]]
+           (is (str/includes? (:body documentation) term)))
+         (is (schema/valid-candidate-value? :seon.error/value value))
+         (is (str/includes? (:seon.eval/shown failed) "Example:"))
+         (is (str/includes? (:seon.eval/shown failed) (:example documentation)))
+         (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] (db/db connection))))
+         (let [unrelated (run "(/ 1 0)")]
+           (is (:seon.cluster.eval/error unrelated))
+           (is (not (find (:seon.sci.admit/value unrelated) :seon.error/doc))))))))))
 
 (deftest an-absent-declaration-is-a-typed-statement-not-an-empty-one
   ;; `doc` and `dir` used to render an absent :seon.fn/spec as [], absent

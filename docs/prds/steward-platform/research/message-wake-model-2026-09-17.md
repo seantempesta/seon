@@ -547,3 +547,69 @@ preserved. A transient shared-tree syntax refusal named only the foreign
 fast verification boundary is the absent source-matching published graph,
 not that foreign syntax. No default connection, evaluation, adoption or
 lifecycle operation was performed. The prior live wake proof remains complete.
+
+
+## Batch 123 B — canonical arming order, 2026-09-17
+
+**Root fix pending at the held runner file; cold remains red.** Batch 123 B,
+`tmp/orchestrator/gate-results/batch-123b.log` at `312f60560`, lines
+1545–1556, reports the inner `seon.cluster.message/send!` instead of
+`my.message/send`. This falsifies the Batch 122 diagnosis above: adding
+cluster configuration cannot replace an already copied core callable.
+
+The input schema is complete: `resources/seon/schemas/my.message.edn`
+requires `:my.message/to`, whose grammar is a nonempty string. The published
+manifest on log line 5 records `my.message/send` as `:core`, with contract
+`[:=> [:cat :my.message/send-request] [:or :seon.message/message :seon.error/value]]`.
+There is no permissive input union admitting recipient 42. The existing
+subject/assignment/from docstring is the wanted single source; neither the
+schema nor documentation formatter needs a change.
+
+Dependency and first-party trace: SCI `copy-var*` stores `@clojure-var`
+(`reference-code/sci/src/sci/core.cljc:112–138`).
+`install-first-party-namespaces!` uses that operation to acquire core
+functions. `test/seon/test_support.clj`'s `create-base` builds the cached SCI
+context. The cold `worker-command-loop!` in `src/seon/test/runner.clj`
+primes that fixture before its command loop initializes contracts. JVM
+arming then replaces roots; the SCI outer function remains unarmed while
+its inner JVM Var is armed. `src/seon/test/fast.clj` initializes contracts
+before any fixture, which explains why the same test passes fast.
+
+The exact root repair calls the existing `initialize-contracts!` with the
+worker's packaged projection before base acquisition. It is recorded in
+[the pending hunk](message-documentation-arming-pending-2026-09-17.patch).
+`git status --short` and `git diff --numstat` confirmed concurrent changes
+in `src/seon/test/runner.clj` (118 additions, 82 deletions at observation),
+as well as `src/seon/sci/eval.clj`; neither was edited. This is the assignment's
+held-item boundary, not a claim that foreign code caused this failure.
+
+The existing documentation regression now uses
+`preserving-instrumentation-state` and asserts that the acquired SCI callable
+carries the canonical host wrapper. It never calls an arming function.
+The earlier diagnostic fast iteration observed verbatim:
+
+```text
+MESSAGE-CONTRACT-EVIDENCE {:host #:seon.instrument{:var #'my.message/send, :authored [:=> [:cat :my.message/send-request] [:or :seon.message/message :seon.error/value]]}, :sci #:seon.instrument{:var #'my.message/send, :authored [:=> [:cat :my.message/send-request] [:or :seon.message/message :seon.error/value]]}, :row {:seon.fn/spec [:=> [:cat :my.message/send-request] [:or :seon.message/message :seon.error/value]], :seon.schema.admission/source :core}}
+```
+
+That iteration passed 9 tests / 104 assertions. The diagnostic print was
+replaced by the persistent wrapper assertion for the final iteration.
+Default was not observed or operated. No publication, reset, provider call,
+cold gate, test override, or foreign session operation was performed.
+
+Final iteration (exit 0), with only the owned test path over HEAD:
+
+```sh
+timeout 2400 bin/test-fast --paths test/seon/sci/documentation_test.clj -- seon.sci.documentation-test
+```
+
+```text
+bin/test: snapshot differences from HEAD b939728cbfb7bb6391e83a4ebea534d74a4b6323:
+Ran 9 tests containing 105 assertions.
+0 failures, 0 errors.
+```
+
+`git apply --check` accepts the pending runner patch against the current
+shared tree; it was not applied. `git diff --check` passes on the owned
+changes. No root-fix or cold-pass claim is made. The pending hunk and cold
+verification remain the only unresolved item in this bounded follow-up.

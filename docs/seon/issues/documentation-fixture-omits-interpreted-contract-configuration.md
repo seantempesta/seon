@@ -6,28 +6,36 @@ created: 2026-09-17
 tags: [issue, test-fixture, instrumentation, documentation]
 ---
 
-# Documentation fixture omits interpreted contract configuration
+# Cold SCI fixture captures core callables before canonical arming
 
-Batch 122 B reports two failures in
-`seon.sci.documentation-test/a-contract-mistake-carries-the-same-documentation-as-doc`.
-The error identifies `seon.cluster.message/send!`; the expected documentation
-is for `my.message/send`. The request's panic setting does not configure the
-cluster database from which the interpreted function's arming policy derives.
-Without that cluster configuration the interpreted wrapper stays unarmed,
-and the JVM owner's contract catches the malformed recipient instead.
+Batch 123 B (`tmp/orchestrator/gate-results/batch-123b.log`, HEAD
+`312f60560`) refutes the earlier missing-cluster-config diagnosis. Seeding
+panic configuration did not fix it: the bad recipient still reaches
+`seon.cluster.message/send!` instead of refusing at `my.message/send`.
 
-The proposed correction seeds the cluster through `seed-cluster!` with panic
-mode before context acquisition, carries explicit custody, and asserts the
-outer function identity as well as exact documentation equality. The public
-message docstring owns the subject/assignment/sender grammar once.
+The stored declaration is complete and core-admitted. `:my.message/to` is a
+nonempty string; `:my.message/send-request` requires it. The cold worker's
+`worker-command-loop!` constructs `seon.test-support/database-base` before
+`serve-worker-commands!` receives its initialization command and arms the
+program. Fixture construction acquires SCI, whose `sci/copy-var*` copies
+`@clojure-var` (`reference-code/sci/src/sci/core.cljc:138`). Later arming
+replaces the JVM root but cannot replace the cached SCI copy. The unarmed
+outer callable delegates through the now-armed inner JVM Var.
 
-Verification remains open: the path-isolated fast launcher exits 64 before
-starting any JVM because HEAD lacks a source-matching published graph.
-The orchestrator must prepare the HEAD baseline before this lane can rerun
-its focused namespace. No test pass or production arming change is claimed.
+Fast initialization arms first, then constructs the fixture. A canonical
+fast diagnostic observed the same `:seon.instrument/var #'my.message/send`
+on both JVM and SCI callable metadata and the complete stored contract.
+No self-arming was performed. The regression now scopes instrumentation
+state and explicitly requires that acquired wrapper, alongside exact
+function identity, documentation equality, example text, and no writes.
 
-Evidence, exact command and source grounding are in
-[the landing note](../../prds/steward-platform/research/message-wake-model-2026-09-17.md#batch-122-b--message-documentation-2026-09-17).
-Acceptance: the canonical armed SCI regression refuses at `my.message/send`,
-carries exactly the same documentation as `doc`, includes the same example
-in shown text, and writes no message.
+The root repair is to call the existing `initialize-contracts!` before cold
+fixture acquisition. `src/seon/test/runner.clj` is concurrently edited by
+the stage-2 lane; the assignment's held-file boundary leaves it untouched.
+The exact pending hunk is recorded in
+[message-documentation-arming-pending-2026-09-17.patch](../../prds/steward-platform/research/message-documentation-arming-pending-2026-09-17.patch).
+This issue remains open until that hunk lands and the orchestrator's cold
+regression passes. No schema or documentation-content change is needed.
+
+See [the landing note](../../prds/steward-platform/research/message-wake-model-2026-09-17.md)
+for commands, measured results, and the review boundary.
