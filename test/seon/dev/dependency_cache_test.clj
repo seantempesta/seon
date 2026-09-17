@@ -208,3 +208,96 @@
             (.destroyForcibly process)
             (.waitFor process 10 TimeUnit/SECONDS)))
         (test-support/delete-recursively! root)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Dependency pins: the cache digest refuses an absent pin source
+;;;
+;;; A gate run root is a `git archive` extraction nested under the source
+;;; repository. `git ls-files --stage -- reference-code` answers for the prefix
+;;; it runs in, so such a root without its own work tree answers exit 0 with
+;;; ZERO bytes — a pin set that digests identically no matter where every fork
+;;; sits. `bin/test` records the source repository's pins into the root, and
+;;; the derivation refuses when neither source states them.
+
+(defn- pins-file-name
+  []
+  @(private-var 'dependency-pins-file))
+
+(defn- snapshot-root!
+  "A run-root-shaped directory: `deps.edn`, optional recorded pins, no work tree."
+  [pins]
+  (let [root (fresh-root)]
+    (io/copy (io/file project-root "deps.edn") (io/file root "deps.edn"))
+    (when pins
+      (spit (io/file root (pins-file-name)) pins))
+    root))
+
+(defn- configuration-digest
+  [root]
+  ((private-var 'dependency-configuration-digest)
+   (.getCanonicalPath (io/file root))))
+
+(def ^:private probe-pins
+  (str "160000 e11845bac78e1241bca0766ddc07d978bd63d74a 0\treference-code/datahike\n"
+       "160000 fcbd8862800e638dc0f8f5521111f999279cbcd2 0\treference-code/sci\n"))
+
+(def ^:private moved-probe-pins
+  (str/replace probe-pins
+               "e11845bac78e1241bca0766ddc07d978bd63d74a"
+               "73afe782000000000000000000000000000000ff"))
+
+(deftest a-snapshot-roots-recorded-pins-decide-its-dependency-cache-digest
+  (let [pinned (snapshot-root! probe-pins)
+        pinned-again (snapshot-root! probe-pins)
+        moved (snapshot-root! moved-probe-pins)]
+    (try
+      (testing "the same recorded pins select the same immutable cache"
+        (is (= (configuration-digest pinned)
+               (configuration-digest pinned-again))))
+      (testing "a moved fork commit selects a different cache"
+        (is (not= (configuration-digest pinned)
+                  (configuration-digest moved))))
+      (finally
+        (run! test-support/delete-recursively! [pinned pinned-again moved])))))
+
+(deftest a-root-with-no-pin-source-refuses-instead-of-digesting-nothing
+  (let [root (snapshot-root! nil)]
+    (try
+      (testing "the git query is silent, not empty-handed, in such a root"
+        (is (nil? ((private-var 'git-dependency-pins)
+                   (.getCanonicalPath root)))))
+      (testing "the refusal is a typed value naming the root and both sources"
+        (let [refusal (try (configuration-digest root)
+                           ::no-refusal
+                           (catch clojure.lang.ExceptionInfo failure
+                             (ex-data failure)))]
+          (is (= :seon.dev-cache/dependency-pins-unavailable
+                 (:seon.error/kind refusal)))
+          (is (= :seon.dev-cache/no-pin-source
+                 (get-in refusal [:seon.error/data
+                                  :seon.error/diagnostic-cause])))
+          (is (= (.getCanonicalPath root)
+                 (get-in refusal [:seon.error/data
+                                  :seon.error/diagnostic-offending])))
+          (is (= (pins-file-name)
+                 (get-in refusal [:seon.error/data
+                                  :seon.error/diagnostic-expected
+                                  :seon.dev-cache/recorded-pins-file])))
+          (is (false? (get-in refusal [:seon.error/data
+                                       :seon.error/diagnostic-evidence
+                                       :seon.dev-cache/recorded-pins-present])))))
+      (finally
+        (test-support/delete-recursively! root)))))
+
+(deftest a-recorded-snapshot-digests-exactly-as-the-checkout-it-came-from
+  (let [checkout-pins ((private-var 'dependency-pins)
+                       (.getCanonicalPath project-root))
+        recorded (snapshot-root! checkout-pins)]
+    (try
+      (is (not (str/blank? checkout-pins)))
+      (is (re-matches #"[0-9a-f]{64}" (configuration-digest project-root)))
+      (testing "a recorded run root reuses the checkout's own dependency classes"
+        (is (= (configuration-digest project-root)
+               (configuration-digest recorded))))
+      (finally
+        (test-support/delete-recursively! recorded)))))

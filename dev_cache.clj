@@ -19,6 +19,10 @@
 (def lock-file "target/dev-dependency-cache.lock")
 (def reference-lock-file "target/dev-dependency-cache-references.lock")
 (def manifest-file "META-INF/seon-dev-cache.edn")
+;; A gate run root is a `git archive` extraction, so `bin/test` records the
+;; source repository's submodule pins here at snapshot time. The name is
+;; shared with `bin/test`, which writes it beside `changed-paths.txt`.
+(def dependency-pins-file "dependency-pins.txt")
 (def cache-version 4)
 
 (defn- canonical-file
@@ -198,7 +202,15 @@
             (recur))))))
   (.update digest (byte-array [(byte 0)])))
 
-(defn- dependency-pins
+(defn- git-dependency-pins
+  "The submodule pins `root`'s own git index states, or nothing.
+
+  `git ls-files` answers for the PREFIX it runs in: a directory nested inside
+  the repository but without its own work tree answers exit 0 with ZERO
+  bytes, which digests exactly like a tree whose forks all sit at different
+  commits. Empty output is therefore not an answer here — it is the absence
+  of one, and the caller falls through to the recorded pins."
+  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
   [root]
   (let [command ["git" "-C" (str root) "ls-files" "--stage" "--" "reference-code"]
         child (.start (doto (ProcessBuilder. ^java.util.List command)
@@ -209,16 +221,76 @@
         (throw (ex-info "Dependency pin query exceeded its execution bound."
                         {:seon.dev-cache/command command})))
       (let [text (deref output 1000 ::unavailable)]
-        (when (or (not (zero? (.exitValue child))) (= ::unavailable text))
-          (throw (ex-info "Dependency pins could not be read."
-                          {:seon.dev-cache/command command :seon.dev-cache/output text})))
-        text)
+        (when (and (zero? (.exitValue child))
+                   (string? text)
+                   (not (str/blank? text)))
+          text))
       (finally
         (when (.isAlive child)
           (.destroyForcibly child)
           (.waitFor child 10 TimeUnit/SECONDS))))))
 
+(defn- recorded-dependency-pins
+  "The pins `bin/test` recorded into this root at snapshot time, or nothing.
+
+  A gate run root is an extraction, not a checkout: its dependency identity
+  travels WITH it instead of being re-derived from a source index that can
+  move while the gate runs. The recorded bytes are the source repository's
+  own `ls-files --stage` output, so a recorded root and its source repository
+  digest identically."
+  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
+  [root]
+  (let [file (io/file root dependency-pins-file)]
+    (when (.isFile file)
+      (let [text (slurp file)]
+        (when-not (str/blank? text)
+          text)))))
+
+(defn- pins-unavailable
+  "The flat refusal for a root whose dependency pins no source can state."
+  {:malli/schema [:=> [:cat :any] :map]}
+  [root]
+  (let [directory (canonical-file root)]
+    {:seon.error/kind :seon.dev-cache/dependency-pins-unavailable
+     :seon.error/message
+     (str "The dependency pins of " (.getCanonicalPath directory)
+          " cannot be read: it is not a git work tree that states them, and it"
+          " carries no " dependency-pins-file " recorded by bin/test. An empty"
+          " pin set would key the dependency-class cache to every fork commit"
+          " at once, so no cache is reused or created here.")
+     :seon.error/data
+     {:seon.error/diagnostic-layer :seon.dev-cache/dependency-configuration
+      :seon.error/diagnostic-operation 'dev-cache/dependency-pins
+      :seon.error/diagnostic-member :seon.dev-cache/dependency-pins
+      :seon.error/diagnostic-expected
+      {:seon.dev-cache/git-command
+       ["git" "-C" (.getCanonicalPath directory) "ls-files" "--stage" "--"
+        "reference-code"]
+       :seon.dev-cache/recorded-pins-file dependency-pins-file}
+      :seon.error/diagnostic-offending (.getCanonicalPath directory)
+      :seon.error/diagnostic-cause :seon.dev-cache/no-pin-source
+      :seon.error/diagnostic-evidence-availability :seon.error/known
+      :seon.error/diagnostic-evidence
+      {:seon.dev-cache/git-pins-stated false
+       :seon.dev-cache/recorded-pins-present
+       (.isFile (io/file directory dependency-pins-file))}}}))
+
+(defn- dependency-pins
+  "The submodule pins this root's dependency classes are keyed on.
+
+  The recorded snapshot pins win when present: they are the bytes this root
+  was built from. Otherwise the root's own git index states them. When
+  neither source answers, this REFUSES — a cache keyed on unknown pins is
+  worse than no cache, because it silently outlives every fork commit."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [root]
+  (or (recorded-dependency-pins root)
+      (git-dependency-pins root)
+      (let [refusal (pins-unavailable root)]
+        (throw (ex-info (:seon.error/message refusal) refusal)))))
+
 (defn- dependency-configuration-digest
+  {:malli/schema [:=> [:cat :any] :string]}
   [root]
   (let [digest (MessageDigest/getInstance "SHA-256")]
     (digest-file! digest (io/file root "deps.edn"))

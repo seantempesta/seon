@@ -719,6 +719,12 @@ populate_checkout_root() {
     esac
   fi
 
+  # `git ls-files` never names this recorded file, and a worker checkout keys
+  # the same dependency-class cache as the root it was copied from.
+  if [ -f "$source_root/dependency-pins.txt" ]; then
+    cp -p "$source_root/dependency-pins.txt" "$target_root/dependency-pins.txt"
+  fi
+
   ln -s "$source_root/.git" "$target_root/.git"
   if [ -e "$source_root/.env" ]; then
     ln -s "$source_root/.env" "$target_root/.env"
@@ -733,6 +739,18 @@ git archive "$git_sha" | tar -x -C "$run_root"
 rm -rf "$run_root/reference-code"
 ln -s "$source_root/reference-code" "$run_root/reference-code"
 ln -s "$source_root/.git" "$run_root/.git"
+# The snapshot carries its own dependency identity. `dev_cache.clj` keys the
+# dependency-class cache on these submodule pins; deriving them inside the run
+# root would read the source repository's LIVE index (or, for a root with no
+# work tree of its own, zero bytes that digest like no forks at all). Record
+# the source repository's exact bytes once, here, and every consumer of this
+# root — the overlay, the dependency preparation, each worker checkout —
+# inherits the same answer.
+if ! git -C "$source_root" ls-files --stage -- reference-code \
+  >"$run_root/dependency-pins.txt" || [ ! -s "$run_root/dependency-pins.txt" ]; then
+  echo "bin/test: refusing to snapshot: the source repository stated no dependency pins" >&2
+  exit 64
+fi
 if [ ${#snapshot_paths[@]} -gt 0 ]; then
   mkdir -p "$run_root/tmp"
   bb --config "$source_root/bb.edn" -e '
@@ -810,7 +828,7 @@ git -C "$source_root" --work-tree="$run_root" diff --name-status "$git_sha" -- \
     printf 'bin/test:   %s\n' "$entry"
   done
 git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standard -- \
-  . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt' | while IFS= read -r entry; do
+  . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt' ':!dependency-pins.txt' | while IFS= read -r entry; do
     printf 'bin/test:   A %s\n' "$entry"
   done
 while IFS= read -r entry; do
@@ -831,7 +849,7 @@ record_phase snapshot
 snapshot_changed=0
 if ! git -C "$source_root" --work-tree="$run_root" diff --quiet "$git_sha" -- . ':!reference-code' ||
    [ -n "$(git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standard -- \
-     . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt')" ]; then
+     . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt' ':!dependency-pins.txt')" ]; then
   snapshot_changed=1
 fi
 # Exact-HEAD fast snapshots need no graph for overlay closure, but if a
