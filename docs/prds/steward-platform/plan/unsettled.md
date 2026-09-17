@@ -3199,3 +3199,25 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   monitor, sci/eval.clj cause, schema.clj canonicalization). Fix #4 (attribute-
   blind tempid rewrite, `fn.clj:2415`) queued behind `contract-findings-query`.
 - Gate 4 launched on `f9eab9e31` after re-preparing the HEAD base.
+
+## 2026-09-17 ~22:25Z — predictable reset landed; gates move to a clean worktree
+
+- `predictable-reset` landed `8e952be28`: preflight lints syntax + unresolved
+  namespace/var/symbol under the existing bound with the hook's kondo config;
+  files changed during republish/refork are re-linted before start and adopt;
+  post-destruction failures print continuation commands; `bin/seon status`
+  derives "reset incomplete at <phase>" from lifecycle logs; 8 platform/long
+  tests, 109 assertions green. Resumed for §1n (no test classpath at cluster
+  launch) and the gate snapshot defect below.
+- Gate 4 (bare `--platform` on `f9eab9e31`, root `run.OZGw7Q`) refused in
+  `verify-long-declarations-indexed!` on a test that exists only in a lane's
+  UNCOMMITTED file: the bare snapshot copies dirty working-tree files
+  (`bin/test:716` before `:732`) while reporting no differences. Issue
+  `a-bare-cold-gate-snapshot-carries-uncommitted-working-tree-files`
+  (blocker). Until fixed, orchestrator gates run from a throwaway worktree at
+  HEAD (`tmp/gate-wt`, reference-code linked): gate 5 running there on
+  `8e952be28`.
+- Owner design dialogue on errors-as-entity-schemas in chat (no docs until
+  asked): base + required domain facts per facet, facets compose, disposition
+  on the occurrence, markers/kind deleted; three questions posed (overlap,
+  message, turn/agent facet).
