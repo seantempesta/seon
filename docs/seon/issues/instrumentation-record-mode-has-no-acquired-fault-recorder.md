@@ -7,6 +7,27 @@ tags: [issue, errors, instrumentation, contracts, wave/instrumentation-error-dat
 
 # Instrumentation record mode has no acquired fault recorder
 
+**2026-09-18 SCI resume:** the recording operation is now acquired by host
+and SCI wrappers. `base-ctx`, `acquire!`, installation and cold cluster forks
+carry the cluster's existing committer. Both dials share per-arity body facet
+enforcement; record arming without custody refuses. The direct real-SCI
+regression passes both dials with committed provenance and exact refusal
+identity. The issue stays open for complete integration proof, not for the
+original missing-operation design question.
+
+The next generic declaration boundaries observed by the full fast run are
+`seon.render.value/transacted` (`src/seon/render/value.clj:29`, output `:map`)
+and `seon.sci.kernel/failure-value` (`src/seon/sci/kernel.clj:519`, output
+`:seon.error/value`). They preserve wrapper contract/arity facets but do not
+declare them. Rendering and normal SCI failure normalization consequently
+refuse at those helpers. Their owners need the explicit base/facet alternatives
+required by program-facts §1q. `seon.error/latest-fact` had the same gap and is
+fixed in this lane. `1278dfa16` already fixed `seon.error.refusal/refusal` and
+`seon.error/refusal`; the accepted `db/pull` and `db/transact-call` dependencies
+remain with the database owner. Full tallies, timings, acquisition corrections
+and outstanding proof are in the linked research note below. The historical
+sections that follow do not describe the current implementation.
+
 **2026-09-18 host implementation update:** acquisition is implemented on the
 host path, but the complete behavior remains blocked by generic return
 contracts. The real canonical recorder regression reaches

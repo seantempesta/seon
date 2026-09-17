@@ -102,7 +102,7 @@
             nil
             (catch clojure.lang.ExceptionInfo error (ex-data error))))]
     (is (= :seon.sci.eval/missing-function-row (:seon.error/kind failure)))
-    (is (= (str function-symbol) (:seon.fn/sym failure)))))
+    (is (= function-symbol (:seon.fn/sym failure)))))
 
 (defn- compiled-runtime-victim
   []
@@ -153,13 +153,14 @@
 (deftest database-provenance-regenerates-the-base-and-reverts-for-retained-forks
   (test-support/with-database
    (fn [connection]
+     (test-support/seed-cluster! connection "default")
      (test-support/transacted!
       connection
       (agent/creation-tx {:seon.cluster/name "default"
                           :seon.agent/id "s3-fixture"
                           :seon.ns/name 'my.agents.s3-fixture}))
      (let [before (db/db connection)
-           original (merge (db/pull before '[*] [:seon.fn/sym "seon.id/valid?"])
+           original (merge (db/pull before '[*] [:seon.fn/sym 'seon.id/valid?])
                            (test-support/program-fn-row 'seon.id/valid?))
            _ (with-redefs [schema.edn/packaged-forms
                            (fn [] (throw (ex-info "A database-derived base must not read schema files." {})))]
@@ -182,9 +183,8 @@
            _ (is (not (:seon.cluster.eval/error private-result)))
            _ (is (not (:seon.cluster.eval/error private-reader)))
            _ (is (identical? @#'seon.id/valid? @(sci/resolve initial 'seon.id/valid?)))
-           _ (is (identical? @#'eval/absent-intern
-                              (some-> (sci/resolve initial 'seon.sci.eval/absent-intern) deref))
-                 "a core identity without stored source still copies its JVM root")
+           _ (is (nil? (sci/resolve initial 'seon.sci.eval/absent-intern))
+                 "a private sentinel is not a callable program declaration")
            admitted (assoc original :seon.schema.admission/source :agent
                            :seon.fn/source
                            "(defn valid? {:malli/schema [:=> [:cat [:int {:min 1}] :string] :boolean]} [length id] true)")]
@@ -260,7 +260,7 @@
               "(defn valid? [length id] (s3.missing/function length id))")])
      (let [ctx (eval/base-ctx (db/db connection))
            results (get-in ctx [:seon.sci.eval/acquisition :seon.sci.eval/load-results])]
-       (is (some #(and (= "seon.id/valid?" (:seon.fn/sym %))
+       (is (some #(and (= 'seon.id/valid? (:seon.fn/sym %))
                        (= :jvm-fallback (:seon.sci.eval/load-state %))
                        (seq (:seon.error/message %))) results))
        (is (identical? @#'seon.id/valid? @(sci/resolve ctx 'seon.id/valid?)))))))
@@ -688,6 +688,7 @@
 (deftest contract-installation-in-a-fork-leaves-the-parent-var-unchanged
   (test-support/with-database
     (fn [connection]
+      (test-support/seed-cluster! connection "fork-contract")
       (let [parent (eval/build-base-ctx (seon.schema/handed-projection))
             _ (sci/eval-string*
                parent
@@ -697,7 +698,7 @@
             candidate (sci/fork parent)]
         (#'eval/install-function-contract!
          candidate
-         {:seon.fn/sym "user/contracted"
+         {:seon.fn/sym 'user/contracted
           :seon.fn/spec "[:=> [:cat :int] :int]"}
          (seon.schema/projection-from-database (db/db connection))
          (db/db connection))
@@ -708,7 +709,7 @@
             "contract installation copies the inherited candidate Var")
         (is (= 42 (sci/eval-string* candidate "(contracted 42)")))))))
 
-(deftest a-configless-database-refuses-caps-by-name-and-still-installs
+(deftest a-configless-database-refuses-contract-installation
   ;; THE CLASS: an absence handed into a contract that forbids it.
   ;; `database-effective-config` answered nil for a database carrying no
   ;; config singleton, and `instrumentation-config` passed that straight to
@@ -716,10 +717,8 @@
   ;; OR the missing-effective refusal. Under armed contracts every SCI
   ;; contract install against such a database died inside the installer.
   ;;
-  ;; `:record` — the shipped default, which instruments nothing and undoes
-  ;; what is there — does not read caps at all, so the install still
-  ;; happens; what changes is that the unavailable observation is the TYPED
-  ;; UNKNOWN naming the first config key it wanted, never nil.
+  ;; Neither a missing recorder nor unavailable caps permits an unarmed
+  ;; record-mode installation.
   (test-support/with-database
     (fn [connection]
       (let [database (db/db connection)
@@ -742,27 +741,27 @@
             "and the key it names is the one a caller has to supply")
         (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))]
           (sci/eval-string* ctx "(defn configless-contracted [x] x)")
-          (#'eval/install-function-contract!
-           ctx
-           {:seon.fn/sym "user/configless-contracted"
-            :seon.fn/spec "[:=> [:cat :int] :int]"}
-           (schema/projection-from-database database)
-           database)
-          (is (= 42 (sci/eval-string* ctx "(configless-contracted 42)"))
-              "and the install completes rather than dying inside the
-               installer's own contract"))))))
+          (let [refusal (test-support/refusal-data
+                         #(#'eval/install-function-contract!
+                           ctx
+                           {:seon.fn/sym 'user/configless-contracted
+                            :seon.fn/spec "[:=> [:cat :int] :int]"}
+                           (schema/projection-from-database database)
+                           database))]
+            (is (= :seon.instrument/missing-recorder (:seon.error/kind refusal)))
+            (is (= :seon.flow/commit-fault! (:seon.error/expected-key refusal)))))))))
 
-(deftest require-context-rows-persist-namespace-lookup-refs
+(deftest require-context-rows-carry-namespace-symbols
   (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         evaluation (run-in ctx "(require 'clojure.set)" 2000)]
     (is (ok? evaluation))
-    (is (= #{[:seon.ns/name 'clojure.set]}
+    (is (= #{'clojure.set}
            (get-in evaluation
                    [:seon.program/row :seon.ns/requires]))
-        "SCI symbols become canonical lookup refs only at persistence")))
+        "namespace dependencies observe their symbol values")))
 
 (deftest base-context-injections-have-program-rows
-  (let [injected (set (map str (program/base-context-injected-symbols)))
+  (let [injected (set (program/base-context-injected-symbols))
         rows (#'seon.fn/desired-rows
               {:seon.fn/roots ["src" "test"]} nil)
         published (set (keep :seon.fn/sym rows))
@@ -784,9 +783,9 @@
                            "parsed-at-runtime [x] x)")
                          2000)
             row (:seon.program/row evaluation)]
-        (is (= "user/parsed-at-runtime" (:seon.fn/sym row)))
+        (is (= 'user/parsed-at-runtime (:seon.fn/sym row)))
         (is (= 1 (count (:seon.fn/arities row))))
-        (is (map? (:seon.fn/ast row)))))))
+        (is (every? :seon.fn.arity/return-schema (:seon.fn/arities row)))))))
 
 (deftest
   static-and-runtime-contracted-definitions-publish-identical-facts
@@ -805,7 +804,7 @@
           (spit (.toFile source-file) (str "(ns parity)\n" source "\n"))
           (let [static-row (first
                              (filter
-                               #(= "parity/same-facts" (:seon.fn/sym %))
+                               #(= 'parity/same-facts (:seon.fn/sym %))
                                (#'seon.fn/desired-rows
                                  {:seon.fn/roots ["src" (str root)]}
                                  (fn [_phase]))))
@@ -818,8 +817,8 @@
                                  :seon.sci.admit/caps caps,
                                  :seon.sci.eval/time-limit-ms 2000,
                                  :seon.config/on-core-error :panic}))
-                p12-keys [:seon.fn/arities :seon.fn/ast :seon.fn/arglists-override?]]
-            (is (= "parity/same-facts" (:seon.fn/sym runtime-row)))
+                p12-keys [:seon.fn/arities :seon.fn/arglists-override?]]
+            (is (= 'parity/same-facts (:seon.fn/sym runtime-row)))
             (is (= (select-keys static-row p12-keys) (select-keys runtime-row p12-keys)))
             (is (= :core (:seon.schema.admission/source static-row)))
             (is (= :agent (:seon.schema.admission/source runtime-row))))
@@ -862,7 +861,7 @@
                      10000))]
         (is (seq capability-symbols)
             "the fixture graph carries the capability surface")
-        (is (contains? (set capability-symbols) "my.web/fetch")
+        (is (contains? (set capability-symbols) 'my.web/fetch)
             "my.web is in the program graph")
         (is (= (mapv (fn [s] [(symbol s) true]) capability-symbols)
                resolved)
@@ -1089,7 +1088,7 @@
 (deftest success-evaluation-assembles-every-optional-projection
   (let [printed (doto (java.io.StringWriter.) (.write "abcdef"))
         record {:seon.eval/outcome :ok}
-        row {:seon.fn/sym "user/f"}
+        row {:seon.fn/sym 'user/f}
         defs [{:seon.def/id "user/x"}]
         evaluation
         (#'eval/success-evaluation
@@ -1222,8 +1221,8 @@
   (is (true? (:seon.sci.eval/namespace-changed? result)))
   (is
    (=
-    #{[:seon.fn/sym "user/discarded"]
-      [:seon.test/sym "user/discarded"]}
+    #{[:seon.fn/sym 'user/discarded]
+      [:seon.test/sym 'user/discarded]}
     (set (:seon.program/delete-identities row))))
   (is (= [:seon.ns/name 'user] (:seon.program/ns row)))
   (is
@@ -1495,6 +1494,7 @@
  (test-support/with-database
   (fn
    [connection]
+   (test-support/seed-cluster! connection "interrupt-acquire")
    (let
     [source
      (str
@@ -1507,13 +1507,8 @@
                                 :namespace
                                 #:seon.ns{:name 'authored.interrupt,
                                           :source "(ns authored.interrupt)"}}
-                   {:seon.fn/sym "authored.interrupt/spin",
-                    :seon.schema.admission/source :agent,
-                    :seon.fn/ns [:seon.ns/name 'authored.interrupt],
-                    :seon.fn/source source,
-                    :seon.fn/arglists "([])",
-                    :seon.fn/private? false,
-                    :seon.fn/spec "[:=> [:cat] :int]"}])
+                   (test-support/program-fn-row (db/db connection)
+                                                 'authored.interrupt/spin source)])
      ctx
      (eval/build-base-ctx (seon.schema/handed-projection))
      acquired
@@ -1521,8 +1516,8 @@
       {:seon.sci.eval/ctx ctx, :seon.db/db (db/db connection)})
      evaluation
      (deadlined-in ctx "(authored.interrupt/spin)" 300)]
-    (is (= 1 (:seon.sci.eval/installed acquired))
-        "only the function has explicit agent admission; the namespace has none")
+    (is (pos? (:seon.sci.eval/installed acquired)))
+    (is (ifn? @(sci/resolve ctx 'authored.interrupt/spin)))
     (is (not= :seon.sci.eval-test/hung evaluation))
     (is (cut? evaluation))
     (is
@@ -1536,6 +1531,7 @@
  (test-support/with-database
   (fn
    [connection]
+   (test-support/seed-cluster! connection "poison-acquire")
    (let
     [namespace-name
      'acquire.poison
@@ -1551,21 +1547,11 @@
                                :namespace
                                #:seon.ns{:name namespace-name,
                                          :source "(ns acquire.poison)"}}
-                  {:seon.fn/sym "acquire.poison/bad",
-                   :seon.schema.admission/source :agent,
-                   :seon.fn/ns [:seon.ns/name namespace-name],
-                   :seon.fn/source
-                   "(defn ^{:malli/schema [:=> [:cat :int] :int]} bad [x] (missing-dependency x))",
-                   :seon.fn/arglists "([x])",
-                   :seon.fn/private? false,
-                   :seon.fn/spec "[:=> [:cat :int] :int]"}
-                  {:seon.fn/sym "acquire.poison/good",
-                   :seon.schema.admission/source :agent,
-                   :seon.fn/ns [:seon.ns/name namespace-name],
-                   :seon.fn/source good-source,
-                   :seon.fn/arglists "([x])",
-                   :seon.fn/private? false,
-                   :seon.fn/spec "[:=> [:cat :int] :int]"}])
+                  (test-support/program-fn-row
+                   (db/db connection) 'acquire.poison/bad
+                   "(defn ^{:malli/schema [:=> [:cat :int] :int]} bad [x] (missing-dependency x))")
+                  (test-support/program-fn-row (db/db connection)
+                                                'acquire.poison/good good-source)])
     (let
      [ctx
       (assoc
@@ -1596,7 +1582,7 @@
      (is
       (str/includes?
        (:seon.error/message refusal)
-       "[:seon.fn/sym \"acquire.poison/bad\"]"))
+       "[:seon.fn/sym acquire.poison/bad]"))
      (is
       (str/includes?
        (:seon.error/data-edn refusal)
@@ -1609,6 +1595,7 @@
  (test-support/with-database
   (fn
    [connection]
+   (test-support/seed-cluster! connection "contract-acquire")
    (let
     [source
      (str
@@ -1616,22 +1603,12 @@
       "accept [x] x)")]
     (test-support/transacted!
                  connection
-                 [(:seon.config/desired-row
-                   (config/compile-manifest
-                    {:seon.boot/cluster-name "contract-acquire",
-                     :seon.config/manifest
-                     (assoc caps :seon.config/on-core-error :panic)}))
-                  #:seon.agent{:id "contract-author",
+                 [#:seon.agent{:id "contract-author",
                                :namespace
                                #:seon.ns{:name 'authored.contract,
                                          :source "(ns authored.contract)"}}
-                  {:seon.fn/sym "authored.contract/accept",
-                   :seon.schema.admission/source :agent,
-                   :seon.fn/ns [:seon.ns/name 'authored.contract],
-                   :seon.fn/source source,
-                   :seon.fn/arglists "([x])",
-                   :seon.fn/private? false,
-                   :seon.fn/spec "[:=> [:cat :int] :int]"}])
+                  (test-support/program-fn-row (db/db connection)
+                                                'authored.contract/accept source)])
     (let
      [assert-violation
       (fn
@@ -1734,14 +1711,13 @@
   (test-support/with-database
     (fn [connection]
       (let [seen (atom [])
-            ctx
+            ctx (eval/cluster-ctx (db/db connection) connection)
+            evaluation
             (with-redefs [call-preparation/hook
                           (fn [runtime-ctx _callee arguments]
                             (swap! seen conj (env/of runtime-ctx))
                             arguments)]
-              (eval/cluster-ctx (db/db connection) connection))
-            evaluation
-            (eval/evaluate
+              (eval/evaluate
              {:seon.sci.eval/ctx ctx
               :seon.agent/id "scoped-agent"
               :seon.turn/id "scoped-run"
@@ -1749,7 +1725,7 @@
               :seon.cluster.eval/source "(seon.run/complete \"done\")"
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
-              :seon.config/on-core-error :panic})]
+              :seon.config/on-core-error :panic}))]
         (is (= {:my.turn/disposition :completed
                 :my.turn/result "done"}
                (:seon.sci.admit/value evaluation)))
@@ -2129,7 +2105,7 @@
    (:seon.sci.admit/value
     (kernel/invoke {:seon.sci.eval/ctx ctx
                     :seon.db/db database
-                    :seon.fn/sym (str function-symbol)
+                    :seon.fn/sym function-symbol
                     :seon.sci.eval/args arguments
                     :seon.sci.eval/time-limit-ms time-limit-ms
                     :seon.sci.admit/caps caps
@@ -2349,7 +2325,7 @@
                     (kernel/invoke
                      {:seon.sci.eval/ctx (eval/build-base-ctx (seon.schema/handed-projection))
                       :seon.db/db (db/db connection)
-                      :seon.fn/sym "user/never-defined"
+                      :seon.fn/sym 'user/never-defined
                       :seon.sci.eval/args []
                       :seon.sci.eval/time-limit-ms 1000
                       :seon.sci.admit/caps caps

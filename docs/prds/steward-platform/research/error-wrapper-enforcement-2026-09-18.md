@@ -7,12 +7,10 @@ tags: [errors, instrumentation, contracts]
 
 # Wrapper enforcement: recording dependency
 
-**Current status, host-only resume:** partial implementation, not green.
-The host wrapper acquires a recorder and enforces body facets, input and arity;
-the canonical recording test now exposes undeclared generic returns in
-`seon.db/pull` and `seon.error.refusal/refusal`. The final section records this
-new dependency. Earlier sections are the historical stops, not the current
-implementation inventory.
+**Current status, SCI resume:** host and SCI wrappers share enforcement and
+acquired recording. Full verification is not green. The latest section records
+SCI acquisition, regressions, timings and the remaining declaration dependencies.
+Earlier sections preserve the historical stops, not the current inventory.
 
 Slice 2 is **not implemented**. The lane stopped before production edits at
 the missing acquired recording/disposition operation. Source inspection used
@@ -359,3 +357,148 @@ Only this lane's temporary logs and thread dump were removed after their
 tallies, dependency messages and timings were retained here. `git diff --check`
 passed. The markdown hook continued to report the same 44 pre-existing
 repository citation errors recorded above, without edits to their owners.
+
+## SCI implementation — 2026-09-18
+
+The owner released `eval.clj` after `e088cc0f9`. `1278dfa16` had already
+enumerated the generic refusal helper's facets. This resume implements the
+SCI half of slice 2, without changing `kernel/with-arm` or its return boundary.
+
+`instrument/wrap-interpreted` now calls the same `compiled-wrapper` as the
+host path. Both dials enforce input and arity before invoking the body, then
+independently validate the body's actual error facets against that arity's
+declared result facets. The wrapper's own refusals bypass the body contract.
+Record mode requires an acquired `:seon.flow/commit-fault!`; its absence is a
+typed registration refusal, not an uninstrumented function. Installation must
+not turn this refusal into a JVM fallback. Panic mode needs no recorder.
+
+`base-ctx` accepts the operation; the program snapshot carries it through
+acquisition, lazy installation, agent forks and regeneration. `acquire!`
+passes its existing operation into base construction. `cluster-ctx` and
+`fork-cluster-ctx` accept the same arm request, and the cold cluster caller
+supplies its existing `cluster/commit-fault!` with connection, cluster,
+process identity and caps. A sovereign fork replaces the source recorder and
+re-arms interpreted roots with the receiving projection and policy. SCI's
+generation-aware `bind-root!` preserves the source context. Grounding:
+`reference-code/sci/src/sci/core.cljc:344` (`fork`),
+`src/seon/sci/kernel.clj:108` (`cache-program!` replaces the snapshot).
+
+Cold acquisition also needed to carry the declared `:seon.fn/arglists` and
+`:seon.fn/private?` into `install-row!`; the previous incomplete request was
+refused before an agent function could be installed. The real acquisition
+tests now construct analyzed function rows with `program-fn-row`. Owned SCI
+fixtures were updated for symbol identities and their canonical config.
+
+`error/latest-fact`, a generic projection of error occurrences, now explicitly
+enumerates the base and all 63 facets, as §1q requires. A regression compares
+its declaration to the projection's discovered facets, alongside the existing
+generic admission and refusal helpers.
+
+The real SCI regression installs an interpreted multi-arity function, counts
+body executions, and exercises both dials: invalid input, wrong arity,
+undeclared returned facet, and a facet declared only by arity two. Recording
+uses the canonical fixture connection and the cluster's actual committer;
+assertions verify committed provenance and the exact returned refusal object.
+The sovereign-fork regression checks recorder/policy separation.
+
+### SCI measurement and verification boundary
+
+`hot-sci-facet-check-measurement` in `test/seon/instrument_test.clj` is the
+retained executable probe. It compares the old Malli callable and the new
+wrapper around the same real SCI identity function under `kernel/with-arm`.
+Each of three batches warms 3,000 calls and measures 20,000. Parsing and
+context acquisition are outside the timed seam. Shared-machine fast-JVM
+measurements are not production percentiles.
+
+The second full run measured these µs/call:
+
+| Return | Before, three batches | After, three batches | Difference of medians |
+|---|---|---|---|
+| Scalar | 0.24540625, 0.17691045, 0.17049585 | 0.22451665, 0.1994479, 0.19882085 | +0.02253745 |
+| Ordinary map | 0.1755896, 0.17653125, 0.17575835 | 0.2255625, 0.21419585, 0.2182625 | +0.04250415 |
+| Declared error | 0.1723646, 0.17464585, 0.1743083 | 17.019325, 16.63647915, 16.63929585 | +16.46498755 |
+
+The error case exceeds a few microseconds. Declared facet sets are already
+memoised per compiled function/arity with the supplied projection and captured
+in the wrapper, never globally. Actual returned-value validation remains the
+measured cost; no value-membership cache or unmeasured speed claim is made.
+
+The requested `--paths` fast overlay refused dirty callers outside this lane
+(including render/walk, test runner and cluster source tests). Per the task,
+iteration used plain `bin/test-fast seon.instrument-test seon.sci.eval-test
+seon.error-test seon.sci.kernel-arm-carriage-test`. No cold gate or default
+lifecycle operation was run. The second run was **157 tests / 849 assertions /
+22 failures / 10 errors**, before the cold-acquisition correction and final
+fixture corrections; its new direct SCI enforcement regression and all
+arm-carriage tests passed. A final run is recorded below when complete.
+
+The new exact declaration dependencies are `seon.render.value/transacted`
+(`src/seon/render/value.clj:29`, both results `:map`) and
+`seon.sci.kernel/failure-value` (`src/seon/sci/kernel.clj:519`, result
+`:seon.error/value`). The former refuses preserved contract/arity facets
+during rendering; the latter refuses the contract facet while normalizing a
+thrown SCI wrapper refusal. These are named integration dependencies outside
+the assigned owners, not an attribution to another lane's uncommitted work.
+The previously accepted three DB failures remain: base-only `db/pull` and
+arity-two `db/transact-call` returning an undeclared-error refusal.
+
+Slice 3 consumes the same projection-owned pure facet derivation and occurrence
+preservation as the host checkpoint. Slice 4 consumes one enforcement path
+for host and SCI and must complete the provisional result-position analysis.
+Generic helpers need explicit error declarations before the full evaluation
+and rendering paths are green. Cold/platform and live adoption proof remain
+orchestrator-owned.
+
+### Final full fast run and construction follow-up
+
+The third four-namespace run completed **157 tests / 850 assertions /
+6 failures / 8 errors**. Direct SCI enforcement, sovereign-fork recorder
+separation, cold function acquisition, provenance regeneration, error tests
+and every kernel-arm-carriage regression passed. The remaining findings were:
+
+- Three accepted host DB failures, unchanged: `db/pull` and arity-two
+  `db/transact-call` at the recorder recurrence boundary.
+- Four rendering errors in `refusal-value-projection-obeys-the-profile-and-html-keeps-the-whole-value`
+  and `a-sci-only-arity-miss-names-its-program-graph-arglists`, all naming
+  `render.value/transacted` and a contract/arity facet.
+- Two normal-evaluation errors in `an-instrumented-multi-arity-miss-reads-like-clojure`
+  and `agent-contracts-apply-on-acquire-and-cold-recovery`, naming
+  `kernel/failure-value` and an arity/contract facet.
+- `a-foreign-armed-context-is-refused-as-a-value`: `kernel/with-arm` throws
+  `already-armed` at acquisition in `evaluate`, before its failure conversion.
+  The existing return/release boundary was not changed to address this.
+- `overrides-follow-current-admission-and-survive-lost-file-coordinates`:
+  the writer refused retraction of function file coordinates, reporting
+  `[:seon.schema.admission/source]`, expected `:core` or `:agent`, actual
+  `:core`, on `seon.id/id`. This observation is not a diagnosed writer cause.
+- `base-context-injections-have-program-rows`: the published population
+  omits the injected `clojure.test` declarations.
+- The existing allocation checks observed **2,265,795,280 bytes** for schema
+  declaration against 67,108,864, and **3,588,873,808 bytes** for through-SCI
+  public walk against 1,073,741,824. No limits were relaxed. The schema class
+  is already tracked in
+  [the allocation issue](../../../seon/issues/guarded-schema-declarations-still-exceed-the-allocation-regression-bound.md).
+
+The final full run repeated the benchmark under different shared load:
+
+| Return | Before µs/call | After µs/call | Difference of medians |
+|---|---|---|---|
+| Scalar | 0.54933335, 0.39376875, 0.3601375 | 0.50015625, 0.43353125, 0.48008955 | +0.0863208 |
+| Ordinary map | 0.38208125, 0.3856021, 0.3537042 | 0.56166875, 0.46739585, 0.4645979 | +0.0853146 |
+| Declared error | 0.32594795, 0.39449165, 0.3998104 | 43.0163021, 42.2806854, 42.80256875 | +42.4080771 |
+
+After that JVM loaded, acquisition's outer catch was also changed to propagate
+typed registration failures. Otherwise it could return a context containing
+a function whose arming failed. The sovereign-fork test now additionally
+asserts that record-mode `base-ctx` without a recorder refuses construction.
+The focused `seon.instrument-test` rerun could not construct its fixture:
+`test/seon/test_runner_test.clj:48:20` still referred to
+`dev-cache/digest-file!`, which a concurrent edit removed. No test tally is
+claimed for that launch. An owned thread dump showed fixture population at
+the writer, then the launcher exited with the named unresolved Var.
+
+Per the assignment, verification continued in `tmp/error-wrapper-sci-wt`,
+detached at `eb2d9a20cee90b991d503dc617e2a1e44adfba79`, with only the six owned
+source/test diffs applied and `reference-code` linked to the checkout's
+vendored dependencies. It runs the complete four-namespace fast command;
+neither foreign source nor another lane's session is repaired or operated.

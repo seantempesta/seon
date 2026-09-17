@@ -38,6 +38,7 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.kernel :as kernel]
+            [seon.sci.eval :as sci.eval]
             [seon.sci.admit :as admit]
             [seon.test.arm]
             [seon.test-support :as test-support])
@@ -329,12 +330,127 @@
     (is (= 'my.agents.contract/value
            (get-in (ex-data failure)
                    [:seon.error/data :seon.error/diagnostic-operation])))
-    (is (= original
-           (instrument/wrap-interpreted
+    (is (= :seon.instrument/missing-recorder
+           (:seon.error/kind
+            (test-support/refusal-data
+             #(instrument/wrap-interpreted
             'my.agents.contract/value
             "[:=> [:cat [:fn clojure.core/int?]] :int]"
-            projection :record caps wrapped))
-        ":record removes an already-installed interpreted wrapper")))
+            projection :record caps wrapped))))
+        ":record cannot arm without acquired recording custody")))
+
+(deftest sci-installed-contracts-enforce-facets-and-refusals-in-both-dials
+  (test-support/with-database
+   (fn [connection]
+     (doseq [mode [:panic :record]]
+       (test-support/seed-cluster! connection "sci-wrapper"
+                                   {:seon.config/on-core-error mode})
+       (let [database (db/db connection)
+             projection (schema/projection-from-database database)
+             caps (config/result-caps (config/effective database "sci-wrapper"))
+             recorded (atom [])
+             recorder (fn [value]
+                        (let [outcome (#'cluster/commit-fault!
+                                       connection "sci-wrapper" "sci-wrapper-test" caps value)]
+                          (swap! recorded conj [value outcome])
+                          outcome))
+             ctx (sci.eval/base-ctx database {:seon.flow/commit-fault! recorder})
+             _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database
+                                   :seon.flow/commit-fault! recorder})
+             domain {:seon.error/at #inst "2026-09-18T00:00:00Z"
+                     :seon.error/layer ::sci-body
+                     :seon.error/operation 'user/sci-facet
+                     :seon.agent/error-agent-id "sci-agent"}
+             contract [:function [:=> [:cat :map] :map]
+                       [:=> [:cat :map :int] [:or :int :seon.agent/error]]]]
+         (sci/eval-string* ctx "(def calls (atom 0))")
+         (doseq [[label args facet ran?]
+                 [[:input [42] :seon.instrument/contract-error false]
+                  [:arity [] :seon.instrument/arity-error false]
+                  [:undeclared [domain] :seon.instrument/undeclared-error true]
+                  [:declared [domain 1] nil true]]]
+           (let [name (symbol (str "sci-facet-" (clojure.core/name mode) "-" (clojure.core/name label)))
+                 qualified (symbol "user" (str name))
+                 source (str "(defn ^{:malli/schema " (pr-str contract) "} " name
+                             " [value & extras] (swap! calls inc) value)")
+                 row (test-support/program-fn-row database qualified source)
+                 _ (sci/eval-string* ctx source)
+                 _ (#'sci.eval/install-function-contract! ctx row projection database)
+                 before (sci/eval-string* ctx "@calls")
+                 [result] (kernel/with-arm
+                           ctx (* 1000 test-support/event-backstop-seconds)
+                           (fn [_]
+                             (let [invoke #(sci/eval-form
+                                            ctx (cons name (map (fn [value] (list 'quote value)) args)))]
+                               [(if facet (test-support/refusal-data invoke) (invoke))])))]
+             (is (= (+ before (if ran? 1 0)) (sci/eval-string* ctx "@calls")))
+             (if facet
+               (do
+                 (is ((schema/projection-validator projection facet) result))
+                 (is (= qualified (:seon.instrument/fn result)))
+                 (is (= (count args) (:seon.instrument/arity result)))
+                 (when (= :undeclared label)
+                   (is (= #{:seon.agent/error} (:seon.instrument/actual-facets result))))
+                 (when (= :record mode)
+                   (let [[value [_ outcome]] (peek @recorded)]
+                     (is (= :seon.flow/committed outcome)
+                         (if (instance? Throwable outcome) (ex-message outcome) (pr-str outcome)))
+                     (is (identical? value result))
+                     (is (seq (db/q '[:find ?e :in $ ?function
+                                      :where [?e :seon.instrument/fn ?function]
+                                             [?e :seon.error.occurrence/process ?process]
+                                             [?process :seon.db.process/id "sci-wrapper-test"]]
+                                    (db/db connection) qualified))))))
+               (is (= domain result)))))
+         (is (= (if (= :record mode) 3 0) (count @recorded))))))))
+
+(deftest a-sovereign-sci-fork-acquires-its-own-recorder
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "sci-fork-recorder")
+     (test-support/transacted!
+      connection [(assoc (test-support/program-fn-row 'seon.id/valid?)
+                         :seon.schema.admission/source :agent
+                         :seon.fn/source
+                         "(defn valid? [length id] true)")])
+     (let [base (sci.eval/base-ctx (db/db connection))
+           _ (is (::instrument/interpreted-original
+                  (meta @(sci/resolve base 'seon.id/valid?)))
+                 "The source context holds a real interpreted wrapper.")
+           _ (test-support/apply-config! connection "sci-fork-recorder"
+                                         {:seon.config/on-core-error :record})
+           database (db/db connection)
+           projection (schema/projection-from-database database)
+           state (sci.eval/projection-state database projection)
+           caps (config/result-caps (config/effective database "sci-fork-recorder"))
+           recorded (atom [])
+           recorder (fn [value]
+                      (let [outcome (#'cluster/commit-fault!
+                                     connection "sci-fork-recorder" "sci-fork-test" caps value)]
+                        (swap! recorded conj [value outcome])
+                        outcome))
+           missing (test-support/refusal-data
+                    #(sci.eval/fork-cluster-ctx base database connection state))
+           missing-base (test-support/refusal-data #(sci.eval/base-ctx database))
+           fork (sci.eval/fork-cluster-ctx base database connection state
+                                          {:seon.flow/commit-fault! recorder})
+           invoke (fn [ctx]
+                    (first (kernel/with-arm
+                            ctx (* 1000 test-support/event-backstop-seconds)
+                            (fn [_] [(test-support/refusal-data
+                                      #(sci/eval-string* ctx "(seon.id/valid?)"))]))))]
+       (is (= :seon.instrument/missing-recorder (:seon.error/kind missing)))
+       (is (= :seon.instrument/missing-recorder (:seon.error/kind missing-base))
+           "Construction cannot publish a context containing an unarmed definition.")
+       (is ((schema/projection-validator projection :seon.instrument/arity-error)
+            (invoke base)))
+       (is (empty? @recorded) "The source context keeps its panic policy.")
+       (let [result (invoke fork)
+             [value [_ outcome]] (first @recorded)]
+         (is (= 1 (count @recorded)))
+         (is (= :seon.flow/committed outcome))
+         (is (identical? value result))
+         (is ((schema/projection-validator projection :seon.instrument/arity-error) result)))))))
 
 (defn guarded-result
   "A fixture function whose pair of arguments and return must be a map."
@@ -1025,11 +1141,13 @@
             "The consumer refuses its input and retains the causal value.")))))
 
 (deftest semantic-admission-explicitly-declares-every-error-facet
-  (let [projection (schema/handed-projection)
-        output (last (:malli/schema (meta #'admit/semantic-value)))
-        declared (#'instrument/declared-result projection output)]
-    (is (= (error/facet-keys projection) (:seon.instrument/declared declared)))
-    (is (true? (:seon.instrument/base? declared)))))
+  (let [projection (schema/handed-projection)]
+    (doseq [candidate [#'admit/semantic-value #'error/refusal #'error/latest-fact]]
+      (let [output (last (:malli/schema (meta candidate)))
+            declared (#'instrument/declared-result projection output)]
+        (is (= (error/facet-keys projection) (:seon.instrument/declared declared))
+            (str candidate))
+        (is (true? (:seon.instrument/base? declared)))))))
 
 (deftest hot-host-facet-check-measurement
   (let [projection (schema/handed-projection)
@@ -1058,6 +1176,37 @@
                                    :after-us (measured after value)}) (range 3))]
         (is (= value (after value)))
         (prn {::facet-overhead label ::samples samples ::timings timings})))))
+
+(deftest hot-sci-facet-check-measurement
+  (let [projection (schema/handed-projection)
+        caps (config/result-caps (test-support/effective-config))
+        ctx (sci.eval/build-base-ctx projection)
+        original (sci/eval-string* ctx "(fn [value] value)")
+        samples 20000
+        measured (fn [call value]
+                   (dotimes [_ 3000] (call value))
+                   (let [start (System/nanoTime)]
+                     (dotimes [_ samples] (call value))
+                     (/ (double (- (System/nanoTime) start)) samples 1000.0)))]
+    (kernel/with-arm
+     ctx (* 1000 test-support/event-backstop-seconds)
+     (fn [_]
+       (doseq [[label contract value]
+               [[:scalar [:=> [:cat :int] :int] 1]
+                [:ordinary-map [:=> [:cat :map] :map] {::value 1}]
+                [:declared-error [:=> [:cat :map] [:or :map :seon.agent/error]]
+                 {:seon.error/at #inst "2026-09-18T00:00:00Z"
+                  :seon.error/layer ::benchmark :seon.error/operation 'user/benchmark
+                  :seon.agent/error-agent-id "benchmark"}]]]
+         (let [before (m/-instrument {:schema contract :scope #{:input :output :guard}
+                                      :report (fn [kind data] (throw (ex-info (str kind) data)))}
+                                     original (:seon.schema.projection/compile-options projection))
+               after (instrument/wrap-interpreted 'user/benchmark (pr-str contract)
+                                                   projection :panic caps original)
+               timings (mapv (fn [_] {:before-us (measured before value)
+                                      :after-us (measured after value)}) (range 3))]
+           (is (= value (after value)))
+           (prn {::sci-facet-overhead label ::samples samples ::timings timings})))))))
 
 (deftest the-work-launcher-api-is-collected-without-an-allowlist
   (instrumented!

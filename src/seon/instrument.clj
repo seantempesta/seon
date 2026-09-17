@@ -450,17 +450,6 @@
                 [:seon.error/data :seon.instrument.lookup/cause]
                 (failure-cause failure)))))
 
-(defn- throwing-report
-  "The `:panic` reporter: raise the violation as our own flat error.
-  Deliberately NOT `m/-fail!`. The ex-data carries `:seon.error/kind`,
-  so when this throw escapes a flow proc the fault path classifies it
-  from the cause chain like any other refusal and the durable fact says
-  `::contract-violated` rather than naming malli."
-  [caps]
-  (fn [kind data]
-    (let [value (violation caps kind data)]
-      (throw (ex-info (:seon.error/message value) value)))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Interpreted function contracts
 ;;; ---------------------------------------------------------------------------
@@ -507,47 +496,46 @@
        :else value))
    contract))
 
+(declare compiled-wrapper ^:dynamic *compiling-contract*)
+
 (defn wrap-interpreted
   "Apply one committed agent function contract under the core-error dial.
 
-  `caps` is EITHER the admission caps or the bounded refusal
-  `seon.config/result-caps` builds when a database carries no config the
-  caps could be derived from. `:record` — which instruments nothing and
-  undoes what is there — never reads them, so a database with no config
-  still gets its uninstrumented function. `:panic` DOES read them, and
-  arming a panic contract whose violation reporter has no bound is the
-  unbounded-execution shape this project refuses: the refusal is raised
-  here, naming the function and the config key that was missing."
+  Both dials use the host boundary's per-arity enforcement. Record mode
+  requires a recording operation acquired by the caller before installation."
   {:malli/schema
-   [:=>
-    [:cat :symbol :string :map :seon.config/on-core-error
-     [:or :seon.sci.admit/caps :seon.error/value] [:fn clojure.core/ifn?]]
-    [:fn clojure.core/ifn?]]}
-  [function-symbol spec-edn projection mode caps f]
+   [:function
+    [:=> [:cat :symbol :string :map :seon.config/on-core-error
+          [:or :seon.sci.admit/caps :seon.error/value] [:fn clojure.core/ifn?]]
+     [:fn clojure.core/ifn?]]
+    [:=> [:cat :symbol :string :map :seon.config/on-core-error
+          [:or :seon.sci.admit/caps :seon.error/value] [:fn clojure.core/ifn?]
+          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]]]
+     [:fn clojure.core/ifn?]]]}
+  ([function-symbol spec-edn projection mode caps f]
+   (wrap-interpreted function-symbol spec-edn projection mode caps f {}))
+  ([function-symbol spec-edn projection mode caps f arm-request]
   (let [original (original-interpreted f)]
-    (when (and (= :panic mode) (:seon.error/kind caps))
+    (when (and (= :record mode) (not (:seon.flow/commit-fault! arm-request)))
+      (throw (ex-info "Record-mode SCI instrumentation requires an acquired fault recorder."
+                      {:seon.error/kind ::missing-recorder
+                       :seon.error/message "Record-mode SCI instrumentation requires an acquired fault recorder."
+                       :seon.instrument/registration-failed true
+                       :seon.instrument/fn function-symbol
+                       :seon.error/expected-key :seon.flow/commit-fault!})))
+    (when (:seon.error/kind caps)
       (throw
        (ex-info
         (str "Cannot arm the contract of " function-symbol
-             " under :panic: " (:seon.error/message caps))
-        (assoc caps :seon.instrument/fn function-symbol))))
-    (case mode
-      :panic
-      (let [contract (->> (edn/read-string spec-edn)
-                          (bind-contract-predicates projection))
-            report (throwing-report caps)
-            wrapped
-            (m/-instrument
-             {:schema contract
-              :scope #{:input :output :guard}
-              :report (fn [kind data]
-                        (report kind (assoc data :fn-name function-symbol)))}
-             original
-             (:seon.schema.projection/compile-options projection))]
+             " under " mode ": " (:seon.error/message caps))
+        (assoc caps :seon.instrument/fn function-symbol
+                    :seon.instrument/registration-failed true))))
+      (let [wrapped (binding [*compiling-contract* true]
+                      (compiled-wrapper projection function-symbol
+                                        (edn/read-string spec-edn) original caps
+                                        (assoc arm-request :seon.config/on-core-error mode)))]
         (with-meta wrapped
-          (assoc (meta wrapped) interpreted-original original)))
-
-      :record original)))
+          (assoc (meta wrapped) interpreted-original original))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one operation

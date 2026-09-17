@@ -3455,13 +3455,16 @@
            instance (publish!
                      (assoc instance :seon.search/handle
                             (search/open! connection search-path)))
+           boot-dials (config/effective (db/db connection) cluster-name)
+           arm-request {:seon.flow/commit-fault!
+                        #(commit-fault! connection cluster-name process
+                                        (config/result-caps boot-dials) %)}
            bare-ctx
            (if base-ctx
              (sci.eval/fork-cluster-ctx
-              base-ctx (db/db connection) connection projection-state)
+              base-ctx (db/db connection) connection projection-state arm-request)
              (sci.eval/cluster-ctx
-              (db/db connection) connection projection-state))
-           boot-dials (config/effective (db/db connection) cluster-name)
+              (db/db connection) connection projection-state arm-request))
            ;; The launcher's own graph belongs to this cluster too, but the
            ;; launcher cannot be a member of the environment its own procs
            ;; carry. Its graph therefore receives this cluster's environment

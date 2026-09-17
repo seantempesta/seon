@@ -659,9 +659,8 @@
 (defn- instrumentation-config
   "Read the contract dial and admission caps from this database value.
 
-  A database with no admissible caps cannot arm a `:panic` contract, and
-  `:record` — the shipped default, which instruments nothing and undoes what
-  is there — does not read caps at all. So the caps member is whatever
+  A database with no admissible caps cannot arm a contract in either dial.
+  The caps member is whatever
   `result-caps` returned: the caps map, or the refusal naming the first
   config key it wanted. `instrument/wrap-interpreted` is the one seam that
   decides what to do with each."
@@ -681,7 +680,9 @@
       (sci/bind-root!
        ctx sci-var
        (instrument/wrap-interpreted
-        function-symbol spec-edn projection on-core-error caps @sci-var))))
+        function-symbol spec-edn projection on-core-error caps @sci-var
+        (select-keys @(::kernel/program-snapshot ctx)
+                     [:seon.flow/commit-fault!])))))
   nil)
 
 (declare install-declared-classes!)
@@ -874,6 +875,8 @@
                     (install-function-from-database! ctx db function-symbol))
                   :interpreted
                   (catch Throwable failure
+                    (when (:seon.instrument/registration-failed (ex-data failure))
+                      (throw failure))
                     (if (install-jvm-root! ctx function-symbol)
                       {:seon.sci.eval/load-state :jvm-fallback
                        :seon.fn/sym (:seon.fn/sym committed)
@@ -1663,7 +1666,9 @@
     db :seon.db/db
     supplied-projection :seon.schema/projection
     commit-fault! :seon.flow/commit-fault!}]
-  (let [projection (or supplied-projection
+  (let [recording-operation (or commit-fault!
+                                (:seon.flow/commit-fault! @(::kernel/program-snapshot ctx)))
+        projection (or supplied-projection
                        (db/carried-projection db)
                        (:seon.schema/projection (env/of ctx)))
         db (if projection
@@ -1775,6 +1780,9 @@
                           ::agent-authored? (agent-authored? admission)}]))
                  all-function-rows)
            all-namespace-row-by-name)
+        _ (when-let [recorder recording-operation]
+            (swap! (::kernel/program-snapshot ctx) assoc
+                   :seon.flow/commit-fault! recorder))
         namespace-names
         (into (set (keys namespace-row-by-name))
               (concat (keys function-rows-by-ns)
@@ -1852,6 +1860,8 @@
                                  (get-in installed [:seon.sci.eval/load-result :seon.error/message]))
                             {:seon.sci.eval/load-state :jvm-fallback}))))))
             (catch Throwable failure
+              (when (:seon.instrument/registration-failed (ex-data failure))
+                (throw failure))
               (update state ::acquisition-refusals (fnil conj [])
                       (acquisition-refusal row failure)))))]
     ;; Imports are explicit namespace facts. Install their named classes before
@@ -1887,11 +1897,15 @@
                 (::agent-authored?
                  (get namespace-row-by-name namespace-name))
                 (update :seon.sci.eval/installed inc))
-              (map (fn [[sym source _ admission _]]
+              (map (fn [[sym source _ admission private?]]
                      {:seon.fn/sym sym
                       :seon.schema.admission/source admission
                       :seon.fn/source source
                       :seon.fn/ns [:seon.ns/name namespace-name]
+                      :seon.fn/private? private?
+                      :seon.fn/arglists
+                      (:seon.fn/arglists (db/pull db [:seon.fn/arglists]
+                                                [:seon.fn/sym sym]))
                       ::skip-contract-install?
                       (not (agent-authored? admission))})
                    (sort-by first
@@ -2080,8 +2094,14 @@
   Core definitions copy the loaded JVM Var root. Agent definitions interpret
   their admitted source. Acquisition refusals remain values on the context;
   construction has no connection, writes no facts, and restores no private state."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]}
-  [database]
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
+    [:=> [:cat :seon.db/database-value
+          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]]]
+     :seon.sci.eval/ctx]]}
+  ([database] (base-ctx database {}))
+  ([database arm-request]
   (let [projection (if-let [carried (db/carried-projection database)]
                      (schema/projection-from-database database carried)
                      (schema/projection-from-database database))]
@@ -2091,13 +2111,15 @@
        (let [ctx (assoc (build-base-ctx projection)
                         :seon.schema/projection projection
                         ::kernel/install-function! install-function-from-database!)
+             _ (swap! (::kernel/program-snapshot ctx) merge
+                      (select-keys arm-request [:seon.flow/commit-fault!]))
              acquired (acquire-program! {:seon.sci.eval/ctx ctx
                                  :seon.db/db database
                                  :seon.schema/projection projection})]
          (swap! (::kernel/program-snapshot ctx) assoc
                 :seon.db/db database ::acquisition acquired
                 :seon.test/class-loader (clojure.lang.RT/baseLoader))
-         (assoc ctx ::acquisition acquired))))))
+         (assoc ctx ::acquisition acquired)))))))
 
 (defn acquire!
   "Regenerate the cluster base from the supplied database value.
@@ -2108,7 +2130,9 @@
   [{ctx :seon.sci.eval/ctx database :seon.db/db
     commit-fault! :seon.flow/commit-fault!}]
   (load-core-namespaces! database)
-  (let [generated (base-ctx database)
+  (let [generated (base-ctx database
+                            (cond-> {} commit-fault!
+                              (assoc :seon.flow/commit-fault! commit-fault!)))
         acquired (::acquisition generated)]
     (reset! (:env ctx) @(:env generated))
     (reset! (::kernel/program-snapshot ctx) @(::kernel/program-snapshot generated))
@@ -2127,22 +2151,28 @@
      :seon.sci.eval/ctx]
     [:=> [:cat :seon.db/database-value :seon.db/connection
           :seon.sci.eval/projection-state]
+     :seon.sci.eval/ctx]
+    [:=> [:cat :seon.db/database-value :seon.db/connection
+          :seon.sci.eval/projection-state
+          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]]]
      :seon.sci.eval/ctx]]}
   ;; EACH ARITY HANDS ON ONLY WHAT IT HAS. Delegating through the widest
   ;; arity with `nil` made the function violate its own declared contract the
   ;; moment instrumentation was armed — which is every live cluster, and now
   ;; the gate too — and it wrote a stored nil into the ctx's custody besides.
   ([db]
-   (cluster-ctx* db nil nil))
+   (cluster-ctx* db nil nil {}))
   ([db connection]
-   (cluster-ctx* db connection nil))
+   (cluster-ctx* db connection nil {}))
   ([db connection supplied-projection-state]
-   (cluster-ctx* db connection supplied-projection-state)))
+   (cluster-ctx* db connection supplied-projection-state {}))
+  ([db connection supplied-projection-state arm-request]
+   (cluster-ctx* db connection supplied-projection-state arm-request)))
 
 (defn- cluster-ctx*
-  [db connection supplied-projection-state]
+  [db connection supplied-projection-state arm-request]
    (load-core-namespaces! db)
-   (let [ctx (assoc (base-ctx db)
+   (let [ctx (assoc (base-ctx db arm-request)
                     ::custody (cond-> {}
                                 connection (assoc :seon.db/connection connection)))
          projection (:seon.schema/projection ctx)
@@ -2176,11 +2206,17 @@
      :seon.sci.eval/ctx]
     [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value
           :seon.db/connection :seon.sci.eval/projection-state]
+     :seon.sci.eval/ctx]
+    [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value
+          :seon.db/connection :seon.sci.eval/projection-state
+          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]]]
      :seon.sci.eval/ctx]]}
   ([base-ctx db connection]
    (fork-cluster-ctx base-ctx db connection
                      (projection-state db (schema/projection-from-database db))))
   ([base-ctx db connection supplied-projection-state]
+   (fork-cluster-ctx base-ctx db connection supplied-projection-state {}))
+  ([base-ctx db connection supplied-projection-state arm-request]
    (let [projection (or (:seon.schema/projection
                          (some-> supplied-projection-state deref))
                         (schema/projection-from-database db))
@@ -2192,10 +2228,20 @@
                       ::kernel/installed-functions
                       (atom @(::kernel/installed-functions base-ctx))
                       ::kernel/program-snapshot
-                      (atom @(::kernel/program-snapshot base-ctx))
+                      (atom (merge (dissoc @(::kernel/program-snapshot base-ctx)
+                                           :seon.flow/commit-fault!)
+                                   (select-keys arm-request [:seon.flow/commit-fault!])))
                       ::custody {:seon.db/connection connection}
                       :seon.schema/projection projection)
                projection-state))]
+     ;; A sovereign branch must not inherit the source branch's recorder.
+     ;; SCI's generation-aware bind-root! changes only this fork's Vars.
+     (doseq [function-symbol @(::kernel/installed-functions ctx)
+             :let [candidate (sci/resolve ctx function-symbol)]
+             :when (and candidate
+                        (::instrument/interpreted-original (meta @candidate)))]
+       (install-function-contract!
+        ctx (db/pull db '[*] [:seon.fn/sym function-symbol]) projection db))
      (when connection
        (call-preparation/watch!
         (get ctx call-preparation/carrier) connection projection))
