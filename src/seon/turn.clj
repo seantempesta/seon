@@ -2643,20 +2643,30 @@
                           [?run :seon.turn.work/situation :call]
                           [?run :seon.turn/closed-tx ?closed]
                           [(> ?closed ?tx)]] db agent-id since)]
-    (or (some #(when (:seon.error/kind %) %) [issue-t replies closed])
+    (or (some #(when (error/error? %) %) [issue-t replies closed])
         (count (into (set replies) closed)))))
 
 (defn- max-episode-runs
   "Read the issue budget, otherwise the agent override or cluster default."
+  {:malli/schema [:=> [:cat
+                       [:or :seon.db/database-value :seon.error/value]
+                       :seon.agent/id]
+                  [:or :nil :seon.config.run/max-episode-runs
+                   :seon.error/value]]}
   [database agent-id]
-  (or (db/q '[:find ?budget . :in $ ?id :where
-               [?agent :seon.agent/id ?id] [?issue :seon.issue/agent ?agent]
-               [?issue :seon.issue/budget ?budget]] database agent-id)
-      (:seon.config.run/max-episode-runs (ai/agent-overlay database agent-id))
-      (db/q '[:find ?value .
-              :where [?config :seon.config/cluster _]
-                     [?config :seon.config.run/max-episode-runs ?value]]
-            database)))
+  (let [issue-budget
+        (db/q '[:find ?budget . :in $ ?id :where
+                [?agent :seon.agent/id ?id] [?issue :seon.issue/agent ?agent]
+                [?issue :seon.issue/budget ?budget]] database agent-id)]
+    (if (error/error? issue-budget)
+      issue-budget
+      (or issue-budget
+          (:seon.config.run/max-episode-runs
+           (ai/agent-overlay database agent-id))
+          (db/q '[:find ?value .
+                  :where [?config :seon.config/cluster _]
+                         [?config :seon.config.run/max-episode-runs ?value]]
+                database)))))
 
 (defn turns-left
   "The remaining turns under the same session bound that admits a turn."
@@ -2664,7 +2674,7 @@
   [database agent-id]
   (let [limit (max-episode-runs database agent-id)
         spent (episode-runs database agent-id)]
-    (or (some #(when (:seon.error/kind %) %) [limit spent])
+    (or (some #(when (error/error? %) %) [limit spent])
         (long (max 0 (- (or limit 0) spent))))))
 
 (defn- opening-deferred?
@@ -2679,26 +2689,46 @@
   newest wake, and the bound REFILLS on a paid model loop (measured:
   verify-listened-attributes-2026-09-08 §10). One missing schema
   resource is not a licence to spend."
+  {:malli/schema [:=> [:cat
+                       [:or :seon.db/database-value :seon.error/value]
+                       :seon.agent/id]
+                  [:or :boolean :seon.error/value]]}
   [db agent-id]
   (let [limit (max-episode-runs db agent-id)]
-    (or (nil? limit)
-        (some? (wake/declarations-refusal db))
-        (>= (episode-runs db agent-id) limit)
-        ;; A terminal provider refusal leaves the wake unanswered, but
-        ;; cannot itself authorize another attempt. A new outside wake
-        ;; moves this basis and permits another turn.
-        (some? (db/q '[:find ?turn .
-                       :in $ ?agent-id ?since
-                       :where
-                       [?agent :seon.agent/id ?agent-id]
-                       [?turn :seon.turn/agent ?agent]
-                       [?turn :seon.turn/id _ ?tx]
-                       [(>= ?tx ?since)]
-                       [?turn :seon.turn/closed-tx _]
-                       (not [?turn :seon.turn/reply _])
-                       [?turn :seon.turn/attempts ?attempt]
-                       [?attempt :seon.ai.attempt/error _]]
-                     db agent-id (outside-wake-t db agent-id))))))
+    (cond
+      (error/error? limit) limit
+      (nil? limit) true
+      :else
+      (let [declarations-refusal (wake/declarations-refusal db)]
+        (if (error/error? declarations-refusal)
+          declarations-refusal
+          (let [spent (episode-runs db agent-id)]
+            (cond
+              (error/error? spent) spent
+              (>= spent limit) true
+              :else
+              ;; A terminal provider refusal leaves the wake unanswered, but
+              ;; cannot itself authorize another attempt. A new outside wake
+              ;; moves this basis and permits another turn.
+              (let [since (outside-wake-t db agent-id)
+                    failed-attempt
+                    (if (error/error? since)
+                      since
+                      (db/q '[:find ?turn .
+                              :in $ ?agent-id ?since
+                              :where
+                              [?agent :seon.agent/id ?agent-id]
+                              [?turn :seon.turn/agent ?agent]
+                              [?turn :seon.turn/id _ ?tx]
+                              [(>= ?tx ?since)]
+                              [?turn :seon.turn/closed-tx _]
+                              (not [?turn :seon.turn/reply _])
+                              [?turn :seon.turn/attempts ?attempt]
+                              [?attempt :seon.ai.attempt/error _]]
+                            db agent-id since))]
+                (if (error/error? failed-attempt)
+                  failed-attempt
+                  (some? failed-attempt))))))))))
 
 (defn deferred-triggers
   "The pending message wakes deferred by the turn bound or provider refusal.
@@ -2786,7 +2816,7 @@
   refuse."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.turn.work/agent-request]
-                  [:maybe :seon.turn.work/next]]}
+                  [:or :nil :seon.turn.work/next :seon.error/value]]}
   [db {:keys [:seon.agent/id]}]
   (let [agent-id id
         run (agent-run db agent-id)
@@ -2813,25 +2843,31 @@
         :else nil)
 
       issue
-      (when (and (not (:seon.issue/resolved-tx issue))
-                 (not (:seon.issue/budget-exhausted-tx issue))
-                 (pos? (turns-left db agent-id)))
-        {:seon.turn.work/situation :open :seon.agent/id agent-id})
+      (let [remaining (turns-left db agent-id)]
+        (if (error/error? remaining)
+          remaining
+          (when (and (not (:seon.issue/resolved-tx issue))
+                     (not (:seon.issue/budget-exhausted-tx issue))
+                     (pos? remaining))
+            {:seon.turn.work/situation :open :seon.agent/id agent-id})))
 
       :else
       ;; ONE TURN FOR EVERY UNANSWERED WAKE. The turn's own transaction
       ;; answers all of them, so nothing is selected and nothing is
       ;; claimed; the wakes are named only so a consumer can say what it
       ;; is about to answer. Handling claims are recorded at settlement.
-      (when-not (opening-deferred? db agent-id)
-        (let [wakes (unanswered-wakes db agent-id {})]
-          (when (or (seq wakes) (continuing-reply? db agent-id))
-            (cond->
-             {:seon.turn.work/situation :open
-              :seon.agent/id agent-id}
-              (some :seon.message/id wakes)
-              (assoc :seon.message/id
-                     (some :seon.message/id wakes)))))))))
+      (let [deferred (opening-deferred? db agent-id)]
+        (if (error/error? deferred)
+          deferred
+          (when-not deferred
+            (let [wakes (unanswered-wakes db agent-id {})]
+              (when (or (seq wakes) (continuing-reply? db agent-id))
+                (cond->
+                 {:seon.turn.work/situation :open
+                  :seon.agent/id agent-id}
+                  (some :seon.message/id wakes)
+                  (assoc :seon.message/id
+                         (some :seon.message/id wakes)))))))))))
 
 (defn more-agent-work?
   "True when another pass would find work for this agent.

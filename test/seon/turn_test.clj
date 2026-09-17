@@ -897,6 +897,28 @@
         (is (= before (db/basis-t (db/db connection)))
             "refusing eligibility commits no transaction")))))
 
+(deftest an-episode-budget-read-refusal-reaches-next-work-verbatim
+  (support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            refusal (db/q '[:find ?entity .
+                            :where [?entity :seon.audit/poison _]]
+                          database)
+            issue-budget-query
+            '[:find ?budget . :in $ ?id :where
+              [?agent :seon.agent/id ?id] [?issue :seon.issue/agent ?agent]
+              [?issue :seon.issue/budget ?budget]]
+            query db/q]
+        (is (error/error? refusal) (pr-str refusal))
+        (with-redefs [db/q
+                      (fn [form & arguments]
+                        (if (= issue-budget-query form)
+                          refusal
+                          (apply query form arguments)))]
+          (is (= refusal
+                 (turn/next-agent-work
+                  database {:seon.agent/id "unreadable-budget"}))))))))
+
 (deftest interrupted-warning-is-one-derived-value
   (testing "clean evaluations derive no warning at all"
     (is (nil? (turn/interrupted-warning
