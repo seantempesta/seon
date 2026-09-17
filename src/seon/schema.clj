@@ -589,7 +589,7 @@
                {:registry registry-for-references})
      canonical-keys)))
 
-(declare canonical-data-string)
+(declare canonical-data-string canonical-value-string)
 
 (defn- portable-string-hash [s]
   (.hashCode ^String s))
@@ -604,15 +604,9 @@
   (str tag (count payload) ":" payload))
 
 (defn- canonical-coll-string [tag values]
-  (framed tag (apply str (map canonical-data-string values))))
+  (framed tag (apply str (map canonical-value-string values))))
 
-(defn canonical-data-string
-  "Canonical byte-comparison string for ordinary projection data.
-
-   This is the portable content oracle used by projection fingerprints and by
-   the preprocessed-base composition proof. It encodes every EDN literal,
-   including instants, uuids and characters; runtime objects are rejected."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Canonical projection encoding handles heterogeneous EDN data, including nil, literals and nested collections; unsupported runtime objects are reported as noncanonical projection data.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
+(defn- canonical-value-string
   [value]
   (cond
     (nil? value) "n"
@@ -633,13 +627,13 @@
     (char? value) (framed "c" (str value))
     (vector? value) (canonical-coll-string "v" value)
     (set? value) (canonical-coll-string
-                   "t" (sort (map canonical-data-string value)))
+                   "t" (sort (map canonical-value-string value)))
     (map? value)
     (canonical-coll-string
       "m"
       (sort (map (fn [[k v]]
-                   (str (canonical-data-string k)
-                        (canonical-data-string v)))
+                   (str (canonical-value-string k)
+                        (canonical-value-string v)))
                  value)))
     (sequential? value) (canonical-coll-string "q" value)
     :else
@@ -648,6 +642,17 @@
                      :seon.schema/noncanonical-projection-data
                      :seon.schema/value value
                      :seon.error/kind :core-bug :seon.schema/noncanonical-projection-data true}))))
+
+
+(defn canonical-data-string
+  "Canonical byte-comparison string for ordinary projection data.
+
+   This is the portable content oracle used by projection fingerprints and by
+   the preprocessed-base composition proof. It encodes every EDN literal,
+   including instants, uuids and characters; runtime objects are rejected."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Canonical projection encoding handles heterogeneous EDN data, including nil, literals and nested collections; unsupported runtime objects are reported as noncanonical projection data.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
+  [value]
+  (canonical-value-string value))
 
 (defn byte-array?
   "True when `value` is a platform byte array."
