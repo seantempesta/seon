@@ -2600,3 +2600,10 @@ working tree, never Sonnet.
   residue (`inst-ms` on a Long in its edited `planner-census`; the
   situation-totality property after the about split). Editing lanes:
   integrator, guardrails, adoption-margin, message-wake.
+- **Launcher-fixture class FIXED** (`ad5d09b01`, guardrails, reviewed): the
+  hand-maintained copy list is gone — fixtures copy the whole
+  `src/seon/test` tree (plus `fs.clj`, the one remaining named file) and a
+  platform regression plants a new require in cache.clj and proves the
+  consumer checkout loads it. 48/312 green. **Batch 120 launched** (platform
+  + runner/test-system/evaluator namespaces) — the platform tier should be
+  GREEN for the first time tonight. Guardrails resumed on items 3–4.
