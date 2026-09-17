@@ -3698,3 +3698,8 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   per dependency digest (reusing dev_cache's), the bound declared where the
   operator's other bounds live and sized from measurements, regression, then
   the pending adoption run and the page re-measured.
+- `test-system-stage1` resumed (source.clj free): implements the publisher's
+  `:seon.source/test-input-digest` itself, finishes `select`, the members
+  admission (wiring into held runner.clj named as the owed hunk), the
+  both-hosts regression. Editing: wrapper (SCI), arm-leak (serial worker),
+  db, stage 1; Opus on the preflight deadline.
