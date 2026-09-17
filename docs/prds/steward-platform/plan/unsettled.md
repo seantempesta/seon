@@ -3589,3 +3589,17 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   a string `:seon.test/sym` at results index 18 — a runner results path
   still passing strings (for the stage-1 resume). Rule applied: no cold
   gate while four editing lanes iterate; next gate after two land.
+- CORRECTION (orchestrator's attribution refuted by the Opus agent,
+  `65305e39c`): the gate snapshot DOES read pins — `bin/test:735` symlinks
+  the source `.git` into the run root (8,250 bytes of pins, datahike at
+  `e11845ba`), and `run.NL3zMp` had REBUILT the dependency cache from the
+  fixed source. The cold red on
+  `a-throwing-datahike-listener-cannot-strand-a-committed-write` is its
+  own tuned 250 ms deadline missed by 4 ms in a cold JVM (fast: green).
+  What the agent found and fixed instead: `git ls-files` in a nested
+  directory without its own work tree answers exit 0 with ZERO bytes —
+  silence digested as a pin set; now refused, and the snapshot records
+  the pins (`dependency-pins.txt`). Issue rewritten as resolved with the
+  refutation; new issue `the-cold-gate-misses-the-250-ms-listener-completion-bound`
+  (the test must assert the completion EVENT under the declared backstop).
+  Lesson re-learned: verify the claim before naming the cause.
