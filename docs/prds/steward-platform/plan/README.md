@@ -109,6 +109,8 @@ Owner: "We'll need to fix the serious bugs but the easier ones are good initial 
 | **Ruling §1l: the data-model analysis first** — the error value family (kind/class/critical), the shapes the audits found, the checks and what they emit, the campaign order with schemas declared before contracts | astra `error-and-data-model-design` (high, design) | in flight; the contract campaign waits on it |
 | Issue triage design (steward per namespace, per-function findings, acceptance deftests, priced slices) | astra `issue-triage-design` | landed `7a6173b22`; slice one = `seon.render.web`, one steward, three workers, after the reset and the data-model design |
 | Serious bugs from the audits (ours): one error predicate (`seon.error/error?`, seven private copies dissolved); `require-open-run` on a refused read; the detector fabricating issues; the fault recorder's fail-open existence checks; the gate set shrinking on a refused read; `transact-call` relabelling refusals; `config/refuse!` without a message | astra `private-contracts` (predicate), sol `audit2-blockers`, sol `audit3-blockers` | in flight |
+| Live trial 1 (`5148553f7`): generate → tests → start → opening all good; the worker's turn proc died silently on every wake (stale projection + oversight silence) | Opus driver | landed, $0; rerun on the fresh cluster after the reset |
+| A dead agent turn proc must be visible: agent procs in `runtime_status`, a proc death is a fault naming the agent, the mailbox→turn drop is counted; fault evidence admission partitioned so the classifying key survives the cap | sol (after the reset) | queued, serious |
 | Owner inspects a prepped agent's context on the debug outline | owner | with the outline |
 
 ### Phase 5 — write-back and iterate

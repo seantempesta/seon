@@ -2950,3 +2950,24 @@ working tree, never Sonnet.
   Worktree and branch removed — no worktrees remain. Owner: keep committing
   and merge to `main` at each green checkpoint. Next: message-wake's
   cold-worker arming patch on the merged base, then `bin/seon reset --force`.
+- **LIVE TRIAL 1 LANDED** (`5148553f7`, $0, zero provider attempts): the
+  detector (3 public candidates left — the public class is nearly closed),
+  `generate!`, `tests!`, `start!` (worker `e6e49c4a5fe7`, budget 8, a
+  complete good opening — bytes committed) all worked; the worker's TURN
+  PROC DIED on every wake with `:malli.core/invalid-schema
+  :seon.test/acquisition` inside `seon.schema/projection-cache-value` — a
+  turn proc compiled under a projection its authority would not choose
+  (§2.1; root's proc took it once too). Worse: `runtime_status` shows only
+  plumbing procs, the agent looks armed with mailbox passes climbing and
+  turn passes 0, the sliding-1 mailbox→turn conn drops every wake, the
+  issue stays open with its budget intact — a dead agent loop invisible to
+  the first tool an operator reaches for. Blocker filed (`an-agent-turn-
+  proc-dies-on-every-pass-and-oversight-still-reports-it-armed`). Also:
+  the fault's classifying ex-data was capped away (`:seon.error/unclassified`,
+  no message) — partitioned admission is a correctness requirement. The
+  stale projection should dissolve at the reset (rerun the trial there);
+  the SILENCE is ours: a sol lane after the reset (agent procs in
+  runtime_status; a proc death = a fault naming the agent; the mailbox drop
+  counted). Observations: symbols still strings in `generate!` (reset
+  batch), `render-ai` omits the problem, the outline route needs a datastar
+  header.
