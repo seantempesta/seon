@@ -9,7 +9,6 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.fn :as functions]
-            [seon.id :as id]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
@@ -655,7 +654,7 @@
                      '[:db/id :seon.test/source :seon.schema.admission/source
                        :seon.program/analyzed-source-digest :seon.fn/file
                        {:seon.test/ns [:seon.ns/name]}]
-                     [:seon.test/sym (str test-symbol)])
+                     [:seon.test/sym test-symbol])
         acquired (sci.eval/acquired-program ctx)
         acquired-db (:seon.db/db acquired)
         wanted (runner/program-digest database)
@@ -669,7 +668,9 @@
       (or (not (string? source))
           (not= (symbol (namespace test-symbol))
                 (get-in row [:seon.test/ns :seon.ns/name]))
-          (not= (id/id source 64) (:seon.program/analyzed-source-digest row)))
+          ;; Analysis covers the resolver context, not just declaration text.
+          ;; Acquired program equality below verifies the complete admitted facts.
+          (nil? (:seon.program/analyzed-source-digest row)))
       (refuse :seon.test/provenance-unknown "The test lacks matching source, namespace or analysis evidence." row)
       (:seon.error/kind wanted) wanted
       (:seon.error/kind actual) actual

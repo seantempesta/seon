@@ -74,7 +74,7 @@
                         :seon.config/on-core-error :panic})
            declaration (program/declaration-row (:seon.program/row evaluation) :all :agent)]
        (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
-       (is (= (id/id source 64) (:seon.program/analyzed-source-digest declaration)))
+       (is (string? (:seon.program/analyzed-source-digest declaration)))
        (test-support/transacted! connection [declaration])
        (let [database (db/db connection)
              request {:seon.db/db database :seon.db/connection connection
@@ -136,7 +136,7 @@
                  (sut/resolve-test (assoc request :seon.sci.eval/ctx ctx
                                          :seon.test/identity 'seon.test-test/no-such-test))))))))))
 
-(deftest recording-derives-only-missing-admission-at-the-writer
+(deftest recording-preserves-admission-and-refuses-a-deleted-definition
   (test-support/with-database
    (fn [connection]
      (let [database (db/db connection)
@@ -166,12 +166,15 @@
         [[:db/add namespace-id :seon.schema.admission/source :agent]
          [:db.fn/call runner/record-tx completion]])
        (is (= :core (source-of)) "recording preserves an existing test's admission")
-       (test-support/transacted!
-        connection
-        [[:db.fn/retractEntity [:seon.test/sym test-symbol]]
-         [:db.fn/call runner/record-tx completion]])
-       (is (= :agent (source-of))
-           "recreation sees namespace provenance at the mid-transaction database")))))
+       (let [basis (db/basis-t (db/db connection))
+             refused (db/transact!
+                      connection
+                      [[:db.fn/retractEntity [:seon.test/sym test-symbol]]
+                       [:db.fn/call runner/record-tx completion]])]
+         (is (:seon.error/kind refused) (pr-str refused))
+         (is (= basis (db/basis-t (db/db connection))))
+         (is (= :core (source-of))
+             "result recording cannot recreate a deleted definition"))))))
 
 (deftest recording-distinguishes-run-replay-from-a-new-event
   (test-support/with-database

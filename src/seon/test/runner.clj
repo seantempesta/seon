@@ -2920,7 +2920,7 @@
           _ (when (and requested (> requested current-t))
               (execution-refusal! 'seon.test.runner/reusable-result (str test-symbol)
                                   :seon.test/invalid-basis current-t requested))
-          row (execution-read (db/pull database result-selector [:seon.test/sym (str test-symbol)]))
+          row (execution-read (db/pull database result-selector [:seon.test/sym test-symbol]))
           run-id (get-in row [:seon.test/run :db/id])
           run (when run-id
                 (execution-read
@@ -2948,7 +2948,7 @@
                          (= (get-in database [:config :branch]) (:seon.test.run/branch run))
                          (not (:seon.test.run/tested-branch run))
                          (= (:seon.test/run-basis-t row) (:seon.test.run/basis-t run))
-                         (= #{(str test-symbol)} (set selected))
+                         (= #{test-symbol} (set selected))
                          (or (nil? requested) (= requested (:seon.test.run/basis-t run))))]
       (cond
         reusable? (assoc (dissoc row :db/id)
