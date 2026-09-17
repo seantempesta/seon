@@ -1,12 +1,24 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-16
 tags: [issue, program-graph, test, wave/test-fixture]
 ---
 
 # A blocked publication reports that findings exist, never which ones
+
+## Resolution — 2026-09-17
+
+`seon.fn/assert-clean-analysis!` now puts every blocking finding's path,
+line, column, type and message into the exception message while preserving
+the structured findings. The owner requested every finding, superseding
+the bounded-sample proposal below. The real analyzer regression
+`publication-refuses-a-required-artifact-load-finding` produces two
+unresolved symbols and asserts that both locations and messages reach the
+exception a caller sees. It passed in the armed fast harness; the full
+namespace's separate SCI-owner census failure is recorded in
+[its issue](my-program-native-evaluation-adds-a-second-sci-owner.md).
 
 ## Problem
 

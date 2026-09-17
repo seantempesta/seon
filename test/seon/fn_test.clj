@@ -864,7 +864,7 @@
 (deftest publication-refuses-a-required-artifact-load-finding
   (let [root (fixture-root)]
     (write-source! root "audit/unresolved.clj"
-                   "(ns audit.unresolved (:require [clojure.set :as sets]))\n(defn broken [] missing)\n")
+                   "(ns audit.unresolved (:require [clojure.set :as sets]))\n(defn broken [] missing)\n(defn also-broken [] another-missing)\n")
     (let [analysis (analyzer/analyze {::analyzer/paths [(.getPath root)]})
           _ (is (some #(= :warning (::analyzer/level %))
                       (::analyzer/findings analysis))
@@ -878,7 +878,15 @@
       (is (some #(= :unresolved-symbol (::analyzer/type %))
                 (::seon.fn/findings (ex-data failure))))
       (is (every? #(= :error (::analyzer/level %))
-                  (::seon.fn/findings (ex-data failure)))))))
+                  (::seon.fn/findings (ex-data failure))))
+      (is (= 2 (count (::seon.fn/findings (ex-data failure)))))
+      (doseq [finding (::seon.fn/findings (ex-data failure))]
+        (is (str/includes? (ex-message failure)
+                           (str (::analyzer/filename finding) ":"
+                                (::analyzer/row finding) ":"
+                                (::analyzer/col finding))))
+        (is (str/includes? (ex-message failure)
+                           (::analyzer/message finding)))))))
 
 (deftest source-context-is-derived-once-per-file-population
   (let [root (fixture-root)

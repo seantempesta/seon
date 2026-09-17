@@ -394,3 +394,43 @@ reported by `git status`; AGENTS.md is foreign-held and untouched. Default
 PID 66052 was not operated. The edit hook queued publication; this is a
 fixture proof, not a claim of default adoption. Cold gate and platform
 integration remain the orchestrator's proof. Items 3–4 remain pending.
+
+## Blocking finding messages — 2026-09-17
+
+`seon.fn/assert-clean-analysis!` now names **every** refused finding as
+`path:line:column type message` in its thrown message, preserving the
+structured findings too. This resolves
+[blocking-static-analysis-names-no-finding](../../../seon/issues/blocking-static-analysis-names-no-finding.md).
+The real analyzer regression produces two unresolved symbols and checks
+both findings' locations and messages in the caller-visible exception.
+
+```sh
+timeout 2400 bin/test-fast --paths src/seon/fn.clj test/seon/fn_test.clj -- seon.fn-test
+```
+
+At HEAD `5160057f6`, this waited **86 s** for a slot, then completed
+**59 tests / 440 assertions / 1 failure / 0 errors** at
+`2026-09-17T05:27:21.149038Z`. The changed regression passed. The failure is
+the separate [SCI owner census](../../../seon/issues/my-program-native-evaluation-adds-a-second-sci-owner.md),
+which now observes the existing `my.program/native!` call to `sci/eval-form`.
+No change was made to that owner. A focused armed run of the changed
+finding and orphan regressions passed **2 tests / 27 assertions / 0 failures
+/ 0 errors** at `2026-09-17T05:30:27.515703Z`.
+
+The overlay refusal itself is **not implemented** in this checkpoint.
+Inspection found that `bin/test` constructs the selected snapshot before
+launch, but obtains its published-base manifest only after launching the
+dependency preparation JVM and the base-publication JVM. Retained
+`target/test-published-bases/*/base/manifest.edn` files are readable through
+Babashka; they are not necessarily the HEAD graph. The owner decision was
+requested before adding a new prerequisite: refuse an absent/stale baseline
+(recommended, preserves the before-any-JVM guarantee), use retained graphs
+with incomplete coverage, or allow preparation to launch a JVM first.
+No stale graph is silently treated as complete.
+
+Foreign boundary: operator/adoption and program/turn edits were excluded by
+the selected snapshot. A transient unbalanced edit in
+`test/seon/gen/loop_test.clj` caused automatic shell review to refuse one
+action; no foreign bytes were changed, and the next attempt proceeded after
+the tree converged. Default PID 94566 was not operated; hook publication is
+not a claim of adoption. The orchestrator still owns the cold proof.

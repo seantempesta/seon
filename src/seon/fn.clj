@@ -1098,7 +1098,16 @@
   [analysis first-party-functions]
   (let [findings (blocking-findings analysis first-party-functions)]
     (when (seq findings)
-      (throw (ex-info "Static program analysis found blocking errors."
+      (throw (ex-info (str "Static program analysis found blocking errors.\n"
+                           (str/join
+                            "\n"
+                            (map (fn [finding]
+                                   (str (::analyzer/filename finding) ":"
+                                        (::analyzer/row finding) ":"
+                                        (::analyzer/col finding) " "
+                                        (::analyzer/type finding) " "
+                                        (::analyzer/message finding)))
+                                 findings)))
                       {:seon.error/kind ::index-refused
                        ::findings findings
                        :seon.fn/index-refused true})))))
