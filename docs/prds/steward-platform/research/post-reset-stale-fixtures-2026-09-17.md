@@ -98,3 +98,27 @@ reds remain separately classified: `stale-incremental-upsert-preserves-the-newer
 `incremental-upsert-derives-scalar-safety-from-installed-schema`, and
 `an-activation-closure-with-empty-member-collections-seals`; each first
 reports `:seon.program/unresolved-report` missing `:seon.db/basis-t`.
+
+## 2026-09-17 — exact-HEAD fast-base announcement
+
+The second post-reset platform gate isolated
+`selected-overlays-require-a-current-graph-and-every-changed-caller` to one
+launcher omission: `bin/test`'s exact-HEAD fast branch skipped
+`seon.test.cache/newest-manifest`, which is the owner of both stale-base
+selection and its `overlay graph <digest> age= <n> commits behind HEAD`
+announcement (`src/seon/test/cache.clj:249-279`).
+
+`bin/test:791-811` now retains exact-HEAD admission when no ready record
+exists, while invoking that owner when a published base does exist. Thus an
+exact-HEAD fast snapshot remains free of overlay-closure admission, but a
+stale base is never silently used.
+
+The requested fast command emitted `overlay graph
+68243553e5aa77047fed283d6871548cd3460ae8591d0a6abe5aec653eeeefa1 age=
+3 commits behind HEAD` before its test JVM started. The JVM later waited in
+`seon.test-support/retrying-base`'s `acquire-base!` for more than the
+290-second declared bound; the recorded `jstack` placed the main thread on
+that promise. It was terminated after the bound, so no namespace tally is
+claimed. The pre-existing `assertionless-test-is-an-attributed-failure` also
+failed before that wait with empty recorded counters; it is outside the
+overlay-launcher assertion.

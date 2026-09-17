@@ -796,6 +796,18 @@ if ! git -C "$source_root" --work-tree="$run_root" diff --quiet "$git_sha" -- . 
      . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt')" ]; then
   snapshot_changed=1
 fi
+# Exact-HEAD fast snapshots need no graph for overlay closure, but if a
+# published base exists it is still the one the fast path will reuse. Preserve
+# that observable provenance: `newest-manifest` owns both selecting it and
+# reporting its commit age. No ready record remains an admitted exact-HEAD
+# snapshot, as ruled by 25a705b4b.
+if [ "$fast_iteration" -eq 1 ] && [ "$snapshot_changed" -eq 0 ] &&
+   compgen -G "$source_root/target/test-published-bases/*/ready.edn" >/dev/null; then
+  bb --config "$source_root/bb.edn" -e '
+    (require (quote [seon.test.cache :as cache]))
+    (cache/newest-manifest (first *command-line-args*)
+                           (second *command-line-args*))' "$source_root" "$git_sha"
+fi
 if [ ${#snapshot_paths[@]} -gt 0 ] && [ "$snapshot_changed" -eq 1 ]; then
   # Cold gates own publication. Reuse the HEAD-only preparation command when
   # its graph is absent; fast iterations may never start this preparation.
