@@ -2455,3 +2455,10 @@ working tree, never Sonnet.
   two reds, results recorded this time (the `:seon.test.run/immutable`
   refusal did not recur; stage 2 has the evidence). Platform tier is green
   once b5cabe732 is gated: batch 118.
+- **Invalid-input-as-absence FIXED** (`761408a17`, Opus): `index-tx` decides
+  validity before deriving datoms and mints identities for admitted notes
+  only (an on-disk-but-refused note is not retracted); `effective-in` returns
+  the pull's error as the cause; `population-transaction-data` refuses
+  `:seon.config/read-refused` instead of minting a tempid. 31/238/1F fast;
+  the red is the known `the-issue-ai-render-no-longer-teaches-its-requery-
+  form` (issue open, small render fix queued). Cold gate: batch 118.
