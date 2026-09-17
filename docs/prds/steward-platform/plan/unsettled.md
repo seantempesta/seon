@@ -2794,3 +2794,6 @@ working tree, never Sonnet.
   312f60560) → guardrails resumed; the open indexed-vs-evaluated row issue.
   Green cold: instrument, error, db, my.message, cluster.message, operator,
   runner, test-runner, fresh-operator-reset, selection.
+- Guardrails `b63bd01e9`: the dependency-cache regression exercises the
+  public `refresh` with real dependency source changes (obsolete digest
+  stub removed); 1/10 green. Lane parked (all items complete).
