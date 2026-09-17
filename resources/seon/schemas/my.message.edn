@@ -66,4 +66,20 @@
  :my.message/no-reason [:= true]
  :my.message/no-reason-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no reason"} [:my.message/no-reason :my.message/no-reason] [:seon.error/message :seon.error/message]]
  :my.message/not-found :seon.message/id
- :my.message/not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the message that does not exist"} [:my.message/not-found :my.message/not-found] [:seon.error/message :seon.error/message]]}
+ :my.message/not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the message that does not exist"} [:my.message/not-found :my.message/not-found] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :my.message/error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:my.message/error-request :my.message/error-request]]]
+
+ :my.message/error-request
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+}

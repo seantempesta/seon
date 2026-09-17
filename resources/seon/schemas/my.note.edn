@@ -35,4 +35,12 @@
  [:or {:error/message "an entity id or a lookup ref such as [:my.note/id \"...\"]"}
   :int [:tuple :keyword :seon.db/lookup-ref-value]]
  :my.note/add-request [:map [:my.note/id :my.note/id] [:my.note/content :my.note/content] [:my.note/about {:optional true} :my.note/existing-about] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
- :my.note/forget-request [:map [:my.note/id :my.note/id] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]}
+ :my.note/forget-request [:map [:my.note/id :my.note/id] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :my.note/error-about
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+}

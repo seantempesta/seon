@@ -42,7 +42,13 @@
             [seon.problems]
             [seon.cluster.status]
             [seon.render.transcript]
+            [malli.core]
+            [seon.id]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
+            [seon.schema.datahike :as schema.datahike]
+            [seon.sci.eval :as sci.eval]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]
             [seon.db :as db]))
@@ -1124,3 +1130,136 @@
           (is (= target (:seon.instrument/fn stored)))
           (is (nil? (db/pull database [:db/id] [:seon.fn/sym target])))
           (is (nil? (db/pull database [:db/id] [:seon.ns/name 'my.mint]))))))))
+
+
+(deftest new-error-facets-compose-and-report-missing-members
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (db/db connection))
+           forms (:seon.schema.projection/forms projection)
+           base {:seon.error/at #inst "2026-09-18T00:00:00Z"
+                 :seon.error/layer :seon.db/read :seon.error/operation 'seon.db/q}
+           facet-keys (into #{} (keep (fn [[k v]]
+                                       (when (and (vector? v) (not= k :seon.error/base)
+                                                  (schema.form/extends-schema? forms v :seon.error/base)) k))) forms)
+           matching (fn [value] (into #{} (filter #((schema/projection-validator projection %) value)) facet-keys))
+           read-error (gen/generate error/read-operation-agrees-generator 4 20260918)
+           combined (assoc read-error :seon.agent/error-agent-id "manifest-agent"
+                           :seon.turn/error-turn-id "manifest-turn")
+           missing (dissoc combined :seon.agent/error-agent-id)]
+       (is ((schema/projection-validator projection :seon.error/base) base))
+       (is (= #{} (matching base)) "Valid base-only error: no domain facet matched.")
+       (is (every? (matching combined) [:seon.db.read/error :seon.turn/error :seon.agent/error]))
+       (is (false? ((schema/projection-validator projection :seon.turn/error) missing)))
+       (is (some #(= [:seon.agent/error-agent-id] (:in %))
+                 (:errors ((schema/projection-explainer projection :seon.turn/error) missing))))))))
+
+(deftest arity-facet-preserves-real-refusal-observations
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (db/db connection))
+           observed-at (java.util.Date.)
+           refusal (test-support/refusal-data #(apply seon.id/valid? []))
+           data (:seon.error/data refusal)
+           contract (:malli/schema (meta #'seon.id/valid?))
+           info (malli.core/-function-info
+                 (malli.core/schema contract (:seon.schema.projection/compile-options projection)))
+           value {:seon.error/at observed-at :seon.error/layer :seon.instrument/invocation
+                  :seon.error/operation 'seon.id/valid?
+                  :seon.instrument/fn (:seon.instrument/fn data)
+                  :seon.instrument/arity (:seon.instrument/arity data)
+                  :seon.instrument/declared-arity-count 1
+                  :seon.instrument/declared-arities
+                  #{(cond-> {:seon.instrument.arity/ordinal 0 :seon.instrument.arity/min (:min info)}
+                      (:max info) (assoc :seon.instrument.arity/max (:max info)))}}
+           validate (schema/projection-validator projection :seon.instrument/arity-error)]
+       (is (= :malli.core/invalid-arity (:seon.instrument/malli data)))
+       (is (= 0 (:seon.instrument/arity data)))
+       (is (validate value) (pr-str ((schema/projection-explainer projection :seon.instrument/arity-error) value)))
+       (is (false? (validate (assoc value :seon.instrument/arity (:min info)))))
+       (is (false? (validate (assoc value :seon.instrument/declared-arity-count 2))))))))
+
+(deftest complete-error-children-validate-through-the-writer
+  (let [forms (assoc (schema.edn/packaged-forms)
+                     ::manifest-id [:string {:seon.db/identity true}]
+                     ::manifest-location [:and {:seon.db/component true
+                                               :seon.db/component-schema :seon.error.location/entity} :seon.db/ref]
+                     ::manifest-observation [:and {:seon.db/component true
+                                                   :seon.db/component-schema :seon.agent/error} :seon.db/ref]
+                     ::manifest-explanations [:and {:seon.db/component true
+                                                    :seon.db/component-schema :seon.instrument.explanations/entity} :seon.db/ref]
+                     ::manifest-root [:map {:seon.db/attributes true}
+                                      [::manifest-id ::manifest-id]
+                                      [::manifest-location ::manifest-location]
+                                      [::manifest-observation {:optional true} ::manifest-observation]
+                                      [::manifest-explanations {:optional true} ::manifest-explanations]])
+        projection (schema/build-projection forms)]
+    (test-support/with-database
+     {::test-support/extra-schema
+      (schema.datahike/malli->datahike-schema-in projection [::manifest-id ::manifest-location ::manifest-observation ::manifest-explanations])}
+     (fn [connection]
+       (db/carry-connection-projection-state!
+        connection (sci.eval/projection-state @connection projection))
+       (test-support/transacted! connection [{::manifest-id "root-path"
+                                              ::manifest-location {:seon.error.location/length 0}}])
+       (test-support/transacted!
+        connection [{::manifest-id "missing-key"
+                     ::manifest-location
+                     {:seon.error.location/length 2
+                      :seon.error.location/segments
+                      #{{:seon.error.location.segment/ordinal 0
+                         :seon.error.location.segment/key
+                         {:seon.error.key/projection "nil" :seon.error.key/capped? false
+                          :seon.error.key/bound-bytes 256}}
+                        {:seon.error.location.segment/ordinal 1
+                         :seon.error.location.segment/key
+                         {:seon.error.key/projection ":plain" :seon.error.key/scalar :plain
+                          :seon.error.key/capped? false :seon.error.key/bound-bytes 256}}}}}])
+       (let [observation {:seon.error/at #inst "2026-09-18T00:00:00Z"
+                          :seon.error/layer :seon.agent/lifecycle
+                          :seon.error/operation 'seon.agent/by-id
+                          :seon.agent/error-agent-id "same-observed-agent"}
+             large-location
+             {:seon.error.location/length 1001
+              :seon.error.location/segments
+              (set (for [n (range 1001)]
+                     {:seon.error.location.segment/ordinal n
+                      :seon.error.location.segment/key
+                      {:seon.error.key/projection (str n) :seon.error.key/scalar n
+                       :seon.error.key/capped? false :seon.error.key/bound-bytes 256}}))}
+             explanations
+             {:seon.instrument.explanations/count 2
+              :seon.instrument.explanations/items
+              (set (for [n (range 2)]
+                     {:seon.instrument.explanation/ordinal n
+                      :seon.instrument.explanation/schema-location {:seon.error.location/length 0}
+                      :seon.instrument.explanation/value-location {:seon.error.location/length 0}
+                      :seon.instrument.explanation/expected-shape (apply str (repeat 64 "0"))
+                      :seon.instrument.explanation/humanized {:seon.instrument.humanized/message-count 0}}))}
+             report (test-support/transacted!
+                     connection [{::manifest-id "large-path" ::manifest-location large-location
+                                  ::manifest-observation observation ::manifest-explanations explanations}
+                                 {::manifest-id "another-observation"
+                                  ::manifest-location {:seon.error.location/length 0}
+                                  ::manifest-observation observation}])
+             database (db/db connection)
+             root (:db/id (db/pull database [:db/id] [::manifest-id "large-path"]))
+             location (:v (first (db/datoms database :eavt root ::manifest-location)))
+             problems (:v (first (db/datoms database :eavt root ::manifest-explanations)))
+             observations (db/datoms database :avet :seon.agent/error-agent-id "same-observed-agent")]
+         (is (= 1001 (count (db/datoms database :eavt location :seon.error.location/segments))))
+         (is (= 2 (count (db/datoms database :eavt problems :seon.instrument.explanations/items))))
+         (is (= 2 (count (set (map :e observations)))) "Observed identity tokens cannot upsert two errors together.")
+         (is (seq (:tx-data report)))
+         (println "ERROR-MANIFEST stored-large-value"
+                  {:entities (count (set (map :e (:tx-data report)))) :datoms (count (:tx-data report))
+                   :segments 1001 :problems 2 :observations (count observations)}))
+       (let [database (db/db connection)
+             root (:db/id (db/pull database [:db/id] [::manifest-id "missing-key"]))
+             location (:v (first (db/datoms database :eavt root ::manifest-location)))
+             segment (:v (first (db/datoms database :eavt location :seon.error.location/segments)))
+             before (db/basis-t database)
+             result (db/transact! connection [[:db/add segment :seon.error.location.segment/ordinal 3]])]
+         (is (= :seon.db/invalid-write (:seon.error/kind result)) (pr-str result))
+         (is (= before (db/basis-t (db/db connection))))
+         (is (= 2 (count (db/datoms database :eavt location :seon.error.location/segments)))))))))
