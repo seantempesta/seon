@@ -28,6 +28,15 @@ remain with the database owner. Full tallies, timings, acquisition corrections
 and outstanding proof are in the linked research note below. The historical
 sections that follow do not describe the current implementation.
 
+Implementation commit: `f3ae2d055`. Final HEAD-plus-owned-diff worktree fast
+result: **157 tests / 851 assertions / 6 failures / 8 errors**. Both new SCI
+enforcement/construction/fork regressions and the complete error and
+arm-carriage namespaces pass. The full result is still red at the declaration
+dependencies above and the separately itemized existing suite findings in the
+research note. The worktree excluded a concurrent `dev-cache/digest-file!`
+removal that prevented the shared tree's fixture from loading; it did not
+change that foreign owner. Cold/platform and live adoption remain owed.
+
 **2026-09-18 host implementation update:** acquisition is implemented on the
 host path, but the complete behavior remains blocked by generic return
 contracts. The real canonical recorder regression reaches

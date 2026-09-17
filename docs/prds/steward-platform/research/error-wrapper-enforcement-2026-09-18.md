@@ -502,3 +502,27 @@ detached at `eb2d9a20cee90b991d503dc617e2a1e44adfba79`, with only the six owned
 source/test diffs applied and `reference-code` linked to the checkout's
 vendored dependencies. It runs the complete four-namespace fast command;
 neither foreign source nor another lane's session is repaired or operated.
+
+The isolated run completed **157 tests / 851 assertions / 6 failures /
+8 errors**, exit 1. Both new real-SCI regressions passed, including missing
+recorder refusal during base construction, as did all error and
+kernel-arm-carriage tests. The remaining six failures and eight errors are
+exactly the classes listed above. In this snapshot the schema and walk
+allocation observations were 2,265,743,440 and 3,588,863,472 bytes respectively.
+This is a named dependency stop, not a green integration claim.
+
+The isolated final timing samples (µs/call) were:
+
+| Return | Before, three batches | After, three batches | Difference of medians |
+|---|---|---|---|
+| Scalar | 0.28811875, 0.18432085, 0.17735625 | 0.2357104, 0.20694375, 0.2164604 | +0.03213955 |
+| Ordinary map | 0.1814771, 0.180025, 0.18007705 | 0.23447915, 0.22260625, 0.22365625 | +0.0435792 |
+| Declared error | 0.17670205, 0.17425835, 0.17766665 | 17.4108, 16.71997705, 16.86356875 | +16.6868667 |
+
+Implementation and owned fixture repairs landed in `f3ae2d055`. No held path
+was edited. The final full snapshot includes every production/test byte of
+that commit. `git diff --check` passed. The markdown hook still reports its
+44 pre-existing repository citation errors; no new citation owner was changed.
+All lane-launched test processes exited; the owned scratch worktree, patch,
+logs and thread dump are removed after retaining their evidence here. The
+recorder issue remains open for the named integration dependencies.
