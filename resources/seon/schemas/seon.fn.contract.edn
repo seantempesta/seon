@@ -1,0 +1,27 @@
+#:seon.fn.contract
+{:finding
+ [:enum
+  {:description "The closed reasons a declared function contract cannot enforce a useful boundary: no contract, an undefined or structurally permissive slot, an unguarded variadic input, or a referenced stored attribute the Datahike bridge cannot map."}
+  :seon.fn.contract.finding/missing-spec
+  :seon.fn.contract.finding/any
+  :seon.fn.contract.finding/some
+  :seon.fn.contract.finding/bare-map
+  :seon.fn.contract.finding/maybe
+  :seon.fn.contract.finding/bare-value
+  :seon.fn.contract.finding/unguarded-variadic
+  :seon.fn.contract.finding/unstorable-attribute]
+ :position
+ [:or
+  [:= :seon.fn.contract.position/contract]
+  [:= :seon.fn.contract.position/output]
+  [:tuple [:= :seon.fn.contract.position/input] [:int {:min 0}]]]
+ :form :seon.schema/definition
+ :caller-count [:int {:min 0}]
+ :finding-row
+ [:map
+  [:seon.fn/sym :seon.fn/sym]
+  [:seon.fn.contract/position :seon.fn.contract/position]
+  [:seon.fn.contract/form :seon.fn.contract/form]
+  [:seon.fn.contract/finding :seon.fn.contract/finding]
+  [:seon.fn.contract/caller-count :seon.fn.contract/caller-count]]
+ :report [:vector :seon.fn.contract/finding-row]}

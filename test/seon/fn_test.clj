@@ -1350,6 +1350,64 @@
         (is (= []
                (seon.fn/tests-reaching @connection (quote sample.reach/absent))))))))
 
+(deftest contract-findings-ranks-each-incomplete-function-contract
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            function-row
+            (fn [function-symbol source]
+              (test-support/program-fn-row database function-symbol source))]
+        (transact-fixture!
+         connection
+         [{:seon.ns/name 'sample.contract-findings
+           :seon.ns/source "(ns sample.contract-findings)"}
+          (function-row
+           'sample.contract-findings/any-input
+           "(defn any-input {:malli/schema [:=> [:cat :any] :int]} [x] 1)")
+          (function-row
+           'sample.contract-findings/bare-map-output
+           "(defn bare-map-output {:malli/schema [:=> [:cat] :map]} [] {})")
+          (function-row
+           'sample.contract-findings/missing-spec
+           "(defn missing-spec [] nil)")
+          (function-row
+           'sample.contract-findings/fully-declared
+           "(defn fully-declared {:malli/schema [:=> [:cat :int] [:map [:sample.contract-findings/value :int]]]} [x] {:sample.contract-findings/value x})")
+          (merge
+           (function-row
+            'sample.contract-findings/caller
+            "(defn caller {:malli/schema [:=> [:cat] :int]} [] 1)")
+           {:seon.fn/calls #{'sample.contract-findings/any-input}})])
+        (let [findings
+              (->> (seon.fn/contract-findings (db/db connection))
+                   (filterv #(= "sample.contract-findings"
+                                (namespace (:seon.fn/sym %)))))]
+          (is (= [{:seon.fn/sym 'sample.contract-findings/any-input
+                   :seon.fn.contract/position
+                   [:seon.fn.contract.position/input 0]
+                   :seon.fn.contract/form :any
+                   :seon.fn.contract/finding
+                   :seon.fn.contract.finding/any
+                   :seon.fn.contract/caller-count 1}
+                  {:seon.fn/sym 'sample.contract-findings/bare-map-output
+                   :seon.fn.contract/position
+                   :seon.fn.contract.position/output
+                   :seon.fn.contract/form :map
+                   :seon.fn.contract/finding
+                   :seon.fn.contract.finding/bare-map
+                   :seon.fn.contract/caller-count 0}
+                  {:seon.fn/sym 'sample.contract-findings/missing-spec
+                   :seon.fn.contract/position
+                   :seon.fn.contract.position/contract
+                   :seon.fn.contract/form :seon.fn.contract/missing
+                   :seon.fn.contract/finding
+                   :seon.fn.contract.finding/missing-spec
+                   :seon.fn.contract/caller-count 0}]
+                 findings))
+          (is (not-any? #(= 'sample.contract-findings/fully-declared
+                            (:seon.fn/sym %))
+                        findings)))))))
+
 (deftest gate-set-walks-only-indexed-callers-once
   (test-support/with-database
     (fn [connection]
