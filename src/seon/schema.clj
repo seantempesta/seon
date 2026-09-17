@@ -3057,10 +3057,7 @@
                     :seon.schema.admission/source :core})
              (seq references)
              (assoc :seon.schema/references
-                    (into #{}
-                          (map (fn [reference]
-                                 [:seon.schema/key reference]))
-                          references))))))
+                    (set references))))))
       (map (fn [schema-key] [schema-key (get forms schema-key)])
            (dependency-first-schema-keys
             ordering-graph materialized-keys))))))

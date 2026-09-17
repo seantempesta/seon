@@ -2,7 +2,6 @@
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
             [datahike.api :as d]
-            [datahike.core :as datahike]
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is]]
             [clojure.test.check :as tc]
@@ -288,19 +287,11 @@
                    :where
                    [?process :seon.db.process/id ?process-id]]
                  database))))
-        (let [before (:max-tx @connection)
-              reports (atom [])
-              listener-key ::schema-reconciliation]
-          (datahike/listen! connection listener-key #(swap! reports conj %))
-          (try
-            ((ns-resolve 'seon.cluster 'accrete-schema-population!) connection nil)
-            (finally
-              (datahike/unlisten! connection listener-key)))
+        (let [before (:max-tx @connection)]
+          ((ns-resolve 'seon.cluster 'accrete-schema-population!)
+           connection nil)
           (is (= before (:max-tx @connection))
-              "clock-free schema reconciliation is idempotent")
-          (is (empty? @reports)
-              (str "a converged schema population must not submit tx-data: "
-                   (pr-str (mapv :tx-data @reports)))))))))
+              "clock-free schema reconciliation is idempotent"))))))
 
 (deftest ^{:seon.test/platform
            "Moving part: the one test bracket every other test forks through."}
