@@ -1,0 +1,58 @@
+bin/test: snapshot differences from HEAD c772db2d343ff6c29c3029d96573b49f59e6d8bf:
+bin/test:   M	test/seon/gen/loop_test.clj
+bin/test:   M	test/seon/turn_work_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=6
+bin/test: all 3 test JVM slots busy; waiting up to 1800s (SEON_TEST_SLOTS / SEON_TEST_SLOT_WAIT_SECONDS)
+bin/test:   slot-1 pid=15625 elapsed=00:12 run-root=/Users/sean/src/seon/tmp/test-runs/run.M3MLcT
+bin/test:   slot-2 pid=11960 elapsed=03:05 run-root=/Users/sean/src/seon/tmp/test-runs/run.Vzemgf
+bin/test:   slot-3 pid=12058 elapsed=03:03 run-root=/Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.RvoabL
+bin/test: PHASE test-slot elapsed-seconds=25
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/test-runs/run.5MUmjK
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-17T05:29:00.839141Z pid= 16444 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-17T05:29:11.047442Z worker= test-fast mode= :panic namespaces= 2 program-namespaces= 109 registered= 1123 instrumented= 1123 program-armable= 1118
+bin/test: 2026-09-17T05:29:11.128974Z BEGIN namespace seon.gen.loop-test
+
+Testing seon.gen.loop-test
+bin/test: 2026-09-17T05:29:11.152211Z BEGIN test seon.gen.loop-test/a-goal-is-a-message-and-the-attempt-retains-its-own-failures
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-17T05:30:20.300398Z END test seon.gen.loop-test/a-goal-is-a-message-and-the-attempt-retains-its-own-failures
+bin/test: 2026-09-17T05:30:20.300711Z BEGIN test seon.gen.loop-test/completion-prose-does-not-erase-failed-evaluations
+bin/test: 2026-09-17T05:30:27.119325Z END test seon.gen.loop-test/completion-prose-does-not-erase-failed-evaluations
+bin/test: 2026-09-17T05:30:27.119455Z BEGIN test seon.gen.loop-test/a-computation-using-a-failed-definition-retains-its-error
+bin/test: 2026-09-17T05:30:37.477692Z END test seon.gen.loop-test/a-computation-using-a-failed-definition-retains-its-error
+bin/test: 2026-09-17T05:30:37.479222Z END namespace seon.gen.loop-test
+bin/test: 2026-09-17T05:30:37.479285Z BEGIN namespace seon.turn-work-test
+
+Testing seon.turn-work-test
+bin/test: 2026-09-17T05:30:37.502425Z BEGIN test seon.turn-work-test/answeredness-is-the-turns-own-transaction
+bin/test: 2026-09-17T05:30:37.892809Z END test seon.turn-work-test/answeredness-is-the-turns-own-transaction
+bin/test: 2026-09-17T05:30:37.892937Z BEGIN test seon.turn-work-test/situation-totality-property
+bin/test: 2026-09-17T05:32:29.626632Z END test seon.turn-work-test/situation-totality-property
+bin/test: 2026-09-17T05:32:29.626978Z BEGIN test seon.turn-work-test/comment-only-input-is-recorded-but-never-becomes-eval-work
+bin/test: 2026-09-17T05:32:29.927816Z END test seon.turn-work-test/comment-only-input-is-recorded-but-never-becomes-eval-work
+bin/test: 2026-09-17T05:32:29.927902Z BEGIN test seon.turn-work-test/the-turn-bound-is-turns-since-the-latest-outside-wake
+bin/test: 2026-09-17T05:32:30.721845Z END test seon.turn-work-test/the-turn-bound-is-turns-since-the-latest-outside-wake
+bin/test: 2026-09-17T05:32:30.722982Z BEGIN test seon.turn-work-test/a-generated-run-resumes-then-requests-one-more-form
+bin/test: 2026-09-17T05:32:30.959520Z END test seon.turn-work-test/a-generated-run-resumes-then-requests-one-more-form
+bin/test: 2026-09-17T05:32:30.961992Z BEGIN test seon.turn-work-test/the-request-declares-exactly-the-dependencies-the-derivation-reads
+bin/test: 2026-09-17T05:32:30.962793Z END test seon.turn-work-test/the-request-declares-exactly-the-dependencies-the-derivation-reads
+bin/test: 2026-09-17T05:32:30.965868Z BEGIN test seon.turn-work-test/the-derivation-is-total-over-every-state
+bin/test: 2026-09-17T05:32:35.346787Z END test seon.turn-work-test/the-derivation-is-total-over-every-state
+bin/test: 2026-09-17T05:32:35.346895Z BEGIN test seon.turn-work-test/triggers-come-back-oldest-first
+bin/test: 2026-09-17T05:32:35.582655Z END test seon.turn-work-test/triggers-come-back-oldest-first
+bin/test: 2026-09-17T05:32:35.582773Z BEGIN test seon.turn-work-test/only-a-turn-whose-reply-came-from-a-model-attempt-answers
+bin/test: 2026-09-17T05:32:36.208535Z END test seon.turn-work-test/only-a-turn-whose-reply-came-from-a-model-attempt-answers
+bin/test: 2026-09-17T05:32:36.208636Z BEGIN test seon.turn-work-test/a-wake-arriving-mid-turn-opens-the-next-turn
+bin/test: 2026-09-17T05:32:36.815891Z END test seon.turn-work-test/a-wake-arriving-mid-turn-opens-the-next-turn
+bin/test: 2026-09-17T05:32:36.815995Z BEGIN test seon.turn-work-test/two-wakes-in-one-transaction-are-one-turn
+bin/test: 2026-09-17T05:32:37.364882Z END test seon.turn-work-test/two-wakes-in-one-transaction-are-one-turn
+bin/test: 2026-09-17T05:32:37.364987Z BEGIN test seon.turn-work-test/a-lint-refusal-is-terminal-until-a-new-trigger-arrives
+bin/test: 2026-09-17T05:32:38.558881Z END test seon.turn-work-test/a-lint-refusal-is-terminal-until-a-new-trigger-arrives
+bin/test: 2026-09-17T05:32:38.558979Z BEGIN test seon.turn-work-test/an-answered-subjectless-message-does-not-end-a-session
+bin/test: 2026-09-17T05:32:39.163582Z END test seon.turn-work-test/an-answered-subjectless-message-does-not-end-a-session
+bin/test: 2026-09-17T05:32:39.163707Z END namespace seon.turn-work-test
+
+Ran 16 tests containing 100 assertions.
+0 failures, 0 errors.

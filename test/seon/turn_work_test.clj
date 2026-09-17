@@ -444,6 +444,28 @@
 ;;; The F2 sealed suite — situation-totality-property, seed 2026072829
 ;;; ---------------------------------------------------------------------------
 
+(deftest an-answered-subjectless-message-does-not-end-a-session
+  ;; The fixed-seed property's minimal case: planned, closed, triggered
+  ;; before opening, no lint ordinal, and no terminal evaluations.
+  (with-database
+    (fn [connection]
+      (configure-cap! connection 3)
+      (add-trigger! connection)
+      (open-run! connection {:planned? true :triggered? true})
+      (close-run! connection)
+      (is (nil? (:seon.message/about
+                 (db/pull @connection [:seon.message/about]
+                          [:seon.message/id message-id]))))
+      (is (empty? (turn/unanswered-triggers @connection agent-id)))
+      (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id}
+             (turn/next-agent-work @connection request))
+          "the accepted reply continues independently of the answered wake")
+      (support/transacted! connection
+                          [[:db/add [:seon.turn/id run-id]
+                            :seon.turn/disposition :completed]])
+      (is (nil? (turn/next-agent-work @connection request))
+          "a disposition ends the session without changing the message"))))
+
 (deftest situation-totality-property
   ;; ORACLE, re-sealed agent-scoped after the central pass died: over
   ;; GENERATED run/receipt/trigger states, `next-agent-work` is TOTAL —
@@ -496,10 +518,11 @@
                  (or (nil? derived)
                      (seon.schema/valid-candidate-value?
                       :seon.turn.work/next derived))
-                 ;; Every answered closed turn is idle. Receipt content cannot
-                 ;; manufacture a new trigger or corrective turn.
+                 ;; An accepted reply without a disposition continues even
+                 ;; after its wake is answered. Receipt content cannot
+                 ;; manufacture a new trigger.
                  (or (not answered-closed?)
-                     (nil? situation))
+                     (= (when planned? :open) situation))
                  ;; :resume carries the FIRST ordinal with no terminal
                  ;; receipt — never one already settled, which is what
                  ;; "nothing re-executes" means in the derivation

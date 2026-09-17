@@ -1,0 +1,137 @@
+bin/test: snapshot differences from HEAD 5160057f622727954321d88becc0813d1b4fcec9:
+bin/test:   M	test/seon/gen/loop_test.clj
+bin/test:   M	test/seon/turn_work_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=3
+bin/test: PHASE test-slot elapsed-seconds=0
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/test-runs/run.GSm9Kz
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-17T05:22:42.903419Z pid= 10405 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-17T05:22:50.650588Z worker= test-fast mode= :panic namespaces= 2 program-namespaces= 109 registered= 1123 instrumented= 1123 program-armable= 1118
+bin/test: 2026-09-17T05:22:50.714784Z BEGIN namespace seon.gen.loop-test
+
+Testing seon.gen.loop-test
+bin/test: 2026-09-17T05:22:50.738195Z BEGIN test seon.gen.loop-test/a-goal-is-a-message-and-the-attempt-routes-its-own-failures
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+
+FAIL in (a-goal-is-a-message-and-the-attempt-routes-its-own-failures) (loop_test.clj:453)
+each red form is addressed to the agent that owns the
+                   namespace it was written in
+the two repairs follow parse-time ownership; beta's
+                ordinary transcript includes the problem identity, so its
+                explicit decline also reaches the planner about that fact
+expected: (= #{["alpha" (turn/problem-id run-id 2)] ["beta" (turn/problem-id run-id 5)] ["planner" (turn/problem-id run-id 5)]} (assignments db run-id))
+actual: (not (= #{["alpha" "9280ee81e96c"] ["beta" "141c5c07433c"] ["planner" "141c5c07433c"]} #{}))
+
+FAIL in (a-goal-is-a-message-and-the-attempt-routes-its-own-failures) (loop_test.clj:469)
+an assignment rides the terminal transaction of the
+                   very form that produced it
+no window in which an assignment exists and the red
+                  receipt explaining it does not
+expected: (= [2] (db/q (quote [:find [?ordinal ...] :in $ ?tx :where [?r :seon.cluster.eval/error _ ?tx] [?r :seon.cluster.eval/ordinal ?ordinal]]) db assignment-tx))
+actual: (not (= [2] [5 2]))
+
+FAIL in (a-goal-is-a-message-and-the-attempt-routes-its-own-failures) (loop_test.clj:481)
+an owner sees the problem through the ordinary transcript
+                   renderer and may make a real declination join
+expected: (= :owner-declared-cant (get (states db run-id) 5))
+actual: (not (= :owner-declared-cant :unrouted-red))
+
+FAIL in (a-goal-is-a-message-and-the-attempt-routes-its-own-failures) (loop_test.clj:482)
+an owner sees the problem through the ordinary transcript
+                   renderer and may make a real declination join
+alpha's repair prose does not mutate the red receipt
+expected: (= :routed (get (states db run-id) 2))
+actual: (not (= :routed :unrouted-red))
+
+ERROR in (a-goal-is-a-message-and-the-attempt-routes-its-own-failures) (instrument.clj:446)
+the goal scopes the whole conversation by cause alone
+the assignment is one hop from the human-shaped goal
+expected: (= 1 (message/chain-depth db (db/q (quote [:find ?id . :in $ ?receipt-id :where [?m :seon.message/assignment ?receipt-id] [?m :seon.message/to ?to] [?to :seon.agent/id "alpha"] [?m :seon.message/id ?id]]) db (turn/problem-id run-id 2))))
+actual: clojure.lang.ExceptionInfo: seon.cluster.message/chain-depth refused message-id at []: expected a string, got nil. Fix: Supply a string at [].
+    at [seon.instrument$throwing_report$fn__91164 invoke instrument.clj 446]
+    at [seon.instrument$compiled_wrapper$fn__91198$fn__91199 invoke instrument.clj 596]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__91211$fn__91214 doInvoke instrument.clj 666]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.gen.loop_test$fn__124196$fn__124197 invoke loop_test.clj 520]
+    at [seon.gen.loop_test$with_render_context_proc invokeStatic loop_test.clj 117]
+    at [seon.gen.loop_test$with_render_context_proc invoke loop_test.clj 78]
+    at [seon.gen.loop_test$with_gen_cluster$fn__124153 invoke loop_test.clj 149]
+    at [seon.test_support$run_database_body$fn__123914 invoke test_support.clj 946]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 1039]
+    at [seon.schema$call_with_projection_state invoke schema.clj 1032]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__3936$fn__3968 doInvoke core.cljc 2216]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__91211$fn__91214 doInvoke instrument.clj 666]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.test_support$run_database_body invokeStatic test_support.clj 941]
+    at [seon.test_support$run_database_body invoke test_support.clj 938]
+    at [seon.test_support$with_branched_database invokeStatic test_support.clj 1013]
+bin/test: 2026-09-17T05:23:47.877490Z END test seon.gen.loop-test/a-goal-is-a-message-and-the-attempt-routes-its-own-failures
+bin/test: 2026-09-17T05:23:47.877948Z BEGIN test seon.gen.loop-test/a-result-built-on-a-failed-form-is-red-and-routes
+
+FAIL in (a-result-built-on-a-failed-form-is-red-and-routes) (loop_test.clj:559)
+the failed def itself is red and routed
+expected: (= :routed (get state 1))
+actual: (not (= :routed :unrouted-red))
+
+FAIL in (a-result-built-on-a-failed-form-is-red-and-routes) (loop_test.clj:561)
+the unbound-var result is red at the one admission gate and
+              routes like any other red form — no string matching, and no
+              run completing on a value that references nothing
+expected: (= :routed (get state 2))
+actual: (not (= :routed :succeeded))
+bin/test: 2026-09-17T05:23:53.379630Z END test seon.gen.loop-test/a-result-built-on-a-failed-form-is-red-and-routes
+bin/test: 2026-09-17T05:23:53.382023Z BEGIN test seon.gen.loop-test/a-silent-owner-leaves-the-plan-unsettled-forever
+
+FAIL in (a-silent-owner-leaves-the-plan-unsettled-forever) (loop_test.clj:601)
+both red forms are routed and neither owner answered
+expected: (= #{:routed} (set (vals (select-keys (states db run-id) [2 5]))))
+actual: (not (= #{:routed} #{:unrouted-red}))
+bin/test: 2026-09-17T05:23:58.425858Z END test seon.gen.loop-test/a-silent-owner-leaves-the-plan-unsettled-forever
+bin/test: 2026-09-17T05:23:58.428861Z END namespace seon.gen.loop-test
+bin/test: 2026-09-17T05:23:58.428943Z BEGIN namespace seon.turn-work-test
+
+Testing seon.turn-work-test
+bin/test: 2026-09-17T05:23:58.457224Z BEGIN test seon.turn-work-test/answeredness-is-the-turns-own-transaction
+bin/test: 2026-09-17T05:23:58.874548Z END test seon.turn-work-test/answeredness-is-the-turns-own-transaction
+bin/test: 2026-09-17T05:23:58.874648Z BEGIN test seon.turn-work-test/situation-totality-property
+bin/test: 2026-09-17T05:25:57.814600Z END test seon.turn-work-test/situation-totality-property
+bin/test: 2026-09-17T05:25:57.814714Z BEGIN test seon.turn-work-test/comment-only-input-is-recorded-but-never-becomes-eval-work
+bin/test: 2026-09-17T05:25:58.143366Z END test seon.turn-work-test/comment-only-input-is-recorded-but-never-becomes-eval-work
+bin/test: 2026-09-17T05:25:58.143485Z BEGIN test seon.turn-work-test/the-turn-bound-is-turns-since-the-latest-outside-wake
+bin/test: 2026-09-17T05:25:59.038336Z END test seon.turn-work-test/the-turn-bound-is-turns-since-the-latest-outside-wake
+bin/test: 2026-09-17T05:25:59.040631Z BEGIN test seon.turn-work-test/a-generated-run-resumes-then-requests-one-more-form
+bin/test: 2026-09-17T05:25:59.315603Z END test seon.turn-work-test/a-generated-run-resumes-then-requests-one-more-form
+bin/test: 2026-09-17T05:25:59.317578Z BEGIN test seon.turn-work-test/the-request-declares-exactly-the-dependencies-the-derivation-reads
+bin/test: 2026-09-17T05:25:59.318392Z END test seon.turn-work-test/the-request-declares-exactly-the-dependencies-the-derivation-reads
+bin/test: 2026-09-17T05:25:59.321714Z BEGIN test seon.turn-work-test/the-derivation-is-total-over-every-state
+bin/test: 2026-09-17T05:26:03.725064Z END test seon.turn-work-test/the-derivation-is-total-over-every-state
+bin/test: 2026-09-17T05:26:03.725167Z BEGIN test seon.turn-work-test/triggers-come-back-oldest-first
+bin/test: 2026-09-17T05:26:03.941363Z END test seon.turn-work-test/triggers-come-back-oldest-first
+bin/test: 2026-09-17T05:26:03.941473Z BEGIN test seon.turn-work-test/only-a-turn-whose-reply-came-from-a-model-attempt-answers
+bin/test: 2026-09-17T05:26:04.516067Z END test seon.turn-work-test/only-a-turn-whose-reply-came-from-a-model-attempt-answers
+bin/test: 2026-09-17T05:26:04.516178Z BEGIN test seon.turn-work-test/a-wake-arriving-mid-turn-opens-the-next-turn
+bin/test: 2026-09-17T05:26:05.127044Z END test seon.turn-work-test/a-wake-arriving-mid-turn-opens-the-next-turn
+bin/test: 2026-09-17T05:26:05.127154Z BEGIN test seon.turn-work-test/two-wakes-in-one-transaction-are-one-turn
+bin/test: 2026-09-17T05:26:05.675329Z END test seon.turn-work-test/two-wakes-in-one-transaction-are-one-turn
+bin/test: 2026-09-17T05:26:05.675433Z BEGIN test seon.turn-work-test/a-lint-refusal-is-terminal-until-a-new-trigger-arrives
+bin/test: 2026-09-17T05:26:06.838753Z END test seon.turn-work-test/a-lint-refusal-is-terminal-until-a-new-trigger-arrives
+bin/test: 2026-09-17T05:26:06.838855Z END namespace seon.turn-work-test
+
+Ran 15 tests containing 95 assertions.
+7 failures, 1 errors.

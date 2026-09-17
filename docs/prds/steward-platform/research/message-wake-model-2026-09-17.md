@@ -348,3 +348,80 @@ ruled `to` derivation. A deployed after query on default remains explicitly
 orchestrator must run the retained probe after the one publication/reset and
 reseed, then run the cold namespace gate and platform proof. The previously
 integrated refresh deletion `78cc3b9b7` is unchanged.
+
+
+## Batch 119 residue — fixture contracts, 2026-09-17
+
+The approved seams (`a50424f6b`, `57581f12f`, `31ac4c05d`) and integrated
+refresh deletion are unchanged. This follow-up reads the complete two test
+owners, the attributed batch-119 failures, program-facts §§1h–1i, the message
+schema, the answering/continuation derivations, and the current canonical
+turn regression. The earlier named authorities remain read end to end as
+recorded above; no new production mechanism or schema change is introduced.
+
+`planner-census` now orders numeric `opened-tx` values directly, selects the
+planner's provider turn rather than its generated opening, and counts current
+terminal evidence (`seon.eval/shown`, error, interruption). Its execution
+assertion likewise reads shown text. Once the exception was removed, the
+old fixture exposed expectations from the retired automatic repair router.
+Ledger ruling 67 says a failed form “becomes a flat error result and the rest
+still run” and results are written “in ONE transaction at the end”. The
+[2026-09-05 owner note](../../../seon/issues/archive/a-run-pays-two-and-a-half-seconds-between-every-form.md#left-behind-by-the-batched-turn-orchestrator-2026-09-05-night)
+explicitly defers automatic owner routing; the canonical
+`seon.cluster.turn-test/a-red-form-routes-to-its-namespace-owner-and-the-fold-continues`
+already asserts no automatic assignment. Therefore the generative fixture
+now checks retained errors, continued sibling execution, one settlement
+transaction, and completion prose leaving error evidence intact. It no longer
+parses the retired vector evaluation identity out of old rendered prose.
+The dependent-computation case injects an explicit exception and computes
+with that failed definition, independent of Java class admission.
+
+The first suspicion that the fold's `:seon.error/kind` predicate was a new
+routing defect was withdrawn after reading that owner note and regression.
+No production change to re-enable routing is warranted by this assignment.
+Explicit subject/assignment/declination protocol coverage from the approved
+seams remains intact.
+
+The property counterexample `[true true true true nil []]` is **legal**. In
+its generator, `nil` means no lint ordinal and `[]` means no settled
+evaluations; neither is a message subject. The message has no `about` key,
+as §1h permits. Its closed accepted reply has no disposition, so the ruled
+`continuing-reply?` derives `:open` even though the wake is answered. The
+property's idle oracle was wrong. It now expects continuation when planned;
+a named canonical regression replays the minimal case, proves the subject is
+absent and wake answered, then proves a completed disposition makes it idle.
+Seed **2026072829**, **200 trials**, and the generator are unchanged.
+
+### Iteration and boundary
+
+The first serial path-isolated fast run reached **15 tests / 95 assertions /
+7 failures / 1 error**: all remaining failures were the stale generative
+routing oracle; the corrected totality property passed. Exact output:
+[first residue run](message-wake-residue-first-2026-09-17.txt).
+An intermediate invocation stopped at a test-source parenthesis error before
+running tests; the source reader error was corrected before the next run.
+The final fast run passes **16 tests / 100 assertions / 0 failures / 0 errors**,
+exit **0**, including the unchanged **200-trial** property and the named
+counterexample. Exact output: [final residue run](message-wake-residue-final-2026-09-17.txt).
+Snapshot base: **c772db2d343ff6c29c3029d96573b49f59e6d8bf**; contracts armed
+in panic mode, **1,123 registered / 1,123 instrumented**. The serial command
+uses the foreground 2,400-second bound and no `SEON_TEST_*` overrides:
+
+```sh
+timeout 2400 bin/test-fast --paths test/seon/gen/loop_test.clj test/seon/turn_work_test.clj -- seon.gen.loop-test seon.turn-work-test
+```
+
+Foreign edits observed by `git status` include `src/seon/turn.clj` (program
+retraction and turn-budget hunks), the adoption owners, and the guardrail
+owners. They were preserved and excluded by `bin/test-fast --paths`;
+no foreign session was operated or contacted. The two owned test files were
+free at entry. No held production hunk is required for these fixture fixes.
+
+**LIVE WAKE-FLIP PROOF OWED.** The owner reports default was reforked for the
+origin type (PID **94566**) but is not adopted while the adoption hold-bound
+blocker is repaired by its lane. This follow-up never connects to, adopts,
+stops, resets, or mutates default. The retained real-message before/after
+probe must still be run after the owner releases adoption. Canonical fixture
+history/answeredness is not a deployed default proof. Cold namespace and
+platform proof remain the orchestrator's responsibility. Stop for review at
+this checkpoint.
