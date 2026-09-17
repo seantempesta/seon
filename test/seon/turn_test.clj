@@ -872,9 +872,30 @@
 
 (deftest state-is-derived-from-primitives
   (testing "open is the absence of closed-at"
-    (is (true? (turn/open? {})))
-    (is (false? (turn/open? {:seon.turn/closed-tx "datomic.tx"}))))
+    (let [open-turn {:seon.turn/id "open"
+                     :seon.turn/agent [:seon.agent/id "a"]
+                     :seon.turn/opened-tx 1}]
+      (is (true? (turn/open? open-turn)))
+      (is (false? (turn/open? (assoc open-turn
+                                     :seon.turn/closed-tx 2))))))
   )
+
+(deftest an-open-turn-read-refusal-refuses-the-writer-verbatim
+  (support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            refusal (db/q '[:find ?entity .
+                            :where [?entity :seon.audit/poison _]]
+                          database)
+            before (db/basis-t database)
+            result (support/refusal-data
+                    #(#'turn/require-open-run
+                      refusal `turn/close-call {:seon.turn/id "unreadable"}))]
+        (is (error/error? refusal) (pr-str refusal))
+        (is (= refusal result)
+            "the serial eligibility read is the refusal; it is never absence or an open turn")
+        (is (= before (db/basis-t (db/db connection)))
+            "refusing eligibility commits no transaction")))))
 
 (deftest interrupted-warning-is-one-derived-value
   (testing "clean evaluations derive no warning at all"
@@ -991,7 +1012,7 @@
                 connection
                 (turn/close-tx {::turn/id "lesson" :seon.db.process/id "p1" :seon.turn/closed-tx "datomic.tx"}))))
         (let [entity (run-entity connection "lesson")]
-          (is (false? (turn/open? {:seon.turn/closed-tx "datomic.tx"})))
+          (is (false? (turn/open? entity)))
           )
         (is (nil? (open-run-id connection "teacher")))))))
 

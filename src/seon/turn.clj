@@ -213,7 +213,7 @@
 
 (defn open?
   "True when the run has not closed."
-  {:malli/schema [:=> [:cat [:map [::closed-tx {:optional true} ::closed-tx]]]
+  {:malli/schema [:=> [:cat :seon.turn/turn]
                   :boolean]}
   [run]
   (not (contains? run ::closed-tx)))
@@ -311,14 +311,26 @@
   "The run's current facts on `db`, or nil when no such run exists.
   The mid-transaction pull IS the eligibility read: a missing lookup ref
   pulls to nil rather than throwing, so absence is an ordinary value."
+  {:malli/schema [:=> [:cat
+                       [:or :seon.db/database-value :seon.error/value]
+                       ::id]
+                  [:or :nil :seon.turn/turn :seon.error/value]]}
   [db id]
   (db/pull db '[*] [::id id]))
 
 (defn- require-open-run
   "Read and require an existing open turn inside the serial writer."
+  {:malli/schema [:=> [:cat
+                       [:or :seon.db/database-value :seon.error/value]
+                       :qualified-symbol
+                       [:map [::id ::id]]]
+                  :seon.turn/turn]}
   [database operation request]
   (let [turn (current-run database (::id request))]
     (cond
+      (error/error? turn)
+      (throw (ex-info (:seon.error/message turn) turn))
+
       (nil? turn) (refuse! operation ::no-such-run request)
       (not (open? turn)) (refuse! operation ::run-closed request)
       :else turn)))
