@@ -3703,3 +3703,17 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   admission (wiring into held runner.clj named as the owed hunk), the
   both-hosts regression. Editing: wrapper (SCI), arm-leak (serial worker),
   db, stage 1; Opus on the preflight deadline.
+
+## 2026-09-18 ~09:20Z — wrapper enforcement complete on both hosts; the campaign feeds itself
+
+- `error-wrapper-enforcement` landed the SCI side (`f3ae2d055`, note
+  `767ff6d75`): recorder threaded through base-ctx and installation; SCI
+  wrappers enforce declared facets; overhead 0.03-0.04 µs ordinary, 16.7 µs
+  errors. Isolated fast: 157 tests 6F/8E — every red a FINDING: `seon.db/*`
+  (db lane, which landed `1695b43b2` "declare database operation error
+  facets"), `kernel/failure-value` (queued to the arm-leak lane's resume;
+  it holds kernel.clj), `render.value/transacted` (Opus agent now). The
+  lane stops here; its remaining work is the constructor groups per PRD §6.
+- Launched sol `acquisition-by-digest` (ruling 1s; eval.clj free).
+  Editing: arm-leak, db, stage 1, acquisition-by-digest; Opus ×2
+  (preflight deadline; render.value union).
