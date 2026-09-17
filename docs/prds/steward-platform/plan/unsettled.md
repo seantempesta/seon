@@ -3550,3 +3550,7 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   blocker; Opus agent fixing: pins carried in the snapshot, refusal when
   absent). Every cold gate since the fork moved has been testing the old
   Datahike.
+- my.plan cold gate (`my-plan-paths-gate.log`): 22 tests, 0F/1E — the one
+  error is the cold-worker arm leak (`kernel.clj:307` via `with-arm`,
+  foreign interpreter armed at `new-armed`), in the arm-leak lane's hands;
+  the plan landing itself is clean.
