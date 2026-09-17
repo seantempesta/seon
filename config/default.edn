@@ -504,6 +504,11 @@
    :seon.call-preparation/supplier
    [:seon.fn/sym "seon.db/supplied-connection"]}
 
+  {:seon.call-preparation/key :my.program/context
+   :seon.call-preparation/schema [:seon.schema/key :my.program/context]
+   :seon.call-preparation/supplier
+   [:seon.fn/sym "my.program/supplied-context"]}
+
   {:seon.call-preparation/key :seon.agent/id
    :seon.call-preparation/schema
    [:seon.schema/key :seon.agent/id]

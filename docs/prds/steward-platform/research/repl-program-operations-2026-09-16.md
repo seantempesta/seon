@@ -276,3 +276,182 @@ Owned paths for this checkpoint: `src/my/program.clj`, `src/seon/issue.clj`,
 the refactoring specification's §10 correction, this landing note, and the
 three linked issue notes for prospective issue rendering, test-fast census
 classification and collection-bound attribute decoding.
+
+## Continuation: guarded mutations and override query
+
+The owner accepted `a2e16338b` for the gate and authorized items 3–4 and
+`overrides`. Default remains PID 33583; descriptor status and MCP answered.
+MCP observed one error signature and 13 errored evaluations, not a clean
+cluster claim. No restart or reset was issued.
+
+The ordinary supplied-default mechanism now carries the executing context
+as a turn-layer environment member. `call-preparation/install` retains the
+cluster context it is installing; SCI forks inherit that reference, while
+`fork-cluster-ctx` installs fresh custody for a different connection. The
+new supplier returns that base, the executing context, and the environment's
+connection. The mutation API uses a supplied context plus named positional
+arguments, so the owner's exact `(my.program/ns-unmap! 'seon.turn/open?)`
+form has one unambiguous omitted argument. No ambient JVM lookup or new
+writer is introduced.
+
+### Exact held hook hunk
+
+`src/seon/sci/eval.clj` is held by the acquisition lane. Replace the existing
+hook value at `build-base-ctx` with these exact bytes (no require cycle):
+
+```diff
+-         :call-preparation-hook call-preparation/hook
++         :call-preparation-hook
++         (fn [ctx callee arguments]
++           (or ((requiring-resolve 'my.program/native-call-refusal)
++                ctx callee arguments)
++               (call-preparation/hook ctx callee arguments)))
+```
+
+`my.program-mutation-test/native-program-mutations-refuse-at-the-installed-hook`
+is deliberately red until this hunk lands, with a one-line comment naming
+this note. The guard returns `reduced` diagnostics naming the native member
+and the replacement operation. Private `intern` and `alter-var-root`
+bindings remain permitted when no program identity exists, per §5.5.
+The native call performed by our writer after acceptance evaluates only
+its constructed literal form with preparation disabled; agent-authored
+forms do not enter that path.
+
+The writer calls `breaks` before submission and again inside `:db.fn/call`
+against the authority's own database value. A rejection changes neither
+context. Until the integrator's seam-B backstop lands, this is protection
+from `breaks` alone; success and refusal both retain the analyzer's explicit
+unknowns for dispatch, apply and macro callers. Plans remain computed.
+
+Namespace removal has one additional held boundary: `turn.clj`'s private
+schema-deletion arm also reconciles Datahike attributes. Until that existing
+calculation can be shared, a namespace owning schema declarations returns
+an explicit refusal; deleting just those declaration entities would be
+incorrect. This is recorded in
+[program-namespace-retraction-needs-shared-schema-writer.md](../../../seon/issues/program-namespace-retraction-needs-shared-schema-writer.md).
+Function/test-only namespace removal remains independently implementable.
+
+Pending vocabulary rows, to apply when the acquisition lane releases
+`AGENTS.md` (its current edits are preserved):
+
+| Term | Meaning and grounding | Legacy spellings |
+|---|---|---|
+| `my.program/ns-unmap!` | Retract a function or test through `seon.db/transact!`, then call SCI's native `ns-unmap` in the executing fork and cluster base. `breaks` runs before submission and inside the writer transaction function (`src/my/program.clj`). | delete!, remove-fn |
+| `my.program/remove-ns!` | Retract a namespace with its owned declarations in one transaction, excluding references internal to that affected set; then remove its SCI namespace (`src/my/program.clj`; `sci/impl/namespaces.cljc`, `sci-remove-ns`). Schema-owning namespaces retain the explicitly recorded writer boundary. | drop-ns |
+| `my.program/ns-unalias!` | Retract the namespace alias component before SCI's native `ns-unalias` in fork and base (`src/my/program.clj`; `resources/seon/schemas/seon.ns.alias.edn`). | drop-alias |
+| `my.program/overrides` | Thin read over the declaration owner's current `:agent` admission and indexed src provenance query (`src/seon/program.cljc`, `overrides`). | override flag |
+| `my.program/supplied-context`; `my.program/context` | The existing supplied-default mechanism hands a mutation its executing SCI context, cluster base and explicit connection; `call-preparation/install` retains the base and the hook carries the executing context (`src/seon/call_preparation.clj`). | ambient context |
+| `my.program/native-call-refusal` | The SCI call-preparation hook's typed `reduced` refusal for native mutations that bypass program facts, naming our replacement operation (`src/my/program.clj`; `reference-code/sci/src/sci/impl/analyzer.cljc:1793`). | deny list |
+
+The environment schema and its loaded consumer publish together:
+`env/scope`'s delayed member projection must be rebuilt when the executing
+context member is added. Its docstring is updated in the same change, so
+adoption reloads that consumer as well as the new schema.
+
+### Continuation verification
+
+The orchestrator restarted this Codex session after discovering its project
+hook had been silently disabled. On resumption both cited files were already
+readable: `src/my/program.clj` and `test/my/program_mutation_test.clj` linted
+with 0 errors and 0 warnings. Earlier intermediate syntax errors had been
+fixed before the resumed run. The queued `run.ilaUnd` received TERM during
+that session restart and its launcher removed the snapshot; no assertion
+had run there.
+
+The resumed HEAD-plus-owned-paths run `run.bnlnHI` armed 1,117 contracts and
+finished at 2026-09-17 02:45:14Z: **7 tests, 98 assertions, 12 failures,
+0 errors**. Every failure belongs to the deliberately red installed-hook
+regression. The mutation, exact positional SCI call, namespace/alias and
+five-read regressions passed. The earlier fixture error from using
+`eval-form` to change `*ns*` was corrected to SCI's `eval-string*` entry point.
+The schema-placement error was corrected by declaring `:seon.program/change`
+and `/affected` in their owning `seon.program.edn` resource.
+
+The enabled hook then blocked a read-only shell command on a foreign
+unmatched parenthesis in `test/seon/render/web_debug_test.clj:1` / `:1080`.
+This lane did not edit that file. It created a detached worktree at HEAD
+`d49447bac`, linked `reference-code`, and copied only its nine source,
+configuration, schema and test paths. The pending hook hunk was applied only
+to that disposable worktree for a canonical proof of the proposed change.
+The shared held SCI file remains untouched by this lane.
+
+The isolated run `run.ZBqOYN` armed 1,117 contracts and finished at
+2026-09-17 02:48:11Z: **7 tests, 98 assertions, 0 failures, 0 errors**.
+Its only additional production change was the exact hook hunk above.
+This verifies the proposed hunk; it does not claim the held main-tree hook
+has landed. Cold and platform gates remain the orchestrator's responsibility.
+
+Applying that worktree hunk unexpectedly queued main-root publication job
+`bfe2aa55-66cb-44d1-ae59-59193637e064`, which refused on changing source.
+The checkout-routing class is recorded in
+[worktree-edit-hook-publication-targets-main-root.md](../../../seon/issues/worktree-edit-hook-publication-targets-main-root.md).
+This lane did not treat that refused publication as live proof.
+
+The next MCP runtime-status observation still found default PID 33583,
+but its result projection returned `:seon.config/missing-effective` naming
+68 required configuration keys. This does not establish their absence in
+storage. A subsequent read-only JVM probe printed `:probe/loaded? false`
+for `(ns-resolve 'my.program 'ns-unmap!)`; configuration pull returned
+`:seon.db/invalid-read`, operation `:datahike.pull/result`, exception
+`java.lang.ClassCastException`: `clojure.lang.Cons cannot be cast to
+clojure.lang.Associative`. The probe's boolean around a separate program
+pull was not valid presence evidence, since a typed error is truthy.
+The known mixed-generation/result-projection boundary is tracked in
+[partial-hot-reload-produces-mixed-code-with-no-warning.md](../../../seon/issues/partial-hot-reload-produces-mixed-code-with-no-warning.md).
+No causal attribution to another lane is made.
+
+Explicit batch publication of this lane's seven source/configuration/schema
+paths also refused: `data/operator/operations/init-init-62339.log` reports
+source changed during analysis, from
+`5bbb6063affdd90bc2e9f0d2f805a0824a45fca1049d23e8d696039580f72126` to
+`88ae0d76371e8534d42947f7d5fc6d8cf77283eb3ee0e6e13efdc5478d59da69`.
+No restart, reset, or foreign session operation was performed. The authorized
+disposable SCI evaluation has not been consumed against this unloaded build;
+its proposed source is
+[repl-program-mutation-probe-2026-09-16.clj](repl-program-mutation-probe-2026-09-16.clj).
+
+At the preceding continuation's ownership check, `AGENTS.md`,
+`src/seon/sci/eval.clj`, `src/seon/program.cljc`, and `src/seon/turn.clj`
+still carried concurrent edits. The override wrapper therefore still depends
+on the unlanded declaration-owner query. The vocabulary rows above have not
+been inserted into the held authority. The continuation was left uncommitted
+under the then-current same-commit requirement. The orchestrator was asked to release `AGENTS.md`;
+no foreign hunk was staged or committed. The original accepted checkpoint
+`a2e16338b` remains the landed read slice.
+
+The isolated test process exited successfully before cleanup. Its
+`reference-code` symlink was unlinked without traversal, then the disposable
+`tmp/repl-program-operations-wt` worktree was removed. No lane test process
+or scratch worktree remains from this proof.
+
+### Authorized landing without the held vocabulary file
+
+The owner explicitly waived the same-commit vocabulary requirement and
+ordered this code committed now. The `AGENTS.md` rows for
+`my.program/ns-unmap!`, `my.program/remove-ns!`, `my.program/ns-unalias!`,
+and `my.program/overrides` are **owed in a follow-up commit the moment the
+file frees**, together with their context-supplier and hook-helper rows above.
+The held `sci/eval.clj` hook arm remains the exact recorded hunk; it is not
+part of this commit.
+
+The owner reported the current tree-wide default adoption refusal verbatim:
+“Initialization lookup refs do not resolve”. The requested proof is therefore
+the canonical fixture's candidate context, not default adoption. The completed
+`run.ZBqOYN` proof above uses `support/with-database`, `seed-cluster!`,
+`fork-cluster-ctx`, a real `sci/fork`, and armed contracts. Its exact SCI call
+`(my.program/ns-unmap! 'seon.turn/open?)` returns
+`:seon.program/declaration-refused`; the surrounding regression verifies five
+callers, five plan issues, unchanged database basis, and unchanged executing
+and base environments. The same fixture then retracts the caller-free
+`my.program/disposable`, verifies the row is absent from a fresh database
+value, and verifies `sci/resolve` is nil in both contexts. Namespace and alias
+retraction also pass in those real contexts. **7 tests, 98 assertions, zero
+failures and errors with the proposed hook hunk**; the main-tree hook test
+remains deliberately red until S3 releases its file. No additional live SCI
+evaluation, default restart, or reset is needed for this authorized checkpoint.
+
+The commit also includes the existing supplied-default plumbing and its
+configuration/environment schemas, which are required for the one-argument
+agent call. It preserves the schema-owning namespace refusal and the pending
+declaration-owner `overrides` dependency described above. These limits are
+explicit; the candidate proof does not claim they have been implemented.

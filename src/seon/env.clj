@@ -251,7 +251,7 @@
   (construct supplied true))
 
 (defn scope
-  "Narrow an existing environment to an agent, run, or form.
+  "Narrow an existing environment to an agent, run, form, or executing SCI context.
 
   Scoping is not construction (PRD ruling 1 — running code receives,
   never builds): only members the schema places in the `:turn` layer may

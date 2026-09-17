@@ -1,12 +1,14 @@
 (ns ^{:seon.ns/context-relevant? true} my.program
   "Read the program graph before changing a declaration.
 
-  Every operation reads one supplied database value. Referrers, past test
-  reach and unknown analyzer coverage remain separate data.
+  Reads use one supplied database value. Writes check those facts before
+  changing SCI; referrers, past reach and unknown coverage remain separate.
 
   Example:
   (my.program/breaks {:seon.program/subject 'seon.turn/open?})"
   (:require [seon.db :as db]
+            [sci.core :as sci]
+            [clojure.set :as set]
             [seon.error :as error]
             [seon.fn :as function]
             [seon.issue :as issue]))
@@ -344,3 +346,248 @@
                                   (fn [event] (nth event 3)) first) events))]
       (cond-> (assoc (observation database subject kind) :seon.program/history entries)
         at (assoc :seon.db/tx at)))))
+
+(defn supplied-context
+  "Supply the executing SCI context, its cluster base and writer connection.
+
+  Call preparation carries the executing context explicitly; no process or
+  thread lookup is used. A host call without that context refuses."
+  {:malli/schema [:=> [:cat :seon.env/environment]
+                  [:or :my.program/context :seon.error/value]]}
+  [environment]
+  (let [ctx (:my.program/executing-ctx environment)
+        base (:my.program/base-ctx ctx)
+        connection (:seon.db/connection environment)]
+    (if (and ctx base connection)
+      {:seon.sci.eval/ctx ctx :my.program/base-ctx base :seon.db/connection connection}
+      (error/diagnostic
+       {:seon.error/kind :seon.program/declaration-refused
+        :seon.program/declaration-refused true
+        :seon.error/message "Program mutation requires the executing SCI context, its cluster base and connection."
+        :seon.error/diagnostic-layer :program-write
+        :seon.error/diagnostic-operation 'my.program/supplied-context
+        :seon.error/diagnostic-member :my.program/context
+        :seon.error/diagnostic-expected :my.program/context
+        :seon.error/diagnostic-offending (select-keys environment [:seon.agent/id])
+        :seon.error/diagnostic-cause :context-unavailable
+        :seon.error/diagnostic-evidence {:my.program/executing? (boolean ctx)
+                                         :my.program/base? (boolean base)
+                                         :my.program/connection? (boolean connection)}}))))
+
+(defn overrides
+  "Read current agent-admitted identities under an indexed src root.
+
+  The declaration owner follows historical file provenance over this same
+  database value. This does not assert JVM write-back or SCI loadability.
+  Example: (my.program/overrides)"
+  {:malli/schema [:=> [:cat :my.program/read-request]
+                  [:or [:vector :seon.fn/sym] :seon.error/value]]}
+  [{database :seon.db/db :as request}]
+  (read-result request 'my.program/overrides
+               #((requiring-resolve 'seon.program/overrides) database)))
+
+(defn- refusal [operation report affected]
+  (merge
+   (error/diagnostic
+    {:seon.error/kind :seon.program/declaration-refused
+     :seon.program/declaration-refused true
+     :seon.error/message (str "Cannot perform " operation " on " (:seon.program/subject report)
+                              "; repair the named referrers first.")
+     :seon.error/diagnostic-layer :program-write
+     :seon.error/diagnostic-operation operation
+     :seon.error/diagnostic-member (:seon.program/subject report)
+     :seon.error/diagnostic-expected :seon.program/change
+     :seon.error/diagnostic-offending report
+     :seon.error/diagnostic-cause :live-referrers
+     :seon.error/diagnostic-evidence report
+     :seon.error/data report})
+   {:seon.program/affected affected
+    :seon.program/plan (:seon.program/plan report)
+    :seon.program/unknown (:seon.program/unknown report)}))
+
+(defn- blocking? [report]
+  (boolean
+   (some seq
+         (vals (select-keys report
+                            [:seon.program/callers :seon.program/references
+                             :seon.program/subject-of :seon.program/render-declared-by
+                             :seon.program/capability-of :seon.program/schedule-tasks
+                             :seon.program/contract-refs :seon.program/schema-references
+                             :seon.program/writes-of :seon.program/requiring-namespaces
+                             :seon.program/data-in-use])))))
+
+(defn- deletion-report [database subject]
+  (let [root (checked (breaks {:seon.db/db database :seon.program/subject subject}))
+        affected (conj (set (:seon.program/owned-declarations root)) subject)
+        reports (into [root]
+                      (map #(checked (breaks {:seon.db/db database :seon.program/subject %})))
+                      (sort-by str (disj affected subject)))
+        relations [:seon.program/callers :seon.program/references :seon.program/subject-of
+                   :seon.program/capability-of :seon.program/schedule-tasks
+                   :seon.program/contract-refs :seon.program/schema-references
+                   :seon.program/writes-of :seon.program/requiring-namespaces]
+        report (reduce (fn [result attribute]
+                         (assoc result attribute (set/difference (into #{} (mapcat attribute) reports) affected)))
+                       root relations)
+        render-pairs (into #{} (comp (mapcat :seon.program/render-declared-by)
+                                     (remove #(affected (:seon.schema/key %)))) reports)
+        sites (into [] (comp (mapcat :seon.program/call-sites)
+                             (remove #(affected (:seon.fn/sym %))) (distinct)) reports)
+        report (assoc report :seon.program/render-declared-by render-pairs
+                             :seon.program/call-sites sites
+                             :seon.program/plan (proposed-plan database subject
+                                                               (:seon.program/callers report) sites))]
+    [report affected]))
+
+(defn- native! [ctx form]
+  ; Only this already-admitted native call skips preparation, never agent code.
+  (sci/eval-form (assoc ctx :call-preparation-hook nil) form))
+
+(defn- retract-operation! [context subject operation native-form]
+  (read-result
+   {:seon.program/subject subject} operation
+   #(let [connection (:seon.db/connection context)
+          [report affected] (deletion-report (checked (db/db connection)) subject)]
+      (if (or (blocking? report) (some keyword? affected))
+        (cond-> (refusal operation report affected)
+          (some keyword? affected)
+          (assoc :seon.error/message
+                 "Namespace removal requires the schema owner's declaration-and-attribute retraction; its turn.clj seam is held."
+                 :seon.error/data
+                 (merge (:seon.error/data (refusal operation report affected))
+                        {:seon.error/diagnostic-cause :schema-retraction-unavailable})))
+        (let [transaction
+              (checked
+               (db/transact!
+                connection
+                [[:db.fn/call
+                  (fn [database]
+                    (let [[current subjects] (deletion-report database subject)]
+                      (when (or (blocking? current) (some keyword? subjects))
+                        (throw (ex-info "Program retraction refused." (refusal operation current subjects))))
+                      (mapv (fn [target]
+                              [:db/retractEntity (:seon.program/identity (locate database target))])
+                            (sort-by str subjects))))]]))]
+          (native! (:seon.sci.eval/ctx context) native-form)
+          (native! (:my.program/base-ctx context) native-form)
+          {:seon.program/subject subject
+           :seon.program/affected (second (deletion-report (:db-before transaction) subject))
+           :seon.db/basis-t (db/basis-t (:db-after transaction))
+           :seon.program/unknown (:seon.program/unknown report)})))))
+
+(defn ns-unmap!
+  "Retract a declaration, then unmap its Var in the executing fork and base.
+
+  Calls breaks first; a refusal changes neither facts nor SCI. Until seam B
+  lands, deletion refuses from breaks alone; :seon.program/unknown records
+  dispatch, apply and macro callers the analyzer cannot see.
+  Example: (my.program/ns-unmap! 'seon.turn/open?)"
+  {:malli/schema [:=> [:cat :my.program/context :qualified-symbol]
+                  [:or :seon.program/change :seon.error/value]]}
+  [context subject]
+  (retract-operation! context subject 'my.program/ns-unmap!
+                      (list 'clojure.core/ns-unmap (list 'quote (symbol (namespace subject)))
+                            (list 'quote (symbol (name subject))))))
+
+(defn remove-ns!
+  "Retract a namespace and its owned declarations, then remove it from SCI.
+
+  Calls breaks first and writes the entire affected set in one transaction.
+  Until seam B lands, deletion refuses from breaks alone; the returned
+  :seon.program/unknown retains dispatch, apply and macro coverage limits.
+  Namespaces owning schema declarations refuse until the existing schema
+  retraction seam can be shared; declaration-only deletion would leave DB attributes.
+  Example: (my.program/remove-ns! 'my.scratch)"
+  {:malli/schema [:=> [:cat :my.program/context :symbol]
+                  [:or :seon.program/change :seon.error/value]]}
+  [context namespace-name]
+  (retract-operation! context namespace-name 'my.program/remove-ns!
+                      (list 'clojure.core/remove-ns (list 'quote namespace-name))))
+
+(defn ns-unalias!
+  "Retract an alias component before removing the alias from fork and base.
+
+  Calls breaks first. Namespace referrers conservatively refuse removal:
+  indexed calls do not retain which alias spelling resolved their targets.
+  Until seam B lands this refusal comes from breaks alone; the result carries
+  :seon.program/unknown for dispatch, apply and macro callers.
+  Example: (my.program/ns-unalias! 'my.scratch 'str)"
+  {:malli/schema [:=> [:cat :my.program/context :symbol :symbol]
+                  [:or :seon.program/change :seon.error/value]]}
+  [context namespace-name alias-name]
+  (read-result
+   {:seon.program/subject namespace-name} 'my.program/ns-unalias!
+   #(let [connection (:seon.db/connection context)
+          [report affected] (deletion-report (checked (db/db connection)) namespace-name)]
+      (if (blocking? report)
+        (refusal 'my.program/ns-unalias! report affected)
+        (let [transaction
+              (checked
+               (db/transact!
+                connection
+                [[:db.fn/call
+                  (fn [database]
+                    (let [[current subjects] (deletion-report database namespace-name)
+                          _ (when (blocking? current)
+                              (throw (ex-info "Alias removal refused." (refusal 'my.program/ns-unalias! current subjects))))
+                          aliases (checked
+                                   (db/q database
+                                         '[:find [?alias ...] :in $ ?ns ?local :where
+                                           [?namespace :seon.ns/name ?ns]
+                                           [?namespace :seon.ns/aliases ?alias]
+                                           [?alias :seon.ns.alias/local ?local]]
+                                         namespace-name alias-name))]
+                      (mapv (fn [entity] [:db/retractEntity entity]) aliases)))]]))
+              form (list 'clojure.core/ns-unalias (list 'quote namespace-name) (list 'quote alias-name))]
+          (native! (:seon.sci.eval/ctx context) form)
+          (native! (:my.program/base-ctx context) form)
+          {:seon.program/subject namespace-name :seon.program/affected #{namespace-name}
+           :seon.db/basis-t (db/basis-t (:db-after transaction))
+           :seon.program/unknown (:seon.program/unknown report)})))))
+
+(defn native-call-refusal
+  "Return a reduced diagnostic for native program mutation, or nil.
+
+  The SCI hook calls this before supplied-default preparation. Intern and
+  alter-var-root remain available for private bindings with no program row.
+  Example: called by the installed SCI call-preparation hook."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.schema/value :seon.schema/arguments]
+                  :seon.schema/value]}
+  [ctx callee arguments]
+  (let [metadata (meta callee)
+        native (when (:ns metadata) (symbol (str (:ns metadata)) (str (:name metadata))))
+        operation (case native
+                    clojure.core/remove-ns 'my.program/remove-ns!
+                    clojure.core/ns-unalias 'my.program/ns-unalias!
+                    clojure.core/intern 'my.program/define!
+                    clojure.core/alter-var-root 'my.program/define!
+                    nil)]
+    (when operation
+      (let [environment ((requiring-resolve 'seon.env/of) ctx)
+            connection (:seon.db/connection environment)]
+        (when connection
+          (let [subject (case native
+                          clojure.core/alter-var-root
+                          (let [m (meta (first arguments))]
+                            (when (:ns m) (symbol (str (:ns m)) (str (:name m)))))
+                          clojure.core/intern
+                          (when (and (first arguments) (second arguments))
+                            (symbol (str (first arguments)) (str (second arguments))))
+                          (when (first arguments) (symbol (str (first arguments)))))
+                report (when subject
+                         (breaks {:seon.db/db (db/db connection) :seon.program/subject subject}))]
+            (when (or (#{'clojure.core/remove-ns 'clojure.core/ns-unalias} native)
+                      (and report (not (:seon.error/kind report))))
+              (reduced
+               (error/diagnostic
+                {:seon.error/kind :seon.program/declaration-refused
+                 :seon.program/declaration-refused true
+                 :seon.error/message (str "Use " operation " so program facts decide before SCI changes.")
+                 :seon.error/diagnostic-layer :program-write
+                 :seon.error/diagnostic-operation operation
+                 :seon.error/diagnostic-member native
+                 :seon.error/diagnostic-expected operation
+                 :seon.error/diagnostic-offending arguments
+                 :seon.error/diagnostic-cause :native-program-mutation
+                 :seon.error/diagnostic-evidence (or report {})
+                 :seon.error/data (or report {})})))))))))

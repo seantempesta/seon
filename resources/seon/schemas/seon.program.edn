@@ -195,4 +195,11 @@
         :seon.render/html seon.error/render-html
         :error/message "must identify the absent program subject"}
   [:seon.program/not-found :seon.program/not-found]
-  [:seon.error/message :seon.error/message]]}
+  [:seon.error/message :seon.error/message]]
+ :seon.program/affected [:set :seon.program/subject]
+ :seon.program/change
+ [:map [:seon.program/subject :seon.program/subject]
+  [:seon.program/affected :seon.program/affected]
+  [:seon.db/basis-t :int]
+  [:seon.program/unknown :seon.program/unknown]]
+}
