@@ -3618,3 +3618,12 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
 - `7854d35b2` `c0ca0b89c` (Opus): the listener regression awaits the
   completion EVENT; issue resolved. Load 15 and falling; gates resume when
   two of the three lanes land.
+- B5 `indexer-error-keys-and-operator-graph` COMPLETE: `689c5b9d1` (a
+  refused index read refuses publication; no error keys become program
+  rows — triage #15 dead), `cfd899133` (cardinality-many set shape kept in
+  published rows), `ad641756e` (`seon.operator.state` moved byte-for-byte
+  under `src/`, consumers updated, program-graph/caller regression, reload
+  issue resolved; three bb-operator options in the note — triage #21 half,
+  owner decision pending on the bb script). fn-test 64 green. RESET NEEDED
+  (published facts change). Platform gate 9 launched (load 10.8; two lanes
+  landed). Launched sol `namespace-page-fanout` (B7).
