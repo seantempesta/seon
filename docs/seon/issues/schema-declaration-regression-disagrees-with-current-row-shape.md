@@ -55,3 +55,13 @@ Not landed here: `src/seon/sci/eval.clj` and `test/seon/sci/eval_test.clj`
 are both held dirty by the S3 acquisition lane. The exact hunks for both
 sides are in
 [the landing note](../../prds/steward-platform/research/baseline-reds-sci-eval-documentation-2026-09-17.md).
+
+## Message-wake review observation — 2026-09-17
+
+The isolated message-wake review at base `8dff32220` also ran
+`seon.cluster.turn-test/runtime-schema-registration-commits-the-evaluated-form-and-attribute`.
+Its namespace assertion errors because `(:db/id (:seon.schema/ns persistent-row))`
+is nil and the armed `seon.db/pull` refuses that entity id. No schema declaration
+writer or this regression was changed by the message-wake slice. This records
+the matching observable; it does not independently re-prove the attribution
+above. See the [landing evidence](../../prds/steward-platform/research/message-wake-model-2026-09-17.md).

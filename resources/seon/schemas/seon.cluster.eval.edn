@@ -23,8 +23,6 @@
                     :run [:and {:seon.wake/context-inert true} :seon.db/ref],
                     :output
                     [:string {:min 1, :seon.db/no-history? true :seon.wake/context-inert true}],
-                    :refreshes
-                    [:and #:seon.db{:unique true :seon.wake/context-inert true} :seon.db/ref],
                     :ordinal [:int {:min 0 :seon.wake/context-inert true}],
                     :receipt
                     [:map
@@ -46,9 +44,6 @@
                      [:seon.cluster.eval/author
                       {:optional true}
                       :seon.cluster.eval/author]
-                     [:seon.cluster.eval/refreshes
-                      {:optional true}
-                      :seon.cluster.eval/refreshes]
                      [:seon.eval/duration-ms
                       {:optional true}
                       :seon.eval/duration-ms]

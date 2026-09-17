@@ -108,7 +108,27 @@
               (is (= {:seon.repl/changes {[] {:seon.db.diff/after 39}}}
                      (repl/shown-value (:seon.eval/shown added))))
               (is (= 39 @(sci/resolve ctx (:seon.repl/handle emission))))
-              (is (nil? (:seon.turn/id (turn/system-turn request)))))))))))
+              (is (nil? (get (:schema @connection) :seon.cluster.eval/refreshes))
+                  "supersession has no installed edge")
+              (is (= (:seon.cluster.eval/id added)
+                     (:seon.cluster.eval/id
+                      (get (#'turn/latest-evaluations @connection "juniper")
+                           (#'turn/source-key (assoc added :seon.ns/name 'my.agents.juniper))))))
+              (is (nil? (:seon.turn/id (turn/system-turn request)))))
+            (support/transacted! connection [[:db/add [:example/order "c1"] :example/amount 38]])
+            (let [result (turn/system-turn request)
+                  latest (last (entries connection source))]
+              (is (string? (:seon.turn/id result)) (pr-str result))
+              (is (= 3 (count (entries connection source))))
+              (is (= {:seon.repl/changes {[] {:seon.db.diff/after 38}}}
+                     (repl/shown-value (:seon.eval/shown latest))))
+              (is (= 38 (:seon.repl/shown-value
+                         (get (#'turn/latest-evaluations @connection "juniper")
+                              (#'turn/source-key (assoc latest :seon.ns/name 'my.agents.juniper))))))
+              (let [basis (db/basis-t @connection)]
+                (is (nil? (:seon.turn/id (turn/system-turn request))))
+                (is (= basis (db/basis-t @connection))
+                    "the latest read answers the next pass without an edge")))))))))
 
 (deftest failed-evaluations-are-not-promoted-and-documentation-follows-its-evidence
   (with-rereads
