@@ -206,6 +206,42 @@
       (throw (ex-info "The published test base has no program manifest."
                       {::base base}))))
 
+(defn record-head!
+  "Record the Git identity of a HEAD-only publication beside its cached base."
+  {:malli/schema [:=> [:cat :string :string :string] :nil]}
+  [source digest git-sha]
+  (let [directory (io/file source "target/test-published-bases" digest)
+        ready (io/file directory "ready.edn")
+        record (read-edn ready)
+        temporary (io/file directory (str "head-" (random-uuid) ".edn"))]
+    (manifest (str (io/file directory "base")))
+    (when-not (= digest (::digest record))
+      (throw (ex-info "HEAD publication has no matching cache record." {::digest digest})))
+    (spit temporary (pr-str (assoc record ::git-sha git-sha)))
+    (when-not (.renameTo temporary ready)
+      (throw (ex-info "Could not record HEAD publication." {::git-sha git-sha})))
+    nil))
+
+(defn head-manifest
+  "Read a published program graph for exactly the requested Git commit."
+  {:malli/schema [:=> [:cat :string :string] :seon.fn.manifest/manifest]}
+  [source git-sha]
+  (or (some (fn [directory]
+              (let [ready (read-edn (io/file directory "ready.edn"))
+                    graph (io/file directory "base/manifest.edn")]
+                (when (and (= git-sha (::git-sha ready))
+                           (= (.getName directory) (::digest ready))
+                           (.isFile graph))
+                  (let [value (read-edn graph)]
+                    (when-not (vector? (:seon.fn.manifest/artifacts value))
+                      (throw (ex-info "Published HEAD graph has no artifacts." {::git-sha git-sha})))
+                    value))))
+            (sort-by #(.getName %) (.listFiles (io/file source "target/test-published-bases"))))
+      (throw (ex-info
+              (str "No published program graph matches HEAD " git-sha
+                   "; orchestrator must run: bin/test --prepare-head-base")
+              {::git-sha git-sha}))))
+
 (defn -main
   "Prepare the selected snapshot's base; retain it while its launcher lives."
   {:malli/schema [:=> [:cat [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics.", :gen/elements [[]]} :string]] :nil]}

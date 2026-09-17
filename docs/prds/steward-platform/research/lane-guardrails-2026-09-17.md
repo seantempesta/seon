@@ -528,3 +528,102 @@ Exact disposable probe, removed after completion:
 (deftest orphan-and-exhaust
   ((:test (meta #'seon.test-runner-test/orphaned-gates-are-announced-by-wait-and-preamble))))
 ```
+
+## Overlay completeness — 2026-09-17
+
+The owner chose refusal when no published graph matches HEAD. This supersedes
+the earlier open design question in this note. `bin/test --prepare-head-base`
+is the exact orchestrator recovery command: HEAD-only snapshot, ordinary
+dependency and cached-base preparation, then publication provenance recorded
+beside that base's existing manifest. It launches no workers or tests. The
+lane identity check refuses this command from a lane. Successful preparation
+removes its disposable run root; the immutable cached base remains.
+
+Both cold and fast `--paths` admission read that matching manifest with
+Babashka before acquiring a slot or launching any JVM. Missing/stale graphs
+refuse with the recovery command. Public declarations in selected files are
+compared to their published source forms with the non-evaluating reader;
+changed declarations seed a query of the manifest's `:seon.fn/calls` edges.
+Only callers whose files differ from HEAD and are absent from the overlay
+refuse, with sorted paths to add. Caller source is never searched or loaded.
+The comparison conservatively includes body changes as well as arity changes;
+unchanged top-level declarations in the same edited file are excluded.
+Nested declarations without an equal top-level form conservatively count as
+changed. A caller still identical to HEAD is admitted as the owner specified.
+
+Dependency ledger: `seon.fn/build-manifest` (`src/seon/fn.clj:1931`) produces
+the canonical artifacts and call edges; `manifest-data` (`:1883`) carries
+them into the already published manifest. `seon.test.cache/ensure-base!`
+owns preparation and its ready record; the new Git SHA is provenance of the
+HEAD-only preparation, not a second graph. Edamame's non-evaluating
+`parse-string-all` and inert auto-resolution are documented in
+`reference-code/edamame/README.md:89` and `:159`; source comparison uses that
+reader, with no textual call inference or new regular expression. Git's
+NUL-delimited diff/untracked inventory uses selection's existing bounded
+process idiom. No database, schema or live cluster changes are needed.
+
+The canonical launcher regression builds its graph through the real indexer,
+changes a public arity and its caller, and proves absence/staleness and an
+omitted caller refuse before the JVM entry point. Complete overlays and a
+HEAD-identical caller reach it. The preparation arm exercises a real cached
+manifest, verifies HEAD bytes despite dirty working source, and refuses any
+unexpected coordinator invocation. Both older snapshot fixtures now publish
+their own indexed baseline rather than maintaining a fake graph.
+
+Verification uses detached worktree `tmp/lane-overlay-wt` at `56b8a1cd8`.
+Its existing HEAD fast launcher bootstraps the new check, which would otherwise
+require the orchestrator to prepare a baseline before its own first test.
+Only owned source/test diffs are overlaid. The focused test installs candidate
+`bin/test` bytes inside that disposable fast snapshot before running the
+canonical fixture bodies, so those fixtures exercise the new launcher.
+This is not a cold gate or a bypass flag. Shared adoption-margin edits in
+`src/seon/cluster.clj`, `src/seon/cluster/source.clj`, `src/seon/program.cljc`,
+`resources/seon/operator/state.clj` and `script/seon/fresh_operator.clj` remain
+outside the verification snapshot. Other shared dirty paths are preserved.
+Default is untouched; cold integration and platform proof remain the
+orchestrator's responsibility.
+
+The focused armed run passed **3 tests / 34 assertions / 0 failures /
+0 errors**, exit **0**, ending `2026-09-17T05:53:12.873203Z`. It covered
+the new admission/preparation regression and both existing snapshot
+regressions. After adding explicit cold-admission and preparation-cleanup
+assertions, the focused admission run passed **1 test / 23 assertions**.
+Final review also closed the doubled-slash path alias, which could otherwise
+miss an exact graph path comparison. The final armed admission run passed
+**1 test / 25 assertions / 0 failures / 0 errors**, exit **0**, ending
+`2026-09-17T05:55:42.314095Z`; slot acquisition took **0 seconds**.
+Shell syntax and owned-path whitespace checks pass. The initial preparation
+probe exposed a fixture cache path lacking its digest suffix, corrected
+before these passes. The temporary wrapper initially invoked nested test
+reporting and had no own assertion count; the final probe invokes the owning
+test body directly, as below.
+
+Command, run in the detached HEAD worktree, one invocation at a time:
+
+```sh
+timeout 2400 bin/test-fast --paths src/seon/test/cache.clj src/seon/test/selection.clj test/seon/test_runner_test.clj tmp/lane_overlay_probe.clj tmp/candidate-test -- tmp.lane-overlay-probe
+```
+
+`tmp/candidate-test` contains the candidate `bin/test` bytes. Exact final
+disposable probe:
+
+```clojure
+(ns tmp.lane-overlay-probe
+  (:require [clojure.test :refer [deftest]]
+            [seon.test-runner-test]))
+(deftest overlay-admission
+  (spit "bin/test" (slurp "tmp/candidate-test"))
+  ((:test (meta #'seon.test-runner-test/selected-overlays-require-a-current-graph-and-every-changed-caller))))
+```
+
+The three-test run used the same pattern for
+`selected-paths-overlay-head-for-preparation-and-every-worker` and
+`fast-selected-paths-exclude-a-broken-foreign-file`. All verification
+processes exited and their fast snapshots were removed; the owned worktree
+and bootstrap patch are removed before reporting. No lane command used
+`SEON_TEST_*` overrides. Markdown feedback still reports the same 31 foreign
+stale-gitlink findings already recorded above. Owned paths in this slice:
+`bin/test`, `src/seon/test/cache.clj`, `src/seon/test/selection.clj`,
+`test/seon/test_runner_test.clj`, AGENTS.md's overlay paragraphs and this note.
+Item 3's finding-name correction was separately accepted at `4155deef4`;
+the slot exhaust correction landed at `56b8a1cd8`.

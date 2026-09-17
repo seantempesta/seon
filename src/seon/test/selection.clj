@@ -16,6 +16,7 @@
   (:require [babashka.process :as process]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [edamame.core :as reader]
             [clojure.string :as str])
   (:import (java.io File)
            (java.nio.file Files)
@@ -174,6 +175,84 @@
                    (keep (fn [[attribute value]]
                            (when (= :seon.test/sym attribute) value)) reached))
            distinct sort vec))))
+
+(defn- source-forms [source]
+  (reader/parse-string-all
+   source {:all true :auto-resolve name :read-cond :allow :features #{:clj}
+           :regex #(list 're-pattern %)}))
+
+(defn missing-overlay-callers
+  "Changed caller files omitted from an overlay of changed public declarations."
+  {:malli/schema [:=> [:cat [:vector :seon.fn.file/artifact]
+                       [:map-of :string :string] [:sequential :string]
+                       [:sequential :string]] [:vector :string]]}
+  [artifacts overlay-texts overlay-paths dirty-paths]
+  (let [overlay (set overlay-paths)
+        dirty (set dirty-paths)
+        changed
+        (into #{}
+              (mapcat
+               (fn [artifact]
+                 (let [path (:seon.fn.file/relative-path artifact)]
+                   (when (overlay path)
+                     (let [forms (set (source-forms (get overlay-texts path "")))]
+                       (for [row (:seon.fn.file/rows artifact)
+                             :when (and (:seon.fn/sym row)
+                                        (:seon.fn/arglists row)
+                                        (not (:seon.fn/private? row))
+                                        (or (not (:seon.fn/source row))
+                                            (not (contains? forms
+                                                            (first (source-forms (:seon.fn/source row)))))))]
+                         [:seon.fn/sym (:seon.fn/sym row)]))))))
+              artifacts)]
+    (->> artifacts
+         (keep (fn [artifact]
+                 (let [path (:seon.fn.file/relative-path artifact)]
+                   (when (and (dirty path) (not (overlay path))
+                              (some (fn [row]
+                                      (some #(contains? changed
+                                                       (if (vector? %) % [:seon.fn/sym %]))
+                                            (:seon.fn/calls row)))
+                                    (:seon.fn.file/rows artifact)))
+                     path))))
+         distinct sort vec)))
+
+(defn- changed-working-paths [source git-sha]
+  (mapcat
+   (fn [arguments]
+     (let [child (process/process arguments {:dir source :out :string :err :string})]
+       (try
+         (let [result (deref child inventory-bound-ms ::expired)]
+           (when (or (= ::expired result) (not= 0 (:exit result)))
+             (throw (ex-info "Git could not enumerate changed overlay callers."
+                             {::result result})))
+           (vec (enumeration-seq (java.util.StringTokenizer. (:out result) (str (char 0))))))
+         (finally (process/destroy-tree child)))))
+   [["git" "diff" "--no-renames" "--name-only" "-z" git-sha "--"]
+    ["git" "ls-files" "--others" "--exclude-standard" "-z"]]))
+
+(defn assert-complete-overlay!
+  "Refuse changed caller files missing from the immutable selected snapshot."
+  {:malli/schema [:=> [:cat :seon.fn.manifest/manifest :string :string :string
+                       [:sequential :string]] :nil]}
+  [manifest source snapshot git-sha overlay-paths]
+  (let [artifacts (:seon.fn.manifest/artifacts manifest)
+        paths (set overlay-paths)
+        texts (into {}
+                    (keep (fn [artifact]
+                            (let [path (:seon.fn.file/relative-path artifact)
+                                  file (io/file snapshot path)]
+                              (when (and (paths path) (.isFile file))
+                                [path (slurp file)]))))
+                    artifacts)
+        missing (missing-overlay-callers artifacts texts overlay-paths
+                                         (changed-working-paths source git-sha))]
+    (when (seq missing)
+      (throw (ex-info
+              (str "Incomplete --paths overlay; add changed caller files: "
+                   (str/join " " missing))
+              {::missing-callers missing})))
+    nil))
 
 (defn- basis-file
   "The recorded green-basis artifact below one checkout root.

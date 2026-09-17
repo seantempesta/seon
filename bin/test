@@ -89,6 +89,7 @@ Usage: bin/test [--all|--full|--platform|--changed PATH]...
   --full          platform tier, then every test (SEON_TEST_FULL=1 too)
   --platform      the declared moving-part regressions alone
   --paths FILE... snapshot HEAD plus these working-tree files; use -- before namespaces
+  --prepare-head-base publish HEAD only for overlay admission; orchestrator preparation, no tests
   --changed PATH  platform tier, then the tests reaching PATH (repeatable)
   --confirm       diagnostic isolation of named failing tests (ns/test ...)
 
@@ -121,6 +122,7 @@ namespaces=()
 changed_paths=()
 snapshot_paths=()
 fast_iteration=0
+prepare_head_base=0
 confirm=0
 
 set_mode() {
@@ -162,6 +164,10 @@ while [ $# -gt 0 ]; do
       fast_iteration=1
       shift
       ;;
+    --prepare-head-base)
+      prepare_head_base=1
+      shift
+      ;;
     --confirm)
       confirm=1
       shift
@@ -171,7 +177,7 @@ while [ $# -gt 0 ]; do
       count_before=${#snapshot_paths[@]}
       while [ $# -gt 0 ] && [[ "$1" != --* ]]; do
         case "$1" in
-          /*|..|../*|*/../*|*/..|./*|*/./*|.git|.git/*|reference-code|reference-code/*)
+          /*|..|../*|*/../*|*/..|./*|*/./*|*//*|.git|.git/*|reference-code|reference-code/*)
             echo "bin/test: --paths requires literal repository-relative first-party files: $1" >&2
             exit 64 ;;
         esac
@@ -240,6 +246,12 @@ if [ -n "${SEON_CODEX_LANE:-}" ] && [ "$fast_iteration" -ne 1 ]; then
 fi
 
 confirm_symbols=
+if [ "$prepare_head_base" -eq 1 ] &&
+   { [ "$fast_iteration" -eq 1 ] || [ "$explicit_selection" -eq 1 ] ||
+     [ ${#snapshot_paths[@]} -gt 0 ] || [ -n "$requested_mode" ] || [ "$confirm" -eq 1 ]; }; then
+  echo 'bin/test: --prepare-head-base takes no selection, overlay, or fast flag' >&2
+  exit 64
+fi
 if [ "$confirm" -eq 1 ]; then
   if [ ${#namespaces[@]} -eq 0 ] || [ -n "$requested_mode" ] || [ "$fast_iteration" -eq 1 ]; then
     echo 'bin/test: --confirm requires named failing tests: ns/test ...' >&2
@@ -721,7 +733,9 @@ git archive "$git_sha" | tar -x -C "$run_root"
 rm -rf "$run_root/reference-code"
 ln -s "$source_root/reference-code" "$run_root/reference-code"
 overlay_paths=()
-if [ ${#snapshot_paths[@]} -gt 0 ]; then
+if [ "$prepare_head_base" -eq 1 ]; then
+  echo "bin/test: preparing the program graph for HEAD $git_sha"
+elif [ ${#snapshot_paths[@]} -gt 0 ]; then
   overlay_paths=("${snapshot_paths[@]}")
 else
   git diff --no-renames --name-only -z "$git_sha" -- . ':!reference-code' >"$run_root/.snapshot-paths"
@@ -766,6 +780,21 @@ git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standa
   done
 echo "bin/test: end snapshot differences"
 record_phase snapshot
+
+if [ ${#snapshot_paths[@]} -gt 0 ]; then
+  if ! bb --config "$source_root/bb.edn" -e '
+    (require (quote [seon.test.cache :as cache])
+             (quote [seon.test.selection :as selection]))
+    (let [[source snapshot git-sha & paths] *command-line-args*]
+      (try
+        (selection/assert-complete-overlay!
+         (cache/head-manifest source git-sha) source snapshot git-sha paths)
+        (catch Exception failure
+          (binding [*out* *err*] (println "bin/test:" (ex-message failure)))
+          (System/exit 64))))' "$source_root" "$run_root" "$git_sha" "${snapshot_paths[@]}"; then
+    exit 64
+  fi
+fi
 
 begin_phase test-slot
 if ! acquire_test_slot; then
@@ -906,6 +935,7 @@ if [ -n "${SEON_TEST_WORKERS-}" ] && [[ "$SEON_TEST_WORKERS" =~ ^[1-9][0-9]*$ ]]
   worker_count=$SEON_TEST_WORKERS
 fi
 original_source_root=$source_root
+if [ "$prepare_head_base" -eq 1 ]; then worker_count=0; fi
 source_root=$run_root
 worker_parent="$run_root/workers"
 mkdir -p "$worker_parent"
@@ -914,6 +944,7 @@ for worker_number in $(seq 1 "$worker_count"); do
 done
 source_root=$original_source_root
 for worker_root in "$worker_parent/"*; do
+  [ -d "$worker_root" ] || continue
   populate_cache_links "$worker_root"
 done
 if [ -n "$snapshot_digest" ]; then
@@ -972,6 +1003,22 @@ if [ "$base_status" -ne 0 ]; then
 fi
 
 record_phase published-base
+
+if [ "$prepare_head_base" -eq 1 ]; then
+  if [ -z "$snapshot_digest" ]; then
+    echo 'bin/test: HEAD preparation requires the cached-base protocol' >&2
+    exit 1
+  fi
+  if ! bb --config "$source_root/bb.edn" -e '
+    (require (quote [seon.test.cache :as cache]))
+    (apply cache/record-head! *command-line-args*)' "$source_root" "$snapshot_digest" "$git_sha"; then
+    exit 1
+  fi
+  echo "bin/test: published overlay baseline for HEAD $git_sha"
+  cd "$source_root"
+  remove_run_root
+  exit 0
+fi
 
 begin_phase coordinator-and-tests
 coordinator_jvm_arguments=(

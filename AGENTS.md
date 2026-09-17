@@ -873,6 +873,14 @@ recorded result facts; tests explicitly exercising file-backed boot still
 create their own fixture roots. These are iteration results, not the
 isolated gate's proof.
 
+Every `--paths` overlay requires a published program graph for exactly HEAD.
+If none exists, the launcher refuses before any JVM and names the orchestrator
+command `bin/test --prepare-head-base`; that command uses the gate's ordinary
+preparation on HEAD alone, without workers or tests. The overlay check follows
+published `:seon.fn/calls` edges from changed public declarations and refuses
+dirty caller files omitted from the overlay, naming the paths to add. A caller
+unchanged from HEAD needs no overlay. Lanes cannot prepare the baseline.
+
 Both entry points acquire a slot through `bin/_test-slot:14` before launching
 test JVMs and release it on exit. That shell declaration owns the default
 count per source checkout, shared by its lanes; separate checkouts have
@@ -1127,6 +1135,8 @@ has done its job.
   Lanes cannot set `SEON_TEST_SILENCE_SECONDS` or `SEON_TEST_SLOTS`, even
   alongside an orchestrator flag; declare test duration with
   `:seon.test/long` and `:seon.test/long-ms` instead.
+  When overlay admission has no HEAD-matching graph, the orchestrator runs
+  `bin/test --prepare-head-base` before lanes resume `--paths` iteration.
   Codex snapshots hook configuration at process start: after changing
   `.codex/hooks.json`, the orchestrator stops and resumes running lanes.
   `bin/codex-agent` enables the vetted project hooks explicitly and resumes

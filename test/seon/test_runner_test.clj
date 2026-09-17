@@ -1164,6 +1164,28 @@
        "mkdir -p src/seon/test\n"
        "cp -R \"$origin/src/seon/test/.\" src/seon/test/\n"))
 
+(defn- publish-fixture-head! [checkout]
+  (let [directory (io/file checkout "target/test-published-bases" fake-cache-digest)
+        base (doto (io/file directory "base") .mkdirs)
+        log (io/file checkout "tmp/head.txt")
+        _ (io/make-parents log)
+        child (.start (doto (ProcessBuilder. ^java.util.List
+                                             ["git" "-C" (.getPath checkout) "rev-parse" "HEAD"])
+                        (.redirectOutput log)))]
+    (try
+      (when-not (and (.waitFor child test-support/event-backstop-seconds TimeUnit/SECONDS)
+                     (zero? (.exitValue child)))
+        (throw (ex-info "Fixture HEAD was not readable." {})))
+      (spit (io/file base "manifest.edn")
+            (pr-str (functions/build-manifest
+                     {:seon.fn/root (.getCanonicalPath checkout)
+                      :seon.fn/roots ["src" "test"]})))
+      (spit (io/file directory "ready.edn")
+            (pr-str {:seon.test.cache/digest fake-cache-digest}))
+      (cache/record-head! (.getCanonicalPath checkout) fake-cache-digest
+                          (str/trim (slurp log)))
+      (finally (stop-process-tree! child)))))
+
 (defn- launcher-checkout!
   "Give a launcher fixture its own cache authority as well as its own run roots."
   ([fixture-root] (launcher-checkout! fixture-root project-root))
@@ -1197,8 +1219,128 @@
       (when-not (zero? (.exitValue child))
         (throw (ex-info "Launcher fixture checkout failed."
                         {::runner/task-output (slurp log)})))
+      (publish-fixture-head! checkout)
       checkout
       (finally (stop-process-tree! child))))))
+
+(defn- fixture-command! [checkout arguments & [orchestrator?]]
+  (let [log (io/file checkout "tmp" (str "command-" (random-uuid) ".log"))
+        _ (io/make-parents log)
+        child (.start (cond-> (doto (ProcessBuilder. ^java.util.List arguments)
+                        (.directory checkout)
+                        (.redirectErrorStream true)
+                        (.redirectOutput log))
+                       orchestrator? as-orchestrator))]
+    (try
+      (when-not (.waitFor child test-support/event-backstop-seconds TimeUnit/SECONDS)
+        (throw (ex-info "Launcher fixture command exceeded its bound."
+                        {::runner/task-output (slurp log)})))
+      [(.exitValue child) (slurp log)]
+      (finally (stop-process-tree! child)))))
+
+(defn- overlay-admission-proof! [launcher-source]
+  (let [root (doto (io/file project-root "tmp" (str "overlay-admission-" (random-uuid))) .mkdirs)]
+    (try
+      (let [checkout (launcher-checkout! root)
+            api (io/file checkout "src/probe/api.clj")
+            caller (io/file checkout "src/probe/caller.clj")
+            unrelated (io/file checkout "src/probe/unrelated.clj")
+            caller-source "(ns probe.caller (:require [probe.api :as api]))\n(defn call [x] (api/value x))\n"
+            ready (io/file checkout "target/test-published-bases" fake-cache-digest "ready.edn")
+            marker (io/file checkout "tmp/jvm-launched")
+            command (fn [paths]
+                      (fixture-command!
+                       checkout
+                       (into ["bash" "-c"
+                              "PATH=\"$PWD/tmp/fake-bin:$PATH\" exec bin/test --fast --paths \"$@\" -- seon.fixture-test"
+                              "overlay-proof"] paths)))]
+        (io/make-parents api)
+        (spit api "(ns probe.api)\n(defn value [x] x)\n(defn unchanged [x] x)\n")
+        (spit caller caller-source)
+        (spit unrelated "(ns probe.unrelated (:require [probe.api :as api]))\n(defn call [x] (api/unchanged x))\n")
+        (spit (io/file checkout "bin/test") launcher-source)
+        (is (zero? (first (fixture-command! checkout ["git" "add" "src" "bin/test"]))))
+        (is (zero? (first (fixture-command! checkout ["git" "commit" "-qm" "overlay baseline"]))))
+        (publish-fixture-head! checkout)
+        (let [record (slurp ready)
+              executable (io/file checkout "tmp/fake-bin/clojure")]
+          (io/make-parents executable)
+          (spit executable (str "#!/bin/sh\necho LAUNCHED > '" (.getCanonicalPath marker) "'\n"))
+          (.setExecutable executable true)
+          (io/delete-file ready)
+          (let [[status output] (command ["src/probe/api.clj"])]
+            (is (= 64 status) output)
+            (is (str/includes? output "orchestrator must run: bin/test --prepare-head-base") output)
+            (is (not (.exists marker)) "absent baseline refuses before a JVM"))
+          (spit ready (pr-str (assoc (edn/read-string record) :seon.test.cache/git-sha "stale")))
+          (let [[status output] (command ["src/probe/api.clj"])]
+            (is (= 64 status) output)
+            (is (not (.exists marker)) "a stale graph is never accepted"))
+          (spit ready record)
+          (let [[status output] (command ["src//probe/api.clj"])]
+            (is (= 64 status) output)
+            (is (not (.exists marker)) "path aliases cannot evade graph identity matching"))
+          (spit api "(ns probe.api)\n(defn value [x y] [x y])\n(defn unchanged [x] x)\n")
+          (spit caller "(ns probe.caller (:require [probe.api :as api]))\n(defn call [x] (api/value x x))\n")
+          (spit unrelated "(ns probe.unrelated (:require [probe.api :as api]))\n(defn call [x] (api/unchanged (inc x)))\n")
+          (let [[status output] (command ["src/probe/api.clj"])]
+            (is (= 64 status) output)
+            (is (str/includes? output "add changed caller files: src/probe/caller.clj") output)
+            (is (not (str/includes? output "src/probe/unrelated.clj")) output)
+            (is (not (.exists marker)) "incomplete overlay refuses before a JVM"))
+          (let [[status output]
+                (fixture-command!
+                 checkout
+                 ["bash" "-c"
+                  "PATH=\"$PWD/tmp/fake-bin:$PATH\" exec bin/test --paths src/probe/api.clj -- seon.fixture-test"]
+                 true)]
+            (is (= 64 status) output)
+            (is (str/includes? output "add changed caller files: src/probe/caller.clj") output)
+            (is (not (.exists marker)) "cold admission also refuses before a JVM"))
+          (let [[status output] (command ["src/probe/api.clj" "src/probe/caller.clj"])]
+            (is (zero? status) output)
+            (is (.exists marker) "the complete overlay reaches the runner"))
+          (io/delete-file marker true)
+          (spit caller caller-source)
+          (let [[status output] (command ["src/probe/api.clj"])]
+            (is (zero? status) output)
+            (is (.exists marker) "a caller unchanged from HEAD need not be overlaid"))
+          ;; Reuse a real indexed HEAD manifest through the gate's cache-hit
+          ;; preparation. Its dependency entry point must see HEAD bytes,
+          ;; and no coordinator or test process is admitted by this command.
+          (spit (io/file checkout "tmp/expected-api")
+                "(ns probe.api)\n(defn value [x] x)\n(defn unchanged [x] x)\n")
+          (.mkdirs (io/file checkout "target/test-published-bases" fake-cache-digest "base/data/store"))
+          (spit ready (pr-str (dissoc (edn/read-string record) :seon.test.cache/git-sha)))
+          (spit executable
+                (str "#!/bin/bash\nset -euo pipefail\n"
+                     "cmp src/probe/api.clj \"$SEON_FAKE_CACHE_PATH/../../expected-api\"\n"
+                     fake-dev-cache-prologue
+                     "echo UNEXPECTED_RUNNER >&2\nexit 99\n"))
+          (let [roots-before (set (map #(.getName %) (.listFiles (io/file checkout "tmp/test-runs"))))
+                [status output]
+                (fixture-command!
+                 checkout
+                 ["bash" "-c"
+                  (str "mkdir -p tmp/cache/" fake-cache-digest "\n"
+                       "export PATH=\"$PWD/tmp/fake-bin:$PATH\"\n"
+                       "export SEON_FAKE_CACHE_PATH=\"$PWD/tmp/cache/" fake-cache-digest "\"\n"
+                       "export SEON_FAKE_CACHE_DIGEST=" fake-cache-digest "\n"
+                       "exec bin/test --prepare-head-base")]
+                 true)]
+            (is (zero? status) output)
+            (is (str/includes? output "published overlay baseline for HEAD") output)
+            (is (= (:seon.test.cache/git-sha (edn/read-string record))
+                   (:seon.test.cache/git-sha (edn/read-string (slurp ready)))))
+            (is (= roots-before
+                   (set (map #(.getName %) (.listFiles (io/file checkout "tmp/test-runs")))))
+                "successful preparation removes its disposable run root")
+            (is (not (str/includes? output "UNEXPECTED_RUNNER")) output))))
+      (finally (test-support/delete-recursively! root)))))
+
+(deftest ^{:seon.test/platform "Selected overlays refuse missing changed callers before launching a JVM."}
+  selected-overlays-require-a-current-graph-and-every-changed-caller
+  (overlay-admission-proof! (slurp (io/file project-root "bin/test"))))
 
 (deftest ^{:seon.test/platform "Launcher fixtures carry newly required test helpers."}
   launcher-checkout-carries-new-cache-dependencies
@@ -2266,8 +2408,9 @@
         log (io/file root "output.txt")
         child (atom nil)]
     (try
-      (spit script (str
-             "set -euo pipefail\n"
+      (let [[status output]
+            (fixture-command!
+             root ["bash" "-c" (str "set -euo pipefail\n"
              "origin=$1\n"
              "fixture=$2\n"
              "mkdir -p \"$fixture/bin\" \"$fixture/src/seon\" \"$fixture/test\" \"$fixture/.agents/skills\" \"$fixture/.claude\" \"$fixture/.clj-kondo\" \"$fixture/tmp/fake-bin\"\n"
@@ -2285,7 +2428,12 @@
              "ln -s \"$origin/reference-code\" reference-code\n"
              "git init -q\n"
              "git add -- bin src test bb.edn .gitignore .agents .claude .clj-kondo seon-skills reference-code\n"
-             "git -c user.name=\"$(git -C \"$origin\" config user.name)\" -c user.email=\"$(git -C \"$origin\" config user.email)\" commit -qm baseline\n"
+             "git -c user.name=\"$(git -C \"$origin\" config user.name)\" -c user.email=\"$(git -C \"$origin\" config user.email)\" commit -qm baseline\n")
+                   "fixture-setup" (.getPath project-root)
+                   (.getPath (io/file root "checkout"))])]
+        (is (zero? status) output))
+      (publish-fixture-head! (io/file root "checkout"))
+      (spit script (str "set -euo pipefail\norigin=$1\nfixture=$2\ncd \"$fixture\"\n"
              "printf 'owned\\n' > src/owned.txt\n"
              "printf 'foreign\\n' > src/foreign.txt\n"
              "printf 'added\\n' > src/added.txt\n"
@@ -2431,8 +2579,9 @@
         log (io/file root "output.txt")
         child (atom nil)]
     (try
-      (spit script
-            (str "set -euo pipefail\n"
+      (let [[status output]
+            (fixture-command!
+             root ["bash" "-c" (str "set -euo pipefail\n"
                  "origin=$1\nfixture=$2\nmkdir -p \"$fixture\"\n"
                  "git -C \"$origin\" archive HEAD | tar -x -C \"$fixture\"\n"
                  "cd \"$fixture\"\n"
@@ -2442,7 +2591,12 @@
                  "for path in bin src resources test; do cp -R \"$origin/$path/.\" \"$path/\"; done\n"
                  "git init -q\n"
                  "git add -f -- bin src test resources config deps.edn bb.edn .agents .claude seon-skills .gitignore .clj-kondo script dev_cache.clj reference-code\n"
-                 "git -c user.name=\"$(git -C \"$origin\" config user.name)\" -c user.email=\"$(git -C \"$origin\" config user.email)\" commit -qm baseline\n"
+                 "git -c user.name=\"$(git -C \"$origin\" config user.name)\" -c user.email=\"$(git -C \"$origin\" config user.email)\" commit -qm baseline\n")
+                   "fixture-setup" (.getPath project-root)
+                   (.getPath (io/file root "checkout"))])]
+        (is (zero? status) output))
+      (publish-fixture-head! (io/file root "checkout"))
+      (spit script (str "set -euo pipefail\norigin=$1\nfixture=$2\ncd \"$fixture\"\n"
                  "printf '(' > src/seon/repl.clj\n"
                  "cat > test/seon/fast_paths_fixture_test.clj <<'CLJ'\n"
                  "(ns seon.fast-paths-fixture-test (:require [clojure.test :refer [deftest is]] [seon.instrument :as instrument]))\n"
