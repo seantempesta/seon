@@ -18,6 +18,74 @@ what moved and when. Every entity names the mechanism it builds on (file), what
 is genuinely missing, the proof that closes it, and its dependencies. Status:
 **landed** (commit), **in flight** (lane), **planned**, **decision**.
 
+## Long-term plan and schedule (orchestrator, 2026-09-17 ~04:20Z; owner: "what is the long term plan? keep everything written down")
+
+**The mission** (PRD section 0a): an AI-first programming environment where
+the program graph in the database makes certain failures impossible and
+refactoring data-driven. **The sequence the owner set** (~00:45Z): find the
+failures (inventory) → mine the easy ones as issues → stabilize → run live
+agents on them → persist reliable fixes to disk → iterate.
+
+### Phase 0 — stabilize (now)
+| Item | Owner | Status |
+|---|---|---|
+| Platform tier refused by a new destroyer reach (batch 115 A) | astra `reset-is-total` | in flight, first |
+| Batch-115 named reds (result-recording, agent-fork-callable, incremental scalar rows, gate-completions, baseline sci/documentation reds) | integrator; incremental agent; bin/test-bounds agent; baseline-reds agent | in flight |
+| Hook honored by codex? + loophole inventory | Opus hook agent | in flight |
+| Lane guardrails (lane identity, no lane `bin/test`, declared bounds, overlay completeness, orphan announcement) | astra `lane-guardrails` | in flight |
+| Hooks references for both platforms | claude-code-guide; Opus | in flight |
+| Independent end-to-end verifier of the hook on both platforms | Opus | queued behind the two above |
+| `datahike.api/with` admission-bypass detector | Opus | queued |
+| Republish margin (173 s of 180): issue-index at publication (13 s) and complete-publication cost | Opus | queued |
+
+### Phase 1 — the one reset (edges as symbols, deletion refused, symbols everywhere, G4 provenance, the 19 unsatisfiable keys, fn.ast merge-then-delete, S2, S6)
+| Item | Owner | Status |
+|---|---|---|
+| Edge retype + deletion refusal in `write-report-error` + tombstone/minting deleted + `:seon.fn/file` required | integrator | blocked on held program.cljc/schema.clj/sci/eval.clj (S3, program-ops) |
+| Validator on the writer thread (75.9 → 41.6 s; more owed) | integrator | in flight |
+| Reset of default with the whole batch, Juniper reseed, live proofs (walk parity, one deletion refused naming callers, one archived issue retracted) | orchestrator | after the retype lands |
+
+### Phase 2 — the runtime is the database
+| Item | Owner | Status |
+|---|---|---|
+| S3 base SCI context as a pure `(base-ctx db)`; overrides by provenance; regenerate on accepted change | astra `acquisition-by-provenance-s3` | in flight |
+| S12 REPL operations: reads landed (`a2e16338b`); `ns-unmap!`/`remove-ns!`/`ns-unalias!` + hook arms | astra `repl-program-operations` | in flight |
+| S12 after the reset: `rename!`, `move!`, `change-contract!`, `revert!`, `launch!`, `seon.program/unresolved-callers` | astra | queued (needs Phase 1) |
+| Tier 3 of the connections inventory: implementations as declarations (defmethod/protocol bodies as rows) | astra | queued (needs Phase 1) |
+| Debug page outline: turns → units → HTML with AI-text toggle, comments as thinking (owner Q3) | Opus | launching now |
+| S10 conversational reply (reply as a fact, `my.message/reply`, per-turn feedback) | astra | queued (S7, S11 landed) |
+| S8 root collects at 2× automatically (derived cutoff + trigger) | Opus | queued |
+| Small fixes: pull's 1,000-member cap on reach reads (484k datoms cut silently), captured-history compare, `:entity-id/syntax`, `:defined-by`, reporter ex-data | Opus | launching now |
+
+### Phase 3 — progressive testing (owner: "ask for tests whenever; unchanged requests return results")
+| Item | Owner | Status |
+|---|---|---|
+| Stage 2 resolution from the admitted identity + claim/completion transaction functions + unchanged-request policy | astra `test-system-stage2` | in flight |
+| Stage 1 one selection function (symbol edges) | astra | after Phase 1 |
+| Stage 3 workers claim from the run entity; `bin/test` a launcher | astra | after 1 + 2 |
+| Migrate `bin/test` callers to the database runner; delete the old runner paths | astra | after stage 3 |
+
+### Phase 4 — live agents
+| Item | Owner | Status |
+|---|---|---|
+| Generate `public-without-contract` (79) and `public-without-reaching-test` (1,693) issues; start three with budget 8 (paid, cheapest model) | orchestrator | after Phase 0 green |
+| Debug-page inspection of a prepped agent's context (owner) | owner + orchestrator | with the outline above |
+| Agent-facing adoption of accepted definitions (no shell) = S3 | see Phase 2 | |
+
+### Phase 5 — write-back and iterate
+| Item | Owner | Status |
+|---|---|---|
+| S5 write-back of accepted definitions to files by exact span, gated (owner: "if agents can fix things reliably we will persist the changes to disk") | astra | after Phase 4 proves reliability |
+| Listening redesign (matching over the transaction log by entity/attribute/value/tx-meta; `:seon.listen/entity` widening) | owner designs | parked by ruling; learned in `what-listening-is-2026-09-16.md` |
+
+### Owner decisions still open (each priced in its note)
+1. Push the Datahike fork (5 ahead + `73afe782`) and the SCI fork (5–7 ahead): owner-only.
+2. `:seon.fn/call-arities`: string tuple vs an interned (callee, arity) identity family.
+3. `seon.commit` entity (R6).
+4. Retention removal (`5a10f5dfa`, reversible) stands unless vetoed.
+5. D2 detector: issues for test helpers too, or src only.
+6. The eight deletion-policy choices the three deletion notes price (all others are decided by the writer's semantics).
+
 ## The target loop, in one paragraph
 
 A task is a entity: instructions, namespace, subject, a set of deftests that
