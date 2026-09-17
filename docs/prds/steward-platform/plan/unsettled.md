@@ -2375,3 +2375,56 @@ working tree, never Sonnet.
   on every PostToolUse including apply_patch, `agent_id`/`agent_type`
   recorded; loophole inventory in its note. Create-path agent: premise
   refuted, regression `770cf35d3`. Guide: `ec350ece0`.
+
+## 2026-09-17 04:50Z — four lanes landed; adoption root-caused twice; reset running
+
+- **Usage limit hit ~04:00Z** (Claude account); every Opus agent died
+  mid-slice (small-fixes after `6a0f8a08a`/`846d75e9c`, hook agent and
+  others after their landings). Resumed at 04:11Z. Load fell to 3.
+- **Base publication and adoption both refused on ONE invalid issue note**
+  (batch 116 B: "Issue indexing was refused"; S3's final adoption attempt:
+  the same): my own note carried `type: defect`; `seon.issue/index-tx` mints
+  an identity-only row for EVERY parsed slug, invalid notes included, and the
+  whole-entity validator refuses the title-less row — so one bad note refuses
+  every publication. Note fixed (`9d2d2d5da`); the indexer defect + the two
+  config seams are one Opus lane (launched, spec: invalid input read as
+  absence). Second Opus lane: the declaration-population memo tests.
+- **Adoption then failed at "development reload seon.operator"**: `No such
+  var: state/cleanup-root-under-lock!` — `seon.operator.state` lives under
+  `resources/`, outside the reload set; the JVM (booted 00:57Z) predates
+  `c4d1be3ac`. Issue filed (blocker, `a-first-party-namespace-under-resources-
+  is-never-reloaded-by-development-adoption`; fix = move it under src/).
+  Owner: "Reset the system if you need to" → `bin/seon reset --force`
+  running (log `tmp/orchestrator/refork/reset-2026-09-17T0440Z.log`).
+- **S3 LANDED** (`684f185f8`, note read end to end): `base-ctx` from one
+  database value; per-identity admission (core copies the armed JVM root,
+  agent interprets stored source, typed JVM fallback); `fork-for-turn`
+  regenerates the fork and reapplies private objects (handle preserved);
+  accepted-row installer retained as the measured optimization with the
+  regeneration equivalence regression; `seon.program/overrides` query; `doc`
+  states the JVM write-back boundary. Live: A→base→B and fresh C proven with
+  a real accepted first-party override; base construction 3.9 s, row install
+  2.4 s, private regeneration 10 ms. Fast: 161/1052/12F/1E — its own
+  regressions green; the reds are retraction-provenance expectations,
+  schema-unregister, delimiter timing (446/300 ms), install diagnostics, the
+  prompt-refusal wait. Reviewed: APPROVED as the first coherent seam; cold
+  gate = batch 117. Its AGENTS.md paragraph landed (`e706884cd`).
+- **message-wake-model seam 4 INTEGRATED** (`cf670ecc4` → `78cc3b9b7`):
+  `refresh-tx`/`refresh-call`/`:seon.cluster.eval/refreshes` deleted; the
+  rereads regression strengthened; 214/1942/21F/1E fast — its two changed
+  regressions green, the 21 reds are cluster.turn-test provenance
+  expectations + transaction-feedback (issue filed by the lane). Remaining
+  seams (handling claim, `about` split, origin) not started — resume when a
+  slot frees.
+- **Guardrails item 2 INTEGRATED** (`89802502a` → `0db8b71bc`; one conflict
+  in runner_test resolved with the variables + a priming term).
+- **Stage 2 first seam LANDED** (`7795e54f4`): `record-tx` derives admission
+  provenance at the writer (mid-transaction `:db.fn/call`), `admit-run` pure
+  admission with complementary membership reservations; 51/346 green. Not
+  yet: resolution by identity, claims/completion, unchanged-result reuse.
+  Note: the lane used `SEON_TEST_SLOTS=3 SEON_TEST_SILENCE_SECONDS=1800` —
+  exactly the override guardrails item 2 now refuses.
+- **Batch 117 launched** (platform + 18 namespaces covering S3, stage 2,
+  hook, config, issue, db, schema; log `batch-117.log`).
+- Orphan staged docs from the stopped retirement lane committed as history
+  (`1fb2e3f78`, superseded by G1).
