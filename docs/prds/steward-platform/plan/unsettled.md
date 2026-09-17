@@ -2724,3 +2724,8 @@ working tree, never Sonnet.
   `seon.error/problem-sentence` is the one composer with `scalar-text` for a
   bounded offending value. 102/527/1F fast (the open allocation bound).
   Cold gate: batch 123 after 122.
+- **Batch 122 A (HEAD d88837ddd): platform 100/744/0/0, exit 0** — green
+  again, and the cold gate prepared its own base (guardrails' correction
+  proven). B running. Message-wake resumed for its live wake-flip proof on
+  the adopted default (last owed item before the reset). Editing: stage 2,
+  message-wake.
