@@ -150,6 +150,19 @@
   (vec (cond-> (:in problem)
          (= :malli.core/invalid-input kind) next)))
 
+(defn- failure-cause
+  "A non-empty description of `failure`, for a refusal's evidence.
+
+   `ex-message` is nil for a throwable carrying no message, and a nil is not
+   storable evidence (AGENTS §3: absent is no key, never a stored nil). The
+   class name is what is genuinely known in that case, so this key is always
+   present and always says something."
+  [^Throwable failure]
+  (let [message (ex-message failure)]
+    (if (or (nil? message) (= "" (.trim ^String message)))
+      (.getName (class failure))
+      message)))
+
 (defn- program-graph-arglists
   [function-symbol]
   (try
@@ -180,19 +193,24 @@
                 {:seon.instrument.lookup/status :failed}))))
         {:seon.instrument.lookup/status :failed})
       {:seon.instrument.lookup/status :no-program-graph})
-    (catch Throwable _
-      {:seon.instrument.lookup/status :failed})))
+    (catch Throwable failure
+      {:seon.instrument.lookup/status :failed
+       :seon.instrument.lookup/cause (failure-cause failure)})))
 
 (defn- jvm-arglists
   [function-symbol]
   (try
-    (some-> function-symbol find-var meta :arglists)
-    (catch Throwable _ nil)))
+    (if-let [arglists (some-> function-symbol find-var meta :arglists)]
+      {:seon.instrument.lookup/status :found ::arglists arglists}
+      {:seon.instrument.lookup/status :missing})
+    (catch Throwable failure
+      {:seon.instrument.lookup/status :failed
+       :seon.instrument.lookup/cause (failure-cause failure)})))
 
 (defn- diagnostic-arglists
   [function-symbol]
   (let [{status :seon.instrument.lookup/status
-         stored :seon.fn/arglists}
+         stored :seon.fn/arglists :as lookup}
         (program-graph-arglists function-symbol)]
     (case status
       :found (try
@@ -200,16 +218,16 @@
                 ::arglists (edn/read-string stored)}
                (catch Throwable failure
                  {:seon.instrument.lookup/status :failed
-                  :seon.instrument.lookup/cause (ex-message failure)}))
+                  :seon.instrument.lookup/cause (failure-cause failure)}))
       ;; With a graph, only an established miss reaches JVM metadata. Outside
       ;; an evaluation there is no program graph to consult; that is the
       ;; system-side, compiled-function case this fallback exists for.
       (:missing :no-program-graph)
-      (if-let [arglists (jvm-arglists function-symbol)]
-        {:seon.instrument.lookup/status :found
-         ::arglists arglists}
-        {:seon.instrument.lookup/status status})
-      {:seon.instrument.lookup/status :failed})))
+      (let [result (jvm-arglists function-symbol)]
+        (if (= :missing (:seon.instrument.lookup/status result))
+          {:seon.instrument.lookup/status status}
+          result))
+      lookup)))
 
 (defn- minimal-violation
   [kind data]
@@ -399,7 +417,8 @@
          :seon.error/diagnostic-cause kind
          :seon.error/diagnostic-evidence
          (if arity?
-           (select-keys lookup [:seon.instrument.lookup/status ::arglists])
+           (select-keys lookup [:seon.instrument.lookup/status
+                                :seon.instrument.lookup/cause ::arglists])
            (cond-> {::problem-count (count problems)}
              caller (assoc ::caller caller)))
          :seon.error/data
@@ -410,8 +429,10 @@
            arglists (assoc ::arglists arglists)
            (seq paths) (assoc ::problem-paths paths)
            caller (assoc ::caller caller))})))
-    (catch Throwable _
-      (minimal-violation kind data))))
+    (catch Throwable failure
+      (assoc-in (minimal-violation kind data)
+                [:seon.error/data :seon.instrument.lookup/cause]
+                (failure-cause failure)))))
 
 (defn- throwing-report
   "The `:panic` reporter: raise the violation as our own flat error.

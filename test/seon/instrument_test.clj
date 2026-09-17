@@ -378,6 +378,18 @@
               (:seon.error/diagnostic-offending (:seon.error/data data)))
            "re-arming without caps cannot replace the shared reporter")))))
 
+(deftest diagnostic-failures-retain-their-cause
+  (let [lookup (#'instrument/diagnostic-arglists 'unqualified)
+        violation (#'instrument/violation
+                   nil :malli.core/invalid-input
+                   {:fn-name 'seon.instrument-test/missing
+                    :input [:not-a-malli-schema] :args [42]})]
+    (is (= :failed (:seon.instrument.lookup/status lookup)))
+    (is (seq (:seon.instrument.lookup/cause lookup)))
+    (is (= ::instrument/contract-violated (:seon.error/kind violation)))
+    (is (seq (get-in violation [:seon.error/data
+                                :seon.instrument.lookup/cause])))))
+
 (deftest a-flat-error-value-at-a-contract-boundary-is-its-own-face
   (let [violation @#'instrument/violation
         inner {:seon.error/kind :seon.db/missing-connection-binding
