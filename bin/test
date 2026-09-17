@@ -788,7 +788,15 @@ git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standa
 echo "bin/test: end snapshot differences"
 record_phase snapshot
 
-if [ ${#snapshot_paths[@]} -gt 0 ]; then
+# An exact HEAD snapshot has no overlay to close over callers. Do not require
+# a separately published HEAD graph merely to iterate on committed source.
+snapshot_changed=0
+if ! git -C "$source_root" --work-tree="$run_root" diff --quiet "$git_sha" -- . ':!reference-code' ||
+   [ -n "$(git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standard -- \
+     . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt')" ]; then
+  snapshot_changed=1
+fi
+if [ ${#snapshot_paths[@]} -gt 0 ] && [ "$snapshot_changed" -eq 1 ]; then
   # Cold gates own publication. Reuse the HEAD-only preparation command when
   # its graph is absent; fast iterations may never start this preparation.
   if [ "$fast_iteration" -ne 1 ] && ! bb --config "$source_root/bb.edn" -e '
