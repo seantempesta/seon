@@ -115,9 +115,9 @@ a published graph 32 commits behind HEAD.
 - `seon.cluster.armed-test`: the existing first-proc-fault regression reached
   the injected durable fault, then found `:seon.error/proc` and
   `:seon.error/process` absent from the root error pull. Those values now live
-  on the occurrence and require `seon.error/latest-fact`; this is outside the
-  lane's test ownership for item 2 and is part of the unfinished integration
-  boundary.
+  on the occurrence and require `seon.error/latest-fact`. Repairing that stale
+  read alone would not prove the unfinished FAILED-state and graph-stop
+  behavior, so the lane did not turn it into a misleading green regression.
 
 The orchestrator still owes the cold path-limited gate and platform proof.
 
