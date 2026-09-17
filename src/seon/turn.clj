@@ -1117,17 +1117,29 @@
   A run's own write is never a concurrent change, whichever declaration family
   it belongs to. The question is asked of the transaction rather than of one
   family's content attribute, so there is no per-family attribute to forget."
+  {:malli/schema [:=> [:cat
+                       [:or :seon.db/database-value :seon.error/value]
+                       :qualified-keyword
+                       :seon.schema/value
+                       ::id]
+                  [:or :boolean :seon.error/value]]}
   [db identity-attribute identity-value run-id]
-  (boolean
-   (db/q '[:find ?receipt .
-           :in $ ?identity-attribute ?identity-value ?run-id
-           :where
-           [?declaration ?identity-attribute ?identity-value]
-           [?declaration _ _ ?tx true]
-           [?receipt :seon.eval/shown _ ?tx]
-           [?receipt :seon.cluster.eval/run ?run]
-           [?run :seon.turn/id ?run-id]]
-         (db/history db) identity-attribute identity-value run-id)))
+  (let [history (db/history db)]
+    (if (error/error? history)
+      history
+      (let [receipt
+            (db/q '[:find ?receipt .
+                    :in $ ?identity-attribute ?identity-value ?run-id
+                    :where
+                    [?declaration ?identity-attribute ?identity-value]
+                    [?declaration _ _ ?tx true]
+                    [?receipt :seon.eval/shown _ ?tx]
+                    [?receipt :seon.cluster.eval/run ?run]
+                    [?run :seon.turn/id ?run-id]]
+                  history identity-attribute identity-value run-id)]
+        (if (error/error? receipt)
+          receipt
+          (boolean receipt))))))
 
 (defn- declaration-diverged-since-open?
   "True when the current declaration differs from the one the request's run
@@ -1143,14 +1155,22 @@
   [db request identity-attribute identity-value existing]
   (if-some [run-id (::id request)]
     (let [opening-database (opening-db db run-id)]
-      (when (:seon.error/kind opening-database)
-        (refuse! `receipt-settle-call ::run-opening-basis-unreadable request))
+      (when (error/error? opening-database)
+        (throw (ex-info (:seon.error/message opening-database)
+                        opening-database)))
       (let [opening-existing
             (db/pull opening-database '[*] [identity-attribute identity-value])]
-        (and (not= (declared-content db opening-existing)
-                   (declared-content db existing))
-             (not (declaration-written-by-run?
-                   db identity-attribute identity-value run-id)))))
+        (if (error/error? opening-existing)
+          (throw (ex-info (:seon.error/message opening-existing)
+                          opening-existing))
+          (when (not= (declared-content db opening-existing)
+                      (declared-content db existing))
+            (let [written?
+                  (declaration-written-by-run?
+                   db identity-attribute identity-value run-id)]
+              (if (error/error? written?)
+                (throw (ex-info (:seon.error/message written?) written?))
+                (not written?)))))))
     false))
 
 (defn- relation-assertions

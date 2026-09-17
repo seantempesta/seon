@@ -919,6 +919,28 @@
                  (turn/next-agent-work
                   database {:seon.agent/id "unreadable-budget"}))))))))
 
+(deftest a-history-read-refusal-cannot-suppress-declaration-divergence
+  (support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            refusal (db/q '[:find ?entity .
+                            :where [?entity :seon.audit/poison _]]
+                          database)
+            existing {:seon.schema/key :seon.audit/diverged
+                      :seon.schema/form ":string"}
+            result
+            (with-redefs-fn
+              {#'turn/opening-db (fn [_database _run-id] database)
+               #'db/history (fn [_database] refusal)}
+              #(support/refusal-data
+                (fn []
+                  (#'turn/declaration-diverged-since-open?
+                   database {:seon.turn/id "history-refused"}
+                   :seon.schema/key :seon.audit/diverged existing))))]
+        (is (error/error? refusal) (pr-str refusal))
+        (is (= refusal result)
+            "an unreadable history is the divergence refusal, never evidence that the run wrote the declaration")))))
+
 (deftest interrupted-warning-is-one-derived-value
   (testing "clean evaluations derive no warning at all"
     (is (nil? (turn/interrupted-warning
