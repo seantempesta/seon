@@ -2502,6 +2502,54 @@
           (is (= [(quote sample.call-references/reaches-references)]
                  (seon.fn/tests-reaching @connection target))))))))
 
+(deftest analyzer-edges-are-readable-symbols-or-no-edge
+  (let [source
+        (str "(ns sample.readable-edges\n"
+             "  (:import [java.nio.file FileVisitResult SimpleFileVisitor]))\n"
+             "(defn probe [value]\n"
+             "  #_{:clj-kondo/ignore [:unresolved-namespace]}\n"
+             "  (::missing/text value)\n"
+             "  (proxy [SimpleFileVisitor] []\n"
+             "    (visitFile [file _attributes] FileVisitResult/CONTINUE)\n"
+             "    (postVisitDirectory [directory _exception] FileVisitResult/CONTINUE))\n"
+             "  `(try ~value (catch Throwable failure# failure#)))\n")]
+    (with-provenance-file
+      "sample/readable_edges.clj"
+      source
+      (fn [connection _ rows]
+        (let [declarations
+              (filter #(or (:seon.fn/sym %) (:seon.test/sym %)) rows)
+              edge-members
+              (mapcat #(concat (:seon.fn/calls %)
+                               (:seon.fn/references %)
+                               (map first (:seon.fn/call-arities %)))
+                      declarations)]
+          (is (seq declarations) "the production analyzer emitted a declaration")
+          (is (seq edge-members) "the fixture exercised real resolved edges")
+          (is (every? #(and (symbol? %)
+                            (= % (edn/read-string (pr-str %))))
+                      edge-members)
+              (pr-str edge-members))
+          (let [report (db/transact!
+                        connection
+                        (seon.fn/reconcile-tx (db/db connection) rows []))]
+            (is (:db-after report)
+                (pr-str (select-keys report [:seon.error/kind
+                                             :seon.error/message]))))
+          (let [bad (symbol ":clj-kondo/unknown-namespace" "visitFile")
+                row (assoc (test-support/program-fn-row
+                            (db/db connection)
+                            'sample.readable-edges/refused
+                            "(defn refused [] true)")
+                           :seon.fn/calls #{bad})
+                refusal (db/transact! connection [row])]
+            (is (= :seon.db/invalid-write (:seon.error/kind refusal))
+                (pr-str refusal))
+            (is (= :seon.fn/calls
+                   (get-in refusal
+                           [:seon.error/data :seon.error/diagnostic-member]))
+                (pr-str refusal))))))))
+
 (deftest cross-file-implementations-keep-edges-or-widen
   (let [root (fixture-root)]
     (try

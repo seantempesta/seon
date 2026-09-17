@@ -1,5 +1,5 @@
 #:seon.test{:ns :seon.db/ref,
-            :reach [:set {:seon.db/index true} :qualified-symbol],
+            :reach [:set {:seon.db/index true} :seon.program/edge-symbol],
             :reaches [:map-of :seon.test/sym :seon.test/reach],
             :reach-unknown [:string {:min 1 :description "Typed unknown for a result whose tested closure could not be retained. Replaced on every run; absence of both membership and this marker is legacy unknown, never proof of an empty closure."}],
             :reach-digest [:and {:seon.db/identity false} :seon.source/digest],
@@ -7,7 +7,7 @@
             :skipped-count [:int {:min 0}],
             :skip-reason :string,
             :source :string,
-            :subject [:qualified-symbol {:seon.db/index true}],
+            :subject [:and {:seon.db/index true} :seon.program/edge-symbol],
             :usage :boolean,
             :fixture-observation
             [:string {:min 1

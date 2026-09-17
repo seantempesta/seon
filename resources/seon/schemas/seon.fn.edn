@@ -25,7 +25,7 @@
   had the fact from `:seon.fn.analyzer/defined-by` — the row simply keeps
   it, so the question is a Datalog clause."}],
           :arities [:vector #:seon.db{:component true :seon.db/component-schema :seon.fn.arity/row} :seon.db/ref],
-          :calls [:set {:seon.db/index true} :qualified-symbol],
+          :calls [:set {:seon.db/index true} :seon.program/edge-symbol],
           :destroys
           [:string
            {:min 1
@@ -44,8 +44,8 @@
   single line naming the thing destroyed (\"an operator root's whole data/
   directory\"), never the mechanism and never wrapped source prose: a newline
   reaches the reader escaped inside the rendered form."}],
-          :references [:set {:seon.db/index true :description "Source-observed function names without a resolved call shape. Names survive target retraction; selection follows them conservatively."} :qualified-symbol],
-          :unresolved-references [:set {:description "Known function targets mentioned outside an attributable definition. A changed target widens selection; absence of a caller never proves no test is needed."} :seon.fn/sym],
+          :references [:set {:seon.db/index true :description "Source-observed function names without a resolved call shape. Names survive target retraction; selection follows them conservatively."} :seon.program/edge-symbol],
+          :unresolved-references [:set {:description "Known function targets mentioned outside an attributable definition. A changed target widens selection; absence of a caller never proves no test is needed. Analyzer usages with :clj-kondo/unknown-namespace have no target identity and cannot enter this target-keyed relation."} :seon.program/edge-symbol],
           :writes
           [:set {:seon.db/index true
                  :description "Qualified attributes the analyzed declaration writes. Values survive schema-row retraction; literal mentions remain a separate relation."}
@@ -64,9 +64,9 @@
   unresolvable vector. `:seon.fn/calls` remains the reach index; this set
   only refines calls whose argument count is known. Declared function values
   carry reach without claiming an arity."}
-           [:tuple :qualified-symbol [:int {:min 0}]]],
-          :caller :qualified-symbol,
-          :callee :qualified-symbol,
+           [:tuple :seon.program/edge-symbol [:int {:min 0}]]],
+          :caller :seon.program/edge-symbol,
+          :callee :seon.program/edge-symbol,
           :call-arity [:int {:min 0}],
           :declared-arities
           [:vector

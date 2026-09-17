@@ -2,6 +2,15 @@
  [:string {:min 64 :max 64
            :description "Digest of the exact analyzed input, including resolver context. Its presence records completed analysis even when the computed relations have no members."}]
  :seon.program/analyzed-count [:int {:min 0}]
+ :seon.program/edge-symbol
+ [:and
+  {:description
+   "A source-observed program edge name whose pr-str output reads back through clojure.edn/read-string as the same symbol. This refuses clj-kondo's :clj-kondo/unknown-namespace sentinel: a symbol minted from it prints as a keyword and corrupted calls, references, and recorded test reach across EDN boundaries."}
+  :qualified-symbol
+  [:fn
+   {:error/message "must print and read back as the same qualified symbol"
+    :gen/schema :qualified-symbol}
+   seon.program/edn-round-trip-symbol?]]
  :seon.program/unresolved-callers
  [:vector [:map
            [:seon.program/identity :seon.program/identity]
