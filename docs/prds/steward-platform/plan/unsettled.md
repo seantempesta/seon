@@ -2654,3 +2654,16 @@ working tree, never Sonnet.
 - **Batch 121 launched** (platform + the S3/guardrails/message-wake residue
   namespaces). Editing: adoption-margin, integrator (+ an Opus triage on
   the sci arity-message parity, queued item, now launched).
+- **Cold gates BLOCKED again by guardrails item 3** (`6f80d1a4d`), three
+  defects, lane stopped+resumed with all three: (1) it added an edamame
+  require to `seon.test.selection`, which the `-T:dev-cache` tool JVM does
+  not carry → every gate's dependency-cache phase and `--prepare-head-base`
+  fail (SECOND instance of the `6df6967b8` class; the class fix is one
+  declaration for selection's requires and the tool alias, plus the
+  regression the first instance never left); (2) the "published graph
+  matches HEAD" check keys on the git commit, so every docs commit
+  re-triggers the refusal — key on the source snapshot digest; (3) the
+  orchestrator's cold gates must self-prepare as before; only a lane's
+  `--fast --paths` refuses. Batch 121 exited 64 ×3 (log kept). Opus triage
+  launched on the sci arity-message parity reds. Editing: adoption-margin,
+  integrator, guardrails, Opus triage.
