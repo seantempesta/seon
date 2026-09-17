@@ -515,6 +515,17 @@ program graph (`seon.fn/contract-findings` gains the "undeclared facet" /
 cannot drift silently. The projection-derived union `:seon.error/result`
 is NOT adopted as a contract spelling.
 
+### 1r. Owner ruling 2026-09-18 ~02:15Z — two write bounds: agent/turn and system
+
+The one 30 s writer bound (`eb8db3503`) failed a publication under load.
+Owner: "maybe we should have two settings to differentiate between what
+user/agent usage and system". Ruling: the write request carries its bound;
+two declared dials — the db dial for agent/turn writes (short, loud), and
+system operations (publication, adoption, reseed, boot recovery, collection)
+hand the writer the bound their own config family declares (publication's
+`publication-bound-ms` already exists). No third constant; the refusal
+shape is unchanged. Interim: the single default is 600 s (`02cb1b2b7`).
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.

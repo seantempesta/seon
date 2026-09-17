@@ -37,6 +37,12 @@ one bound for every write is the wrong shape: a two-datom turn write and an
    owed"). A publication that takes 40 s single-threaded on an idle machine
    is the defect the bound exposed, not a tuning item.
 
+## Ruling (owner, 2026-09-18 ~02:15Z, PRD 1r)
+
+Two bounds: the db dial for agent/turn writes; system operations hand the
+writer their own declared bound (publication's `publication-bound-ms`). The
+request carries the obligation.
+
 ## Interim
 
 The default `:seon.config.db/write-time-limit-ms` is raised to 600,000 ms
