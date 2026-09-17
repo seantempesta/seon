@@ -1,0 +1,145 @@
+bin/test: snapshot differences from HEAD 3576287786ceabd3759491e3208790656cb1f043:
+bin/test:   M	test/seon/cluster/message_test.clj
+bin/test:   M	test/seon/cluster/wake_test.clj
+bin/test:   M	test/seon/render/transcript_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=2
+bin/test: all 3 test JVM slots busy; waiting up to 1800s (SEON_TEST_SLOTS / SEON_TEST_SLOT_WAIT_SECONDS)
+bin/test:   slot-1 pid=10613 elapsed=02:10 run-root=/Users/sean/src/seon/tmp/test-runs/run.9wNRt5
+bin/test:   slot-2 pid=11960 elapsed=00:04 run-root=/Users/sean/src/seon/tmp/test-runs/run.Vzemgf
+bin/test:   slot-3 pid=10281 elapsed=02:50 run-root=/Users/sean/src/seon/tmp/test-runs/run.GSm9Kz
+bin/test: PHASE test-slot elapsed-seconds=56
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/reset-batch-wt/tmp/test-runs/run.RvoabL
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-17T05:26:24.782086Z pid= 12739 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-17T05:26:32.697100Z worker= test-fast mode= :panic namespaces= 3 program-namespaces= 109 registered= 1124 instrumented= 1124 program-armable= 1119
+bin/test: 2026-09-17T05:26:32.773075Z BEGIN namespace seon.render.transcript-test
+
+Testing seon.render.transcript-test
+bin/test: 2026-09-17T05:26:32.795038Z BEGIN test seon.render.transcript-test/unreadable-shown-text-and-subject-values-stay-replayable
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-17T05:27:32.718801Z END test seon.render.transcript-test/unreadable-shown-text-and-subject-values-stay-replayable
+bin/test: 2026-09-17T05:27:32.719425Z BEGIN test seon.render.transcript-test/the-history-query-bounds-what-the-transcript-pulls
+bin/test: 2026-09-17T05:27:33.267705Z END test seon.render.transcript-test/the-history-query-bounds-what-the-transcript-pulls
+bin/test: 2026-09-17T05:27:33.267945Z BEGIN test seon.render.transcript-test/historical-shown-text-keeps-its-original-elision
+bin/test: 2026-09-17T05:27:33.779984Z END test seon.render.transcript-test/historical-shown-text-keeps-its-original-elision
+bin/test: 2026-09-17T05:27:33.782206Z BEGIN test seon.render.transcript-test/supersession-chains-vanish-from-the-history
+bin/test: 2026-09-17T05:27:34.214358Z END test seon.render.transcript-test/supersession-chains-vanish-from-the-history
+bin/test: 2026-09-17T05:27:34.214516Z BEGIN test seon.render.transcript-test/every-generated-history-is-ordered-and-total
+bin/test: 2026-09-17T05:27:56.315704Z END test seon.render.transcript-test/every-generated-history-is-ordered-and-total
+bin/test: 2026-09-17T05:27:56.315814Z BEGIN test seon.render.transcript-test/durable-history-entries-never-invent-executions
+bin/test: 2026-09-17T05:27:56.317219Z END test seon.render.transcript-test/durable-history-entries-never-invent-executions
+bin/test: 2026-09-17T05:27:56.317289Z BEGIN test seon.render.transcript-test/same-instant-bootstrap-prefix-and-newest-tail-preserve-plan-order
+bin/test: 2026-09-17T05:27:56.771522Z END test seon.render.transcript-test/same-instant-bootstrap-prefix-and-newest-tail-preserve-plan-order
+bin/test: 2026-09-17T05:27:56.771631Z BEGIN test seon.render.transcript-test/selected-evaluations-project-only-their-stored-source-and-result
+bin/test: 2026-09-17T05:27:59.571626Z END test seon.render.transcript-test/selected-evaluations-project-only-their-stored-source-and-result
+bin/test: 2026-09-17T05:27:59.571731Z BEGIN test seon.render.transcript-test/the-transcript-is-whole-and-the-ai-boundary-elides-it
+bin/test: 2026-09-17T05:28:02.671159Z END test seon.render.transcript-test/the-transcript-is-whole-and-the-ai-boundary-elides-it
+bin/test: 2026-09-17T05:28:02.671271Z BEGIN test seon.render.transcript-test/error-receipt-without-triage-has-an-execution-error-face
+bin/test: 2026-09-17T05:28:03.095439Z END test seon.render.transcript-test/error-receipt-without-triage-has-an-execution-error-face
+bin/test: 2026-09-17T05:28:03.095540Z BEGIN test seon.render.transcript-test/absent-bootstrap-trigger-does-not-pin-another-agents-message
+bin/test: 2026-09-17T05:28:03.498834Z END test seon.render.transcript-test/absent-bootstrap-trigger-does-not-pin-another-agents-message
+bin/test: 2026-09-17T05:28:03.498942Z BEGIN test seon.render.transcript-test/populated-history-restores-the-repl-fidelity-checklist
+bin/test: 2026-09-17T05:28:06.693352Z END test seon.render.transcript-test/populated-history-restores-the-repl-fidelity-checklist
+bin/test: 2026-09-17T05:28:06.693484Z BEGIN test seon.render.transcript-test/stored-evaluations-are-terminal-transcript-values
+bin/test: 2026-09-17T05:28:07.195169Z END test seon.render.transcript-test/stored-evaluations-are-terminal-transcript-values
+bin/test: 2026-09-17T05:28:07.197241Z BEGIN test seon.render.transcript-test/history-unit-derives-both-projections-from-one-bounded-derivation
+bin/test: 2026-09-17T05:28:07.792708Z END test seon.render.transcript-test/history-unit-derives-both-projections-from-one-bounded-derivation
+bin/test: 2026-09-17T05:28:07.794386Z BEGIN test seon.render.transcript-test/message-subject-tokens-render-without-target-entities
+bin/test: 2026-09-17T05:28:08.339680Z END test seon.render.transcript-test/message-subject-tokens-render-without-target-entities
+bin/test: 2026-09-17T05:28:08.341469Z BEGIN test seon.render.transcript-test/selected-run-requires-its-database-in-both-projections
+bin/test: 2026-09-17T05:28:08.343097Z END test seon.render.transcript-test/selected-run-requires-its-database-in-both-projections
+bin/test: 2026-09-17T05:28:08.345531Z BEGIN test seon.render.transcript-test/one-reply-reads-identically-on-the-page-in-history-and-in-the-prompt
+bin/test: 2026-09-17T05:28:12.330698Z END test seon.render.transcript-test/one-reply-reads-identically-on-the-page-in-history-and-in-the-prompt
+bin/test: 2026-09-17T05:28:12.330835Z BEGIN test seon.render.transcript-test/reasoning-is-html-only-and-inline-blob-history-has-one-disclosure
+bin/test: 2026-09-17T05:28:17.318976Z END test seon.render.transcript-test/reasoning-is-html-only-and-inline-blob-history-has-one-disclosure
+bin/test: 2026-09-17T05:28:17.319136Z END namespace seon.render.transcript-test
+bin/test: 2026-09-17T05:28:17.319183Z BEGIN namespace seon.cluster.message-test
+
+Testing seon.cluster.message-test
+bin/test: 2026-09-17T05:28:17.351383Z BEGIN test seon.cluster.message-test/generated-message-histories-preserve-identity-fanout-and-depth
+bin/test: 2026-09-17T05:29:04.640045Z END test seon.cluster.message-test/generated-message-histories-preserve-identity-fanout-and-depth
+bin/test: 2026-09-17T05:29:04.640186Z BEGIN test seon.cluster.message-test/blank-and-unknown-are-values-not-throws-test
+bin/test: 2026-09-17T05:29:04.721069Z END test seon.cluster.message-test/blank-and-unknown-are-values-not-throws-test
+bin/test: 2026-09-17T05:29:04.721181Z BEGIN test seon.cluster.message-test/a-completed-run-answering-a-human-replies-to-nobody
+bin/test: 2026-09-17T05:29:04.895441Z END test seon.cluster.message-test/a-completed-run-answering-a-human-replies-to-nobody
+bin/test: 2026-09-17T05:29:04.895587Z BEGIN test seon.cluster.message-test/a-reply-is-not-a-question-so-completing-does-not-bounce
+bin/test: 2026-09-17T05:29:05.483196Z END test seon.cluster.message-test/a-reply-is-not-a-question-so-completing-does-not-bounce
+bin/test: 2026-09-17T05:29:05.484268Z BEGIN test seon.cluster.message-test/inbound-wakes-the-named-agent-test
+bin/test: 2026-09-17T05:29:05.658898Z END test seon.cluster.message-test/inbound-wakes-the-named-agent-test
+bin/test: 2026-09-17T05:29:05.659084Z BEGIN test seon.cluster.message-test/message-html-separates-attribution-time-and-authored-content
+2026-09-17T05:29:05.825083Z :error datahike.db.utils [146 8] Nothing found for entity id [:seon.agent/id "nobody"] 
+  data: {:error :entity-id/missing, :entity-id [:seon.agent/id "nobody"]}
+bin/test: 2026-09-17T05:29:05.826413Z END test seon.cluster.message-test/message-html-separates-attribution-time-and-authored-content
+bin/test: 2026-09-17T05:29:05.826505Z BEGIN test seon.cluster.message-test/message-terminal-formatter-preserves-database-errors
+bin/test: 2026-09-17T05:29:05.826629Z END test seon.cluster.message-test/message-terminal-formatter-preserves-database-errors
+bin/test: 2026-09-17T05:29:05.826655Z BEGIN test seon.cluster.message-test/a-completed-run-answers-the-agent-that-asked
+bin/test: 2026-09-17T05:29:06.066984Z END test seon.cluster.message-test/a-completed-run-answers-the-agent-that-asked
+bin/test: 2026-09-17T05:29:06.067116Z BEGIN test seon.cluster.message-test/message-render-resolves-supported-agent-ref-shapes
+2026-09-17T05:29:06.149127Z :error datahike.db.utils [146 8] Nothing found for entity id [:seon.agent/id "nobody"] 
+  data: {:error :entity-id/missing, :entity-id [:seon.agent/id "nobody"]}
+bin/test: 2026-09-17T05:29:06.155397Z END test seon.cluster.message-test/message-render-resolves-supported-agent-ref-shapes
+bin/test: 2026-09-17T05:29:06.155522Z BEGIN test seon.cluster.message-test/a-delivered-message-wakes-the-recipient-by-construction
+bin/test: 2026-09-17T05:29:06.407082Z END test seon.cluster.message-test/a-delivered-message-wakes-the-recipient-by-construction
+bin/test: 2026-09-17T05:29:06.407196Z BEGIN test seon.cluster.message-test/a-two-agent-ping-pong-cannot-run-forever
+bin/test: 2026-09-17T05:29:11.368291Z END test seon.cluster.message-test/a-two-agent-ping-pong-cannot-run-forever
+bin/test: 2026-09-17T05:29:11.368503Z BEGIN test seon.cluster.message-test/the-trigger-of-a-run-is-a-recorded-ref
+bin/test: 2026-09-17T05:29:11.651142Z END test seon.cluster.message-test/the-trigger-of-a-run-is-a-recorded-ref
+bin/test: 2026-09-17T05:29:11.651265Z BEGIN test seon.cluster.message-test/reverse-agent-concerns-are-schema-declarations
+bin/test: 2026-09-17T05:29:11.654247Z END test seon.cluster.message-test/reverse-agent-concerns-are-schema-declarations
+bin/test: 2026-09-17T05:29:11.654383Z BEGIN test seon.cluster.message-test/inbound-identity-is-unique-under-burst-test
+bin/test: 2026-09-17T05:29:17.681762Z END test seon.cluster.message-test/inbound-identity-is-unique-under-burst-test
+bin/test: 2026-09-17T05:29:17.681901Z BEGIN test seon.cluster.message-test/inbox-unit-renders-both-projections-of-the-same-messages
+bin/test: 2026-09-17T05:29:18.077597Z END test seon.cluster.message-test/inbox-unit-renders-both-projections-of-the-same-messages
+bin/test: 2026-09-17T05:29:18.077712Z BEGIN test seon.cluster.message-test/inbound-tx-omits-from-test
+bin/test: 2026-09-17T05:29:18.264749Z END test seon.cluster.message-test/inbound-tx-omits-from-test
+bin/test: 2026-09-17T05:29:18.264894Z BEGIN test seon.cluster.message-test/a-non-temporal-run-retains-its-trigger-without-a-transaction-entity
+bin/test: 2026-09-17T05:29:19.049224Z END test seon.cluster.message-test/a-non-temporal-run-retains-its-trigger-without-a-transaction-entity
+bin/test: 2026-09-17T05:29:19.049536Z BEGIN test seon.cluster.message-test/a-delivery-records-who-sent-it
+bin/test: 2026-09-17T05:29:19.374970Z END test seon.cluster.message-test/a-delivery-records-who-sent-it
+bin/test: 2026-09-17T05:29:19.375277Z BEGIN test seon.cluster.message-test/inbox-has-one-request-map-arity-and-supplied-defaults
+bin/test: 2026-09-17T05:29:20.396734Z END test seon.cluster.message-test/inbox-has-one-request-map-arity-and-supplied-defaults
+bin/test: 2026-09-17T05:29:20.397025Z BEGIN test seon.cluster.message-test/message-ai-source-evaluates-through-the-agent-database
+bin/test: 2026-09-17T05:29:21.416052Z END test seon.cluster.message-test/message-ai-source-evaluates-through-the-agent-database
+bin/test: 2026-09-17T05:29:21.416501Z END namespace seon.cluster.message-test
+bin/test: 2026-09-17T05:29:21.416879Z BEGIN namespace seon.cluster.wake-test
+
+Testing seon.cluster.wake-test
+bin/test: 2026-09-17T05:29:21.448359Z BEGIN test seon.cluster.wake-test/route-render-wake-and-disjointness-property
+bin/test: 2026-09-17T05:29:44.203977Z END test seon.cluster.wake-test/route-render-wake-and-disjointness-property
+bin/test: 2026-09-17T05:29:44.204167Z BEGIN test seon.cluster.wake-test/an-unrouted-recipient-reaches-the-armer
+bin/test: 2026-09-17T05:29:44.458627Z END test seon.cluster.wake-test/an-unrouted-recipient-reaches-the-armer
+bin/test: 2026-09-17T05:29:44.458740Z BEGIN test seon.cluster.wake-test/a-routed-attribute-wakes-its-agent-and-nothing-else-does
+bin/test: 2026-09-17T05:29:44.706409Z END test seon.cluster.wake-test/a-routed-attribute-wakes-its-agent-and-nothing-else-does
+bin/test: 2026-09-17T05:29:44.706537Z BEGIN test seon.cluster.wake-test/an-unindexed-listened-attribute-is-refused-at-registration
+bin/test: 2026-09-17T05:29:44.829518Z END test seon.cluster.wake-test/an-unindexed-listened-attribute-is-refused-at-registration
+bin/test: 2026-09-17T05:29:44.829640Z BEGIN test seon.cluster.wake-test/unlisten-is-idempotent-and-stops-delivery
+bin/test: 2026-09-17T05:29:44.996057Z END test seon.cluster.wake-test/unlisten-is-idempotent-and-stops-delivery
+bin/test: 2026-09-17T05:29:44.996185Z BEGIN test seon.cluster.wake-test/render-wake-intersects-the-current-published-interest
+bin/test: 2026-09-17T05:29:45.322174Z END test seon.cluster.wake-test/render-wake-intersects-the-current-published-interest
+bin/test: 2026-09-17T05:29:45.322288Z BEGIN test seon.cluster.wake-test/a-fenced-mailbox-is-recognized-and-never-hangs-the-writer
+bin/test: 2026-09-17T05:29:45.508687Z END test seon.cluster.wake-test/a-fenced-mailbox-is-recognized-and-never-hangs-the-writer
+bin/test: 2026-09-17T05:29:45.508802Z BEGIN test seon.cluster.wake-test/the-listened-set-is-declared-not-listed
+bin/test: 2026-09-17T05:29:49.746214Z END test seon.cluster.wake-test/the-listened-set-is-declared-not-listed
+bin/test: 2026-09-17T05:29:49.746371Z BEGIN test seon.cluster.wake-test/a-closed-render-channel-delivers-a-fault
+bin/test: 2026-09-17T05:29:49.929125Z END test seon.cluster.wake-test/a-closed-render-channel-delivers-a-fault
+bin/test: 2026-09-17T05:29:49.929282Z BEGIN test seon.cluster.wake-test/delivery-requires-both-a-closed-offer-and-the-derived-fence
+bin/test: 2026-09-17T05:29:49.930386Z END test seon.cluster.wake-test/delivery-requires-both-a-closed-offer-and-the-derived-fence
+bin/test: 2026-09-17T05:29:49.930445Z BEGIN test seon.cluster.wake-test/a-turn-never-wakes-itself
+bin/test: 2026-09-17T05:29:50.025276Z END test seon.cluster.wake-test/a-turn-never-wakes-itself
+bin/test: 2026-09-17T05:29:50.025390Z BEGIN test seon.cluster.wake-test/a-fault-wakes-the-steward-of-the-failing-functions-namespace
+bin/test: 2026-09-17T05:29:50.459777Z END test seon.cluster.wake-test/a-fault-wakes-the-steward-of-the-failing-functions-namespace
+bin/test: 2026-09-17T05:29:50.459884Z BEGIN test seon.cluster.wake-test/a-constrained-listen-matcher-reads-both-declared-datom-shapes
+bin/test: 2026-09-17T05:29:52.542706Z END test seon.cluster.wake-test/a-constrained-listen-matcher-reads-both-declared-datom-shapes
+bin/test: 2026-09-17T05:29:52.542827Z BEGIN test seon.cluster.wake-test/runtime-listens-route-and-refresh-with-entity-and-value-constraints
+bin/test: 2026-09-17T05:29:55.524325Z END test seon.cluster.wake-test/runtime-listens-route-and-refresh-with-entity-and-value-constraints
+bin/test: 2026-09-17T05:29:55.524435Z BEGIN test seon.cluster.wake-test/a-declared-attribute-wakes-with-no-code-change
+bin/test: 2026-09-17T05:29:55.806290Z END test seon.cluster.wake-test/a-declared-attribute-wakes-with-no-code-change
+bin/test: 2026-09-17T05:29:55.806402Z BEGIN test seon.cluster.wake-test/a-live-but-non-accepting-route-still-faults-loudly
+bin/test: 2026-09-17T05:29:55.978473Z END test seon.cluster.wake-test/a-live-but-non-accepting-route-still-faults-loudly
+bin/test: 2026-09-17T05:29:55.978564Z BEGIN test seon.cluster.wake-test/a-saturated-mailbox-drops-and-never-parks
+bin/test: 2026-09-17T05:29:56.450290Z END test seon.cluster.wake-test/a-saturated-mailbox-drops-and-never-parks
+bin/test: 2026-09-17T05:29:56.450381Z END namespace seon.cluster.wake-test
+
+Ran 55 tests containing 349 assertions.
+0 failures, 0 errors.

@@ -436,6 +436,10 @@
       (test-support/transacted! connection [{:seon.agent/id "agent-a"}
                                            {:seon.ns/name 'my.agents.agent-a
                                             :seon.ns/steward [:seon.agent/id "agent-a"]}])
+      (test-support/transacted!
+       connection
+       [(test-support/program-fn-row (db/db connection) 'my.agents.agent-a/broken
+                                     "(defn broken [] true)")])
       (let [mailbox (async/chan (async/sliding-buffer 1))
             {:keys [key]} (route-probe! connection mailbox)
             recording (error/recording
@@ -443,7 +447,7 @@
                        {:seon.error/source
                         {:seon.error/kind :seon.instrument/contract-violated
                          :seon.error/message "the function violated its contract"
-                         :seon.error/data {:seon.instrument/fn "my.agents.agent-a/broken"
+                         :seon.error/data {:seon.instrument/fn 'my.agents.agent-a/broken
                                            :seon.instrument/arm :input}}
                         :seon.error/id "fault-wake" :seon.error/at (Date.)
                         :seon.error/process "wake-test-process"

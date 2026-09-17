@@ -149,8 +149,8 @@
             (db/pull @connection
                      '[{:seon.fn/arities
                         [:seon.fn.arity/argument-count
-                         {:seon.fn.arity/input-refs [:seon.schema/key]}]}]
-                     [:seon.fn/sym "my.message/inbox"])
+                         :seon.fn.arity/input-refs]}]
+                     [:seon.fn/sym 'my.message/inbox])
             argless (evaluate-form "(my.message/inbox)")
             listing (fn [evaluation]
                       (mapv #(select-keys %
@@ -166,9 +166,8 @@
                      (:seon.fn/arities indexed)))
             "the agent surface has one request-map arity")
         (is (some #(and (= 1 (:seon.fn.arity/argument-count %))
-                        (= [:my.message/inbox-request]
-                           (mapv :seon.schema/key
-                                 (:seon.fn.arity/input-refs %))))
+                        (= #{:my.message/inbox-request}
+                           (set (:seon.fn.arity/input-refs %))))
                   (:seon.fn/arities indexed))
             "the request-map arity records its one named request input")
         (is (= expected

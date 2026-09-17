@@ -1292,8 +1292,8 @@ refusal. G5 closes the different identity-less entity coverage hole.
 | G5 components | Discover roots through before AND after; complete traversal under declared bound, not wildcard pull. Test 1,001 children, child-only edit/unlink, multiple parents, cycles and identity-less orphan rows. Owned occurrence links differ from shared shape refs. | New explicit obligations; implementation incomplete. |
 | Archived agents | Install archived-tx and lifecycle writer; derive archived?/open? for UI. Never retract agents, even coordinated removal of their incoming refs. Archive does not stop graphs or detach ownership. | Co-deletion proof deleted; archive writer and derived open?/archived? passed fast 22. Namespace agent listings omit archived identities; historical direct reads remain available. |
 | Capability handler | Delete declaration capability-fn; existing handler symbol is a final deletion obligation. | In worktree schema and final validator; declared handler reach regression passed fast 22. |
-| Message subject/sender/protocol | §1h in one publication; option A accepted: preserve existing token grammar, remove resolution/inside-about classification; from marks inside; assignment/declination separate facts. | message-wake-model owns seon.message.edn/seon.wake.edn; do not edit. Record its landing before integration. |
-| Message handling | Delete inbox-move pattern; listened to plus handling-turn claim and answering-t rule. Final authority decides claims; listeners are notifications, not claims. | Same foreign message-wake-model boundary; no substitute mechanism here. |
+| Message subject/sender/protocol | §1h in one publication; option A accepted: preserve existing token grammar, remove resolution/inside-about classification; from marks inside; assignment/declination separate facts. | Foreign owner landings a50424f6b, 57581f12f and 31ac4c05d are incorporated by rebase; no direct resource edits here. Cold/live integration proof remains owed. |
+| Message handling | Delete inbox-move pattern; listened to plus handling-turn claim and answering-t rule. Final authority decides claims; listeners are notifications, not claims. | Landed foreign implementation is incorporated; no substitute mechanism here. Verify it with this reset before publication. |
 | Origin | eval/origin becomes issue/id value; retain generated-by display. No generic ref carrier. | Issue-ID value and reader changes implemented; deletion-survival regression passed fast 26. |
 | Refreshes | Delete attribute and both refresh-call functions; latest-read derivation remains ordinal-based. No new digest/index. | Attribute deletion and regression replacement now also landed upstream; obsolete functions removed here, no remaining production references. |
 | fn.ast | Option A authorized: preserve reconciliation/backfill via canonical schema.shape plus provenance/arity facts, then delete AST writers/resources. Shared shape roots remain ordinary refs. | Historical grep found maintenance consumers; the pinned production grep is empty and reconciliation/backfill regressions passed fast 22 and 27. |
@@ -1439,3 +1439,26 @@ current fixture referrer counts are in the integration landing note. The
 message/wake follow-up `57581f12f` landed during this run and must be incorporated
 before the final publication. G5 and the query-cost assertion remain explicit
 review boundaries; this checkpoint is not permission to reset.
+
+
+The edge implementation checkpoint is committed as `357628778`, rebased onto
+`b6562f1ce`. Message/wake/origin landings `a50424f6b`, `57581f12f` and `31ac4c05d`
+are now present, with their owned resource edits preserved. The new integration
+run follows this rebase. G5 and the recorded query-cost decision remain the
+current review boundaries. **RESET NEEDED; do not merge/reset yet.**
+
+
+Post-rebase fast 29: 122 tests / 684 assertions / 3 failures / 2 errors.
+All reset/effect/error checks passed. Transcript/message/wake failures were
+legacy fixture priming and old ref/string reads exposed by this retype; the
+three test files are corrected in the isolated worktree and rerun serially.
+This is our integration work, not a foreign-breakage stop.
+
+
+Fast 30 passes **55 tests / 349 assertions / zero failures / zero errors** in
+the three corrected transcript/message/wake namespaces. Exact output and the
+implementation's file inventory are in the integration landing note. All own
+runner sessions exited; the requested branch/worktree remain. Stop for review
+at this committed implementation checkpoint: G5 and the unchanged query-cost
+assertion remain incomplete, so the full reset group is not green or merge-ready.
+No default lifecycle/adoption action was performed.

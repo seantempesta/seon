@@ -705,19 +705,14 @@
           (is (db/pull db '[*]
                        [:seon.cluster.eval/id "curated-receipt"])))))))
 
-(deftest malformed-receipt-bytes-and-any-unique-about-stay-replayable
+(deftest unreadable-shown-text-and-subject-values-stay-replayable
   (support/with-database
     (fn [connection]
       (support/transacted!
        connection
        [{:seon.agent/id agent-id}
         {:seon.agent/id peer-id}
-        ;; A TEST ROW DECLARES WHERE IT CAME FROM. `:seon.schema.admission/source`
-        ;; is a required key of the test entity, so a bare `{:seon.test/sym …}`
-        ;; is refused — silently, by a returned error value — and the whole
-        ;; seed is lost with it. The entity here is only a unique `about`
-        ;; target; what matters is that it is a REAL one.
-        {:seon.test/sym "target-fact" :seon.schema.admission/source :core}
+        ;; The message observes a subject token; no target entity is required.
         {:seon.message/id "about-test" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about "target-fact" :seon.message/content "Inspect the test fact."}
         {:seon.turn/id "run-malformed" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
         {:seon.cluster.eval/id "eval-malformed"
@@ -981,11 +976,7 @@
             (fn [connection]
               (let [events (mapv generated-event (range) history)
                     rows (into [{:seon.agent/id agent-id}
-                                {:seon.agent/id peer-id}
-                                ;; a real test row, source declared — see
-                                ;; `malformed-receipt-bytes-…`
-                                {:seon.test/sym "generated-target"
-                                 :seon.schema.admission/source :core}]
+                                {:seon.agent/id peer-id}]
                                (mapcat generated-rows)
                                events)
                     ;; EVERY GENERATED MESSAGE IS ORDERED BY THIS INSTANT,

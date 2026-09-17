@@ -39,3 +39,12 @@ That path was clean in the selected worktree at the time; subsequent reads
 succeeded. The same acceptance must cover attribution: a returning reader
 must not be blamed for another checkout's writer. The hook was not edited or
 disabled by this lane.
+
+
+During fast 30 on the same date, a read-only log/status command in
+`tmp/reset-batch-wt` again received “Bash left unreadable Clojure on disk”, this
+time naming `test/seon/gen/loop_test.clj:331:1` and `:517:1`. A subsequent
+explicit `git status --short -- test/seon/gen/loop_test.clj` was empty in the
+worktree and modified in `/Users/sean/src/seon`. This lane never edited that
+file. The admitted snapshot continued running, the next read succeeded, and
+no hook override or foreign-file repair was used.
