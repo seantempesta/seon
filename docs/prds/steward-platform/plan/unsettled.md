@@ -3248,3 +3248,10 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   now a query), `eb8db3503` (bounded Datahike writer waits), `940f4b426`
   (refusals keep their cause). Launched `attribute-aware-tempid-rewrite`
   (boot note fix #4, fn.clj free again).
+- Launched `transaction-report-schema` (sol): `seon.db/transact!` output
+  declared from Datahike's report shape (97 callers; contract-findings #2);
+  foreign callers the armed contract refuses are recorded as findings, not
+  fixed. Opus agent on `seon.config-test`'s four stale string expectations.
+  RESET NEEDED pending from `eb8db3503` (new config fact
+  `:seon.config.db/write-time-limit-ms`) — batched into the next reset after
+  a green platform gate.
