@@ -72,8 +72,9 @@ answer the writer will re-decide; it hands the decision to the authority.
 `src/seon/db.clj:2402` now builds the symbol where the class name is
 obtained — `(symbol (.getName (class cause)))` — matching the sibling write
 at `src/seon/error.clj:577`. NOTE: `src/seon/db.clj` came under a concurrent
-lane's edits while this lane worked, so that one-line change is NOT in this
-lane's commit; it is left in the working tree for the holder to carry.
+lane's edits while this lane worked, so that one-line change is not in this
+lane's commit — the holder's commit `5a5359205` carried it in with their
+slice, and the line is live at HEAD.
 
 ## Every write of the two class attributes
 
