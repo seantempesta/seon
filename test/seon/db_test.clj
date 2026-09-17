@@ -284,7 +284,7 @@
    (fn [connection]
      (let [refusal {:seon.error/kind :seon.turn/refused
                     :seon.turn/rule
-                    :seon.turn/agent-already-running}
+                    :seon.turn/no-such-agent}
            wrapped (ex-info "classified transition refusal"
                             refusal
                             (ex-info "transaction wrapper"
@@ -303,12 +303,12 @@
            (db/transact!
             connection
             (turn/open-tx
-             {:seon.turn/id "contending-run" :seon.turn/agent [:seon.agent/id "busy-agent"] :seon.turn/opened-tx "datomic.tx"}))]
+             {:seon.turn/id "contending-run" :seon.turn/agent [:seon.agent/id "missing-agent"] :seon.turn/opened-tx "datomic.tx"}))]
        (is (= :seon.turn/refused (:seon.error/kind result)))
-       (is (= :seon.turn/agent-already-running
+       (is (= :seon.turn/no-such-agent
               (:seon.turn/rule result))
-           "real run contention preserves the rule needed by source preview")
-       (is (= "run transition refused: agent-already-running"
+           "a real invalid opening preserves its writer rule")
+       (is (= "run transition refused: no-such-agent"
               (:seon.error/message result)))
        (is (schema/valid-candidate-value? :seon.error/value result)
            "classified transaction refusals satisfy the same error contract as their callers")))))
@@ -687,7 +687,6 @@
                     [{:seon.agent/id "db-test-recipient"}
                      {:seon.message/id "semantic-replay-unrelated"
                       :seon.message/to [:seon.agent/id "db-test-recipient"]
-                      :seon.message/inbox [:seon.agent/id "db-test-recipient"]
                       :seon.message/content "unrelated"}])
        (is (true? (db/read-evidence-current? @connection durable))
            "an equal wildcard replay survives an unrelated transaction")
@@ -714,7 +713,6 @@
                       [{:seon.agent/id "db-test-recipient"}
                        {:seon.message/id (second subject)
                         :seon.message/to [:seon.agent/id "db-test-recipient"]
-                        :seon.message/inbox [:seon.agent/id "db-test-recipient"]
                         :seon.message/content
                         (apply str (repeat 100000 "x"))}]))
        (let [captured (atom [])]
@@ -1130,7 +1128,6 @@
                     [{:seon.agent/id "db-test-recipient"}
                      {:seon.message/id "db-test-temporal"
                       :seon.message/to [:seon.agent/id "db-test-recipient"]
-                      :seon.message/inbox [:seon.agent/id "db-test-recipient"]
                       :seon.message/content "temporal"}])
        (let [after @connection]
          (binding [db/*conn* connection]
@@ -1151,8 +1148,8 @@
                connection
                [{:seon.agent/id "db-diff-alice"}
                 {:seon.agent/id "db-diff-bob"}
-                {:seon.message/id "db-diff-m1" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/from [:seon.agent/id "db-diff-alice"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}
-                {:seon.message/id "db-diff-m2" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "removed" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}]))
+                {:seon.message/id "db-diff-m1" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/from [:seon.agent/id "db-diff-alice"] :seon.message/content "hello"}
+                {:seon.message/id "db-diff-m2" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "removed"}]))
 
 (deftest ^{:seon.test/usage true} diff-replays-one-read-by-derived-identity
   (test-support/with-database
@@ -1166,7 +1163,7 @@
                       :seon.message/content "hello, edited"]
                      [:db.fn/retractEntity
                       [:seon.message/id "db-diff-m2"]]
-                     {:seon.message/id "db-diff-m3" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "added" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}])
+                     {:seon.message/id "db-diff-m3" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "added"}])
        (binding [db/*conn* connection]
          (let [result (db/diff before #'message/inbox "db-diff-bob")
                current (db/basis-t @connection)]

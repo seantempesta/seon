@@ -37,7 +37,6 @@
      :seon.agent/namespace [:seon.ns/name agent-namespace]}
     {:seon.message/id "render-walk-message"
      :seon.message/to [:seon.agent/id agent-id]
-     :seon.message/inbox [:seon.agent/id agent-id]
      :seon.message/content "42"}])]
     (is (not (:seon.error/kind result)) (pr-str result))))
 
@@ -47,8 +46,7 @@
      (seed-agent-and-inbox! connection)
      (support/transacted!
              connection
-             [{:seon.message/content "identityless message"
-               :seon.message/inbox [:seon.agent/id agent-id]}])
+             [{:seon.message/content "identityless message"}])
      (let [database @connection
            identity-attributes (db/populated-identity-attributes database)
            units (vals (:seon.render.walk/members
@@ -144,7 +142,6 @@
              (mapv (fn [ordinal]
                      {:seon.message/id (str "render-walk-message-" ordinal)
                       :seon.message/to [:seon.agent/id agent-id]
-                      :seon.message/inbox [:seon.agent/id agent-id]
                       :seon.message/content "42"})
                    [1 2]))
      (let [database @connection

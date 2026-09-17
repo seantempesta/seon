@@ -27,7 +27,7 @@
                {:seon.runtime/agent "agent"
                 :seon.runtime/trigger "message"
                 :seon.runtime/turns ["older" "newer"]
-                :seon.runtime/listens [{:seon.listen/attribute :seon.message/inbox}]}}
+                :seon.runtime/listens [{:seon.listen/attribute :seon.message/to}]}}
               {:seon.agent/id "root"}
               {:db/id "message" :seon.message/id "private-message-id"
                :seon.message/from [:seon.agent/id "root"]
@@ -69,7 +69,7 @@
         (is (str/includes? html "seon-message-entry") "Trigger goes through the message pair.")
         (is (str/includes? html "entity=%5B%3Aseon.message%2Fid"))
         (is (str/includes? text "Which customer has the largest total?"))
-        (is (str/includes? text "Listening::seon.message/inbox"))
+        (is (str/includes? text "Listening::seon.message/to"))
         (is (str/includes? text "Turns (2)"))
         (is (< (.indexOf text "Newest reply") (.indexOf text "Older reply")))
         (is (str/includes? text "1Newest reply"))

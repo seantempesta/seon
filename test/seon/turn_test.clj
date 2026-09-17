@@ -618,7 +618,7 @@
              (agent/disarm! {:seon.agent/routing routing
                              :seon.agent/id id}))
            (checked-transact! connection
-                         [{:seon.message/id "to-b" :seon.message/to [:seon.agent/id "b"] :seon.message/content "For B" :seon.message/inbox [:seon.agent/id "b"]}])
+                         [{:seon.message/id "to-b" :seon.message/to [:seon.agent/id "b"] :seon.message/content "For B"}])
            (let [other (turn/system-turn (assoc request :seon.turn/write? false))]
              (is (seq (:seon.turn/forms other)) (pr-str other))
              (is (= #{}
@@ -633,7 +633,7 @@
                  "a peer message does not refresh this agent's inbox")
              (is (nil? (:seon.turn/id other))))
            (checked-transact! connection
-                         [{:seon.message/id "to-a" :seon.message/to [:seon.agent/id "a"] :seon.message/content "For A" :seon.message/inbox [:seon.agent/id "a"]}])
+                         [{:seon.message/id "to-a" :seon.message/to [:seon.agent/id "a"] :seon.message/content "For A"}])
            (let [basis (db/basis-t @connection)
                  preview (turn/system-turn (assoc request :seon.turn/write? false))
                  changed (filterv #(= :changed (:seon.turn/status %))
@@ -2052,3 +2052,53 @@
                 "the park survives every later wake")
             (is (nil? (async/poll! fault-channel))
                 "a parked agent commits no further faults")))))))
+
+(deftest settlement-claims-covered-messages-without-removing-their-wakes
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "message-claims")
+     (support/transacted! connection
+                          (agent/creation-tx {:seon.agent/id "message-claims"
+                                              :seon.ns/name 'my.agents.message-claims
+                                              :seon.cluster/name "message-claims"}))
+     (let [agent-ref [:seon.agent/id "message-claims"]
+           opening {:seon.turn/id "claim-first" :seon.turn/agent agent-ref
+                    :seon.turn/opened-tx "datomic.tx"}
+           arrival (fn [id] {:seon.message/id id :seon.message/to agent-ref
+                             :seon.message/content id})]
+       (support/transacted! connection [(arrival "first") (arrival "second")])
+       (support/transacted! connection (turn/open-tx opening))
+       (support/transacted! connection [(arrival "later")])
+       (doseq [request [opening (assoc opening :seon.turn/id "duplicate-open")]]
+         (let [report (support/transacted! connection (turn/open-tx request))]
+           (is (not-any? #(= :seon.turn/id (:a %)) (:tx-data report))
+               "the writer admits an ordinary no-op for both stale opening shapes")))
+       (is (= "claim-first" (turn/open-for-agent (db/db connection) agent-ref)))
+       (is (= 3 (count (turn/unanswered-wakes (db/db connection) "message-claims" {})))
+           "opening alone answers nothing")
+       (support/transacted! connection [[:db/add [:seon.turn/id "claim-first"] :seon.turn/reply-size 1]])
+       (let [report (support/transacted! connection (turn/close-tx {:seon.turn/id "claim-first"}))
+             database (:db-after report)]
+         (is (not-any? #(= :seon.message/to (:a %)) (:tx-data report)))
+         (is (= #{"first" "second"}
+                (set (db/q '[:find [?id ...] :where
+                             [?turn :seon.turn/id "claim-first"]
+                             [?turn :seon.turn/handled ?message]
+                             [?message :seon.message/id ?id]] database))))
+         (is (= [#:seon.message{:id "later"}]
+                (turn/unanswered-triggers database "message-claims")))
+         (is (= 3 (count (turn/unanswered-wakes database "message-claims"
+                                               {:seon.turn.work/answered? :any}))))
+         (is (= 3 (count (db/datoms (db/history database) :aevt :seon.message/to))))
+         (is (every? :added (db/datoms (db/history database) :aevt :seon.message/to))))
+       (support/transacted! connection (turn/open-tx (assoc opening :seon.turn/id "claim-next")))
+       (support/transacted! connection [[:db/add [:seon.turn/id "claim-next"] :seon.turn/reply-size 1]])
+       (support/transacted! connection (turn/close-tx {:seon.turn/id "claim-next"}))
+       (let [database (db/db connection)]
+         (is (empty? (turn/unanswered-wakes database "message-claims" {})))
+         (is (= 3 (count (db/datoms database :aevt :seon.turn/handled))))
+         (is (= #{"later"}
+                (set (db/q '[:find [?id ...] :where
+                             [?turn :seon.turn/id "claim-next"]
+                             [?turn :seon.turn/handled ?message]
+                             [?message :seon.message/id ?id]] database)))))))))

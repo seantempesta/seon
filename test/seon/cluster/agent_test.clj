@@ -304,12 +304,12 @@
 (defn- outside-trigger!
   [connection agent-id message-id content]
   (test-support/transacted! connection
-                          [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content content :seon.message/inbox [:seon.agent/id agent-id]}]))
+                          [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content content}]))
 
 (defn- agent-trigger!
   [connection from-id to-id message-id content]
   (test-support/transacted! connection
-                          [{:seon.message/id message-id :seon.message/to [:seon.agent/id to-id] :seon.message/from [:seon.agent/id from-id] :seon.message/content content :seon.message/inbox [:seon.agent/id to-id]}]))
+                          [{:seon.message/id message-id :seon.message/to [:seon.agent/id to-id] :seon.message/from [:seon.agent/id from-id] :seon.message/content content}]))
 
 (defn- open-runs
   [db]
@@ -1082,7 +1082,7 @@
                       (config-row
                        "install-gate-chain"
                        {:seon.config.agent/turn-completion-backstop-ms timeout-ms})
-                      {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "finish generated opening" :seon.message/inbox [:seon.agent/id agent-id]}])
+                      {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "finish generated opening"}])
         (test-support/transacted!
                      connection
                      (turn/open-tx
@@ -1316,7 +1316,7 @@
         ;; A message about an earlier entity is an inside wake. The
         ;; classification depends on the about ref, not the target's family.
         (test-support/transacted! connection
-                                [{:seon.message/id "r1" :seon.message/to [:seon.agent/id "alice"] :seon.message/about [:seon.message/id "h1"] :seon.message/content "about a fault" :seon.message/inbox [:seon.agent/id "alice"]}])
+                                [{:seon.message/id "r1" :seon.message/to [:seon.agent/id "alice"] :seon.message/about [:seon.message/id "h1"] :seon.message/content "about a fault"}])
         (opened-run! connection "alice" "e2" "r1" now)
         (is (= 2 (turn/episode-runs @connection "alice"))
             "the recorder's message did not reset the episode (R3)")
@@ -1733,7 +1733,7 @@
                                            :seon.cluster/name "route-trial"
                                            :seon.ns/name
                                            (symbol (str "my.agents." agent-id))}]
-                                        {:seon.message/id (str "rm-" index) :seon.message/to {:seon.agent/id agent-id} :seon.message/content "hello, newborn" :seon.message/inbox {:seon.agent/id agent-id}}]})
+                                        {:seon.message/id (str "rm-" index) :seon.message/to {:seon.agent/id agent-id} :seon.message/content "hello, newborn"}]})
                           (swap! created conj agent-id)
                           (swap! message-count inc))
 

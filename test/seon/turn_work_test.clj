@@ -56,7 +56,7 @@
   "Commit one trigger message for the agent."
   [connection]
   (support/transacted! connection
-                     [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "do the thing" :seon.message/inbox [:seon.agent/id agent-id]}]))
+                     [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "do the thing"}]))
 
 (defn- model-attempt
   "The row that makes a turn an ANSWERING turn.
@@ -141,7 +141,7 @@
 (defn- add-outside-trigger!
   [connection id at]
   (support/transacted! connection
-                     [{:seon.message/id id :seon.message/to [:seon.agent/id agent-id] :seon.message/content id :seon.message/inbox [:seon.agent/id agent-id]}]))
+                     [{:seon.message/id id :seon.message/to [:seon.agent/id agent-id] :seon.message/content id}]))
 
 (defn- closed-run!
   "Commit one complete turn, with each supplied value as a receipt result."
@@ -280,7 +280,7 @@
                                      :triggered? true})
               (close-run! connection)
               (db/transact! connection
-                          [{:seon.message/id "message-2" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "again" :seon.message/inbox [:seon.agent/id agent-id]}]))
+                          [{:seon.message/id "message-2" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "again"}]))
     ::expect {:seon.turn.work/situation :open
               :seon.agent/id agent-id
               :seon.message/id "message-2"}}
@@ -292,7 +292,7 @@
               (open-run! connection {:planned? true
                                      :triggered? true})
               (db/transact! connection
-                          [{:seon.message/id "message-2" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "again" :seon.message/inbox [:seon.agent/id agent-id]}]))
+                          [{:seon.message/id "message-2" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "again"}]))
     ::expect {:seon.turn.work/situation :resume
               :seon.turn/id run-id
               :seon.agent/id agent-id
@@ -547,7 +547,7 @@
         (is (empty? (turn/unanswered-triggers (db/db connection) agent-id))
             "the first wake stays answered")
         (support/transacted! connection
-                           [{:seon.message/id "message-3" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "third" :seon.message/inbox [:seon.agent/id agent-id]}])
+                           [{:seon.message/id "message-3" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "third"}])
         (is (= ["message-3"]
                (mapv :seon.message/id
                      (turn/unanswered-triggers (db/db connection) agent-id))))))))
@@ -616,8 +616,8 @@
       (configure-cap! connection 100)
       (support/transacted!
               connection
-              [{:seon.message/id "pair-a" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "a" :seon.message/inbox [:seon.agent/id agent-id]}
-               {:seon.message/id "pair-b" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "b" :seon.message/inbox [:seon.agent/id agent-id]}])
+              [{:seon.message/id "pair-a" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "a"}
+               {:seon.message/id "pair-b" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "b"}])
       (let [wakes (turn/unanswered-wakes (db/db connection) agent-id {})]
         (is (= 2 (count wakes)) "both are unanswered")
         (is (apply = (map :seon.wake/t wakes))
@@ -648,7 +648,7 @@
       (open-run! connection {})
       (support/transacted!
               connection
-              [{:seon.message/id "mid-turn" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "arrived while the turn was open" :seon.message/inbox [:seon.agent/id agent-id]}])
+              [{:seon.message/id "mid-turn" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "arrived while the turn was open"}])
       (is (= ["mid-turn"]
              (mapv :seon.message/id
                    (turn/unanswered-triggers (db/db connection) agent-id)))
@@ -680,7 +680,7 @@
       ;; INSIDE wake by its own declaration, unanswered by `:t`
       (support/transacted!
               connection
-              [{:seon.message/id "self-1" :seon.message/to [:seon.agent/id agent-id] :seon.message/from [:seon.agent/id agent-id] :seon.message/content "keep going" :seon.message/inbox [:seon.agent/id agent-id]}])
+              [{:seon.message/id "self-1" :seon.message/to [:seon.agent/id agent-id] :seon.message/from [:seon.agent/id agent-id] :seon.message/content "keep going"}])
       (let [database (db/db connection)]
         (is (= 2 (turn/episode-runs database agent-id))
             "the inside wake did not refill the bound")
@@ -702,7 +702,7 @@
       (is (nil? (turn/next-agent-work @connection request)))
       (support/transacted!
               connection
-              [{:seon.message/id "human-2" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "new instruction" :seon.message/inbox [:seon.agent/id agent-id]}])
+              [{:seon.message/id "human-2" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "new instruction"}])
       (let [database (db/db connection)]
         (is (zero? (turn/episode-runs database agent-id))
             "an outside wake ARRIVING is the reset; there is no reset code")
@@ -724,7 +724,7 @@
     (fn [connection]
       (doseq [id ["m-2" "m-1" "m-3"]]
         (support/transacted! connection
-                           [{:seon.message/id id :seon.message/to [:seon.agent/id agent-id] :seon.message/content id :seon.message/inbox [:seon.agent/id agent-id]}]))
+                           [{:seon.message/id id :seon.message/to [:seon.agent/id agent-id] :seon.message/content id}]))
       (is (= ["m-2" "m-1" "m-3"]
              (mapv :seon.message/id
                    (turn/unanswered-triggers (db/db connection) agent-id)))

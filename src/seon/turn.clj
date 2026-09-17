@@ -363,14 +363,13 @@
       (when-let [agent-eid (:db/id row)]
         (db/q '[:find ?id .
                 :in $ ?agent
-                :where [?runtime :seon.runtime/agent ?agent]
-                [?runtime :seon.runtime/turns ?turn]
+                :where [?turn :seon.turn/agent ?agent]
                 [?turn :seon.turn/id ?id]
                 (not [?turn :seon.turn/closed-tx])]
               database agent-eid)))))
 
 (defn open-call
-  "Open one turn inside the writer; refuse an existing id or open turn.
+  "Open one turn inside the writer; an already open turn is ordinary state.
   The agent's owning ref and closed-tx facts supply the decision in the
   writer's database. No current-turn pointer is stored on the agent."
   {:malli/schema [:=> [:cat :seon.db/database-value
@@ -391,10 +390,11 @@
         run-tempid (str "seon.turn/" id)]
     (cond
       (nil? agent-eid) (refuse! `open-call ::no-such-agent request)
-      (some? (current-run db id)) (refuse! `open-call ::run-exists request)
-
-      (some? (open-for-agent db agent-eid))
-      (refuse! `open-call ::agent-already-running request)
+      (some? (open-for-agent db agent-eid)) []
+      (some? (current-run db id))
+      (if (= agent-eid (get-in (current-run db id) [::agent :db/id]))
+        []
+        (refuse! `open-call ::run-exists request))
 
       :else [(cond-> {:db/id run-tempid ::id id ::agent agent-eid :seon.turn.work/situation (or situation :call) ::opened-tx "datomic.tx"}
                trigger (assoc ::trigger trigger)
@@ -416,25 +416,27 @@
   [[:db.fn/call #'close-call request]])
 
 (defn close-call
-  "Close the open turn in the writer with this transaction's identity."
+  "Close the turn and claim its covered messages at the writer.
+  Routing datoms remain intact. Claims record handling, never wake answering."
   {:malli/schema [:=> [:cat :seon.db/database-value [:map [::id ::id]]]
                   :seon.store/transaction-data]}
   [database request]
   (let [turn (require-open-run database `close-call request)
-        trigger (get-in turn [::trigger :db/id])
-        recipient (when trigger (db/pull database
-                                        '[:db/id {:seon.message/inbox [:db/id]}]
-                                        trigger))
-        answered? (and (db/q '[:find ?turn . :in $ ?turn
-                               :where [?turn :seon.turn/id _ ?opened]
-                                      [?turn :seon.turn/reply-size _ ?replied]
-                                      [(> ?replied ?opened)]] database (:db/id turn))
-                       (= (get-in turn [::agent :db/id])
-                          (get-in recipient [:seon.message/inbox :db/id])))]
-    (cond-> [[:db/add (:db/id turn) ::closed-tx "datomic.tx"]]
-      answered? (into [[:db/retract trigger :seon.message/inbox
-                        (get-in recipient [:seon.message/inbox :db/id])]
-                       [:db/add trigger :seon.message/read-tx "datomic.tx"]]))))
+        turn-eid (:db/id turn)
+        covered (db/q '[:find [?message ...]
+                        :in $ ?turn
+                        :where
+                        [?turn :seon.turn/agent ?agent]
+                        [?turn :seon.turn/id _ ?opened]
+                        [?turn :seon.turn/reply-size _ ?replied]
+                        [(> ?replied ?opened)]
+                        [?message :seon.message/to ?agent ?sent]
+                        [(<= ?sent ?opened)]
+                        (not [_ :seon.turn/handled ?message])]
+                      database turn-eid)]
+    (into [[:db/add turn-eid ::closed-tx "datomic.tx"]]
+          (map (fn [message] [:db/add turn-eid ::handled message]))
+          covered)))
 
 (defn open-run-tx-call
   "Emit run-dependent transaction data only while its run is present and open.
@@ -684,6 +686,8 @@
         open-rows (open-call database
                                  (cond-> {::id id ::agent [:seon.agent/id agent-id] ::opened-tx "datomic.tx"}
                                    trigger (assoc ::trigger trigger)))
+        _ (when (empty? open-rows)
+            (refuse! `system-run-call ::agent-already-running request))
         opened (first open-rows)
         agent-namespace (db/q '[:find ?name . :in $ ?agent
                                 :where [?agent :seon.agent/namespace ?ns]
@@ -2915,7 +2919,7 @@
       ;; ONE TURN FOR EVERY UNANSWERED WAKE. The turn's own transaction
       ;; answers all of them, so nothing is selected and nothing is
       ;; claimed; the wakes are named only so a consumer can say what it
-      ;; is about to answer.
+      ;; is about to answer. Handling claims are recorded at settlement.
       (when-not (opening-deferred? db agent-id)
         (let [wakes (unanswered-wakes db agent-id {})]
           (when (or (seq wakes) (continuing-reply? db agent-id))
@@ -2974,8 +2978,7 @@
   this agent; every datom carries its transaction, and a turn's own
   transaction is the basis its context projected from. So a wake is
   answered exactly when an ANSWERING turn of that agent
-  (`latest-answering-turn-t`) has `:t` at or after it — no reference
-  from turn to wake, no claim, no per-wake write, and no way for a turn
+  (`latest-answering-turn-t`) has `:t` at or after it — independent of handling claims, with no way for a turn
   to answer something its context never contained, or something no model
   ever saw.
 
@@ -3034,7 +3037,7 @@
                                   :seon.message/id]]]]}
   [db agent-id]
   (->> (unanswered-wakes db agent-id {})
-       (filter #(= :seon.message/inbox (:seon.wake/attribute %)))
+       (filter #(= :seon.message/to (:seon.wake/attribute %)))
        (sort-by (juxt :seon.wake/t :db/id))
        (mapv #(select-keys % [:seon.message/id]))))
 
@@ -4112,8 +4115,7 @@
     ;; is answered by the turn whose context contained it, so two wakes
     ;; in one commit are one paid call and a wake arriving mid-turn
     ;; opens the next one. The `:seon.turn.loop/trigger-already-answered` fence is
-    ;; gone with the reference it guarded — `open-call`'s
-    ;; `:seon.turn.loop/agent-already-running` is what stops two openers, and the
+    ;; gone with the reference it guarded — `open-call`'s writer-side no-op stops two openers, and the
     ;; derivation is what stops a second turn for an answered wake.
     ;;
     ;; `:seon.turn/trigger` is retained as PROVENANCE ONLY — the
@@ -4138,20 +4140,6 @@
                    {:tx-data
                     [[:db.fn/call #'open-call open-request]]}))]
       (cond
-        ;; THE FENCE FIRING IS THE DESIGN, NOT A DEFECT. `::agent-already-running`
-        ;; means another opener already holds this agent's turn — exactly what
-        ;; the comment above says stops two openers. Turn PRD §3/§14: a wake
-        ;; arriving mid-turn has `:t` greater than the open turn's basis and
-        ;; opens the NEXT turn, answered by the `:t` rule; nothing is claimed,
-        ;; nothing is lost, and there is no second turn to open now. Recording
-        ;; it as a durable core fault made ordinary loop flow a defect report —
-        ;; and, because `:seon.error/steward` is a listened attribute, woke the
-        ;; steward with it. Measured on `default` 2026-09-16T15:32:57Z: one such
-        ;; fact for juniper and one for root at seed time, from a wake that met
-        ;; an open turn. The agent is released; the next kick opens the turn.
-        (= ::agent-already-running (:seon.turn/rule outcome))
-        (report :released 0)
-
         (:seon.error/kind outcome)
         (do
           ;; The open transaction formed no run, so settlement records the

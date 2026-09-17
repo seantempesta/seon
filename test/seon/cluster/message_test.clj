@@ -101,7 +101,7 @@
                      :seon.boot/cluster-name "message-test"})
       (test-support/transacted!
                    connection
-                   [{:seon.message/id "message-1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "bob"]}])
+                   [{:seon.message/id "message-1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "hello"}])
       (let [source (message/render-ai {:seon.message/id "message-1"})
             planned (turn/planned-sources source 'my.agents.alice 4096)
             evaluated
@@ -129,8 +129,8 @@
                      :seon.boot/cluster-name "message-test"})
       (test-support/transacted!
                    connection
-                   [{:seon.message/id "message-older" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "older" :seon.message/inbox [:seon.agent/id "bob"]}
-                    {:seon.message/id "message-newer" :seon.message/to [:seon.agent/id "bob"] :seon.message/content "newer" :seon.message/inbox [:seon.agent/id "bob"]}])
+                   [{:seon.message/id "message-older" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "older"}
+                    {:seon.message/id "message-newer" :seon.message/to [:seon.agent/id "bob"] :seon.message/content "newer"}])
       (let [ctx (test-support/fork-cluster-ctx connection "message-test")
             evaluate-form
             (fn [source]
@@ -195,12 +195,12 @@
     (fn [connection]
       (test-support/transacted!
                    connection
-                   [{:seon.message/id "inbox/2" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "second" :seon.message/inbox [:seon.agent/id "bob"]}
-                    {:seon.message/id "inbox/1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "first" :seon.message/inbox [:seon.agent/id "bob"]}])
+                   [{:seon.message/id "inbox/2" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "second"}
+                    {:seon.message/id "inbox/1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "first"}])
       (let [database @connection
             reverse-value
-            (:seon.message/_inbox
-             (db/pull database [:seon.message/_inbox]
+            (:seon.message/_to
+             (db/pull database [:seon.message/_to]
                       [:seon.agent/id "bob"]))
             messages (db/pull-many database '[*]
                                    (mapv :db/id reverse-value))
@@ -251,7 +251,7 @@
       (let [database @connection
             rendered
             (message/render-html
-             {:seon.db/db database :seon.message/id "message-1" :seon.message/content "first line\nsecond line" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/about [:seon.agent/id "alice"] :seon.message/caused-by {:seon.message/id "message-0"} :seon.message/inbox [:seon.agent/id "bob"]})]
+             {:seon.db/db database :seon.message/id "message-1" :seon.message/content "first line\nsecond line" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/about [:seon.agent/id "alice"] :seon.message/caused-by {:seon.message/id "message-0"}})]
         (is (str/includes? (pr-str rendered) "first line\\nsecond line"))
         (is (str/includes? (pr-str rendered) "unread"))
         (is (str/includes? (pr-str rendered) "2023-11-14T22:13:20Z"))
@@ -274,7 +274,7 @@
   No `from`, and no triggering transaction: the head of a chain."
   [connection id to content]
   (test-support/transacted! connection
-                          [{:seon.message/id id :seon.message/to [:seon.agent/id to] :seon.message/content content :seon.message/inbox [:seon.agent/id to]}])
+                          [{:seon.message/id id :seon.message/to [:seon.agent/id to] :seon.message/content content}])
   id)
 
 (defn- deliver!
@@ -559,8 +559,7 @@
                     @connection
                     (:db/id (:seon.message/from pulled))))
             "from resolves to the sending agent")
-        (is (some? (:seon.message/to pulled)))
-        (is (some? (:seon.message/inbox pulled)))))))
+        (is (some? (:seon.message/to pulled)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The refusals, each a fact
@@ -768,7 +767,7 @@
                       [?agent :seon.agent/id ?agent-id]]
                     @connection
                     (:seon.message/id row))))
-        (is (= (:seon.message/to row) (:seon.message/inbox row)))
+        (is (nil? (get (:schema @connection) :seon.message/inbox)))
         (is (not (contains? row :seon.message/from))
             "absence, not a human/origin stamp, is the outside contract")))))
 
@@ -846,7 +845,7 @@
 (deftest reverse-agent-concerns-are-schema-declarations
   (let [forms (schema.edn/packaged-forms)
         units (:seon.render/units (second (:seon.agent/agent forms)))]
-    (is (some #{:seon.message/_inbox} units))
+    (is (some #{:seon.message/_to} units))
     (is (not-any? (set units)
                   [:seon.def/_agent :seon.def/_ns
                    :seon.schema.admission/_source :seon.render.route/_data]))))

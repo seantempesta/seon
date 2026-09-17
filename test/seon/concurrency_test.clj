@@ -54,7 +54,7 @@
                 (let [result
                       (db/transact!
                        right
-                       [{:seon.message/id "connection-isolation" :seon.message/to [:seon.agent/id "recipient"] :seon.message/content "only the right recipient" :seon.message/inbox [:seon.agent/id "recipient"]}])]
+                       [{:seon.message/id "connection-isolation" :seon.message/to [:seon.agent/id "recipient"] :seon.message/content "only the right recipient"}])]
                   (is (not (:seon.error/kind result)))
                   (is (some? (support/await-event! right-mailbox "right message wake")))
                   ;; Datahike has synchronously delivered the committed report.

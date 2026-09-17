@@ -19,8 +19,15 @@
                :content-too-large :seon.message/size,
                :to
                [:and
-                {:description "The permanent recipient record.",
-                 :seon.db/index true}
+                {:description
+                 "The permanent recipient and listened routing edge; handling never retracts it. Required peer ref refuses recipient deletion on a surviving message.",
+                 :seon.db/index true,
+                 :seon.wake/listen true,
+                 :seon.wake/opens-turn? true,
+                 :seon.render/ai seon.cluster.message/render-inbox-ai,
+                 :seon.render/html
+                 seon.cluster.message/render-inbox-html,
+                 :seon.render/form seon.render.transcript/inbox-form}
                 :seon.db/ref],
                :about
                [:and
@@ -84,13 +91,7 @@
                  :seon.message/about]
                 [:my.message/reason
                  {:optional true}
-                 :my.message/reason]
-                [:seon.message/inbox
-                 {:optional true}
-                 :seon.message/inbox]
-                [:seon.message/read-tx
-                 {:optional true}
-                 :seon.message/read-tx]],
+                 :my.message/reason]],
                :pulled
                [:map
                 {:description
@@ -138,18 +139,6 @@
                  :seon.message/id]],
                :chain-limit :seon.message/limit,
                :content [:string {:min 1, :seon.search/index :text}],
-               :inbox
-               [:and
-                {:description
-                 "The recipient's pending inbox edge. Handling retracts this edge in the answering transaction.",
-                 :seon.db/index true,
-                 :seon.wake/listen true,
-                 :seon.wake/opens-turn? true,
-                 :seon.render/ai seon.cluster.message/render-inbox-ai,
-                 :seon.render/html
-                 seon.cluster.message/render-inbox-html,
-                 :seon.render/form seon.render.transcript/inbox-form}
-                :seon.db/ref],
                :size [:int {:min 0}],
                :content-too-large-error
                [:map
@@ -196,9 +185,4 @@
                 [:seon.message/unknown-recipient
                  :seon.message/unknown-recipient]
                 [:seon.error/message :seon.error/message]],
-               :read-tx
-               [:and
-                {:description
-                 "The transaction which handled the inbox edge."}
-                :seon.db/ref],
                :limit [:int {:min 0}]}

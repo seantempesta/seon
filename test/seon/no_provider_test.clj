@@ -29,7 +29,7 @@
                             [{:seon.agent/id agent-id
                               :seon.agent/settings
                               {:seon.config.ai/api-key-variable credential}}
-                             {:seon.message/id "refusal-trigger" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Take one turn." :seon.message/inbox [:seon.agent/id agent-id]}])
+                             {:seon.message/id "refusal-trigger" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Take one turn."}])
        (let [cluster (support/cluster-handle
                       {:seon.db/connection connection
                        :seon.cluster/name cluster-name
@@ -64,7 +64,7 @@
          (is (false? (turn/more-agent-work? @connection request)))
          (is (seq (turn/unanswered-wakes @connection agent-id {})))
          (support/transacted! connection
-                              [{:seon.message/id "new-outside-trigger" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Configuration repaired; try again." :seon.message/inbox [:seon.agent/id agent-id]}])
+                              [{:seon.message/id "new-outside-trigger" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Configuration repaired; try again."}])
          (is (= :open (:seon.turn.work/situation
                         (turn/next-agent-work @connection request)))))))))
 
@@ -88,7 +88,7 @@
                     connection
                     [{:seon.agent/id agent-id
                       :seon.agent/settings {:seon.config.ai/no-provider true}}
-                     {:seon.message/id "no-provider-message" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Take a virtual turn." :seon.message/inbox [:seon.agent/id agent-id]}])
+                     {:seon.message/id "no-provider-message" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Take a virtual turn."}])
            opened (db/transact! connection
                     (turn/open-tx
                      {:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id "no-provider-message"] :seon.turn/opened-tx "datomic.tx"}))

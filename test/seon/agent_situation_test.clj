@@ -19,7 +19,7 @@
            {:seon.agent/id "situation"
             :seon.agent/namespace [:seon.ns/name 'my.agents.situation]}
            {:seon.turn/id "situation-run" :seon.turn/agent [:seon.agent/id "situation"] :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.situation]}
-           {:seon.message/id "unread" :seon.message/to [:seon.agent/id "situation"] :seon.message/content "Read me" :seon.message/inbox [:seon.agent/id "situation"]}]))
+           {:seon.message/id "unread" :seon.message/to [:seon.agent/id "situation"] :seon.message/content "Read me"}]))
 
 (deftest situation-is-the-live-derived-control-surface
   (support/with-database

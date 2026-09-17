@@ -448,7 +448,7 @@
        ;; doing.
        (test-support/transacted! connection
                                [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content (str "Build the widget helpers: my.gen.alpha owns "
-                                      "the arithmetic and my.gen.beta owns the label.") :seon.message/inbox [:seon.agent/id "planner"]}])
+                                      "the arithmetic and my.gen.beta owns the label.")}])
        (let [run-id (with-redefs [ai/complete staged-reply]
                       (drive! cluster 12 7))
              db @connection]
@@ -617,7 +617,7 @@
    (fn [cluster]
      (let [connection (:seon.db/connection cluster)]
        (test-support/transacted! connection
-                               [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Count the primes." :seon.message/inbox [:seon.agent/id "planner"]}])
+                               [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Count the primes."}])
        (let [run-id
              (with-redefs [ai/complete
                            (fn [{prompt :seon.ai/prompt}]
@@ -650,7 +650,7 @@
    (fn [cluster]
      (let [connection (:seon.db/connection cluster)]
        (test-support/transacted! connection
-                               [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Build the helpers." :seon.message/inbox [:seon.agent/id "planner"]}])
+                               [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Build the helpers."}])
        ;; every owner is mute; only the planner ever answers, and it
        ;; answers by claiming it is done
        (let [run-id

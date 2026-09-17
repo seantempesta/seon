@@ -1633,7 +1633,6 @@
        (conj
         {:seon.message/id message-id
          :seon.message/to [:seon.agent/id owner]
-         :seon.message/inbox [:seon.agent/id owner]
          :seon.message/content message}))}))
 
 ;;; ---------------------------------------------------------------------------

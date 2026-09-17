@@ -343,11 +343,11 @@
   (let [instants
         (mapv (fn [message]
                 (transaction-instant (support/transacted! connection [message])))
-              [{:seon.message/id "outside-0" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Start with the failed deployment." :my.message/reason "An external observation, not this agent's decline." :seon.message/inbox [:seon.agent/id agent-id]}
-               {:seon.message/id "peer-1" :seon.message/from [:seon.agent/id peer-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "Repair the owning namespace." :seon.message/inbox [:seon.agent/id agent-id]}
-               {:seon.message/id "send-2" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/content "Check the repaired namespace." :seon.message/inbox [:seon.agent/id peer-id]}
-               {:seon.message/id "decline-3" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "I cannot make the requested edit." :my.message/reason "The namespace is owned by another agent." :seon.message/inbox [:seon.agent/id peer-id]}
-               {:seon.message/id "self-4" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/content "A self-addressed continuity note." :seon.message/inbox [:seon.agent/id agent-id]}])]
+              [{:seon.message/id "outside-0" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Start with the failed deployment." :my.message/reason "An external observation, not this agent's decline."}
+               {:seon.message/id "peer-1" :seon.message/from [:seon.agent/id peer-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "Repair the owning namespace."}
+               {:seon.message/id "send-2" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/content "Check the repaired namespace."}
+               {:seon.message/id "decline-3" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "I cannot make the requested edit." :my.message/reason "The namespace is owned by another agent."}
+               {:seon.message/id "self-4" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/content "A self-addressed continuity note."}])]
     ;; A BOUND THAT FIRES IS A BUG REPORT. Distinct instants are what the
     ;; interleaving is derived from; if two fixture transactions landed in
     ;; one millisecond, say so here rather than mis-order silently.
@@ -566,16 +566,16 @@
         messages
         (concat
          (map (fn [index]
-                {:seon.message/id (str "middle-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "middle history " index " " (apply str (repeat 80 "x"))) :seon.message/inbox [:seon.agent/id agent-id]})
+                {:seon.message/id (str "middle-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "middle history " index " " (apply str (repeat 80 "x")))})
               (range 40))
          (map (fn [index]
-                {:seon.message/id (str "newest-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "newest history " index) :seon.message/inbox [:seon.agent/id agent-id]})
+                {:seon.message/id (str "newest-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "newest history " index)})
               (range 6)))]
     (support/transacted!
      connection
      (into [{:seon.agent/id agent-id}
             {:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
-            {:db/id "bootstrap-message" :seon.message/id "task0001" :seon.message/to [:seon.agent/id agent-id] :seon.message/content (bootstrap/task-message) :seon.message/inbox [:seon.agent/id agent-id]}]
+            {:db/id "bootstrap-message" :seon.message/id "task0001" :seon.message/to [:seon.agent/id agent-id] :seon.message/content (bootstrap/task-message)}]
            cat
            [bootstrap-receipts messages]))))
 
@@ -718,7 +718,7 @@
         ;; seed is lost with it. The entity here is only a unique `about`
         ;; target; what matters is that it is a REAL one.
         {:seon.test/sym "target-fact" :seon.schema.admission/source :core}
-        {:seon.message/id "about-test" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.test/sym "target-fact"] :seon.message/content "Inspect the test fact." :seon.message/inbox [:seon.agent/id peer-id]}
+        {:seon.message/id "about-test" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.test/sym "target-fact"] :seon.message/content "Inspect the test fact."}
         {:seon.turn/id "run-malformed" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
         {:seon.cluster.eval/id "eval-malformed"
          :seon.cluster.eval/run [:seon.turn/id "run-malformed"]
@@ -746,8 +746,8 @@
        [{:seon.agent/id agent-id}
         {:seon.problems/id "about-first"}
         {:seon.problems/id "about-second"}
-        {:seon.message/id "about-message-first" :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "about-first"] :seon.message/content "Inspect the first problem." :seon.message/inbox [:seon.agent/id agent-id]}
-        {:seon.message/id "about-message-second" :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "about-second"] :seon.message/content "Inspect the second problem." :seon.message/inbox [:seon.agent/id agent-id]}])
+        {:seon.message/id "about-message-first" :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "about-first"] :seon.message/content "Inspect the first problem."}
+        {:seon.message/id "about-message-second" :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "about-second"] :seon.message/content "Inspect the second problem."}])
       (let [database @connection
             basis-before (:max-tx database)
             pull-many db/pull-many
@@ -873,7 +873,7 @@
        connection
        (into [{:seon.agent/id agent-id}]
              (map (fn [index]
-                    {:seon.message/id (str "bounded-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "message " index) :seon.message/inbox [:seon.agent/id agent-id]}))
+                    {:seon.message/id (str "bounded-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "message " index)}))
              (range 100)))
       (let [candidate-limit
             (:seon.config.eval.result/max-nodes caps)
@@ -925,8 +925,7 @@
     event-at :at}]
   (if (contains? message-event-kinds event-kind)
     [(cond-> {:seon.message/id id :seon.message/to [:seon.agent/id
-               (if (= :message-out event-kind) peer-id agent-id)] :seon.message/content content :seon.message/inbox [:seon.agent/id
-               (if (= :message-out event-kind) peer-id agent-id)]}
+               (if (= :message-out event-kind) peer-id agent-id)] :seon.message/content content}
        (not= :message-in event-kind)
        (assoc :seon.message/from
               [:seon.agent/id agent-id])

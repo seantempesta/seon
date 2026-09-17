@@ -179,7 +179,7 @@
                         [{:db/id agent-eid
                           :seon.agent/plan (assoc (update authored-plan :my.plan/steps set) :my.plan/agent agent-eid)
                           :seon.agent/settings seeded-settings}
-                         {:db/id "fixture-root-message" :seon.message/id (id/id (random-uuid) 8) :seon.message/from [:seon.agent/id "root"] :seon.message/to [:seon.agent/id "juniper"] :seon.message/content instruction :seon.message/inbox [:seon.agent/id "juniper"]}]))))]]))
+                         {:db/id "fixture-root-message" :seon.message/id (id/id (random-uuid) 8) :seon.message/from [:seon.agent/id "root"] :seon.message/to [:seon.agent/id "juniper"] :seon.message/content instruction}]))))]]))
   {:seon.test/orders (count orders)}))
 
 (defn submit!

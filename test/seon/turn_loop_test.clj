@@ -316,7 +316,7 @@
         (test-support/transacted!
                      connection
                      [{:seon.agent/id agent-id}
-                      {:seon.message/id trigger-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "answer once" :seon.message/inbox [:seon.agent/id agent-id]}])
+                      {:seon.message/id trigger-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "answer once"}])
         (is (= :open (:seon.turn.work/situation
                       (turn/next-agent-work (db/db connection) request)))
             "the wake opens exactly one turn")
@@ -550,7 +550,7 @@
 (defn- prepare-call!
   [{connection :seon.db/connection :as cluster} agent-id run-id message-id]
   (test-support/transacted! connection
-                          [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove live settings" :seon.message/inbox [:seon.agent/id agent-id]}])
+                          [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove live settings"}])
   (test-support/transacted!
                connection
                [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}
@@ -611,7 +611,7 @@
                       :seon.cluster/name cluster-name}))
        (test-support/transacted!
                     connection
-                    [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "start" :seon.message/inbox [:seon.agent/id agent-id]}])
+                    [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "start"}])
        (test-support/transacted!
                     connection
                     (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}))
@@ -1059,7 +1059,7 @@
                       {:seon.agent/id agent-id
                        :seon.agent/namespace
                        [:seon.ns/name 'my.agents.undisposed-agent]}
-                      {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove the contract" :seon.message/inbox [:seon.agent/id agent-id]}])
+                      {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove the contract"}])
         (test-support/transacted!
                      connection
                      (into [] cat
@@ -1188,7 +1188,7 @@
       (testing "the trigger — the exact transact the live drive failed on"
         (is (map? (db/transact! connection
                               [{:seon.agent/id "alice"}
-                               {:seon.message/id "m-live" :seon.message/to [:seon.agent/id "alice"] :seon.message/content "count the widgets" :seon.message/inbox [:seon.agent/id "alice"]}]))))
+                               {:seon.message/id "m-live" :seon.message/to [:seon.agent/id "alice"] :seon.message/content "count the widgets"}]))))
       (testing "the run, its agent pointer, and recorded trigger"
         (is (map? (db/transact!
                    connection
@@ -1279,7 +1279,7 @@
       (test-support/transacted! connection
                               [{:seon.ns/name 'user}
                                {:seon.agent/id "agent-a"}
-                               {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "go" :seon.message/inbox [:seon.agent/id "agent-a"]}])
+                               {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "go"}])
       (body connection))))
 
 (defn- commit-run! [connection {:keys [planned? receipts closed? completed?]}]
@@ -1668,7 +1668,7 @@
         (is (nil? (turn/open-for-agent database [:seon.agent/id "agent-a"]))
             "the agent holds no wreckage")
         (test-support/transacted! connection
-                                  [{:seon.message/id "m-after-refusal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "again" :seon.message/inbox [:seon.agent/id "agent-a"]}])
+                                  [{:seon.message/id "m-after-refusal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "again"}])
         (is (= :open
                (:seon.turn.work/situation
                 (turn/next-agent-work

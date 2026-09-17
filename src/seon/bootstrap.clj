@@ -57,7 +57,7 @@
           ") lists your own public functions and schema declarations.")
      "Your plan is your instructions. Read its current step and completion criterion before acting; a done-query completes it automatically when the facts match, and you mark a step without one complete only after seeing the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it."
      "Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to \"root\" :my.message/content \"...\"}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact."
-     "Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.message/_inbox; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied."
+     "Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.message/_to; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied."
      "Define a function with its invoke contract: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1)). The input :cat describes the arguments; the last schema describes the result. A function that can fail returns [:or <success> :seon.error/value]; a bare :maybe is refused. [:vector X] needs a vector; use vec to convert a lazy seq. Admitted definitions are durable. Auto-check calls your function with generated inputs including each collection's empty value. A deftest becomes a durable test. deftest and is are referred; use clojure.test/testing with its namespace. (my.test/run) runs yours."
      (str "A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value \"datomic.tx\" names this write, for example (seon.db/transact! [{:my.note/id \"observation\" :my.note/agent [:seon.agent/id "
           (pr-str agent-id)
@@ -876,7 +876,7 @@
            :seon.ns.refer/target-ns 'clojure.test
            :seon.ns.refer/target-name 'is}]}
         message-row
-        {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content (task-message) :seon.message/inbox [:seon.agent/id agent-id]}]
+        {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content (task-message)}]
     (into [namespace-row message-row]
           (turn/generated-run-tx
            db

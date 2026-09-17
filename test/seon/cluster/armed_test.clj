@@ -302,7 +302,7 @@
            (test-support/transacted!
                         (:seon.db/connection
                          (:seon.turn.loop/cluster request))
-                        [{:seon.message/id "boot-window-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "answer during boot" :seon.message/inbox [:seon.agent/id "root"]}])
+                        [{:seon.message/id "boot-window-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "answer during boot"}])
            entry))
        ai/complete
        (fn [_request]

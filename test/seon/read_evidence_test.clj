@@ -14,7 +14,7 @@
                 connection
                 [{:seon.agent/id "juniper"}
                  {:seon.agent/id "root"}
-                 {:seon.message/id "opening" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "Opening message" :seon.message/inbox [:seon.agent/id "juniper"]}]))))
+                 {:seon.message/id "opening" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "Opening message"}]))))
      (let [ctx (test-support/fork-cluster-ctx connection)
            captured (atom [])
            evaluation
@@ -24,7 +24,7 @@
                :seon.db/connection connection
                :seon.db/db @connection
                :seon.agent/id "juniper"
-               :seon.cluster.eval/source "(seon.db/q '[:find [(pull ?m [:seon.message/content]) ...] :where [?m :seon.message/to [:seon.agent/id \"juniper\"]] (not [?m :seon.message/read-tx])])"
+               :seon.cluster.eval/source "(seon.db/q '[:find [(pull ?m [:seon.message/content]) ...] :where [?m :seon.message/to [:seon.agent/id \"juniper\"]] (not [?m :seon.message/from])])"
                :seon.cluster.eval/ns [:seon.ns/name 'user]
                :seon.sci.admit/caps (config/result-caps (config/defaults))
                :seon.sci.eval/time-limit-ms 5000
@@ -49,7 +49,7 @@
        (is (not (:seon.error/kind
                  (db/transact!
                   connection
-                  [{:seon.message/id "next" :seon.message/to [:seon.agent/id recipient] :seon.message/content "Next message" :seon.message/inbox [:seon.agent/id recipient]}]))))
+                  [{:seon.message/id "next" :seon.message/to [:seon.agent/id recipient] :seon.message/content "Next message"}]))))
        ;; Remove replay inputs as data: these assertions must be decided by
        ;; retained index evidence, without re-executing the inbox.
        (let [changes (db/read-evidence-changes @connection evidence basis)]
@@ -82,15 +82,15 @@
                               {:seon.message/id "theirs" :seon.message/content "theirs"
                                :seon.message/to [:seon.agent/id "root"]}]))))
      (doseq [where '[[[?m :seon.message/to ?recipient]
-                     (not [?m :seon.message/read-tx])]
+                     (not [?m :seon.message/from])]
                     [[?m :seon.message/to ?recipient]
                      (or [?m :seon.message/content "mine"]
                          (and [?m :seon.message/id "mine"]
-                              (not [?m :seon.message/read-tx])))]
+                              (not [?m :seon.message/from])))]
                     [[?m :seon.message/to ?recipient]
                      (or-join [?m] [?m :seon.message/content "mine"]
                               (and [?m :seon.message/id "mine"]
-                                   (not-join [?m] [?m :seon.message/read-tx])))]]]
+                                   (not-join [?m] [?m :seon.message/from])))]]]
        (let [captured (atom [])
              result (binding [db/*read-evidence-sink* captured]
                       (db/q {:find '[(pull ?m [:seon.message/id :seon.message/content])]
@@ -107,7 +107,7 @@
          (is (= [[{:seon.message/id "mine" :seon.message/content "mine"}]]
                 (vec result)))
          (is (some #{ {:seon.db/pattern-entity mine
-                       :seon.db/pattern-attribute :seon.message/read-tx}} patterns))
+                       :seon.db/pattern-attribute :seon.message/from}} patterns))
          (is (some #{ {:seon.db/pattern-entity mine
                        :seon.db/pattern-attribute :seon.message/content}} patterns))
          (is (true? (db/read-evidence-current? @connection evidence)))
@@ -116,7 +116,7 @@
                                  [[:db/add [:seon.message/id "theirs"]
                                    :seon.message/content (pr-str where)]
                                   [:db/add [:seon.message/id "theirs"]
-                                   :seon.message/read-tx "datomic.tx"]]))))
+                                   :seon.message/from [:seon.agent/id "root"]]]))))
          (is (true? (db/read-evidence-current? @connection evidence)))
          (is (not (:seon.error/kind
                    (db/transact! connection
@@ -128,9 +128,9 @@
      (let [captured (atom [])
            query '[:find [?m ...] :in $ ?recipient
                    :where [?m :seon.message/to ?recipient]
-                   (not [?m :seon.message/read-tx])]]
+                   (not [?m :seon.message/from])]]
        (test-support/transacted! connection [[:db/add [:seon.message/id "mine"]
-                                             :seon.message/read-tx "datomic.tx"]])
+                                             :seon.message/from [:seon.agent/id "root"]]])
        (is (empty? (binding [db/*read-evidence-sink* captured]
                      (db/q query @connection [:seon.agent/id "juniper"]))))
        (let [evidence (mapv #(dissoc % :seon.db/read-request
@@ -138,6 +138,6 @@
                            (db/read-evidence @captured))]
          (is (seq evidence))
          (test-support/transacted! connection [[:db/retract [:seon.message/id "mine"]
-                                               :seon.message/read-tx]])
+                                               :seon.message/from]])
          (is (false? (db/read-evidence-current? @connection evidence)))
          (is (= 1 (count (db/q query @connection [:seon.agent/id "juniper"])))))))))

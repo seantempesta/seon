@@ -39,7 +39,6 @@
                                    :seon.schema/schema
                                    :seon.message/message
                                    :seon.message/to
-                                   :seon.message/inbox
                                    :seon.agent/agent}
                                  :seon.schema/key))
                    (schema/canonical-schema-rows)))
@@ -48,7 +47,7 @@
              [{:seon.ns/name 'fixture.history}
               {:seon.agent/id "history-agent"
                :seon.agent/namespace [:seon.ns/name 'fixture.history]}
-              {:seon.message/id "history-message" :seon.message/to [:seon.agent/id "history-agent"] :seon.message/content "Read me." :seon.message/inbox [:seon.agent/id "history-agent"]}])
+              {:seon.message/id "history-message" :seon.message/to [:seon.agent/id "history-agent"] :seon.message/content "Read me."}])
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            selected
@@ -75,11 +74,11 @@
                 (transcript/message-form message))))
        (testing "an attribute declaration precedes the landed entity shape"
          (is (= 'seon.render.transcript/inbox-form
-                (selected message :seon.message/inbox)))
-         (let [recipient (:seon.message/inbox (render/transacted message))
+                (selected message :seon.message/to)))
+         (let [recipient (:seon.message/to (render/transacted message))
                form (transcript/inbox-form recipient)]
            (is (= 'seon.db/pull (first form)))
-           (is (contains? (first (second (second form))) :seon.message/_inbox)
+           (is (contains? (first (second (second form))) :seon.message/_to)
                (pr-str form))
            (is (= recipient (last form)))))
        (testing "an attribute with no declared pair reaches the generic printer"

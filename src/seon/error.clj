@@ -1307,8 +1307,7 @@
                                                  :seon.error/reason reason
                                                  :seon.agent/id recipient}
                                                 notification)))
-   :seon.message/about [:seon.error/signature (:seon.error/signature fact)]
-   :seon.message/inbox [:seon.agent/id recipient]})
+   :seon.message/about [:seon.error/signature (:seon.error/signature fact)]})
 
 (defn commit-call
   "Upsert one error occurrence and its bounded notifications at the writer."

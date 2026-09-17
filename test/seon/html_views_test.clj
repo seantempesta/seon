@@ -78,15 +78,17 @@
       (support/transacted! connection [{:seon.agent/id "alice"} {:seon.agent/id "bob"}])
       (support/transacted! connection [{:seon.message/id "hello" :seon.message/content "Hello\nagain"
                                         :seon.message/from [:seon.agent/id "bob"]
-                                        :seon.message/to [:seon.agent/id "alice"]
-                                        :seon.message/inbox [:seon.agent/id "alice"]}])
+                                        :seon.message/to [:seon.agent/id "alice"]}])
       (let [row (db/pull @connection '[*] [:seon.message/id "hello"])
             unit (assoc row :seon.db/db @connection)]
         (readable! (message/render-html unit) ["Hello\nagain" "unread" "alice" "bob" "title="])
         (readable! (message/render-inbox-html [row] @connection) ["Messages (1)" "unread"])
         (is (= (golden :message) (message/render-ai unit)))
         (is (= (golden :inbox) (message/render-inbox-ai [row])))
-        (support/transacted! connection [[:db/retract [:seon.message/id "hello"] :seon.message/inbox]])
+        (support/transacted! connection [{:seon.turn/id "handled-message" :seon.turn/agent [:seon.agent/id "alice"]
+                                          :seon.turn/opened-tx "datomic.tx"
+                                          :seon.turn/closed-tx "datomic.tx"
+                                          :seon.turn/handled #{[:seon.message/id "hello"]}}])
         (readable! (message/render-html (assoc (db/pull @connection '[*] [:seon.message/id "hello"])
                                               :seon.db/db @connection)) ["handled"])))))
 

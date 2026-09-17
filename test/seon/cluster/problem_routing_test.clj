@@ -27,10 +27,10 @@
                    {:seon.agent/id "alpha"
                     :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
                    {:seon.agent/id "root"}
-                   {:seon.message/id "goal" :seon.message/to [:seon.agent/id "root"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "root"]}])
+                   {:seon.message/id "goal" :seon.message/to [:seon.agent/id "root"] :seon.message/content "Generate the program."}])
      (test-support/transacted!
                   connection
-                  [{:seon.message/id "planner-goal" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/caused-by [:seon.message/id "goal"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "planner"]}])
+                  [{:seon.message/id "planner-goal" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/caused-by [:seon.message/id "goal"] :seon.message/content "Generate the program."}])
      (test-support/transacted!
                   connection
                   [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "planner"] :seon.turn/trigger [:seon.message/id "planner-goal"] :seon.turn/opened-tx "datomic.tx"}])

@@ -1,7 +1,5 @@
 (ns seon.cluster.message
-  "Durable messages and inbox edges, committed together by the writer.
-  Sending records the recipient permanently and adds its inbox edge.
-  Answering retracts that edge and records the handling transaction."
+  "Durable messages with permanent routing and settlement claims."
   (:refer-clojure :exclude [read send])
   (:require [seon.db :as db]
             [seon.repl :as repl]
@@ -215,11 +213,10 @@
     :else
     [{:seon.message/id (id/id (random-uuid) 8)
       :seon.message/to [:seon.agent/id id]
-      :seon.message/inbox [:seon.agent/id id]
       :seon.message/content inbound-content}]))
 
 (defn delivery
-  "Resolve messages and their handled inbox edges into one transaction's data."
+  "Prepare durable messages; handling belongs to turn settlement."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map
                         [:my.message/value :my.message/value]
@@ -256,25 +253,15 @@
            (if failure
              (update delivered :seon.error/values conj failure)
              (let [subject (:seon.message/about about)
-                   handled (when subject
-                             (db/pull database
-                                      '[:db/id :seon.message/id
-                                        {:seon.message/inbox [:seon.agent/id]}] subject))
                    row (cond-> {:seon.message/id (or (:seon.message/id candidate)
                                                       (id/id))
                                 :seon.message/to [:seon.agent/id recipient]
-                                :seon.message/inbox [:seon.agent/id recipient]
                                 :seon.message/from [:seon.agent/id sender]
                                 :seon.message/content (or (:my.message/content candidate)
                                                           (:my.message/reason candidate))}
                          trigger (assoc :seon.message/caused-by [:seon.message/id trigger])
                          subject (assoc :seon.message/about subject))]
-               (update delivered :seon.message/rows into
-                       (cond-> [row]
-                         (and (:seon.message/id handled)
-                              (= sender (get-in handled [:seon.message/inbox :seon.agent/id])))
-                         (into [[:db/retract subject :seon.message/inbox [:seon.agent/id sender]]
-                                [:db/add subject :seon.message/read-tx "datomic.tx"]])))))))
+               (update delivered :seon.message/rows conj row)))))
        {:seon.message/rows [] :seon.error/values []}
        candidates))))
 
@@ -430,13 +417,14 @@
                            :else (str (quot minutes 1440) " days ago"))])))
           [:p {:class "seon-message-content" :style {:white-space "pre-wrap"}} content]
           (let [stored (when (and database (:seon.message/id unit))
-                         (db/pull database [:seon.message/id :seon.message/inbox]
-                                  [:seon.message/id (:seon.message/id unit)]))
-                unread? (or (:seon.message/inbox unit) (:seon.message/inbox stored))]
-            [:p {:class (str "seon-message-state " (if unread? "is-unread" "is-handled"))}
-             "● " (cond unread? "unread"
-                        (:seon.message/id stored) "handled"
-                        (:seon.message/read-tx unit) "handled"
+                         (db/pull database [:db/id] [:seon.message/id (:seon.message/id unit)]))
+                handled? (when (:db/id stored)
+                           (db/q '[:find ?turn . :in $ ?message
+                                   :where [?turn :seon.turn/handled ?message]]
+                                 database (:db/id stored)))]
+            [:p {:class (str "seon-message-state " (if handled? "is-handled" "is-unread"))}
+             "● " (cond handled? "handled"
+                        stored "unread"
                         :else "status unavailable")])]
           (or about caused-by-ref)
           (conj
@@ -456,7 +444,7 @@
 ;;;
 ;;; `:seon.message/to` is reached two ways. A walk from one message
 ;;; hands the single recipient reference; the agent's declared
-;;; `:seon.message/_inbox` unit hands every message addressed to that
+;;; `:seon.message/_to` unit hands every message addressed to that
 ;;; agent. One producer per projection answers both, because both are the same
 ;;; question asked from the two ends of one ref.
 ;;;
@@ -466,7 +454,7 @@
 
 (defn render-inbox-ai
   "Read each acquired message once through its entity's AI pair."
-  {:malli/schema [:=> [:cat [:or :seon.message/inbox :seon.db/ref :seon.message/inbox-unit]] :seon.render/source]}
+  {:malli/schema [:=> [:cat [:or :seon.message/to :seon.message/inbox-unit]] :seon.render/source]}
   [recipient-or-inbox]
   (if (and (sequential? recipient-or-inbox)
            (every? map? recipient-or-inbox))
@@ -477,7 +465,7 @@
          (repl/source-text
           (list 'seon.db/pull
                       (list 'quote
-                            '[{:seon.message/_inbox
+                            '[{:seon.message/_to
                                [:seon.message/id :seon.message/content
                                 {:seon.message/from [:seon.agent/id]}]}])
                       recipient-or-inbox)))))
@@ -513,7 +501,7 @@
   The reverse unit hands every message it acquired and renders them through
   [[inbox-html]]; a walk from one message hands that message's single
   recipient reference and renders it as the reference it is."
-  {:malli/schema [:=> [:cat [:or :seon.message/inbox :seon.db/ref :seon.message/inbox-unit] :seon.db/database-value]
+  {:malli/schema [:=> [:cat [:or :seon.message/to :seon.message/inbox-unit] :seon.db/database-value]
                   :seon.render/hiccup]}
   [recipient-or-inbox database]
   ;; A LOOKUP REF IS ALSO SEQUENTIAL, so the collection branch is the one
@@ -533,7 +521,6 @@
   '[:seon.message/id
     :seon.message/content
     {:seon.message/to [:seon.agent/id]}
-    {:seon.message/inbox [:seon.agent/id]}
     {:seon.message/from [:seon.agent/id]}
     {:seon.message/caused-by [:seon.message/id]}
     :seon.message/about
@@ -555,9 +542,6 @@
                         (fn [endpoint]
                           [:seon.agent/id
                            (:seon.agent/id endpoint)])))
-      (:seon.message/inbox message)
-      (update :seon.message/inbox (fn [endpoint] [:seon.agent/id (:seon.agent/id endpoint)]))
-
       (:seon.message/from message)
       (update :seon.message/from
               (fn [endpoint]
@@ -590,11 +574,12 @@
         database agent-id))
 
 (defn- inbox-message-eids
-  [database recipient]
+  [database current recipient]
   (db/q '[:find [?message ...]
-          :in $ ?recipient
-          :where [?message :seon.message/inbox ?recipient]]
-        database recipient))
+          :in $ $current ?recipient
+          :where [?message :seon.message/to ?recipient]
+                 (not [$current _ :seon.turn/handled ?message])]
+        database current recipient))
 
 (defn- inbox*
   [database agent-id since]
@@ -604,7 +589,7 @@
       (let [source (if (some? since) (db/since database since) database)]
         (if (error-value? source)
           source
-          (let [ids (inbox-message-eids source recipient)]
+          (let [ids (inbox-message-eids source database recipient)]
             (if (error-value? ids)
               ids
               (->> ids
@@ -731,7 +716,7 @@
       (:seon.message/rows result))))
 
 (defn send!
-  "Write a message and its inbox edge atomically; return the stored message.
+  "Write a message and its permanent recipient atomically; return the stored message.
 
   The writer resolves recipients, the active turn's cause, and the configured
   conversation bound against its current database, just as it resolves about."

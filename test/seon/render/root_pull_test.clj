@@ -74,7 +74,7 @@
      (support/transacted!
              connection
              [{:seon.agent/id "temporal-root-agent"}
-              {:seon.message/id "temporal-root-message" :seon.message/to [:seon.agent/id "temporal-root-agent"] :seon.message/content "The opening message." :seon.message/inbox [:seon.agent/id "temporal-root-agent"]}])
+              {:seon.message/id "temporal-root-message" :seon.message/to [:seon.agent/id "temporal-root-agent"] :seon.message/content "The opening message."}])
      (support/transacted!
              connection
              [{:seon.turn/id "temporal-root-run" :seon.turn/agent [:seon.agent/id "temporal-root-agent"] :seon.turn/trigger [:seon.message/id "temporal-root-message"] :seon.turn/opened-tx "datomic.tx"}
@@ -94,7 +94,7 @@
              :seon.sci.admit/caps caps})
            messages (get-in acquisition
                             [:seon.render.walk/root
-                             :seon.message/_inbox])
+                             :seon.message/_to])
            history
            (walk/history
             {:seon.db/db temporal
@@ -123,7 +123,7 @@
      (support/transacted!
              connection
              [{:seon.agent/id "historical-walk-agent"}
-              {:seon.message/id "historical-walk-message" :seon.message/to [:seon.agent/id "historical-walk-agent"] :seon.message/content "A historical walk must terminate." :seon.message/inbox [:seon.agent/id "historical-walk-agent"]}])
+              {:seon.message/id "historical-walk-message" :seon.message/to [:seon.agent/id "historical-walk-agent"] :seon.message/content "A historical walk must terminate."}])
      (let [current @connection
            render-request {:seon.db/db current
                     :seon.agent/id "historical-walk-agent"
@@ -290,7 +290,7 @@
        (is (not (contains? selector-map-keys
                            [(reverse-attribute ::edge) :limit (inc (long width))]))
            "an installed ref does not declare a reverse concern")
-       (is (not (contains? selector-map-keys [:seon.message/_inbox :limit (inc (long width))]))
+       (is (not (contains? selector-map-keys [:seon.message/_to :limit (inc (long width))]))
            "reverse concerns require the pulled entity's matching schema")
        (is (set? attributes))
        (is (every? attributes
@@ -455,8 +455,7 @@
            tx (db/transact! connection
                             [{:seon.message/id "non-agent-reference"
                               :seon.message/content "Only agents declare the inbox concern."
-                              :seon.message/to [::root-id "root"]
-                              :seon.message/inbox [::root-id "root"]}])
+                              :seon.message/to [::root-id "root"]}])
            after (walk/root-acquisition (assoc render-request :seon.db/db @connection))]
        (is (:db-after tx) (pr-str tx))
        (is (true? (db/read-evidence-current?

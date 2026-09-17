@@ -153,7 +153,7 @@
                :seon.agent/id "fixture-search-agent"}
               {:seon.cluster.instruction/id :fixture-search-instruction
                :seon.cluster.instruction/text "crossfamilysearchneedle"}
-              {:seon.message/id "fixture-search-message" :seon.message/to "fixture-search-agent" :seon.message/content "crossfamilysearchneedle" :seon.message/inbox "fixture-search-agent"}])]
+              {:seon.message/id "fixture-search-message" :seon.message/to "fixture-search-agent" :seon.message/content "crossfamilysearchneedle"}])]
         (search/apply-report! index report)
         (let [request
               {:seon.search/query "crossfamilysearchneedle"

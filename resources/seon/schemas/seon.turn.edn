@@ -9,6 +9,7 @@
              [:seon.turn/attempts {:optional true} :seon.turn/attempts]
              [:seon.turn/disposition {:optional true} :seon.turn/disposition]
              [:seon.turn/trigger {:optional true} :seon.turn/trigger]
+             [:seon.turn/handled {:optional true} :seon.turn/handled]
              [:seon.turn/opened-tx :seon.turn/opened-tx]
              [:seon.turn/starting-ns
               {:optional true}
@@ -40,6 +41,7 @@
             [:and {:description "The completed/wait control returned by the last evaluated form, recorded with settlement before presentation. These are the two closed session dispositions, not an entity kind or a stored session-open flag." :seon.wake/context-inert true}
              :my.turn/disposition],
             :rule [:and {:seon.wake/context-inert true} :keyword],
+            :handled [:set {:description "Messages handled by this turn at settlement. Optional peer refs sweep if a message is deleted; they do not decide wake answering."} :seon.db/ref],
             :trigger [:and #:seon.db{:index true :seon.wake/context-inert true} :seon.db/ref],
             :system-result
             [:map

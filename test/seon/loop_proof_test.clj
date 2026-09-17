@@ -192,7 +192,6 @@
              (let [basis (db/basis-t @connection)]
                (support/transacted! connection [{:seon.message/id "running-fixture/wake"
                                                 :seon.message/to [:seon.agent/id "juniper"]
-                                                :seon.message/inbox [:seon.agent/id "juniper"]
                                                 :seon.message/content "Probe the running runtime component."}])
                (await-settled!)
                (is (= 29 (turn/turns-left @connection "juniper")))
@@ -707,7 +706,7 @@
                (let [prefix (stored-text @connection)
                      message (db/transact!
                               connection
-                              [{:seon.message/id "proof-wake" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "Read the changed message." :seon.message/inbox [:seon.agent/id "juniper"]}])
+                              [{:seon.message/id "proof-wake" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "Read the changed message."}])
                      wake-t (db/basis-t (:db-after message))
                      pending (turn/unanswered-wakes @connection "juniper" {})]
                  (is (seq pending))
@@ -716,7 +715,7 @@
                                        (:seon.turn/forms system))]
                    (is (= 1 (count changed)) "one message appends exactly the generated inbox read")
                    (assert-changed-response! @connection handle system)
-                   (is (= #{'(seon.db/pull '[{:seon.message/_inbox
+                   (is (= #{'(seon.db/pull '[{:seon.message/_to
                                              [:seon.message/id :seon.message/content
                                               {:seon.message/from [:seon.agent/id]}]}]
                                            [:seon.agent/id "juniper"])}
@@ -745,7 +744,7 @@
                      faults-before (set (db/q '[:find [?e ...] :where [?e :seon.error/id]] @connection))
                      written (db/transact!
                               connection
-                              [{:seon.message/id "proof-wake-2" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "A second changed message." :seon.message/inbox [:seon.agent/id "juniper"]}])
+                              [{:seon.message/id "proof-wake-2" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "A second changed message."}])
                      wake-t (db/basis-t (:db-after written))
                      closed? #(seq (db/q '[:find ?turn :in $ ?since
                                            :where [?agent :seon.agent/id "juniper"]
@@ -767,7 +766,7 @@
                    (is (seq fresh))
                    (is (= 'seon.db/pull (first (read-string (:seon.cluster.eval/source (first fresh)))))
                        "changed read must precede the no-provider reply")
-                   (is (= #{'(seon.db/pull '[{:seon.message/_inbox
+                   (is (= #{'(seon.db/pull '[{:seon.message/_to
                                               [:seon.message/id :seon.message/content
                                                {:seon.message/from [:seon.agent/id]}]}]
                                             [:seon.agent/id "juniper"])}
@@ -829,7 +828,7 @@
              (testing "a system-only turn without the wake's results answers nothing"
                (support/transacted!
                        connection
-                       [{:seon.message/id "unobserved-wake" :seon.message/to [:seon.agent/id "unobserved"] :seon.message/content "This agent has no inbox read." :seon.message/inbox [:seon.agent/id "unobserved"]}])
+                       [{:seon.message/id "unobserved-wake" :seon.message/to [:seon.agent/id "unobserved"] :seon.message/content "This agent has no inbox read."}])
                (let [pending (turn/unanswered-wakes @connection "unobserved" {})
                      system (turn/system-turn
                              (assoc request :seon.agent/id "unobserved"))]

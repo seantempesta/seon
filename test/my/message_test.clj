@@ -25,8 +25,8 @@
                             {:seon.agent/id "bob"}])
       (let [before (db/basis-t @connection)]
         (support/transacted! connection
-                             [{:seon.message/id "m-1" :seon.message/to [:seon.agent/id "bob"] :seon.message/from [:seon.agent/id "alice"] :seon.message/content "First message" :seon.message/inbox [:seon.agent/id "bob"]}
-                              {:seon.message/id "m-2" :seon.message/to [:seon.agent/id "bob"] :seon.message/content (apply str (repeat 200 "x")) :seon.message/inbox [:seon.agent/id "bob"]}])
+                             [{:seon.message/id "m-1" :seon.message/to [:seon.agent/id "bob"] :seon.message/from [:seon.agent/id "alice"] :seon.message/content "First message"}
+                              {:seon.message/id "m-2" :seon.message/to [:seon.agent/id "bob"] :seon.message/content (apply str (repeat 200 "x"))}])
         (f connection before)))))
 
 (deftest ^{:seon.test/usage true} inbox-lists-this-agents-messages-newest-last
@@ -49,7 +49,7 @@
   (with-messages
     (fn [connection _before]
       (let [value (message/read "m-1" @connection)]
-        (is (= {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "bob"] :seon.message/from [:seon.agent/id "alice"] :seon.message/content "First message" :seon.message/inbox [:seon.agent/id "bob"]}
+        (is (= {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "bob"] :seon.message/from [:seon.agent/id "alice"] :seon.message/content "First message"}
                value))
         (is (seon.schema/valid-candidate-value?
              :seon.message/message value))))))
@@ -113,7 +113,7 @@
                   (db/pull (:db-after written) [:seon.message/id]
                            [:seon.message/id (:seon.message/id value)])))))))))
 
-(deftest send-writes-and-handles-the-inbox-in-one-transaction
+(deftest send-preserves-routing-until-turn-settlement
   (with-messages
     (fn [connection _]
       (support/seed-cluster! connection "message-write")
@@ -126,10 +126,10 @@
             original (db/pull @connection '[*] [:seon.message/id "m-1"])]
         (is (string? (:seon.message/id sent)) (pr-str sent))
         (is (= sent stored))
-        (is (= [:seon.agent/id "alice"] (:seon.message/inbox stored)))
+        (is (= [:seon.agent/id "alice"] (:seon.message/to stored)))
         (is (= [:seon.agent/id "bob"] (:seon.message/from stored)))
-        (is (nil? (:seon.message/inbox original)))
-        (is (some? (:seon.message/read-tx original)))
+        (is (some? (:seon.message/to original)))
+        (is (nil? (:seon.turn/_handled original)))
         (let [missing (my.message/send {:my.message/to "absent"
                                         :my.message/content "No recipient."
                                         :seon.db/connection connection

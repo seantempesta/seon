@@ -50,7 +50,7 @@
        @connection))
 
 (defn- message-tx [id]
-  [{:seon.message/id id :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "agent-a"]}])
+  [{:seon.message/id id :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "hello"}])
 
 (defn- run-tx
   "A commit of attributes a TURN writes — the other side of C2."
@@ -302,7 +302,7 @@
         ;; The RULINGS the declarations encode, each stated where a reader
         ;; meets it. These are membership claims about one family, never a
         ;; second copy of the set.
-        (is (contains? opening :seon.message/inbox)
+        (is (contains? opening :seon.message/to)
             "a message is an ask, so it opens a turn")
         (is (contains? opening :seon.issue/agent)
             "so is an issue assignment: it is a one-time explicit ask, and
@@ -345,7 +345,7 @@
                armer takes a pass without anyone addressing it")
           (test-support/transacted!
                        connection
-                       [{:seon.message/id "m-to-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "agent-b"]}])
+                       [{:seon.message/id "m-to-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "hello"}])
           (is (some? (test-support/await-event! armer "armer wake"))
               "the armer derives (agents in facts) − (armed set)")
           (is (nil? (async/poll! mailbox))

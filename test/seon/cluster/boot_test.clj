@@ -1581,7 +1581,6 @@
                                     [{:seon.agent/id "history-refork-recipient"}
                                      {:seon.message/id "history-refork-destroys"
                                       :seon.message/to [:seon.agent/id "history-refork-recipient"]
-                                      :seon.message/inbox [:seon.agent/id "history-refork-recipient"]
                                       :seon.message/content "history-refork-destroys"}])
           (let [result (operator/refork!
                         {:seon.operator/repository-root repository-root

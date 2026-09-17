@@ -225,7 +225,7 @@
                    {:seon.ns/name 'clojure.test}
                    {:seon.ns/name 'seon.schema}
                    (agent-row "agent-a")
-                   {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets" :seon.message/inbox [:seon.agent/id "agent-a"]}])]
+                   {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets"}])]
         (when (:seon.error/kind result)
           (throw (ex-info "Turn fixture seed was refused." result))))
       (with-render-context-proc
@@ -567,7 +567,6 @@
         (test-support/transacted! connection
                                   [{:seon.message/id "delete-obsolete"
                                     :seon.message/to [:seon.agent/id "agent-a"]
-                                    :seon.message/inbox [:seon.agent/id "agent-a"]
                                     :seon.message/content "Remove obsolete."}])
         (with-redefs [ai/complete
                       (fn [_]
@@ -917,7 +916,7 @@
                     "commit-first leaves the program row unchanged")
                 (test-support/transacted!
                              connection
-                             [{:seon.message/id "peer-follow-up" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/from [:seon.agent/id "peer"] :seon.message/content "Try again after reading the error." :seon.message/inbox [:seon.agent/id "agent-a"]}])
+                             [{:seon.message/id "peer-follow-up" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/from [:seon.agent/id "peer"] :seon.message/content "Try again after reading the error."}])
                 (let [next-reports (drive-agent! cluster "agent-a" 10)]
                   (if next-turn?
                     (do
@@ -1427,7 +1426,7 @@
                         (assoc (agent-row "agent-b")
                                :seon.agent/namespace
                                [:seon.ns/name 'my.agents.agent-b])
-                        {:seon.message/id "m-contract-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "violate the published contract" :seon.message/inbox [:seon.agent/id "agent-b"]}])
+                        {:seon.message/id "m-contract-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "violate the published contract"}])
           (drive-agent! cluster "agent-b" 2)
           (let [evaluations
                 (db/q '[:find [(pull ?evaluation
@@ -1503,7 +1502,7 @@
               "the refused definition never enters the shared base")
           (test-support/transacted!
                        connection
-                       [{:seon.message/id "m-agent-a-after-refusal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "call the refused definition" :seon.message/inbox [:seon.agent/id "agent-a"]}])
+                       [{:seon.message/id "m-agent-a-after-refusal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "call the refused definition"}])
           (drive-agent! cluster "agent-a" 2)
           (is (= (pr-str (seon.run/complete "42"))
                  (:seon.eval/shown (last (agent-evaluations @connection))))
@@ -1631,8 +1630,7 @@
                   (db/transact! connection
                                 [{:seon.message/id "m-2"
                                   :seon.message/to [:seon.agent/id "agent-a"]
-                                  :seon.message/content "try again"
-                                  :seon.message/inbox [:seon.agent/id "agent-a"]}])]
+                                  :seon.message/content "try again"}])]
               (is (nil? (:seon.error/kind seeded))
                   "the wake that reopens the agent must commit"))
             (with-redefs [ai/complete
@@ -1681,7 +1679,7 @@
                        :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
                       {:seon.agent/id "agent-a"
                        :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
-                      {:seon.message/id "route-goal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "agent-a"]}])
+                      {:seon.message/id "route-goal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "Generate the program."}])
         (test-support/transacted!
                      connection
                      [{:seon.turn/id route-run :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "route-goal"] :seon.turn/opened-tx "datomic.tx"}])
@@ -3300,7 +3298,7 @@
                               :seon.turn.work/next work}
                              (Date.)))
         (test-support/transacted! connection
-                                  [{:seon.message/id "m-2" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "message B" :seon.message/inbox [:seon.agent/id "agent-a"]}])
+                                  [{:seon.message/id "m-2" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "message B"}])
         (with-redefs [ai/complete
                       (recording-completer
                        requests
@@ -3314,7 +3312,7 @@
                                (Date.)))
           (let [prompt-a (:seon.ai/prompt (first @requests))]
             (is (str/includes? prompt-a "count the widgets"))
-            (is (str/includes? prompt-a ":seon.message/_inbox")
+            (is (str/includes? prompt-a ":seon.message/_to")
                 "the opening message appears as its real REPL read form")
             (is (not (str/includes? prompt-a "message B"))
                 "a message committed after run A opened is absent by
@@ -3540,7 +3538,7 @@
         ;; a second agent with a trigger of its own
         (test-support/transacted! connection
                                 [(agent-row "agent-b")
-                                 {:seon.message/id "m-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "count the sprockets" :seon.message/inbox [:seon.agent/id "agent-b"]}])
+                                 {:seon.message/id "m-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "count the sprockets"}])
         ;; NOBODY reads the conn for the whole run: every offer must
         ;; still return immediately, which is what sliding-1 buys
         (let [offer-results (atom [])

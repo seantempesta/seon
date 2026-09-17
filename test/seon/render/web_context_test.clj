@@ -21,7 +21,7 @@
    (fn [connection server context]
      (flow/pause (:graph context))
      (support/transacted! connection
-                          [{:seon.message/id "context-probe-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A caller-owned context." :seon.message/inbox [:seon.agent/id "root"]}
+                          [{:seon.message/id "context-probe-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A caller-owned context."}
                            {:seon.turn/id "context-probe" :seon.turn/agent [:seon.agent/id "root"] :seon.turn/opened-tx "datomic.tx"}])
      (let [ctx (:ctx context)
            request {:seon.db/db @connection
@@ -195,7 +195,7 @@
            (is (= 200 (.statusCode before)))
            (is (pos? initial))
            (support/transacted! connection
-                                [{:seon.message/id "identity-cache-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A newly connected message." :seon.message/inbox [:seon.agent/id "root"]}])
+                                [{:seon.message/id "identity-cache-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A newly connected message."}])
            (let [after (#'web-test/fetch server "/agent/root")]
              (is (= 200 (.statusCode after)))
              (is (= "A newly connected message."

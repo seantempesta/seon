@@ -2321,7 +2321,6 @@ handle))}}
                (db/transact! connection
                  [{:seon.message/id "context-runtime-wake"
                    :seon.message/to [:seon.agent/id "root"]
-                   :seon.message/inbox [:seon.agent/id "root"]
                    :seon.message/content "Runtime history wake."}])))
           (is (= 204 (.statusCode (post-form server "/agent/root/context"
                                             "action=system-turn"))))

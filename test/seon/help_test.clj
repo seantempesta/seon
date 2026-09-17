@@ -115,7 +115,7 @@
                           [{:seon.agent/id "help"
                             :seon.agent/plan {:my.plan/objective "Observe the new plan"}
                             :seon.agent/settings {:seon.config.ai/no-provider true}}
-                           {:seon.message/id "new-message" :seon.message/to [:seon.agent/id "help"] :seon.message/content "Observe the new message" :seon.message/inbox [:seon.agent/id "help"]}
+                           {:seon.message/id "new-message" :seon.message/to [:seon.agent/id "help"] :seon.message/content "Observe the new message"}
                            {:my.note/id "first-note" :my.note/agent [:seon.agent/id "help"]
                             :my.note/content "Observe the first note"}])]
              (is (:db-after written) (pr-str written))

@@ -62,8 +62,7 @@
              ; A senderless inbox message must count; joining its sender would hide it.
              (let [report (db/transact! connection [{:seon.message/id "trial/pollution"
                                                      :seon.message/to [:seon.agent/id "juniper"]
-                                                     :seon.message/content "Extra instruction"
-                                                     :seon.message/inbox [:seon.agent/id "juniper"]}])]
+                                                     :seon.message/content "Extra instruction"}])]
                (is (nil? (:seon.error/kind report)) (pr-str report)))
              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"initial fixture" (check! @connection)))
              (is (= admitted (check! initial)) "an advancing connection cannot change the checked value")

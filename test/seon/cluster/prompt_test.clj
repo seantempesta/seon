@@ -69,7 +69,7 @@
                            :seon.cluster/name "prompt-walk"
                            :seon.ns/name 'my.agents.walker}))
       (support/transacted! connection
-                         [{:seon.message/id "walk-message" :seon.message/to [:seon.agent/id "walker"] :seon.message/content "inspect this walk" :seon.message/inbox [:seon.agent/id "walker"]}])
+                         [{:seon.message/id "walk-message" :seon.message/to [:seon.agent/id "walker"] :seon.message/content "inspect this walk"}])
       (let [ctx (support/fork-cluster-ctx connection)]
         (record-evaluation! connection ctx "opening-history"
                             "(seon.db/pull [:seon.message/content] [:seon.message/id \"walk-message\"])")
@@ -123,7 +123,7 @@
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection (request connection ctx)))]
        (support/transacted! connection
-                            [{:seon.message/id "later" :seon.message/to [:seon.agent/id "walker"] :seon.message/content "not evaluated yet" :seon.message/inbox [:seon.agent/id "walker"]}])
+                            [{:seon.message/id "later" :seon.message/to [:seon.agent/id "walker"] :seon.message/content "not evaluated yet"}])
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection (request connection ctx)))]
          (is (= before after) "a stored observation changes only through a later evaluation")

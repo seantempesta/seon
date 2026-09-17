@@ -104,7 +104,7 @@
                                           :seon.turn/id "probe-send" :seon.cluster.eval/ordinal 0
                                           :seon.config.message/max-chain 16})
         send-report (d/with seed (:seon.message/rows delivered))
-        inbox-selector '[{:seon.message/_inbox [:seon.message/id :seon.message/content
+        inbox-selector '[{:seon.message/_to [:seon.message/id :seon.message/content
                                                 {:seon.message/from [:seon.agent/id]}]}]
         before (d/pull (:db-after send-report) inbox-selector [:seon.agent/id "recipient"])
         opened (d/with (:db-after send-report)
@@ -119,17 +119,18 @@
                                     :seon.config.message/max-chain 16})
         answer-report (d/with (:db-after opened) (:seon.message/rows answered))
         close-report (d/with (:db-after answer-report)
-                             (turn/close-tx {:seon.turn/id "data-shapes-turn"}))
+                             (into [[:db/add [:seon.turn/id "data-shapes-turn"] :seon.turn/reply-size 1]]
+                                   (turn/close-tx {:seon.turn/id "data-shapes-turn"})))
         listen-report (d/with (:db-after close-report)
                               [{:seon.runtime/agent [:seon.agent/id "recipient"]
-                                :seon.runtime/listens [{:seon.listen/attribute :seon.message/inbox}]}])
+                                :seon.runtime/listens [{:seon.listen/attribute :seon.message/to}]}])
         result (:db-after listen-report)]
     {:seon.test/message-id (:seon.message/id ask)
      :seon.test/before before
      :seon.test/after (d/pull result inbox-selector [:seon.agent/id "recipient"])
      :seon.test/message (d/pull result '[:seon.message/id
                                        {:seon.message/to [:seon.agent/id]}
-                                       {:seon.message/read-tx [:db/id :db/txInstant]}]
+                                       {:seon.turn/_handled [:seon.turn/id]}]
                                [:seon.message/id (:seon.message/id ask)])
      :seon.test/open-id (turn/open-for-agent (:db-after opened) [:seon.agent/id "recipient"])
      :seon.test/closed-id (turn/open-for-agent result [:seon.agent/id "recipient"])
@@ -157,16 +158,17 @@
        ;; Minted message identities come from the one identity derivation, so
        ;; the expected length is derived from it rather than mirrored here.
        (is (= (count (id/id)) (count (:seon.test/message-id probe))))
-       (is (= 1 (count (get-in probe [:seon.test/before :seon.message/_inbox]))))
-       (is (empty? (get-in probe [:seon.test/after :seon.message/_inbox])))
+       (is (= 1 (count (get-in probe [:seon.test/before :seon.message/_to]))))
+       (is (= 1 (count (get-in probe [:seon.test/after :seon.message/_to]))))
        (is (= "recipient" (get-in probe [:seon.test/message :seon.message/to :seon.agent/id])))
-       (is (inst? (get-in probe [:seon.test/message :seon.message/read-tx :db/txInstant])))
+       (is (= [#:seon.turn{:id "data-shapes-turn"}]
+              (get-in probe [:seon.test/message :seon.turn/_handled])))
        (is (= "data-shapes-turn" (:seon.test/open-id probe)))
        (is (nil? (:seon.test/closed-id probe)))
        (is (= 1 (count (:seon.runtime/turns runtime))))
        (is (inst? (get-in recorded-turn [:seon.turn/opened-tx :db/txInstant])))
        (is (inst? (get-in recorded-turn [:seon.turn/closed-tx :db/txInstant])))
-       (is (= :seon.message/inbox (:seon.listen/attribute (first (:seon.runtime/listens runtime)))))))))
+       (is (= :seon.message/to (:seon.listen/attribute (first (:seon.runtime/listens runtime)))))))))
 
 (deftest handling-an-outside-message-retains-its-budget-basis
   (support/with-database
@@ -193,11 +195,11 @@
            basis (turn/outside-wake-t database "outside-recipient")]
        (is (pos? basis))
        (is (= basis (turn/outside-wake-t after "outside-recipient")))
-       (is (empty? (:seon.message/_inbox (d/pull after '[{:seon.message/_inbox [:seon.message/id]}]
-                                                 [:seon.agent/id "outside-recipient"]))))
-       (is (inst? (get-in (d/pull after '[{:seon.message/read-tx [:db/txInstant]}]
-                                  [:seon.message/id message-id])
-                         [:seon.message/read-tx :db/txInstant])))))))
+       (is (= 1 (count (:seon.message/_to (d/pull after '[{:seon.message/_to [:seon.message/id]}]
+                                                 [:seon.agent/id "outside-recipient"])))))
+       (is (= [#:seon.turn{:id "outside-turn"}]
+              (:seon.turn/_handled (d/pull after '[{:seon.turn/_handled [:seon.turn/id]}]
+                                          [:seon.message/id message-id]))))))))
 
 (deftest provider-reasoning-is-retained-only-by-an-explicit-setting
   (support/with-database
@@ -403,7 +405,6 @@
            incoming (d/with (:db-after created)
                             [{:seon.message/id "system-message"
                               :seon.message/to [:seon.agent/id "system-recipient"]
-                              :seon.message/inbox [:seon.agent/id "system-recipient"]
                               :seon.message/content "Still waiting for an answer."}])
            opened (d/with (:db-after incoming)
                           (turn/system-run-tx (:db-after incoming)
@@ -416,7 +417,7 @@
                                                  :seon.ns/name 'my.agents.system-recipient}]}))
            closed (d/with (:db-after opened) (turn/close-tx {:seon.turn/id "system-only"}))
            row (d/pull (:db-after closed)
-                       '[:seon.message/read-tx {:seon.message/inbox [:seon.agent/id]}]
+                       '[:seon.turn/_handled {:seon.message/to [:seon.agent/id]}]
                        [:seon.message/id "system-message"])]
-       (is (= "system-recipient" (get-in row [:seon.message/inbox :seon.agent/id])))
-       (is (nil? (:seon.message/read-tx row)))))))
+       (is (= "system-recipient" (get-in row [:seon.message/to :seon.agent/id])))
+       (is (nil? (:seon.turn/_handled row)))))))

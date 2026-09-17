@@ -5,7 +5,7 @@
                        :seon.render/units
                        [:seon.agent/plan
                         :seon.issue/_agent
-                        :seon.message/_inbox
+                        :seon.message/_to
                         :seon.agent/settings
                         :my.note/_agent
                         :seon.agent/namespace

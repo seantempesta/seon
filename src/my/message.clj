@@ -33,7 +33,7 @@
 
   Returns the stored :seon.message/id, :seon.message/content and endpoint refs.
   Sending inside let or do delivers even when its return value is discarded.
-  Supply :my.message/about to answer a message and remove its inbox edge.
+  Supply :my.message/about to name its subject. Handling is recorded when the turn settles.
 
   Example:
   (my.message/send {:my.message/to \"root\" :my.message/content \"The verification passed.\"})"

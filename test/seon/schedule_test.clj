@@ -184,8 +184,7 @@
                  (db/transact! connection
                                [{:seon.message/id "schedule-test/inbox"
                                  :seon.message/content "A declared concern changed."
-                                 :seon.message/to [:seon.agent/id "root"]
-                                 :seon.message/inbox [:seon.agent/id "root"]}]))))
+                                 :seon.message/to [:seon.agent/id "root"]}]))))
        (is (false? (db/read-evidence-current?
                     @connection (:seon.render.call/read-evidence before)))
            "an initially empty declared reverse concern still invalidates on insertion")

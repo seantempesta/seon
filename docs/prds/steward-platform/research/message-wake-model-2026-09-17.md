@@ -200,3 +200,39 @@ The orchestrator still owes the cold gate and platform proof. Stop here for
 review as assigned; message routing/handling, subject split and origin are
 not implemented or claimed. No reset is needed for this zero-datom deletion;
 no reset-batch change is made.
+
+## Remaining seams resumed — 2026-09-17
+
+Seam 4 was integrated as `78cc3b9b7`; it is not reapplied. Entry status held
+only `src/seon/test/runner.clj` and `test/seon/test_test.clj`. Default PID
+66052 answers MCP. The new open-turn fault note is open. The modeling study
+was read end to end, and PRD §§1h–1i and the updated modeling/Datahike skills
+were read before editing. All remaining schema and consumer changes are
+prepared without publication; the owner permits only read-only default access.
+
+Dependency decisions: Datahike `db/transaction.cljc:1153–1154` supplies the
+mid-transaction database to `:db.fn/call`; duplicate opening and handling
+claims belong there. `:998–1015` sweeps incoming refs but not string tokens.
+Message subject keeps `:my.message/about`'s existing nonempty-string grammar.
+A claim records handling at close; wake answering still compares the wake's
+transaction to the accepted turn's opening transaction. A genuinely newer
+wake cannot be claimed by an older context.
+
+Read-only default probe (18 ms): basis 536871047, Juniper answering basis
+536871039. Current `unanswered-wakes` with `answered? :any` returned `[]`.
+The same `wake/agent-wake-datoms` owner, supplied `#{:seon.message/to}`, found
+message `9f84a5fe` at 536871034, answered=true. This is the ruled derivation
+against a real permanent message edge, not proof of deployed code. Default
+still declares inbox listened and about as ref. No adoption/reset is performed.
+
+Handling seam prepared: listened `to`, turn `handled` refs at close, no
+inbox/read-tx attributes or writers, pending inbox derives unclaimed messages.
+Constructors and reverse readers use the permanent route. Open-call treats
+an existing turn for the same agent as a writer no-op; explicit submitted
+system source still reports busy at its own writer boundary rather than
+constructing evaluations without a newly opened turn. Generic refusal tests
+now exercise a genuinely missing agent. The regression covers two messages
+before opening and one during it: only the former two are claimed at first
+settlement, all three stay visible, and the next turn covers the third.
+Reader syntax and diff whitespace pass. Fast iteration is pending completion
+of the coupled §1h publication; no live implementation proof is claimed.
