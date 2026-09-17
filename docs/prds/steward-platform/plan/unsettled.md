@@ -2971,3 +2971,15 @@ working tree, never Sonnet.
   counted). Observations: symbols still strings in `generate!` (reset
   batch), `render-ai` omits the problem, the outline route needs a datastar
   header.
+- **THE ONE RESET REFUSED at republish** (`reset-republish-50177.log`,
+  151 s): "The source activation closure is missing 2 facts:
+  `seon.cluster/derive-activation`, `seon.cluster/populate-source!`" — the
+  activation names executables as STRINGS while `:seon.fn/sym` is now a
+  symbol; the half-landed symbols seam audits 3 and 4 both hit. Default is
+  DOWN (0/0 clusters) until it converges. Integrator resumed on the CLASS
+  (every function-naming attribute a symbol per the symbols inventory;
+  the `seon.db/q` codec for symbol literals and collection bindings), to
+  prove with a scratch-root reset first. Owner: keep the test work going →
+  astra `test-system-stage1` launched (the selection function over the
+  merged symbol edges). Editing: integrator, message-wake, stage 1; design:
+  error-and-data-model-design.
