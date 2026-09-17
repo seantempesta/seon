@@ -2908,3 +2908,9 @@ working tree, never Sonnet.
   env refusal schemas, the MCP issue). Editing: integrator (rebase),
   private-contracts (one predicate first), audit3-blockers,
   audit2-blockers; design: issue-triage-design; audit 4 + live trial (Opus).
+- **Owner ruling §1k (17:45Z): fail loud in development (throw at the
+  seam under `:panic`), collect in production (`:record` writes faults and
+  continues, triage from the database), and database errors go to the
+  operator's durable fault log, never into the database that refused them.**
+  Folded into the private-contracts lane's F1–F3 (one predicate, one
+  throw-or-record helper on the existing dial).

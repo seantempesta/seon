@@ -375,6 +375,36 @@ Rulings:
   steward agent triaging and launching sub-agents to write contracts and
   sanity-check data in and out. Design note requested before Phase 4.
 
+### 1k. Loud in development, collected in production; one dial (owner, 2026-09-17 17:45Z)
+
+Owner: "We want to fail loud in development and we need the instrumentation
+to help make that happen (so throw instead of catch in dev) and we need the
+production system to keep collecting the errors or to write them to the
+database and then we'll just triage them from there — that should work for
+all but database errors so careful there."
+
+The dial already exists: `:seon.config/on-core-error` `:panic | :record`
+(`resources/seon/schemas/seon.config.edn:62`; `config/default.edn:285` is
+`:panic`; the panic reporter is `src/seon/instrument.clj:451`). The ruling
+extends it to every check the audits are adding:
+- **`:panic` (development):** a contract violation, a refused database read
+  reaching a consumer, or an unknown transaction outcome THROWS at the seam
+  (the instrumentation wrapper for contracts; the one error predicate's
+  consumer helper for reads) with the flat error as ex-data — never caught
+  and relabelled, never carried on as data.
+- **`:record` (production):** the same events are recorded as fault facts
+  through the existing fault committer with their provenance, the flat
+  value is returned, and the system continues; triage happens from the
+  database (the issue detectors read faults).
+- **Database errors are the exception:** when the read or write that failed
+  IS the database (store unavailable, writer refused, connection gone), the
+  fault cannot be written there; it goes to the operator's durable fault
+  log (a file under the process root's logs, the same evidence shape) and
+  the next healthy transaction records the backlog. Recording a database
+  error into the database that refused it is the recursion to design out.
+- One predicate (`seon.error/error?`) decides "is this an error"; one
+  helper decides throw-or-record from the dial; no per-namespace copies.
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.
