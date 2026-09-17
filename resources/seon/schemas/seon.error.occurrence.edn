@@ -40,4 +40,12 @@
   [:seon.instrument/expected {:optional true} :seon.instrument/expected]
   [:seon.instrument/args {:optional true} :seon.instrument/args]
   [:seon.instrument/actual {:optional true} :seon.instrument/actual]
-  [:seon.instrument/actual-size {:optional true} :seon.instrument/actual-size]]}
+  [:seon.instrument/actual-size {:optional true} :seon.instrument/actual-size]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.error.occurrence/cluster
+ :seon.db/ref
+
+ :seon.error.occurrence/evaluation
+ :seon.db/ref
+}

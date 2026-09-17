@@ -35,4 +35,131 @@
                   :contract-violated :seon.instrument/fn
                   :contract-violated-error [:map {:seon.error/class true :seon.render/ai seon.error/instrumentation-prose :seon.render/html seon.error/render-html :error/message "must identify the function whose declared contract was violated"} [:seon.instrument/contract-violated :seon.instrument/contract-violated] [:seon.error/message :seon.error/message]]
  :seon.instrument/registration-failed [:= true]
- :seon.instrument/registration-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.instrument/registration-failed class marker"} [:seon.instrument/registration-failed :seon.instrument/registration-failed] [:seon.error/message :seon.error/message]]}
+ :seon.instrument/registration-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.instrument/registration-failed class marker"} [:seon.instrument/registration-failed :seon.instrument/registration-failed] [:seon.error/message :seon.error/message]]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.instrument/actual-facet-count
+ [:int {:min 0}]
+
+ :seon.instrument/actual-facets
+ [:set :qualified-keyword]
+
+ :seon.instrument/arity
+ [:int {:min 0}]
+
+ :seon.instrument/arity-error
+ [:and
+ [:and
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+   {:seon.db/attributes true}
+   [:seon.instrument/fn :seon.instrument/fn]
+   [:seon.instrument/arity :seon.instrument/arity]
+   [:seon.instrument/declared-arity-count
+    :seon.instrument/declared-arity-count]
+   [:seon.instrument/declared-arities
+    :seon.instrument/declared-arities]]]
+ [:fn
+  {:error/message "arity-refusal-valid?",
+   :gen/gen seon.error/arity-refusal-valid-generator}
+  seon.error/arity-refusal-valid?]]
+
+ :seon.instrument/check
+ [:enum :input :output :guard]
+
+ :seon.instrument/contract-error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.instrument/fn :seon.instrument/fn]
+  [:seon.instrument/arity :seon.instrument/arity]
+  [:seon.instrument/check :seon.instrument/check]
+  [:seon.instrument/explanations :seon.instrument/explanations]
+  [:seon.error/expected-shape :seon.error/expected-shape]
+  [:seon.error/location :seon.error/location]
+  [:seon.error/offending-projection
+   {:optional true}
+   :seon.error/offending-projection]]]
+
+ :seon.instrument/declared-arities
+ [:set
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.instrument.arity/bounds}
+ :seon.db/ref]
+
+ :seon.instrument/declared-arity-count
+ [:int {:min 1}]
+
+ :seon.instrument/declared-facet-count
+ [:int {:min 0}]
+
+ :seon.instrument/declared-facet-digest
+ [:string {:min 64, :max 64}]
+
+ :seon.instrument/declared-facets
+ [:set :qualified-keyword]
+
+ :seon.instrument/explanations
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.instrument.explanations/entity}
+ :seon.db/ref]
+
+ :seon.instrument/refusal-result
+ [:or
+ :seon.instrument/contract-error
+ :seon.instrument/arity-error
+ :seon.instrument/undeclared-error]
+
+ :seon.instrument/registration-error
+ [:and
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.instrument/fn :seon.instrument/fn]
+  [:seon.instrument/registration-observation
+   :seon.instrument/registration-observation]]]
+
+ :seon.instrument/registration-observation
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.instrument/returned-error
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.instrument/undeclared-error
+ [:and
+ [:and
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+   {:seon.db/attributes true}
+   [:seon.instrument/fn :seon.instrument/fn]
+   [:seon.instrument/arity :seon.instrument/arity]
+   [:seon.instrument/returned-error :seon.instrument/returned-error]
+   [:seon.instrument/declared-facet-digest
+    :seon.instrument/declared-facet-digest]
+   [:seon.instrument/declared-facet-count
+    :seon.instrument/declared-facet-count]
+   [:seon.instrument/actual-facet-count
+    :seon.instrument/actual-facet-count]
+   [:seon.instrument/declared-facets
+    {:optional true}
+    :seon.instrument/declared-facets]
+   [:seon.instrument/actual-facets
+    {:optional true}
+    :seon.instrument/actual-facets]]]
+ [:fn
+  {:error/message "facet-counts-agree?",
+   :gen/gen seon.error/facet-counts-agree-generator}
+  seon.error/facet-counts-agree?]]
+}

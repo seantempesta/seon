@@ -278,4 +278,80 @@
              :regressions [:set :seon.db/ref],
              :issue :seon.db/ref,
              :resolved-tx :seon.db/ref,
-             :process [:string {:min 1}]}
+             :process [:string {:min 1}]
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.error/base
+ [:map
+ {:seon.db/attributes true}
+ [:seon.error/at :seon.error/at]
+ [:seon.error/layer :seon.error/layer]
+ [:seon.error/operation :seon.error/operation]
+ [:seon.error/message {:optional true} :seon.error/message]
+ [:seon.error/member {:optional true} :seon.error/member]
+ [:seon.error/expected-key {:optional true} :seon.error/expected-key]
+ [:seon.error/expected-shape
+  {:optional true}
+  :seon.error/expected-shape]
+ [:seon.error/location {:optional true} :seon.error/location]
+ [:seon.error/offending-projection
+  {:optional true}
+  :seon.error/offending-projection]
+ [:seon.error/evidence-items
+  {:optional true}
+  :seon.error/evidence-items]
+ [:seon.error/evidence-unavailable
+  {:optional true}
+  :seon.error/evidence-unavailable]
+ [:seon.error/cause {:optional true} :seon.error/cause]
+ [:seon.error/fix {:optional true} :seon.error/fix]
+ [:seon.error/basis {:optional true} :seon.error/basis]]
+
+ :seon.error/basis
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.basis/entity}
+ :seon.db/ref]
+
+ :seon.error/cause
+ :seon.db/ref
+
+ :seon.error/evidence-items
+ [:set
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.error/evidence-unavailable
+ [:string {:min 1}]
+
+ :seon.error/expected-key
+ [:qualified-keyword {:seon.db/index true}]
+
+ :seon.error/expected-shape
+ [:string {:min 64, :max 64}]
+
+ :seon.error/fix
+ :string
+
+ :seon.error/layer
+ :qualified-keyword
+
+ :seon.error/location
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.location/entity}
+ :seon.db/ref]
+
+ :seon.error/member
+ [:or :qualified-keyword :qualified-symbol]
+
+ :seon.error/offending-projection
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.error/operation
+ [:qualified-symbol {:seon.db/index true}]
+}

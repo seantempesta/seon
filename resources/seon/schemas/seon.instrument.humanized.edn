@@ -1,0 +1,35 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.instrument.humanized/entity
+ [:and
+ [:map
+  {:seon.db/attributes true}
+  [:seon.instrument.humanized/message-count
+   :seon.instrument.humanized/message-count]
+  [:seon.instrument.humanized/messages
+   {:optional true}
+   :seon.instrument.humanized/messages]
+  [:seon.instrument.humanized/omission
+   {:optional true}
+   :seon.instrument.humanized/omission]]
+ [:fn
+  {:error/message "ordered-messages?",
+   :gen/gen seon.error/ordered-messages-generator}
+  seon.error/ordered-messages?]]
+
+ :seon.instrument.humanized/message-count
+ [:int {:min 0}]
+
+ :seon.instrument.humanized/messages
+ [:set
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.instrument.humanized.message/entity}
+ :seon.db/ref]
+
+ :seon.instrument.humanized/omission
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.omission/entity}
+ :seon.db/ref]
+}

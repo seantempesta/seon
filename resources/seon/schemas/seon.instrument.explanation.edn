@@ -1,0 +1,68 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.instrument.explanation/actual
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.projection/entity}
+ :seon.db/ref]
+
+ :seon.instrument.explanation/entity
+ [:and
+ [:map
+  {:seon.db/attributes true}
+  [:seon.instrument.explanation/ordinal
+   :seon.instrument.explanation/ordinal]
+  [:seon.instrument.explanation/schema-location
+   :seon.instrument.explanation/schema-location]
+  [:seon.instrument.explanation/value-location
+   :seon.instrument.explanation/value-location]
+  [:seon.instrument.explanation/expected-shape
+   :seon.instrument.explanation/expected-shape]
+  [:seon.instrument.explanation/problem-type
+   {:optional true}
+   :seon.instrument.explanation/problem-type]
+  [:seon.instrument.explanation/actual
+   {:optional true}
+   :seon.instrument.explanation/actual]
+  [:seon.instrument.explanation/humanized
+   {:optional true}
+   :seon.instrument.explanation/humanized]
+  [:seon.instrument.explanation/humanization-unavailable
+   {:optional true}
+   :seon.instrument.explanation/humanization-unavailable]]
+ [:fn
+  {:error/message "explanation-complete?",
+   :gen/gen seon.error/explanation-complete-generator}
+  seon.error/explanation-complete?]]
+
+ :seon.instrument.explanation/expected-shape
+ [:string {:min 64, :max 64}]
+
+ :seon.instrument.explanation/humanization-unavailable
+ [:string {:min 1}]
+
+ :seon.instrument.explanation/humanized
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.instrument.humanized/entity}
+ :seon.db/ref]
+
+ :seon.instrument.explanation/ordinal
+ [:int {:min 0}]
+
+ :seon.instrument.explanation/problem-type
+ :qualified-keyword
+
+ :seon.instrument.explanation/schema-location
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.location/entity}
+ :seon.db/ref]
+
+ :seon.instrument.explanation/value-location
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.location/entity}
+ :seon.db/ref]
+}

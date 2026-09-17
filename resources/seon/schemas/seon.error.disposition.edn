@@ -1,0 +1,33 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.error.disposition/action
+ [:enum :return :abort-operation :stop-graph]
+
+ :seon.error.disposition/evidence
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.evidence/entity}
+ :seon.db/ref]
+
+ :seon.error.disposition/graph-id
+ [:string {:min 1}]
+
+ :seon.error.disposition/observation
+ [:and
+ [:map
+  {:seon.db/attributes true}
+  [:seon.error.disposition/action :seon.error.disposition/action]
+  [:seon.error.disposition/observer :seon.error.disposition/observer]
+  [:seon.error.disposition/evidence :seon.error.disposition/evidence]
+  [:seon.error.disposition/graph-id
+   {:optional true}
+   :seon.error.disposition/graph-id]]
+ [:fn
+  {:error/message "stop-target-present?",
+   :gen/gen seon.error/stop-target-present-generator}
+  seon.error/stop-target-present?]]
+
+ :seon.error.disposition/observer
+ [:qualified-symbol {:seon.db/index true}]
+}

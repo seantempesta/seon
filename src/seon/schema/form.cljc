@@ -22,36 +22,91 @@
     (some (fn [x] (when (map? x) x)) (rest form))))
 
 (defn- entity-map-form
-  "The structural map in a map declaration with additional constraints."
-  [form]
-  (when (vector? form)
-    (case (first form)
-      :map form
-      :and (some #(when (and (vector? %) (= :map (first %))) %) (rest form))
-      nil)))
+  "Resolve conjunctive entity maps without changing authored reference edges."
+  {:malli/schema [:=> [:cat :map :seon.schema/value] [:or :nil [:vector :seon.schema/value]]]}
+  [forms definition]
+  (letfn [(collect [node active]
+            (cond
+              (and (keyword? node) (get forms node))
+              (if (contains? active node)
+                (throw (ex-info "Cyclic entity declaration."
+                                {:seon.schema/identity node}))
+                (collect (get forms node) (conj active node)))
+              (vector? node)
+              (case (first node)
+                :map [node]
+                :and (mapcat #(collect % active) (remove map? (rest node)))
+                (:ref :schema) (collect (last node) active)
+                [])
+              :else []))
+          (entries [node]
+            (let [body (rest node)] (if (map? (first body)) (rest body) body)))
+          (optional? [entry]
+            (true? (when (map? (second entry)) (:optional (second entry)))))
+          (scalar [node seen]
+            (if (and (keyword? node) (get forms node) (not (contains? seen node)))
+              (scalar (get forms node) (conj seen node)) node))]
+    (when-let [maps (seq (collect definition #{}))]
+      (let [merged
+            (reduce
+             (fn [result entry]
+               (if-let [prior (get result (first entry))]
+                 (do
+                   (when (or (not= (scalar (peek prior) #{}) (scalar (peek entry) #{}))
+                             (and (not (optional? prior)) (optional? entry)))
+                     (throw (ex-info "Conflicting inherited entity member or optionalized required member."
+                                     {:seon.schema/member (first entry)
+                                      :seon.schema/expected prior
+                                      :seon.schema/offending entry})))
+                   (assoc result (first entry) (if (optional? entry) prior entry)))
+                 (assoc result (first entry) entry)))
+             {} (mapcat entries maps))]
+        (into [:map (apply merge (map attr-form-properties maps))]
+              (map merged (distinct (map first (mapcat entries maps)))))))))
 
 (defn map-shape?
-  "True for a map, including a map constrained by an enclosing conjunction."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [form]
-  (boolean (entity-map-form form)))
+  "True for an entity map reached through aliases and every conjunction arm."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.schema/value] :boolean]
+                  [:=> [:cat :map :seon.schema/value] :boolean]]}
+  ([definition] (map-shape? {} definition))
+  ([forms definition] (boolean (entity-map-form forms definition))))
 
 (defn map-entries
-  "Entries of the structural map, without its head and properties."
-  {:malli/schema [:=> [:cat [:or :nil [:sequential :seon.schema/value]]]
-                  [:vector :seon.schema/value]]}
-  [form]
-  (let [body (rest (or (entity-map-form form) form))]
-    (vec (if (map? (first body)) (rest body) body))))
+  "All inherited map entries, with requiredness strengthened and conflicts refused."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.schema/value] [:vector :seon.schema/value]]
+                  [:=> [:cat :map :seon.schema/value] [:vector :seon.schema/value]]]}
+  ([definition] (map-entries {} definition))
+  ([forms definition]
+   (if-let [entity (entity-map-form forms definition)]
+     (subvec entity 2)
+     [])))
 
 (defn schema-properties
-  "Properties of the entity declaration, including a constrained map."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:maybe :map]]}
-  [form]
-  (when-let [value-map (entity-map-form form)]
-    (let [properties (merge (attr-form-properties value-map)
-                            (attr-form-properties form))]
-      (when (seq properties) properties))))
+  "Properties of an entity declaration, including nested constrained maps."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.schema/value] [:or :nil :map]]
+                  [:=> [:cat :map :seon.schema/value] [:or :nil :map]]]}
+  ([definition] (schema-properties {} definition))
+  ([forms definition]
+   (when-let [entity (entity-map-form forms definition)]
+     (not-empty (merge (attr-form-properties entity)
+                       (attr-form-properties definition))))))
+
+(defn extends-schema?
+  "True only for declared alias/conjunction extension edges, never payload mentions."
+  {:malli/schema [:=> [:cat :map :seon.schema/value :qualified-keyword] :boolean]}
+  [forms definition ancestor]
+  (letfn [(extends? [node seen]
+            (cond
+              (= node ancestor) true
+              (and (keyword? node) (get forms node) (not (contains? seen node)))
+              (extends? (get forms node) (conj seen node))
+              (and (vector? node) (#{:and :ref :schema} (first node)))
+              (boolean (some #(extends? % seen) (remove map? (rest node))))
+              :else false))]
+    (extends? definition #{})))
 
 (defn namespaced-properties
   "Qualified Malli properties carried by one authored schema form."
@@ -82,16 +137,16 @@
         (fn [attributes schema-key definition]
           (let [properties (attr-form-properties definition)
                 declared-attributes
-                (when (and (map-shape? definition)
+                (when (and (map-shape? forms definition)
                            (true? (:seon.db/attributes
-                                   (schema-properties definition))))
+                                   (schema-properties forms definition))))
                   (into #{}
                         (keep (fn [entry]
                                 (let [attribute
                                       (when (vector? entry) (first entry))]
                                   (when (qualified-keyword? attribute)
                                     attribute))))
-                        (map-entries definition)))]
+                        (map-entries forms definition)))]
             (cond-> (into attributes declared-attributes)
               (and (qualified-keyword? schema-key)
                    (some #(contains? properties %)

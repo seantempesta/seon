@@ -1,0 +1,26 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.instrument.arity/bounds
+ [:and
+ [:map
+  {:seon.db/attributes true}
+  [:seon.instrument.arity/ordinal :seon.instrument.arity/ordinal]
+  [:seon.instrument.arity/min :seon.instrument.arity/min]
+  [:seon.instrument.arity/max
+   {:optional true}
+   :seon.instrument.arity/max]]
+ [:fn
+  {:error/message "arity-bounds-valid?",
+   :gen/gen seon.error/arity-bounds-valid-generator}
+  seon.error/arity-bounds-valid?]]
+
+ :seon.instrument.arity/max
+ [:int {:min 0}]
+
+ :seon.instrument.arity/min
+ [:int {:min 0}]
+
+ :seon.instrument.arity/ordinal
+ [:int {:min 0}]
+}

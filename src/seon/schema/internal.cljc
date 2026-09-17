@@ -116,6 +116,75 @@
             m/type
             (= :map))))
 
+(defn- assert-error-declaration!
+  "Validate structural error inheritance and the complete owned storage declaration."
+  {:malli/schema [:=> [:cat :map] :nil]}
+  [{:seon.schema/keys [identity definition forms storable-attribute?]}]
+  (when (and (keyword? identity) (map? forms)
+             (or (= :seon.error/base identity)
+                 (form/extends-schema? forms definition :seon.error/base)))
+    (let [entries (form/map-entries forms definition)
+          required (into #{} (keep #(when-not (:optional (second %)) (first %))) entries)
+          base-entries (form/map-entries forms (get forms :seon.error/base))
+          base-members (set (map first base-entries))
+          base-required (into #{} (keep #(when-not (:optional (second %)) (first %))) base-entries)
+          additions (remove base-members required)
+          alias? (keyword? definition)
+          properties (form/schema-properties definition)]
+      (when-not (every? required base-required)
+        (contract-error! identity definition [] :seon.schema/invalid-schema
+                         "An error declaration must retain every required base member."
+                         {:seon.schema/member (first (remove required base-required))}))
+      (when (and (not= :seon.error/base identity) (not alias?) (empty? additions))
+        (contract-error! identity definition [] :seon.schema/invalid-schema
+                         "An error facet requires a non-base domain member." {}))
+      (letfn [(boolean-form? [node seen]
+                (cond
+                  (= :boolean node) true
+                  (and (keyword? node) (get forms node) (not (contains? seen node)))
+                  (boolean-form? (get forms node) (conj seen node))
+                  (vector? node)
+                  (case (first node)
+                    :boolean true
+                    := (boolean? (last node))
+                    :and (boolean (some #(boolean-form? % seen) (remove map? (rest node))))
+                    false)
+                  :else false))
+              (owned-storage! [node seen]
+                (doseq [entry (form/map-entries forms node)
+                        :let [attribute (first entry)
+                              attribute-form (get forms attribute)
+                              attribute-properties (form/attr-form-properties attribute-form)
+                              target (:seon.db/component-schema attribute-properties)]]
+                  (when (and storable-attribute? (not (storable-attribute? attribute)))
+                    (contract-error! identity definition [attribute] :seon.schema/invalid-schema
+                                     "A stored error member must have a storable registered attribute."
+                                     {:seon.schema/member attribute}))
+                  (when (:seon.db/component attribute-properties)
+                    (when-not (and (qualified-keyword? target)
+                                   (form/map-shape? forms (get forms target)))
+                      (contract-error! identity definition [attribute] :seon.schema/invalid-schema
+                                       "An owned error member must declare a complete component schema."
+                                       {:seon.schema/member attribute}))
+                    (when-not (contains? seen target)
+                      (owned-storage! (get forms target) (conj seen target))))))]
+        (when (and (seq additions) (every? #(boolean-form? (get forms %) #{}) additions))
+          (contract-error! identity definition [] :seon.schema/invalid-schema
+                           "A boolean marker alone cannot define an error facet."
+                           {:seon.schema/member (first additions)}))
+        (owned-storage! definition #{identity}))
+      (doseq [property [:seon.render/ai :seon.render/html]
+              :let [entry (find properties property)]
+              :when (and entry (not (qualified-symbol? (val entry))))]
+        (contract-error! identity definition [] :seon.schema/invalid-schema
+                         "An error render property names a qualified function symbol."
+                         {:seon.schema/member property}))
+      (when (not= (contains? properties :seon.render/ai)
+                  (contains? properties :seon.render/html))
+        (contract-error! identity definition [] :seon.schema/invalid-schema
+                         "Declare both error render functions or neither." {}))))
+  nil)
+
 (defn assert-complete-schema!
   "Reject incomplete positions in one compiled schema.
 
@@ -125,7 +194,8 @@
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [{:seon.schema/keys [identity definition compiled role admission
                        predicate-symbols pure-predicate-symbols
-                       canonical-keys]}]
+                       canonical-keys] :as request}]
+  (assert-error-declaration! request)
   (let [authored?
         (= :agent (:seon.schema.admission/source admission))
         advisories (volatile! [])
@@ -225,11 +295,11 @@
   {:malli/schema
    [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :keyword]]}
   [schemas v]
-  (when (form/map-shape? v)
+  (when (form/map-shape? schemas v)
     (some (fn [entry]
             (when-let [k (and (vector? entry) (first entry))]
               (when (identity-attr? schemas k) k)))
-          (form/map-entries v))))
+          (form/map-entries schemas v))))
 
 
 (defn map-required-attrs
@@ -242,33 +312,14 @@
   ([v]
    (map-required-attrs {} v))
   ([schemas v]
-   (letfn [(required [form visited]
-             (cond
-               (and (keyword? form)
-                    (contains? schemas form)
-                    (not (contains? visited form)))
-               (required (get schemas form) (conj visited form))
+   (not-empty
+    (vec (sort-by str
+                  (keep (fn [entry]
+                          (let [k (first entry)]
+                            (when (and (keyword? k) (not= k :malli.core/default)
+                                       (not (:optional (second entry)))) k)))
+                        (form/map-entries schemas v)))))))
 
-               (and (vector? form) (= :map (first form)))
-               (into #{}
-                     (keep (fn [entry]
-                             (when (vector? entry)
-                               (let [k (first entry)
-                                     properties (when (map? (second entry))
-                                                  (second entry))]
-                                 (when (and (keyword? k)
-                                            (not= k :malli.core/default)
-                                            (not (:optional properties)))
-                                   k)))))
-                     (form/map-entries form))
-
-               (and (vector? form) (= :and (first form)))
-               (into #{}
-                     (mapcat #(required % visited))
-                     (remove map? (rest form)))
-
-               :else #{}))]
-     (not-empty (vec (sort-by str (required v #{})))))))
 
 (defn- missing-schema-reference
   [error]

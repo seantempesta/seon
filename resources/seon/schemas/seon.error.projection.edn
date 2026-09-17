@@ -1,0 +1,40 @@
+{
+ ; Additive error declaration manifest, 2026-09-18.
+
+ :seon.error.projection/bound-bytes
+ [:int {:min 1}]
+
+ :seon.error.projection/entity
+ [:and
+ [:map
+  {:seon.db/attributes true}
+  [:seon.error/capped? :seon.error/capped?]
+  [:seon.error.projection/bound-bytes
+   :seon.error.projection/bound-bytes]
+  [:seon.instrument/actual {:optional true} :seon.instrument/actual]
+  [:seon.instrument/actual-size
+   {:optional true}
+   :seon.instrument/actual-size]
+  [:seon.error.projection/missing-member
+   {:optional true}
+   :seon.error.projection/missing-member]
+  [:seon.error.projection/omission
+   {:optional true}
+   :seon.error.projection/omission]]
+ [:fn
+  {:error/message "projection-complete?",
+   :gen/gen seon.error/projection-complete-generator}
+  seon.error/projection-complete?]]
+
+ :seon.error.projection/missing-member
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.key/entity}
+ :seon.db/ref]
+
+ :seon.error.projection/omission
+ [:and
+ {:seon.db/component true,
+  :seon.db/component-schema :seon.error.omission/entity}
+ :seon.db/ref]
+}
