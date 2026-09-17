@@ -3471,3 +3471,11 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   fork regression + gitlink + Seon regression; push is the owner's).
   Option 2 (validator cost on the writer, 11.4 s) is the next performance
   lane after the platform is green.
+- B2 cold gate (`b2-paths-gate.log`, 69 tests): 31F/10E in turn/turn-loop/
+  cluster tests, dominated by `seon.turn/receipt-settle-tx` refusing program
+  rows missing `:seon.ns/name` or carrying lookup-ref vectors where symbols
+  are declared (settlement writes the pre-reset spelling), plus resumed-fold
+  namespace mismatches. The lane's own note reported 11F/10E of "reset
+  fixture drift" on its clean snapshot; the delta is being attributed by a
+  baseline gate at `4feab16ff` from a clean worktree
+  (`b2-baseline-gate.log`). Recording still refused (`test-definition-absent`).
