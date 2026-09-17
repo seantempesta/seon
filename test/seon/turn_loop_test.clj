@@ -446,6 +446,9 @@
                 :seon.turn/id run-id
                 :seon.cluster.eval/ordinal 0})]
           (is (= ending-ns (:seon.sci.eval/ending-ns first-evaluation)))
+          (is (= ending-ns
+                 (get-in first-evaluation
+                         [:seon.program/row :seon.ns/name])))
           (test-support/transacted!
                        connection
                        ;; ABSENT MEANS NO KEY: the settle request marks every terminal
@@ -503,6 +506,8 @@
             (is (= ending-ns resumed-namespace))
             (is (= [:seon.ns/name ending-ns]
                    (:seon.cluster.eval/ns form)))
+            (is (nil? (:seon.cluster.eval/error evaluation))
+                (pr-str evaluation))
             (is (= 'my.generated.after-resume/attributed-after-resume
                    (get-in evaluation
                            [:seon.program/row :seon.fn/sym])))))))))
