@@ -488,9 +488,10 @@
   (let [inputs (test-inputs "." (:seon.dev-cache/digest selection))
         digest (test-digest inputs)
         file (io/file "target/test-classpaths" (str digest ".edn"))
-        _
-        (if (.isFile file)
-          (edn/read-string (slurp file))
+        basis-file (io/file "target/test-classpaths" (str digest ".basis.edn"))
+        resolved
+        (if (and (.isFile file) (.isFile basis-file))
+          (edn/read-string (slurp basis-file))
           (let [basis (b/create-basis {:project "deps.edn" :aliases [:test]})
                 root (.toPath (canonical-file "."))
                 paths (mapv
@@ -501,16 +502,23 @@
                                (if (empty? relative) "." relative))
                              (str canonical))))
                        (:classpath-roots basis))
-                value (str/join java.io.File/pathSeparator
-                                (cons (:seon.dev-cache/path selection) paths))]
+                ordered (into [(:seon.dev-cache/path selection)] paths)
+                value (str/join java.io.File/pathSeparator ordered)
+                resolved {:seon.test/classpath-roots ordered
+                          :seon.test/classpath-root (str (canonical-file "."))
+                          :seon.test/jvm-options (vec (get-in basis [:argmap :jvm-opts]))
+                          :seon.dev-cache/digest (:seon.dev-cache/digest selection)}]
             (atomic-write-edn! file value)
-            value))]
+            (atomic-write-edn! basis-file resolved)
+            resolved))]
     ;; Retain the exact inputs hashed above, so base compatibility compares
     ;; corresponding inputs rather than unrelated aggregate digests.
     (atomic-write-edn! (io/file "target/test-classpaths" (str digest ".inputs.edn"))
                        inputs)
     (assoc selection
            :seon.dev-cache/test-digest digest
+           :seon.dev-cache/test-classpath resolved
+           :seon.dev-cache/test-basis-file (.getCanonicalPath basis-file)
            :seon.dev-cache/test-classpath-file (.getCanonicalPath file))))
 
 (defn- record-process-reference!

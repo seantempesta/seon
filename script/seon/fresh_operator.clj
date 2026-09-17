@@ -6,7 +6,8 @@
             [clojure.string :as str]
             [seon.dev.clj-kondo :as dev.kondo]
             [seon.dev.state :as state]
-            [seon.operator.state :as operator.state])
+            [seon.operator.state :as operator.state]
+            [seon.test.cache :as test.cache])
   (:import [java.io PushbackReader]
            [java.net InetSocketAddress ServerSocket Socket
             SocketTimeoutException]
@@ -393,7 +394,7 @@
 
 (defn- child-jvm-command
   [{:seon.fresh-operator/keys
-    [root jvm-options arguments detach dependency-cache-path]}]
+    [root jvm-options arguments detach dependency-cache-path test-classpath]}]
   (let [root (.getCanonicalPath (io/file root))
         cache-path (some-> dependency-cache-path io/file .getCanonicalPath)
         cache-options
@@ -404,11 +405,16 @@
         child-command
         (into ["clojure"]
               (concat cache-options
+                      (when test-classpath
+                        ["-Scp"
+                         (test.cache/classpath test-classpath
+                                               (:seon.test/classpath-root test-classpath))])
                       [(str "-J-Dseon.operator.root=" root)
                        "-J-Dseon.operator.claimed=true"
                        (str "-J-Dseon.repository.root=" (repository-root))]
                       (when cache-path
                         [(str "-J-Dseon.dependency-cache.path=" cache-path)])
+                      (map #(str "-J" %) (:seon.test/jvm-options test-classpath))
                       jvm-options
                       [(if cache-path "-M:dev:seon-cache" "-M:dev")]
                       arguments))
@@ -457,13 +463,13 @@
          output :seon.operator.subprocess/output}
         (operator.state/run-process!
          {:seon.operator.subprocess/argv
-          ["clojure" "-T:dev-cache" "ensure-cache"]
+          ["clojure" "-T:dev-cache" "ensure-cache" ":test?" "true"]
           :seon.operator.subprocess/deadline-ms
           operator.state/lifecycle-lock-timeout-ms
           :seon.operator.subprocess/directory (str (repository-root))
           :seon.operator.subprocess/merge-error? true})
         lines (str/split-lines output)]
-    (doseq [line lines]
+    (doseq [line (if (zero? exit) (butlast lines) lines)]
       (println line)
       (flush))
     (when-not (zero? exit)
@@ -481,6 +487,9 @@
                      (fs/directory? path))
         (fail! "The dependency cache selected an invalid directory."
                {:seon.dev-cache/path path}))
+      (println "● boot dependency cache:" (:seon.dev-cache/status result)
+               (:seon.dev-cache/namespaces result) "namespaces")
+      (flush)
       result)))
 
 (defn- valid-name!
@@ -1994,8 +2003,9 @@
 
 (defn- launch!
   [root name manifest ready-port adoption-port silence-ms
-   dependency-cache-path]
-  (let [_ (operator.state/claim-root-under-lock!
+   dependency-cache]
+  (let [dependency-cache-path (:seon.dev-cache/path dependency-cache)
+        _ (operator.state/claim-root-under-lock!
            (repository-root) root (ephemeral-owner root) name)
         log (create-log! root name)
         generation (random-uuid)
@@ -2003,6 +2013,7 @@
         (run-child-jvm!
          {:seon.fresh-operator/root root
           :seon.fresh-operator/dependency-cache-path dependency-cache-path
+          :seon.fresh-operator/test-classpath (:seon.dev-cache/test-classpath dependency-cache)
           :seon.fresh-operator/jvm-options
           [(str "-J-Dseon.operator.generation=" generation)
            (str "-J-Dseon.operator.repository-root=" (.getCanonicalPath (repository-root)))
@@ -2328,8 +2339,7 @@
                    (:seon.fresh-operator/name anchor)
                    "; that process owns its original stdout/stderr.\n"))
         (print-started! root name value))
-      (let [dependency-cache (ensure-dependency-cache!)
-            dependency-cache-path (:seon.dev-cache/path dependency-cache)]
+      (let [dependency-cache (ensure-dependency-cache!)]
         (with-open [ready-server
                     (ServerSocket.
                      0 1 (java.net.InetAddress/getLoopbackAddress))
@@ -2341,7 +2351,7 @@
                          (.getLocalPort ready-server)
                          (.getLocalPort adoption-server)
                          silence-ms
-                         dependency-cache-path)
+                         dependency-cache)
                 pid (:seon.fresh-operator/pid launch-result)
                 record
                 (try
@@ -2637,14 +2647,27 @@
                   (.addSuppressed failure# restore-failure#)
                   (throw restore-failure#)))))))))))
 
+(defn- with-test-classpath-form
+  "Carry the resolved loader through publication and the acquired program."
+  [form basis-file]
+  (pr-str
+   `(let [basis# (clojure.edn/read-string (slurp ~basis-file))
+          loader# ((requiring-resolve 'seon.test/test-loader) basis#)]
+      (if (:seon.error/kind loader#)
+        loader#
+        ((deref (ns-resolve 'seon.test (symbol "with-test-loader")))
+         loader# (fn [] ~(read-string form)))))))
+
 (defn- source-process-value!
   [root form]
-  (let [{captured :seon.operator.subprocess/output
+  (let [dependency-cache (ensure-dependency-cache!)
+        {captured :seon.operator.subprocess/output
          exit :seon.operator.subprocess/exit}
         (run-child-jvm!
          {:seon.fresh-operator/root root
           :seon.fresh-operator/dependency-cache-path
-          (:seon.dev-cache/path (ensure-dependency-cache!))
+          (:seon.dev-cache/path dependency-cache)
+          :seon.fresh-operator/test-classpath (:seon.dev-cache/test-classpath dependency-cache)
           :seon.fresh-operator/deadline-ms (publication-bound-ms)
           :seon.fresh-operator/arguments ["-e" form]})
         output (StringBuilder.)
@@ -2715,8 +2738,12 @@
            (terminal-value
             (prepl-eval!
              (:seon.fresh-operator/transport-advertisement anchor)
-             (init-form root name force? changed-paths false
-                        publish-before-fork? development-cluster)
+             (let [form (init-form root name force? changed-paths false
+                                   publish-before-fork? development-cluster)]
+               (if development-cluster
+                 (with-test-classpath-form
+                  form (:seon.dev-cache/test-basis-file (ensure-dependency-cache!)))
+                 form))
              (or (:seon.config.operator/event-silence-backstop-ms request)
                  (publication-bound-ms))
              (fn [event]

@@ -1,5 +1,6 @@
 (ns seon.test-reaching-test
   (:require [clojure.java.io]
+            [clojure.string :as str]
             [clojure.test :as t :refer [deftest is]]
             [malli.instrument]
             [seon.db :as db]
@@ -57,6 +58,17 @@
                 (sut/reaching {:seon.db/db database
                                :seon.test/changed ['absent.function/no-row]}))))))))
 
+(defn- with-indexed-tests [connection namespace-name sources assertion]
+  (let [root (doto (clojure.java.io/file "tmp" (str "reaching-source-" (id/id))) .mkdirs)]
+    (try
+      (spit (clojure.java.io/file root "probe.clj")
+            (str "(ns " namespace-name " (:require [clojure.test] [clojure.java.io] [seon.id] [seon.schema] [malli.instrument]))\n"
+                 (binding [*print-meta* true]
+                   (str/join "\n" (map pr-str sources)))))
+      (support/transacted! connection (functions/rows {:seon.fn/roots [(.getPath root)]}))
+      (assertion)
+      (finally (support/delete-recursively! root)))))
+
 (defn- with-test [connection body assertion]
   (support/seed-cluster! connection "default")
   (let [namespace-name (symbol (str "reaching.probe" (id/id)))
@@ -67,13 +79,8 @@
                    (clojure.core/refer 'clojure.core)
                    (eval source))]
     (try
-      (support/transacted! connection
-                           [{:seon.ns/name namespace-name}
-                            {:seon.test/sym test-symbol
-                             :seon.schema.admission/source :core
-                             :seon.test/ns [:seon.ns/name namespace-name]
-                             :seon.test/source (pr-str source)}])
-      (assertion test-symbol test-var)
+      (with-indexed-tests connection namespace-name [source]
+        #(assertion test-symbol test-var))
       (finally (remove-ns namespace-name)))))
 
 (deftest unchanged-closures-reuse-green-results
@@ -438,14 +445,12 @@
                 (db/pull (db/db connection) [:seon.fn/destroys]
                          [:seon.fn/sym destructive-owner])))
           "the canonical population carries the owner's own :seon.fn/destroys")
-      (support/transacted! connection
-                           [{:seon.ns/name namespace-name}
-                            {:seon.test/sym test-symbol
-                             :seon.schema.admission/source :core
-                             :seon.test/ns [:seon.ns/name namespace-name]
-                             :seon.test/source (pr-str source)
-                             :seon.fn/calls [[:seon.fn/sym destructive-owner]]}])
-      (assertion test-symbol test-var marker)
+      (with-indexed-tests connection namespace-name [source]
+        (fn []
+          (support/transacted! connection
+                               [{:seon.test/sym test-symbol
+                                 :seon.fn/calls [[:seon.fn/sym destructive-owner]]}])
+          (assertion test-symbol test-var marker)))
       (finally
         (support/delete-recursively! marker)
         (remove-ns namespace-name)))))
@@ -674,14 +679,8 @@
                    (clojure.core/refer 'clojure.core)
                    (eval source))]
     (try
-      (support/transacted! connection
-                           [{:seon.ns/name namespace-name}
-                            {:seon.test/sym test-symbol
-                             :seon.schema.admission/source :core
-                             :seon.test/ns [:seon.ns/name namespace-name]
-                             :seon.test/source (pr-str source)
-                             :seon.test/long long-declaration}])
-      (assertion test-symbol test-var marker)
+      (with-indexed-tests connection namespace-name [source]
+        #(assertion test-symbol test-var marker))
       (finally
         (support/delete-recursively! marker)
         (remove-ns namespace-name)))))
@@ -766,21 +765,15 @@
       (clojure.core/refer 'clojure.core)
       (doseq [source (vals sources)] (eval source)))
     (try
-      (support/transacted! connection
-                           (into [{:seon.ns/name namespace-name}]
-                                 (map (fn [[test-symbol source]]
-                                        {:seon.test/sym test-symbol
-                                         :seon.schema.admission/source :core
-                                         :seon.test/ns [:seon.ns/name namespace-name]
-                                         :seon.test/source (pr-str source)}))
-                                 sources))
-      (let [measured (sut/check {:seon.db/connection connection
+      (with-indexed-tests connection namespace-name (vals sources)
+       (fn []
+        (let [measured (sut/check {:seon.db/connection connection
                                  :seon.test/changed [calibration]})
             _ (is (= [calibration] (:seon.test/passed measured)) (pr-str measured))
             allowance (long (max 5000 (* 4 (:seon.test/elapsed-ms measured))))]
         (support/seed-cluster! connection "default"
                                {:seon.test/check-time-limit-ms allowance})
-        (assertion completed unreturned allowance))
+        (assertion completed unreturned allowance))))
       (finally (remove-ns namespace-name)))))
 
 (deftest an-expired-check-reports-the-verdicts-it-already-recorded

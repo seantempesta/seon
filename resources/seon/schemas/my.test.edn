@@ -1,1 +1,4 @@
-{:my.test/check-request :seon.test/check-request}
+{:my.test/check-request
+ [:map {:description "The agent protocol receives its acquired program context and writer through call preparation; test options are validated by seon.test/check."}
+  [:seon.db/connection :seon.db/connection]
+  [:my.program/context :my.program/context]]}

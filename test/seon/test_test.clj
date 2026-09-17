@@ -2,9 +2,112 @@
   "Run admission uses the canonical writer and preserves selected obligations."
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
+            [seon.config :as config]
             [seon.id :as id]
+            [seon.program :as program]
+            [seon.schema :as schema]
+            [seon.sci.eval :as sci.eval]
+            [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
+
+(deftest interpreted-test-bodies-use-the-sci-interrupt-bound
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           evaluation (sci.eval/evaluate
+                       {:seon.sci.eval/ctx ctx
+                        :seon.cluster.eval/source
+                        "(clojure.test/deftest bounded-test (loop [] (recur)))"
+                        :seon.cluster.eval/ns [:seon.ns/name 'seon.test-test]
+                        :seon.sci.admit/caps (config/result-caps (config/defaults))
+                        :seon.sci.eval/time-limit-ms 10000
+                        :seon.config/on-core-error :panic})
+           result (sci.eval/run-test
+                   {:seon.sci.eval/ctx ctx
+                    :seon.test/var (:seon.sci.admit/value evaluation)
+                    :seon.sci.eval/time-limit-ms 50
+                    :seon.db/connection connection})]
+       (is (= 1 (:seon.test/error-count result)) (pr-str result))
+       (is (pos? (count (:seon.test/failure-message result))) (pr-str result))))))
+
+(deftest resolution-follows-admitted-source-and-acquisition
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           before (db/db connection)
+           stale (sci.eval/fork-cluster-ctx ctx before connection)
+           source "(clojure.test/deftest admitted-fileless-test (clojure.test/is (seon.db/database-value? (seon.db/db))))"
+           evaluation (sci.eval/evaluate
+                       {:seon.sci.eval/ctx ctx
+                        :seon.cluster.eval/source source
+                        :seon.cluster.eval/ns [:seon.ns/name 'seon.test-test]
+                        :seon.sci.admit/caps (config/result-caps (config/defaults))
+                        :seon.sci.eval/time-limit-ms 10000
+                        :seon.config/on-core-error :panic})
+           declaration (program/declaration-row (:seon.program/row evaluation) :all :agent)]
+       (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
+       (is (= (id/id source 64) (:seon.program/analyzed-source-digest declaration)))
+       (test-support/transacted! connection [declaration])
+       (let [database (db/db connection)
+             request {:seon.db/db database :seon.db/connection connection
+                      :seon.test/identity 'seon.test-test/admitted-fileless-test
+                      :seon.sci.eval/ctx stale
+                      :seon.schema/projection (schema/projection-from-database database)
+                      :seon.test/class-loader (clojure.lang.RT/baseLoader)}]
+         (is (= :seon.test/program-mismatch (:seon.error/kind (sut/resolve-test request))))
+         (sci.eval/install-evaluated-rows!
+          {:seon.sci.eval/ctx ctx :seon.db/db database
+           :seon.sci.eval/installations
+           [{:seon.program/row declaration :seon.sci.eval/evaluation evaluation}]})
+         (let [worker-result
+               (#'runner/run-task!
+                {:seon.test.runner/task-namespace "seon.test-test"
+                 :seon.test.runner/task-symbols ["seon.test-test/admitted-fileless-test"]}
+                (assoc request :seon.sci.eval/ctx ctx
+                               :seon.db/custody-request {:seon.db/connection connection}))]
+           (is (= {:seon.test.runner/test-count 1 :seon.test.runner/pass-count 1
+                   :seon.test.runner/fail-count 0 :seon.test.runner/error-count 0}
+                  (:seon.test.runner/task-summary worker-result))
+               (pr-str worker-result)))
+         (let [resolved (sut/resolve-test (assoc request :seon.sci.eval/ctx ctx))]
+           (is (runner/var-reference? resolved) (pr-str resolved))
+           (when (runner/var-reference? resolved)
+             (let [result (sut/run-owned
+                           {:seon.test/var resolved
+                            :seon.db/connection connection
+                            :my.program/context
+                            {:seon.sci.eval/ctx ctx :my.program/base-ctx ctx
+                             :seon.db/connection connection}})]
+               (is (= [1 0 0] (mapv result [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count]))))))
+         (let [core-symbol (first (db/q '[:find [?symbol ...]
+                                         :in $ ?namespace
+                                         :where [?ns :seon.ns/name ?namespace]
+                                         [?test :seon.test/ns ?ns]
+                                         [?test :seon.test/sym ?symbol]]
+                                       database 'seon.test-runner-test))
+               resolved (sut/resolve-test
+                         (assoc request :seon.sci.eval/ctx ctx
+                                        :seon.test/identity (symbol core-symbol)))]
+           (is (var? resolved) (pr-str resolved))
+           (let [file (get-in (db/pull database [:seon.fn/file]
+                                      [:seon.test/sym core-symbol])
+                              [:seon.fn/file :db/id])
+                 override (assoc declaration :seon.fn/file file)]
+             (test-support/transacted! connection [override])
+             (sci.eval/install-evaluated-rows!
+              {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+               :seon.sci.eval/installations
+               [{:seon.program/row override :seon.sci.eval/evaluation evaluation}]})
+             (let [resolved (sut/resolve-test
+                             (assoc request :seon.sci.eval/ctx ctx
+                                            :seon.db/db (db/db connection)))]
+               (is (and (runner/var-reference? resolved) (not (var? resolved)))
+                   "Agent provenance wins even when a core file coordinate remains."))))
+         (is (= :seon.test/identity-unresolved
+                (:seon.error/kind
+                 (sut/resolve-test (assoc request :seon.sci.eval/ctx ctx
+                                         :seon.test/identity 'seon.test-test/no-such-test))))))))))
 
 (deftest recording-derives-only-missing-admission-at-the-writer
   (test-support/with-database

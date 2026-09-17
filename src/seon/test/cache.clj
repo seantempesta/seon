@@ -3,6 +3,7 @@
   (:require [babashka.process :as process]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [seon.fs :as fs]
             [seon.test.bounds :as bounds]
             [seon.test.selection :as selection])
@@ -15,6 +16,16 @@
 (defn- read-edn [file]
   (when (.isFile (io/file file))
     (edn/read-string (slurp file))))
+
+(defn classpath
+  "Resolve the tool-produced ordered roots against one checkout."
+  {:malli/schema [:=> [:cat :seon.test/classpath :string] :string]}
+  [basis checkout]
+  (str/join java.io.File/pathSeparator
+            (map (fn [path]
+                   (let [file (io/file path)]
+                     (.getPath (if (.isAbsolute file) file (io/file checkout path)))))
+                 (:seon.test/classpath-roots basis))))
 
 (defn- snapshot-git-sha [snapshot]
   (let [ledger (io/file snapshot "test-run.txt")]
@@ -149,7 +160,7 @@
                 ["/bin/cp" "-cRP" (str (io/file seed path)) (str destination)]
                 ["cp" "-a" "--reflink=auto" (str (io/file seed path)) (str destination)])))))
 
-(defn- ensure-base! [source snapshot digest classpath pid]
+(defn- ensure-base! [source snapshot digest basis-file pid]
   (let [parent (.getCanonicalFile (io/file source "target" "test-published-bases"))
         directory (io/file parent digest)
         base (io/file directory "base")
@@ -158,6 +169,7 @@
         reference (io/file directory "references" (str pid ".edn"))
         handle (.orElseThrow (ProcessHandle/of (Long/parseLong pid)))
         lock (io/file source "target" "dev-dependency-cache.lock")
+        basis (read-edn basis-file)
         started (System/nanoTime)]
     (.mkdirs (.getParentFile lock))
     (with-open [file (RandomAccessFile. lock "rw")
@@ -183,11 +195,13 @@
                      (when seed (select-keys seed [::digest ::changes])))
             (flush)
             (child! checkout
-                    (cond-> ["clojure" "-Scp" classpath
+                    (cond-> (into ["clojure" "-Scp" (classpath basis (str checkout))]
+                                  (concat (map #(str "-J" %) (:seon.test/jvm-options basis))
+                                          [
                              (str "-J-Dseon.operator.root=" base)
                              (str "-J-Dseon.test.root=" snapshot)
                              (str "-J-Dseon.test.source-root=" source)
-                             "-M:test" "-m" "seon.test.runner" "--prepare-base" (str base)]
+                             "-M:test" "-m" "seon.test.runner" "--prepare-base" (str base)]))
                       seed (conj (pr-str (::changes seed)))))
             (when-not (and (.isDirectory (io/file base "data" "store"))
                            (.isFile (io/file base "manifest.edn")))

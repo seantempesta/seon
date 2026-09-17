@@ -1,8 +1,16 @@
 (ns seon.test-cache-test
   "Compatibility compares the inputs the existing cache owner digests."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [seon.test.cache :as cache]
             [seon.test.selection :as selection]))
+
+(deftest resolved-classpath-preserves-order-and-rebases-only-checkout-roots
+  (let [basis {:seon.test/classpath-root "/original"
+               :seon.test/classpath-roots ["/cache/classes" "src" "." "/deps/library.jar"]}]
+    (is (= (str/join java.io.File/pathSeparator
+                    ["/cache/classes" "/worker/src" "/worker/." "/deps/library.jar"])
+           (cache/classpath basis "/worker")))))
 
 (deftest retained-base-compatibility-is-per-input
   (let [digests (selection/input-digests ".")

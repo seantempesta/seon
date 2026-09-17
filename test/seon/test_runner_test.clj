@@ -270,8 +270,9 @@
    "    printf '%s\\n' \"$*\" >\"$SEON_FAKE_CACHE_CALL\"\n"
    "  fi\n"
    "  printf '\"fixture-classpath\"\\n' >\"$SEON_FAKE_CACHE_PATH/classpath.edn\"\n"
-   "  printf '#:seon.dev-cache{:digest \"%s\", :test-digest \"%s\", :path \"%s\", :test-classpath-file \"%s/classpath.edn\"}\\n' \\\n"
-   "    \"$SEON_FAKE_CACHE_DIGEST\" \"$SEON_FAKE_CACHE_DIGEST\" \"$SEON_FAKE_CACHE_PATH\" \"$SEON_FAKE_CACHE_PATH\"\n"
+   "  printf '#:seon.test{:classpath-roots [\"/fixture-classpath\"], :classpath-root \".\", :jvm-options []}\\n' >\"$SEON_FAKE_CACHE_PATH/basis.edn\"\n"
+   "  printf '#:seon.dev-cache{:digest \"%s\", :test-digest \"%s\", :path \"%s\", :test-classpath-file \"%s/classpath.edn\", :test-basis-file \"%s/basis.edn\"}\\n' \\\n"
+   "    \"$SEON_FAKE_CACHE_DIGEST\" \"$SEON_FAKE_CACHE_DIGEST\" \"$SEON_FAKE_CACHE_PATH\" \"$SEON_FAKE_CACHE_PATH\" \"$SEON_FAKE_CACHE_PATH\"\n"
    "  exit 0\n"
    "fi\n"))
 
@@ -1826,7 +1827,7 @@
          "done\n"
          "if [ \"$prepare\" = true ]; then mkdir -p \"${!#}/data/store\"; echo '{}' > \"${!#}/manifest.edn\"; exit 0; fi\n"
          "test \"$1\" = -Scp\n"
-         "test \"$2\" = fixture-classpath\n"
+         "test \"$2\" = /fixture-classpath\n"
          "test -f workers/pool-1/.gitignore\n"
          "test ! -L workers/pool-1/.gitignore\n"
          "test -d workers/pool-1/docs\n"

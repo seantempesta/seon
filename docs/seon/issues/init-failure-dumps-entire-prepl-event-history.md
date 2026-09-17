@@ -102,6 +102,19 @@ permitted to do. Source-exact verdict.
 
 surface: operator
 
+## Stage 2 loader observation — 2026-09-17
+
+The expanded fast run in `tmp/stage2-resolution-sixth-current-fast.log`
+reproduced this face from an owned scratch reset: its failure block was
+409,401 bytes, with a 30,936-byte longest line. A draft loader lookup
+incorrectly resolved a syntax-quoted private symbol; the resulting exception
+included the generated prepl form and its inline classpath basis repeatedly.
+The loader lookup is corrected, and the handoff now names the tool's existing
+immutable basis artifact instead of embedding its roots in the generated
+form. This removes that new source of diagnostic expansion. The general
+operator failure face remains this issue's outstanding scope; no new clipping
+point was added.
+
 Fix sketch: retain `output` to `logs/current-source-failure.log` (the hook
 already names that file) and let the failure data carry the log path plus a
 bounded tail, so `prn` of the data is small by construction rather than by

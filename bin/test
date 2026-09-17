@@ -883,10 +883,15 @@ test_classpath_file=$(bb -e '
   (require (quote [clojure.edn :as edn]))
   (print (or (:seon.dev-cache/test-classpath-file
               (edn/read-string (first *command-line-args*))) ""))' "$dev_cache_result")
+test_basis_file=$(bb -e '
+  (require (quote [clojure.edn :as edn]))
+  (print (or (:seon.dev-cache/test-basis-file
+              (edn/read-string (first *command-line-args*))) ""))' "$dev_cache_result")
 snapshot_digest=
-if [ -n "$test_classpath_file" ]; then
-  test_classpath=$(bb -e '(require (quote [clojure.edn :as edn]))
-    (print (edn/read-string (slurp (first *command-line-args*))))' "$test_classpath_file")
+if [ -n "$test_classpath_file" ] && [ -f "$test_basis_file" ]; then
+  test_classpath=$(bb -e '(require (quote [clojure.edn :as edn]) (quote [seon.test.cache :as cache]))
+    (print (cache/classpath (edn/read-string (slurp (first *command-line-args*)))
+                            (second *command-line-args*)))' "$test_basis_file" "$run_root")
   snapshot_digest=$(bb -e '
     (require (quote [clojure.edn :as edn]))
     (print (:seon.dev-cache/test-digest (edn/read-string (first *command-line-args*))))' "$dev_cache_result")
@@ -896,10 +901,9 @@ if [ -n "$test_classpath_file" ]; then
     exit 1
   fi
 else
-  # A --paths snapshot can predate this launcher's cache protocol. Its own
-  # runner and dependency producer remain authoritative for that invocation.
-  echo "bin/test: snapshot predates cached classpaths; using its test classpath"
-  test_classpath=$(clojure -Spath -M:test)
+  announce_phase_failure dependency-cache-and-classpath \
+    "the dependency cache returned no resolved test classpath"
+  exit 1
 fi
 printf 'snapshot-digest=%s\n' "$snapshot_digest" >>"$run_root/test-run.txt"
 
@@ -1009,7 +1013,7 @@ begin_phase published-base
 echo "bin/test: preparing or reusing published test base $snapshot_digest"
 if [ -n "$snapshot_digest" ]; then
   launch_runner bb --config "$run_root/bb.edn" -m seon.test.cache \
-    "$source_root" "$run_root" "$snapshot_digest" "$test_classpath" "$$"
+    "$source_root" "$run_root" "$snapshot_digest" "$test_basis_file" "$$"
 else
   launch_runner clojure -Scp "$test_classpath" \
     "-J-Dseon.operator.root=$shared_published_base" \
@@ -1061,6 +1065,7 @@ if [ -n "$persistent_results_root" ]; then
 fi
 
 launch_runner clojure -Scp "$test_classpath" \
+  "-J-Dseon.test.classpath-basis=$test_basis_file" \
   "${coordinator_jvm_arguments[@]}" \
   -M:test -m seon.test.runner \
   "${result_cluster:--}" "$result_root" "$git_sha" "$selection_mode" \

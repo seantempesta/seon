@@ -7,6 +7,100 @@ tags: [test, database, admission, stage-2]
 
 # Test recording and pre-execution admission
 
+## Continuing resolution after the launcher release
+
+The launcher and guardrails edits landed before this continuation touched
+their files; clean status was checked first. The draft is now applied in the
+main tree. The schema hook admits prospective files against source already
+on disk: admitting the new source-digest declaration first, then the
+predicate owner, then its referencing schemas resolved the earlier refusal.
+The complete candidate population independently compiled successfully.
+
+The isolated `stage2` cluster was stopped before returning to fast snapshots.
+Its final resolution proof returned **7 passes, 0 failures, 0 errors** through
+the actual worker function and `run-owned`. This is iteration evidence, not
+the orchestrator's cold gate or default proof. Exact JVM REPL form:
+
+```clojure
+(let [connection (seon.operator/connection "stage2")
+      database (seon.db/db connection)]
+  (select-keys
+   (seon.test/run #'seon.test-test/resolution-follows-admitted-source-and-acquisition
+     connection
+     {:seon.db/db database
+      :seon.test.run/provenance (seon.test.runner/provenance database)
+      :seon.test/remaining-ms 240000})
+   [:seon.test/sym :seon.test/pass-count :seon.test/fail-count
+    :seon.test/error-count :seon.error/kind :seon.error/message
+    :seon.test/failure-message]))
+```
+
+That run took 48,875 ms against scratch source commit
+`6aab8a39-72fc-5348-b845-321ced396562`. The scratch root was
+`tmp/stage2-wt/tmp/stage2-root`; default was never explicitly evaluated,
+started, stopped, or adopted. Edit hooks retain their configured publication
+behavior; no convergence or default proof is claimed.
+
+Main-tree fast iterations, all foreground `timeout 2400`, one at a time,
+with explicit owned paths and no environment overrides:
+
+- **Current resolution slice:** `tmp/stage2-resolution-seventh-current-fast.log`,
+  **56 tests, 402 assertions, 0 failures, 0 errors**, exit 0. Namespaces:
+  `seon.test-test`, `seon.test.runner-test`, `my.test-test`,
+  `seon.test-reaching-test`, `seon.test-cache-test`. This proves the latest
+  acquisition contract and retained-file override regression. The operator
+  and shell-launcher regressions still require their separate expanded run;
+  cold gate and default proof remain the orchestrator's work.
+- `tmp/stage2-resolution-current-fast.log`: **53 tests, 323 assertions,
+  0 failures, 9 errors**. Synthetic namespace requires were missing; the
+  agent fixture had no admitted definition row.
+- `tmp/stage2-resolution-second-current-fast.log`: **53 tests, 367 assertions,
+  9 failures, 1 error**. Synthetic source printing dropped Var metadata;
+  reacquisition erased the fixture's fork generation. The fixture now prints
+  metadata and acquires the base before creating the agent fork.
+- `tmp/stage2-resolution-fifth-current-fast.log`: **56 tests, 401 assertions,
+  0 failures, 0 errors**, including the agent's `my.test/check` and
+  `my.test/run`, admitted fileless resolution, SCI interruption and classpath
+  root rebasing. Later adoption-form and acquisition-contract refinements
+  require the subsequent run; this tally does not cover them.
+- `tmp/stage2-resolution-sixth-current-fast.log`: expanded to operator and
+  launcher namespaces; **interrupted by TERM, exit 143, no final tally**.
+  Failures exposed a generated `ns-resolve` symbol incorrectly qualified by
+  syntax-quote, a one-arity publication fault fixture, a keyword wildcard pull,
+  an obsolete bound assertion and old launch/cache-output expectations. The
+  draft fixes these; the interrupted run is not a proof. Its snapshot
+  `tmp/test-runs/run.YLZTQO` was removed by the launcher's TERM trap.
+
+The classpath handoff now reads the tool owner's immutable basis artifact in
+the adopting JVM, instead of embedding the entire basis in its prepl form.
+`dev_cache.clj` owns tools.build resolution; `seon.test.cache/classpath`
+rebases repository-relative roots while preserving ordered absolute roots.
+The operator, fixture publication and cold worker consume that same value,
+including alias JVM options. The old paths-only reader and worker classpath
+fallback are removed. Loader construction refuses a different already-loaded
+dependency cache; adding URLs cannot replace JVM classes.
+
+Dependency ledger: tools.build's `create-basis` supplies the resolved roots
+through the existing `dev_cache.clj/test-classpath!`; Clojure's
+`reference-code/clojure/src/jvm/clojure/lang/RT.java:2168` supplies the current
+Compiler/context loader; SCI's existing acquisition, fork and interrupt
+owners remain `src/seon/sci/eval.clj` and
+`reference-code/sci/src/sci/interrupt.cljc`. The worker primes only after
+`initialize-contracts!`, so SCI copies armed roots. This incorporates the
+pending worker-order hunk documented by `3170a0060`; the broader cold-worker
+instrumentation work remains its owning lane's boundary.
+
+These are draft defects, not foreign failures. The admitted fileless
+resolution regression passed in both runs. Claim/completion and unchanged
+request reuse remain outstanding. The cross-branch scheduling boundary also
+needs an authority decision: a pure transaction can serialize claims within
+its authority database, but cannot inspect another branch's uncommitted
+claims. The three options raised are one designated authority cluster per
+JVM (one writer, explicit routing), per-authority serialization only (simpler,
+no cross-branch guarantee), or a JVM execution boundary in addition to writer
+claims (extra mechanism). Pure transaction work does not by itself establish
+the cross-branch scheduling guarantee.
+
 ## Continuation after launcher release: callback prerequisite
 
 The preserved draft applies to HEAD `5dd6ef7cc`. Main-tree schema admission
@@ -44,8 +138,8 @@ edit, not a diagnosis of the other lane's final change. No shared launcher
 bytes or foreign session were changed. The owner's explicit “stop … at any
 held file” rule applies here.
 
-The unapplied work is retained in
-[the resolution draft](test-system-stage2-resolution-pending-2026-09-17.patch),
+The then-unapplied work was retained in the resolution patch at commit
+`b6562f1ce` (Git history preserves its exact bytes),
 against **19251d6469f0b87e7512f6dbd022dbb1a49db9ba**. It is **incomplete and
 not approved production code**. It contains the acquisition-evidence draft,
 provenance-based resolution, an analyzer-written source digest, the loader

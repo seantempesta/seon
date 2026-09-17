@@ -285,11 +285,18 @@
       (finally (test-support/delete-recursively! root)))))
 
 (deftest default-red-does-not-launch-confirmation
-  (let [task {::runner/task-id "default-red"
+  (test-support/with-database
+   (fn [connection]
+    (let [database (db/db connection)
+          resolution {:seon.db/db database :seon.db/connection connection
+                      :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
+                      :seon.schema/projection (schema/projection-from-database database)
+                      :seon.test/class-loader (clojure.lang.RT/baseLoader)}
+          task {::runner/task-id "default-red"
               ::runner/task-ordinal 0
               ::runner/task-namespace "seon.test-runner-failure-fixture"
               ::runner/task-symbols ["seon.test-runner-failure-fixture/failing-example"]}
-        red (assoc (#'runner/run-task! task) ::runner/executed-by "pool-1")
+        red (assoc (#'runner/run-task! task resolution) ::runner/executed-by "pool-1")
         launches (atom 0)
         outcome (atom nil)]
     (with-out-str
@@ -313,7 +320,7 @@
              #'seon.test-runner-failure-fixture/failing-example]
             #{"seon.test-runner-failure-fixture/failing-example"})))
     (is (thrown? clojure.lang.ExceptionInfo
-                 (#'runner/confirmation-vars [] #{"missing/test"})))))
+                 (#'runner/confirmation-vars [] #{"missing/test"})))))))
 
 (deftest initialization-acquires-one-projection
   ;; TWO call shapes, ONE acquisition between them. `arm/initialize-contracts!`

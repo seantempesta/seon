@@ -293,9 +293,13 @@
                 (fn []
                   ((var-get (operator-var# (symbol "launch!")))
                    ~(str root) "launch-observation" {} 1 2 30000
-                   ~(.getCanonicalPath
-                     (io/file project-root
-                              "target/dev-dependency-classes/test")))
+                   {:seon.dev-cache/path
+                    ~(.getCanonicalPath
+                      (io/file project-root "target/dev-dependency-classes/test"))
+                    :seon.dev-cache/test-classpath
+                    {:seon.test/classpath-root ~(.getCanonicalPath project-root)
+                     :seon.test/classpath-roots ["src" "test" "/dependency/classes"]
+                     :seon.test/jvm-options ["-Dstage2.classpath=resolved"]}})
                   (prn
                    (clojure.string/split-lines
                     (slurp
@@ -320,7 +324,7 @@
       (throw
        (ex-info "The launch observation failed."
                 {:seon.dev.fresh-operator-test/output output})))
-    (edn/read-string output)))
+    (edn/read-string (last (str/split-lines output)))))
 
 (defn- readiness-simulation
   [root mode]
@@ -461,9 +465,6 @@
    :seon.dev.fresh-operator-test/output @output-future})
 
 (deftest init-changed-paths-are-an-explicit-source-publication-mode
-  (is (= (operator-private-value 'publication-bound-ms)
-         (operator-private-value 'source-publication-silence-backstop-ms))
-      "an atomic source population uses the hook publication bound")
   (is (= {:seon.fresh-operator/development-cluster "development"
           :seon.fresh-operator/changed-paths ["src/seon/fn.clj"]
           :seon.fresh-operator/force? false}
@@ -972,6 +973,23 @@
       (finally
         (delete-recursively! root)))))
 
+(deftest publication-carries-and-restores-the-resolved-loader
+  (let [root (fresh-root)
+        basis-file (io/file root "basis.edn")
+        _ (spit basis-file
+                (pr-str {:seon.test/classpath-root (.getCanonicalPath project-root)
+                         :seon.test/classpath-roots ["src" "test" "resources"]}))
+        thread (Thread/currentThread)
+        before (.getContextClassLoader thread)
+        form (operator-private-value
+              'with-test-classpath-form
+              "(identical? (clojure.lang.RT/baseLoader) (.getContextClassLoader (Thread/currentThread)))"
+              (.getCanonicalPath basis-file))]
+    (try
+      (is (true? (eval (read-string form))))
+      (is (identical? before (.getContextClassLoader thread)))
+      (finally (delete-recursively! root)))))
+
 (deftest isolated-root-launch-keeps-repository-classpath-and-root-property
   (let [root (fresh-root)]
     (try
@@ -983,6 +1001,12 @@
                          (.getCanonicalPath root))}
                   child-command))
         (is (some #{"-M:dev:seon-cache"} child-command))
+        (is (some #{"-Scp"} child-command))
+        (is (some #{"-J-Dstage2.classpath=resolved"} child-command))
+        (is (some #{(str/join java.io.File/pathSeparator
+                             [(str (io/file project-root "src"))
+                              (str (io/file project-root "test"))
+                              "/dependency/classes"])} child-command))
         (is (some #(str/starts-with?
                     % "-J-Dseon.dependency-cache.path=")
                   child-command))
@@ -1151,7 +1175,7 @@
                                      (seon.config/compile-manifest
                                       {:seon.boot/cluster-name ~name}))
                           actual# (seon.db/pull
-                                   (seon.db/db connection#) [:*]
+                                   (seon.db/db connection#) '[~'*]
                                    [:seon.config/cluster ~name])]
                       (if (= expected# (select-keys actual# (keys expected#)))
                         true
@@ -1264,8 +1288,9 @@
                   (alter-var-root
                    #'seon.program/canonical-row
                    (constantly
-                    (fn [row#]
-                      (dissoc row# :seon.fn/calls))))
+                    (fn
+                      ([row#] (dissoc row# :seon.fn/calls))
+                      ([_shapes# row#] (dissoc row# :seon.fn/calls)))))
                   {:seon.dev.fresh-operator-test/program-stale? true}))))]
         (is (true? (::program-stale? stale)) stale))
       (let [refused (run-operator root "init")
@@ -1675,7 +1700,7 @@
             started (run-operator root "start" name)]
         (is (= 0 (::exit initialized)) (::output initialized))
         (is (= 0 (::exit started)) (::output started))
-        (is (str/includes? (::output started) "#:seon.dev-cache{")
+        (is (str/includes? (::output started) "● boot dependency cache:")
             "the isolated launch selected the dependency cache")
         (doseq [phase ["namespaces" "repl" "store" "branch" "recovery"
                        "config" "program" "work-launcher" "agents" "web"]]

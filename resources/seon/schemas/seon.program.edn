@@ -1,4 +1,8 @@
-{:seon.program/identity-attribute
+{:seon.program/analyzed-source-digest
+ [:and {:seon.db/identity false
+        :description "Digest of the exact source whose program relations were analyzed; absence is unknown analysis, never an empty relation."}
+  :seon.source/digest]
+ :seon.program/identity-attribute
  [:enum :seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym
   :seon.fn.file/relative-path :seon.lint/id]
  :seon.program/source-attribute

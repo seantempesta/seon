@@ -968,6 +968,66 @@
 
 (declare base-bindings)
 
+(defn acquired-program
+  "Return the database and refusal report actually acquired by this context.
+
+  Evidence follows the existing program snapshot through reacquisition and
+  forks. A resolvable Var alone is not evidence of an acquired program."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.test/acquisition]}
+  [ctx]
+  (let [snapshot (some-> (::kernel/program-snapshot ctx) deref)]
+    (assoc (select-keys snapshot [:seon.db/db :seon.test/class-loader])
+           :seon.test/acquisition-refusals
+           (vec (get-in snapshot [::acquisition ::acquisition-refusals])))))
+
+(defn- installation-covers-program-change?
+  [before after installations projection]
+  (let [identities (set (map (comp program/row-identity :seon.program/row)
+                             installations))
+        shapes (program/shapes-in (:seon.schema.projection/forms projection))
+        history (db/history after)
+        changed-database (db/since history (db/basis-t before))
+        components (into []
+                         (keep (fn [[attribute properties]]
+                                 (when (:db/isComponent properties) attribute)))
+                         (:schema (db/schema-database after)))
+        touched (db/q '[:find [?entity ...] :where [?entity]] changed-database)
+        parents (when-not (or (:seon.error/kind components) (:seon.error/kind touched))
+                  (loop [frontier touched seen #{}]
+                    (if (empty? frontier)
+                      seen
+                      (let [incoming (db/q '[:find [?parent ...]
+                                             :in $ [?child ...] [?attribute ...]
+                                             :where [?parent ?attribute ?child]]
+                                           history frontier components)]
+                        (when-not (:seon.error/kind incoming)
+                          (recur (vec (remove seen incoming)) (into seen incoming)))))))
+        entities (db/q '[:find [?entity ...]
+                         :in $ [?attribute ...]
+                         :where [?entity ?attribute]]
+                       (db/since (db/history after) (db/basis-t before))
+                       program/identity-attributes)
+        changed (db/q '[:find [?entity ...]
+                        :in $ $changed [?attribute ...]
+                        :where [$changed ?entity] [?entity ?attribute]]
+                      after (db/since (db/history after) (db/basis-t before))
+                      program/identity-attributes)]
+    (when (and parents (not (:seon.error/kind entities)) (not (:seon.error/kind changed)))
+      (let [eids (vec (set (concat entities changed parents)))
+            old (db/pull-many before '[*] eids)
+            current (db/pull-many after '[*] eids)]
+        (and (not (:seon.error/kind old)) (not (:seon.error/kind current))
+             (every?
+              (fn [[eid old-row current-row]]
+                (let [identity (or (program/row-identity current-row)
+                                   (program/row-identity old-row))]
+                  (or (nil? identity)
+                      (contains? identities identity)
+                      (and (not (contains? parents eid))
+                           (= (program/canonical-row shapes old-row)
+                              (program/canonical-row shapes current-row))))))
+              (map vector eids old current)))))))
+
 (defn install-evaluated-rows!
   "Install committed rows from the evaluations that produced them.
 
@@ -1033,6 +1093,12 @@
       installations))]
       (when-let [snapshot (::base-bindings agent-ctx)]
         (reset! snapshot (base-bindings ctx)))
+      (when-let [before (:seon.db/db (acquired-program ctx))]
+        (when (and (not-any? :seon.error/kind installed)
+                   (installation-covers-program-change?
+                    before db installations (context-projection ctx)))
+          (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
+            (swap! (::kernel/program-snapshot target) assoc :seon.db/db db))))
       installed))
 
 (defn- classpath-locatable?
@@ -1973,6 +2039,9 @@
              acquired (acquire-program! {:seon.sci.eval/ctx ctx
                                  :seon.db/db database
                                  :seon.schema/projection projection})]
+         (swap! (::kernel/program-snapshot ctx) assoc
+                :seon.db/db database ::acquisition acquired
+                :seon.test/class-loader (clojure.lang.RT/baseLoader))
          (assoc ctx ::acquisition acquired))))))
 
 (defn acquire!
@@ -2054,7 +2123,8 @@
           :seon.db/connection :seon.sci.eval/projection-state]
      :seon.sci.eval/ctx]]}
   ([base-ctx db connection]
-   (fork-cluster-ctx base-ctx db connection nil))
+   (fork-cluster-ctx base-ctx db connection
+                     (projection-state db (schema/projection-from-database db))))
   ([base-ctx db connection supplied-projection-state]
    (let [projection (or (:seon.schema/projection
                          (some-> supplied-projection-state deref))
@@ -2867,6 +2937,35 @@
    (or (:seon.cluster.eval/error evaluation)
        (str "Candidate test " test-symbol " could not be evaluated."))})
 
+(defn run-tests
+  "Invoke the selected-Var capture owner under this SCI context's bound."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+               [:seon.test/vars [:vector :seon.test/var]]
+               [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+               [:seon.db/connection {:optional true} :seon.db/connection]]]
+    [:or :seon.test.runner/captured-results :seon.test/not-runnable-error]]}
+  [{ctx :seon.sci.eval/ctx test-vars :seon.test/vars
+    limit :seon.sci.eval/time-limit-ms :as request}]
+  (let [armed (kernel/arm ctx limit)]
+    (try
+      (test.runner/run-vars! test-vars request)
+      (finally ((::kernel/stop! armed))))))
+
+(defn run-test
+  "Invoke one Var through the selected-Var capture owner under the SCI bound."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+               [:seon.test/var :seon.test/var]
+               [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+               [:seon.db/connection {:optional true} :seon.db/connection]]]
+    [:or :seon.test.runner/captured-result :seon.test/not-runnable-error]]}
+  [request]
+  (let [results (run-tests (assoc request :seon.test/vars [(:seon.test/var request)]))]
+    (if (:seon.error/kind results) results (first results))))
+
 (defn- run-candidate-test!
   [ctx database request test-symbol]
   (let [row (db/pull database
@@ -2881,19 +2980,16 @@
                 [:seon.ns/name (get-in row [:seon.test/ns :seon.ns/name])]))]
     (if (:seon.cluster.eval/error evaluation)
       (candidate-test-result test-symbol evaluation)
-      (let [test-var (sci/resolve ctx (symbol test-symbol))
-            armed (kernel/arm ctx (:seon.sci.eval/time-limit-ms request))]
-        (try
+      (let [test-var (sci/resolve ctx (symbol test-symbol))]
           (binding [clojure.test/report (constantly nil)]
             ;; A gate test is THIS AGENT'S work, exactly like the definition
             ;; it gates: the candidate request already carries the connection
             ;; its evaluation runs on, so hand that value down and the test's
             ;; elided `seon.db` arities reach the agent's own cluster rather
             ;; than refusing. Same seam, same value, as `seon.test/run-owned`.
-            (test.runner/run-var!
-             test-var (select-keys request [:seon.db/connection])))
-          (finally
-            ((::kernel/stop! armed))))))))
+            (run-test
+             (assoc (select-keys request [:seon.db/connection :seon.sci.eval/time-limit-ms])
+                    :seon.sci.eval/ctx ctx :seon.test/var test-var)))))))
 
 (defn evaluate-candidate
   "Evaluate one durable function and every gate test in an isolated candidate.

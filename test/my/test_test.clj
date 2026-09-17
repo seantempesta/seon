@@ -1,88 +1,61 @@
 (ns my.test-test
-  "An agent running its own declared tests keeps its cluster's custody.
-
-  `my.test/run` is what an AGENT calls inside its own evaluation, and inside
-  an evaluation the elided `seon.db` arity is the documented affordance
-  (AGENTS §3). The run therefore has to reach the agent's cluster — but the
-  Var runs behind a `bound-fn` on a virtual thread, so for a day it reached
-  whichever cluster happened to be bound on the creating thread, and then,
-  once that inheritance was removed, nothing at all
-  (`docs/seon/issues/an-agents-own-test-loses-its-clusters-custody.md`).
-  The connection is now a VALUE the caller hands the one run seam, and this
-  asserts the agent's half of it end to end: a real SCI evaluation, the
-  agent's own `deftest`, its own declared test roster, its own cluster."
+  "Agent-authored tests resolve their admitted source with their cluster's custody."
   (:require [clojure.test :refer [deftest is]]
-            [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.program :as program]
+            [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
 (deftest an-agents-own-test-reaches-its-cluster-through-the-elided-arity
   (support/with-database
    (fn [connection]
-     (config/apply! {:seon.db/connection connection
-                     :seon.boot/cluster-name "own-tests"
-                     :seon.config/manifest {:seon.config.ai/no-provider true}})
-     (support/transacted! connection [{:seon.agent/id "owner"
-                                       :seon.agent/namespace
-                                       {:seon.ns/name 'my.agents.owner}}])
-     (cluster/ensure-cluster-entity! connection "own-tests"
-                                     cluster/boot-process-identity)
-     (let [ctx (support/fork-cluster-ctx connection)
-           ;; THE AGENT'S OWN ENVIRONMENT IS HANDED OVER, NEVER AMBIENT.
-           ;; Production scopes `:seon.agent/id` onto the cluster environment
-           ;; the ctx carries for every evaluation it runs
-           ;; (`seon.sci.eval/evaluate`, src/seon/sci/eval.clj:2273), and that
-           ;; is the one place call preparation reads it from when it supplies
-           ;; `seon.test/owned-symbols`. A fixture that forks the cluster ctx
-           ;; and stops there is an environment with no agent in it: the run
-           ;; then refuses with `:seon.env/agent-id-absent` and every
-           ;; assertion below is about the refusal instead of the custody
-           ;; (AGENTS §5.2 — hand the environment explicitly, exactly like
-           ;; production callers).
+     (support/seed-cluster! connection "own-tests"
+                           {:seon.config.ai/no-provider true
+                            :seon.test/check-time-limit-ms 120000})
+     (support/transacted! connection
+                          [{:seon.agent/id "owner"
+                            :seon.agent/namespace {:seon.ns/name 'my.agents.owner}}])
+     (let [base (support/fork-cluster-ctx connection)
+           _ (evaluation/acquire! {:seon.sci.eval/ctx base :seon.db/db (db/db connection)})
+           ctx (:seon.sci.eval/ctx
+                (evaluation/fork-for-turn
+                 {:seon.sci.eval/ctx base :seon.db/db (db/db connection)
+                  :seon.agent/id "owner"}))
            scoped (env/scope (env/of ctx) {:seon.agent/id "owner"})
            _ (env/replace-environment! (get ctx env/state-carrier) scoped)
-           ;; THE ROSTER IS A DATABASE FACT. An agent's `deftest` becomes a
-           ;; `:seon.test` row when the TURN WRITER commits the evaluation's
-           ;; `:seon.program/row` (src/seon/turn.clj:1775); `agent-value`
-           ;; crosses `seon.sci.eval/evaluate` without a turn, so the row that
-           ;; writer would commit is committed here, through the one fixture
-           ;; write path. Without it `seon.test/owned-symbols` answers `[]`
-           ;; and the run below has nothing to reach a cluster with. The row
-           ;; carries no `:seon.test/source`: the declaration's source names
-           ;; the basis that this very write advances, and the agent's own
-           ;; SCI context holds the Var the run resolves.
-           _ (support/transacted!
-              connection
-              [{:seon.test/sym "my.agents.owner/my-cluster-is-reachable"
-                :seon.test/ns [:seon.ns/name 'my.agents.owner]
-                :seon.schema.admission/source :agent}])
-           ;; Read AFTER the last fixture write, so the agent's own assertion
-           ;; names the exact database value its cluster holds: an elided read
-           ;; that reached any other cluster, or an older value of this one,
-           ;; fails it.
-           basis (db/basis-t (db/db connection))
-           declared
-           (support/agent-value
-            ctx
-            (str "(deftest my-cluster-is-reachable"
-                 "  (is (= " basis " (seon.db/basis-t (seon.db/db)))"
-                 "      (pr-str (seon.db/db))))")
-            'my.agents.owner)
-           results (support/agent-value ctx "(my.test/run)" 'my.agents.owner)]
-       (is (not (:seon.error/kind declared))
-           (str "the agent's own deftest is admitted: " (pr-str declared)))
-       (is (vector? results)
-           (str "my.test/run answers its declared tests: " (pr-str results)))
-       (let [result (first results)]
-         (is (= "my.agents.owner/my-cluster-is-reachable"
-                (:seon.test/sym result))
-             (str "the agent's one declared test ran: " (pr-str results)))
-         (is (= 1 (:seon.test/pass-count result))
-             (str "and its elided read reached the agent's own cluster, "
-                  "instead of refusing with no connection bound: "
-                  (pr-str result)))
-         (is (= 0 (+ (:seon.test/fail-count result)
-                     (:seon.test/error-count result)))
-             (pr-str result)))))))
+           source "(clojure.test/deftest my-cluster-is-reachable (clojure.test/is (= \"own-tests\" (:seon.cluster/name (seon.db/pull (seon.db/db) [:seon.cluster/name] [:seon.cluster/name \"own-tests\"])))))"
+           declared (evaluation/evaluate
+                     {:seon.sci.eval/ctx ctx
+                      :seon.db/db (db/db connection)
+                      :seon.cluster.eval/source source
+                      :seon.cluster.eval/ns [:seon.ns/name 'my.agents.owner]
+                      :seon.sci.admit/caps (config/result-caps (config/defaults))
+                      :seon.sci.eval/time-limit-ms 120000
+                      :seon.config/on-core-error :panic})
+           row (when (:seon.program/row declared)
+                 (program/declaration-row (:seon.program/row declared) :all :agent))]
+       (is (nil? (:seon.cluster.eval/error declared)) (pr-str declared))
+       (is (map? row) (pr-str declared))
+       (support/transacted! connection [row])
+       (evaluation/install-evaluated-rows!
+        {:seon.sci.eval/ctx base :seon.sci.eval/agent-ctx ctx
+         :seon.db/db (db/db connection)
+         :seon.sci.eval/installations
+         [{:seon.program/row row :seon.sci.eval/evaluation declared}]})
+       (let [checked (support/agent-value
+                      ctx
+                      "(my.test/check {:seon.test/changed ['my.agents.owner/my-cluster-is-reachable]})"
+                      'my.agents.owner)
+             results (support/agent-value ctx "(my.test/run)" 'my.agents.owner)]
+         (is (= ["my.agents.owner/my-cluster-is-reachable"]
+                (:seon.test/passed checked)) (pr-str checked))
+         (is (vector? results) (pr-str results))
+         (let [result (first results)]
+           (is (= "my.agents.owner/my-cluster-is-reachable" (:seon.test/sym result))
+               (pr-str results))
+           (is (= [1 0 0] (mapv result [:seon.test/pass-count
+                                        :seon.test/fail-count
+                                        :seon.test/error-count]))
+               (pr-str result))))))))

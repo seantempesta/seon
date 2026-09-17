@@ -1,17 +1,18 @@
 (ns seon.test
   "Agent-facing test execution over the one JVM test runner."
-  (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [sci.core :as sci]
             [seon.await :as await]
             [seon.config :as config]
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.error :as error]
             [seon.fn :as functions]
-            [seon.instrument :as instrument]
+            [seon.id :as id]
             [seon.program :as program]
             [seon.schema :as schema]
+            [seon.sci.eval :as sci.eval]
             [seon.test.selection :as selection]
             [seon.test.runner :as runner])
   (:import [clojure.lang DynamicClassLoader]
@@ -103,21 +104,41 @@
                       (mapv (fn [[e s]] {:db/id e :seon.fn/sym s})
                             (sort-by second changed)))))))))))
 
-(defn- test-loader []
-  (let [loader (DynamicClassLoader. (clojure.lang.RT/baseLoader))
-        paths (get-in (edn/read-string (slurp "deps.edn")) [:aliases :test :extra-paths])]
-    (doseq [path paths]
-      (.addURL loader (.toURL (.toURI (io/file path)))))
-    loader))
+(defn test-loader
+  "Build a loader from the tool owner's ordered, resolved test classpath."
+  {:malli/schema [:=> [:cat :seon.test/classpath]
+                  [:or :seon.test/class-loader :seon.error/value]]}
+  [{roots :seon.test/classpath-roots root :seon.test/classpath-root
+    digest :seon.dev-cache/digest}]
+  (let [loaded-cache (System/getProperty "seon.dependency-cache.path")]
+    (if (and digest loaded-cache
+             (not= digest (.getName (io/file loaded-cache))))
+      (error/diagnostic
+       {:seon.error/kind :seon.test/classpath-incompatible
+        :seon.error/message "The JVM loaded a different dependency cache; adding URLs cannot replace its classes."
+        :seon.error/diagnostic-layer :test-resolution
+        :seon.error/diagnostic-operation 'seon.test/test-loader
+        :seon.error/diagnostic-member :seon.dev-cache/digest
+        :seon.error/diagnostic-expected digest
+        :seon.error/diagnostic-offending (.getName (io/file loaded-cache))
+        :seon.error/diagnostic-cause :loaded-dependency-classes
+        :seon.error/diagnostic-evidence {:seon.test/classpath-root root}})
+      (let [loader (DynamicClassLoader. (clojure.lang.RT/baseLoader))]
+    (doseq [path roots]
+      (let [file (io/file path)]
+        (.addURL loader (.toURL (.toURI (if (.isAbsolute file) file
+                                          (io/file root path)))))))
+        loader))))
 
-(defn- with-test-loader [work]
-  (let [loader (test-loader)
-        thread (Thread/currentThread)
+(defn- with-test-loader
+  ([work] (with-test-loader (clojure.lang.RT/baseLoader) work))
+  ([loader work]
+  (let [thread (Thread/currentThread)
         previous (.getContextClassLoader thread)]
     (try
       (.setContextClassLoader thread loader)
       (with-bindings {clojure.lang.Compiler/LOADER loader} (work))
-      (finally (.setContextClassLoader thread previous)))))
+      (finally (.setContextClassLoader thread previous))))))
 
 (defn- event-backstop-ms []
   ;; `seon.test-support` lives under `test/`, off this namespace's classpath
@@ -128,7 +149,14 @@
 
 (defn- bounded-result [test-var timeout-ms custody]
   (let [test-symbol (str (:ns (meta test-var)) "/" (:name (meta test-var)))
-        task (FutureTask. (bound-fn [] (with-test-loader #(runner/run-var! test-var custody))))
+        task (FutureTask.
+              (bound-fn []
+                (with-test-loader
+                  #(if (:seon.sci.eval/ctx custody)
+                     (sci.eval/run-test
+                      (assoc custody :seon.test/var test-var
+                                     :seon.sci.eval/time-limit-ms timeout-ms))
+                     (runner/run-var! test-var custody)))))
         thread (.unstarted (Thread/ofVirtual) task)]
     (.start thread)
     (try
@@ -439,7 +467,7 @@
                        (schema/call-with-projection
                          (db/carried-projection database)
                          #(bounded-result test-var (:seon.test/remaining-ms options)
-                                          (select-keys options [:seon.db/connection]))))
+                                          (select-keys options [:seon.db/connection :seon.sci.eval/ctx]))))
               restored (runner/restore-live-cluster-schema! registry-before)
               drifted (runner/schema-restore-drift restored)
               ;; A COMMITTED change is the writer doing its job during the
@@ -467,6 +495,8 @@
               (if (:seon.error/kind committed) committed (first committed)))))))))
 
 
+(declare prepare-tests! resolve-test)
+
 (defn run-owned
   "Run one of MY declared tests, under my own cluster's custody.
 
@@ -481,16 +511,26 @@
   cluster's own work, and its body's elided arities refuse and say so."
   {:malli/schema [:=> [:cat :seon.test/run-owned-request]
                   [:or :seon.test/result :seon.error/value]]}
-  [{connection :seon.db/connection test-var :seon.test/var}]
+  [{connection :seon.db/connection test-var :seon.test/var :as request}]
   (let [database (db/db connection)]
     (if (:seon.error/kind database)
       database
-      (let [provenance (runner/provenance database)]
-        (if (:seon.error/kind provenance)
-          provenance
-          (run test-var connection
+      (let [provenance (runner/provenance database)
+            prepared (prepare-tests! database connection request)
+            resolved (if (:seon.error/kind prepared)
+                       prepared
+                       (resolve-test
+                        (assoc prepared :seon.test/identity
+                               (symbol (str (:ns (meta test-var)))
+                                       (str (:name (meta test-var)))))))]
+        (cond
+          (:seon.error/kind provenance) provenance
+          (:seon.error/kind resolved) resolved
+          :else
+          (run resolved connection
                {:seon.db/db database
                 :seon.db/connection connection
+                :seon.sci.eval/ctx (:seon.sci.eval/ctx prepared)
                 :seon.test.run/provenance provenance
                 :seon.test/remaining-ms (event-backstop-ms)}))))))
 
@@ -600,22 +640,85 @@
    (into (into ["bin/test"] (when (seq paths) (into ["--paths"] paths)))
          ["--platform"])])
 
-(defn- resolve-test [test-symbol]
-  (with-test-loader #(requiring-resolve (symbol test-symbol))))
+(defn resolve-test
+  "Resolve an admitted test in the host or acquired SCI program by provenance."
+  {:malli/schema [:=> [:cat :seon.test/resolution-request]
+                  [:or :seon.test/var :seon.error/value]]}
+  [{database :seon.db/db test-symbol :seon.test/identity
+    ctx :seon.sci.eval/ctx loader :seon.test/class-loader
+    projection :seon.schema/projection}]
+  (let [refuse (fn [kind message observed]
+                 (error/diagnostic
+                  {:seon.error/kind kind :seon.error/message message
+                   :seon.error/diagnostic-layer :test-resolution
+                   :seon.error/diagnostic-operation 'seon.test/resolve-test
+                   :seon.error/diagnostic-member test-symbol
+                   :seon.error/diagnostic-expected :admitted-executable-test
+                   :seon.error/diagnostic-offending observed
+                   :seon.error/diagnostic-cause kind
+                   :seon.error/diagnostic-evidence
+                   {:seon.test.run/basis-t (db/basis-t database)}}))
+        row (db/pull database
+                     '[:db/id :seon.test/source :seon.schema.admission/source
+                       :seon.program/analyzed-source-digest :seon.fn/file
+                       {:seon.test/ns [:seon.ns/name]}]
+                     [:seon.test/sym (str test-symbol)])
+        acquired (sci.eval/acquired-program ctx)
+        acquired-db (:seon.db/db acquired)
+        wanted (runner/program-digest database)
+        actual (when acquired-db (runner/program-digest acquired-db))
+        source (:seon.test/source row)
+        admission (:seon.schema.admission/source row)]
+    (cond
+      (:seon.error/kind row) row
+      (not (:db/id row))
+      (refuse :seon.test/identity-unresolved "The admitted test has no current row." test-symbol)
+      (or (not (string? source))
+          (not= (symbol (namespace test-symbol))
+                (get-in row [:seon.test/ns :seon.ns/name]))
+          (not= (id/id source 64) (:seon.program/analyzed-source-digest row)))
+      (refuse :seon.test/provenance-unknown "The test lacks matching source, namespace or analysis evidence." row)
+      (:seon.error/kind wanted) wanted
+      (:seon.error/kind actual) actual
+      (not= wanted actual)
+      (refuse :seon.test/program-mismatch "The SCI context did not acquire the tested program."
+              {:seon.test.run/program-digest wanted :seon.test/acquired-digest actual})
+      (seq (:seon.test/acquisition-refusals acquired))
+      (first (:seon.test/acquisition-refusals acquired))
+      (not (or (= :agent admission) (and (= :core admission) (:seon.fn/file row))))
+      (refuse :seon.test/provenance-unknown "The test has no executable admission provenance." row)
+      :else
+      (try
+        (let [test-var (schema/call-with-projection
+                        projection
+                        #(if (= :agent admission)
+                           (sci/resolve ctx test-symbol)
+                           (with-test-loader loader (fn [] (requiring-resolve test-symbol)))))]
+          (if (and (runner/var-reference? test-var) (ifn? (:test (meta test-var))))
+            test-var
+            {:seon.error/kind :seon.test.runner/not-runnable
+             :seon.test/not-runnable (str test-symbol)
+             :seon.error/message "The admitted identity has no executable test Var."}))
+        (catch LinkageError failure
+          (refuse :seon.test/classpath-incompatible
+                  (or (ex-message failure) (.getName (class failure))) test-symbol))
+        (catch Exception failure
+          (refuse :seon.test/classpath-unavailable
+                  (or (ex-message failure) (.getName (class failure))) test-symbol))))))
 
-(defn- prepare-tests! [database selected effective]
-  ;; Reload source-bearing test namespaces before using their Vars: the live
-  ;; development classpath may not have exposed them during adoption.
-  (let [namespaces (filter #(:seon.ns/source
-                            (db/pull database [:seon.ns/source] [:seon.ns/name %]))
-                          (distinct (map #(symbol (namespace (symbol %))) selected)))
-        projection (schema/projection-from-database database)]
-    (when (seq namespaces)
-      (with-test-loader #(doseq [namespace-name namespaces] (require namespace-name :reload)))
-      (instrument/apply!
-       {:seon.config/on-core-error (:seon.config/on-core-error effective)
-        :seon.sci.admit/caps (config/result-caps effective)
-        :seon.schema/projection projection}))))
+(defn- prepare-tests! [database connection request]
+  (let [context (:my.program/context request)
+        loader (or (:seon.test/class-loader request)
+                   (some-> (:my.program/base-ctx context) sci.eval/acquired-program
+                           :seon.test/class-loader)
+                   (clojure.lang.RT/baseLoader))
+        ctx (or (:my.program/base-ctx context)
+                (with-test-loader loader #(sci.eval/cluster-ctx database connection)))]
+    (if (:seon.error/kind ctx)
+      ctx
+      {:seon.db/db database :seon.db/connection connection
+       :seon.schema/projection (schema/projection-from-database database)
+       :seon.test/class-loader loader :seon.sci.eval/ctx ctx})))
 
 (defn- relative-path [path]
   (let [root (.toPath (.getCanonicalFile (io/file ".")))
@@ -753,7 +856,7 @@
                   #(deref @(requiring-resolve 'seon.test-support/database-base))))
             prepared (when (seq runnable)
                        (swap! progress assoc :seon.test/progress "test namespace loading and contract arming")
-                       (prepare-tests! database runnable effective))
+                       (prepare-tests! database connection request))
             result
             (if (:seon.error/kind prepared)
               (assoc prepared :seon.test/next-tier :none)
@@ -770,14 +873,19 @@
                                  :seon.test/failure-message
                                  "Total :seon.test/check-time-limit-ms bound fired before this test."}))
                     (let [outcome (try
-                                    (if-let [test-var (resolve-test test-symbol)]
+                                    (let [test-var (resolve-test
+                                                    (assoc prepared :seon.test/identity
+                                                           (symbol test-symbol)))]
+                                      (if (:seon.error/kind test-var)
+                                        test-var
                                       (run test-var connection
                                            (cond-> {:seon.db/db database
+                                                    :seon.db/connection connection
+                                                    :seon.sci.eval/ctx (:seon.sci.eval/ctx prepared)
                                                     :seon.test.run/provenance provenance
                                                     :seon.test/remaining-ms remaining-ms}
                                              declared
-                                             (assoc :seon.test/declared-root declared)))
-                                      (unknown test-symbol "The indexed test Var is unavailable."))
+                                             (assoc :seon.test/declared-root declared)))))
                                     (catch Exception failure
                                       (when (instance? InterruptedException failure)
                                         (throw failure))

@@ -1,6 +1,7 @@
 (ns ^{:seon.ns/context-relevant? true} my.test
   "Run the tests declared in my namespace."
-  (:require [seon.test]))
+  (:require [seon.test]
+            [seon.env :as env]))
 
 (defn check
   "Check the tests reaching my change and return results and next-tier commands.
@@ -15,7 +16,16 @@
   {:malli/schema [:=> [:cat :my.test/check-request]
                   [:or :seon.test/check-result :seon.error/value]]}
   [request]
-  (seon.test/check request))
+  (let [environment (env/require-environment
+                     (get-in request [:my.program/context :seon.sci.eval/ctx])
+                     :my.test/check)]
+    (if (:seon.error/kind environment)
+      environment
+      (seon.test/check
+       (cond-> request
+         (and (not (find request :seon.boot/cluster-name))
+              (:seon.boot/cluster-name environment))
+         (assoc :seon.boot/cluster-name (:seon.boot/cluster-name environment)))))))
 
 (defmacro run
   "Run my namespace's declared tests and store their results.

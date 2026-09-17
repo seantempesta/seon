@@ -133,6 +133,8 @@
             :seon.schema.admission/source]
            [:seon.fn/ns :seon.fn/ns]
            [:seon.fn/source {:optional true} :seon.fn/source]
+           [:seon.program/analyzed-source-digest {:optional true}
+            :seon.program/analyzed-source-digest]
            [:seon.fn/file {:optional true} :seon.fn/file]
            [:seon.fn/form-span {:optional true} :seon.fn/form-span]
            [:seon.fn/arglists {:optional true} :seon.fn/arglists]

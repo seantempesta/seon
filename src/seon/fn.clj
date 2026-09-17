@@ -612,6 +612,7 @@
       (cond-> {:seon.test/sym (str qualified)
                :seon.test/ns [:seon.ns/name namespace-name]
                :seon.test/source source
+               :seon.program/analyzed-source-digest (id/id source 64)
                :seon.fn/file file
                :seon.fn/form-span span}
         (find metadata :seon.test/fixture-observation)
@@ -644,6 +645,7 @@
       (cond-> {:seon.fn/sym (str qualified)
                :seon.fn/ns [:seon.ns/name namespace-name]
                :seon.fn/source source
+               :seon.program/analyzed-source-digest (id/id source 64)
                :seon.fn/file file
                :seon.fn/form-span span
                :seon.fn/arglists (str "(" (str/join " " (::analyzer/arglist-strs entry)) ")")

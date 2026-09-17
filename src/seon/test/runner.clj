@@ -9,6 +9,7 @@
             [clojure.test :as test]
             [clojure.test.check.generators :as gen]
             [malli.core :as m]
+            [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
@@ -68,6 +69,17 @@
 
 (schema/register-core-predicate! 'seon.test.runner/var-reference?
                                  var-reference?)
+
+(def class-loader-generator
+  (gen/return (clojure.lang.RT/baseLoader)))
+
+(defn class-loader?
+  "Whether a supplied runtime value is a JVM class loader."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (instance? ClassLoader value))
+
+(schema/register-core-predicate! 'seon.test.runner/class-loader? class-loader?)
 
 (defn- var-symbol
   [test-var]
@@ -593,7 +605,45 @@
          (assoc :seon.test/failure-message (str/join "\n\n" messages)))))
    order))
 
-(declare ambient-snapshot ambient-drift)
+(declare ambient-snapshot ambient-drift run-selected-tests)
+
+(defn run-vars!
+  "Capture selected host or SCI Vars together, applying namespace fixtures once."
+  {:malli/schema
+   [:=> [:cat [:vector :seon.test/var] :seon.db/custody-request]
+    [:or [:vector :seon.test.runner/captured-result]
+     :seon.test/not-runnable-error]]}
+  [test-vars custody]
+  (if-let [unrunnable (first (remove #(ifn? (:test (meta %))) test-vars))]
+    {:seon.error/kind ::not-runnable
+     :seon.test/not-runnable (str unrunnable)
+     :seon.error/message "The supplied Var has no clojure.test function."}
+    (let [selected-namespaces (set (map (comp symbol namespace symbol var-symbol) test-vars))
+          options (report-options)
+          capture (atom {::order [] ::results {}})
+          reported-signatures (atom #{})
+          default-report (.getRawRoot #'test/report)
+          before (ambient-snapshot)]
+      (binding [test/*report-counters* (ref test/*initial-report-counters*)
+                test/*testing-vars* ()
+                test/*testing-contexts* ()
+                test/report
+                (fn [event]
+                  (capture-and-report-event!
+                   options capture selected-namespaces default-report
+                   reported-signatures event))]
+        (db/call-with-custody custody
+          #(run-selected-tests (sort selected-namespaces) test-vars
+                               (:seon.sci.eval/ctx custody))))
+      (let [results (captured-results @capture)
+            drift (ambient-drift before (ambient-snapshot))]
+        (mapv (fn [result]
+                (cond-> result
+                  (seq drift) (update :seon.test/error-count (fnil inc 0))
+                  (seq drift) (update :seon.test/failure-message
+                                      #(str (when % (str % "\n"))
+                                            "Worker-global state changed: " (pr-str drift)))))
+              results)))))
 
 (defn run-var!
   "Run one host or SCI test Var under the custody its caller hands it, and
@@ -630,33 +680,8 @@
       :seon.test/not-runnable-error]]]}
   ([test-var] (run-var! test-var {}))
   ([test-var custody]
-   (if-not (ifn? (:test (meta test-var)))
-     {:seon.error/kind ::not-runnable
-      :seon.test/not-runnable (str test-var)
-      :seon.error/message "The supplied Var has no clojure.test function."}
-     (let [test-symbol (var-symbol test-var)
-           selected-namespaces #{(symbol (namespace test-symbol))}
-           options (report-options)
-           capture (atom {::order [] ::results {}})
-           reported-signatures (atom #{})
-           default-report (.getRawRoot #'test/report)
-           before (ambient-snapshot)]
-       (binding [test/*report-counters* (ref test/*initial-report-counters*)
-                 test/*testing-vars* ()
-                 test/*testing-contexts* ()
-                 test/report
-                 (fn [event]
-                   (capture-and-report-event!
-                    options capture selected-namespaces default-report
-                    reported-signatures event))]
-         (db/call-with-custody custody #(test/test-vars [test-var])))
-       (let [result (first (captured-results @capture))
-             drift (ambient-drift before (ambient-snapshot))]
-         (cond-> result
-           (seq drift) (update :seon.test/error-count (fnil inc 0))
-           (seq drift) (update :seon.test/failure-message
-                               #(str (when % (str % "\n"))
-                                     "Worker-global state changed: " (pr-str drift)))))))))
+   (let [results (run-vars! [test-var] custody)]
+     (if (:seon.error/kind results) results (first results)))))
 
 (defn- test-vars-in
   [namespaces]
@@ -1143,28 +1168,31 @@
   nil)
 
 (defn- run-selected-tests
-  [namespaces selected-vars]
+  ([namespaces selected-vars] (run-selected-tests namespaces selected-vars nil))
+  ([namespaces selected-vars ctx]
   (let [selected-by-namespace (group-by (comp :ns meta) selected-vars)]
     (binding [test/*report-counters* (ref test/*initial-report-counters*)]
       (doseq [namespace-name namespaces
-              :let [namespace-object (the-ns namespace-name)
-                    namespace-vars (get selected-by-namespace namespace-object)]
+              [namespace-object namespace-vars] selected-by-namespace
+              :when (= (str namespace-name) (str namespace-object))
+              :let [host? (instance? clojure.lang.Namespace namespace-object)
+                    bindings (if host? (ns-interns namespace-object)
+                                 (get (sci/namespace-state ctx) namespace-name))
+                    hook (get bindings 'test-ns-hook)]
               :when (seq namespace-vars)]
-        (test/do-report {:type :begin-test-ns :ns namespace-object})
-        (if-let [hook (find-var
-                       (symbol (str namespace-name) "test-ns-hook"))]
-          (if (= (count namespace-vars)
-                 (count (filter (comp :test meta)
-                                (vals (ns-interns namespace-object)))))
-            ((var-get hook))
+        (when host? (test/do-report {:type :begin-test-ns :ns namespace-object}))
+        (if hook
+          (if (= (set namespace-vars)
+                 (set (filter (comp :test meta) (vals bindings))))
+            (@hook)
             (throw
              (ex-info
-              "A namespace test hook cannot select around long test vars."
-              {:seon.error/kind ::long-test-ns-hook
+              "A namespace test hook requires its complete admitted selection."
+              {:seon.error/kind :seon.test/namespace-hook-requires-complete-selection
                :seon.ns/name namespace-name :seon.test.runner/long-test-ns-hook namespace-name})))
           (test/test-vars namespace-vars))
-        (test/do-report {:type :end-test-ns :ns namespace-object}))
-      @test/*report-counters*)))
+        (when host? (test/do-report {:type :end-test-ns :ns namespace-object})))
+      @test/*report-counters*))))
 
 (defn- red?
   [raw-summary]
@@ -1235,22 +1263,11 @@
       :seon.test.runner/results (captured-results @capture)}
       stopped-after (assoc ::stopped-after stopped-after))))
 
-(defn- task-summary
-  [raw-summary]
-  {::test-count (:test raw-summary)
-   ::pass-count (:pass raw-summary)
-   ::fail-count (:fail raw-summary)
-   ::error-count (:error raw-summary)})
+(defonce ^:private resolve-admitted-test
+  (delay (requiring-resolve 'seon.test/resolve-test)))
 
-(defn- resolve-task-vars
-  [task]
-  (mapv (fn [test-symbol]
-          (or (find-var (symbol test-symbol))
-              (throw
-               (ex-info "A worker could not resolve a selected test Var."
-                        {:seon.error/kind ::unresolved-test-var
-                         :seon.test/sym test-symbol :seon.test.runner/unresolved-test-var true}))))
-        (::task-symbols task)))
+(defonce ^:private run-interpreted-tests
+  (delay (requiring-resolve 'seon.sci.eval/run-tests)))
 
 (def ^:private ambient-drift-journal-limit
   "How many recent drifting tasks one worker keeps as attribution evidence."
@@ -1517,36 +1534,40 @@
 
 (defn- run-task!
   "Run one worker task with all output captured as attributed data."
-  [task]
-  (let [test-vars (resolve-task-vars task)
-        namespace-name (symbol (::task-namespace task))
-        options (report-options)
-        capture (atom {::order [] ::results {}})
-        reported-signatures (atom #{})
+  [task resolution]
+  (let [options (report-options)
         output (StringWriter.)
         started-at (Instant/now)
-        started-nanos (System/nanoTime)
-        default-report test/report]
+        started-nanos (System/nanoTime)]
     (try
-      (let [raw-summary
+      (let [test-vars (mapv #(@resolve-admitted-test
+                              (assoc resolution :seon.test/identity (symbol %)))
+                            (::task-symbols task))
+            _ (when-let [failure (first (filter :seon.error/kind test-vars))]
+                (throw (ex-info (:seon.error/message failure) failure)))
+            results
             (binding [*out* output
                       *err* output
-                      test/*test-out* output
-                      test/report
-                      (fn [event]
-                        (capture-and-report-event!
-                         options capture #{namespace-name} default-report
-                         reported-signatures event))]
-              (let [summary (run-selected-tests [namespace-name] test-vars)]
-                (test/do-report (assoc summary :type :summary))
-                summary))]
+                      test/*test-out* output]
+              (@run-interpreted-tests
+               (merge (select-keys resolution [:seon.sci.eval/ctx])
+                      (:seon.db/custody-request resolution)
+                      {:seon.test/vars test-vars
+                       :seon.sci.eval/time-limit-ms
+                       (* 1000 (bounds/exchange-seconds (or (::task-long-ms task) 0) 0))})))
+            _ (when (:seon.error/kind results)
+                (throw (ex-info (:seon.error/message results) results)))
+            summary {::test-count (count results)
+                     ::pass-count (reduce + 0 (map :seon.test/pass-count results))
+                     ::fail-count (reduce + 0 (map :seon.test/fail-count results))
+                     ::error-count (reduce + 0 (map :seon.test/error-count results))}]
         (assoc task
                ::task-started-at (str started-at)
                ::task-ended-at (str (Instant/now))
                ::task-elapsed-ms
                (quot (- (System/nanoTime) started-nanos) 1000000)
-               ::task-summary (task-summary raw-summary)
-               ::task-results (captured-results @capture)
+               ::task-summary summary
+               ::task-results results
                ::task-output (str output)))
       (catch Throwable failure
         (let [test-symbol (first (::task-symbols task))
@@ -1788,7 +1809,7 @@
         (case (::worker-command command)
           :initialize
           (let [namespaces (mapv symbol (::worker-namespaces command))
-                arming (initialize-contracts! worker-id namespaces (::projection arming))]
+                arming (merge arming (initialize-contracts! worker-id namespaces (::projection arming)))]
               (write-protocol! writer
                                {::worker-event :initialized
                                 ::worker-id worker-id
@@ -1819,7 +1840,7 @@
             ;; the work derives it either side of the task and reports the
             ;; difference as that task's own fact.
             (let [before (ambient-snapshot)
-                  result (run-task! (::worker-task command))
+                  result (run-task! (::worker-task command) (::resolution arming))
                   drift (ambient-drift before (ambient-snapshot))]
               (write-protocol! writer
                                (cond-> (assoc result
@@ -1846,6 +1867,8 @@
   "Prime the canonical fixture before readiness, then serve commands until stopped."
   [worker-id ^BufferedReader reader ^PrintWriter writer]
   (let [projection (packaged-test-projection worker-id)
+        ;; SCI copies core roots; arm before the canonical fixture acquires them.
+        _ (initialize-contracts! worker-id [] projection)
         started (System/nanoTime)
         base (schema/call-with-projection
               projection
@@ -1860,7 +1883,15 @@
                             ::fixture-preparation-ms
                             (quot (- (System/nanoTime) started) 1000000)
                             ::exchange-id (str worker-id "/readiness")})
-    (serve-worker-commands! worker-id reader writer {::projection projection})))
+    (let [connection (:seon.test-support/connection base)
+          database (db/db connection)]
+      (serve-worker-commands!
+       worker-id reader writer
+       {::projection projection
+        ::resolution {:seon.db/db database :seon.db/connection connection
+                      :seon.sci.eval/ctx (:seon.sci.eval/ctx base)
+                      :seon.schema/projection (schema/projection-from-database database)
+                      :seon.test/class-loader (clojure.lang.RT/baseLoader)}}))))
 
 (defn- worker-main!
   [worker-id]
@@ -2139,7 +2170,9 @@
           :seon.error/diagnostic-operation :seon.test.runner/admit-run
           :seon.error/diagnostic-member run-id
           :seon.error/diagnostic-expected expected
-          :seon.error/diagnostic-offending offending})]
+          :seon.error/diagnostic-offending offending
+          :seon.error/diagnostic-cause kind
+          :seon.error/diagnostic-evidence {:seon.test.run/id run-id}})]
     (throw (ex-info (:seon.error/message failure) failure))))
 
 (defn- admission-members [database run-id]
@@ -3206,8 +3239,13 @@
   (.mkdirs (io/file operator-root "logs"))
   (let [error-log (io/file operator-root "logs" "worker-stderr.log")
         published-base (System/getProperty "seon.test.published-base")
+        basis-file (System/getProperty "seon.test.classpath-basis")
+        basis (when basis-file (edn/read-string (slurp basis-file)))
+        _ (when-not basis
+            (throw (ex-info "A worker needs the resolved test classpath basis."
+                            {:seon.error/kind :seon.test/classpath-unavailable})))
         command (cond-> [(or (System/getenv "SEON_TEST_CLOJURE") "clojure")
-                         "-Scp" (System/getProperty "java.class.path")
+                         "-Scp" (cache/classpath basis (.getCanonicalPath checkout-root))
                          (str "-J-Dseon.operator.root="
                               (.getCanonicalPath operator-root))
                          (str "-J-Dseon.test.root="
@@ -3215,6 +3253,8 @@
                          (str "-J-Dseon.test.source-root=" (source-root))]
                   published-base
                   (conj (str "-J-Dseon.test.published-base=" published-base))
+                  true
+                  (into (map #(str "-J" %) (:seon.test/jvm-options basis)))
                   true
                   (into ["-M:test" "-m" "seon.test.runner"
                          "--worker" worker-id]))
