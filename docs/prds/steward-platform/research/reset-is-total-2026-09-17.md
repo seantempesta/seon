@@ -144,3 +144,79 @@ The source syntax check now includes changed/untracked test files too,
 because complete publication analyzes those files. No broad semantic-load
 or successful-publication guarantee is inferred from that check.
 
+
+## Review follow-up: elapsed phases and low-load drill
+
+The reviewed slice is `c4d1be3ac`. This follow-up starts from clean HEAD
+`ad6fe0fdd` in `tmp/reset-proof-wt`, excluding all concurrent uncommitted
+edits. Every `phase!` invocation now prints and appends its monotonic
+`elapsed-ms` in a `finally` block, on success and refusal alike. Its
+regression checks both outcomes and the retained log. The deadline-output
+fixture uses a minimal Python process instead of loading BB within a 300 ms
+deadline; the previous BB fixture could expire before printing its marker.
+
+**A lane must never run `bin/test` for this assignment.** That prohibition
+also includes `bin/test --all`, `bin/test --full`, path gates, and platform
+gates. Scoped iteration uses `bin/test-fast seon.dev.fresh-operator-reset-test`.
+The only cluster this lane boots is the one isolated reset drill. No command
+targets the main root's default cluster.
+
+The load gate samples `uptime` every 60 seconds for at most 20 minutes and
+uses its one-minute load average, requiring a value below 20 before the one
+reset invocation. Raw samples and final logs are under `tmp/reset-proof/`.
+Initial samples: 36.43, 23.95, 35.76.
+
+The gate passed after approximately 4.53 minutes: subsequent one-minute
+samples were 26.95 and **19.04**. Exactly one reset was invoked in the
+snapshot: `bin/seon --root tmp/reset-drill-root reset --force`. It exited
+**0**, including start and first development adoption. Its terminal phase
+lines were:
+
+```text
+● reset phase=preflight elapsed-ms=261 log=/Users/sean/src/seon/tmp/reset-proof-wt/tmp/reset-drill-root/data/operator/operations/reset-preflight-80446.log
+● reset phase=preflight elapsed-ms=207 log=/Users/sean/src/seon/tmp/reset-proof-wt/tmp/reset-drill-root/data/operator/operations/reset-preflight-80446.log
+● reset phase=down elapsed-ms=196 log=/Users/sean/src/seon/tmp/reset-proof-wt/tmp/reset-drill-root/data/operator/operations/reset-down-80446.log
+● reset phase=destroy elapsed-ms=12 log=/Users/sean/src/seon/tmp/reset-proof-wt/tmp/reset-drill-root/data/operator/operations/reset-destroy-80446.log
+● reset phase=republish elapsed-ms=173210 log=/Users/sean/src/seon/tmp/reset-proof-wt/tmp/reset-drill-root/data/operator/operations/reset-republish-80446.log
+● reset phase=refork elapsed-ms=33043 log=/Users/sean/src/seon/tmp/reset-proof-wt/tmp/reset-drill-root/data/operator/operations/reset-refork-80446.log
+● reset phase=start elapsed-ms=22059 log=/Users/sean/src/seon/tmp/reset-proof-wt/tmp/reset-drill-root/data/operator/operations/reset-start-80446.log
+● reset phase=adopt elapsed-ms=125323 log=/Users/sean/src/seon/tmp/reset-proof-wt/tmp/reset-drill-root/data/operator/operations/reset-adopt-80446.log
+● reset phase=lifecycle elapsed-ms=354072 log=/Users/sean/src/seon/tmp/reset-proof-wt/tmp/reset-drill-root/data/operator/operations/reset-lifecycle-80446.log
+```
+
+Final descriptor status, before cleanup:
+
+```text
+default                   82823 alive       64322 http://127.0.0.1:64327   -
+1/1 clusters alive
+recorded JVM pid 82823 generation 2c2dc119-ef51-415c-bcbe-30205d48e771 alive
+orphan seon JVMs: none
+```
+
+One read-only MCP JVM evaluation against the explicit scratch root compared
+non-nil `seon.cluster.source/current` and the cluster's
+`:seon.source/commit-id`: both were
+`6aab45fa-7065-55ea-962b-0b8272d650b2`, and `converged?` was **true**.
+MCP runtime status independently reported `alive`; all three plumbing
+procs replied. It also reported six errored historical evaluations; this
+proof establishes live source adoption, not an error-free application.
+The same read-only evaluation queried `seon.fn/tests-reaching` for
+`seon.operator/cleanup-root!`, returning the declared-root and complete,
+truthful, symlink-safe cleanup regressions in `seon.operator-test`.
+
+Scoped `bin/test-fast seon.dev.fresh-operator-reset-test` passed **7 tests,
+89 assertions, zero failures/errors**. The earlier iteration had one
+failure because BB startup exceeded the deadline-output fixture's 300 ms;
+the minimal child correction above retained the same production deadline
+and made the intended output/reaping assertion observable.
+
+This successful drill supersedes the earlier publication-bound refusal as
+the live-reset proof. Publication still consumed 173210 ms of its declared
+180000 ms bound; that measured margin is narrow, and no faster-publication
+claim is made. No bound was increased. Foreign uncommitted source changes
+were excluded by the HEAD worktree, never edited or operated.
+
+Cleanup used `bin/seon --root tmp/reset-drill-root down --force`, which
+exited 0 and reaped pid 82823. Phase logs were retained under
+`tmp/reset-proof/phase-logs`; the scratch root and worktree were removed.
+No full gate was launched and no main-root cluster was booted or changed.

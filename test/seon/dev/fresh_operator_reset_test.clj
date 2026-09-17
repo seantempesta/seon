@@ -246,7 +246,8 @@
       (let [result
             (with-redefs-fn
               {(ns-resolve 'seon.fresh-operator 'child-jvm-command)
-               (constantly ["bb" "-e" "(do (println :before-timeout) (flush) (Thread/sleep 10000))"])}
+               (constantly ["python3" "-c"
+                            "import os,time\nos.write(1,b':before-timeout\\n')\ntime.sleep(10)"])}
               #(operator-private-outcome
                 'phase! (str root) "reset" :republish
                 (fn []
@@ -259,4 +260,27 @@
         (is (str/includes? (slurp (:seon.fresh-operator/child-output data)) ":before-timeout"))
         (is (str/includes? (slurp (:seon.fresh-operator/log data)) "child output="))
         (is (< (/ (- (System/nanoTime) started) 1000000) immediate-refusal-bound-ms)))
+      (finally (delete-recursively! root)))))
+
+(deftest phase-duration-is-visible-on-success-and-refusal
+  (let [root (fresh-root)]
+    (try
+      (doseq [refuse? [false true]]
+        (let [output (with-out-str
+                       (operator-private-outcome
+                        'phase! (str root) "reset" :down
+                        #(if refuse?
+                           (throw (ex-info "duration refusal" {}))
+                           :completed)))
+              prefix "● reset phase=down elapsed-ms="
+              line (first (filter #(str/starts-with? % prefix)
+                                  (str/split-lines output)))
+              separator (when line (str/index-of line " log="))
+              elapsed (when separator (parse-long (subs line (count prefix) separator)))]
+          (is (some? elapsed) output)
+          (is (and (number? elapsed) (<= 0 elapsed)
+                   (< elapsed immediate-refusal-bound-ms)) output)
+          (when separator
+            (is (str/includes? (slurp (subs line (+ separator 5)))
+                               "phase=down elapsed-ms=")))))
       (finally (delete-recursively! root)))))

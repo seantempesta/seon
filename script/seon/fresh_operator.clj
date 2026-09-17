@@ -263,7 +263,8 @@
 (defn- phase!
   "Run a phase, preserving its complete failure and naming its output file."
   [root command phase operation]
-  (let [directory (io/file root "data/operator/operations")
+  (let [started (System/nanoTime)
+        directory (io/file root "data/operator/operations")
         log (io/file directory
                      (str command "-" (name phase) "-"
                           (.pid (java.lang.ProcessHandle/current)) ".log"))]
@@ -286,7 +287,14 @@
                 (assoc (ex-data failure)
                        :seon.fresh-operator/phase phase
                        :seon.fresh-operator/log (str log))
-                failure))))))
+                failure)))
+      (finally
+        (let [elapsed-ms (long (/ (- (System/nanoTime) started) 1000000))
+              line (str command " phase=" (name phase)
+                        " elapsed-ms=" elapsed-ms " log=" log)]
+          (println (str "● " line))
+          (flush)
+          (spit log (str line "\n") :append true))))))
 
 (defn- syntax-preflight!
   [source-root]
