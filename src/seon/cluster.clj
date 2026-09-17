@@ -2592,6 +2592,13 @@
 (defn- recover-runs!
   "Close all prior open turns before arming agents. The writer decides
   which evaluations and effects remain unfinished; nothing is replayed."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection]
+    [:or
+     [:map
+      [:seon.boot/recovered-runs :seon.boot/recovered-runs]
+      [:seon.boot/recovery-operations :seon.boot/recovery-operations]]
+     :seon.error/value]]}
   [connection]
   (let [db (db/db connection)
         now (java.util.Date.)
@@ -2600,24 +2607,29 @@
                          [?run :seon.turn/id ?run-id]
                          (not [?run :seon.turn/closed-tx _])]
                        db)
-        ;; the decision moved INSIDE the transaction (custody revision,
-        ;; Revision 4): `recover-call` reads each run's receipts at
-        ;; transaction time, so this caller only names the open runs —
-        ;; a stale-basis recovery stamping a settled receipt is
-        ;; unrepresentable
-        operations (into (schedule/recover-tx db now)
-                         (mapcat
-                          (fn [run-id]
-                            (turn/recover-tx
-                             {:seon.turn/id run-id
-                              :seon.turn/now now})))
-                         open-runs)]
-    (when (seq operations)
-      (require-committed!
-       (db/transact! connection operations)
-       {:seon.boot/population :seon.turn/recovery}))
-    {:seon.boot/recovered-runs (count open-runs)
-     :seon.boot/recovery-operations (count operations)}))
+        result
+        (if (error/error? open-runs)
+          open-runs
+          (let [;; the decision moved INSIDE the transaction (custody revision,
+                ;; Revision 4): `recover-call` reads each run's receipts at
+                ;; transaction time, so this caller only names the open runs —
+                ;; a stale-basis recovery stamping a settled receipt is
+                ;; unrepresentable
+                operations
+                (into (schedule/recover-tx db now)
+                      (mapcat
+                       (fn [run-id]
+                         (turn/recover-tx
+                          {:seon.turn/id run-id
+                           :seon.turn/now now})))
+                      open-runs)]
+            (when (seq operations)
+              (require-committed!
+               (db/transact! connection operations)
+               {:seon.boot/population :seon.turn/recovery}))
+            {:seon.boot/recovered-runs (count open-runs)
+             :seon.boot/recovery-operations (count operations)}))]
+    result))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The armed layers — the fault consumer, the root agent, and the loop
@@ -3396,6 +3408,8 @@
    projection-state
    (fn []
      (let [recovery (recover-runs! connection)
+           _ (when (error/error? recovery)
+               (throw (ex-info (:seon.error/message recovery) recovery)))
            instance (publish! (merge instance recovery))
            instance (publish!
                      (assoc instance

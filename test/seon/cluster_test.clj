@@ -2,6 +2,7 @@
   "Cluster reconciliation invariants that own no cluster process."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.flow :as seon.flow]
             [seon.db :as db]
@@ -11,6 +12,22 @@
             [seon.test-support :as test-support]))
 
 (def ^:private ordered-marker ::ordered)
+
+(deftest boot-recovery-refuses-an-unreadable-open-turn-query
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            refusal (db/q '[:find ?entity .
+                            :where [?entity :seon.audit/poison _]]
+                          database)
+            before (db/basis-t database)
+            result (with-redefs [db/q (fn [& _] refusal)]
+                     (#'cluster/recover-runs! connection))]
+        (is (error/error? refusal) (pr-str refusal))
+        (is (= refusal result)
+            "boot recovery returns the failed read instead of recovering zero turns")
+        (is (= before (db/basis-t (db/db connection)))
+            "an unreadable recovery decision commits nothing")))))
 
 (deftest schema-row-convergence-uses-the-stores-own-semantics
   (test-support/with-database
