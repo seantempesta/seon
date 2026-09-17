@@ -7,6 +7,7 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [seon.db :as db]
+            [seon.error :as error]
             [malli.core :as m]
             [malli.registry :as mr]
             [seon.ai.tokens :as tokens]
@@ -51,10 +52,6 @@
       (pos-int? max-collection)
       (assoc :max-results max-collection))))
 
-(defn- error-value?
-  [value]
-  (and (map? value) (keyword? (:seon.error/kind value))))
-
 (defn- namespace-row
   [unit]
   (let [db (:seon.db/db unit)
@@ -63,7 +60,7 @@
       (let [row (db/pull db (merge (read-bounds unit)
                                    {:selector namespace-selector
                                     :eid eid}))]
-        (if (error-value? row) row (merge unit row)))
+        (if (error/error? row) row (merge unit row)))
       unit)))
 
 (defn- function-rows
@@ -78,7 +75,7 @@
                      :in $ ?namespace selector
                      :where [?function :seon.fn/ns ?namespace]]
                    :args [db namespace-eid function-selector]}))]
-      (if (error-value? rows)
+      (if (error/error? rows)
         rows
         (vec (sort-by :seon.fn/sym rows))))))
 
@@ -97,7 +94,7 @@
                      [(namespace ?key) ?key-namespace]
                      [(= ?key-namespace ?namespace-name)]]
                    :args [db (str namespace-name) schema-selector]}))]
-      (if (error-value? rows)
+      (if (error/error? rows)
         rows
         (->> rows (sort-by (comp str :seon.schema/key)) vec)))))
 
@@ -201,7 +198,7 @@
             (recur remaining seen emitted definitions)
             (let [row (when-not (get definitions schema-key)
                         (cached-schema-row db bounds cache schema-key))]
-              (if (error-value? row)
+              (if (error/error? row)
                 row
                 (let [definition
                       (or (get definitions schema-key)
@@ -247,7 +244,7 @@
          db bounds cache
          (into [] (keep :seon.fn/spec) functions)
          own-rows)]
-    (if (error-value? closure)
+    (if (error/error? closure)
       closure
       {::schema-keys (::schema-keys closure)
        ::schemas-capped? (::schemas-capped? closure)})))
@@ -372,7 +369,7 @@
 (defn- render-data
   [unit]
   (let [row (namespace-row unit)]
-    (if (error-value? row)
+    (if (error/error? row)
       row
       (let [db (:seon.db/db unit)
             bounds (read-bounds unit)
@@ -381,13 +378,13 @@
             all-functions (if (pos? distance)
                             (function-rows db bounds (:db/id unit))
                             [])]
-        (if (error-value? all-functions)
+        (if (error/error? all-functions)
           all-functions
           (let [functions (if (= 1 distance)
                             all-functions
                             (vec (remove :seon.fn/private? all-functions)))
                 own-schemas (own-schema-rows db bounds namespace-name distance)]
-            (if (error-value? own-schemas)
+            (if (error/error? own-schemas)
               own-schemas
               {::db db
                ::read-bounds bounds
@@ -510,7 +507,7 @@
   [db bounds schema-row-cache functions own-schemas]
   (let [summary (referenced-schema-summary db bounds schema-row-cache
                                            functions own-schemas)]
-    (if (error-value? summary)
+    (if (error/error? summary)
       summary
       (let [{::keys [schema-keys schemas-capped?]} summary]
         (when (or (seq schema-keys) schemas-capped?)
@@ -544,7 +541,7 @@
         schema-section
         (referenced-schema-ai-section
          db bounds schema-row-cache functions own-schemas)]
-    (if (error-value? schema-section)
+    (if (error/error? schema-section)
       schema-section
       (str/join
        "\n\n"
@@ -559,7 +556,7 @@
   (let [bounds (::read-bounds data)
         summary (referenced-schema-summary db bounds schema-row-cache
                                            functions own-schemas)]
-    (if (error-value? summary)
+    (if (error/error? summary)
       summary
       (let [{::keys [schema-keys schemas-capped?]} summary]
         (vec
@@ -593,7 +590,7 @@
     0 (str (::namespace-name data))
     1 (full-ai-text data)
     (let [items (compact-ai-items data)]
-      (if (error-value? items)
+      (if (error/error? items)
         items
         (compact-ai-text data items (count items))))))
 
@@ -616,8 +613,8 @@
   (if (or (nil? budget) (< (::distance data) 2))
     (ai-text data)
     (let [items (compact-ai-items data)
-          item-count (when-not (error-value? items) (count items))]
-      (if (error-value? items)
+          item-count (when-not (error/error? items) (count items))]
+      (if (error/error? items)
         items
         (let [render #(compact-ai-text data items %)
               initial (render 0)]
@@ -651,7 +648,7 @@
   [db bounds schema-row-cache functions own-schemas]
   (let [summary (referenced-schema-summary db bounds schema-row-cache
                                            functions own-schemas)]
-    (if (error-value? summary)
+    (if (error/error? summary)
       summary
       (let [{::keys [schema-keys schemas-capped?]} summary
             items
@@ -689,7 +686,7 @@
         schema-section (when include-detail?
                          (referenced-schema-html db bounds schema-row-cache
                                                  functions own-schemas))]
-    (if (error-value? schema-section)
+    (if (error/error? schema-section)
       schema-section
       (into
        [:section {:class "seon-family-entry seon-namespace-entry"}
@@ -740,7 +737,7 @@
         schema-section
         (referenced-schema-html db bounds schema-row-cache
                                 included own-schemas)]
-    (if (error-value? schema-section)
+    (if (error/error? schema-section)
       schema-section
       (into
        [:section {:class "seon-family-entry seon-namespace-entry"}
@@ -914,7 +911,7 @@
                                             :where [?entity ?attribute _]])
                              (vec attributes)))))))
       (let [data (render-data unit)]
-        (if (error-value? data) data (ai-text data))))))
+        (if (error/error? data) data (ai-text data))))))
 
 (defn render-html
   "Render the namespace's same definitions as stable HTML entries."
@@ -922,6 +919,6 @@
                   [:or [:maybe :seon.render/hiccup] :seon.error/value]]}
   [unit]
   (let [data (render-data unit)]
-    (if (error-value? data)
+    (if (error/error? data)
       data
       (html-view data (count (::functions data))))))

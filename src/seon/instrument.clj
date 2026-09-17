@@ -90,12 +90,6 @@
 ;;; The reporter
 ;;; ---------------------------------------------------------------------------
 
-(defn- flat-error-value?
-  [value]
-  (and (map? value)
-       (keyword? (:seon.error/kind value))
-       (string? (:seon.error/message value))))
-
 (defn- buried-error
   "The flat error value a contract report would otherwise bury, if any.
 
@@ -107,8 +101,8 @@
    `seon.db/missing-connection-binding` and its remedy."
   [kind data]
   (case kind
-    :malli.core/invalid-input (first (filter flat-error-value? (:args data)))
-    :malli.core/invalid-output (when (flat-error-value? (:value data))
+    :malli.core/invalid-input (first (filter error/error? (:args data)))
+    :malli.core/invalid-output (when (error/error? (:value data))
                                  (:value data))
     nil))
 
@@ -170,7 +164,7 @@
     (if-let [environment (env/of effect/*request-context*)]
       (if-let [connection (:seon.db/connection environment)]
         (let [database (db/db connection)]
-          (if (flat-error-value? database)
+          (if (error/error? database)
             {:seon.instrument.lookup/status :failed}
             (let [result
                   (db/q '[:find ?arglists .
@@ -180,7 +174,7 @@
                           [?function :seon.fn/arglists ?arglists]]
                         database function-symbol)]
               (cond
-                (flat-error-value? result)
+                (error/error? result)
                 {:seon.instrument.lookup/status :failed}
 
                 (string? result)

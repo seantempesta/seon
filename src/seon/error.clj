@@ -1411,6 +1411,8 @@
   [id]
   (str "seon.error/fact-" id))
 
+(declare error?)
+
 (defn- agent-exists?
   "True when this cluster really has that agent.
   A message addressed to an id nothing declares would fail the WHOLE
@@ -1418,10 +1420,11 @@
   the record because the recipient was a typo is precisely the failure
   mode the fault path may not have."
   [db agent-id]
-  (some? (db/q '[:find ?agent .
-                :in $ ?id
-                :where [?agent :seon.agent/id ?id]]
-              db agent-id)))
+  (let [agent (db/q '[:find ?agent .
+                      :in $ ?id
+                      :where [?agent :seon.agent/id ?id]]
+                    db agent-id)]
+    (if (error? agent) agent (some? agent))))
 
 (defn- entity-exists?
   "True when `db` really has an entity with that identity attribute.
@@ -1430,10 +1433,11 @@
   recipient would. The recorder may not be destroyed by the pointer it
   was handed: a run that vanished costs the REF, never the record."
   [db attribute value]
-  (some? (db/q '[:find ?entity .
-                :in $ ?attribute ?value
-                :where [?entity ?attribute ?value]]
-              db attribute value)))
+  (let [entity (db/q '[:find ?entity .
+                       :in $ ?attribute ?value
+                       :where [?entity ?attribute ?value]]
+                     db attribute value)]
+    (if (error? entity) entity (some? entity))))
 
 (defn steward
   "The steward of the currently defined function named by a historical fault."

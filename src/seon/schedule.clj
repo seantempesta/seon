@@ -488,12 +488,6 @@
                              :seon.schedule/result result))))
     result))
 
-(defn- flat-error?
-  [value]
-  (and (map? value)
-       (keyword? (:seon.error/kind value))
-       (string? (:seon.error/message value))))
-
 (defn- declared-maintenance-request-values
   [projection effective]
   (select-keys
@@ -553,7 +547,7 @@
         result (if failure
                  handler-result
                  (maintenance/result-entity handler-result))
-        returned-error? (flat-error? result)
+        returned-error? (error/error? result)
         source (cond
                  failure failure
                  returned-error?
