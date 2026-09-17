@@ -7,6 +7,114 @@ tags: [test, database, admission, stage-2]
 
 # Test recording and pre-execution admission
 
+## Continuation after e58a27c86: held acquisition regression
+
+`e58a27c86` was accepted. The recorder error-as-row class is now owned by
+[the class issue](../../../seon/issues/a-database-reads-error-value-is-read-as-a-row-by-its-caller.md);
+this continuation makes no further change there.
+
+The owner's new stop rule is “Stop for review after (3) or at any held file,
+naming it.” The concrete held file encountered at item (1) is
+`test/seon/sci/eval_test.clj`: it has another lane's uncommitted changes.
+`src/seon/sci/eval.clj` was clean at entry, with acquisition work landed at
+`684f185f8`, and **became dirty during this read-only inspection**, confirmed
+by the final `git status --short` check. Both source and regression are now
+held. This is not a reservation inferred from an old assignment. Neither
+file was changed by this lane; the source observations below refer to the
+clean definition inspected at entry.
+
+### Required acquisition change and regression
+
+Stage 2 requires a resolver to reject an acquired context for a different
+program and to preserve acquisition refusals. At this inspected source:
+
+- `base-ctx` (`src/seon/sci/eval.clj:1953`) returns an `::acquisition` report
+  on its context, but does not retain the acquired database or program digest
+  with that report.
+- `acquire!` (`:1975`) replaces the existing context's environment and kernel
+  snapshot; its new acquisition report is returned to the caller. The
+  original context map's `::acquisition` entry is not replaced by that
+  mutation. Reading that map entry alone cannot prove current acquisition.
+- `kernel/cache-program!` (`src/seon/sci/kernel.clj:108`) retains function and
+  namespace definitions, without the acquired test-source population. It
+  cannot establish that an SCI test Var denotes the requested stored test.
+- `install-evaluated-rows!` (`src/seon/sci/eval.clj:971`) installs a complete
+  accepted batch, while `fork-for-turn` and `fork-cluster-ctx` copy the
+  existing kernel snapshot. The evidence must follow these same operations.
+
+The required owner change is to carry the acquired immutable database and
+its acquisition refusal report with the **existing** kernel program snapshot,
+updating that evidence at completion of base acquisition/reacquisition and
+accepted-batch installation. Forks carry that same evidence under their
+existing copy semantics. The resolver can compare the existing
+`runner/program-digest` derivation over the acquired and requested databases;
+it must not stamp a caller-supplied digest as evidence of acquisition or infer
+freshness from a resolvable Var. Failed installation must remain a refusal,
+not acquire a successful-program assertion. This is a required change
+description, not an applied or verified implementation patch. The initial
+unapplied hunk at `base-ctx`, against `684f185f8`, is:
+
+```diff
+              acquired (acquire-program! {:seon.sci.eval/ctx ctx
+                                  :seon.db/db database
+                                  :seon.schema/projection projection})]
++         (swap! (::kernel/program-snapshot ctx) assoc
++                :seon.db/db database
++                ::acquisition acquired)
+          (assoc ctx ::acquisition acquired))))))
+```
+
+This hunk alone is insufficient: accepted-batch installation must advance
+the evidence, refusal handling must remain visible, and the held regression
+must verify both paths before a resolver relies on it. `acquire!` and fork
+operations already copy that snapshot; no second acquisition-state atom is
+needed.
+
+The held acquisition regression needs the corresponding cases: acquire a
+real admitted fileless test; admit a changed test/dependency into the same
+canonical database while retaining the old context; verify stale resolution
+refuses; reacquire through the existing owner and verify the new test body;
+repeat across a fork and an accepted installation batch, including a refused
+installation. Item (1)'s runner regression then proves execution through
+the existing capture owner. No alternate evaluator, per-test source replay,
+or caller-generated acquisition proof was introduced to bypass this boundary.
+
+### Read-only live observation
+
+`bin/seon status` observed default pid **66052**, alive, no orphan Seon JVMs.
+MCP runtime status answered with all three listed plumbing procs reporting
+`reply`. It also reported two error signatures, three errored evaluations,
+one failed run and three failed tests; those counts were not diagnosed by
+this bounded lane and are not an assertion of a clean platform gate.
+
+Exact JVM REPL form, `read_only: true`, root `/Users/sean/src/seon`, cluster
+`default`, session `test-system-stage2`:
+
+```clojure
+(let [database (seon.db/db (seon.operator/connection "default"))]
+  {:pid (.pid (java.lang.ProcessHandle/current))
+   :basis-t (seon.db/basis-t database)
+   :analyzed-source-digest-installed?
+   (boolean (get (:schema database) :seon.program/analyzed-source-digest))})
+```
+
+Returned value, reported evaluation time **1 ms**:
+
+```clojure
+{:analyzed-source-digest-installed? false
+ :basis-t 536871059
+ :pid 66052}
+```
+
+The reset-group analysis attribute required by the design is therefore still
+an integration prerequisite in this observed live database. That observation
+does not justify an old/new schema compatibility reader or Stage 1 selection.
+No production edits, tests, write evaluations, explicit publications,
+adoptions, restarts, resets, or foreign-session operations were performed in
+this continuation. The Markdown edit hook may queue its normal publication.
+Items (1), (2), and (3) remain unimplemented beyond the earlier admission
+seam; this note does not claim any additional execution acceptance.
+
 ## Follow-up: batch 116 recording refusal
 
 The accepted first seam is `7795e54f4`. The next coherent slice corrects
