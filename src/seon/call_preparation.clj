@@ -61,12 +61,6 @@
 
 (schema.edn/load! {})
 
-;;; LOAD-CYCLE BOUNDARY. `seon.error` requires this namespace and `seon.db`,
-;;; so resolve its public predicate once at first use instead of requiring it
-;;; back or keeping a second local classification rule.
-(defonce ^:private error-predicate
-  (delay (requiring-resolve 'seon.error/error?)))
-
 (def ^:private empty-snapshot
   {:seon.call-preparation/supplied-defaults {}
    :seon.call-preparation/prepared-symbols #{}
@@ -118,6 +112,12 @@
    :seon.error/kind kind
    :seon.error/message message
    :seon.error/data data})
+
+(defn- error-value?
+  [value]
+  (and (map? value)
+       (keyword? (:seon.error/kind value))
+       (string? (:seon.error/message value))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The declared row attributes — a query over the declaration, not a list
@@ -222,7 +222,7 @@
    environment-fingerprint error-fingerprint]
   (let [shapes (db/q database supplier-shape-query supplier)]
     (cond
-      (@error-predicate shapes) shapes
+      (error-value? shapes) shapes
 
       (empty? shapes)
       (incoherent default-key
@@ -292,7 +292,7 @@
   ;; the evaluated form that preparation had merely admitted.
   (binding [db/*read-evidence-sink* nil]
     (let [history (db/history database)
-          historical (when-not (@error-predicate history)
+          historical (when-not (error-value? history)
                        (db/q history historical-row-transaction-query
                              attributes))
           current (db/q database current-row-transaction-query attributes)]
@@ -352,13 +352,13 @@
       #{}
       (let [positional (db/q database prepared-positional-query fingerprints)
             entries (db/q database prepared-entry-query fingerprints)]
-        (into (if (@error-predicate positional) #{} (set positional))
+        (into (if (error-value? positional) #{} (set positional))
               (comp (filter (fn [[_ entry-key fingerprint]]
                               (= entry-key
                                  (:seon.call-preparation/key
                                   (get index fingerprint)))))
                     (map first))
-              (when-not (@error-predicate entries) entries))))))
+              (when-not (error-value? entries) entries))))))
 
 (defn snapshot
   "Derive the complete supplied-default snapshot from one database value.
@@ -374,7 +374,7 @@
     [:or :seon.call-preparation/snapshot :seon.error/value]]}
   [database projection]
   (let [rows (db/q database row-query)]
-    (if (@error-predicate rows)
+    (if (error-value? rows)
       rows
       (let [environment-fingerprint
             (db/q database schema-fingerprint-query :seon.env/environment)
@@ -478,14 +478,14 @@
     [:or :seon.call-preparation/snapshot :seon.error/value]]}
   [call-state database projection]
   (let [basis (db/basis-t database)]
-    (if (@error-predicate basis)
+    (if (error-value? basis)
       basis
       (let [held (:seon.call-preparation/snapshot @call-state)]
         (if (>= (long (:seon.call-preparation/checked-through-t held))
                 (long basis))
           held
           (let [derived (snapshot database projection)]
-            (if (@error-predicate derived)
+            (if (error-value? derived)
               derived
               (:seon.call-preparation/snapshot
                (swap! call-state adopt derived)))))))))
@@ -510,7 +510,7 @@
      (fn [report]
        (when (some (comp attributes :a) (:tx-data report))
          (let [derived (snapshot (:db-after report) projection)]
-           (when-not (@error-predicate derived)
+           (when-not (error-value? derived)
              (swap! call-state adopt derived))))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -633,13 +633,13 @@
     [:or [:vector [:tuple :int :int :qualified-keyword]] :seon.error/value]]}
   [database sym]
   (let [rows (db/q database row-query)]
-    (if (@error-predicate rows)
+    (if (error-value? rows)
       rows
       (let [declared (into #{} (map (fn [[entry-key _ fingerprint _]] [entry-key fingerprint])) rows)
             fingerprints (vec (distinct (map #(nth % 2) rows)))
             entries (if (seq fingerprints)
                       (db/q database map-entry-query sym fingerprints) [])]
-        (if (@error-predicate entries)
+        (if (error-value? entries)
           entries
           (->> entries
                (filter (fn [[_ _ entry-key fingerprint]] (contains? declared [entry-key fingerprint])))
@@ -937,7 +937,7 @@
 
       :else
       (let [compiled (plan-for database current sym)]
-        (when (and compiled (not (@error-predicate compiled)))
+        (when (and compiled (not (error-value? compiled)))
           (swap! call-state assoc-in [:seon.call-preparation/plans sym]
                  {:seon.call-preparation/contract-t
                   (:seon.call-preparation/contract-t compiled)
@@ -1002,7 +1002,7 @@
             valid? (get (:seon.call-preparation/validators current)
                         default-key)]
         (cond
-          (@error-predicate produced) (unavailable sym slot produced)
+          (error-value? produced) (unavailable sym slot produced)
 
           (or (nil? valid?) (valid? produced)) produced
 
@@ -1151,7 +1151,7 @@
         (let [refusal (volatile! nil)
               value-for (fn [slot]
                           (let [produced (supply current environment slot sym)]
-                            (when (@error-predicate produced)
+                            (when (error-value? produced)
                               (vreset! refusal produced))
                             produced))
               with-inserts
@@ -1213,10 +1213,10 @@
         connection (when (and call-state environment projection)
                      (:seon.db/connection environment))
         database (when connection (db/db connection))]
-    (if-not (and database (not (@error-predicate database)))
+    (if-not (and database (not (error-value? database)))
       arguments
       (let [current (current-snapshot call-state database projection)]
-        (if (@error-predicate current)
+        (if (error-value? current)
           arguments
           (let [sym (callee-identity callee)]
             (if-not (contains? (:seon.call-preparation/prepared-symbols current)
@@ -1226,6 +1226,6 @@
                     prepared (prepare current environment
                                       (plan call-state database current sym)
                                       (vec arguments))]
-                (if (@error-predicate prepared)
+                (if (error-value? prepared)
                   (reduced prepared)
                   prepared)))))))))

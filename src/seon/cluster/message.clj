@@ -2,7 +2,6 @@
   "Durable messages with permanent routing and settlement claims."
   (:refer-clojure :exclude [read send])
   (:require [seon.db :as db]
-            [seon.error :as error]
             [seon.repl :as repl]
             [seon.id :as id]
             [clojure.string :as str]
@@ -140,11 +139,10 @@
 
 (defn- agent-exists?
   [db agent-id]
-  (let [agent (db/q '[:find ?agent .
-                      :in $ ?id
-                      :where [?agent :seon.agent/id ?id]]
-                    db agent-id)]
-    (if (error/error? agent) agent (some? agent))))
+  (some? (db/q '[:find ?agent .
+                :in $ ?id
+                :where [?agent :seon.agent/id ?id]]
+              db agent-id)))
 
 
 
@@ -154,23 +152,21 @@
                   :seon.message/inbound]}
   [database {:keys [:seon.agent/id :seon.message/inbound-content
                     :seon.config.eval.result/max-string]}]
-  (let [recipient-exists? (agent-exists? database id)]
-    (cond
-      (error/error? recipient-exists?) recipient-exists?
-      (not recipient-exists?)
-      {:seon.error/kind :seon.message/unknown-recipient :seon.message/unknown-recipient id
-       :seon.error/message (str "There is no agent named " (pr-str id) ".")}
-      (str/blank? inbound-content)
-      {:seon.error/kind :seon.message/blank-content :seon.message/blank-content true
-       :seon.error/message "A message must contain some text."}
-      (> (count inbound-content) max-string)
-      {:seon.error/kind :seon.message/content-too-large
-       :seon.message/content-too-large (count inbound-content)
-       :seon.error/message (str "The message exceeds the configured " max-string " character bound.")}
-      :else
-      [{:seon.message/id (id/id (random-uuid) 8)
-        :seon.message/to [:seon.agent/id id]
-        :seon.message/content inbound-content}])))
+  (cond
+    (not (agent-exists? database id))
+    {:seon.error/kind :seon.message/unknown-recipient :seon.message/unknown-recipient id
+     :seon.error/message (str "There is no agent named " (pr-str id) ".")}
+    (str/blank? inbound-content)
+    {:seon.error/kind :seon.message/blank-content :seon.message/blank-content true
+     :seon.error/message "A message must contain some text."}
+    (> (count inbound-content) max-string)
+    {:seon.error/kind :seon.message/content-too-large
+     :seon.message/content-too-large (count inbound-content)
+     :seon.error/message (str "The message exceeds the configured " max-string " character bound.")}
+    :else
+    [{:seon.message/id (id/id (random-uuid) 8)
+      :seon.message/to [:seon.agent/id id]
+      :seon.message/content inbound-content}]))
 
 (defn delivery
   "Prepare durable messages; handling belongs to turn settlement."
@@ -180,7 +176,7 @@
                         [:seon.agent/id :seon.agent/id]
                         [:seon.config.message/max-chain :seon.config.message/max-chain]
                         [:seon.message/trigger {:optional true} :seon.message/id]]]
-                  [:or :seon.message/delivery :seon.error/value]]}
+                  :seon.message/delivery]}
   [database {:keys [:my.message/value :seon.message/trigger
                     :seon.config.message/max-chain] :as request}]
   (let [sender (:seon.agent/id request)
@@ -200,20 +196,15 @@
        (fn [delivered candidate]
          (let [recipient (:my.message/to candidate)
                about-id (:my.message/about candidate)
-               recipient-exists? (agent-exists? database recipient)
                failure (cond
-                         (error/error? recipient-exists?)
-                         recipient-exists?
-                         (not recipient-exists?)
+                         (not (agent-exists? database recipient))
                          {:seon.error/kind :seon.message/unknown-recipient
                           :seon.message/unknown-recipient recipient
                           :seon.error/message (str "There is no agent named " (pr-str recipient) ".")}
                          :else nil)]
-           (if (error/error? failure)
-             (reduced failure)
-             (if failure
-               (update delivered :seon.error/values conj failure)
-               (let [subject about-id
+           (if failure
+             (update delivered :seon.error/values conj failure)
+             (let [subject about-id
                    row (cond-> {:seon.message/id (or (:seon.message/id candidate)
                                                       (id/id))
                                 :seon.message/to [:seon.agent/id recipient]
@@ -226,7 +217,7 @@
                          (assoc :seon.message/assignment (:my.message/assignment candidate))
                          (:my.message/reason candidate)
                          (assoc :my.message/reason (:my.message/reason candidate)))]
-                 (update delivered :seon.message/rows conj row))))))
+               (update delivered :seon.message/rows conj row)))))
        {:seon.message/rows [] :seon.error/values []}
        candidates))))
 
@@ -492,6 +483,10 @@
     :seon.message/assignment
     :my.message/reason])
 
+(defn- error-value?
+  [value]
+  (and (map? value) (keyword? (:seon.error/kind value))))
+
 (defn- endpoint-id
   [message endpoint]
   (get-in message [endpoint :seon.agent/id]))
@@ -543,13 +538,13 @@
 (defn- inbox*
   [database agent-id since]
   (let [recipient (recipient-eid database agent-id)]
-    (if (error/error? recipient)
+    (if (error-value? recipient)
       recipient
       (let [source (if (some? since) (db/since database since) database)]
-        (if (error/error? source)
+        (if (error-value? source)
           source
           (let [ids (inbox-message-eids source database recipient)]
-            (if (error/error? ids)
+            (if (error-value? ids)
               ids
               (->> ids
                    (map #(db/pull database message-selector %))
@@ -586,7 +581,7 @@
   (let [message (db/pull database message-selector
                          [:seon.message/id message-id])]
     (cond
-      (error/error? message) message
+      (error-value? message) message
       message (admitted-message message)
       :else
       {:seon.error/kind :my.message/not-found
@@ -684,14 +679,14 @@
   [request connection agent-id]
   (let [candidate (send-value (:my.message/to request) (:my.message/content request)
                               (some? (:my.message/about request)) (:my.message/about request))]
-    (if (error/error? candidate)
+    (if (error-value? candidate)
       candidate
       (let [candidate (merge candidate (select-keys request [:my.message/assignment :my.message/reason]))
             result (db/transact!
                     connection
                     {:tx-data [[:db.fn/call #'send-call candidate agent-id]]
                      :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
-        (if (error/error? result) result
+        (if (error-value? result) result
             (read (:seon.message/id candidate) (:db-after result)))))))
 
 (defn decline

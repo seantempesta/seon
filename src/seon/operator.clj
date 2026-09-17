@@ -24,7 +24,6 @@
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.error :as error]
             [seon.fs :as fs]
             [seon.operator.runtime :as runtime]
             [seon.operator.state :as state]
@@ -51,6 +50,12 @@
     (f)
     (catch Throwable error
       (flat-error error))))
+
+(defn- error-value?
+  [value]
+  (and (map? value)
+       (keyword? (:seon.error/kind value))
+       (string? (:seon.error/message value))))
 
 (defn- lifecycle-lock-bound-ms
   [request]
@@ -80,7 +85,7 @@
     [:or :seon.boot/instance :seon.error/value]]}
   [instance]
   (let [stopped (stop! instance)]
-    (if (error/error? stopped)
+    (if (error-value? stopped)
       stopped
       (start! (:seon.boot/config instance)))))
 
@@ -142,7 +147,7 @@
 (defn- selected-connection
   [cluster-name]
   (let [environment (selected-environment cluster-name)]
-    (if (error/error? environment)
+    (if (error-value? environment)
       environment
       (db/supplied-connection environment))))
 
@@ -182,7 +187,7 @@
   {:malli/schema [:=> [:cat] [:or :string :seon.error/value]]}
   []
   (let [current (status)]
-    (if (error/error? current)
+    (if (error-value? current)
       current
       (attempt
        #(str/join
@@ -686,7 +691,7 @@
                   (:seon.store/connection-object operation-store) branch)]
     (try
       (let [history-value (db/history database)
-            searchable (if (error/error? history-value)
+            searchable (if (error-value? history-value)
                          database
                          history-value)]
         (into #{}

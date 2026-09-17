@@ -6,7 +6,6 @@
   Datahike retains its history."
   (:require [clojure.string :as str]
             [seon.db :as db]
-            [seon.error :as error]
             [seon.repl :as repl]
             [seon.render.route :as route]
             [seon.render.value :as render.value]
@@ -27,6 +26,10 @@
     :my.note/content
     {:my.note/agent [:db/id]}
     {:my.note/about [:db/id]}])
+
+(defn- error-value?
+  [value]
+  (and (map? value) (keyword? (:seon.error/kind value))))
 
 (defn- note-value
   [value]
@@ -248,11 +251,11 @@
         (transact-note!
          connection agent-id
          [[:db.fn/call #'add-note-call request]])]
-    (if (error/error? result)
+    (if (error-value? result)
       result
       (let [note (db/pull (:db-after result) note-selector
                           [:my.note/id id])]
-        (if (error/error? note) note (note-row note))))))
+        (if (error-value? note) note (note-row note))))))
 
 (defn add!
   "Add or update one note owned by the calling agent."
@@ -282,7 +285,7 @@
          connection agent-id
          [[:db.fn/call #'forget-note-call
            {:my.note/id id :seon.agent/id agent-id}]])]
-    (if (error/error? result)
+    (if (error-value? result)
       result
       (note-row (db/pull (:db-before result) note-selector [:my.note/id id])))))
 
@@ -300,7 +303,7 @@
                 [?note :my.note/agent ?agent]
                 [?note :my.note/id ?id]]
               database agent-id)]
-    (if (error/error? rows)
+    (if (error-value? rows)
       rows
       (->> rows
            (sort-by first)
