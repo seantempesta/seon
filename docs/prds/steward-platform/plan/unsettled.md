@@ -1818,6 +1818,15 @@ analysis-names-no-finding`. **Batch 115 launched by the orchestrator** (load
 15): platform tier, then 24 namespaces across every slice landed since the
 resume, on HEAD (`tmp/orchestrator/gate-results/batch-115.log`).
 
+**reset-is-total PROVEN** (`5cd10e8d4`): one `bin/seon --root <scratch>
+reset --force` at load 19 → live adopted cluster, exit 0: preflight 0.26 s,
+down 0.2 s, destroy 0.01 s, republish 173 s, refork 33 s, start 22 s, adopt
+125 s (354 s total); `converged? true`; per-phase elapsed printed. Boundary
+recorded: republish ran at 173 s against its 180 s bound — the margin is the
+complete-publication cost (issue-index 13 s and friends), not the bound; the
+incremental base publication and the publication-cost issues are the fix.
+7/89 fast green; cold gate owed.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
