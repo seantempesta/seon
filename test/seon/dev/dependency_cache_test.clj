@@ -145,7 +145,6 @@
         lock-file (io/file root "cache.lock")
         result-file (io/file root "result.edn")
         rows (write-probe-sources! source-root)
-        project-digest (atom "project-a")
         child (atom nil)]
     (try
       (with-redefs-fn
@@ -156,7 +155,6 @@
          (.getCanonicalPath references-root)
          (private-var 'lock-file) (.getCanonicalPath lock-file)
          (private-var 'result-file) (.getCanonicalPath result-file)
-         (private-var 'project-digest) #(deref project-digest)
          (private-var 'run-build!)
          (fn [_basis staging]
            (compile-probes! source-root rows staging))}
@@ -176,7 +174,10 @@
                   (io/file references-root
                            (str (:seon.operator.process-record/generation record) ".edn"))]
               (state/write-edn! reference-file record)
-              (reset! project-digest "project-b")
+              (let [second-file (io/file source-root "cache_probe/second.clj")]
+                (spit second-file
+                      "(ns cache-probe.second)\n(def value :second-rebuilt)\n")
+                (.setLastModified second-file 1))
               (let [second-cache
                     (:seon.dev-cache/path (dev-cache/refresh nil))
                     reaped (dev-cache/reap nil)]

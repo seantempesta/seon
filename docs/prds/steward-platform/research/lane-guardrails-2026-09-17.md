@@ -778,3 +778,31 @@ hook still reports the previously recorded 31 foreign stale-gitlink findings.
 Owned paths: `bin/test`, `src/seon/test/cache.clj`,
 `test/seon/test_runner_test.clj`, AGENTS.md and this note. No cold host gate or
 `SEON_TEST_*` override was used; cold/platform proof remains the orchestrator's.
+
+### Dependency-cache regression follows real source changes
+
+Batch 123 B (`tmp/orchestrator/gate-results/batch-123b.log:1577`) failed
+before exercising cache retention: the fixture resolved the removed private
+`dev-cache/project-digest`. The current `dev-cache/refresh` hashes dependency
+source bytes through `sha-256` and combines them with dependency configuration
+at `refresh!`; no replacement digest stub is necessary. The existing regression
+now rewrites its synthetic second dependency from `:second-loaded` to
+`:second-rebuilt` before calling public `refresh` again. Its delayed old JVM
+must still load `:second-loaded`, retain the exact original directory under
+heap pressure, and permit reclamation only after exit.
+
+```sh
+timeout 2400 bin/test-fast --paths test/seon/dev/dependency_cache_test.clj -- seon.dev.dependency-cache-test
+```
+
+Result: **1 test / 10 assertions / 0 failures / 0 errors**, exit **0**,
+ending `2026-09-17T07:01:56.615006Z`, snapshot HEAD `76383eb228`.
+Slot wait was **0 seconds**. The two real cache rebuilds took **1325 ms**
+and **506 ms**; the first reap protected the live process, and the second
+reclaimed its old directory after exit. The child exited and fixture cleanup
+completed; the fast snapshot was removed. No cold gate, environment override,
+or default operation was used. Cold/platform proof remains the orchestrator's.
+
+Foreign boundary: concurrent `dev_cache.clj` and `bin/test` edits were excluded
+by HEAD-plus-paths, as were the other dirty paths; neither held file needed an
+edit. Owned paths are `test/seon/dev/dependency_cache_test.clj` and this note.
