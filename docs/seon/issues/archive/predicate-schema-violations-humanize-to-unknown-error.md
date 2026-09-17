@@ -70,3 +70,14 @@ Commit `fef44a5a8` gives the remaining two predicate declarations explicit
 `:error/message` properties, adds the registry-wide query proof, and makes the
 instrumentation humanizer omit Malli's invented `unknown error` string while
 retaining the bounded schema form as diagnostic expectation.
+
+
+## 2026-09-17 regression caught a new declaration
+
+Reset G5 fast 10, after rebasing the adoption-progress work, found exactly one
+new bare registered predicate: `:seon.source/progress!` from `be9c90e2f`.
+The existing registry-wide regression refused `[:fn clojure.core/ifn?]`.
+`aa05520b1` adds "must be a callable publication progress reporter" to that
+resource declaration; accepted values and callback behavior are unchanged.
+The reset landing note records the correcting schema rerun. The class remains
+covered by its existing recurring proof; no second predicate inventory is added.
