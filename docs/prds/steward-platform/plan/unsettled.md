@@ -3627,3 +3627,19 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   owner decision pending on the bb script). fn-test 64 green. RESET NEEDED
   (published facts change). Platform gate 9 launched (load 10.8; two lanes
   landed). Launched sol `namespace-page-fanout` (B7).
+
+## 2026-09-18 ~07:10Z — turn settlement repaired; refusal enumerates its facets
+
+- `turn-settlement-post-reset` COMPLETE (`e088cc0f9` + its fixup commits):
+  settlement preserves symbol identities/calls/requires/subjects (no
+  lookup-ref conversion, no fabricated unresolved rows); bare `in-ns`
+  persists the living SCI namespace declaration (resumed folds correct);
+  class D was fixture-only; the stub-minting regression rewritten to assert
+  unresolved-call reporting. 69 tests / 592 assertions; 1F/2E inherited
+  config/schema fixtures (named in its note). Cold gate queued behind gate 9.
+- `1278dfa16` (Opus): `seon.error.refusal/refusal` and `seon.error/refusal`
+  enumerate the 63-facet union explicitly (1q), with a drift regression
+  against `seon.error/facet-keys`; wrapper reds now 76 tests 3F/0E — the
+  three are `seon.db/pull` and `seon.db/transact-call` (held db.clj).
+- Wrapper lane resumed on the SCI side (eval.clj free). Editing: publication,
+  namespace-page, wrapper.
