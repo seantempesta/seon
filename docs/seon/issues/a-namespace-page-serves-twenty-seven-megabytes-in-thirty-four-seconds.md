@@ -70,3 +70,29 @@ record seconds, not megabytes.
 
 Orchestrator window; the fix belongs to the namespace page render owner
 (`src/seon/render/ns.clj`) or the query-work bound at the walk.
+
+## Acceptance
+
+- A canonical-fixture page render contains exactly one full namespace entry.
+- Required and otherwise related namespaces render only as identity links,
+  without their source or member definitions.
+- The same structural expansion is removed from `/`.
+- Curl records post-adoption bytes and time for `/ns/seon.id` and `/`.
+
+## Implementation status (2026-09-18)
+
+Commits `b2f62f288` and `f5bbecde0` repair the root cause and the isolated
+armed-contract regression is green: 3 tests, 62 assertions, 0 failures, 0
+errors. The walk had resolved symbol-valued `:seon.ns/requires` observations
+to namespace entities for traversal, then leaked those resolved entities into
+the render value. That invalidated the namespace shape and sent the whole
+nested graph through the structural value renderer. The walk now restores the
+stored symbols, the selected namespace remains full, and requirements render
+as namespace links.
+
+The issue remains open solely for the required live measurement. Two edit-hook
+adoption attempts failed in preflight because the clj-kondo dependency-cache
+subprocess exceeded its declared deadline, and a read-only JVM probe proved
+the default process still held the old Var. RESET NEEDED at `0e8f7d323`; the
+orchestrator owns the reset and post-adoption curl. Full evidence is in
+`docs/prds/steward-platform/research/namespace-page-fanout-2026-09-18.md`.
