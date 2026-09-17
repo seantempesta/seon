@@ -1360,6 +1360,8 @@
   on data rows retain conservative attribute-consumer reach because those
   rows do not identify a calling function. Keyword mentions never replace
   the known owner of a function declaration."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or [:set [:tuple :int :int]] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [database]
   (db/q '[:find ?caller ?target
           :in $ %
@@ -1369,15 +1371,20 @@
 
 (defn- gate-set-in
   "Reverse-walk names, including a seed whose definition has been removed."
-  [database identities tests incoming function-symbol]
-  (loop [pending [function-symbol] seen #{}]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map-of :int :qualified-symbol] [:set :qualified-symbol]
+                       [:map-of :qualified-symbol [:set :qualified-symbol]]
+                       [:sequential :qualified-symbol]]
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
+  [database identities tests incoming seeds]
+  (loop [pending (vec seeds) seen #{}]
     (if-let [target (peek pending)]
       (if (seen target)
         (recur (pop pending) seen)
         (let [calls (db/datoms database :avet :seon.fn/calls target)
               references (db/datoms database :avet :seon.fn/references target)
               subjects (db/datoms database :avet :seon.test/subject target)
-              refusal (some #(when (:seon.error/kind %) %) [calls references subjects])]
+              refusal (some #(when (error/error? %) %) [calls references subjects])]
           (if refusal
             refusal
             (let [referrers (into (get incoming target #{})
@@ -1386,13 +1393,14 @@
               (recur (into (pop pending) referrers) (conj seen target))))))
       (vec (sort (set/intersection tests seen))))))
 
-(defn gate-sets
+(defn- gate-sets-in
   "Select tests through surviving named edges in one immutable database.
    Acquire identity and genuine declaration-ref joins once per operation."
-  {:malli/schema
-   [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
-    [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.error/value]]}
-  [database function-symbols]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:sequential :qualified-symbol] :boolean]
+                  [:or [:vector :seon.test/sym]
+                   [:map-of :qualified-symbol [:vector :seon.test/sym]] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
+  [database function-symbols union?]
   (let [identity-rows (db/q '[:find ?entity ?symbol
                              :where (or [?entity :seon.fn/sym ?symbol]
                                         [?entity :seon.test/sym ?symbol])] database)
@@ -1406,7 +1414,7 @@
         handlers (db/q '[:find ?caller ?symbol
                          :where [?caller :seon.fn/sym]
                                 [?caller :seon.effect/capability ?symbol]] database)
-        refusal (some #(when (:seon.error/kind %) %)
+        refusal (some #(when (error/error? %) %)
                       [identity-rows test-symbols declared file-references handlers])]
     (if refusal
       refusal
@@ -1418,13 +1426,29 @@
                              {} (concat (map (fn [[caller target]]
                                                [caller (get identities target)]) declared)
                                         file-references handlers))]
-        (reduce (fn [result function-symbol]
+        (if union?
+          (gate-set-in database identities (set test-symbols) incoming function-symbols)
+          (reduce (fn [result function-symbol]
                   (let [selected (gate-set-in database identities (set test-symbols)
-                                              incoming function-symbol)]
-                    (if (:seon.error/kind selected)
+                                              incoming [function-symbol])]
+                    (if (error/error? selected)
                       (reduced selected)
                       (assoc result function-symbol selected))))
-                {} (distinct function-symbols))))))
+                {} (distinct function-symbols)))))))
+
+(defn gate-sets
+  "Select tests through the shared reverse graph. The map arity seeds one
+  frontier with all changed symbols; the positional arity retains per-seed results."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.fn/gate-request]
+     [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]
+    [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
+     [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]]}
+  ([{database :seon.db/db seeds :seon.fn/seeds}]
+   (gate-sets-in database (vec seeds) true))
+  ([database function-symbols]
+   (gate-sets-in database function-symbols false)))
 
 (defn unresolved-callers
   "Report named calls with no current definition, including external names.
@@ -1467,15 +1491,15 @@
   explicitly pending subject; unresolved file references select that file's
   tests. Use gate-sets when one operation asks about several identities."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
-                  [:or [:vector :seon.test/sym] :seon.error/value]]}
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [database function-symbol]
   (let [result (gate-sets database [function-symbol])]
-    (if (:seon.error/kind result) result (get result function-symbol))))
+    (if (error/error? result) result (get result function-symbol))))
 
 (defn tests-reaching
   "Compatibility spelling for the shared gate-set derivation."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
-                  [:or [:vector :seon.test/sym] :seon.error/value]]}
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [database function-symbol]
   (gate-set database function-symbol))
 

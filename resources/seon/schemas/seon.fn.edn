@@ -1,4 +1,7 @@
-#:seon.fn{:root [:string {:min 1}],
+#:seon.fn{:gate-request
+          [:map [:seon.db/db :seon.db/database-value]
+           [:seon.fn/seeds [:set :qualified-symbol]]],
+          :root [:string {:min 1}],
           :source-path [:string {:min 1}],
           :arglists :string,
           :reference-to [:qualified-keyword {:description "Identity attribute of the function named by a declared reference value; enables call-graph joins from attribute consumers to the referenced identity."}]

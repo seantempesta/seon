@@ -1468,8 +1468,31 @@
             "even an absent definition can have surviving value referrers")
         (is (<= (count @queries) (* 5 (count symbols)))
             "each identity uses at most five nonrecursive selection queries")
-        (is (not-any? #(some #{'%} %) @queries)
-            "N definitions never repeat the graph-wide recursive derivation")
+        (is (= (count symbols) (count (filter (fn [query] (some #{'%} query)) @queries)))
+            "each operation acquires its declared-reference relation once")
+        (doseq [seeds [#{(symbol "sample.gates" "a")}
+                        #{(symbol "sample.gates" "a") (symbol "sample.gates" "b")}
+                        #{(symbol "sample.gates" "a") (symbol "sample.gates" "b")
+                          (symbol "sample.gates" "new")}]]
+          (let [started (System/nanoTime)
+                union
+                (with-redefs
+                  [db/datoms (fn [& arguments]
+                               (when (identical? thread (Thread/currentThread))
+                                 (swap! scans conj (vec (rest arguments))))
+                               (apply datoms arguments))]
+                  (reset! scans [])
+                  (seon.fn/gate-sets {:seon.db/db database :seon.fn/seeds seeds}))]
+            (is (= (vec (sort (cond-> [(symbol "sample.gates" "direct")
+                                      (symbol "sample.gates" "pending")
+                                      (symbol "sample.gates" "subject")]
+                               (seeds (symbol "sample.gates" "new"))
+                               (conj (symbol "sample.gates" "future"))))) union))
+            (is (= (count @scans) (count (distinct @scans)))
+                "overlapping seeds share one visited set, including through a cycle")
+            (println "gate-sets union seeds=" (count seeds)
+                     "indexed-reads=" (count @scans)
+                     "elapsed-ms=" (/ (- (System/nanoTime) started) 1000000.0))))
         (transact-fixture!
          connection
          [[:db/retract [:seon.fn/sym (quote sample.gates/b)] :seon.fn/calls
@@ -1480,7 +1503,7 @@
         (is (= (first results) (seon.fn/gate-set database (quote sample.gates/a)))
             "the old immutable value keeps its own reach")))))
 
-(deftest gate-set-returns-the-shape-its-contract-declares
+(deftest a-refused-reference-read-refuses-gate-set-derivation
   (test-support/with-database
     (fn [connection]
       (transact-fixture!
@@ -1527,8 +1550,9 @@
               ;; A degrading cluster hands a read this flat value; the dev
               ;; dial throws the same diagnostic, so the selection must never
               ;; concatenate it either way.
-              refusal (error/diagnostic
-                       {:seon.error/kind :seon.db/invalid-read
+              refusal (dissoc (error/diagnostic
+                       {:seon.db/invalid-read true
+                        :seon.error/kind :seon.db/invalid-read
                         :seon.error/message
                         "seon.db/q cannot read uninstalled attribute :sample.shape/uninstalled."
                         :seon.error/diagnostic-layer :database-read
@@ -1538,23 +1562,25 @@
                         :seon.error/diagnostic-offending :sample.shape/uninstalled
                         :seon.error/diagnostic-cause :seon.db/uninstalled-attribute
                         :seon.error/diagnostic-evidence
-                        {:seon.fn/sym (quote sample.shape/many)}})
+                        {:seon.fn/sym (quote sample.shape/many)}}) :seon.error/kind)
               refused (with-redefs
                         [db/q (fn [& arguments]
-                                (if (identical? thread (Thread/currentThread))
+                                (if (and (identical? thread (Thread/currentThread))
+                                         (= @#'seon.fn/declared-reference-rules (last arguments)))
                                   refusal
                                   (apply query arguments)))]
-                        (seon.fn/gate-set database (quote sample.shape/many)))]
-          (is (= :seon.db/invalid-read (:seon.error/kind refusal))
+                        [(seon.fn/tests-reaching database (symbol "sample.shape" "many"))
+                         (seon.fn/gate-set database (symbol "sample.shape" "many"))
+                         (seon.fn/gate-sets database [(symbol "sample.shape" "many")])
+                         (seon.fn/gate-sets {:seon.db/db database
+                                             :seon.fn/seeds #{(symbol "sample.shape" "many")}})])]
+
+          (is (true? (:seon.db/invalid-read refusal))
               "the injected read is a flat database refusal")
-          (is (= refusal refused)
-              "a refused read is returned whole")
-          (is (not (vector? refused))
-              "a refusal never becomes the gate set's own elements")
-          (is (empty? (filter #(and (vector? %) (= 2 (count %))
-                                    (keyword? (first %)))
-                              (when (vector? refused) refused)))
-              "no spliced map entry reaches the caller"))))))
+          (is (= [refusal refusal refusal refusal] refused)
+              "a refused declared-reference read refuses every selection arity")
+          (is (every? map? refused)
+              "a refusal never becomes a shortened gate set"))))))
 
 (deftest output-path-report-finds-the-shortest-bypass
   (test-support/with-database
