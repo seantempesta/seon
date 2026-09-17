@@ -1641,6 +1641,23 @@ while wedged, so the orchestrator is RESTARTING default (stop/start, not a
 refork; log `tmp/orchestrator/refork/restart-2026-09-17T0045Z.log`) and
 re-adopting.
 
+**Environment continuation FINISHED** (`73cb2fafe`, `8a507aa8f`): the wedge
+cause — schema resources are read from the classpath on every publication,
+so a new `[:fn …]` predicate went live the instant the file was written
+while the JVM held its boot-time copy of `seon.search`; the reload that
+installs it is part of ADOPTION, which runs after the refused publication.
+Fix: `converged-predicate-var` reloads an already-loaded namespace whose
+source declares a predicate its loaded copy lacks (an unloaded namespace
+still refuses). Live: branch publication complete, twice. NEW RESET NEEDED:
+`79c106925` removed `:db/noHistory` from `:seon.context.capture/prompt`,
+which Datahike cannot apply in place → adoption stops; the orchestrator's
+stop/start (pid 26293 booting) is not enough — refork next. Second cause
+confirmed for `seon.cluster.source-test` (activation seal refused
+`:transaction/validation-rejected`, source.clj:626) → Opus triage/fix lane
+launched. Also seen: 17 foreign reds in the pulled-shape class
+(`pulled-references-satisfy-every-declared-entity-contract`, `:my.plan/*`)
+— the pulled-form derivation (step B) is the owner.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
