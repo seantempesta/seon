@@ -2983,3 +2983,8 @@ working tree, never Sonnet.
   astra `test-system-stage1` launched (the selection function over the
   merged symbol edges). Editing: integrator, message-wake, stage 1; design:
   error-and-data-model-design.
+- Cold-worker arming order: already fixed inside stage 2's `a0c69cfd9`
+  (the worker arms before acquiring); message-wake verified it on the
+  merged base and updated its post-reset regressions (`f26330a56`,
+  30/266 green). Message-wake lane COMPLETE. The cold-only contract reds
+  should vanish in the first post-reset gates.
