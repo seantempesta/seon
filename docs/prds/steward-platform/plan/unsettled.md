@@ -3343,3 +3343,22 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   `:seon.error/result`, recommended). `647694741` (B6 item 3): overwritten
   agent wake signals counted. Editing lanes at the cap; the manifest slice
   launches on the first freed slot.
+
+## 2026-09-18 ~01:10Z — three landings; wave 2 proper launches
+
+- Landed: `9de4b0ebf` (`seon.schema/pulled-form-in`, option B, 28 tests
+  green; the `seon.db/pull` contract switch waits for db.clj to free);
+  `f4b9e007c` `647694741` `b78936144` (B6 items 1, 3, 4: agent procs in
+  runtime_status, overwritten wakes counted, classifying members survive
+  the cap; item 2 — FAILED state + stop the affected graph — stopped at
+  `cluster.clj`'s `:seon.flow/panic!` fanout, which the error PRD's
+  recorder/graph-control slice owns); `2a8a61612` `966d73589`
+  (predictable-reset: no test classpath at boot; HEAD-exact bare
+  snapshot). Owner ruling 1q recorded (every function lists its errors).
+- Gate 7 launched bare from the main root (HEAD `1c8e9d8fa`) — the first
+  trustworthy bare gate since the snapshot defect.
+- Launched: astra `error-declaration-manifest` (error PRD slice 1), sol
+  `one-error-predicate` (B1), astra `test-system-stage1` resumed with its
+  shelved patch (Track A; absorbs triage #14 and the runner-test symbol
+  reds). Running with `publication-report-projection` = 4 editing lanes.
+  Wrapper enforcement (slice 2) follows the manifest.
