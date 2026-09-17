@@ -8,6 +8,8 @@
             [clojure.test.check.properties :as prop]
             [seon.ai.tokens :as tokens]
             [seon.db :as db]
+            [seon.error :as error]
+            [seon.instrument :as instrument]
             [sci.core :as sci]
             [clojure.test :refer [deftest is]]
             [seon.config :as config]
@@ -906,3 +908,51 @@
        (is (< (:seon.print/omitted cut) (:seon.render.data/total cut)) shown)
        (is (= 'seon.print/value-at (first (:seon.print/requery-form cut)))
            shown)))))
+
+(deftest transacted-declares-every-error-facet-it-hands-back
+  ;; `seon.error/rendered-error-value` hands this floor the error entity
+  ;; `seon.error/latest-fact` projected, so an ARMED `transacted` returns a
+  ;; base-shaped value carrying that error's own facets. While both arities
+  ;; were declared `:map`, the wrapper's facet check refused the render path
+  ;; with "seon.render.value/transacted returned undeclared error facets
+  ;; #{:seon.instrument/contract-error}" (error-wrapper-enforcement
+  ;; research, 2026-09-18). Nothing here CONSTRUCTS an error, so the
+  ;; declaration is the generic pass-through enumeration program-facts PRD
+  ;; 1q requires, identical to `seon.error/latest-fact`'s.
+  (support/with-database
+   (fn [connection]
+     (let [projection (schema/handed-projection)
+           refusal (try ((instrument/wrap-interpreted
+                          'my.agents.audit/vector-input
+                          "[:=> [:cat [:vector :int]] :int]"
+                          projection :panic caps (constantly 1))
+                         "not-a-vector")
+                        (catch Exception failure (ex-data failure)))]
+       (is (contains? (error/facets projection refusal)
+                      :seon.instrument/contract-error)
+           (str "the reproduction is a genuinely faceted base error: "
+                (pr-str refusal)))
+       ;; The fast runner arms this Var under :panic, so an undeclared facet
+       ;; throws here instead of passing silently. Surviving the call IS the
+       ;; proof, and the facets must survive it too.
+       (doseq [[label returned]
+               [["shape-only arity" (value/transacted refusal)]
+                ["database arity" (value/transacted refusal (db/db connection))]]]
+         (is (contains? (error/facets projection returned)
+                        :seon.instrument/contract-error)
+             (str label " returns a value satisfying its declared alternative"))
+         (is (= (:seon.error/operation refusal) (:seon.error/operation returned))
+             label))
+       ;; An ordinary success value still normalizes and validates.
+       (is (= {:seon.agent/id "root"}
+              (value/transacted {:db/id 7 :seon.agent/id "root"})))
+       (is (= {:seon.agent/id "root"}
+              (value/transacted {:db/id 7 :seon.agent/id "root"}
+                                (db/db connection))))
+       ;; And the hand-written union cannot drift from the projection.
+       (doseq [arity (rest (:malli/schema (meta #'value/transacted)))]
+         (let [declared (#'instrument/declared-result projection (last arity))]
+           (is (= (error/facet-keys projection)
+                  (:seon.instrument/declared declared))
+               (pr-str arity))
+           (is (true? (:seon.instrument/base? declared)))))))))

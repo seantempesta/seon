@@ -32,13 +32,69 @@
   With a database value, installed Datahike value type and cardinality are the
   authority: refs become entity ids, cardinality-many values become sets, and
   scalar EDN vectors remain vectors. The one-argument arity preserves the
-  established shape-only behavior for callers without database custody."
+  established shape-only behavior for callers without database custody.
+
+  This is a generic pass-through: the entity handed in is returned in
+  transaction shape, so an error entity — `seon.error/latest-fact`'s
+  projection reaches here through `seon.error/rendered-error-value` — comes
+  back carrying its own base and facets. Per the program-facts PRD §1q the
+  output therefore enumerates `:seon.error/base` and every canonical facet
+  explicitly, exactly as `seon.error/latest-fact` does. Nothing here
+  constructs an error: the legacy `:seon.error/value` shape belongs to
+  `node-id`, `window` and `prepare`, which still build it themselves."
   {:malli/schema
    [:function
-    [:=> [:catn [::entity :map]] :map]
+    [:=> [:catn [::entity :map]]
+     [:or :map
+      :seon.error/base
+      :my.background/error :my.edit/error :my.fs/error :my.message/error
+      :my.plan/error :my.shell/error :my.turn/error
+      :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
+      :seon.artifact/error :seon.boot/error :seon.bootstrap/error
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+      :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+      :seon.instrument/registration-error :seon.instrument/undeclared-error
+      :seon.message/error :seon.operator/error :seon.operator.collect/error
+      :seon.problems/error :seon.program/error :seon.reconcile/error
+      :seon.render/error :seon.render.data/error :seon.render.value/error
+      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
+      :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+      :seon.sci.admit/error :seon.sci.eval/acquisition-error
+      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+      :seon.search/error :seon.test/error :seon.test.accretion/error
+      :seon.test.run/error :seon.test.runner/error :seon.turn/error
+      :seon.turn.loop/error]]
     [:=> [:catn [::entity :map]
                  [::database :seon.db/db]]
-     :map]]}
+     [:or :map
+      :seon.error/base
+      :my.background/error :my.edit/error :my.fs/error :my.message/error
+      :my.plan/error :my.shell/error :my.turn/error
+      :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
+      :seon.artifact/error :seon.boot/error :seon.bootstrap/error
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+      :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+      :seon.instrument/registration-error :seon.instrument/undeclared-error
+      :seon.message/error :seon.operator/error :seon.operator.collect/error
+      :seon.problems/error :seon.program/error :seon.reconcile/error
+      :seon.render/error :seon.render.data/error :seon.render.value/error
+      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
+      :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+      :seon.sci.admit/error :seon.sci.eval/acquisition-error
+      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+      :seon.search/error :seon.test/error :seon.test.accretion/error
+      :seon.test.run/error :seon.test.runner/error :seon.turn/error
+      :seon.turn.loop/error]]]}
   ([entity]
    (into {}
          (map (fn [[attribute value]]
