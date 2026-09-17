@@ -2805,3 +2805,18 @@ working tree, never Sonnet.
   stage 2); exact patch in the lane's note; resume message-wake to land it
   the moment stage 2 stops. Suspect for other cold-only reds too (the
   eval_test deadline red is under investigation separately).
+- **Two lanes converged on one root cause** (Opus `130ef0e60` + message-
+  wake `3170a0060`): `sci/copy-var*` derefs the JVM Var ONCE
+  (`sci/core.cljc:137`); a context acquired before `seon.instrument/apply!`
+  (the cold worker's order) holds the unarmed root for the JVM's life — a
+  mirror the authority re-decides, the owner law exactly. It explains the
+  eval_test "arity" red (a raw `ArityException` from uninstrumented
+  `seon.db/as-of`), transact-feedback `bad-value-type` (a write admitted
+  where the projection should refuse) and the documentation red. The
+  eval_test now asserts the fork's binding is `identical?` to the armed
+  root BEFORE evaluating, so a cold gate names the cause. The deadline/
+  inherited-arm hypothesis is refuted and its issue superseded. Fix lands
+  with message-wake's runner patch when stage 2 frees runner.clj. Small
+  follow-up queued: `seon.instrument/violation` must re-raise
+  `kernel/interrupted?` throwables instead of converting a bound firing
+  into a contract sentence.
