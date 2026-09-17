@@ -20,7 +20,8 @@
             [seon.error :as error]
             [seon.id]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.kernel :as sci.kernel]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -428,6 +429,20 @@
            (seq paths) (assoc ::problem-paths paths)
            caller (assoc ::caller caller))})))
     (catch Throwable failure
+      ;; A BOUND FIRING IS ITS OWN REPORT. Composing this value runs the
+      ;; contract's own predicates again (`m/explain` re-checks the value
+      ;; that failed), so an evaluation's deadline can close while the
+      ;; reporter is mid-sentence. Converting that interrupt into
+      ;; `minimal-violation` gave the interrupt a `:seon.error/kind` of
+      ;; `::contract-violated`, which `seon.sci.kernel/failure-value` then
+      ;; keeps as the boundary's own answer (`src/seon/sci/kernel.clj:486`)
+      ;; — so a 2000 ms bound firing around a 10 ms refusal was read as
+      ;; "Wrong number of args … passed to: …", naming the wrong defect for
+      ;; whoever read the fault. The interrupt is uncatchable by design
+      ;; (`reference-code/sci/src/sci/interrupt.cljc`); it leaves here
+      ;; unchanged so the bound reports what never arrived.
+      (when (sci.kernel/interrupted? failure)
+        (throw failure))
       (assoc-in (minimal-violation kind data)
                 [:seon.error/data :seon.instrument.lookup/cause]
                 (failure-cause failure)))))

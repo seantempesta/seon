@@ -83,3 +83,14 @@ genuinely separate deadline event is unproven. Independently of it,
 interrupt into `minimal-violation`'s contract-violation sentence; it should
 re-raise `seon.sci.kernel/interrupted?` throwables so a bound firing is
 always reported as itself.
+
+### The reporter half is closed (2026-09-17)
+
+`seon.instrument/violation` now re-raises `seon.sci.kernel/interrupted?`
+throwables unchanged, and
+`seon.instrument-test/a-deadline-firing-inside-an-instrumented-call-is-reported-as-the-bound`
+holds the class: a real kernel arm, a real armed function, and a check that
+the bound fired while the reporter was composing. See
+[the landing note](../../prds/steward-platform/research/bound-firings-and-fault-evidence-2026-09-17.md).
+Whether batch 120's own deadline was a second symptom of the uninstrumented
+call remains unproven; nothing here re-observes it.

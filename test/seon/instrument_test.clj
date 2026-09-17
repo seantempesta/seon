@@ -20,6 +20,7 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [malli.instrument :as mi]
+            [sci.core :as sci]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.dev.docstring :as docstring]
@@ -34,6 +35,7 @@
             [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
+            [seon.sci.kernel :as kernel]
             [seon.test.arm]
             [seon.test-support :as test-support])
   (:import [java.nio.file Files LinkOption]))
@@ -295,6 +297,78 @@
         (is (= :malli.core/invalid-guard
                (get-in failure [:seon.error/data :seon.instrument/malli])))
         (is (str/includes? (:seon.error/message failure) "The guard was evaluated."))))))
+
+(def ^:private reporter-frames (atom nil))
+
+(defn- inside-the-contract-reporter?
+  "True when the contract reporter is composing on this thread, right now."
+  []
+  (boolean
+   (some #(str/starts-with? (.getClassName ^StackTraceElement %)
+                            "seon.instrument$violation")
+         (.getStackTrace (Thread/currentThread)))))
+
+(defn- deadline-crossing-sequence
+  "A value whose FIRST element refuses the contract and whose tail enters the
+  armed guard when it is realized.
+
+  This is the real shape, not a stand-in: `m/validate` stops at the first
+  invalid element, so the wrapper refuses without touching the tail, and
+  `seon.instrument/violation` then explains the same value — walking every
+  element, realizing the tail, and entering the interrupt-fn exactly where SCI
+  enters it for interpreted work (`reference-code/sci/doc/interrupt.md`). The
+  frame check records WHERE the bound fired, so this regression cannot pass by
+  interrupting somewhere else."
+  [interrupt-fn]
+  (lazy-seq
+   (cons "not an int"
+         (lazy-seq
+          (reset! reporter-frames (inside-the-contract-reporter?))
+          (interrupt-fn)
+          nil))))
+
+(defn ^{:malli/schema [:=> [:cat [:sequential :int]] :int]}
+  deadline-probe
+  [_values]
+  1)
+
+(deftest a-deadline-firing-inside-an-instrumented-call-is-reported-as-the-bound
+  ;; A BOUND FIRING IS ITS OWN REPORT (AGENTS.md 2.3). `violation` used to
+  ;; convert ANY throwable into `minimal-violation`'s contract sentence, so a
+  ;; 2000 ms evaluation deadline closing around a 10 ms refusal was read as
+  ;; "Wrong number of args (0) passed to: seon.db/as-of" — the kernel keeps a
+  ;; throwable's own `:seon.error/kind` (`src/seon/sci/kernel.clj:486`), and
+  ;; the contract reporter had just given the interrupt one. Measured in
+  ;; `docs/prds/steward-platform/research/sci-arity-message-parity-2026-09-17.md`.
+  (instrumented!
+   (fn [_]
+     (reset! reporter-frames nil)
+     (let [options (kernel/context-options)
+           ctx (assoc (sci/init {:interrupt-fn (:interrupt-fn options)})
+                      :seon.sci.kernel/guard (:seon.sci.kernel/guard options))
+           armed (kernel/arm ctx 1)
+           record (:seon.sci.kernel/record armed)]
+       (try
+         ;; the declared bound's own latch closes; nothing here tunes it
+         (Thread/sleep 25)
+         (let [thrown (try (deadline-probe
+                            (deadline-crossing-sequence (:interrupt-fn options)))
+                           (catch Throwable throwable throwable))
+               outcome (kernel/failure-value
+                        {:seon.sci.kernel/time-limit-kind :seon.sci.eval/time-limit
+                         :seon.sci.kernel/failure-kind :seon.sci.eval/evaluation-failed}
+                        thrown
+                        (record (if (kernel/interrupted? thrown) :time :error)))]
+           (is (true? @reporter-frames)
+               "the bound fired while the contract reporter was composing")
+           (is (kernel/interrupted? thrown)
+               "the contract reporter re-raises the bound's own interrupt")
+           (is (not= :seon.instrument/contract-violated
+                     (:seon.error/kind (ex-data thrown)))
+               "a bound firing is never reported as a contract violation")
+           (is (= :seon.sci.eval/time-limit (:seon.error/kind outcome))
+               "the evaluation boundary names the bound that fired"))
+         (finally ((:seon.sci.kernel/stop! armed))))))))
 
 (deftest a-sci-only-arity-miss-names-its-program-graph-arglists
   (test-support/with-database
