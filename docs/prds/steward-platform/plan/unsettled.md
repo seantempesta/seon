@@ -3294,3 +3294,10 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   348 ms → 37 ms over 2,877 schemas + 1,193 contracts); schema suite 27
   tests green. Its combined-run reds (18F/16E) are the source-test family
   the publication lane owns.
+- `attribute-aware-tempid-rewrite` landed `9c392a6e4` (tempids substituted
+  only under `:db.type/ref` attributes per the value's carried projection;
+  62 tests green). Launched `pulled-form-derivation` (C1b #2: option B of the
+  pulled-shape study, `seon.schema` only; the `seon.db/pull` contract switch
+  follows once `transaction-report-schema` releases db.clj). Editing lanes:
+  predictable-reset, transaction-report-schema, publication-report-projection,
+  pulled-form-derivation; research: error-entities-prd-review.
