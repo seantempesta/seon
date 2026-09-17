@@ -738,9 +738,13 @@
             test-symbol 'fixture.pending/target-test
             function-symbol 'fixture.pending/target
             now (java.util.Date. 1785000000000)
-            settle-source!
-            (fn [run-id agent-id program-identity source]
-              (let [row (support/program-row @connection program-identity source)]
+            settle-row!
+            (fn [run-id agent-id row]
+              (let [source (or (:seon.fn/source row) (:seon.test/source row))
+                    namespace-ref (or (:seon.fn/ns row) (:seon.test/ns row))
+                    row (second
+                         (seon.fn/analyze-form
+                          @connection source namespace-ref row))]
                 (support/transacted!
                         connection
                         [{:seon.agent/id agent-id}
@@ -759,11 +763,15 @@
                           :seon.eval/shown "nil"
                           :seon.program/row row}))))]
         (support/transacted! connection [{:seon.ns/name namespace-name}])
-        (settle-source!
+        (settle-row!
          "pending-test-run" "pending-test-agent"
-         [:seon.test/sym test-symbol]
-         (str "(clojure.test/deftest ^{:seon.test/subject " function-symbol
-              "} target-test (clojure.test/is true))"))
+         {:seon.test/sym test-symbol
+          :seon.test/ns [:seon.ns/name namespace-name]
+          :seon.test/source
+          (str "(clojure.test/deftest ^{:seon.test/subject " function-symbol
+               "} target-test (clojure.test/is true))")
+          :seon.schema.admission/source :agent
+          :seon.test/subject function-symbol})
         (let [pending (db/pull @connection '[*]
                                [:seon.test/sym test-symbol])]
           (is (= function-symbol (:seon.test/subject pending))
@@ -773,10 +781,16 @@
               "settlement does not fabricate a function row for the name")
           (is (some #{test-symbol}
                     (seon.fn/gate-set @connection function-symbol))))
-        (settle-source!
+        (settle-row!
          "pending-function-run" "pending-function-agent"
-         [:seon.fn/sym function-symbol]
-         "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)")
+         {:seon.fn/sym function-symbol
+          :seon.fn/ns [:seon.ns/name namespace-name]
+          :seon.fn/source
+          "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"
+          :seon.fn/arglists "([])"
+          :seon.fn/private? false
+          :seon.fn/spec "[:=> [:cat] :int]"
+          :seon.schema.admission/source :agent})
         (let [resolved (db/pull @connection '[:seon.test/subject]
                                 [:seon.test/sym test-symbol])]
           (is (= function-symbol (:seon.test/subject resolved))
@@ -801,13 +815,25 @@
                            "^{:seon.test/subject fixture.batch/target} "
                            "target-test (clojure.test/is true))")
                       "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"]
-             rows [(support/program-row
-                    @connection
-                    [:seon.test/sym 'fixture.batch/target-test]
-                    (first sources))
-                   (support/program-fn-row
-                    @connection 'fixture.batch/target
-                    (second sources))]
+             preliminary-rows
+             [{:seon.test/sym 'fixture.batch/target-test
+               :seon.test/ns [:seon.ns/name 'fixture.batch]
+               :seon.test/source (first sources)
+               :seon.test/subject 'fixture.batch/target
+               :seon.schema.admission/source :agent}
+              {:seon.fn/sym 'fixture.batch/target
+               :seon.fn/ns [:seon.ns/name 'fixture.batch]
+               :seon.fn/source (second sources)
+               :seon.fn/arglists "([])"
+               :seon.fn/private? false
+               :seon.fn/spec "[:=> [:cat] :int]"
+               :seon.schema.admission/source :agent}]
+             rows (mapv (fn [source row]
+                          (second
+                           (seon.fn/analyze-form
+                            @connection source
+                            (or (:seon.test/ns row) (:seon.fn/ns row)) row)))
+                        sources preliminary-rows)
              result (db/transact!
                      connection
                      (turn/receipt-settle-batch-tx
@@ -1334,8 +1360,18 @@
                             [:seon.ns/name 'my.macro-caller])))))
       (let [source (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
                         "unresolved-caller [] (missing.target/nope))")
-            row (support/program-fn-row
-                 @connection 'my.macro-caller/unresolved-caller source)
+            preliminary-row
+            {:seon.fn/sym 'my.macro-caller/unresolved-caller
+             :seon.fn/ns [:seon.ns/name 'my.macro-caller]
+             :seon.fn/source source
+             :seon.fn/arglists "([])"
+             :seon.fn/private? false
+             :seon.fn/spec "[:=> [:cat] :int]"
+             :seon.schema.admission/source :agent}
+            row (second
+                 (seon.fn/analyze-form
+                  @connection source (:seon.fn/ns preliminary-row)
+                  preliminary-row))
             result (db/transact!
                     connection
                     (turn/receipt-settle-tx
@@ -1460,10 +1496,21 @@
                         [:seon.agent/id agent-id])
             function-row
             (fn [result]
-              (support/program-fn-row
-               @connection qualified-id
-               (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
-                    "scratch [] " result ")")))
+              (let [source
+                    (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
+                         "scratch [] " result ")")
+                    preliminary-row
+                    {:seon.fn/sym qualified-id
+                     :seon.fn/ns [:seon.ns/name namespace-name]
+                     :seon.fn/source source
+                     :seon.fn/arglists "([])"
+                     :seon.fn/private? false
+                     :seon.fn/spec "[:=> [:cat] :int]"
+                     :seon.schema.admission/source :agent}]
+                (second
+                 (seon.fn/analyze-form
+                  @connection source (:seon.fn/ns preliminary-row)
+                  preliminary-row))))
             start!
             (fn [run-id ordinal]
               (db/transact!
