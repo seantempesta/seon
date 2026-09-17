@@ -3540,3 +3540,13 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   `error-wrapper-enforcement` (error PRD slice 2) on the merged manifest.
   Pushed: Datahike fork `e11845ba`, seon `steward-platform` (111 commits);
   owner: personal repos are pushed without asking (memory saved).
+- Manifest merge gate (`manifest-merge-gate.log`): 134 tests, 8,611
+  assertions, 2F/0E — the manifest is GREEN cold; the two failures are the
+  Datahike listener regression running against STALE AOT dependency
+  classes: the `git archive` run root has no `.git`, so `dev_cache.clj`'s
+  gitlink pin digest is empty there and the cache never invalidates on a
+  fork commit (issue
+  `the-gate-snapshot-cannot-read-dependency-pins-so-fork-aot-classes-go-stale`,
+  blocker; Opus agent fixing: pins carried in the snapshot, refusal when
+  absent). Every cold gate since the fork moved has been testing the old
+  Datahike.
