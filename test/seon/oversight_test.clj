@@ -8,6 +8,7 @@
             [seon.db :as db]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
+            [seon.cluster.agent :as agent]
             [seon.oversight :as oversight]
             [seon.render.hiccup :as hiccup]
             [seon.test-support :as support])
@@ -22,6 +23,19 @@
   (is (= {:seon.oversight/proc :dead
           :seon.oversight/ping :unknown}
          (oversight/proc-ping :dead nil))))
+
+(deftest a-sliding-wake-reports-every-overwritten-signal
+  (let [channel (agent/wake-channel)]
+    (try
+      (is (true? (async/offer! channel :first)))
+      (is (true? (async/offer! channel :second)))
+      (is (= {:type 'CountedSlidingBuffer
+              :count 1
+              :capacity 1
+              :dropped 1}
+             (:buffer (datafy/datafy channel))))
+      (finally
+        (async/close! channel)))))
 
 (deftest absent-pongs-never-become-evidence-of-work
   (doseq [[observations expected]
@@ -129,7 +143,9 @@
           (doseq [occupancy (keep root [:seon.oversight/mailbox
                                        :seon.oversight/turn-buffer])]
             (is (<= 0 (:seon.oversight/count occupancy)
-                    (:seon.oversight/capacity occupancy))))
+                    (:seon.oversight/capacity occupancy)))
+            (is (nat-int? (:seon.oversight/dropped occupancy))
+                "every lossy wake buffer reports its overwritten count"))
           (is (= declared-plumbing
                  (into #{} (map :seon.oversight/proc) plumbing)))
           (is (= #{:seon.agent/mailbox

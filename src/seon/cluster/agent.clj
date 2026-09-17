@@ -63,6 +63,7 @@
   evaluations; nothing resumes the interrupted execution. No row
   depends on a channel for recovery."
   (:require [clojure.core.async :as async]
+            [clojure.core.protocols :as core.protocols]
             [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
@@ -83,13 +84,42 @@
             [seon.schedule :as schedule]
             [seon.sci.eval :as sci.eval]
             [seon.schema.edn :as schema.edn])
-  (:import [java.util Date]))
+  (:import [java.util Date LinkedList]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+(deftype CountedSlidingBuffer [^LinkedList buffer ^long capacity dropped]
+  async.protocols/UnblockingBuffer
+  async.protocols/Buffer
+  (full? [_] false)
+  (remove! [_] (.removeLast buffer))
+  (add!* [this value]
+    (when (= (.size buffer) capacity)
+      (async.protocols/remove! this)
+      (swap! dropped inc))
+    (.addFirst buffer value)
+    this)
+  (close-buf! [_])
+  clojure.lang.Counted
+  (count [_] (.size buffer))
+  async.protocols/Capacity
+  (capacity [_] capacity)
+  core.protocols/Datafiable
+  (datafy [_]
+    {:type 'CountedSlidingBuffer
+     :count (.size buffer)
+     :capacity capacity
+     :dropped @dropped}))
+
+(defn wake-channel
+  "A sliding-one wake channel whose overwritten signals remain observable."
+  {:malli/schema [:=> [:cat] :seon.flow/channel]}
+  []
+  (async/chan (CountedSlidingBuffer. (LinkedList.) 1 (atom 0))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Namespace assignment
@@ -468,7 +498,9 @@
                (env/carry {:seon.turn.loop/cluster handle
                            :seon.agent/id agent-id}
                           environment))
-        :chan-opts {:seon.agent/episode {:buf-or-n (async/sliding-buffer 1)}}}
+        :chan-opts
+        {:seon.agent/episode
+         {:buf-or-n (CountedSlidingBuffer. (LinkedList.) 1 (atom 0))}}}
        :seon.agent/schedule
        {:proc (seon.flow/var-process
                #'schedule/schedule-step :io
@@ -707,7 +739,7 @@
                                 {:seon.error/kind :seon.agent/no-such-agent
                                  :seon.agent/id agent-id
                                  :seon.agent/no-such-agent agent-id})))
-            wake-channel (async/chan (async/sliding-buffer 1))
+            wake-ch (wake-channel)
             schedule-channel (async/chan (async/sliding-buffer 1))
             completion (async/chan 1)
             turn-stopped (async/promise-chan)
@@ -722,7 +754,7 @@
                                 (acquire-context! handle agent-id)
                                 :seon.cluster.wake/armer-channel
                                 (:seon.cluster.wake/channel handle)
-                                :seon.cluster.wake/channel wake-channel
+                                :seon.cluster.wake/channel wake-ch
                                 :seon.schedule/channel schedule-channel
                                 :seon.turn.loop/completion completion
                                 :seon.agent/fault-channel (:seon.agent/fault-channel @routing)
@@ -748,7 +780,7 @@
                    :seon.turn.loop/cluster agent-handle
                    :seon.flow/graph graph
                    :seon.flow/started started
-                   :seon.cluster.wake/channel wake-channel
+                   :seon.cluster.wake/channel wake-ch
                    :seon.schedule/channel schedule-channel
                    :seon.turn.loop/completion completion
                    :seon.agent/turn-backstop-state turn-backstop-state
@@ -757,9 +789,9 @@
                (fn [current]
                  (-> current
                      (assoc-in [:seon.agent/armed agent-id] entry)
-                     (assoc-in [:seon.agent/channels eid] wake-channel))))
+                     (assoc-in [:seon.agent/channels eid] wake-ch))))
         ;; the arm prime — every mailbox arm primes exactly once
-        (async/offer! wake-channel :seon.agent/wake)
+        (async/offer! wake-ch :seon.agent/wake)
         entry))))
 
 (defn- await-turn-completion!

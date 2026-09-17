@@ -87,8 +87,10 @@
   "The count and capacity from one datafied Flow channel, or nil."
   [channel]
   (when-let [buffer (:buffer channel)]
-    {:seon.oversight/count (:count buffer)
-     :seon.oversight/capacity (:capacity buffer)}))
+    (cond-> {:seon.oversight/count (:count buffer)
+             :seon.oversight/capacity (:capacity buffer)}
+      (int? (:dropped buffer))
+      (assoc :seon.oversight/dropped (:dropped buffer)))))
 
 (defn proc-ping
   "Project one expected Flow proc and its optional ping reply.
@@ -250,7 +252,9 @@
   (if found
     (str (:seon.oversight/count found)
          "/"
-         (:seon.oversight/capacity found))
+         (:seon.oversight/capacity found)
+         (when (pos? (or (:seon.oversight/dropped found) 0))
+           (str "; " (:seon.oversight/dropped found) " dropped")))
     "—"))
 
 (defn html-table
