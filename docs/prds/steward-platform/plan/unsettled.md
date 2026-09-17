@@ -3743,3 +3743,7 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   ONE clipping spot silently stopped firing; absence-as-health; next Opus
   slot). Opus continuation of the db items 2-4 launched from the dead lane's
   partial edits.
+- Owner reset the Codex credits (~10:05Z). `test-system-stage1` resumed
+  from its partial edits; `acquisition-by-digest` resumes when an Opus agent
+  finishes (load). The serial-worker and db slices stay with the Opus agents
+  that already hold those files.
