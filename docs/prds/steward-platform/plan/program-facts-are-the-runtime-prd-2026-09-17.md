@@ -534,6 +534,12 @@ the short db dial; a bounded-out agent write returns its refusal WITH the
 transaction data so root can re-run it. (Orchestrator's caveat, stated
 once: an unbounded system write is the hang class seen today; the
 operation deadline is what keeps it loud.)
+Owner ~02:30Z: "we don't have access control in the database explicitly
+but we have the user metadata so we can still write it in." So the bound
+derives from the write's provenance — the `:seon.db/user` / `:seon.db/process`
+transaction metadata every admitted `transact!` already carries — root or a
+system process: no per-write bound; an agent user: the dial. No new
+access-control mechanism.
 
 ## 2. What exists today, with the seams named
 
