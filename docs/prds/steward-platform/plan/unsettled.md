@@ -3221,3 +3221,18 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   asked): base + required domain facts per facet, facets compose, disposition
   on the occurrence, markers/kind deleted; three questions posed (overlap,
   message, turn/agent facet).
+
+## 2026-09-17 ~22:50Z — gate 5 (clean worktree) refused on a runner check inconsistency
+
+- Gate 5 from `tmp/gate-wt` at HEAD `8e952be28` (fresh base, git-sha
+  recorded) refused in `verify-long-declarations-indexed!`: the reset lane
+  declared `:seon.test/long-ms 600000` at namespace level; the indexer lifts
+  namespace markers onto rows (`program.cljc:180`), `marker-reason` resolves
+  the reason through the namespace, but the allowance is read from the Var
+  alone (`runner.clj:868`). False drift; Opus agent fixing runner + regression
+  (runner.clj is unheld). Gate 6 after it lands.
+- `boot-load-bounds` landed `c8776fafe` (bounded concurrent source
+  publication) and continues on fixes B and C.
+- Owner rulings 1o recorded; design lane redirected to write
+  `plan/error-entities-prd-2026-09-17.md`; an astra review lane (reads all
+  research + guidance, REPL probes) follows the PRD.
