@@ -2064,6 +2064,22 @@ second opinion on the reset batch + skill corrections), integrator on
 `reset-batch`, program-ops, S3, guardrails, stage 2; Opus: hook loopholes,
 create-path validator, outline, small fixes.
 
+**ADOPTION REFUSED TREE-WIDE (~06:20Z):** `init phase=init failed:
+Initialization lookup refs do not resolve` — `:seon.activation/missing`
+names lookup refs `[:seon.fn/sym "seon.db/supplied-database-value"]`,
+`[:seon.fn/sym "seon.env/supplied-agent-id"]`, `[:seon.fn/sym
+"seon.search/supplied-handle"]`, `[:seon.schema/key :seon.db/database-value]`,
+`[:seon.schema/key :seon.agent/id]` (log
+`data/operator/operations/init-init-75199.log`): the activation closure names
+call-preparation suppliers whose rows the publication no longer carries. The
+base-context injection seam (`base-context-injected-symbols`, program.cljc /
+sci/eval.clj) is exactly what the S3 lane is rewiring in the main tree —
+the intermediate-edit class; FOR S3 at its next stop (commit a coherent
+pair or record why the rows vanish). Until then: no live proofs on default
+for anyone; lanes prove in candidate contexts / fixtures. program-ops told
+to commit its code without waiting on AGENTS.md (held by guardrails) and to
+add the vocabulary rows when it frees.
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
