@@ -3301,3 +3301,21 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   follows once `transaction-report-schema` releases db.clj). Editing lanes:
   predictable-reset, transaction-report-schema, publication-report-projection,
   pulled-form-derivation; research: error-entities-prd-review.
+
+## 2026-09-18 ~00:10Z — the PRD review landed; boot carries no test namespaces
+
+- `b49c806b0` [error-entities-prd-review-2026-09-17.md](../research/error-entities-prd-review-2026-09-17.md):
+  six must-fix (admissible declaration manifest in namespace-owned resources;
+  retained payloads that are refs to missing targets or retired grammar;
+  facet membership = candidates by Datalog + validation of the owned value;
+  cluster ref uniformly optional; arity-aware declared-facet analysis with
+  canonical inheritance and `:multi`; wrapper enforcement as a prerequisite
+  slice), two should-fix (an arity-refusal facet; the compositional render
+  entry at `render.clj:323-377`), ten-resource spot-check, three live MCP
+  observations (a stored fault today carries none of the proposed base trio;
+  `/first-at`, `/last-at`, `/op`, `/fn` are what exists). Design lane
+  resumed to revise the PRD in place with the recommended options and a
+  final "Owner decisions" section. **The owner's read of PRD + review gates
+  B1 and the error-entities slices.**
+- `2a8a61612` (predictable-reset item 1): clusters boot without test
+  namespaces (§1n); lane continues on the HEAD-exact gate snapshot.
