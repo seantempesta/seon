@@ -224,10 +224,10 @@
                            :seon.fn.file/first-party-functions known})]}
                selected #(vector (ns-resolve namespace-name %))
                expensive (#'runner/expensive-fixture-tests manifest)]
-           (is (contains? expensive (str namespace-name "/unreasoned")))
-           (is (contains? expensive (str namespace-name "/reasoned")))
-           (is (contains? expensive (str namespace-name "/fresh")))
-           (is (not (contains? expensive (str namespace-name "/ordinary"))))
+           (is (contains? expensive (symbol (str namespace-name) "unreasoned")))
+           (is (contains? expensive (symbol (str namespace-name) "reasoned")))
+           (is (contains? expensive (symbol (str namespace-name) "fresh")))
+           (is (not (contains? expensive (symbol (str namespace-name) "ordinary"))))
            (is (thrown? clojure.lang.ExceptionInfo
                         (#'runner/verify-fixture-observations! manifest (selected 'unreasoned))))
            (is (nil? (#'runner/verify-fixture-observations! manifest (selected 'reasoned))))
@@ -261,7 +261,7 @@
             platform-vars (mapv #(requiring-resolve (symbol %)) (keys declarations))
             report (seon-test/host
                     (db/db connection)
-                    "seon.cluster.registry-test/a-concurrent-create-wave-loses-nothing")]
+                    'seon.cluster.registry-test/a-concurrent-create-wave-loses-nothing)]
         (is (seq platform-vars) "An absent platform tier is not a proof.")
         (is (= :seon.test.host/in-process (:seon.test/host report)) (pr-str report))
         (is (nil? (#'runner/verify-platform-tier-carries-no-destructive-drill!
@@ -308,9 +308,9 @@
           (is (seq owner-rows) "the analyzed source declares its destructive owners")
           (is (every? #(and (string? %) (seq %)) (vals owners))
               "every owner says what it destroys")
-          (is (contains? owners "seon.test-support/populate-published-root!")
+          (is (contains? owners 'seon.test-support/populate-published-root!)
               "the declaration at the definition is admitted as a program fact")
-          (is (str/includes? (get owners "seon.test-support/populate-published-root!" "")
+          (is (str/includes? (get owners 'seon.test-support/populate-published-root! "")
                              "store")
               (pr-str owners)))
         (let [drifted (mapv #(dissoc % :seon.fn/destroys) rows)
@@ -328,10 +328,10 @@
               offender (first (:seon.test.runner/destructive-platform-tests
                                (ex-data refusal)))]
           (is (some? refusal) "a platform test reaching a destructive owner refuses")
-          (is (= (str namespace-name "/drill") (:seon.test/sym offender)))
-          (is (= [(str namespace-name "/drill")
-                  (str namespace-name "/indirect")
-                  "seon.test-support/populate-published-root!"]
+          (is (= (symbol (str namespace-name) "drill") (:seon.test/sym offender)))
+          (is (= [(symbol (str namespace-name) "drill")
+                  (symbol (str namespace-name) "indirect")
+                  'seon.test-support/populate-published-root!]
                  (:seon.test.runner/destructive-path offender))
               "the refusal carries the call path to the owner")
           (is (str/includes? (ex-message refusal) (str namespace-name "/drill"))))
@@ -422,7 +422,7 @@
         (is (= test/*initial-report-counters* @counters))
         (is (empty? @events) "No nested event reaches the enclosing reporter.")
         (is (= [['outer] ['outer] ['outer]] @contexts))
-        (is (= (str namespace-name "/outer") (:seon.test/sym result)))
+        (is (= (symbol (str namespace-name) "outer") (:seon.test/sym result)))
         (is (= [3 0 0] (mapv result [:seon.test/pass-count
                                      :seon.test/fail-count :seon.test/error-count])))
         (is (nil? (:seon.test/failing-assertions result)))
@@ -611,9 +611,9 @@
                        (first (#'runner/test-tasks
                                all-vars [(ns-resolve namespace-name name-symbol)]
                                declarations)))]
-        (is (= {(str namespace-name "/allowed")
+        (is (= {(symbol (str namespace-name) "allowed")
                 {:seon.test/long reason :seon.test/long-ms allowance-ms}
-                (str namespace-name "/declared")
+                (symbol (str namespace-name) "declared")
                 {:seon.test/long plain-reason}}
                declarations)
             "both halves of the declaration are lifted onto the program row")
@@ -642,13 +642,13 @@
         (is (nil? (#'runner/verify-long-declarations-indexed! declarations all-vars))
             "the indexed rows agree with the Vars that declared them")
         (let [refusal (try (#'runner/verify-long-declarations-indexed!
-                            (dissoc declarations (str namespace-name "/allowed"))
+                            (dissoc declarations (symbol (str namespace-name) "allowed"))
                             all-vars)
                            nil
                            (catch clojure.lang.ExceptionInfo failure failure))]
           (is (some? refusal)
               "an unindexed declaration refuses instead of reading the row as NOT-LONG")
-          (is (= [(str namespace-name "/allowed")]
+          (is (= [(symbol (str namespace-name) "allowed")]
                  (mapv :seon.test/sym
                        (:seon.test.runner/drifted-long-declarations
                         (ex-data refusal)))))))
@@ -723,11 +723,11 @@
                             rows)]
         (is (= 2 (count by-symbol)) (pr-str (keys by-symbol)))
         (is (= {:seon.test/long namespace-reason :seon.test/long-ms 600000}
-               (select-keys (get by-symbol (str namespace-name "/inherits"))
+               (select-keys (get by-symbol (symbol (str namespace-name) "inherits"))
                             [:seon.test/long :seon.test/long-ms]))
             "a namespace-declared long reaches the row of a test that declares nothing")
         (is (= {:seon.test/long own-reason :seon.test/long-ms 600000}
-               (select-keys (get by-symbol (str namespace-name "/overrides"))
+               (select-keys (get by-symbol (symbol (str namespace-name) "overrides"))
                             [:seon.test/long :seon.test/long-ms]))
             "the deftest's own reason wins while it still inherits the allowance"))
       (finally
@@ -783,8 +783,8 @@
                         {:seon.fn/source-path (str file)
                          :seon.fn.file/first-party-functions []})]}
             declarations (#'runner/platform-declarations manifest)
-            inherits (str namespace-name "/inherits")
-            overrides (str namespace-name "/overrides")
+            inherits (symbol (str namespace-name) "inherits")
+            overrides (symbol (str namespace-name) "overrides")
             all-vars (mapv #(ns-resolve namespace-name %) '[inherits overrides])
             partition-with
             (fn [rows]
@@ -800,17 +800,17 @@
             "a namespace-declared platform reason reaches every test row, and the deftest's own reason wins")
         (let [selection (partition-with declarations)]
           (is (= #{inherits overrides}
-                 (into #{} (map (comp str #'runner/var-symbol))
+                 (into #{} (map #'runner/var-symbol)
                        (::runner/platform selection)))
               "the partition selects the platform tier from the indexed rows")
           (is (empty? (::runner/selected selection))))
         (let [selection (partition-with (dissoc declarations overrides))]
           (is (= #{inherits}
-                 (into #{} (map (comp str #'runner/var-symbol))
+                 (into #{} (map #'runner/var-symbol)
                        (::runner/platform selection)))
               "a row the manifest does not carry is NOT platform, however the Var is annotated")
           (is (= #{overrides}
-                 (into #{} (map (comp str #'runner/var-symbol))
+                 (into #{} (map #'runner/var-symbol)
                        (::runner/selected selection)))))
         (is (nil? (#'runner/verify-platform-declarations-indexed!
                    declarations all-vars))
@@ -919,24 +919,12 @@
    connection (schema/canonical-schema-rows {schema-key :string})))
 
 (defn- retract-schema-key!
-  "Delete one declaration exactly as the deletion path deletes.
-
-  `seon.turn`'s deleted-identity transaction (`src/seon/turn.clj:1337`) pulls
-  the whole declaration and hands `seon.program/exact-replacement-tx` a desired
-  row of the identity ALONE: every owned attribute is retracted and the
-  identity row survives as a tombstone (ruling 47). The projection loses the
-  key because its form is gone.
-
-  Retracting `:seon.schema/form` by itself is what this fixture did before, and
-  the writer refused it: `:seon.schema.admission/source` survived, so the
-  whole-entity validator rebuilt a row missing its required form. The fixture
-  does not re-derive which attributes a schema declaration owns — deriving it
-  here would be a mirror the writer re-decides (AGENTS §2.1, §5 rule 8)."
+  "Retract the synthetic declaration; its past remains in history."
+  {:malli/schema [:=> [:cat :seon.db/connection :qualified-keyword]
+                  :seon.db/transaction-report]}
   [connection schema-key]
-  (let [declaration (db/pull (db/db connection) '[*] [:seon.schema/key schema-key])]
-    (test-support/transacted!
-     connection
-     (program/exact-replacement-tx declaration {:seon.schema/key schema-key}))))
+  (test-support/transacted!
+   connection [[:db/retractEntity [:seon.schema/key schema-key]]]))
 
 (deftest ^{:seon.test/platform
            "Moving part: the live cluster projection an in-process run leaves behind."}

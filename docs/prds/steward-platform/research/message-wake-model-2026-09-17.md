@@ -577,7 +577,8 @@ before any fixture, which explains why the same test passes fast.
 
 The exact root repair calls the existing `initialize-contracts!` with the
 worker's packaged projection before base acquisition. It is recorded in
-[the pending hunk](message-documentation-arming-pending-2026-09-17.patch).
+`message-documentation-arming-pending-2026-09-17.patch` at `3170a0060`
+(the hunk is now integrated; see the reset-merge section below).
 `git status --short` and `git diff --numstat` confirmed concurrent changes
 in `src/seon/test/runner.clj` (118 additions, 82 deletions at observation),
 as well as `src/seon/sci/eval.clj`; neither was edited. This is the assignment's
@@ -613,3 +614,68 @@ Ran 9 tests containing 105 assertions.
 shared tree; it was not applied. `git diff --check` passes on the owned
 changes. No root-fix or cold-pass claim is made. The pending hunk and cold
 verification remain the only unresolved item in this bounded follow-up.
+
+
+## Reset merge — arming fix already integrated, 2026-09-17
+
+At `f629dbaed`, `git status --short` confirms the runner and documentation
+test are free. Reading the merged `worker-command-loop!` end to end and
+`git blame -L 1876,1885 src/seon/test/runner.clj` establishes that
+`a0c69cfd9e` already applied the pending root repair: canonical
+`initialize-contracts!` runs before `seon.test-support/database-base`
+acquires SCI callables. The existing documentation regression from
+`3170a0060` retains `preserving-instrumentation-state`, requires the acquired
+host wrapper, and verifies the outer refusal and exact documentation bytes
+without self-arming. No duplicate arming call or new regression is needed.
+
+The previously pending patch is deleted in this follow-up because its
+behavior is merged; Git retains the historical hunk. The issue now records
+implementation complete with cold verification still owed. The updated
+AGENTS.md instructions and both Clojure implementation/testing skills were
+read in full; prior authority and dependency grounding remains above.
+
+Requested serial iteration:
+
+```sh
+timeout 2400 bin/test-fast --paths src/seon/test/runner.clj test/seon/sci/documentation_test.clj -- seon.sci.documentation-test seon.test.runner-test
+```
+
+Default was not observed, operated or published to. Foreign issue notes and
+live-trial artifacts were left untouched. No missing-base refusal occurred,
+so the conditional authorization to prepare a base was not used.
+
+
+The first merged iteration ran 30 tests / 256 assertions and reported 22
+failures / 4 errors. The outer message refusal was already correct:
+`actual: (not (= "my.message/send" my.message/send))` — only its string
+expectation was stale. The other failures in the two requested namespaces
+were pre-reset string identities in lookups, declaration maps and expected
+call paths, plus a schema-deletion fixture still trying to retain an
+identity-only tombstone. The latter was refused by final entity validation.
+
+Updated both test namespaces to use the ruled qualified-symbol identities;
+changed the synthetic schema deletion to `:db/retractEntity`, through the
+canonical `transacted!` fixture, with a complete private helper contract.
+No production contract or request grammar was weakened. Both test files
+were free when checked. The final iteration adds
+`test/seon/test/runner_test.clj` to the same `--paths` command. The supplied
+published graph was 55 commits behind the overlay HEAD; the fast launcher
+reported that fact and admitted the snapshot under its existing policy.
+
+
+Final iteration completed with exit 0:
+
+```sh
+timeout 2400 bin/test-fast --paths src/seon/test/runner.clj test/seon/sci/documentation_test.clj test/seon/test/runner_test.clj -- seon.sci.documentation-test seon.test.runner-test
+```
+
+```text
+Ran 30 tests containing 266 assertions.
+0 failures, 0 errors.
+```
+
+`git diff --check` passes. Both test invocations have exited; their snapshot
+roots were removed by the launcher. This follow-up changes only the two
+test files, this landing note, the owning issue, and removal of the obsolete
+pending patch. The production ordering fix is already in `a0c69cfd9e`.
+Stop for review; the orchestrator owns cold-worker and platform proof.

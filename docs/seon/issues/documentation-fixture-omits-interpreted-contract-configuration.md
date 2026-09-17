@@ -29,13 +29,24 @@ No self-arming was performed. The regression now scopes instrumentation
 state and explicitly requires that acquired wrapper, alongside exact
 function identity, documentation equality, example text, and no writes.
 
-The root repair is to call the existing `initialize-contracts!` before cold
-fixture acquisition. `src/seon/test/runner.clj` is concurrently edited by
-the stage-2 lane; the assignment's held-file boundary leaves it untouched.
-The exact pending hunk is recorded in
-[message-documentation-arming-pending-2026-09-17.patch](../../prds/steward-platform/research/message-documentation-arming-pending-2026-09-17.patch).
-This issue remains open until that hunk lands and the orchestrator's cold
-regression passes. No schema or documentation-content change is needed.
+The root repair landed in `a0c69cfd9e`, included in reset merge HEAD
+`f629dbaed`: `worker-command-loop!` calls the existing
+`initialize-contracts!` before acquiring the canonical fixture. The previous
+held-file boundary is released, and the recorded pending patch is now
+redundant. The documentation regression from `3170a0060` is also merged.
+No schema or documentation-content change is needed.
+
+This issue remains open only for the orchestrator's cold verification of the
+merged ordering. The lane's requested fast results are recorded below in
+the landing note; fast acquisition alone does not exercise cold-worker
+startup, so a green fast run is not claimed as that proof.
 
 See [the landing note](../../prds/steward-platform/research/message-wake-model-2026-09-17.md)
 for commands, measured results, and the review boundary.
+
+
+Reset-merge verification also exposed stale string identity assertions in
+both requested test namespaces, and a runner fixture retaining a deleted
+schema identity as a tombstone. This follow-up repairs those tests to use
+symbol values and `:db/retractEntity`; it preserves the outer refusal and
+byte-equal documentation assertions under canonical arming.

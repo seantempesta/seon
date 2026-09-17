@@ -29,7 +29,7 @@
          (is (not-any? #(= function-symbol (:sym %)) (:functions directory))))
        (support/transacted!
         connection
-        [[:db/add [:seon.fn/sym (str function-symbol)]
+        [[:db/add [:seon.fn/sym function-symbol]
           :seon.schema.admission/source :core]])
        (is (= :seon.sci.eval/documentation-unavailable
               (:seon.error/kind
@@ -75,7 +75,7 @@
        (is (every? #(not (str/includes? (:doc %) "\n")) rows))
        (is (= #{:summary :body :example :arglists :in :out :supplied} (set (keys row))))
        (is (= (first (str/split-lines (:seon.fn/doc (db/pull (db/db connection) [:seon.fn/doc]
-                                    [:seon.fn/sym "my.agent/settings!"]))))
+                                    [:seon.fn/sym 'my.agent/settings!]))))
               (:summary row)))
        (is (= (:in row)
               (:in (first (filter #(= 'my.agent/settings! (:sym %)) rows)))))
@@ -126,7 +126,7 @@
        (is (seq evidence))
        (is (true? (db/read-evidence-current? (db/db connection) evidence)))
        (is (nil? (:seon.cluster.eval/error defined)) (pr-str defined))
-       (is (= "fixture.own-functions/identity-number" (:seon.fn/sym row)))
+       (is (= 'fixture.own-functions/identity-number (:seon.fn/sym row)))
        (let [written (db/transact! connection
                                    [{:seon.ns/name 'fixture.own-functions}
                                     (program/canonical-row row)])]
@@ -200,13 +200,13 @@
                     :seon.config/on-core-error :panic})
            row (:seon.program/row result)]
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
-       (is (= "fixture.bare-tests/durable-arithmetic" (:seon.test/sym row)))
+       (is (= 'fixture.bare-tests/durable-arithmetic (:seon.test/sym row)))
        (let [written (db/transact! connection [(program/canonical-row row)])]
          (is (:db-after written) (pr-str written))
          (is (= (:seon.test/source row)
                 (:seon.test/source
                  (db/pull (db/db connection) [:seon.test/source]
-                          [:seon.test/sym "fixture.bare-tests/durable-arithmetic"])))))))))
+                          [:seon.test/sym 'fixture.bare-tests/durable-arithmetic])))))))))
 
 (deftest retained-context-receives-new-bare-test-referrals
   (support/with-database
@@ -261,7 +261,7 @@
                 (:seon.instrument/var (meta @(sci/resolve ctx 'my.message/send))))
              "SCI must acquire the canonical armed host callable, not a pre-arming copy")
          (is (= :seon.instrument/contract-violated (:seon.error/kind value)) (pr-str failed))
-         (is (= "my.message/send" (:seon.instrument/contract-violated value)))
+         (is (= 'my.message/send (:seon.instrument/contract-violated value)))
          (is (= documentation (:seon.error/doc value)) (pr-str failed))
          (doseq [term ["nonempty string subject identity token"
                        ":my.message/assignment" ":seon.message/from"]]
