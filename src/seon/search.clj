@@ -204,10 +204,11 @@
     (symbol? identity-value)
     (or (namespace identity-value) (str identity-value))
 
+    ;; A string identity value is a symbol not yet stored as one (AGENTS §3);
+    ;; `symbol` validates nothing, so reading its namespace cannot throw and
+    ;; the absent namespace is already nil.
     (string? identity-value)
-    (try
-      (namespace (symbol identity-value))
-      (catch Throwable _ nil))
+    (namespace (symbol identity-value))
 
     :else nil))
 
