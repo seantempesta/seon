@@ -82,10 +82,10 @@
                second-completion (completion other-run parent-row (claim-t second-claim) second-results false)]
            (is (= 1 (count (filter #(= :seon.test.member/claim-tx (:a %)) (:tx-data first-claim)))))
            (is (= 3 (count (filter #(= :seon.test.member/claim-tx (:a %)) (:tx-data second-claim)))))
-           (test-support/transacted! connection [[:db.fn/retractEntity [:seon.test/sym (str (nth symbols 2))]]])
+           (test-support/transacted! connection [[:db.fn/retractEntity [:seon.test/sym (nth symbols 2)]]])
            (let [recorded (runner/commit-results! connection second-completion)]
              (is (vector? recorded) (pr-str recorded)))
-           (is (nil? (:db/id (db/pull (db/db connection) [:db/id] [:seon.test/sym (str (nth symbols 2))])))
+           (is (nil? (:db/id (db/pull (db/db connection) [:db/id] [:seon.test/sym (nth symbols 2)])))
                "Completion never recreates a deleted program row.")
            (is (= 2 (db/q '[:find (count ?report) . :where [?report :seon.test.report/id]] (db/db connection)))
                "Seven identical errors share one report; passes have no reports.")

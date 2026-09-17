@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-17
 tags: [issue, test, gate, bounded-execution, liveness]
@@ -73,3 +73,36 @@ slice that found it:
 Whichever lands, the child gates' own preparation bounds (300–600 s, declared
 at `bin/test:44-79`) are now longer than the parent's 300 s silence bound, so
 the parent must either outlast them or say why it need not.
+
+## Stage 1 runner follow-up, 2026-09-17
+
+Reproduced at isolated HEAD `707508b6f` in the requested four-namespace fast
+run: test JVM 76470 entered the concurrent-launcher regression at
+19:50:16.415680Z, then the watchdog reported 320 seconds without progress and
+exited 124. The declared test-body allowance was zero. No environment override
+was used. The full tally and the remaining namespaces were not reached.
+
+The test now declares `:seon.test/long` and `:seon.test/long-ms 1800000`.
+This is the issue's second direction: two complete gates are explicitly long
+work. The bound accommodates two store preparations, the test's parallel
+child waits and bounded output collection/cleanup; it does
+not remove any child preparation or execution bound. Explicit namespace runs
+continue to include it. Verification is recorded in
+[the Stage 1 note](../../prds/steward-platform/research/test-system-stage1-2026-09-17.md).
+
+The next complete fast run reached the tally: 141 tests, 1,026 assertions,
+9 failures and zero errors. Two were separately corrected graph-test mistakes;
+seven came from this fixture. Its inner `12 * event-backstop-seconds` wait
+was only **240 seconds** (`event-backstop-seconds` is 20), so both children
+were killed with exit 137 during base publication despite the longer outer
+declaration. The child completion waits now derive remaining milliseconds from
+the single declared test deadline, starting before store preparation. Output
+collection and cleanup retain their existing bounded waits. No environment
+override is involved. This removes the two conflicting body-duration bounds.
+
+The final serial fast iteration at isolated HEAD `02cb1b2b7` passed all 141
+tests and 1,026 assertions, with zero failures/errors. The concurrent-launcher
+test began at 20:40:45.833340Z and ended at 20:50:21.239062Z (575.406 seconds),
+with both child tallies observed. Evidence:
+`tmp/test-system-stage1-resumed-fast-5.log:400–405`. Cold integration remains
+the orchestrator's responsibility.

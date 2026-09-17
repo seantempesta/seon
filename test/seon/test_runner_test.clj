@@ -756,7 +756,7 @@
            (:seon.test.runner/summary result)))
     (is (= #:seon.test{:pass-count 1 :fail-count 0 :error-count 0}
            (select-keys
-            (by-symbol "seon.test-runner-failure-fixture/passing-example")
+            (by-symbol 'seon.test-runner-failure-fixture/passing-example)
             [:seon.test/pass-count
              :seon.test/fail-count
              :seon.test/error-count])))
@@ -764,11 +764,11 @@
            (count
             (:seon.test/failing-assertions
              (by-symbol
-              "seon.test-runner-failure-fixture/failing-example")))))
+              'seon.test-runner-failure-fixture/failing-example)))))
     (is (str/includes?
          (:seon.test/failure-message
           (by-symbol
-           "seon.test-runner-failure-fixture/failing-example"))
+           'seon.test-runner-failure-fixture/failing-example))
          "deliberate broken-test evidence"))))
 
 (deftest assertionless-test-is-an-attributed-failure
@@ -778,7 +778,7 @@
                         (:seon.test.runner/results result))
         assertionless
         (by-symbol
-         "seon.test-runner-failure-fixture/assertionless-example")]
+         'seon.test-runner-failure-fixture/assertionless-example)]
     (is (= #:seon.test{:pass-count 0 :fail-count 1 :error-count 0}
            (select-keys assertionless
                         [:seon.test/pass-count
@@ -796,7 +796,7 @@
         repeated-message
         (:seon.test/failure-message
          (by-symbol
-          "seon.test-runner-failure-fixture/repeated-identical-error"))
+          'seon.test-runner-failure-fixture/repeated-identical-error))
         repeated-signature (apply str (repeat 64 "a"))
         distinct-signature (apply str (repeat 64 "b"))
         signature-at (str/index-of output repeated-signature)
@@ -874,12 +874,7 @@
           "/checkout-root" nil))))
 
 (deftest result-recording-is-total-under-concurrent-test-retraction
-  ;; The class this kills: the presence decision ran as a caller
-  ;; pre-read, so a test row retracted between building the record
-  ;; transaction and the writer executing it stranded the retract's
-  ;; lookup ref and rejected the WHOLE result transaction. record-tx
-  ;; now runs as a transaction function: the writer re-decides, the
-  ;; absent branch recreates the row, and recording always commits.
+  ;; Result recording must not resurrect a retracted program definition.
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "test")
@@ -894,7 +889,7 @@
                          (first (filter #(pos? (:seon.test/fail-count %))
                                         (:seon.test.runner/results run-result))))]
         (is (seq (runner/commit-results! connection completion))
-            "first recording installs the row")
+            "first recording updates the existing test definition")
         (let [failure-ids (set (db/q '[:find [?id ...]
                                        :in $ ?s
                                        :where [?t :seon.test/sym ?s]
@@ -905,18 +900,13 @@
         (test-support/transacted!
                      connection
                      [[:db.fn/retractEntity [:seon.test/sym test-symbol]]])
-        (let [recorded (runner/commit-results! connection completion)]
-          (is (not (:seon.error/kind recorded))
-              "recording after the retraction still commits")
-          (is (some #(= test-symbol (:seon.test/sym %)) recorded)
-              "the retracted row was recreated by the writer's decision")
-          (is (= failure-ids
-                 (set (db/q '[:find [?id ...] :in $ ?s
-                              :where [?t :seon.test/sym ?s]
-                                     [?t :seon.test/failures ?f]
-                                     [?f :seon.test.failure/id ?id]]
-                            @connection test-symbol)))
-              "canonical failure identities survive recreation without conflicting tempids")))))))
+        (let [before (db/basis-t @connection)
+              recorded (runner/commit-results! connection completion)]
+          (is (= :seon.test.runner/test-definition-absent (:seon.error/kind recorded)))
+          (is (= before (db/basis-t @connection))
+              "a refused completion changes no database facts")
+          (is (nil? (:db/id (db/pull @connection [:db/id] [:seon.test/sym test-symbol])))
+              "result recording never recreates a retracted definition")))))))
 
 (deftest result-facts-live-on-the-test-row-and-reruns-replace-them
   (test-support/with-database
@@ -949,7 +939,7 @@
                        :seon.cluster/name "test"
                        :seon.ns/name 'seon.test-runner-failure-fixture}))
         (is
-         (= #{["seon.test-runner-failure-fixture/failing-example"
+         (= #{['seon.test-runner-failure-fixture/failing-example
                 "fixture-owner"
                 0 1 0 basis-t at]}
             (db/q
@@ -968,10 +958,10 @@
                [?test :seon.test/run-basis-t ?basis]
                [?test :seon.test/run-at ?at]]
              @connection
-             "seon.test-runner-failure-fixture/failing-example")))
+             'seon.test-runner-failure-fixture/failing-example)))
         (let [test-ref
               [:seon.test/sym
-               "seon.test-runner-failure-fixture/failing-example"]
+               'seon.test-runner-failure-fixture/failing-example]
               before (db/pull @connection
                               [:db/id :seon.test/failing-assertions]
                               test-ref)
@@ -2090,8 +2080,15 @@
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))
 
-(deftest ^{:seon.test/fixture-observation "Independent launcher processes require separate persistent result stores and locks to record both gate tallies."} concurrent-bin-test-invocations-both-reach-their-tallies
-  (let [fixture-root
+(deftest ^{:seon.test/fixture-observation "Independent launcher processes require separate persistent result stores and locks to record both gate tallies."
+           :seon.test/long "Publishes two isolated result stores and awaits two complete child gates under their preparation and execution bounds."
+           :seon.test/long-ms 1800000}
+  concurrent-bin-test-invocations-both-reach-their-tallies
+  (let [deadline (+ (System/nanoTime)
+                    (* 1000000 (:seon.test/long-ms
+                                 (meta #'concurrent-bin-test-invocations-both-reach-their-tallies))))
+        remaining-ms #(max 0 (quot (- deadline (System/nanoTime)) 1000000))
+        fixture-root
         (io/file project-root "tmp" "test-runner-concurrent-gates"
                  (str (random-uuid)))
         fake-bin (io/file fixture-root "bin")
@@ -2142,12 +2139,12 @@
             completions
             (mapv #(future
                      (.waitFor ^Process %
-                               (* 12 test-support/event-backstop-seconds)
-                               TimeUnit/SECONDS))
+                               (remaining-ms)
+                               TimeUnit/MILLISECONDS))
                   launched)
             completed
             (mapv #(deref %
-                          (* 13 1000 test-support/event-backstop-seconds)
+                          (remaining-ms)
                           false)
                   completions)]
         (doseq [[process complete?] (map vector launched completed)]
@@ -2781,8 +2778,9 @@
   "A gate-sized captured-result vector: one green row per synthetic test."
   [test-count]
   (mapv (fn [ordinal]
-          {:seon.test/sym (str "seon.staged-completion-fixture.ns"
-                               (quot ordinal 50) "-test/case-" ordinal)
+          {:seon.test/sym (symbol (str "seon.staged-completion-fixture.ns"
+                                       (quot ordinal 50) "-test")
+                                 (str "case-" ordinal))
            :seon.test/pass-count 1
            :seon.test/fail-count 0
            :seon.test/error-count 0})
@@ -2821,8 +2819,8 @@
                 "the staged file reads back as the exact completion")
             (is (= at (:seon.test/run-at staged))
                 "instants survive the EDN round trip")
-            (is (= 2000
-                   (count (runner/commit-results!
+            (is (= :seon.test.runner/test-definition-absent
+                   (:seon.error/kind (runner/commit-results!
                            connection
                            (assoc (select-keys staged
                                                [:seon.test.runner/results
@@ -2830,7 +2828,7 @@
                                                 :seon.test/run-at])
                                   :seon.test.run/provenance
                                   (runner/provenance @connection)))))
-                "every staged result commits as a test row"))
+                "transported results cannot fabricate absent program definitions"))
           (finally
             (io/delete-file file true)))))))
 

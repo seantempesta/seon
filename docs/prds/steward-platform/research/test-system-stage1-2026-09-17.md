@@ -143,10 +143,43 @@ In the final serial four-namespace iteration, all **62 seon.fn-test tests**,
 **6 seon.test.selection-test tests**, and **22 seon.test.runner-test tests**
 completed without unexpected failures. This includes the corrected reference
 read refusal and shared-frontier assertions. The broader launcher namespace
-is still running at this checkpoint; a whole-invocation green is not claimed.
+subsequently completed green as recorded below.
 
 The final graph measurement retained 15 / 15 / 21 indexed reads for one / two /
 three seeds, at 104.555 / 102.638 / 99.658 ms. Both observed timing sets are
 reported; the regression asserts exact membership and no repeated reads, not
 the design's explicitly unproven 50 ms estimate. Static lint reports zero
 errors for the changed graph and regression files.
+
+### Final fast result and review boundary
+
+The final invocation exited **0**, with **141 tests / 1,026 assertions /
+0 failures / 0 errors**. Exact invocation, from the detached worktree at
+`02cb1b2b7`:
+
+```sh
+timeout 2400 bin/test-fast --paths src/seon/fn.clj src/seon/test.clj src/seon/test/runner.clj resources/seon/schemas/seon.fn.edn resources/seon/schemas/seon.test.selection.edn test/seon/test/selection_test.clj test/seon/fn_test.clj test/seon/test_runner_test.clj test/seon/test/runner_test.clj -- seon.fn-test seon.test.selection-test seon.test.runner-test seon.test-runner-test
+```
+
+Raw evidence: `tmp/test-system-stage1-resumed-fast-5.log`. The concurrent
+launcher test completed in 575.406 seconds; both child tallies were observed.
+The graph checkpoint is commit `fe2f1e816`. The runner regression checkpoint
+contains only the symbol/retraction expectations, declared launcher deadline,
+and their issue evidence. No production selector draft is certified by these
+commits or by this tally.
+
+Publication changes landed while verification ran (`ac13b8b4d`, followed by
+`54e3a45ce`), leaving `src/seon/cluster/source.clj` clean. The required input
+digest still does not exist. An ownership clarification was sent because the
+assignment explicitly held that owner for the publication lane; no answer
+had arrived at this checkpoint. This lane has not changed that owner or
+substituted filesystem evidence. Full Stage 1 remains at the named publication
+input-digest dependency, with shared admission and the exact two-host
+acceptance still owed. The restored draft is preserved in the shared tree.
+
+The completed lane JVM and its worktree JVM holders were absent before cleanup.
+Removed only `tmp/test-system-stage1-resumed-wt`, unlinking its shared cache,
+reference-code and slot symlinks first. The verified overlay and new schema
+were saved under `tmp/orchestrator/worktree-patches/test-system-stage1-resumed-*`;
+raw logs remain in `tmp/`. The documentation hook reported repository-wide
+stale citation errors in older audit documents; `git diff --check` is clean.
