@@ -1608,6 +1608,47 @@
                         (db/pull (db/db connection) '[*]
                                  [:seon.schedule/id "f2-composed"])))))))))
 
+(deftest a-create-is-validated-complete-while-an-upsert-validates-the-merged-row
+  (test-support/with-database
+   (fn [connection]
+     (let [existing (db/pull (db/db connection) '[*] [:seon.fn/sym "seon.id/id"])]
+       (is (some? (:db/id existing)) "the canonical fixture carries a complete program row")
+       (test-support/transacted! connection
+                                 [{:seon.fn/sym "seon.id/id"
+                                   :seon.fn/doc "updated documentation"}])
+       (let [updated (db/pull (db/db connection) '[*] [:seon.fn/sym "seon.id/id"])]
+         (is (= "updated documentation" (:seon.fn/doc updated))
+             "a sparse upsert of an existing row is the ruled partial-upsert behaviour")
+         (is (= (:db/id (:seon.fn/ns existing)) (:db/id (:seon.fn/ns updated)))
+             "the merged row still carries the keys the submission omitted")))
+     (doseq [[entity identities]
+             [[{:seon.fn/sym "seon.source.test/incomplete" :seon.fn/doc "incomplete"}
+               {:seon.fn/sym "seon.source.test/incomplete"}]
+              [{:seon.test/sym "seon.source.test/incomplete-test"}
+               {:seon.test/sym "seon.source.test/incomplete-test"}]]]
+       (let [basis (db/basis-t (db/db connection))
+             refusal (db/transact! connection [entity])]
+         (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+         (is (= :seon.schema.admission/source (:seon.db/attribute refusal))
+             "the refusal names the missing required key")
+         (is (= :seon.error/unknown (:seon.db/offending refusal)))
+         (is (= identities (get-in refusal [:seon.error/data :seon.db/entity]))
+             "the refusal names the entity by its identity attributes")
+         (is (= basis (db/basis-t (db/db connection))) "the incomplete create commits nothing")))
+     (test-support/transacted! connection [{:seon.ns/name 'seon.source.test.complete}])
+     (is (some? (:db/id (db/pull (db/db connection) '[:db/id]
+                                 [:seon.ns/name 'seon.source.test.complete])))
+         "a create carrying every required key of its schema is admitted")
+     (test-support/transacted! connection
+                               [{:seon.schedule/id "create-probe"
+                                 :seon.schedule/expression "0 4 * * *"
+                                 :seon.schedule/zone-id "UTC"}])
+     (test-support/transacted! connection
+                               [[:db/retractEntity [:seon.schedule/id "create-probe"]]])
+     (is (nil? (:db/id (db/pull (db/db connection) '[:db/id]
+                                [:seon.schedule/id "create-probe"])))
+         "an entity retracted to nothing is skipped by whole-entity validation"))))
+
 (deftest required-program-relations-name-the-surviving-referrer
   (test-support/with-database
    (fn [connection]

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-17
 tags: [issue, write-admission, seon.db, testing]
@@ -62,5 +62,50 @@ files overlaid, `seon.cluster.source-test` is 18 tests / 170 assertions /
 1 failure / 0 errors: this one assertion and nothing else.
 
 Found while fixing the source seal refusal
-([note](../../prds/steward-platform/research/source-seal-refusal-2026-09-17.md));
+([note](../../../prds/steward-platform/research/source-seal-refusal-2026-09-17.md));
 out of that lane's scope.
+
+## Resolution, 2026-09-17 — the create path refuses; the red was the old test text
+
+Probed live at HEAD `333b1bf2d` under the canonical fixture, through
+`bin/test-fast --paths test/seon/write_admission_probe_test.clj --` with a
+throwaway probe namespace (since deleted) that replays the test body exactly:
+
+```
+PROBE identity-attr? true
+PROBE unique :db.unique/identity
+PROBE existing true                 ; the fixture row [:seon.fn/sym "seon.id/id"]
+PROBE updated true nil              ; the sparse upsert is admitted
+PROBE refused #:seon.error{:kind :seon.db/invalid-write}
+PROBE report? false
+PROBE eid nil                       ; no entity for "seon.source.test/incomplete"
+PROBE datoms []
+```
+
+So the incomplete CREATE of `seon.source.test/incomplete` is refused, with and
+without the preceding sparse upsert on the same connection. The whole
+namespace is green at HEAD: `bin/test-fast --paths … -- seon.cluster.source-test`
+→ **17 tests, 149 assertions, 0 failures, 0 errors** (run root
+`tmp/test-runs/run.CsCWVW`, 2026-09-17T02:51–02:56Z).
+
+The correction above mapped an OLD gate log onto NEW line numbers. The quoted
+failure message, "the canonical fixture has authored entity validation armed",
+is the text the test carried BEFORE `1768b466b`, where the refused transaction
+was `[{:seon.fn/sym "seon.id/id" :seon.fn/doc "incomplete"}]` — a sparse UPSERT
+of an existing complete row, which `35c5d2fa8` deliberately admits. That red
+was the stale expectation, and `1768b466b` already replaced the assertion with
+the incomplete-create form it quotes. There is no admitted incomplete create.
+
+Two things the diagnosis cost, both recorded:
+`the-test-reporter-attributes-a-failing-is-to-its-enclosing-let-binding-line`
+(the gate header pointed at `:334`, a `let` binding, for an `is` at `:341`),
+and `an-entity-with-no-identity-attribute-is-never-validated-at-the-writer`
+(`src/seon/db.clj:3058` selects schemas from identity attributes only) — the
+one genuine absence-as-health hole on this seam, left open.
+
+Landed instead: `seon.db-test/a-create-is-validated-complete-while-an-upsert-validates-the-merged-row`
+pins the class — an incomplete create of a `:seon.fn/sym` and of a
+`:seon.test/sym` identity is refused naming the entity and the missing
+`:seon.schema.admission/source`, a sparse upsert of an existing row keeps the
+keys it omitted, a create carrying every required key is admitted, and an
+entity retracted to nothing is skipped. No `src/seon/db.clj` line was changed.
