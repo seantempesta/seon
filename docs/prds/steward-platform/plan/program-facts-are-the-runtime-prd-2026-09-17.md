@@ -339,6 +339,16 @@ G6. All of G1–G5 land in the ONE reset with symbols-everywhere and the
   forbade; the PRD's mechanism is restored — `:seon.message/to` listened,
   handled = a claim ref from the handling run, answering by the `:t` rule.
 
+### 1i. Owner ruling 2026-09-17 ~06:35Z — the Datahike modeling study overrides prior decisions
+
+Owner, verbatim: "learn from the datahike modeling and override our previous
+decisions on the schemas and refs vs components or whatever. don't be
+dogmatic." The astra study `datahike-modeling-study` (its note
+`../research/datahike-modeling-study-2026-09-17.md`) is the authority the
+reset batch follows where it corrects G1–G6, 1g, 1h or the reset plan; the
+integrator rebases `reset-batch` on its corrections before the reset; every
+override is written into this PRD with the Datahike line that decided it.
+
 ## 2. What exists today, with the seams named
 
 Verified on `steward-platform` at `a36d55c3b`/`849bbce0b` on 2026-09-17.

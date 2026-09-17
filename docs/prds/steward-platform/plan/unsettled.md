@@ -2089,6 +2089,14 @@ reds then the 300 s watchdog (no green tally claimed). Resumed on items 2–4
 (declared bounds; overlay completeness + named analysis findings; orphaned
 gate announcement) and the AGENTS.md hold.
 
+**Owner ~06:35Z:** "learn from the datahike modeling and override our
+previous decisions on the schemas and refs vs components or whatever. don't
+be dogmatic." → PRD §1i: the Datahike modeling study's corrections govern the
+reset batch; the integrator rebases on them before the reset. AGENTS.md's
+current dirty hunk is the S3 lane's base-ctx paragraph (not guardrails');
+guardrails resumed with LANE_SID after its own new resume path refused a
+pre-change lane (backfill from the retained log = its next item).
+
 Remaining queue after those: write-volume (`seon.cluster.boot-test
 seon.cluster.source-test`), destructive (`seon.test-reaching-test
 seon.test-runner-test`), S1 rerun (`seon.program-test seon.fn-test
