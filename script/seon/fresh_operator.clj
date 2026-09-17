@@ -100,9 +100,9 @@
 (declare publication-bound-ms)
 
 (defn- source-publication-silence-backstop-ms
-  "Bound one atomic source population by the existing lifecycle deadline."
+  "Publication progress uses the declared operator silence window."
   []
-  (publication-bound-ms))
+  (operator-silence-backstop-ms {}))
 
 (defn- parse-root
   [arguments]
@@ -352,16 +352,17 @@
   operator roots never contend; only two commands in the same root queue, and
   that wait announces the holder instead of blocking silently."
   ([root command transition]
+   (with-operator-lock root command {} transition))
+  ([root command request transition]
    (operator.state/with-lifecycle-lock!
-    {:seon.operator.lock/path (operator.state/root-lifecycle-lock-path root)
+    (merge {:seon.operator.lock/path (operator.state/root-lifecycle-lock-path root)
      :seon.operator.lock/command command
-     :seon.operator.lock/holder-timeout-ms (publication-bound-ms)
      :seon.operator.lock/acquisition-timeout-ms
      (publication-bound-ms)
      :seon.operator.lock/hold-timeout-ms
      (if (str/starts-with? command "init")
        (publication-bound-ms)
-       operator.state/lifecycle-lock-timeout-ms)}
+       operator.state/lifecycle-lock-timeout-ms)} request)
     transition)))
 
 (defn- unquote-value
@@ -2515,6 +2516,7 @@
         cold-source (gensym "source")
         cold-store (gensym "store")
         progress (gensym "progress")
+        phase-clock (gensym "phase-clock")
         primary-failure (gensym "primary-failure")
         ;; `publish?` is spliced into syntax-quoted `(when ~publish? ...)`
         ;; templates below, so it must be a literal-safe boolean: a retained
@@ -2585,7 +2587,8 @@
           operation)]
     (pr-str
      `(let [~primary-failure (volatile! nil)
-            ~progress (atom [])]
+            ~progress (atom [])
+            ~phase-clock (volatile! {:seon.source/progress "publication preparation" :seon.source/at-nanos (System/nanoTime)})]
        (try
         (when ~publish?
           ;; Publication reads and validates the stable filesystem snapshot
@@ -2608,8 +2611,15 @@
                   (ns-resolve 'seon.cluster (symbol "*source-progress!*"))
                   progress!#
                   (fn [phase#]
-                    (swap! ~progress conj {:seon.source/progress phase#})
-                    (println (str "● current-src: " phase#))
+                    (let [now# (System/nanoTime)
+                          previous# @~phase-clock
+                          event# {:seon.source/progress phase#
+                                  :seon.source/completed-phase (:seon.source/progress previous#)
+                                  :seon.source/elapsed-ms
+                                  (quot (- now# (:seon.source/at-nanos previous#)) 1000000)}]
+                      (vreset! ~phase-clock {:seon.source/progress phase# :seon.source/at-nanos now#})
+                      (swap! ~progress conj event#)
+                      (println (str "● current-src: " (pr-str event#))))
                     (flush))]
               (with-bindings
                 {progress-var# progress!#}
@@ -2664,6 +2674,8 @@
   ([root arguments]
    (init! root arguments false))
   ([root arguments publish-before-fork?]
+   (init! root arguments publish-before-fork? {}))
+  ([root arguments publish-before-fork? request]
   (let [{:seon.fresh-operator/keys [name force? changed-paths development-cluster]}
         (parse-init-arguments arguments)
         _ (operator.state/claim-root-under-lock!
@@ -2705,12 +2717,19 @@
              (:seon.fresh-operator/transport-advertisement anchor)
              (init-form root name force? changed-paths false
                         publish-before-fork? development-cluster)
-             ;; Source publication contains one atomic Datahike population
-             ;; transaction. It cannot emit intermediate events, so the
-             ;; lifecycle operation deadline is its honest bound.
-             (source-publication-silence-backstop-ms)
+             (or (:seon.config.operator/event-silence-backstop-ms request)
+                 (source-publication-silence-backstop-ms))
              (fn [event]
                (when (= :out (:tag event))
+                 (let [text (:val event)
+                       prefix "● current-src: "]
+                   (when (str/starts-with? text prefix)
+                     (when-let [progress (:seon.operator.lock/progress request)]
+                       (let [value (subs text (count prefix))
+                             evidence (try (edn/read-string value)
+                                           (catch Exception _ nil))]
+                         (reset! progress (or (:seon.source/progress evidence)
+                                              (str/trim value)))))))
                  (print (:val event))
                  (flush))))))
 
@@ -2758,14 +2777,15 @@
 
 (defn- init-result!
   "Write the operator's typed terminal result separately from console output."
-  [root arguments]
+  ([root arguments] (init-result! root arguments {}))
+  ([root arguments request]
   (if (= "--result-file" (first arguments))
     (let [path (second arguments)]
       (when (str/blank? path)
         (fail! "Use `init --result-file PATH [init arguments]`." {}))
       (io/make-parents path)
       (try
-        (let [result (init! root (vec (drop 2 arguments)))]
+        (let [result (init! root (vec (drop 2 arguments)) false request)]
           (spit path (str (pr-str result) "\n"))
           result)
         (catch Throwable error
@@ -2777,7 +2797,7 @@
                                     :seon.error/message (ex-message error)}))
                      "\n"))
           (throw error))))
-    (init! root arguments)))
+    (init! root arguments false request))))
 
 (defn- row-state
   [row]
@@ -3353,13 +3373,18 @@
   (let [[root arguments] (parse-root raw-arguments)
         command (first arguments)
         command-arguments (vec (rest arguments))
+        request (if (= "init" command)
+                  {:seon.config.operator/event-silence-backstop-ms
+                   (operator-silence-backstop-ms {})
+                   :seon.operator.lock/progress (atom "init preparation")}
+                  {})
         run-command
         (fn []
           (case command
             "start" (start! root command-arguments)
             "config" (config! root command-arguments)
             "export" (export! root command-arguments)
-            "init" (init-result! root command-arguments)
+            "init" (init-result! root command-arguments request)
             "status" (status! root command-arguments)
             "open" (open! root command-arguments)
             "stop" (stop! root command-arguments)
@@ -3389,7 +3414,7 @@
                        "stop" "down" "reset"}
                      command)
         (phase! root command :lifecycle
-                #(with-operator-lock root (str/join " " arguments)
+                #(with-operator-lock root (str/join " " arguments) request
                    (fn []
                      ; The tree can change while another publication owns the lock.
                      (when (contains? #{"start" "init" "reset"} command)

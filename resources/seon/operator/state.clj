@@ -463,40 +463,89 @@
             (finally
               (release-lock-slot! lock-key))))))))
 
-(defn- start-lock-held-transition!
-  [path held lock-key holder transition]
+(defn- await-lock-held-transition!
+  [path held lock-key holder progress silence-ms waiter transition]
   (let [completion (promise)
         completion-lock (Object.)
+        observation (atom {::holder holder ::at (System/nanoTime) ::signal (promise)})
+        watch-key (Object.)
+        observe! (fn [_ _ _ phase]
+                   (locking completion-lock
+                     (when-not (realized? completion)
+                       (let [previous @observation
+                             now (Date.)
+                             next-holder (assoc (::holder previous)
+                                                :seon.operator.lock/phase phase
+                                                :seon.operator.lock/progress-at now
+                                                :seon.operator.lock/hold-deadline
+                                                (Date. (+ (.getTime now) silence-ms)))]
+                         (write-edn! (lock-holder-path path) next-holder)
+                         (reset! observation {::holder next-holder
+                                              ::at (System/nanoTime)
+                                              ::signal (promise)})
+                         (deliver (::signal previous) :progress)))))
         run-transition (bound-fn [] (transition))
-        worker
-        (Thread.
-         (fn []
-           (let [outcome
-                 (try
-                   [::returned (run-transition)]
-                   (catch Throwable failure [::failed failure]))]
-             (locking completion-lock
-               (try
-                 (close-lifecycle-lock! path held lock-key)
-                 (deliver completion outcome)
-                 (catch Throwable cleanup-failure
-                   (deliver completion [::failed cleanup-failure])))))))]
-    (.setName worker
-              (str "seon-lifecycle-lock-holder-"
-                   (:seon.operator.lock/command holder)))
-    ;; A timed-out CLI must not exit and release the kernel lock while its
-    ;; transition still mutates state. `System/exit` remains process-wide and
-    ;; stops both the transition and any dependency writers.
-    (.setDaemon worker false)
-    (.start worker)
-    {:completion completion
-     :completion-lock completion-lock}))
+        worker (Thread.
+                (fn []
+                  (let [outcome (try [::returned (run-transition)]
+                                     (catch Throwable failure [::failed failure]))]
+                    (locking completion-lock
+                      (when progress (remove-watch progress watch-key))
+                      (try
+                        (close-lifecycle-lock! path held lock-key)
+                        (deliver completion outcome)
+                        (catch Throwable failure
+                          (deliver completion [::failed failure])))
+                      (deliver (::signal @observation) :complete)))))]
+    ;; Subscribe before launching; a phase is evidence, not a periodic heartbeat.
+    (try
+      (write-edn! (lock-holder-path path) holder)
+      (when progress
+        (add-watch progress watch-key observe!)
+        (observe! nil nil nil @progress))
+      (.setName worker (str "seon-lifecycle-lock-holder-"
+                            (:seon.operator.lock/command holder)))
+      (.setDaemon worker false)
+      (.start worker)
+      (catch Throwable failure
+        (when progress (remove-watch progress watch-key))
+        (close-lifecycle-lock! path held lock-key)
+        (throw failure)))
+    (loop []
+      (let [{::keys [at signal]} @observation
+            remaining (max 0 (- silence-ms
+                                (quot (- (System/nanoTime) at) 1000000)))]
+        (deref signal remaining :silent)
+        (let [outcome
+              (locking completion-lock
+                (cond
+                  (realized? completion) @completion
+                  (< (- (System/nanoTime) (::at @observation))
+                     (* silence-ms 1000000)) :progress
+                  :else
+                  (let [expired-at (Date.)
+                        expired (assoc (::holder @observation)
+                                       :seon.operator.lock/hold-expired-at expired-at)]
+                    (write-edn! (lock-holder-path path) expired)
+                    (throw
+                     (ex-info
+                      (str "Operator lifecycle holder was silent for " silence-ms
+                           " ms in phase " (pr-str (:seon.operator.lock/phase expired))
+                           " holding " lock-key " for `"
+                           (:seon.operator.lock/command holder) "`.")
+                      {:seon.error/kind :seon.operator/lock-hold-timeout
+                       :seon.operator/lock-hold-timeout true
+                       :seon.operator.lock/holder expired
+                       :seon.operator.lock/waiter waiter
+                       :seon.operator.lock/expired-at expired-at})))))]
+          (if (= :progress outcome) (recur) outcome))))))
 
 (defn with-lifecycle-lock!
   "Run one lifecycle transition under a named kernel-owned file lock.
 
   Acquisition and hold bounds are required before the first lock attempt.
-  Waiting remains event-driven and loud. If a hold expires, the caller gets a
+  The hold bound measures silence since the latest event on the optional
+  request progress atom. Waiting remains event-driven and loud. On silence, the caller gets a
   typed fault while a non-daemon holder thread retains kernel custody until
   the transition is terminal; work is never interrupted and the lock is never
   released while a dependency writer may continue."
@@ -508,7 +557,9 @@
         (declared-lock-timeout
          request :seon.operator.lock/acquisition-timeout-ms)
         hold-timeout-ms
-        (declared-lock-timeout request :seon.operator.lock/hold-timeout-ms)
+        (if (:seon.config.operator/event-silence-backstop-ms request)
+          (declared-lock-timeout request :seon.config.operator/event-silence-backstop-ms)
+          (declared-lock-timeout request :seon.operator.lock/hold-timeout-ms))
         started (System/currentTimeMillis)
         deadline (+ started acquisition-timeout-ms)
         lock-key (str path)
@@ -533,60 +584,22 @@
                         holder (assoc (current-process-identity)
                                       :seon.operator.lock/path lock-key
                                       :seon.operator.lock/command (str command)
+                                      :seon.operator.lock/phase (str command)
                                       :seon.operator.lock/acquired-at acquired-at
                                       :seon.operator.lock/hold-timeout-ms
                                       hold-timeout-ms
                                       :seon.operator.lock/hold-deadline
                                       (Date. (+ (.getTime acquired-at)
                                                 hold-timeout-ms)))
-                        {:keys [completion completion-lock]}
-                        (try
-                          (when (and previous-holder
+                        _ (when (and previous-holder
                                      (not (:seon.operator.lock/holder-alive? previous-holder)))
                             (println (str "↻ reclaimed stale lifecycle holder record: "
-                                          (holder-sentence path)
-                                          "; kernel lock acquired"))
-                            (flush))
-                          (write-edn! (lock-holder-path path) holder)
-                          (start-lock-held-transition!
-                           path held lock-key holder transition)
-                          (catch Throwable launch-failure
-                            (close-lifecycle-lock! path held lock-key)
-                            (throw launch-failure)))
-                        timeout-value (Object.)
-                        result (deref completion hold-timeout-ms timeout-value)]
-                    (if (identical? timeout-value result)
-                      (locking completion-lock
-                        (if (realized? completion)
-                          [::ran @completion]
-                          (let [expired-at (Date.)
-                                timed-out-holder
-                                (assoc holder
-                                       :seon.operator.lock/hold-expired-at
-                                       expired-at)
-                                record-failure
-                                (try
-                                  (write-edn! (lock-holder-path path)
-                                              timed-out-holder)
-                                  nil
-                                  (catch Throwable failure failure))]
-                            (throw
-                             (ex-info
-                              (str "Timed out holding the operator lifecycle lock "
-                                   lock-key " for `" command "`.")
-                              (cond->
-                               {:seon.error/kind
-                                :seon.operator/lock-hold-timeout
-                                :seon.operator.lock/holder timed-out-holder
-                                :seon.operator.lock/waiter waiter
-                                :seon.operator.lock/expired-at expired-at
-                                :seon.operator/lock-hold-timeout true}
-                                record-failure
-                                (assoc
-                                 :seon.operator.lock/holder-record-failure
-                                 (ex-message record-failure)))
-                              record-failure)))))
-                      [::ran result]))
+                                          (holder-sentence path) "; kernel lock acquired"))
+                            (flush))]
+                    [::ran (await-lock-held-transition!
+                            path held lock-key holder
+                            (:seon.operator.lock/progress request)
+                            hold-timeout-ms waiter transition)])
                   (do
                     (release-lock-slot! lock-key)
                     nil))))]
