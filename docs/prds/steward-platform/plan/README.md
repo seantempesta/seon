@@ -105,7 +105,8 @@ Owner: "We'll need to fix the serious bugs but the easier ones are good initial 
 | **Ruling §1j (2026-09-17 morning): every function carries a contract, private included; instrumentation arms every contracted function** — slice 1 arm private functions; slice 2 contracts on the critical private read-consumers (352 by query) and error-returning functions, welcoming the breakage as findings | astra `private-contracts` (high) | in flight |
 | Issue triage design: namespace steward agents triaging and launching sub-agents to write contracts and sanity-check data in/out; the `private-function-without-contract` detector (3,145 today) as the first mined class | astra `issue-triage-design` (high, design only) | in flight |
 | First paid tasks = EASY private-contract issues (one call site, one caller, reaching tests exist), from the four audits + the detector; start three with budget 8 on the cheapest model | orchestrator | after stage 1 + 3 land (owner's order) |
-| Four read-only audits of the critical private functions (db/schema/config; turn/cluster/sci; test/program/issue; my/render/operator): per-function facts, contract candidates, breakage, triage order, easy-first list | Opus ×4 | in flight |
+| Four read-only audits of the critical private functions | Opus ×4 | three landed (`7506b8c59` `64d6a85cd` `3d1ccde52`); my/render/operator in flight |
+| Serious bugs from the audits (ours): one error predicate (`seon.error/error?`, seven private copies dissolved); `require-open-run` on a refused read; the detector fabricating issues; the fault recorder's fail-open existence checks; the gate set shrinking on a refused read; `transact-call` relabelling refusals; `config/refuse!` without a message | astra `private-contracts` (predicate), sol `audit2-blockers`, sol `audit3-blockers` | in flight |
 | Owner inspects a prepped agent's context on the debug outline | owner | with the outline |
 
 ### Phase 5 — write-back and iterate

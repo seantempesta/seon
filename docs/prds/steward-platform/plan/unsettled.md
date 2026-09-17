@@ -2887,3 +2887,24 @@ working tree, never Sonnet.
   with F1–F3 FIRST (one predicate: `seon.error/error?`), then contracts in
   the audit's order — contracts on a broken predicate would be a green
   suite with no protection.
+- **Audits 2 and 3 LANDED** (turn/cluster/sci `64d6a85cd`: 800 fns, 470
+  private, 1 contracted, 112 read-consumers; test/program/issue
+  `3d1ccde52`: 700 fns, 493 private, 2 contracted, 43 read-consumers, 268
+  one-caller easy pool, 17-row easy-first list). Blockers, all the same
+  class, all "ours" per the owner: `seon.turn/require-open-run` treats a
+  refused read as an OPEN TURN at the serial writer (`open?`'s open-map
+  contract admits the error); `seon.issue.detect` FABRICATES "no render
+  pair" issues from a refused read — the generator the live trial uses;
+  `seon.error/agent-exists?`/`entity-exists?` answer TRUE on a refused read
+  and the fault write fails; `seon.fn/declared-reference-edges` shrinks the
+  gate set silently on a refused read (a gate that tests less than it
+  claims); the error predicate is a private copy in seven namespaces;
+  `:seon.ns/name` is a symbol while `:seon.fn/sym` is still a string, so a
+  string-keyed join answers empty (the symbols ruling half-landed; the reset
+  retypes it); the MCP elision's requery path is refused by `get_value`
+  (437/469 rows unreachable). Launched two sol lanes (owner: sol ≥ Opus):
+  `audit3-blockers` (detector, fault recorder, gate set) and
+  `audit2-blockers` (require-open-run, opening-deferred, fail-open shapes,
+  env refusal schemas, the MCP issue). Editing: integrator (rebase),
+  private-contracts (one predicate first), audit3-blockers,
+  audit2-blockers; design: issue-triage-design; audit 4 + live trial (Opus).
