@@ -3820,3 +3820,17 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   the four files restored to HEAD (authorized once), the agent told to pause
   and resume from the patch; reset 4 running from committed HEAD
   (`reset-2026-09-18-fourth.log`).
+- Republish root cause CONFIRMED (Opus, `1ccf15ac8`): (b) in sharp form —
+  the shelved db.clj's `validate-pulled-result` refuses a `[:db/id]`-only
+  pull on any entity whose present attributes declare no
+  `:seon.program/row-schema` (the provider descriptor), returning
+  `:seon.db/unknown-pull-schema` for an entity that EXISTS; wave 2 read the
+  refusal as absence. cluster.clj's readiness loop now distinguishes
+  nil/refused/resolved and refuses naming the read (two regressions written,
+  gate owed). Issues: `initialization-readiness-read-absence-as-health`
+  (resolved), `pull-validation-refuses-a-db-id-selector` (open, for the db
+  agent's resume). Also explained: population 87,716 → 74,303 is compiled
+  entity rows 28,125 → 11,180 (= one entity per contract row instead of
+  expanded shared shapes; no facts lost; the compile change not pinned).
+- Owner (12:25Z): "you don't need permission to reset the system … be
+  decisive" — memory saved; resets are the orchestrator's.
