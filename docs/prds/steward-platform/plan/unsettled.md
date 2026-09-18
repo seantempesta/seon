@@ -3834,3 +3834,15 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   expanded shared shapes; no facts lost; the compile change not pinned).
 - Owner (12:25Z): "you don't need permission to reset the system … be
   decisive" — memory saved; resets are the orchestrator's.
+- db agent holding (report `9ae547c75`): its shelved patch already made the
+  undecided schema key pass through (its own scratch init converged); the
+  two remaining points (`[:db/id]`-only selector needs no schema; undeclared
+  entity ≠ disagreeing attributes) are its first items on resume. It also
+  completed item 1 for ten more `seon.db` owners, #18/#19/#20 and 1r in the
+  patch, all unverified: NO canonical-fixture test can run in this tree
+  because `test/seon/test_runner_test.clj:48` still calls
+  `dev-cache/digest-file!`, removed by 4133085b3 (the fixture base loads
+  first-party test namespaces) → Opus agent fixing that one reference now.
+  Note: `seon.db.edn` kept its additive rows through the shelve (additive,
+  safe). The agent's `pkill -f test-fast` sweeps may have killed another
+  agent's gate launcher — a rule to add: never kill by pattern.
