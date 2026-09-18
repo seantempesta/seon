@@ -1267,45 +1267,85 @@
    :seon.activation.lookup/attribute attribute
    :seon.activation.lookup/value value})
 
+(defn- lookup-resolution
+  "How one lookup ref answers at `database`: resolved, absent, or REFUSED.
+
+   The probe has THREE states, never two. Reading a refused read as an absent
+   entity is the absence-as-health defect this seam shipped: on 2026-09-18 a
+   `seon.db/pull` refusal on an EXISTING provider descriptor
+   (`:seon.db/unknown-pull-schema`) made every model row look unready, and the
+   boot reported \"Initialization lookup refs do not resolve\" about rows whose
+   targets were in the database all along. The read's own refusal is the
+   evidence; this seam never re-decides it."
+  [database lookup]
+  (let [result (db/pull database [:db/id] (vec lookup))]
+    (cond
+      (:seon.error/kind result)
+      {::lookup lookup ::refusal result}
+
+      (:db/id result) nil
+
+      :else {::lookup lookup})))
+
+(defn- row-lookup-refusal
+  [database row]
+  (reduce (fn [_ lookup]
+            (let [resolution (lookup-resolution database lookup)]
+              (if (::refusal resolution) (reduced resolution) nil)))
+          nil
+          (lookup-refs-in database row)))
+
+(defn- row-ready?
+  [database row]
+  (every? (fn [lookup] (nil? (lookup-resolution database lookup)))
+          (lookup-refs-in database row)))
+
 (defn- transact-initialization!
   [connection rows]
   (loop [pending (vec rows)]
     (when (seq pending)
       (let [database (db/db connection)
-            ready?
-            (fn [row]
-              (every?
-               (fn [[attribute value]]
-                 (:db/id (db/pull database [:db/id] [attribute value])))
-               (lookup-refs-in database row)))
-            ready (into [] (filter ready?) pending)
-            waiting (into [] (remove ready?) pending)]
-        (when (empty? ready)
-          (refused!
-           "Initialization lookup refs do not resolve."
-           {:seon.activation/missing
-            (into []
-                  (comp
-                   (mapcat #(lookup-refs-in database %))
-                   ;; `(distinct)` — the transducer. Bare `distinct` is the
-                   ;; one-argument COLLECTION arity, so composing it here
-                   ;; handed `comp` a LazySeq where a reducing function
-                   ;; belongs and the refusal threw a ClassCastException
-                   ;; instead of naming the unresolved lookups (found
-                   ;; 2026-08-08, the first time this branch ever ran).
-                   (distinct)
-                   (map (fn [[attribute value]]
-                          {:seon.activation/lookup-attribute attribute
-                           :seon.activation/lookup-value value})))
-                  waiting)}))
-        (require-committed!
-         (db/transact! connection
-                       {:tx-data ready
-                        :tx-meta
-                        {:seon.db/process
-                         [:seon.db.process/id boot-process-identity]}})
-         {:seon.boot/population :seon.config/initialization})
-        (recur waiting))))
+            refusal (some #(row-lookup-refusal database %) pending)]
+        ;; A refused readiness read is surfaced verbatim BEFORE any judgement
+        ;; about what resolves: the readiness question cannot be answered at
+        ;; all while the read seam is refusing.
+        (when refusal
+          (let [[attribute value] (::lookup refusal)]
+            (refused!
+             (str "An initialization readiness read was refused: "
+                  (:seon.error/message (::refusal refusal)))
+             {:seon.activation/lookup-attribute attribute
+              :seon.activation/lookup-value value
+              :seon.boot/population :seon.config/initialization
+              :seon.boot/result (::refusal refusal)})))
+        (let [ready (into [] (filter #(row-ready? database %)) pending)
+              waiting (into [] (remove #(row-ready? database %)) pending)]
+          (when (empty? ready)
+            (refused!
+             "Initialization lookup refs do not resolve."
+             {:seon.activation/missing
+              (into []
+                    (comp
+                     (mapcat #(lookup-refs-in database %))
+                     ;; `(distinct)` — the transducer. Bare `distinct` is the
+                     ;; one-argument COLLECTION arity, so composing it here
+                     ;; handed `comp` a LazySeq where a reducing function
+                     ;; belongs and the refusal threw a ClassCastException
+                     ;; instead of naming the unresolved lookups (found
+                     ;; 2026-08-08, the first time this branch ever ran).
+                     (distinct)
+                     (map (fn [[attribute value]]
+                            {:seon.activation/lookup-attribute attribute
+                             :seon.activation/lookup-value value})))
+                    waiting)}))
+          (require-committed!
+           (db/transact! connection
+                         {:tx-data ready
+                          :tx-meta
+                          {:seon.db/process
+                           [:seon.db.process/id boot-process-identity]}})
+           {:seon.boot/population :seon.config/initialization})
+          (recur waiting)))))
   nil)
 
 (defn activation-missing

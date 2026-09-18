@@ -388,3 +388,56 @@
         (is (= :seon.fn/source-changed-during-analysis
                (get-in surviving [:seon.boot/offense :seon.error/diagnostic-cause]))
             "and retaining the typed cause as evidence")))))
+
+(deftest initialization-readiness-surfaces-a-refused-read-instead-of-absence
+  ;; The readiness probe answers three states, not two. Before this, a
+  ;; `seon.db/pull` REFUSAL on a lookup ref was read as "the entity is not
+  ;; there yet": every row stayed waiting, nothing was ever ready, and the
+  ;; boot refused with "Initialization lookup refs do not resolve." about
+  ;; targets that were in the database all along (2026-09-18, republish).
+  (test-support/with-database
+    (fn [connection]
+      (let [;; A unique lookup attribute carrying a value its installed type
+            ;; rejects: the read refuses instead of answering absence.
+            row {:seon.ai.model/id "seon.cluster-test/unreadable-lookup"
+                 :seon.ai.model/provider [:seon.ai.model/provider-id 42]}
+            before (db/basis-t (db/db connection))
+            refusal (test-support/refusal-data
+                     #(#'cluster/transact-initialization! connection [row]))
+            offense (:seon.boot/offense refusal)]
+        (is (= :seon.boot/refused (:seon.error/kind refusal))
+            (pr-str refusal))
+        (is (not (str/includes? (str (:seon.error/message refusal))
+                                "lookup refs do not resolve"))
+            (str "the refusal names the refused read, not absence: "
+                 (:seon.error/message refusal)))
+        (is (= :seon.ai.model/provider-id
+               (:seon.activation/lookup-attribute offense))
+            (pr-str offense))
+        (is (error/error? (:seon.boot/result offense))
+            "the read's own refusal is carried verbatim")
+        (is (= before (db/basis-t (db/db connection)))
+            "a refused readiness read commits nothing")))))
+
+(deftest initialization-orders-provider-rows-before-the-models-naming-them
+  (test-support/with-database
+    (fn [connection]
+      (let [provider {:seon.ai.model/provider-id "seon.cluster-test/provider"
+                      :seon.config.ai/endpoint "https://example.invalid/v1/chat/completions"
+                      :seon.config.ai/api-key-variable "SEON_CLUSTER_TEST_KEY"
+                      :seon.ai.model/openai-chat-completions true
+                      :seon.ai.model/output-token-wire-key "max_tokens"}
+            model {:seon.ai.model/id "seon.cluster-test/model"
+                   :seon.ai.model/provider
+                   [:seon.ai.model/provider-id "seon.cluster-test/provider"]
+                   :seon.ai.model/context-window-tokens 1000
+                   :seon.ai.model/input-modalities #{:text}}]
+        ;; The model row is offered FIRST: readiness, not input order, decides.
+        (#'cluster/transact-initialization! connection [model provider])
+        (let [database (db/db connection)
+              pulled (db/pull database
+                              [{:seon.ai.model/provider [:seon.ai.model/provider-id]}]
+                              [:seon.ai.model/id "seon.cluster-test/model"])]
+          (is (= "seon.cluster-test/provider"
+                 (get-in pulled [:seon.ai.model/provider :seon.ai.model/provider-id]))
+              (pr-str pulled)))))))
