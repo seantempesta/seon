@@ -335,3 +335,44 @@ through `seon.test/select`, the `::unchanged?` platform suppression) were left
 uncommitted for their own lane: this commit stages only the import, the
 `run-vars!` request carriage, `bounded-worker-task!`, and the two command-loop
 hunks.
+
+### Cold gate: the serial worker completes every exchange
+
+`SEON_TEST_ORCHESTRATOR=1 bin/test -- seon.cluster.store-test seon.test.selection-test`
+at `f77fa320f`, run root `tmp/test-runs/run.8vac2X`. It selected `TIER platform
+0 tests` and `TIER bulk 23 tests` and ran for eleven minutes before an external
+TERM killed the launcher (not a gate refusal, not a worker fault). In every
+serial exchange it completed:
+
+```text
+BEGIN worker=serial 4 tasks, bound=296s
+END   worker=serial elapsed-ms=8677 task=…/an-in-process-refusal-never-drops-the-os-fence
+END   worker=serial elapsed-ms=6545 task=…/the-flock-fences-across-processes
+END   worker=serial elapsed-ms=923  task=…/a-failed-release-never-drops-the-fence
+```
+
+- `worker-retired`: **0** occurrences in the whole log.
+- `worker-exchange-bound`: **0**.
+- Task `END` lines with an EMPTY `elapsed-ms=`: **0**. (The single
+  `elapsed-ms= ` match in the log is the `PREPARED cached base` line, a
+  different message.)
+
+That is the class invariant the repair is for: on the serial tier, every host
+task published a terminal `:task-complete` carrying numeric elapsed time.
+Compare gates 8 and 9, where the first exceeded exchange retired the serial
+worker and 168 and 170 later tasks were reported failed unrun.
+
+Two further cold attempts did not reach their workers, both before any worker
+exists and both foreign:
+
+1. `run.aEQ8ZR` refused at `dependency-cache-and-classpath`: `seon.test.cache`
+   requires `seon.fs`, which another lane was committing at that moment
+   (`fbb4a205b`), so the HEAD-plus-tracked-changes snapshot had the modified
+   `src/seon/test/cache.clj` without its new dependency.
+2. `run.5wvQ4Z` refused at `published-base`: "Test input preparation exceeded
+   its execution bound" at its declared 320 s, with the machine under a
+   concurrent republish from the reset investigation.
+
+The orchestrator still owns the complete cold platform proof. It should be
+taken on a quiet machine; nothing in this lane's bytes is implicated in either
+refusal.
