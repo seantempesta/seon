@@ -18,6 +18,7 @@
             [seon.fn :as fn]
             [seon.fs :as fs]
             [seon.program :as program]
+            [seon.test.cache :as test.cache]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
@@ -63,6 +64,7 @@
 
 (def ^:private source-attributes
   [:seon.source/digest
+   :seon.source/test-input-digest
    :seon.source/built-at
    :seon.source/activation-closure
    :seon.activation/source-digest
@@ -486,6 +488,25 @@
      :seon.issue/index-refused "Issue indexing was refused."
      {:seon.source/digest source-digest})))
 
+(defn- publication-input-digest!
+  "Require the snapshot inventory before beginning a publication transaction."
+  {:malli/schema [:=> [:cat :string] :seon.source/digest]}
+  [directory]
+  (try
+    (test.cache/test-input-digest (test.cache/input-digests directory))
+    (catch Exception failure
+      (let [refusal (error/diagnostic
+                     {:seon.error/kind :seon.test/input-evidence-unavailable
+                      :seon.error/message "The publication input inventory is unavailable."
+                      :seon.error/diagnostic-layer :source-publication
+                      :seon.error/diagnostic-operation 'seon.cluster.source/publish!
+                      :seon.error/diagnostic-member directory
+                      :seon.error/diagnostic-expected :snapshot-input-inventory
+                      :seon.error/diagnostic-offending directory
+                      :seon.error/diagnostic-cause :seon.test/input-evidence-unavailable
+                      :seon.error/diagnostic-evidence {:seon.source/inventory-failure (str (ex-message failure))}})]
+        (throw (ex-info (:seon.error/message refusal) refusal failure))))))
+
 (defn publish!
   "Build and atomically publish one complete source database value."
   {:malli/schema [:=> [:cat :seon.source/publish-request]
@@ -498,7 +519,8 @@
     populate-request :seon.source/populate-request
     progress! :seon.source/progress!
     :or {progress! (constantly nil)}}]
-  (let [populate-fn (resolve-population populate source-digest)
+  (let [input-digest (publication-input-digest! (or directory (fs/source-directory)))
+          populate-fn (resolve-population populate source-digest)
           activation-fn (resolve-activation activation source-digest)
           expected-commit (:seon.source/commit-id (current store))
           scratch (scratch-branch)]
@@ -549,8 +571,10 @@
              (db/transact!
               connection
               {:tx-data
-               (activation-seal-tx
-                connection source-digest #{populate activation} activation-fn)})
+               (conj (activation-seal-tx
+                      connection source-digest #{populate activation} activation-fn)
+                     {:seon.source/digest source-digest
+                      :seon.source/test-input-digest input-digest})})
              ::source-seal-refused
              "the source seal transaction was refused"
              {:seon.source/digest source-digest})
@@ -633,7 +657,8 @@
     expected-commit :seon.source/expected-commit-id
     source-digest :seon.source/digest
     activation :seon.source/activation}]
-  (let [activation-fn (resolve-activation activation source-digest)
+  (let [input-digest (publication-input-digest! (or directory (fs/source-directory)))
+        activation-fn (resolve-activation activation source-digest)
         scratch (scratch-branch)]
     (registry/branch! {:seon.store/store store
                        :seon.cluster.registry/from expected-commit
@@ -672,8 +697,10 @@
                {:seon.source/digest source-digest
                 :seon.source/expected-commit-id expected-commit}))
               (index-issues! connection source-digest (or directory (fs/source-directory)))
-              (let [seal (activation-seal-tx
-                          connection source-digest #{activation} activation-fn)]
+              (let [seal (conj (activation-seal-tx
+                                connection source-digest #{activation} activation-fn)
+                               {:seon.source/digest source-digest
+                                :seon.source/test-input-digest input-digest})]
                 (when (seq seal)
                  (require-committed!
                   (db/transact!

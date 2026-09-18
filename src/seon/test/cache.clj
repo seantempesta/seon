@@ -4,14 +4,152 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [seon.fs :as fs]
-            [seon.test.bounds :as bounds]
-            [seon.test.selection :as selection])
-  (:import [java.io RandomAccessFile]
+            [seon.test.bounds :as bounds])
+  (:import [java.io File RandomAccessFile]
+           [java.security MessageDigest]
            [java.lang Process ProcessHandle]
            [java.nio.file Files LinkOption]
            [java.time Instant]
            [java.util.concurrent TimeUnit]))
+
+(def graph-roots
+  "Roots whose files are represented in the program-graph manifest."
+  ["src" "test"])
+
+(def ^:private inventory-bound-ms
+  "Bound for Git's local file inventory, matching the existing issue-history
+  Git read allowance. Expiry refuses selection rather than omitting inputs."
+  30000)
+
+(defn- sha-256
+  {:malli/schema [:=> [:cat :seon.blob/octet-array] :string]}
+  [^bytes source-bytes]
+  (let [digest (.digest (MessageDigest/getInstance "SHA-256") source-bytes)]
+    (apply str (map #(format "%02x" (bit-and 0xff %)) digest))))
+
+(defn- input-paths
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [directory]
+  (let [root (io/file directory)
+        recorded (io/file root "test-input-paths.txt")]
+    (if (.isFile recorded)
+      (vec (enumeration-seq (java.util.StringTokenizer. (slurp recorded) (str (char 0)))))
+      (let [child (process/process
+               ["git" "--work-tree" (.getPath root) "ls-files"
+                "--cached" "--others" "--exclude-standard" "-z"]
+               {:dir (.getPath root) :out :string :err :string})]
+    (try
+      (let [result (deref child inventory-bound-ms ::expired)]
+        (when (or (= ::expired result) (not= 0 (:exit result)))
+          (throw (ex-info "Git could not enumerate test inputs."
+                          {:seon.test.cache/root (.getPath root)
+                           :seon.test.cache/result result})))
+        (vec (enumeration-seq
+              (java.util.StringTokenizer. (:out result) (str (char 0))))))
+      (finally (process/destroy-tree child)))))))
+
+(defn- file-input-digests
+  "Hash Git's tracked and non-ignored files by repository-relative path.
+  Directory links and submodule directories are never traversed.
+  The gate snapshot carries the source Git index but hashes its own bytes."
+  {:malli/schema [:=> [:cat [:string {:min 1}]]
+                  [:map-of [:string {:min 1}] [:string {:min 1}]]]}
+  [root]
+  (let [root-file (.getCanonicalFile (io/file root))]
+    (into
+     {}
+     (comp
+      (map #(io/file root-file %))
+      (filter #(.isFile ^File %))
+      (map (fn [^File file]
+             [(str/replace (str (.relativize (.toPath root-file) (.toPath file))) File/separator "/")
+              (sha-256 (Files/readAllBytes (.toPath file)))])))
+     (input-paths (.getPath root-file)))))
+
+(defn source-inputs
+  "The program-source part of a gate's recorded input digests."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :string :string]]}
+  [digests]
+  (into {}
+        (filter (fn [[path _]]
+                  (some #(str/starts-with? path (str % "/")) graph-roots)))
+        digests))
+
+(defn changed-inputs
+  "Repository-relative paths whose bytes differ from a recorded basis."
+  {:malli/schema [:=> [:cat
+                       [:map-of [:string {:min 1}] [:string {:min 1}]]
+                       [:map-of [:string {:min 1}] [:string {:min 1}]]]
+                  [:map [:seon.test.cache/changed [:vector [:string {:min 1}]]]
+                   [:seon.test.cache/removed [:vector [:string {:min 1}]]]]]}
+  [basis-digests current-digests]
+  {:seon.test.cache/changed
+   (->> current-digests
+        (keep (fn [[path digest]]
+                (when-not (= digest (get basis-digests path))
+                  path)))
+        sort
+        vec)
+   :seon.test.cache/removed
+   (->> basis-digests
+        (keep (fn [[path _]]
+                (when-not (contains? current-digests path)
+                  path)))
+        sort
+        vec)})
+
+(defn widening-path?
+  "True when a changed path is a gate input outside the program graph."
+  {:malli/schema [:=> [:cat [:string {:min 1}]] :boolean]}
+  [path]
+  (not
+   (some (fn [input]
+           (or (= path input)
+               (str/starts-with? path (str input "/"))))
+         graph-roots)))
+
+(defn- gitlink-digests
+  "Hash pinned gitlink identities; recorded snapshot pins win over the live index."
+  {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
+  [root]
+  (let [recorded (io/file root "dependency-pins.txt")
+        text (if (.isFile recorded)
+               (slurp recorded)
+               (let [child (process/process
+                            ["git" "--work-tree" root "ls-files" "--stage"]
+                            {:dir root :out :string :err :string})]
+                 (try
+                   (let [result (deref child inventory-bound-ms ::expired)]
+                     (when (or (= ::expired result) (not= 0 (:exit result)))
+                       (throw (ex-info "Git could not enumerate input gitlinks."
+                                       {::root root ::result result})))
+                     (:out result))
+                   (finally (process/destroy-tree child)))))]
+    (into {}
+          (keep (fn [line]
+                  (when (str/starts-with? line "160000 ")
+                    (let [tab (.indexOf ^String line "\t")
+                          tokens (vec (enumeration-seq
+                                       (java.util.StringTokenizer. (subs line 0 tab))))]
+                      [(subs line (inc tab))
+                       (sha-256 (.getBytes ^String (second tokens) "UTF-8"))]))))
+          (str/split-lines text))))
+
+(defn input-digests
+  "Path/content digests of snapshot files and pinned gitlinks.
+  File links contribute their bytes; directory links are never traversed."
+  {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
+  [root]
+  (let [root (.getCanonicalPath (io/file root))]
+    (into (file-input-digests root) (gitlink-digests root))))
+
+(defn test-input-digest
+  "Digest the sorted inventory outside the program graph, including gitlinks."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] :seon.source/digest]}
+  [inputs]
+  (sha-256 (.getBytes (pr-str (into (sorted-map)
+                                   (filter (fn [[path _]] (widening-path? path)))
+                                   inputs)) "UTF-8")))
 
 (defn- read-edn [file]
   (when (.isFile (io/file file))
@@ -114,7 +252,7 @@
     (doseq [[rank directory] (map-indexed vector inactive)
             :when (or (>= rank 3)
                       (< (.lastModified (io/file directory "ready.edn")) cutoff))]
-      (fs/delete-recursively! (str parent) (str directory)))))
+      ((requiring-resolve 'seon.fs/delete-recursively!) (str parent) (str directory)))))
 
 (defn- compatible-changes
   "Program paths differing between complete, corresponding cache inputs.
@@ -126,13 +264,13 @@
              (every? string? (subvec before 1))
              (every? string? (subvec after 1))
              (= (subvec before 1) (subvec after 1)))
-    (let [changes (selection/changed-inputs (first before) (first after))
-          paths (vec (sort (concat (::selection/changed changes)
-                                   (::selection/removed changes))))]
+    (let [changes (changed-inputs (first before) (first after))
+          paths (vec (sort (concat (::changed changes)
+                                   (::removed changes))))]
       ;; The selector already declares which changed paths are outside the
       ;; program graph; re-deriving that boundary here would be a second
       ;; authority for the same question.
-      (when-not (some selection/widening-path? paths)
+      (when-not (some widening-path? paths)
         paths))))
 
 (defn- retained-base
@@ -186,7 +324,7 @@
                       (.isFile (io/file base "manifest.edn")))]
         (when-not hit?
           (when (.exists directory)
-            (fs/delete-recursively! (str parent) (str directory)))
+            ((requiring-resolve 'seon.fs/delete-recursively!) (str parent) (str directory)))
           (let [seed (retained-base parent inputs)]
             (copy-checkout! snapshot checkout)
             (when seed (clone-base! (::base seed) base))
@@ -237,7 +375,7 @@
                     inputs (first (::inputs ready))
                     graph (io/file directory "base/manifest.edn")]
                 (when (and (map? inputs)
-                           (= source-inputs (selection/source-inputs inputs))
+                           (= source-inputs (seon.test.cache/source-inputs inputs))
                            (= (.getName directory) (::digest ready))
                            (.isFile graph))
                   (manifest (str (io/file directory "base"))))))

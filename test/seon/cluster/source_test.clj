@@ -18,6 +18,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.test.runner :as runner]
+            [seon.test.cache :as cache]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
@@ -270,6 +271,11 @@
                (:seon.source/branch b)))
         (is (= digest-a (:seon.source/digest a)))
         (is (= digest-b (:seon.source/digest b)))
+        (is (= (cache/test-input-digest (cache/input-digests (fs/source-directory)))
+               (:seon.source/test-input-digest
+                (db/pull (source/database opened (:seon.source/commit-id b))
+                         [:seon.source/test-input-digest] [:seon.source/digest digest-b])))
+            "Publication carries its observed external-input identity.")
         (is (not= (:seon.source/commit-id a)
                   (:seon.source/commit-id b)))
         (is (= #{(:seon.source/commit-id a)}

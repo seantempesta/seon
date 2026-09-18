@@ -183,3 +183,94 @@ reference-code and slot symlinks first. The verified overlay and new schema
 were saved under `tmp/orchestrator/worktree-patches/test-system-stage1-resumed-*`;
 raw logs remain in `tmp/`. The documentation hook reported repository-wide
 stale citation errors in older audit documents; `git diff --check` is clean.
+
+
+## Publisher and admission continuation
+
+The owner released `src/seon/cluster/source.clj` for this lane after accepting
+`fe2f1e816` and `a47ecb926`. The remaining held paths are the runner and its
+member-runner test namespace, so the new transaction function is being
+implemented in `seon.test`; the held runner's delegation and old-body deletion
+remain one named integration boundary.
+
+Dependency ledger: Git's NUL-delimited snapshot inventory is constructed in
+`bin/test` from the exact archived commit plus selected overlays. The cache
+owner hashes files and pinned gitlink identities without walking directory
+symlinks. Sorted ordering is applied at the fingerprint seam. Publication
+records that observed digest on its existing source seal for both full and
+incremental publication. Datahike's transaction-function database is the
+admission authority (`reference-code/datahike/src/datahike/db/transaction.cljc`,
+`:db.fn/call`); history/since retain identity retractions and namespace binding
+changes. Complete membership reads use queried datoms rather than capped
+cardinality-many pulls. Reverse traversal remains the accepted union
+`seon.fn/gate-sets` implementation.
+
+The initial overlay refused dirty caller files `src/seon/cluster.clj` and
+`src/seon/test/runner.clj`. Verification therefore uses an owned detached
+worktree, initially `eb2d9a20c`, advanced to the landed wrapper commit
+`f3ae2d055`. The first isolated run
+completed 89 tests / 559 assertions / 12 failures / 13 errors, all explained
+by the error-validator sorted-map exception recorded in
+[the wrapper issue](../../../seon/issues/armed-error-validation-throws-on-non-keyword-sorted-maps.md).
+The next serial iteration is in progress; no green claim is made yet.
+
+While work continued, `dev_cache.clj` acquired an unrelated dependency-digest
+extraction into `script/seon/dev/dependency_digest.clj`. This lane owns only
+the `test-inputs` migration in that file, preserves the extraction, and does
+not overlay its uncommitted dependency into verification. Its path-limited
+commit must wait for that foreign edit to land or otherwise exclude it.
+
+
+### Resumption after the external usage limit
+
+Correction to the earlier isolation statement: `fast-3.log` included the
+in-flight `dev_cache.clj` extraction and could not load the canonical fixture
+because `seon.test-runner-test` still referenced `dev-cache/digest-file!`.
+The owned launcher was stopped and its child exit observed. Only the detached
+worktree's cache file was reconstructed from its HEAD plus this lane's
+`test-inputs` hunk; the shared foreign extraction was left untouched.
+`fast-4.log` ended before arming, with no tally; its launcher and JVM were
+absent on resumption. Neither run is evidence for selection correctness.
+The replacement serial run is `tmp/test-system-stage1-inputs/fast-5.log`.
+
+The latest ownership boundary also holds `bin/test` and `dev_cache.clj`.
+Their preserved earlier Stage 1 inventory hunks are not included in a new
+path-limited commit while those paths carry foreign work. The detached
+worktree retains only this lane's previously written hunks for verification.
+`src/seon/test/runner.clj` still has uncommitted edits at this resumption.
+The exact owed integration is its `admit-run` delegation to
+`seon.test/admit-run`, execution through admitted member claims/completions,
+and replacing `bulk-selection`/`record-green-basis!` before deleting their
+remaining `selection.clj` adapters. The required
+`selection-is-one-function-on-both-hosts` regression belongs with that actual
+integration in `test/seon/test/runner_test.clj`; pure-selector assertions here
+do not claim to substitute for it.
+
+
+`fast-5.log` was cancelled while waiting for a slot so the next snapshot
+could include the review fixes. `fast-6.log`, at committed baseline
+`f77fa320f`, armed 1,237 contracts and began the fileless SCI regression,
+then received TERM and exited 143 without a tally. Its processes were absent
+before the identical serial replacement, `fast-7.log`, was launched. The
+sender of TERM was not established; no cause is attributed.
+
+The cache owner's `test-inputs` migration landed alongside its owner's
+extraction in `4133085b3`; that path is no longer an uncommitted Stage 1
+hunk. Admission now also checks retained definition changes after the tested
+basis, including removed identities. Selection refuses swept membership refs
+by comparing current refs with admitted history; incomplete coverage cannot
+silently become a smaller green run.
+
+
+`fast-7.log` also ended on TERM before arming, with no phase-bound diagnostic.
+The permitted plain fast form in the same isolated worktree (`fast-8.log`)
+then reached the tests. Fileless SCI selection and input inventory regressions
+passed. Admission exposed an owned temporal-read defect: `as-of` values do
+not carry top-level schema/config maps. `select` now obtains installed schema
+and branch through the existing `seon.db/schema-database` owner.
+The run later exited 124 at the 320-second publication liveness bound, before
+a suite tally. See
+[the publication liveness evidence](../../../seon/issues/full-publication-tests-exceed-liveness-while-compiling-the-commit-projection.md).
+No environment bound override or foreign schema/database edit was made.
+The next serial run is `fast-9.log`, with selection and graph namespaces
+ordered before the same publication namespace.

@@ -16,105 +16,36 @@
   (:require [babashka.process :as process]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str])
-  (:import (java.io File)
-           (java.nio.file Files)
-           (java.security MessageDigest)))
+            [clojure.string :as str]
+            [seon.test.cache :as cache]))
 
-(def graph-roots
-  "Roots whose files are represented in the program-graph manifest."
-  ["src" "test"])
-
-(def ^:private inventory-bound-ms
-  "Bound for Git's local file inventory, matching the existing issue-history
-  Git read allowance. Expiry refuses selection rather than omitting inputs."
-  30000)
-
-(defn- sha-256
-  [^bytes source-bytes]
-  (let [digest (.digest (MessageDigest/getInstance "SHA-256") source-bytes)]
-    (apply str (map #(format "%02x" (bit-and 0xff %)) digest))))
-
-(defn- relative-path
-  [^File root ^File file]
-  (str/replace (str (.relativize (.toPath root) (.toPath file)))
-               File/separator "/"))
-
-(defn- input-paths
-  [^File root]
-  (let [child (process/process
-               ["git" "--work-tree" (.getPath root) "ls-files"
-                "--cached" "--others" "--exclude-standard" "-z"]
-               {:dir (.getPath root) :out :string :err :string})]
-    (try
-      (let [result (deref child inventory-bound-ms ::expired)]
-        (when (or (= ::expired result) (not= 0 (:exit result)))
-          (throw (ex-info "Git could not enumerate test inputs."
-                          {:seon.test.selection/root (.getPath root)
-                           :seon.test.selection/result result})))
-        (vec (enumeration-seq
-              (java.util.StringTokenizer. (:out result) (str (char 0))))))
-      (finally (process/destroy-tree child)))))
+; Remaining callers in the held runner migrate with selection admission.
+(def graph-roots cache/graph-roots)
+(def ^:private inventory-bound-ms 30000)
 
 (defn input-digests
-  "Hash Git's tracked and non-ignored files by repository-relative path.
-  Directory links and submodule directories are never traversed.
-  The gate snapshot carries the source Git index but hashes its own bytes."
-  {:malli/schema [:=> [:cat [:string {:min 1}]]
-                  [:map-of [:string {:min 1}] [:string {:min 1}]]]}
+  {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
   [root]
-  (let [root-file (.getCanonicalFile (io/file root))]
-    (into
-     (sorted-map)
-     (comp
-      (map #(io/file root-file %))
-      (filter #(.isFile ^File %))
-      (map (fn [^File file]
-             [(relative-path root-file file)
-              (sha-256 (Files/readAllBytes (.toPath file)))])))
-     (input-paths root-file))))
+  (cache/input-digests root))
 
 (defn source-inputs
-  "The program-source part of a gate's recorded input digests."
   {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :string :string]]}
   [digests]
-  (into (sorted-map)
-        (filter (fn [[path _]]
-                  (some #(str/starts-with? path (str % "/")) graph-roots)))
-        digests))
-
-(defn changed-inputs
-  "Repository-relative paths whose bytes differ from a recorded basis."
-  {:malli/schema [:=> [:cat
-                       [:map-of [:string {:min 1}] [:string {:min 1}]]
-                       [:map-of [:string {:min 1}] [:string {:min 1}]]]
-                  [:map [:seon.test.selection/changed [:vector [:string {:min 1}]]]
-                   [:seon.test.selection/removed [:vector [:string {:min 1}]]]]]}
-  [basis-digests current-digests]
-  {:seon.test.selection/changed
-   (->> current-digests
-        (keep (fn [[path digest]]
-                (when-not (= digest (get basis-digests path))
-                  path)))
-        sort
-        vec)
-   :seon.test.selection/removed
-   (->> basis-digests
-        (keep (fn [[path _]]
-                (when-not (contains? current-digests path)
-                  path)))
-        sort
-        vec)})
+  (cache/source-inputs digests))
 
 (defn widening-path?
-  "True when a changed path is a gate input outside the program graph."
-  {:malli/schema [:=> [:cat [:string {:min 1}]] :boolean]}
+  {:malli/schema [:=> [:cat :string] :boolean]}
   [path]
-  (not
-   (some (fn [input]
-           (or (= path input)
-               (str/starts-with? path (str input "/"))))
-         graph-roots)))
+  (cache/widening-path? path))
+
+(defn changed-inputs
+  {:malli/schema [:=> [:cat [:map-of :string :string] [:map-of :string :string]]
+                  [:map [:seon.test.selection/changed [:vector :string]]
+                   [:seon.test.selection/removed [:vector :string]]]]}
+  [before after]
+  (let [delta (cache/changed-inputs before after)]
+    {:seon.test.selection/changed (:seon.test.cache/changed delta)
+     :seon.test.selection/removed (:seon.test.cache/removed delta)}))
 
 (defn- row-identities
   [row]

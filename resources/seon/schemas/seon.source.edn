@@ -9,6 +9,8 @@
                [:seon.source/commit-id :seon.source/commit-id]],
               :digest
               [:re #:seon.db{:identity true} "^[0-9a-f]{64}$"],
+              :test-input-digest
+              [:and {:seon.db/identity false :description "Digest of the sorted publication input inventory outside the program graph, including pinned gitlink identities. Observed value survives its input files."} :seon.source/digest],
               :digest-request
               [:map [:seon.source/roots :seon.source/roots]
                     [:seon.fn/root {:optional true} :string]],
