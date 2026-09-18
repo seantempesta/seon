@@ -3846,3 +3846,19 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   Note: `seon.db.edn` kept its additive rows through the shelve (additive,
   safe). The agent's `pkill -f test-fast` sweeps may have killed another
   agent's gate launcher — a rule to add: never kill by pattern.
+
+## 2026-09-18 ~12:45Z — DEFAULT IS UP (reset 4); agent procs are visible
+
+- Reset 4 (`reset-2026-09-18-fourth.log`): preflight → down → destroy →
+  republish 121 s → refork 19 s → start 15 s (ready 8.6 s, boot loads no
+  test namespaces) → adopt refused "Source changed while current-src was
+  being analyzed; retry" (an agent's edit landed mid-analysis; retrying,
+  `adopt-after-reset-4.log`). Default alive, pid 53925.
+- B6 is LIVE: `runtime_status` now lists root's agent procs (mailbox 26
+  passes, schedule 1, turn `ping unknown`), the mailbox/turn buffers with
+  `dropped` counts, `episode-runs 6`. Root's TURN PROC answers `unknown` —
+  the dead-turn-proc class is now visible instead of hidden; to diagnose
+  after adoption (3 errored receipts on the fresh cluster).
+- db agent told to resume from its patch with the two `[:db/id]`/undeclared-
+  entity points first and a fixture-base proof; runner-test digest fix in
+  flight.
