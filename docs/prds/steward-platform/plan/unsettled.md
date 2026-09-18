@@ -3793,3 +3793,24 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   a refused wave write as committed? does `pull` on a missing lookup ref now
   return an error instead of nil?), fix the root, and prove a scratch init
   converges. Default stays down until then.
+
+## 2026-09-18 ~12:00Z — serial worker fixed at the root; the republish refusal is the dirty db.clj
+
+- Opus (`f77fa320f` `6c8917c3f` `97b8e3530`): the arm split (ea676d0af) had
+  removed the host task's ONLY aggregate deadline, so the coordinator's
+  exchange bound retired the worker (gate 9 line 1314/1315: one source test
+  ran exactly 306 s); the worker command loop now owns one long-lived
+  execution thread and supervises each task under `exchange-seconds`
+  strictly inside the coordinator's bound, publishing an attributed
+  `:task-complete` on expiry; `kernel/failure-value` enumerates its union
+  (its `::base?` was false because it declared only `:seon.error/value`).
+  Cold run `run.8vac2X`: 0 retired, 0 exchange-bound, every END numeric.
+  Its shared-tree run: every `with-database` test refuses "Initialization
+  lookup refs do not resolve" while HEAD + its own diffs pass in a clean
+  worktree → the republish refusal is the db agent's in-flight `db.clj`
+  (`pull` of a missing lookup ref must be nil, a refused read an error; the
+  readiness loop must tell them apart). Message sent to the db agent; the
+  cluster-side agent keeps the loop's nil-vs-error distinction.
+- Load 76 at 11:50Z with five JVM-running workers → both codex lanes paused
+  (sessions preserved). Rule: ≤3 workers running JVMs; no reset while db.clj
+  or cluster.clj is held dirty.
