@@ -3862,3 +3862,8 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
 - db agent told to resume from its patch with the two `[:db/id]`/undeclared-
   entity points first and a fixture-base proof; runner-test digest fix in
   flight.
+- LIVE: the namespace-page fix is in default's fork — `/ns/seon.id` 27.5 MB /
+  33 s → **19 KB / 1.4 s**; `/` 3.7 MB / 6.5 s → **24 KB / 0.9 s** (issue
+  resolvable with these numbers). Adoption of the working tree still refuses
+  "Source changed while analyzed" while two agents write; retried after
+  they land. Load 9.9 → `test-system-stage1` resumed (runner.clj free).
