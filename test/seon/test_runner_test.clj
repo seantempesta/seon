@@ -4,6 +4,7 @@
             [clojure.edn :as edn]
             [seon.test.cache :as cache]
             [dev-cache]
+            [seon.dev.dependency-digest :as dependency-digest]
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is testing]]
             [seon.config :as config]
@@ -45,7 +46,7 @@
         right (io/file root "right.clj")
         digest (fn [file]
                  (let [sha (java.security.MessageDigest/getInstance "SHA-256")]
-                   (#'dev-cache/digest-file! sha file)
+                   (#'dependency-digest/digest-file! sha file)
                    (vec (.digest sha))))]
     (try
       (spit left "(ns fixture)\n")
