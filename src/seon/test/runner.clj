@@ -1851,11 +1851,21 @@
 (defn- bounded-worker-task!
   "Run one task inside the worker's own bound, before the coordinator's bound.
 
-  Host Vars deliberately do not borrow the canonical SCI ctx's arm. That
-  makes the worker command—not an unrelated interpreter—the owner of their
-  aggregate extent. Its earlier deadline leaves enough time to publish the
-  terminal exchange event; the coordinator remains the process-level
-  backstop when code does not respond to interruption."
+  Host Vars deliberately do not borrow the canonical SCI ctx's arm
+  (`run-resolved-tests!`). That arm had been the host task's only aggregate
+  deadline, so removing it left the worker running a host body with no bound
+  of its own: the coordinator's exchange bound expired first, retired the
+  worker, and every remaining task on that tier was reported failed unrun
+  with no terminal event to attribute it to. The bound belongs at the seam
+  that admits the work (AGENTS §2.3), so the worker command owns it.
+
+  The bounds nest: this one is `bounds/exchange-seconds` WITHOUT the measured
+  fixture priming the coordinator's `task-exchange-bound-seconds` adds, so it
+  fires strictly first and leaves the worker time to publish an attributed
+  `:task-complete`. The coordinator remains the process-level backstop for
+  code that ignores interruption. `executor` is the worker's ONE long-lived
+  execution thread: pooled-thread `ThreadLocal` carriage — the SCI arm above
+  all — stays observable exactly as it was when `run-task!` ran in place."
   [task resolution ^java.util.concurrent.ExecutorService executor]
   (let [started-at (Instant/now)
         started-nanos (System/nanoTime)
