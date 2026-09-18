@@ -3814,3 +3814,9 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
 - Load 76 at 11:50Z with five JVM-running workers → both codex lanes paused
   (sessions preserved). Rule: ≤3 workers running JVMs; no reset while db.clj
   or cluster.clj is held dirty.
+- Owner (12:15Z): shelve and reset now. The db agent's uncommitted
+  `db.clj`/`schema.clj`/tests are saved to
+  `tmp/orchestrator/worktree-patches/db-contracts-shelved-2026-09-18.patch`,
+  the four files restored to HEAD (authorized once), the agent told to pause
+  and resume from the patch; reset 4 running from committed HEAD
+  (`reset-2026-09-18-fourth.log`).
