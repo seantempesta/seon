@@ -3867,3 +3867,83 @@ as orchestrator/astra lanes, easy pool as the first live-agent slice).
   resolvable with these numbers). Adoption of the working tree still refuses
   "Source changed while analyzed" while two agents write; retried after
   they land. Load 9.9 → `test-system-stage1` resumed (runner.clj free).
+
+## RESUME HERE (2026-09-18 ~13:15Z, written before a context compaction)
+
+**Read first:** [plan README](README.md) "The schedule from 2026-09-17 19:50Z"
+(tracks 0/A/B/C, standing rules), then this block, then `bin/codex-agent
+status`, `git status --short`, `bin/seon status`, `uptime`.
+
+**Standing rules (owner, this session):** the orchestrator resets/recovers
+default decisively without asking; personal repos are pushed without asking
+(datahike/sci forks, seon); data model and schemas first; every function lists
+the errors it can return (1q); errors are entity schemas, facets compose, data
+first, render pairs stay schema properties (1o/1p); root writes unbounded per
+write, agent writes bounded, derived from tx provenance (1r); boot carries no
+test namespaces, tests run at runtime from facts (1n); acquisition by digest
+equality (1s); ≤3 workers running JVMs at once (load 76 happened); no reset
+while a lane holds db.clj/cluster.clj dirty (shelve to a patch first); never
+kill by pattern; a landing without a fast tally is not a landing; cold gate
+per landing is the orchestrator's; merge to main at each green platform
+checkpoint (none reached yet today).
+
+**System:** default ALIVE on reset 4 (pid 53925, forked from committed HEAD
+~cd2971e50; boot 8.6 s without test namespaces). Working-tree adoption
+(`bin/seon init --dev default`) refuses "Source changed while analyzed"
+while agents write — retry when the tree is quiet (last log
+`adopt-after-reset-4.log`). Juniper NOT reseeded on this fork (do:
+`(load-file "docs/prds/context-generation/research/juniper_fixture_2026_09_06.clj")
+((resolve 'juniper-fixture-2026-09-06/install!) "default")` via
+`mcp__seon__eval_clj` jvm mode). Namespace page live at 19 KB / 1.4 s
+(issue `a-namespace-page-serves-twenty-seven-megabytes…` can be resolved
+with those numbers). Root's turn proc pings "unknown" (parked vs dead
+undistinguishable — issue filed).
+
+**Running now:** codex `test-system-stage1` (astra; dirty: src/seon/test.clj,
+src/seon/test/runner.clj hunks, test/seon/test/selection_test.clj,
+seon.test.selection.edn untracked; runner.clj is free for it); Opus agent
+"db contracts" (dirty: src/seon/db.clj, src/seon/schema.clj,
+resources/seon/schemas/seon.db.edn, test/seon/db_test.clj,
+test/seon/schema_test.clj — resumed from
+tmp/orchestrator/worktree-patches/db-contracts-shelved-2026-09-18.patch; its
+FIRST items: a `[:db/id]`-only pull needs no entity schema; an undeclared
+entity passes through, only disagreeing attributes refuse; nil for absent —
+then a fixture-base proof `bin/test-fast seon.test-support-test
+seon.cluster-test seon.db-test seon.schema-test`); Opus agent "runner-test
+digest reference" (test/seon/test_runner_test.clj:48 `dev-cache/digest-file!`
+→ the new script/seon/dev/dependency_digest.clj owner; until it lands, NO
+canonical-fixture test can run because the fixture base loads that
+namespace). Paused codex lane with session preserved:
+`acquisition-by-digest` (sol; ruling 1s; eval.clj free) — resume when a JVM
+slot frees.
+
+**Next, in order:** (1) when the runner-test fix lands: bare
+`SEON_TEST_ORCHESTRATOR=1 bin/test --platform` (the serial-worker fix
+f77fa320f makes gates valid again; gate 9 was the last invalid one); (2)
+when the db agent lands: cold gate `bin/test --paths src/seon/db.clj
+src/seon/schema.clj resources/seon/schemas/seon.db.edn test/seon/db_test.clj
+test/seon/schema_test.clj -- seon.db-test seon.schema-test seon.instrument-test
+seon.cluster-test`; (3) adoption retry + Juniper reseed; (4) resume
+`acquisition-by-digest`; (5) queued lanes/agents: turn-loop/cluster fixture
+drift residue (audit2's 1F/2E), the profile elision defect
+(`the-agent-profile-no-longer-cuts-an-oversized-rendered-string`, blocker
+class: the one clipping spot silently stopped firing), stage 1 → stage 3,
+error-entities constructor groups (PRD §6) once the manifest's slice 2
+findings are closed, B1 predicate after the base is used by constructors,
+the bb-operator decision (three options in
+`indexer-error-keys-and-operator-graph-2026-09-18.md`), Datahike validator
+cost on the writer (option 2 of the writer-hang note), the 1F
+`seon.dev.fresh-operator-reset-test/cluster-boot-omits…` red seen by the
+preflight agent; (6) merge to `main` at the first green platform gate.
+
+**Gate ledger today:** valid gates 6/7 (101 tests, 3F/13E, all source-test +
+arm cascade — both since fixed); 8/9 invalid (serial worker retired —
+fixed f77fa320f); manifest merge gate 134 tests 2F (the 2 = listener test's
+tuned deadline, fixed 7854d35b2); predicate gate 25F/5E → reverted; B2
+gate = baseline (inherited turn drift, fixed e088cc0f9); plan gate 0F/1E
+(cold-worker arm, fixed ea676d0af); arm-leak gate 9E (cold worker, fixed
+ea676d0af). No green platform gate yet on a HEAD that includes all fixes.
+
+**Landed since handover (code):** ~80 commits, all pushed to
+`seantempesta/seon` at 04:30Z (push again: `git push origin steward-platform`).
+Datahike fork `e11845ba` pushed.
