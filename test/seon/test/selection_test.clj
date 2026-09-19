@@ -98,11 +98,11 @@
        (is (seq (:seon.test.run/members first-selection)) (pr-str first-selection))
        (is (every? (symbols first-selection) (conj expected (fixture-symbol "unrelated"))))
        (is (= :seon.test/cluster-required
-              (:seon.error/kind (select-request (dissoc request :seon.test.run/cluster)))))
+              (:seon.test/selection-refusal (select-request (dissoc request :seon.test.run/cluster)))))
        (is (= :seon.test/cluster-unavailable
-              (:seon.error/kind (select-request (assoc request :seon.test.run/cluster [:seon.cluster/name "missing"])))))
+              (:seon.test/selection-refusal (select-request (assoc request :seon.test.run/cluster [:seon.cluster/name "missing"])))))
        (is (= :seon.test/invalid-basis
-              (:seon.error/kind (select-request (assoc request :seon.test.run/change-basis-t
+              (:seon.test/selection-refusal (select-request (assoc request :seon.test.run/change-basis-t
                                                   (inc (db/basis-t (db/db connection))))))))
        (complete-selection! connection request)
        (is (= #{} (symbols (select!))) "A green bare rerun selects zero, including platform.")
@@ -147,8 +147,9 @@
          (is (every? #(get-in % [:seon.test.member/reasons]) (:seon.test.run/members changed)))
          (let [query db/q
                thread (Thread/currentThread)
-               refusal (dissoc (error/diagnostic
-                                 {:seon.db/invalid-read true :seon.error/kind :seon.db/invalid-read
+               refusal (assoc (error/diagnostic
+                                 {:seon.error/at (java.util.Date.) :seon.error/layer :seon.db/read
+                                  :seon.error/operation 'seon.db/q
                                   :seon.error/message "Declared-reference read refused."
                                   :seon.error/diagnostic-layer :database-read
                                   :seon.error/diagnostic-operation 'seon.db/q
@@ -156,7 +157,7 @@
                                   :seon.error/diagnostic-expected :available-read
                                   :seon.error/diagnostic-offending :refused
                                   :seon.error/diagnostic-cause :seon.db/invalid-read
-                                  :seon.error/diagnostic-evidence {}}) :seon.error/kind)]
+                                  :seon.error/diagnostic-evidence {}}) :seon.db/invalid-read true)]
            (with-redefs [db/q (fn [& arguments]
                                (if (and (identical? thread (Thread/currentThread))
                                         (= @#'functions/declared-reference-rules (last arguments)))
@@ -188,7 +189,7 @@
                     (symbols (select-request (assoc request :seon.db/db snapshot))))))))
        (testing "Explicit fixture material refuses"
          (is (= :seon.test/fixture-excluded
-                (:seon.error/kind
+                (:seon.test/selection-refusal
                  (select-request (assoc request :seon.db/db (db/db connection)
                                        :seon.test/identities #{'seon.test-runner-failure-fixture/failing-example}))))))
        (support/transacted! connection [{:seon.source/digest seal
@@ -219,11 +220,11 @@
                                 [?run :seon.test.run/members ?member]] database)
              missing-member (:db-after (d/with database [[:db/retractEntity member-eid]]))]
          (is (= :seon.test/population-unknown
-                (:seon.error/kind (select-request (assoc request :seon.db/db missing-member)))))
+                (:seon.test/selection-refusal (select-request (assoc request :seon.db/db missing-member)))))
          (is (= :seon.test/input-evidence-unavailable
-                (:seon.error/kind (select-request (assoc request :seon.db/db missing-inputs)))))
+                (:seon.test/selection-refusal (select-request (assoc request :seon.db/db missing-inputs)))))
          (is (= :seon.test/analysis-unknown
-                (:seon.error/kind (select-request (assoc request :seon.db/db missing-analysis))))))))))
+                (:seon.test/selection-refusal (select-request (assoc request :seon.db/db missing-analysis))))))))))
 
 (deftest selection-derives-bases-obligations-and-exact-symbol-reach
   (exercise-selection! sut/select))

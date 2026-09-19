@@ -40,7 +40,7 @@
                         (is (= 2 (#'runner/run-coordinator!
                                   name "tmp/a0-no-worker-root" "a0" "changed" []))))
                refusal (edn/read-string output)]
-           (is (= expected (:seon.error/kind refusal)))
+           (is (= expected (:seon.test/selection-refusal refusal)))
            (is (= 'seon.test/select
                   (get-in refusal [:seon.error/data :seon.error/diagnostic-operation])))
            (is (= {:seon.test.run/cluster :explicit-cluster-ref
@@ -313,12 +313,12 @@
            (is (= 2 (db/q '[:find (count ?report) . :where [?report :seon.test.report/id]] (db/db connection)))
                "Seven identical errors share one report; passes have no reports.")
            (is (= :seon.test/claim-conflict
-                  (:seon.error/kind (db/transact! connection [[:db.fn/call runner/claim-member
+                  (:seon.test/execution-refusal (db/transact! connection [[:db.fn/call runner/claim-member
                                                               (claim-request run parent-row)]])))
                "Recorded counts without termination do not release the process.")
            (is (vector? (runner/commit-results! connection (assoc second-completion :seon.test.run/terminated? true))))
            (is (= :seon.test/report-conflict
-                  (:seon.error/kind
+                  (:seon.test/execution-refusal
                    (runner/commit-results!
                     connection (assoc-in second-completion
                                          [:seon.test.runner/results 1 :seon.test.failure/reports 0 :seon.test.failure/actual]
@@ -331,13 +331,13 @@
                  late (completion run child-row (claim-t first-claim) [result] true)
                  accepted (completion other-run parent-row (claim-t reclaimed) [result] true)]
              (is (not= (claim-t first-claim) (claim-t reclaimed)))
-             (is (= :seon.test/claim-replaced (:seon.error/kind (runner/commit-results! connection late))))
+             (is (= :seon.test/claim-replaced (:seon.test/execution-refusal (runner/commit-results! connection late))))
              (is (vector? (runner/commit-results! connection accepted)))
              (let [replay (test-support/transacted! connection [[:db.fn/call runner/record-tx accepted]])]
                (is (empty? (filter #(contains? #{"seon.test.member" "seon.test.report"} (namespace (:a %)))
                                    (:tx-data replay)))))
              (is (= :seon.test.run/immutable
-                    (:seon.error/kind
+                    (:seon.test/execution-refusal
                      (runner/commit-results! connection
                                              (update-in accepted [:seon.test.runner/results 0 :seon.test/pass-count] inc)))))
              (is (empty? (filter #(= :seon.test.member/claim-tx (:a %))
@@ -396,16 +396,16 @@
                   (set (db/q '[:find [?symbol ...] :in $ ?tx
                                :where [?member :seon.test.member/claim-tx ?tx]
                                       [?member :seon.test.member/symbol ?symbol]] (:db-after claim) claim-t))))
-           (is (= :seon.test/claim-conflict (:seon.error/kind (refused (request run other))))
+           (is (= :seon.test/claim-conflict (:seon.test/execution-refusal (refused (request run other))))
                "A different worker cannot claim bulk while platform is pending.")
-           (is (= :seon.test/claim-conflict (:seon.error/kind (refused (request other-run parent))))
+           (is (= :seon.test/claim-conflict (:seon.test/execution-refusal (refused (request other-run parent))))
                "The same JVM cannot overlap groups across runs in this authority.")
            (is (= :seon.test/process-state-unknown
-                  (:seon.error/kind (refused (update (request run other) :seon.db.process/pid inc)))))
+                  (:seon.test/execution-refusal (refused (update (request run other) :seon.db.process/pid inc)))))
            (is (= :seon.test.runner/worker-exchange-bound
-                  (:seon.error/kind (refused (assoc (request run other) :seon.test.member/claimed-at deadline)))))
+                  (:seon.test/execution-refusal (refused (assoc (request run other) :seon.test.member/claimed-at deadline)))))
            (is (= :seon.test.runner/worker-exchange-bound
-                  (:seon.error/kind (refused (assoc (request run other) :seon.test.run/deadline
+                  (:seon.test/execution-refusal (refused (assoc (request run other) :seon.test.run/deadline
                                                   (java.util.Date. (inc (inst-ms deadline))))))))
            (let [result (runner/run-var! (requiring-resolve platform))
                  recorded (runner/commit-results!

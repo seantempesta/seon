@@ -52,20 +52,13 @@
                   [:seon.test.run/terminated? :seon.test.run/terminated?]]],
                 :immutable [:and {:seon.db/identity false} :seon.test.run/id],
                 :immutable-error
-                [:map {:seon.error/class true
-                       :error/message "must identify the immutable test run"
-                       :seon.render/ai seon.error/render-ai
-                       :seon.render/html seon.error/render-html}
-                 [:seon.test.run/immutable :seon.test.run/immutable]
-                 [:seon.error/message :seon.error/message]],
+                [:and :seon.error/base [:map [:seon.test.run/immutable :seon.test.run/immutable]]],
                 :unavailable [:= true],
+                :provenance-failure [:string {:min 1}],
                 :unavailable-error
-                [:map {:seon.error/class true
-                       :error/message "must identify unavailable test execution"
-                       :seon.render/ai seon.error/render-ai
-                       :seon.render/html seon.error/render-html}
-                 [:seon.test.run/unavailable :seon.test.run/unavailable]
-                 [:seon.error/message :seon.error/message]],
+                [:and :seon.error/base
+                 [:map [:seon.test.run/unavailable :seon.test.run/unavailable]
+                  [:seon.test.run/provenance-failure :seon.test.run/provenance-failure]]],
                 :provenance
                 [:map
                  [:seon.test.run/id :seon.test.run/id]

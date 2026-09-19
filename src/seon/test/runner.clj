@@ -2237,12 +2237,12 @@
   extend that identity with canonical program facts; result-only writes do not.
   Only program rows touched since the seal need comparison."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or :seon.test.run/program-digest :seon.error/value]]}
+                  [:or :seon.test.run/program-digest :seon.test.run/unavailable-error]]}
   [database]
   (try
    (let [seals (db/q '[:find ?digest ?t
                      :where [_ :seon.source/digest ?digest ?t]] database)
-        _ (when (:seon.error/kind seals)
+        _ (when (and (map? seals) (contains? seals :seon.error/at) (contains? seals :seon.error/layer) (contains? seals :seon.error/operation))
             (throw (ex-info "Cannot read the tested source identity." seals)))
         _ (when (> (count seals) 1)
             (throw (ex-info "The tested program has multiple source seals." {})))
@@ -2256,12 +2256,12 @@
                          :where [$changed ?entity]
                                 [?entity ?identity]]
                        database changed program/identity-attributes)
-        _ (when (:seon.error/kind entities)
+        _ (when (and (map? entities) (contains? entities :seon.error/at) (contains? entities :seon.error/layer) (contains? entities :seon.error/operation))
             (throw (ex-info "Cannot identify changed program rows." entities)))
         old-rows (db/pull-many before '[*] entities)
         current-rows (db/pull-many database '[*] entities)
         _ (doseq [rows [old-rows current-rows]]
-            (when (:seon.error/kind rows)
+            (when (and (map? rows) (contains? rows :seon.error/at) (contains? rows :seon.error/layer) (contains? rows :seon.error/operation))
               (throw (ex-info "Cannot read tested program rows." rows))))
         differences
         (into []
@@ -2274,8 +2274,10 @@
     (if (empty? differences) digest
         (id/digest 64 [digest (vec (sort-by pr-str differences))])))
    (catch Exception failure
-     {:seon.error/kind :seon.test.run/unavailable
+     {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/provenance
+      :seon.error/operation 'seon.test.runner/program-digest
       :seon.test.run/unavailable true
+      :seon.test.run/provenance-failure (or (ex-message failure) (.getName (class failure)))
       :seon.error/message (str "Test provenance unavailable: " (ex-message failure))})))
 
 (defn provenance
@@ -2283,10 +2285,10 @@
   Git is optional for an
   agent's database program, which need not have a corresponding Git commit."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or :seon.test.run/provenance :seon.error/value]]}
+                  [:or :seon.test.run/provenance :seon.test.run/unavailable-error]]}
   [database]
   (let [digest (program-digest database)]
-    (if (:seon.error/kind digest) digest
+    (if (and (map? digest) (contains? digest :seon.error/at) (contains? digest :seon.error/layer) (contains? digest :seon.error/operation)) digest
         {:seon.test.run/id (id/id)
    :seon.test.run/at (java.util.Date.)
    :seon.test.run/program-digest digest
@@ -2296,14 +2298,15 @@
 (defn worker-request-admission
   "Prepare worker membership through the same owner used by in-process check."
   {:malli/schema [:=> [:cat :seon.test.selection/request]
-                  [:or :seon.test.run/admission :seon.error/value
+                  [:or :seon.test.run/admission :seon.test/selection-error :seon.test/unknown-error :seon.test.run/unavailable-error
                    :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [request]
   ((requiring-resolve 'seon.test/selection-admission) request))
 
 (defn- execution-refusal! [operation run-id kind expected observed]
-  (let [failure (error/diagnostic
-                 {:seon.error/kind kind
+  (let [failure (assoc (error/diagnostic
+                 {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
+                  :seon.error/operation operation
                   :seon.error/message "The test execution evidence does not authorize this transition."
                   :seon.error/diagnostic-layer :test-execution
                   :seon.error/diagnostic-operation operation
@@ -2311,11 +2314,11 @@
                   :seon.error/diagnostic-expected expected
                   :seon.error/diagnostic-offending observed
                   :seon.error/diagnostic-cause kind
-                  :seon.error/diagnostic-evidence {:seon.test.run/id run-id}})]
+                  :seon.error/diagnostic-evidence {:seon.test.run/id run-id}}) :seon.test/execution-refusal kind)]
     (throw (ex-info (:seon.error/message failure) failure))))
 
 (defn- execution-read [value]
-  (when (:seon.error/kind value)
+  (when (and (map? value) (contains? value :seon.error/at) (contains? value :seon.error/layer) (contains? value :seon.error/operation))
     (throw (ex-info (:seon.error/message value) value)))
   value)
 
@@ -2463,7 +2466,7 @@
                      (db/as-of database (:seon.test.run/basis-t run)))
                    database)
         threshold (db/q '[:find ?n . :where [_ :seon.config.eval.result/blob-threshold ?n]] database)
-        _ (when (:seon.error/kind threshold)
+        _ (when (and (map? threshold) (contains? threshold :seon.error/at) (contains? threshold :seon.error/layer) (contains? threshold :seon.error/operation))
             (throw (ex-info "Cannot read the assertion blob threshold." threshold)))
         staged (volatile! [])
         stage-field
@@ -2716,7 +2719,7 @@
         digests (or carried-digests
                     (when tested (reach-digests tested (mapv :seon.test/sym results))))
         derived-reaches (when tested (reach-memberships tested (mapv :seon.test/sym results)))
-        reaches (if (:seon.error/kind derived-reaches)
+        reaches (if (and (map? derived-reaches) (contains? derived-reaches :seon.error/at) (contains? derived-reaches :seon.error/layer) (contains? derived-reaches :seon.error/operation))
                   (or carried-reaches derived-reaches)
                   (merge derived-reaches carried-reaches))
         run-id (:seon.test.run/id run)
@@ -2751,11 +2754,12 @@
               (cond-> (dissoc failure :seon.test.failure/file)
                 reported-path? (assoc :seon.test.failure/reported-file path)))))
         previous (db/pull database (vec (keys run)) run-ref)]
-    (when (:seon.error/kind previous)
+    (when (and (map? previous) (contains? previous :seon.error/at) (contains? previous :seon.error/layer) (contains? previous :seon.error/operation))
       (throw (ex-info (:seon.error/message previous) previous)))
     (when (and previous (not= run (dissoc previous :db/id)))
-      (let [failure (error/diagnostic
-                     {:seon.error/kind :seon.test.run/immutable
+      (let [failure (assoc (error/diagnostic
+                     {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/recording
+                      :seon.error/operation 'seon.test.runner/record-tx
                       :seon.error/message "A test run's provenance is immutable."
                       :seon.error/diagnostic-layer :test
                       :seon.error/diagnostic-operation 'seon.test.runner/record-tx
@@ -2767,7 +2771,7 @@
                       {:seon.test.run/id run-id
                        :seon.db/basis-t (db/basis-t database)}
                       :seon.test.run/id run-id
-                      :seon.test.run/immutable run-id})]
+                      :seon.test.run/immutable run-id}) :seon.test.run/immutable run-id)]
         (throw (ex-info (:seon.error/message failure) failure))))
     (let [missing (into [] (comp (map :seon.test/sym) (remove current-by-symbol)) results)]
       (when (seq missing)
@@ -2937,10 +2941,11 @@
                             requested)
         :else :seon.test/execution-required))
     (catch Exception failure
-      (if (:seon.error/kind (ex-data failure))
+      (if (and (map? (ex-data failure)) (contains? (ex-data failure) :seon.error/at) (contains? (ex-data failure) :seon.error/layer) (contains? (ex-data failure) :seon.error/operation))
         (ex-data failure)
-        (error/diagnostic
-         {:seon.error/kind :seon.test/population-unknown
+        (assoc (error/diagnostic
+         {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/reuse
+          :seon.error/operation 'seon.test.runner/reusable-result
           :seon.error/message "Recorded test evidence could not be read."
           :seon.error/diagnostic-layer :test-reuse
           :seon.error/diagnostic-operation 'seon.test.runner/reusable-result
@@ -2948,7 +2953,8 @@
           :seon.error/diagnostic-expected :recorded-program-selection-and-basis
           :seon.error/diagnostic-offending (or (ex-message failure) (.getName (class failure)))
           :seon.error/diagnostic-cause :unavailable-recorded-evidence
-          :seon.error/diagnostic-evidence {:seon.test/run-basis-t (db/basis-t database)}})))))
+          :seon.error/diagnostic-evidence {:seon.test/run-basis-t (db/basis-t database)}})
+         :seon.test/execution-refusal :seon.test/population-unknown)))))
 
 (defn- recorded-member-result [database run test-symbol]
   (let [member (first (filter #(= (symbol test-symbol) (:seon.test.member/symbol %))
@@ -2987,12 +2993,12 @@
                             (reach-memberships tested (mapv :seon.test/sym results)))
                      completion)
         transaction-report
-        (if (:seon.error/kind database)
+        (if (and (map? database) (contains? database :seon.error/at) (contains? database :seon.error/layer) (contains? database :seon.error/operation))
           database
           (blob/with-publication! connection (:seon.blob/staged-writes completion)
             #(db/transact! connection
                            [[:db.fn/call #'record-tx (dissoc completion :seon.blob/staged-writes)]]))) ]
-    (if (:seon.error/kind transaction-report)
+    (if (and (map? transaction-report) (contains? transaction-report :seon.error/at) (contains? transaction-report :seon.error/layer) (contains? transaction-report :seon.error/operation))
       transaction-report
       (let [recorded (mapv (fn [{test-symbol :seon.test/sym}]
               (if (:seon.test.run/selection-tx
@@ -3006,7 +3012,7 @@
                           [:seon.test/sym test-symbol])
                  :db/id)))
             results)]
-        (or (first (filter :seon.error/kind recorded)) recorded)))))
+        (or (first (filter :seon.error/at recorded)) recorded)))))
 
 (defn- start-cluster!
   [cluster-name root]
@@ -3262,12 +3268,11 @@
 
 (defn- bare-selection-refusal
   "Refuse checkout selection until the launcher supplies named-cluster custody."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name] :seon.error/value]}
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name] :seon.test/selection-error]}
   [cluster-name]
-  (error/diagnostic
-   {:seon.error/kind (if (= "-" cluster-name)
-                       :seon.test/cluster-required
-                       :seon.test/selection-authority-unavailable)
+  (assoc (error/diagnostic
+   {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/selection
+    :seon.error/operation 'seon.test/select
     :seon.error/message
     "Bare bin/test requires an explicitly named cluster and its immutable published database at seon.test/select; the checkout coordinator has only publication provenance."
     :seon.error/diagnostic-layer :test
@@ -3280,7 +3285,9 @@
     :seon.error/diagnostic-cause :seon.test/selection-authority-unavailable
     :seon.error/diagnostic-evidence
     {:seon.boot/cluster-name cluster-name
-     :seon.test.run/policy :incremental}}))
+     :seon.test.run/policy :incremental}})
+    :seon.test/selection-refusal (if (= "-" cluster-name) :seon.test/cluster-required
+                                   :seon.test/selection-authority-unavailable)))
 
 (defn- record-green-basis!
   {:seon.fn/external-sink :codec-storage

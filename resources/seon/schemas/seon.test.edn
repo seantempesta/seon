@@ -46,13 +46,7 @@
              seon.test.runner/var-reference?],
             :not-runnable :string,
             :not-runnable-error
-            [:map
-             {:seon.error/class true
-              :seon.render/ai seon.error/render-ai
-              :seon.render/html seon.error/render-html
-              :error/message "must identify the Var with no test function"}
-             [:seon.test/not-runnable :seon.test/not-runnable]
-             [:seon.error/message :seon.error/message]],
+            [:and :seon.error/base [:map [:seon.test/not-runnable :seon.test/not-runnable]]],
             :sym
             [:qualified-symbol
              { :seon.db/identity true, :seon.search/index :symbol,
@@ -237,11 +231,7 @@
   [:seon.test/command {:optional true} :seon.test/command]]
  :seon.test/unknown :string
  :seon.test/unknown-error
- [:map {:seon.error/class true :seon.render/ai seon.error/render-ai
-        :seon.render/html seon.error/render-html
-        :error/message "must name the unavailable test check input"}
-  [:seon.test/unknown :seon.test/unknown]
-  [:seon.error/message :seon.error/message]]
+ [:and :seon.error/base [:map [:seon.test/unknown :seon.test/unknown]]]
  :seon.test/next-tier
  [:or [:= :none] [:vector [:vector [:string {:min 1}]]]]
  :seon.test/command [:vector [:string {:min 1}]]
@@ -305,4 +295,25 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.evidence/entity}
  :seon.db/ref]
+
+ :seon.test/selection-refusal :qualified-keyword
+ :seon.test/selection-error
+ [:and :seon.error/base
+  [:map {:seon.db/attributes true}
+   [:seon.test/selection-refusal :seon.test/selection-refusal]]]
+ :seon.test/admission-refusal :qualified-keyword
+ :seon.test/admission-error
+ [:and :seon.error/base
+  [:map {:seon.db/attributes true}
+   [:seon.test/admission-refusal :seon.test/admission-refusal]]]
+ :seon.test/resolution-refusal :qualified-keyword
+ :seon.test/resolution-error
+ [:and :seon.error/base
+  [:map {:seon.db/attributes true}
+   [:seon.test/resolution-refusal :seon.test/resolution-refusal]]]
+ :seon.test/execution-refusal :qualified-keyword
+ :seon.test/execution-error
+ [:and :seon.error/base
+  [:map {:seon.db/attributes true}
+   [:seon.test/execution-refusal :seon.test/execution-refusal]]]
 }

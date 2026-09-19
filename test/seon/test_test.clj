@@ -29,12 +29,10 @@
                              :seon.sci.admit/caps (config/result-caps (config/defaults))
                              :seon.sci.eval/time-limit-ms 120000 :seon.config/on-core-error :panic})
                row (program/declaration-row (:seon.program/row evaluation) :all :agent)]
-           (is (map? row) (pr-str evaluation))
+           (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
+           (is (string? (:seon.program/analyzed-source-digest row)) (pr-str row))
            (test-support/transacted! connection [row])
-           (sci.eval/install-evaluated-rows!
-             {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
-              :seon.sci.eval/installations [{:seon.program/row row :seon.sci.eval/evaluation evaluation}]})))
-       (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)})
+           (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)})))
        (is (= (runner/program-digest (db/db connection))
               (runner/program-digest (:seon.db/db (sci.eval/acquired-program ctx)))))
        (let [request {:seon.db/connection connection :seon.boot/cluster-name "check-reuse"
@@ -89,7 +87,7 @@
        (execute! [passing])
        (is (true? (:seon.test/unchanged (reuse))))
        (is (= :seon.test/invalid-basis
-              (:seon.error/kind
+              (:seon.test/execution-refusal
                (runner/reusable-result {:seon.db/db (db/db connection) :seon.test/identity passing
                                         :seon.test/run-basis-t (inc (db/basis-t (db/db connection)))}))))))))
 
@@ -137,7 +135,7 @@
                       :seon.sci.eval/ctx stale
                       :seon.schema/projection (schema/projection-from-database database)
                       :seon.test/class-loader (clojure.lang.RT/baseLoader)}]
-         (is (= :seon.test/program-mismatch (:seon.error/kind (sut/resolve-test request))))
+         (is (= :seon.test/program-mismatch (:seon.test/resolution-refusal (sut/resolve-test request))))
          (sci.eval/install-evaluated-rows!
           {:seon.sci.eval/ctx ctx :seon.db/db database
            :seon.sci.eval/installations
@@ -188,7 +186,7 @@
                (is (and (runner/var-reference? resolved) (not (var? resolved)))
                    "Agent provenance wins even when a core file coordinate remains."))))
          (is (= :seon.test/identity-unresolved
-                (:seon.error/kind
+                (:seon.test/resolution-refusal
                  (sut/resolve-test (assoc request :seon.sci.eval/ctx ctx
                                          :seon.test/identity 'seon.test-test/no-such-test))))))))))
 
@@ -268,7 +266,7 @@
                                        (pull database selector entity)))]
                        (test-support/refusal-data
                         #(runner/commit-results! connection (completion first-run))))]
-         (is (= :seon.db/invalid-read (:seon.error/kind read-refusal)))
+         (is (true? (:seon.db/invalid-read read-refusal)))
          (is (= read-refusal refused)
              "a refused read is never evidence of an existing run or an identity collision")
          (is (= basis (db/basis-t (db/db connection)))))
@@ -276,7 +274,7 @@
              changed (assoc first-run :seon.test.run/basis-t (inc (:seon.test.run/basis-t first-run)))
              refused (test-support/refusal-data
                       #(runner/commit-results! connection (completion changed)))]
-         (is (= :seon.test.run/immutable (:seon.error/kind refused)) (pr-str refused))
+         (is (string? (:seon.test.run/immutable refused)) (pr-str refused))
          (is (= (:seon.test.run/basis-t first-run)
                 (get-in refused [:seon.error/data :seon.error/diagnostic-expected
                                  :seon.test.run/basis-t])))
@@ -338,7 +336,7 @@
              refused (db/transact! connection
                        [[:db.fn/call sut/admit-run
                          (assoc second-request :seon.test.run/members [])]])]
-         (is (= :seon.test.run/immutable (:seon.error/kind refused)) (pr-str refused))
+         (is (= :seon.test.run/immutable (:seon.test/admission-refusal refused)) (pr-str refused))
          (is (= before (db/basis-t (db/db connection)))))))))
 
 (deftest admission-refuses-stale-program-and-records-empty-selection
@@ -361,13 +359,13 @@
                      [[:db.fn/call sut/admit-run
                        (assoc-in request [:seon.test.run/provenance :seon.test.run/program-digest]
                                  (id/digest 64 [:different :program]))]])]
-       (is (= :seon.test/program-mismatch (:seon.error/kind refused)) (pr-str refused))
+       (is (= :seon.test/program-mismatch (:seon.test/admission-refusal refused)) (pr-str refused))
        (is (= before (db/basis-t (db/db connection))))
        (let [wrong-input (db/transact! connection
                            [[:db.fn/call sut/admit-run
                              (assoc request :seon.test.run/input-digest
                                     (id/digest 64 [:different :inputs]))]])]
-         (is (= :seon.test/program-mismatch (:seon.error/kind wrong-input))
+         (is (= :seon.test/program-mismatch (:seon.test/admission-refusal wrong-input))
              (pr-str wrong-input))
          (is (= before (db/basis-t (db/db connection)))))
        (let [report (test-support/transacted!
