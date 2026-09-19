@@ -4341,3 +4341,19 @@ the pairs of its components/refs recursively, the render profile bounding
 depth and child count as the ONE clipping spot; the walk today renders the
 agent's units at distance 1 only (`walk.clj:667`, audit 6 gap 2). Design
 before any lane; no new clipping spot.
+
+## 2026-09-20 ~04:30 UTC — A1 landed; first sol PRD lane launched
+
+`test-selector-a1` (astra MEDIUM, ~2 h incl. the pause) landed through
+`04d044538` + note `45651a46e`: sound selector committed with the three
+inherited reds fixed; eligibility-scope ruling implemented
+(`f07d4eb64`: policies are eligibility, only execution members admitted;
+`04d044538`: retained green members reported on unchanged bare selections);
+exact selection/admission refusal facets (`74608b99c`); real host+SCI custody
+regression (`d549c42a6`); measurements in the note; A5 follow-up listed. Its
+owned files are clean. Final fast 41/306/7F/15E — the reds are held
+provenance/instrumentation/SCI-acquisition failures from 1a's in-flight
+work, so the "second bare check executes zero" proof is owed with the cold
+gate after 1a lands. Launched `kind-sweep-turn-cluster` (gpt-5.6-sol LOW)
+from the PRD template — first sol data point. Running: 1a (high), render
+(low), turn-cluster (sol low).
