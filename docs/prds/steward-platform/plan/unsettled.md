@@ -4215,3 +4215,22 @@ Owner re-upped Codex credits. `error-family-1a` stopped cleanly (pids
 verified exited) and resumed from its preserved session on its uncommitted
 partial edits; `reset-boot-readiness` never hit the limit and continues.
 Gate 4 (`a0-stage1-cold-4`) still executing.
+
+## 2026-09-19 ~23:15 UTC — gate 4 tally; widening definition completed; readiness landed
+
+Gate 4 (`a0-stage1-cold-4`, HEAD + inherited selector files): 39 tests /
+347 assertions / 5F / 2E. Three failures were the orchestrator's: the
+selection test asserted the complement-era widening for `src-other/…`, and
+the gitlink identity test showed the new definition had MISSED vendored
+gitlinks. Fixed in `40ddbfd87`: `input-roots` derives deps.edn roots +
+local/root dependencies + recorded gitlinks + config/manifest/launchers;
+`test-input-digest` takes the snapshot root; HEAD's test restated by a
+staged blob so the stage-1 WIP stays in the tree. Fast (HEAD+paths)
+10/113/0/0. Remaining four reds are the inherited stage-1 admission and
+resolution work (`seon.test-test`), assigned to A1.
+`reset-boot-readiness` landed `83b014123` (cleanup follows READY or a
+terminal boot failure; isolated boot reached READY; 13/184/1F(post-READY
+smoke error-count)/0E). `error-family-1a` landed `06c4fe7fe` `340a878b2`
+(reader acquires complete owned observations; instrumentation error
+predicate and contract bypass removed) and continues. Next: 1a lands →
+`--platform` → reset → merge to main → A1.
