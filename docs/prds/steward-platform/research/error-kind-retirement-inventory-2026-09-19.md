@@ -351,9 +351,7 @@ Total: **2357 matching lines; 2393 matches; 323 files**.
 | `test/seon/turn_test.clj` | 23 | Mechanical follow-up |
 | `test/seon/turn_work_test.clj` | 2 | Mechanical follow-up |
 
-
 ## Exact sites and required conversion
-
 
 Replacement actions (each site below names its action):
 
@@ -376,6 +374,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1503 | `(str (pr-str (:seon.error/kind failure)) " " message` | R1 |
 | 1543 | `{:seon.error/kind :seon.hook/publication-result-unavailable` | R1 |
 | 1549 | `(if (and (zero? (:exit result)) (not (:seon.error/kind terminal)))` | R2 |
+
 ### resources/seon/schemas/my.background.edn
 
 | Line | Source | Replacement |
@@ -383,6 +382,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 23 | `:invalid-call-error [:map {:seon.error/class true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must mark an invalid background call"} [:my.background/invalid-call :my.background/invalid-call] [:seon.error/message :seon.error/message]]` | R3 |
 | 25 | `:invalid-result-error [:map {:seon.error/class true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must mark an invalid background result"} [:my.background/invalid-result :my.background/invalid-result] [:seon.error/message :seon.error/message]]` | R3 |
 | 27 | `:missing-result-error [:map {:seon.error/class true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must mark a background call with no result"} [:my.background/missing-result :my.background/missing-result] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/my.edit.edn
 
 | Line | Source | Replacement |
@@ -393,6 +393,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 70 | `:my.edit/lossless-check-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark edited source that failed the lossless check"} [:my.edit/lossless-check-failed :my.edit/lossless-check-failed] [:seon.error/message :seon.error/message]]` | R3 |
 | 72 | `:my.edit/stale-source-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose source is stale"} [:my.edit/stale-source :my.edit/stale-source] [:seon.error/message :seon.error/message]]` | R3 |
 | 74 | `:my.edit/not-utf8-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose source is not strict UTF-8"} [:my.edit/not-utf8 :my.edit/not-utf8] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/my.fs.edn
 
 | Line | Source | Replacement |
@@ -413,6 +414,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 147 | `:glob-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose glob expansion failed"} [:my.fs/glob-failed :my.fs/glob-failed] [:seon.error/message :seon.error/message]]` | R3 |
 | 149 | `:invalid-glob-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose glob expression is invalid"} [:my.fs/invalid-glob :my.fs/invalid-glob] [:seon.error/message :seon.error/message]]` | R3 |
 | 151 | `:blob-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unavailable blob digest"} [:my.fs/blob-unavailable :my.fs/blob-unavailable] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/my.message.edn
 
 | Line | Source | Replacement |
@@ -423,6 +425,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 65 | `:my.message/no-assignment-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no assignment identity"} [:my.message/no-assignment :my.message/no-assignment] [:seon.error/message :seon.error/message]]` | R3 |
 | 67 | `:my.message/no-reason-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no reason"} [:my.message/no-reason :my.message/no-reason] [:seon.error/message :seon.error/message]]` | R3 |
 | 69 | `:my.message/not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the message that does not exist"} [:my.message/not-found :my.message/not-found] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/my.note.edn
 
 | Line | Source | Replacement |
@@ -432,6 +435,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 29 | `:about-not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the note subject that does not exist"} [:my.note/about-not-found :my.note/about-not-found] [:seon.error/message :seon.error/message]],` | R3 |
 | 31 | `:not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the current note that does not exist"} [:my.note/not-found :my.note/not-found] [:seon.error/message :seon.error/message]],` | R3 |
 | 33 | `:not-owned-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the note not owned by the caller"} [:my.note/not-owned :my.note/not-owned] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/my.plan.edn
 
 | Line | Source | Replacement |
@@ -449,6 +453,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 243 | `:not-owned-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan step outside this agent's plan"} [:my.plan/not-owned :my.plan/not-owned] [:seon.error/message :seon.error/message]],` | R3 |
 | 245 | `:subject-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan subject that does not exist"} [:my.plan/subject-not-found :my.plan/subject-not-found] [:seon.error/message :seon.error/message]],` | R3 |
 | 247 | `:unusable-current-step-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a current step that is not an open step of this plan"} [:my.plan/unusable-current-step :my.plan/unusable-current-step] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/my.shell.edn
 
 | Line | Source | Replacement |
@@ -458,6 +463,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 40 | `:my.shell/cwd-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a refused child working directory"} [:my.shell/cwd-refused :my.shell/cwd-refused] [:seon.error/message :seon.error/message]]` | R3 |
 | 42 | `:my.shell/time-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a foreign process stopped by its time limit"} [:my.shell/time-limit :my.shell/time-limit] [:seon.error/message :seon.error/message]]` | R3 |
 | 44 | `:my.shell/start-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a foreign process that could not start"} [:my.shell/start-failed :my.shell/start-failed] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/my.turn.edn
 
 | Line | Source | Replacement |
@@ -465,6 +471,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 34 | `:blank-note-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a run wait whose note is blank"} [:my.turn/blank-note :my.turn/blank-note] [:seon.error/message :seon.error/message]]` | R3 |
 | 36 | `:blank-result-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a run completion whose result is blank"} [:my.turn/blank-result :my.turn/blank-result] [:seon.error/message :seon.error/message]]` | R3 |
 | 38 | `:usage-walkthrough-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark my.turn when its usage walkthrough is absent"} [:my.turn/usage-walkthrough-absent :my.turn/usage-walkthrough-absent] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/my.web.edn
 
 | Line | Source | Replacement |
@@ -480,6 +487,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 144 | `{:seon.error/class true` | R3 |
 | 155 | `{:seon.error/class true` | R3 |
 | 166 | `{:seon.error/class true` | R3 |
+
 ### resources/seon/schemas/seon.agent.edn
 
 | Line | Source | Replacement |
@@ -490,6 +498,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 151 | `:creation-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify an incompletely created agent"} [:seon.agent/creation-incomplete :seon.agent/creation-incomplete] [:seon.error/message :seon.error/message]]` | R3 |
 | 153 | `:armer-quiescence-undeliverable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an armer that could not publish quiescence"} [:seon.agent/armer-quiescence-undeliverable :seon.agent/armer-quiescence-undeliverable] [:seon.error/message :seon.error/message]]` | R3 |
 | 155 | `:supervision-not-committed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark first-agent supervision that did not commit"} [:seon.agent/supervision-not-committed :seon.agent/supervision-not-committed] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.ai.edn
 
 | Line | Source | Replacement |
@@ -514,11 +523,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 451 | `{:seon.error/class true,` | R3 |
 | 470 | `{:seon.error/class true,` | R3 |
 | 480 | `{:seon.error/class true,` | R3 |
+
 ### resources/seon/schemas/seon.artifact.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 2 | `:seon.artifact/refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.artifact/refused :seon.artifact/refused] [:seon.error/message :seon.error/message]] :error/message "must mark a refused artifact transition"} :seon.error/refusal-value [:map [:seon.artifact/refused :seon.artifact/refused]]]` | R3 |
+
 ### resources/seon/schemas/seon.blob.edn
 
 | Line | Source | Replacement |
@@ -528,17 +539,20 @@ A line with several uses must convert each use; excerpts are source context, not
 | 36 | `:stored-content-mismatch-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify stored blob content that mismatches its digest or size"} [:seon.blob/stored-content-mismatch :seon.blob/stored-content-mismatch] [:seon.error/message :seon.error/message]]` | R3 |
 | 38 | `:input-stalled-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify a blob input stream that made no progress"} [:seon.blob/input-stalled :seon.blob/input-stalled] [:seon.error/message :seon.error/message]]` | R3 |
 | 40 | `:content-digest-mismatch-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify blob content that does not match its digest"} [:seon.blob/content-digest-mismatch :seon.blob/content-digest-mismatch] [:seon.error/message :seon.error/message]]}` | R3 |
+
 ### resources/seon/schemas/seon.boot.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 156 | `:refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.boot/refused :seon.boot/refused] [:seon.error/message :seon.error/message]] :error/message "must mark a refused boot transition"} :seon.error/refusal-value [:map [:seon.boot/refused :seon.boot/refused]]]` | R3 |
+
 ### resources/seon/schemas/seon.bootstrap.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 4 | `{:seon.error/class true` | R3 |
 | 15 | `{:seon.error/class true` | R3 |
+
 ### resources/seon/schemas/seon.cluster.eval.edn
 
 | Line | Source | Replacement |
@@ -547,6 +561,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 79 | `:seon.error/kind]` | R4 |
 | 139 | `[:seon.error/kind` | R4 |
 | 141 | `:seon.error/kind]` | R4 |
+
 ### resources/seon/schemas/seon.cluster.export.edn
 
 | Line | Source | Replacement |
@@ -556,11 +571,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 7 | `:seon.cluster.export/genesis-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the export with incomplete genesis data"} [:seon.cluster.export/genesis-incomplete :seon.cluster.export/genesis-incomplete] [:seon.error/message :seon.error/message]]` | R3 |
 | 9 | `:seon.cluster.export/no-branch-head-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the branch with no branch head"} [:seon.cluster.export/no-branch-head :seon.cluster.export/no-branch-head] [:seon.error/message :seon.error/message]]` | R3 |
 | 11 | `:seon.cluster.export/refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.cluster.export/refused :seon.cluster.export/refused] [:seon.error/message :seon.error/message]] :error/message "must mark a refused cluster-export transition"} :seon.error/refusal-value [:map [:seon.cluster.export/refused :seon.cluster.export/refused]]]}` | R3 |
+
 ### resources/seon/schemas/seon.cluster.process.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 8 | `:start-instant-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the process whose start instant is unavailable"} [:seon.cluster.process/start-instant-unavailable :seon.cluster.process/start-instant-unavailable] [:seon.error/message :seon.error/message]]}` | R3 |
+
 ### resources/seon/schemas/seon.cluster.prompt.edn
 
 | Line | Source | Replacement |
@@ -570,6 +587,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 34 | `:missing-cluster-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose prompt has no cluster configuration"} [:seon.cluster.prompt/missing-cluster :seon.cluster.prompt/missing-cluster] [:seon.error/message :seon.error/message]]` | R3 |
 | 36 | `:budget-exceeded-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the prompt token budget that was exceeded"} [:seon.cluster.prompt/budget-exceeded :seon.cluster.prompt/budget-exceeded] [:seon.error/message :seon.error/message]]` | R3 |
 | 38 | `:seon.cluster.prompt/missing-config-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose effective prompt configuration is absent"} [:seon.cluster.prompt/missing-config :seon.cluster.prompt/missing-config] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.cluster.registry.edn
 
 | Line | Source | Replacement |
@@ -582,6 +600,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 63 | `:seon.cluster.registry/candidate-file-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.cluster.registry/candidate-file-absent class marker"} [:seon.cluster.registry/candidate-file-absent :seon.cluster.registry/candidate-file-absent] [:seon.error/message :seon.error/message]]` | R3 |
 | 65 | `:seon.cluster.registry/dry-run-barrier-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.cluster.registry/dry-run-barrier-absent class marker"} [:seon.cluster.registry/dry-run-barrier-absent :seon.cluster.registry/dry-run-barrier-absent] [:seon.error/message :seon.error/message]]` | R3 |
 | 67 | `:seon.cluster.registry/dry-run-complete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.cluster.registry/dry-run-complete class marker"} [:seon.cluster.registry/dry-run-complete :seon.cluster.registry/dry-run-complete] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.cluster.reply.edn
 
 | Line | Source | Replacement |
@@ -589,6 +608,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 14 | `:refused-tag-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the tagged literal refused by the reply reader"} [:seon.cluster.reply/refused-tag :seon.cluster.reply/refused-tag] [:seon.error/message :seon.error/message]]` | R3 |
 | 16 | `:unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the reply text that the reader could not parse"} [:seon.cluster.reply/unreadable :seon.cluster.reply/unreadable] [:seon.error/message :seon.error/message]]` | R3 |
 | 18 | `:no-forms-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an agent reply containing no forms"} [:seon.cluster.reply/no-forms :seon.cluster.reply/no-forms] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.cluster.source.edn
 
 | Line | Source | Replacement |
@@ -600,6 +620,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 11 | `:seon.cluster.source/stale-publication-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the stale source publication commit"} [:seon.cluster.source/stale-publication :seon.cluster.source/stale-publication] [:seon.error/message :seon.error/message]]` | R3 |
 | 13 | `:seon.cluster.source/unsafe-incremental-rows-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unsafe incremental source-row count"} [:seon.cluster.source/unsafe-incremental-rows :seon.cluster.source/unsafe-incremental-rows] [:seon.error/message :seon.error/message]]` | R3 |
 | 15 | `:seon.cluster.source/refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.cluster.source/refused :seon.cluster.source/refused] [:seon.error/message :seon.error/message]] :error/message "must mark a refused source-publication transition"} :seon.error/refusal-value [:map [:seon.cluster.source/refused :seon.cluster.source/refused]]]` | R3 |
+
 ### resources/seon/schemas/seon.cluster.store.edn
 
 | Line | Source | Replacement |
@@ -610,11 +631,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 9 | `:seon.cluster.store/initialization-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the database branch with incomplete initialization"} [:seon.cluster.store/initialization-incomplete :seon.cluster.store/initialization-incomplete] [:seon.error/message :seon.error/message]]` | R3 |
 | 11 | `:seon.cluster.store/refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.cluster.store/refused :seon.cluster.store/refused] [:seon.error/message :seon.error/message]] :error/message "must mark a refused cluster-store transition"} :seon.error/refusal-value [:map [:seon.cluster.store/refused :seon.cluster.store/refused]]]` | R3 |
 | 13 | `:seon.cluster.store/file-lock-generator-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the file whose fresh lock could not be acquired"} [:seon.cluster.store/file-lock-generator-failed :seon.cluster.store/file-lock-generator-failed] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.cluster.wake.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 37 | `:undeliverable-wake-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose wake could not be delivered"} [:seon.cluster.wake/undeliverable-wake :seon.cluster.wake/undeliverable-wake] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.config.edn
 
 | Line | Source | Replacement |
@@ -626,23 +649,27 @@ A line with several uses must convert each use; excerpts are source context, not
 | 74 | `:required-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the required configuration key that is absent"} [:seon.config/required-absent :seon.config/required-absent] [:seon.error/message :seon.error/message]]` | R3 |
 | 76 | `:unknown-key-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unknown configuration key"} [:seon.config/unknown-key :seon.config/unknown-key] [:seon.error/message :seon.error/message]]` | R3 |
 | 78 | `:seon.config/missing-result-cap-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.config/missing-result-cap class marker"} [:seon.config/missing-result-cap :seon.config/missing-result-cap] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.context.capture.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 27 | `[:seon.error/kind` | R4 |
 | 29 | `:seon.error/kind]` | R4 |
+
 ### resources/seon/schemas/seon.context.contribution.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 23 | `[:seon.error/kind` | R4 |
 | 25 | `:seon.error/kind]` | R4 |
+
 ### resources/seon/schemas/seon.context.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 81 | `{:seon.error/class true` | R3 |
+
 ### resources/seon/schemas/seon.db.edn
 
 | Line | Source | Replacement |
@@ -652,11 +679,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 326 | `:seon.db/invalid-read-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/invalid-read class marker"} [:seon.db/invalid-read :seon.db/invalid-read] [:seon.error/message :seon.error/message]]` | R3 |
 | 328 | `:seon.db/invalid-request-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/invalid-request class marker"} [:seon.db/invalid-request :seon.db/invalid-request] [:seon.error/message :seon.error/message]]` | R3 |
 | 330 | `:seon.db/diff-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/diff-refused class marker"} [:seon.db/diff-refused :seon.db/diff-refused] [:seon.error/message :seon.error/message]]}` | R3 |
+
 ### resources/seon/schemas/seon.dev.mcp.artifact.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 9 | `:root-not-committed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the durable MCP artifact root that did not commit"} [:seon.dev.mcp.artifact/root-not-committed :seon.dev.mcp.artifact/root-not-committed] [:seon.error/message :seon.error/message]]}` | R3 |
+
 ### resources/seon/schemas/seon.dev.mcp.edn
 
 | Line | Source | Replacement |
@@ -666,6 +695,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 6 | `:seon.dev.mcp/remainder-not-retrievable-error [:map {:seon.error/class true :seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must identify the value whose clipped remainder cannot be retrieved"} [:seon.dev.mcp/remainder-not-retrievable :seon.dev.mcp/remainder-not-retrievable] [:seon.error/message :seon.error/message]]` | R3 |
 | 8 | `:seon.dev.mcp/nil-deref-error [:map {:seon.error/class true :seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must mark a development evaluation that dereferenced nil"} [:seon.dev.mcp/nil-deref :seon.dev.mcp/nil-deref] [:seon.error/message :seon.error/message]]` | R3 |
 | 10 | `:seon.dev.mcp/jvm-exception-error [:map {:seon.error/class true :seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must mark a development evaluation that threw on the JVM"} [:seon.dev.mcp/jvm-exception :seon.dev.mcp/jvm-exception] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.effect.edn
 
 | Line | Source | Replacement |
@@ -673,6 +703,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 164 | `:seon.effect/already-recorded-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.effect/already-recorded class marker"} [:seon.effect/already-recorded :seon.effect/already-recorded] [:seon.error/message :seon.error/message]]` | R3 |
 | 166 | `:seon.effect/already-settled-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.effect/already-settled class marker"} [:seon.effect/already-settled :seon.effect/already-settled] [:seon.error/message :seon.error/message]]` | R3 |
 | 168 | `:seon.effect/missing-receipt-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.effect/missing-receipt class marker"} [:seon.effect/missing-receipt :seon.effect/missing-receipt] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.env.edn
 
 | Line | Source | Replacement |
@@ -685,6 +716,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 94 | `:seon.env/invalid-member-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.env/invalid-member class marker"} [:seon.env/invalid-member :seon.env/invalid-member] [:seon.error/message :seon.error/message]]` | R3 |
 | 96 | `:seon.env/schema-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.env/schema-absent class marker"} [:seon.env/schema-absent :seon.env/schema-absent] [:seon.error/message :seon.error/message]]` | R3 |
 | 98 | `:seon.env/unscopable-member-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.env/unscopable-member class marker"} [:seon.env/unscopable-member :seon.env/unscopable-member] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.error.edn
 
 | Line | Source | Replacement |
@@ -696,12 +728,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 230 | `{:seon.error/class true,` | R3 |
 | 240 | `[:seon.error/kind :seon.error/kind]` | R4 |
 | 268 | `:kind :keyword,` | R4 |
+
 ### resources/seon/schemas/seon.eval.drive.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 48 | `[:seon.error/kind :seon.error/kind]` | R4 |
 | 57 | `:seon.eval.drive/absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an absent evaluation-drive result"} [:seon.eval.drive/absent :seon.eval.drive/absent] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.flow.edn
 
 | Line | Source | Replacement |
@@ -712,11 +746,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 202 | `:configuration-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an invalid flow configuration"} [:seon.flow/configuration :seon.flow/configuration] [:seon.error/message :seon.error/message]]` | R3 |
 | 204 | `:timeout-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the proc whose observable completion timed out"} [:seon.flow/timeout :seon.flow/timeout] [:seon.error/message :seon.error/message]]` | R3 |
 | 206 | `:seon.flow/fault-channel-overflow-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.flow/fault-channel-overflow class marker"} [:seon.flow/fault-channel-overflow :seon.flow/fault-channel-overflow] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.fn.binding.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 23 | `:seon.fn.binding/unsupported-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn.binding/unsupported class marker"} [:seon.fn.binding/unsupported :seon.fn.binding/unsupported] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.fn.edn
 
 | Line | Source | Replacement |
@@ -734,12 +770,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 207 | `:scratch-not-fresh-error [:map {:seon.error/class true :seon.render/ai seon.error/index-refusal-prose :seon.render/html seon.error/render-html :error/message "must identify the program entity already present on a source scratch branch"} [:seon.fn/scratch-not-fresh :seon.fn/scratch-not-fresh] [:seon.error/message :seon.error/message]]` | R3 |
 | 209 | `:seon.fn/index-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn/index-refused class marker"} [:seon.fn/index-refused :seon.fn/index-refused] [:seon.error/message :seon.error/message]]` | R3 |
 | 211 | `:seon.fn/signature-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn/signature-refused class marker"} [:seon.fn/signature-refused :seon.fn/signature-refused] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.instrument.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 42 | `:contract-violated-error [:map {:seon.error/class true :seon.render/ai seon.error/instrumentation-prose :seon.render/html seon.error/render-html :error/message "must identify the function whose declared contract was violated"} [:seon.instrument/contract-violated :seon.instrument/contract-violated] [:seon.error/message :seon.error/message]]` | R3 |
 | 44 | `:seon.instrument/registration-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.instrument/registration-failed class marker"} [:seon.instrument/registration-failed :seon.instrument/registration-failed] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.maintenance.result.edn
 
 | Line | Source | Replacement |
@@ -747,6 +785,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 97 | `[:seon.error/kind` | R4 |
 | 99 | `:seon.error/kind]` | R4 |
 | 154 | `[:seon.error/kind :seon.error/kind]` | R4 |
+
 ### resources/seon/schemas/seon.message.edn
 
 | Line | Source | Replacement |
@@ -756,11 +795,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 134 | `{:seon.error/class true,` | R3 |
 | 144 | `{:seon.error/class true,` | R3 |
 | 159 | `{:seon.error/class true,` | R3 |
+
 ### resources/seon/schemas/seon.operator.collect.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 13 | `:unrecognized-option-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must name the unrecognized collection option key"} [:seon.operator.collect/unrecognized-option :seon.operator.collect/unrecognized-option] [:seon.operator.collect/option-key :seon.operator.collect/option-key] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.operator.edn
 
 | Line | Source | Replacement |
@@ -771,11 +812,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 123 | `:seon.operator/collection-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/collection-incomplete class marker"} [:seon.operator/collection-incomplete :seon.operator/collection-incomplete] [:seon.error/message :seon.error/message]]` | R3 |
 | 125 | `:seon.operator/process-census-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/process-census-incomplete class marker"} [:seon.operator/process-census-incomplete :seon.operator/process-census-incomplete] [:seon.error/message :seon.error/message]]` | R3 |
 | 127 | `:seon.operator/reap-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/reap-incomplete class marker"} [:seon.operator/reap-incomplete :seon.operator/reap-incomplete] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.print.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 396 | `:unknown-face-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the requested print face that is not declared"} [:seon.print/unknown-face :seon.print/unknown-face] [:seon.error/message :seon.error/message]]}` | R3 |
+
 ### resources/seon/schemas/seon.problems.edn
 
 | Line | Source | Replacement |
@@ -785,6 +828,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 30 | `{:seon.error/class true,` | R3 |
 | 42 | `{:seon.error/class true,` | R3 |
 | 120 | `[:seon.error/kind :seon.error/kind]` | R4 |
+
 ### resources/seon/schemas/seon.program.edn
 
 | Line | Source | Replacement |
@@ -793,6 +837,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 116 | `[:map {:seon.error/class true` | R3 |
 | 223 | `[:map {:seon.error/class true` | R3 |
 | 231 | `[:map {:seon.error/class true` | R3 |
+
 ### resources/seon/schemas/seon.reconcile.edn
 
 | Line | Source | Replacement |
@@ -803,11 +848,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 29 | `:duplicate-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark duplicate identities in a reconciled population"} [:seon.reconcile/duplicate-identity :seon.reconcile/duplicate-identity] [:seon.error/message :seon.error/message]]` | R3 |
 | 31 | `:identity-outside-scope-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a reconciled identity outside the declared scope"} [:seon.reconcile/identity-outside-scope :seon.reconcile/identity-outside-scope] [:seon.error/message :seon.error/message]]` | R3 |
 | 33 | `:seon.reconcile/missing-declarations-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.reconcile/missing-declarations class marker"} [:seon.reconcile/missing-declarations :seon.reconcile/missing-declarations] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.render.data.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 31 | `:no-such-path-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a requested nested value path that does not exist"} [:seon.render.data/no-such-path :seon.render.data/no-such-path] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.render.edn
 
 | Line | Source | Replacement |
@@ -817,11 +864,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 239 | `:ambiguous-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a value matching more than one declared render producer"} [:seon.render/ambiguous :seon.render/ambiguous] [:seon.error/message :seon.error/message]]` | R3 |
 | 241 | `:invalid-output-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the render projection whose producer returned invalid output"} [:seon.render/invalid-output :seon.render/invalid-output] [:seon.error/message :seon.error/message]]` | R3 |
 | 243 | `:seon.render/walk-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.render/walk-failed class marker"} [:seon.render/walk-failed :seon.render/walk-failed] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.render.hiccup.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 3 | `:seon.render.hiccup/unparseable-tag-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the Hiccup tag that could not be parsed"} [:seon.render.hiccup/unparseable-tag :seon.render.hiccup/unparseable-tag] [:seon.error/message :seon.error/message]]}` | R3 |
+
 ### resources/seon/schemas/seon.render.value.edn
 
 | Line | Source | Replacement |
@@ -829,6 +878,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 52 | `:window-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the blob whose display window could not be read"} [:seon.render.value/window-failed :seon.render.value/window-failed] [:seon.error/message :seon.error/message]]` | R3 |
 | 54 | `:window-realization-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an ordinary value whose display window could not be realized"} [:seon.render.value/window-realization-failed :seon.render.value/window-realization-failed] [:seon.error/message :seon.error/message]]` | R3 |
 | 56 | `:seon.render.value/missing-root-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.render.value/missing-root-identity class marker"} [:seon.render.value/missing-root-identity :seon.render.value/missing-root-identity] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.render.walk.edn
 
 | Line | Source | Replacement |
@@ -836,6 +886,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 94 | `:elided-error [:map {:seon.error/class true :seon.render/ai seon.error/elision-prose :seon.render/html seon.error/elision-html :error/message "must mark a bounded render walk that elided additional content"} [:seon.render.walk/elided :seon.render.walk/elided] [:seon.error/message :seon.error/message]]` | R3 |
 | 96 | `:no-such-entity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a render walk whose requested entity does not exist"} [:seon.render.walk/no-such-entity :seon.render.walk/no-such-entity] [:seon.error/message :seon.error/message]]` | R3 |
 | 98 | `:connections-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a render walk whose connection discovery failed"} [:seon.render.walk/connections-failed :seon.render.walk/connections-failed] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.render.web.edn
 
 | Line | Source | Replacement |
@@ -849,6 +900,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 158 | `:value-unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the rendered value whose blob is unreadable"} [:seon.render.web/value-unreadable :seon.render.web/value-unreadable] [:seon.error/message :seon.error/message]]` | R3 |
 | 161 | `[:map {:seon.error/class true` | R3 |
 | 169 | `[:map {:seon.error/class true` | R3 |
+
 ### resources/seon/schemas/seon.schedule.edn
 
 | Line | Source | Replacement |
@@ -860,6 +912,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 50 | `:seon.schedule/missing-execution-handle-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/missing-execution-handle class marker"} [:seon.schedule/missing-execution-handle :seon.schedule/missing-execution-handle] [:seon.error/message :seon.error/message]]` | R3 |
 | 52 | `:seon.schedule/missing-receipt-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/missing-receipt class marker"} [:seon.schedule/missing-receipt :seon.schedule/missing-receipt] [:seon.error/message :seon.error/message]]` | R3 |
 | 54 | `:seon.schedule/unresolved-handler-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/unresolved-handler class marker"} [:seon.schedule/unresolved-handler :seon.schedule/unresolved-handler] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.schema.datahike.edn
 
 | Line | Source | Replacement |
@@ -874,6 +927,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 16 | `:seon.schema.datahike/storage-not-string-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify an EDN-backed attribute without string storage"} [:seon.schema.datahike/storage-not-string :seon.schema.datahike/storage-not-string] [:seon.error/message :seon.error/message]]` | R3 |
 | 18 | `:seon.schema.datahike/malformed-edn-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify an EDN-backed attribute containing unreadable data"} [:seon.schema.datahike/malformed-edn :seon.schema.datahike/malformed-edn] [:seon.error/message :seon.error/message]]` | R3 |
 | 20 | `:seon.schema.datahike/noncanonical-edn-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify an EDN-backed attribute containing a noncanonical value"} [:seon.schema.datahike/noncanonical-edn :seon.schema.datahike/noncanonical-edn] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.schema.edn
 
 | Line | Source | Replacement |
@@ -903,6 +957,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 157 | `:single-segment-namespace-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the single-segment namespace that cannot own durable data"} [:seon.schema/single-segment-namespace :seon.schema/single-segment-namespace] [:seon.error/message :seon.error/message]]` | R3 |
 | 159 | `:seon.schema/missing-projection-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema/missing-projection class marker"} [:seon.schema/missing-projection :seon.schema/missing-projection] [:seon.error/message :seon.error/message]]` | R3 |
 | 161 | `:seon.schema/render-contract-incoherent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema/render-contract-incoherent class marker"} [:seon.schema/render-contract-incoherent :seon.schema/render-contract-incoherent] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.schema.edn.edn
 
 | Line | Source | Replacement |
@@ -915,6 +970,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 21 | `:seon.schema.edn/dishonest-generator-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the predicate schema with a dishonest generator"} [:seon.schema.edn/dishonest-generator :seon.schema.edn/dishonest-generator] [:seon.error/message :seon.error/message]]` | R3 |
 | 23 | `:seon.schema.edn/unregistered-predicate-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the predicate that is not registered"} [:seon.schema.edn/unregistered-predicate :seon.schema.edn/unregistered-predicate] [:seon.error/message :seon.error/message]]` | R3 |
 | 25 | `:seon.schema.edn/unresolved-reference-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema reference that cannot be resolved"} [:seon.schema.edn/unresolved-reference :seon.schema.edn/unresolved-reference] [:seon.error/message :seon.error/message]]}` | R3 |
+
 ### resources/seon/schemas/seon.schema.shape.edn
 
 | Line | Source | Replacement |
@@ -922,11 +978,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 33 | `:seon.schema.shape/fingerprint-collision-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema.shape/fingerprint-collision class marker"} [:seon.schema.shape/fingerprint-collision :seon.schema.shape/fingerprint-collision] [:seon.error/message :seon.error/message]]` | R3 |
 | 35 | `:seon.schema.shape/noncanonical-compiled-form-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema.shape/noncanonical-compiled-form class marker"} [:seon.schema.shape/noncanonical-compiled-form :seon.schema.shape/noncanonical-compiled-form] [:seon.error/message :seon.error/message]]` | R3 |
 | 37 | `:seon.schema.shape/unsupported-map-key-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema.shape/unsupported-map-key class marker"} [:seon.schema.shape/unsupported-map-key :seon.schema.shape/unsupported-map-key] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.sci.admit.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 81 | `:projection-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a value that could not be projected into admitted data"} [:seon.sci.admit/projection-failed :seon.sci.admit/projection-failed] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.sci.eval.edn
 
 | Line | Source | Replacement |
@@ -941,6 +999,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 237 | `{:seon.error/class true,` | R3 |
 | 250 | `{:seon.error/class true,` | R3 |
 | 266 | `{:seon.error/class true,` | R3 |
+
 ### resources/seon/schemas/seon.sci.kernel.edn
 
 | Line | Source | Replacement |
@@ -952,6 +1011,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 21 | `:failure-admission-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a kernel failure that could not be admitted as data"} [:seon.sci.kernel/failure-admission-failed :seon.sci.kernel/failure-admission-failed] [:seon.error/message :seon.error/message]]` | R3 |
 | 23 | `:time-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invocation cut by its time limit"} [:seon.sci.kernel/time-limit :seon.sci.kernel/time-limit] [:seon.error/message :seon.error/message]]` | R3 |
 | 25 | `:invocation-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invocation that failed before returning a value"} [:seon.sci.kernel/invocation-failed :seon.sci.kernel/invocation-failed] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.sci.reader.edn
 
 | Line | Source | Replacement |
@@ -961,30 +1021,35 @@ A line with several uses must convert each use; excerpts are source context, not
 | 18 | `:seon.sci.reader/oversize-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark Clojure source that exceeds its reader bound"} [:seon.sci.reader/oversize :seon.sci.reader/oversize] [:seon.error/message :seon.error/message]]` | R3 |
 | 20 | `:seon.sci.reader/refused-tag-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the reader tag that was refused"} [:seon.sci.reader/refused-tag :seon.sci.reader/refused-tag] [:seon.error/message :seon.error/message]]` | R3 |
 | 22 | `:seon.sci.reader/keyword-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an invalid keyword read from agent source"} [:seon.sci.reader/keyword :seon.sci.reader/keyword] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.search.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 47 | `{:seon.error/class true` | R3 |
 | 56 | `:seon.search/missing-resource-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.search/missing-resource class marker"} [:seon.search/missing-resource :seon.search/missing-resource] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.test.accretion.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 101 | `{:seon.error/class true` | R3 |
 | 107 | `[:seon.error/kind :seon.error/kind]` | R4 |
+
 ### resources/seon/schemas/seon.test.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 50 | `{:seon.error/class true` | R3 |
 | 240 | `[:map {:seon.error/class true :seon.render/ai seon.error/render-ai` | R3 |
+
 ### resources/seon/schemas/seon.test.run.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 53 | `[:map {:seon.error/class true` | R3 |
 | 61 | `[:map {:seon.error/class true` | R3 |
+
 ### resources/seon/schemas/seon.test.runner.edn
 
 | Line | Source | Replacement |
@@ -999,12 +1064,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 78 | `:seon.test.runner/unknown-worker-command-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.test.runner/unknown-worker-command class marker"} [:seon.test.runner/unknown-worker-command :seon.test.runner/unknown-worker-command] [:seon.error/message :seon.error/message]]` | R3 |
 | 80 | `:seon.test.runner/unresolved-test-var-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.test.runner/unresolved-test-var class marker"} [:seon.test.runner/unresolved-test-var :seon.test.runner/unresolved-test-var] [:seon.error/message :seon.error/message]]` | R3 |
 | 82 | `:seon.test.runner/worker-launch-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.test.runner/worker-launch-failure class marker"} [:seon.test.runner/worker-launch-failure :seon.test.runner/worker-launch-failure] [:seon.error/message :seon.error/message]]` | R3 |
+
 ### resources/seon/schemas/seon.turn.edn
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 32 | `{:seon.error/class true,` | R3 |
 | 166 | `{:seon.error/class true,` | R3 |
+
 ### resources/seon/schemas/seon.turn.loop.edn
 
 | Line | Source | Replacement |
@@ -1014,6 +1081,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 144 | `{:seon.error/class true,` | R3 |
 | 158 | `{:seon.error/class true,` | R3 |
 | 186 | `{:seon.error/class true,` | R3 |
+
 ### script/seon/dev/changed_test.clj
 
 | Line | Source | Replacement |
@@ -1021,21 +1089,25 @@ A line with several uses must convert each use; excerpts are source context, not
 | 166 | `(:seon.error/kind (ex-data error))` | R2 |
 | 167 | `(assoc :seon.error/kind (:seon.error/kind (ex-data error))` | R1 |
 | 212 | `(:seon.error/kind (ex-data failure)))` | R2 |
+
 ### script/seon/dev/dependency_digest.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 107 | `{:seon.error/kind :seon.dev-cache/dependency-pins-unavailable` | R1 |
+
 ### script/seon/dev/issues.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 24 | `(not (:seon.error/kind result)) (empty? (:seon.issue/refusals result)))` | R1 |
+
 ### script/seon/dev/mcp.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 616 | `{:seon.error/kind :seon.dev.mcp/cluster-degraded` | R1 |
+
 ### script/seon/fresh_operator.clj
 
 | Line | Source | Replacement |
@@ -1081,11 +1153,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 3138 | `(if (:seon.error/kind test-statuses)` | R2 |
 | 3670 | `:seon.error/kind` | R5 |
 | 3671 | `(or (:seon.error/kind (ex-data error))` | R1 |
+
 ### src/my/background.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 11 | `{:seon.error/kind ::invalid-call` | R1 |
+
 ### src/my/program.clj
 
 | Line | Source | Replacement |
@@ -1098,12 +1172,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 387 | `{:seon.error/kind :seon.program/declaration-refused` | R1 |
 | 574 | `(and report (not (:seon.error/kind report))))` | R1 |
 | 577 | `{:seon.error/kind :seon.program/declaration-refused` | R1 |
+
 ### src/my/test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 22 | `(if (:seon.error/kind environment)` | R2 |
 | 52 | `(if (:seon.error/kind symbols#)` | R2 |
+
 ### src/seon/agent.clj
 
 | Line | Source | Replacement |
@@ -1121,6 +1197,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 132 | `(nil? defaults) {:seon.error/kind :seon.config/required-absent` | R2 |
 | 180 | `(:seon.error/kind attributes) attributes` | R2 |
 | 181 | `(:seon.error/kind defaults) defaults` | R2 |
+
 ### src/seon/ai.clj
 
 | Line | Source | Replacement |
@@ -1151,16 +1228,19 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1445 | `{:seon.error/kind ::transport-failure` | R1 |
 | 1482 | `(:seon.error/kind body)` | R2 |
 | 1494 | `{:seon.error/kind ::no-credential` | R1 |
+
 ### src/seon/artifact.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 16 | `:seon.error/kind ::refused` | R1 |
+
 ### src/seon/await.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 44 | `{:seon.error/kind cause` | R1 |
+
 ### src/seon/background.clj
 
 | Line | Source | Replacement |
@@ -1169,6 +1249,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 72 | `{:seon.error/kind :my.background/missing-result` | R1 |
 | 88 | `(if (or (:seon.error/kind descriptor)` | R2 |
 | 93 | `(if (:seon.error/kind wait-value)` | R2 |
+
 ### src/seon/blob.clj
 
 | Line | Source | Replacement |
@@ -1178,6 +1259,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 133 | `{:seon.error/kind :core-bug` | R1 |
 | 238 | `{:seon.error/kind :core-bug` | R1 |
 | 364 | `{:seon.error/kind :core-bug` | R1 |
+
 ### src/seon/bootstrap.clj
 
 | Line | Source | Replacement |
@@ -1194,12 +1276,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 654 | `(if (:seon.error/kind pull)` | R2 |
 | 682 | `:seon.error/kind ::prefix-drift` | R1 |
 | 703 | `:seon.error/kind ::prefix-drift` | R1 |
+
 ### src/seon/call_preparation.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 112 | `:seon.error/kind kind` | R1 |
 | 119 | `(keyword? (:seon.error/kind value))` | R2 |
+
 ### src/seon/cluster.clj
 
 | Line | Source | Replacement |
@@ -1237,6 +1321,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 3436 | `{:seon.error/kind` | R5 |
 | 3580 | `_ (when-let [kind (:seon.error/kind start-permit)]` | R1 |
 | 3765 | `{:seon.error/kind :seon.boot/refused` | R1 |
+
 ### src/seon/cluster/agent.clj
 
 | Line | Source | Replacement |
@@ -1258,6 +1343,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 739 | `{:seon.error/kind :seon.agent/no-such-agent` | R1 |
 | 1020 | `(when (:seon.error/kind result)` | R2 |
 | 1024 | `{:seon.error/kind :seon.agent/supervision-not-committed` | R1 |
+
 ### src/seon/cluster/export.clj
 
 | Line | Source | Replacement |
@@ -1265,6 +1351,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 46 | `\`{:seon.error/kind ::refused ::rule <which>}\`, matching B0/B1` | R1 |
 | 99 | `:seon.error/kind ::refused` | R1 |
 | 213 | `(:seon.error/kind (ex-data failure)))` | R2 |
+
 ### src/seon/cluster/message.clj
 
 | Line | Source | Replacement |
@@ -1286,11 +1373,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 703 | `{:seon.error/kind :my.message/no-recipient` | R1 |
 | 709 | `{:seon.error/kind :my.message/no-assignment` | R1 |
 | 715 | `{:seon.error/kind :my.message/no-reason` | R1 |
+
 ### src/seon/cluster/process.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 25 | `{:seon.error/kind :seon.cluster.process/start-instant-unavailable` | R1 |
+
 ### src/seon/cluster/prompt.clj
 
 | Line | Source | Replacement |
@@ -1305,6 +1394,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 343 | `acquired (if (:seon.error/kind profile) profile` | R2 |
 | 350 | `(:seon.error/kind acquired)` | R2 |
 | 400 | `(if (:seon.error/kind settings)` | R2 |
+
 ### src/seon/cluster/registry.clj
 
 | Line | Source | Replacement |
@@ -1316,6 +1406,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 465 | `{:seon.error/kind` | R5 |
 | 511 | `{:seon.error/kind` | R5 |
 | 533 | `{:seon.error/kind` | R5 |
+
 ### src/seon/cluster/reply.clj
 
 | Line | Source | Replacement |
@@ -1323,6 +1414,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 51 | `{:seon.error/kind kind` | R1 |
 | 336 | `(:seon.error/kind admission-events))` | R2 |
 | 357 | `(if (= :seon.sci.reader/refused-tag (:seon.error/kind events))` | R2 |
+
 ### src/seon/cluster/source.clj
 
 | Line | Source | Replacement |
@@ -1335,17 +1427,20 @@ A line with several uses must convert each use; excerpts are source context, not
 | 428 | `(if (:seon.error/kind result)` | R2 |
 | 467 | `{:seon.error/kind ::recording-expired` | R1 |
 | 499 | `{:seon.error/kind :seon.test/input-evidence-unavailable` | R1 |
+
 ### src/seon/cluster/status.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 14 | `{:seon.error/kind :seon.cluster.status/unavailable` | R1 |
+
 ### src/seon/cluster/store.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 114 | `{:seon.error/kind :core-bug` | R1 |
 | 208 | `:seon.error/kind ::refused` | R1 |
+
 ### src/seon/cluster/wake.clj
 
 | Line | Source | Replacement |
@@ -1355,6 +1450,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 255 | `{:seon.error/kind ::unindexed-listened-attribute` | R1 |
 | 280 | `{:seon.error/kind ::no-arming-attributes` | R1 |
 | 394 | `{:seon.error/kind ::undeliverable-wake` | R1 |
+
 ### src/seon/config.clj
 
 | Line | Source | Replacement |
@@ -1367,6 +1463,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 540 | `(when (:seon.error/kind result)` | R2 |
 | 593 | `(if (:seon.error/kind row)` | R2 |
 | 610 | `:seon.error/kind ::missing-effective` | R1 |
+
 ### src/seon/context.clj
 
 | Line | Source | Replacement |
@@ -1380,6 +1477,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 464 | `" (" (:seon.error/kind unit) ")"))]` | R6 |
 | 487 | `(assoc :seon.error/kind (:seon.error/kind failure)` | R1 |
 | 533 | `(assoc :seon.error/kind (:seon.error/kind failure)` | R1 |
+
 ### src/seon/db.clj
 
 | Line | Source | Replacement |
@@ -1414,6 +1512,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 4199 | `(some? (:seon.error/kind data))` | R2 |
 | 4208 | `{:seon.error/kind :seon.db/unknown-failure` | R1 |
 | 4225 | `{:seon.error/kind ::invalid-request` | R1 |
+
 ### src/seon/edit.clj
 
 | Line | Source | Replacement |
@@ -1427,6 +1526,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 292 | `(if (:seon.error/kind candidate)` | R2 |
 | 310 | `(if (:seon.error/kind parsed)` | R2 |
 | 322 | `(if (:seon.error/kind dispatch)` | R2 |
+
 ### src/seon/edit/jvm.clj
 
 | Line | Source | Replacement |
@@ -1437,6 +1537,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 101 | `(if (:seon.error/kind before)` | R2 |
 | 109 | `(if (:seon.error/kind transformed)` | R2 |
 | 120 | `(if (:seon.error/kind written)` | R2 |
+
 ### src/seon/effect.clj
 
 | Line | Source | Replacement |
@@ -1453,6 +1554,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 723 | `(:seon.error/kind background-limit)` | R2 |
 | 780 | `(if (:seon.error/kind opened)` | R2 |
 | 783 | `(if (:seon.error/kind` | R2 |
+
 ### src/seon/env.clj
 
 | Line | Source | Replacement |
@@ -1467,6 +1569,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 315 | `{:seon.error/kind ::agent-id-absent` | R1 |
 | 327 | `{:seon.error/kind ::absent-environment` | R1 |
 | 381 | `{:seon.error/kind ::invalid-environment-state` | R1 |
+
 ### src/seon/error.clj
 
 | Line | Source | Replacement |
@@ -1500,12 +1603,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1922 | `(when-not (:seon.error/kind row)` | R2 |
 | 1930 | `{:seon.error/kind :seon.render/unavailable` | R1 |
 | 2016 | `(:seon.error/kind row) [row]` | R2 |
+
 ### src/seon/error/refusal.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 51 | `(if (some? (:seon.error/kind data))` | R2 |
 | 55 | `(str (:seon.error/kind data))))` | R1 |
+
 ### src/seon/eval.clj
 
 | Line | Source | Replacement |
@@ -1513,6 +1618,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 33 | `(:seon.error/kind agent-row) agent-row` | R2 |
 | 36 | `{:seon.error/kind ::agent-not-found` | R1 |
 | 61 | `(if (:seon.error/kind rows)` | R2 |
+
 ### src/seon/eval/drive.clj
 
 | Line | Source | Replacement |
@@ -1521,6 +1627,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 154 | `[(get-else $ ?receipt :seon.error/kind :seon.eval.drive/absent)` | R1 |
 | 165 | `:seon.error/kind error-kind` | R1 |
 | 209 | `[:seon.error/kind` | R5 |
+
 ### src/seon/flow.clj
 
 | Line | Source | Replacement |
@@ -1535,6 +1642,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 837 | `{:seon.error/kind :configuration` | R1 |
 | 928 | `{:seon.error/kind ::fault-channel-overflow` | R1 |
 | 1084 | `{:seon.error/kind ::unsupported-command` | R1 |
+
 ### src/seon/fn.clj
 
 | Line | Source | Replacement |
@@ -1564,11 +1672,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 2578 | `{:seon.error/kind ::index-refused` | R1 |
 | 2655 | `{:seon.error/kind ::index-refused` | R1 |
 | 2905 | `{:seon.error/kind ::index-refused` | R1 |
+
 ### src/seon/fn/analyzer.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 400 | `{:seon.error/kind ::analysis-refused})))` | R1 |
+
 ### src/seon/fn/schema_shape.clj
 
 | Line | Source | Replacement |
@@ -1576,22 +1686,26 @@ A line with several uses must convert each use; excerpts are source context, not
 | 131 | `{:seon.error/kind` | R5 |
 | 168 | `{:seon.error/kind :seon.schema.shape/unsupported-map-key` | R1 |
 | 329 | `{:seon.error/kind :seon.schema.shape/fingerprint-collision` | R1 |
+
 ### src/seon/fn/signature.cljc
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 11 | `(merge {:seon.error/kind :seon.fn/signature-refused` | R1 |
+
 ### src/seon/fs.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 20 | `(assoc data :seon.error/kind :seon.cluster.store/refused` | R1 |
+
 ### src/seon/fs/jvm.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 38 | `:seon.error/kind marker` | R1 |
 | 51 | `(if (and (keyword? (:seon.error/kind classified))` | R2 |
+
 ### src/seon/instrument.clj
 
 | Line | Source | Replacement |
@@ -1611,6 +1725,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 898 | `{:seon.error/kind ::invalid-mode` | R1 |
 | 915 | `{:seon.error/kind ::missing-projection` | R1 |
 | 950 | `{:seon.error/kind ::registration-failed` | R1 |
+
 ### src/seon/issue.clj
 
 | Line | Source | Replacement |
@@ -1630,6 +1745,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1035 | `(if (:seon.error/kind report) report` | R2 |
 | 1074 | `(if (:seon.error/kind report) report` | R2 |
 | 1110 | `(if (:seon.error/kind report) report` | R2 |
+
 ### src/seon/issue/detect.clj
 
 | Line | Source | Replacement |
@@ -1642,12 +1758,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 246 | `(or (some #(when (:seon.error/kind %) %)` | R2 |
 | 304 | `(or (some #(when (:seon.error/kind %) %) [subjects shared basis-t])` | R2 |
 | 307 | `(if (:seon.error/kind gates)` | R2 |
+
 ### src/seon/issue/opening.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 207 | `{:seon.error/kind :seon.issue/not-found` | R1 |
 | 237 | `{:seon.error/kind :seon.issue/not-found` | R1 |
+
 ### src/seon/maintenance.clj
 
 | Line | Source | Replacement |
@@ -1660,6 +1778,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 296 | `(if (:seon.error/kind database)` | R2 |
 | 341 | `{:seon.error/kind ::root-never-collected` | R1 |
 | 368 | `(if (:seon.error/kind database)` | R2 |
+
 ### src/seon/note.clj
 
 | Line | Source | Replacement |
@@ -1667,6 +1786,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 32 | `(and (map? value) (keyword? (:seon.error/kind value))))` | R2 |
 | 128 | `(if (:seon.error/kind pulled)` | R2 |
 | 157 | `:seon.error/kind marker` | R1 |
+
 ### src/seon/operator.clj
 
 | Line | Source | Replacement |
@@ -1683,6 +1803,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 964 | `(:seon.error/kind (ex-data failure)))` | R2 |
 | 969 | `(:seon.error/kind (ex-data failure)))` | R2 |
 | 1016 | `{:seon.error/kind :seon.operator.collect/unrecognized-option` | R1 |
+
 ### src/seon/operator/state.clj
 
 | Line | Source | Replacement |
@@ -1702,6 +1823,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 915 | `{:seon.error/kind :seon.operator/process-remained-alive` | R1 |
 | 1046 | `{:seon.error/kind` | R5 |
 | 1346 | `{:seon.error/kind :seon.operator/undeclared-managed-root` | R1 |
+
 ### src/seon/plan.clj
 
 | Line | Source | Replacement |
@@ -1711,6 +1833,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 365 | `:seon.error/kind :my.plan/agent-not-found` | R1 |
 | 412 | `:seon.error/kind :my.plan/not-found` | R1 |
 | 1309 | `" — " (pr-str (:seon.error/kind value)) ": "` | R6 |
+
 ### src/seon/print.cljc
 
 | Line | Source | Replacement |
@@ -1718,6 +1841,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 738 | `{:seon.error/kind ::object-without-class` | R1 |
 | 785 | `{:seon.error/kind ::unknown-face` | R1 |
 | 1035 | `{:seon.error/kind ::elision-without-requery-coordinates` | R1 |
+
 ### src/seon/problems.clj
 
 | Line | Source | Replacement |
@@ -1732,6 +1856,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 495 | `(row "kind" (:seon.error/kind entry)` | R1 |
 | 511 | `"kind" (:seon.error/kind entry)` | R6 |
 | 601 | `" kind=" (:seon.error/kind entry)` | R6 |
+
 ### src/seon/program.cljc
 
 | Line | Source | Replacement |
@@ -1747,6 +1872,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 565 | `{:seon.error/kind :seon.fn/signature-refused` | R1 |
 | 619 | `{:seon.error/kind :seon.fn/signature-refused` | R1 |
 | 693 | `{:seon.error/kind :seon.fn/signature-refused` | R1 |
+
 ### src/seon/reconcile.cljc
 
 | Line | Source | Replacement |
@@ -1754,6 +1880,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 53 | `(merge {:seon.error/kind ::refused` | R1 |
 | 64 | `{:seon.error/kind ::missing-declarations :seon.reconcile/missing-declarations true})))` | R1 |
 | 445 | `(if (:seon.error/kind result)` | R2 |
+
 ### src/seon/render.clj
 
 | Line | Source | Replacement |
@@ -1795,6 +1922,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1437 | `(if (:seon.error/kind selected)` | R2 |
 | 1584 | `(if (:seon.error/kind basis) basis` | R2 |
 | 1658 | `{:seon.error/kind ::walk-failed` | R1 |
+
 ### src/seon/render/data.clj
 
 | Line | Source | Replacement |
@@ -1807,6 +1935,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 139 | `(if (:seon.error/kind page)` | R2 |
 | 171 | `(:seon.error/kind snapshot) snapshot` | R2 |
 | 172 | `(:seon.error/kind found) found` | R2 |
+
 ### src/seon/render/hiccup.clj
 
 | Line | Source | Replacement |
@@ -1816,6 +1945,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 314 | `{:seon.error/kind ::unparseable-tag` | R1 |
 | 425 | `{:seon.error/kind ::unparseable-tag` | R1 |
 | 428 | `(if (:seon.error/kind parsed)` | R2 |
+
 ### src/seon/render/lint.clj
 
 | Line | Source | Replacement |
@@ -1825,17 +1955,20 @@ A line with several uses must convert each use; excerpts are source context, not
 | 145 | `(when-not (:seon.error/kind parsed)` | R2 |
 | 222 | `{:seon.error/kind ::absent-element` | R1 |
 | 519 | `(if (:seon.error/kind rendered)` | R2 |
+
 ### src/seon/render/ns.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 56 | `(and (map? value) (keyword? (:seon.error/kind value))))` | R2 |
+
 ### src/seon/render/test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 23 | `(if (:seon.error/kind stored) (assoc entity :seon.test/reach-unknown (:seon.error/message stored))` | R2 |
 | 115 | `(if (:seon.error/kind changed) [:p (:seon.error/message changed)]` | R2 |
+
 ### src/seon/render/transcript.clj
 
 | Line | Source | Replacement |
@@ -1890,6 +2023,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 2363 | `row (if (:seon.error/kind agent-id) agent-id` | R2 |
 | 2371 | `(:seon.error/kind row) row` | R2 |
 | 2374 | `{:seon.error/kind :seon.db/not-found` | R1 |
+
 ### src/seon/render/value.clj
 
 | Line | Source | Replacement |
@@ -1899,6 +2033,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 493 | `:seon.print/value :seon.error/kind}` | R5 |
 | 539 | `(if (:seon.error/kind id)` | R2 |
 | 637 | `(if (:seon.error/kind projection)` | R2 |
+
 ### src/seon/render/walk.clj
 
 | Line | Source | Replacement |
@@ -1913,6 +2048,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 778 | `failure (when (:seon.error/kind rendered) rendered)` | R2 |
 | 946 | `(if (:seon.error/kind evaluations)` | R2 |
 | 955 | `(if (:seon.error/kind rendered)` | R2 |
+
 ### src/seon/render/web.clj
 
 | Line | Source | Replacement |
@@ -1955,11 +2091,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 3300 | `{:seon.error/kind :seon.render.web/value-not-found` | R1 |
 | 3304 | `{:seon.error/kind :seon.render.web/value-unreadable` | R1 |
 | 3500 | `(when (:seon.error/kind result)` | R2 |
+
 ### src/seon/repl.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 489 | `(:seon.error/kind live) [:pre (pr-str live)]` | R2 |
+
 ### src/seon/run.clj
 
 | Line | Source | Replacement |
@@ -1967,6 +2105,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 104 | `{:seon.error/kind :my.turn/usage-walkthrough-absent` | R1 |
 | 125 | `{:seon.error/kind :my.turn/blank-note` | R1 |
 | 144 | `{:seon.error/kind :my.turn/blank-result` | R1 |
+
 ### src/seon/schedule.clj
 
 | Line | Source | Replacement |
@@ -1981,6 +2120,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 487 | `:seon.error/kind refusal-kind` | R1 |
 | 494 | `(keyword? (:seon.error/kind value))` | R2 |
 | 585 | `{:seon.error/kind ::unresolved-handler` | R1 |
+
 ### src/seon/schema.clj
 
 | Line | Source | Replacement |
@@ -2018,6 +2158,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 3622 | `:seon.error/kind :core-bug})))` | R1 |
 | 3632 | `:seon.error/kind :core-bug})))` | R1 |
 | 3800 | `:seon.error/kind :core-bug :seon.schema/unknown-shape schema-key})))` | R1 |
+
 ### src/seon/schema/datahike.clj
 
 | Line | Source | Replacement |
@@ -2029,6 +2170,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 245 | `:seon.error/kind :user-input})))` | R1 |
 | 259 | `:seon.error/kind :user-input})))` | R1 |
 | 380 | `:seon.error/kind :user-input})))` | R1 |
+
 ### src/seon/schema/edn.clj
 
 | Line | Source | Replacement |
@@ -2045,6 +2187,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 303 | `:seon.error/kind :user-input}))))))` | R1 |
 | 321 | `:seon.error/kind :user-input}))))` | R1 |
 | 483 | `:seon.error/kind :user-input}` | R1 |
+
 ### src/seon/schema/internal.cljc
 
 | Line | Source | Replacement |
@@ -2053,6 +2196,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 387 | `:seon.error/kind   :user-input :seon.schema/invalid-schema k}` | R1 |
 | 426 | `:seon.error/kind   :user-input :seon.schema/nilable-value-schema k})))))` | R1 |
 | 451 | `:seon.error/kind   :user-input})))))` | R1 |
+
 ### src/seon/sci/admit.clj
 
 | Line | Source | Replacement |
@@ -2061,6 +2205,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 419 | `{:seon.error/kind ::projection-failed` | R1 |
 | 688 | `{:seon.error/kind ::missing-bound` | R1 |
 | 716 | `{:seon.error/kind ::missing-cap` | R1 |
+
 ### src/seon/sci/eval.clj
 
 | Line | Source | Replacement |
@@ -2104,6 +2249,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 2434 | `shown (if (:seon.error/kind projection) projection` | R2 |
 | 2440 | `(:seon.error/kind value)` | R2 |
 | 3084 | `(if (:seon.error/kind results) results (first results))))` | R2 |
+
 ### src/seon/sci/kernel.clj
 
 | Line | Source | Replacement |
@@ -2116,18 +2262,21 @@ A line with several uses must convert each use; excerpts are source context, not
 | 588 | `:seon.error/kind kind` | R1 |
 | 659 | `{:seon.error/kind ::unresolved-invocation` | R1 |
 | 707 | `{:seon.error/kind ::failure-admission-failed` | R1 |
+
 ### src/seon/sci/reader.cljc
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 14 | `:seon.error/kind kind` | R1 |
 | 881 | `[:seon.error/kind :keyword]` | R1 |
+
 ### src/seon/search.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 117 | `{:seon.error/kind ::handle-absent` | R1 |
 | 558 | `{:seon.error/kind ::missing-resource :seon.search/missing-resource true})))` | R1 |
+
 ### src/seon/shell/jvm.clj
 
 | Line | Source | Replacement |
@@ -2149,6 +2298,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 381 | `(:seon.error/kind evidence) evidence` | R2 |
 | 382 | `(:seon.error/kind input) input` | R2 |
 | 407 | `(if (:seon.error/kind cwd)` | R2 |
+
 ### src/seon/test.clj
 
 | Line | Source | Replacement |
@@ -2210,6 +2360,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1676 | `(:seon.error/kind row) row` | R2 |
 | 1677 | `(:seon.error/kind digest) digest` | R2 |
 | 1698 | `(if (:seon.error/kind result) result (boolean result)))))` | R2 |
+
 ### src/seon/test/accretion.clj
 
 | Line | Source | Replacement |
@@ -2222,6 +2373,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 344 | `(if (:seon.error/kind actual)` | R2 |
 | 345 | `(str (:seon.error/kind actual) " — " (:seon.error/message actual))` | R1 |
 | 360 | `[(str (:seon.error/kind unit) "\n" (:seon.error/message unit))` | R1 |
+
 ### src/seon/test/arm.clj
 
 | Line | Source | Replacement |
@@ -2233,17 +2385,20 @@ A line with several uses must convert each use; excerpts are source context, not
 | 159 | `(when (:seon.error/kind caps)` | R2 |
 | 194 | `(when (:seon.error/kind applied)` | R2 |
 | 200 | `{:seon.error/kind :seon.test.runner/instrumentation-unavailable})))` | R1 |
+
 ### src/seon/test/bounds.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 36 | `{:seon.error/kind ::unauthorized-override})))` | R1 |
 | 41 | `{:seon.error/kind ::invalid-override})))` | R1 |
+
 ### src/seon/test/fast.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 28 | `{:seon.error/kind ::missing-namespaces})))` | R1 |
+
 ### src/seon/test/runner.clj
 
 | Line | Source | Replacement |
@@ -2325,11 +2480,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 4134 | `"kind=" (:seon.error/kind failure))))))` | R6 |
 | 4272 | `{:seon.error/kind ::invalid-selection-mode` | R1 |
 | 4508 | `(when (:seon.error/kind captured)` | R2 |
+
 ### src/seon/test/selection.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 236 | `{:seon.error/kind ::invalid-basis` | R1 |
+
 ### src/seon/turn.clj
 
 | Line | Source | Replacement |
@@ -2403,11 +2560,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 5093 | `:seon.error/kind (:seon.error/kind refusal)}` | R1 |
 | 5155 | `{:seon.error/kind :seon.agent/turn-completion-backstop` | R1 |
 | 5340 | `{:seon.error/kind :seon.agent/turn-completion-undeliverable` | R1 |
+
 ### test/my/background_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 37 | `(:seon.error/kind` | R8 |
+
 ### test/my/examples_test.clj
 
 | Line | Source | Replacement |
@@ -2416,17 +2575,20 @@ A line with several uses must convert each use; excerpts are source context, not
 | 136 | `(is (= :seon.instrument/contract-violated (:seon.error/kind value)) (pr-str failed))` | R8 |
 | 144 | `(get-in failed [:seon.sci.admit/value :seon.error/kind]))` | R8 |
 | 170 | `(is (nil? (get-in result [:seon.sci.admit/value :seon.error/kind]))` | R8 |
+
 ### test/my/message_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 137 | `(is (= :seon.message/unknown-recipient (:seon.error/kind missing)))` | R8 |
 | 200 | `(is (keyword? (:seon.error/kind value)) source)` | R8 |
+
 ### test/my/note_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 70 | `(is (= :my.note/not-found (:seon.error/kind missing)))` | R8 |
+
 ### test/my/plan_test.clj
 
 | Line | Source | Replacement |
@@ -2439,6 +2601,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 352 | `(:seon.error/kind` | R8 |
 | 366 | `(:seon.error/kind` | R8 |
 | 374 | `(:seon.error/kind` | R8 |
+
 ### test/my/program_mutation_test.clj
 
 | Line | Source | Replacement |
@@ -2449,6 +2612,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 72 | `(is (= :seon.program/declaration-refused (:seon.error/kind value)) (pr-str result))` | R8 |
 | 100 | `(is (not (:seon.error/kind result)) (pr-str result))` | R8 |
 | 108 | `(is (not (:seon.error/kind result)) (pr-str result))` | R8 |
+
 ### test/my/program_test.clj
 
 | Line | Source | Replacement |
@@ -2459,23 +2623,27 @@ A line with several uses must convert each use; excerpts are source context, not
 | 94 | `(is (not (:seon.error/kind snapshot)) (pr-str snapshot))` | R8 |
 | 98 | `(is (not (:seon.error/kind metadata-snapshot)) (pr-str metadata-snapshot))` | R8 |
 | 107 | `(is (not (:seon.error/kind result)) (pr-str result))` | R8 |
+
 ### test/my/turn_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 64 | `(is (keyword? (:seon.error/kind value)) source)` | R8 |
+
 ### test/seon/adoption_diagnostic_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 16 | `{:seon.error/kind ::missing-namespace` | R8 |
 | 41 | `{:seon.error/kind ::missing-namespace` | R8 |
+
 ### test/seon/adoption_margin_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 33 | `(is (= :seon.operator/lock-hold-timeout (:seon.error/kind failure)))` | R8 |
 | 68 | `(is (= :seon.cluster/source-observer-closed (:seon.error/kind failure)))` | R8 |
+
 ### test/seon/adoption_rows_test.clj
 
 | Line | Source | Replacement |
@@ -2483,6 +2651,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 71 | `[?error :seon.error/kind` | R8 |
 | 78 | `[?e :seon.error/kind :seon.sci.eval/acquisition-refused]]` | R8 |
 | 83 | `(pr-str (mapv #(select-keys % [:seon.error/message :seon.error/kind])` | R8 |
+
 ### test/seon/agent_call_edges_test.clj
 
 | Line | Source | Replacement |
@@ -2490,11 +2659,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 59 | `(when (or (:seon.error/kind entries) (seq failures))` | R8 |
 | 62 | `(if (:seon.error/kind entries) entries (mapv #(select-keys % [:seon.cluster.eval/source :seon.cluster.eval/error :seon.eval/shown]) failures))}))))` | R8 |
 | 76 | `(when (:seon.error/kind created) (throw (ex-info "Probe agent refused" created))))` | R8 |
+
 ### test/seon/agent_situation_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 65 | `(:seon.error/kind` | R8 |
+
 ### test/seon/ai_stream_fold_test.clj
 
 | Line | Source | Replacement |
@@ -2508,6 +2679,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 313 | `(is (= :seon.ai/unparseable-body (:seon.error/kind completion)))))))` | R8 |
 | 320 | `(is (= :seon.ai/provider-error (:seon.error/kind completion)))` | R8 |
 | 342 | `(is (= :seon.ai/provider-error (:seon.error/kind failure)))` | R8 |
+
 ### test/seon/ai_test.clj
 
 | Line | Source | Replacement |
@@ -2537,6 +2709,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1361 | `{:seon.error/kind kind` | R8 |
 | 1476 | `(is (= :seon.ai/transport-failure (:seon.error/kind value))` | R8 |
 | 1500 | `(is (= :seon.ai/no-credential (:seon.error/kind value)))` | R8 |
+
 ### test/seon/await_test.clj
 
 | Line | Source | Replacement |
@@ -2544,6 +2717,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 46 | `(is (= ::await/backstop-fired (:seon.error/kind result)))` | R8 |
 | 70 | `(is (= ::await/backstop-fired (:seon.error/kind result)))` | R8 |
 | 88 | `(is (= ::await/completion-closed (:seon.error/kind result)))` | R8 |
+
 ### test/seon/bootstrap_test.clj
 
 | Line | Source | Replacement |
@@ -2551,6 +2725,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 396 | `(is (= :seon.config/required-absent (:seon.error/kind result)))` | R8 |
 | 406 | `{:seon.error/kind :seon.db/invalid-read` | R8 |
 | 426 | `(is (= expected-kind (:seon.error/kind result)) label)` | R8 |
+
 ### test/seon/bounded_boundary_census_test.clj
 
 | Line | Source | Replacement |
@@ -2559,6 +2734,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 285 | `{:seon.error/kind` | R8 |
 | 329 | `(:seon.error/kind (ex-data absent-error))))` | R8 |
 | 337 | `(:seon.error/kind (ex-data error)))))))))` | R8 |
+
 ### test/seon/call_preparation_test.clj
 
 | Line | Source | Replacement |
@@ -2573,28 +2749,33 @@ A line with several uses must convert each use; excerpts are source context, not
 | 628 | `(:seon.error/kind result)))` | R8 |
 | 700 | `(:seon.error/kind` | R8 |
 | 741 | `(is (= :my.plan/agent-not-found (:seon.error/kind omitted)))` | R8 |
+
 ### test/seon/classification_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 67 | `(is (not (:seon.error/kind acquired)) (pr-str acquired))` | R8 |
 | 91 | `(is (not (:seon.error/kind report)) (pr-str report)))` | R8 |
+
 ### test/seon/cluster/agent_arming_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 135 | `(is (nil? (:seon.error/kind created)) (pr-str created))` | R8 |
 | 193 | `(is (nil? (:seon.error/kind started)) (pr-str started))` | R8 |
+
 ### test/seon/cluster/agent_identity_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 58 | `(is (:seon.error/kind database-error))` | R8 |
+
 ### test/seon/cluster/agent_namespace_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 81 | `(is (nil? (:seon.error/kind result))` | R8 |
+
 ### test/seon/cluster/agent_test.clj
 
 | Line | Source | Replacement |
@@ -2609,6 +2790,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1124 | `(:seon.error/kind (edn/read-string (:seon.eval/shown evaluation))))` | R8 |
 | 1761 | `(select-keys [:seon.error/kind :seon.error/message]))}` | R8 |
 | 1765 | `{:seon.error/kind ::routing-watch-closed})))` | R8 |
+
 ### test/seon/cluster/armed_test.clj
 
 | Line | Source | Replacement |
@@ -2620,6 +2802,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 452 | `{:seon.error/kind ::first-cluster-proc-fault}))` | R8 |
 | 470 | `(:seon.error/kind %))` | R8 |
 | 474 | `(is (= ::first-cluster-proc-fault (:seon.error/kind fact)))` | R8 |
+
 ### test/seon/cluster/boot_test.clj
 
 | Line | Source | Replacement |
@@ -2629,6 +2812,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 753 | `{:seon.error/kind ::transaction-stuck})))` | R8 |
 | 1741 | `{:seon.error/kind ::child-exited-before-derivation` | R8 |
 | 1783 | `:where [_ :seon.error/kind ?kind]]` | R8 |
+
 ### test/seon/cluster/evaluate_sources_test.clj
 
 | Line | Source | Replacement |
@@ -2638,12 +2822,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 148 | `_refusal (is (:seon.error/kind` | R8 |
 | 150 | `_close (is (nil? (:seon.error/kind` | R8 |
 | 171 | `(is (nil? (:seon.error/kind committed)) (pr-str (select-keys committed [:seon.error/kind :seon.error/message :seon.turn/refused])))` | R8 |
+
 ### test/seon/cluster/instruction_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 156 | `(is (nil? (:seon.error/kind` | R8 |
 | 161 | `(is (nil? (:seon.error/kind` | R8 |
+
 ### test/seon/cluster/mcp_test.clj
 
 | Line | Source | Replacement |
@@ -2653,11 +2839,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 351 | `(if (:seon.error/kind effective)` | R8 |
 | 360 | `(is (not (contains? result :seon.error/kind)))))` | R8 |
 | 481 | `(:seon.error/kind` | R8 |
+
 ### test/seon/cluster/message_assignment_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 27 | `:seon.error/kind :seon.sci.eval/evaluation-failed` | R8 |
+
 ### test/seon/cluster/message_test.clj
 
 | Line | Source | Replacement |
@@ -2666,6 +2854,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 475 | `(mapv :seon.error/kind (:seon.error/values delivery)))` | R8 |
 | 642 | `:kinds (mapv :seon.error/kind` | R8 |
 | 837 | `(mapv :seon.error/kind results)))` | R8 |
+
 ### test/seon/cluster/problem_routing_test.clj
 
 | Line | Source | Replacement |
@@ -2680,12 +2869,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 210 | `:seon.error/kind :probe/red})` | R8 |
 | 213 | `(pr-str {:seon.error/kind :probe/red})` | R8 |
 | 215 | `:seon.error/kind :probe/red})])` | R8 |
+
 ### test/seon/cluster/program_restart_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 44 | `{:seon.error/kind ::commit-timeout` | R8 |
 | 251 | `(:seon.error/kind` | R8 |
+
 ### test/seon/cluster/prompt_test.clj
 
 | Line | Source | Replacement |
@@ -2697,11 +2888,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 438 | `(is (not (:seon.error/kind result)) (pr-str result))))` | R8 |
 | 506 | `(is (nil? (:seon.error/kind replayed))` | R8 |
 | 517 | `(:seon.error/kind drifted)))` | R8 |
+
 ### test/seon/cluster/registry_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 324 | `{:seon.error/kind ::injected})]` | R8 |
+
 ### test/seon/cluster/reply_test.clj
 
 | Line | Source | Replacement |
@@ -2714,6 +2907,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 346 | `(:seon.error/kind refused)))))` | R8 |
 | 351 | `(:seon.error/kind (sources "   \n\n  "))))))` | R8 |
 | 415 | `(is (= :seon.cluster.reply/no-forms (:seon.error/kind result)))` | R8 |
+
 ### test/seon/cluster/resume_artifact_routing_test.clj
 
 | Line | Source | Replacement |
@@ -2721,6 +2915,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 17 | `{:seon.error/kind :seon.sci.eval/evaluation-failed` | R8 |
 | 21 | `(pr-str {:seon.error/kind :seon.sci.eval/evaluation-failed` | R8 |
 | 77 | `:seon.error/kind` | R8 |
+
 ### test/seon/cluster/source_test.clj
 
 | Line | Source | Replacement |
@@ -2729,6 +2924,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 322 | `{:seon.error/kind :seon.db/invalid-transaction` | R8 |
 | 329 | `[:seon.source/transaction-result :seon.error/kind])))` | R8 |
 | 411 | `(is (= :seon.db/invalid-write (:seon.error/kind refused))` | R8 |
+
 ### test/seon/cluster/status_test.clj
 
 | Line | Source | Replacement |
@@ -2737,6 +2933,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 46 | `(get-in row [:seon.cluster.status/provider-cost-usd :seon.error/kind]))))` | R8 |
 | 62 | `(is (not (:seon.error/kind report)) (pr-str report))` | R8 |
 | 102 | `(get-in observation [:seon.cluster.status/store-bytes :seon.error/kind])))` | R8 |
+
 ### test/seon/cluster/store_test.clj
 
 | Line | Source | Replacement |
@@ -2744,6 +2941,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 222 | `(:seon.error/kind` | R8 |
 | 285 | `(:seon.error/kind (db/history @connection))))` | R8 |
 | 329 | `(is (= :seon.db/rejected (:seon.error/kind outcome)))` | R8 |
+
 ### test/seon/cluster/store_transact_test.clj
 
 | Line | Source | Replacement |
@@ -2755,6 +2953,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 132 | `(is (= :seon.db/rejected (:seon.error/kind outcome)))` | R8 |
 | 180 | `(is (= :user-input (:seon.error/kind outcome)))` | R8 |
 | 195 | `(is (= :user-input (:seon.error/kind failure)))` | R8 |
+
 ### test/seon/cluster/turn_test.clj
 
 | Line | Source | Replacement |
@@ -2794,6 +2993,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 3282 | `[?e :seon.error/kind ?kind]]` | R8 |
 | 3712 | `(is (nil? (:seon.error/kind seeded)) (pr-str (:seon.error/kind seeded)))` | R8 |
 | 3713 | `(when (:seon.error/kind seeded) (throw (ex-info "Budget fixture refused" seeded)))` | R8 |
+
 ### test/seon/cluster/wake_test.clj
 
 | Line | Source | Replacement |
@@ -2805,6 +3005,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 448 | `{:seon.error/kind :seon.instrument/contract-violated` | R8 |
 | 618 | `(:seon.error/kind (ex-data fault)))` | R8 |
 | 643 | `(:seon.error/kind (ex-data fault))))` | R8 |
+
 ### test/seon/cluster_test.clj
 
 | Line | Source | Replacement |
@@ -2818,6 +3019,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 368 | `(phase-of (ex-info "unrelated" {:seon.error/kind :seon.fn/index-refused}))])` | R8 |
 | 384 | `(is (= :seon.boot/refused (:seon.error/kind surviving))` | R8 |
 | 408 | `(is (= :seon.boot/refused (:seon.error/kind refusal))` | R8 |
+
 ### test/seon/concurrency_independence_test.clj
 
 | Line | Source | Replacement |
@@ -2827,18 +3029,21 @@ A line with several uses must convert each use; excerpts are source context, not
 | 310 | `:seon.error/kind` | R8 |
 | 598 | `:seon.error/kind :user-input}` | R8 |
 | 605 | `[run-id 2 :seon.error/kind :user-input]` | R8 |
+
 ### test/seon/concurrency_streams_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 80 | `refusals (filterv :seon.error/kind results)` | R8 |
 | 91 | `(:seon.error/kind (first refusals))))` | R8 |
+
 ### test/seon/concurrency_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 58 | `(is (not (:seon.error/kind result)))` | R8 |
 | 92 | `(when (:seon.error/kind created)` | R8 |
+
 ### test/seon/config_test.clj
 
 | Line | Source | Replacement |
@@ -2855,18 +3060,21 @@ A line with several uses must convert each use; excerpts are source context, not
 | 580 | `refusal {:seon.error/kind :seon.db/invalid-read` | R8 |
 | 583 | `(is (= :seon.db/invalid-read (:seon.error/kind result))` | R8 |
 | 585 | `(is (not= ::config/missing-effective (:seon.error/kind result))` | R8 |
+
 ### test/seon/context_blocks_fixture.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 140 | `(when (:seon.error/kind result)` | R8 |
 | 344 | `[:seon.turn/id :seon.error/kind :seon.error/message]))))))` | R8 |
+
 ### test/seon/context_capture_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 24 | `_ (is (nil? (:seon.error/kind seed)))` | R8 |
 | 48 | `(is (nil? (:seon.error/kind committed)))` | R8 |
+
 ### test/seon/context_selection_test.clj
 
 | Line | Source | Replacement |
@@ -2876,11 +3084,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 125 | `(is (nil? (:seon.error/kind` | R8 |
 | 127 | `(is (nil? (:seon.error/kind` | R8 |
 | 210 | `(is (nil? (:seon.error/kind committed)))` | R8 |
+
 ### test/seon/contracts_fixture.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 51 | `(when (:seon.error/kind value)` | R8 |
+
 ### test/seon/contracts_install_test.clj
 
 | Line | Source | Replacement |
@@ -2888,6 +3098,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 30 | `(is (= :seon.test.accretion/non-data-contract (:seon.error/kind value)))` | R8 |
 | 45 | `(get-in rejected [:seon.sci.admit/value :seon.error/kind])))` | R8 |
 | 54 | `(get-in result [:seon.sci.admit/value :seon.error/kind]))` | R8 |
+
 ### test/seon/contracts_plan_test.clj
 
 | Line | Source | Replacement |
@@ -2897,11 +3108,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 44 | `(is (= :seon.sci.reader/unreadable (:seon.error/kind refusal)))` | R8 |
 | 55 | `(is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))` | R8 |
 | 65 | `(is (= :seon.sci.eval/evaluation-failed (:seon.error/kind refusal)))` | R8 |
+
 ### test/seon/custody_stability_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 314 | `[:seon.sci.admit/value :seon.error/kind])))` | R8 |
+
 ### test/seon/data_shapes_test.clj
 
 | Line | Source | Replacement |
@@ -2911,6 +3124,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 232 | `(is (not (:seon.error/kind changed)) (pr-str changed))` | R8 |
 | 391 | `(is (not (:seon.error/kind created)) (pr-str created))` | R8 |
 | 392 | `(is (not (:seon.error/kind changed)) (pr-str changed))` | R8 |
+
 ### test/seon/db/declaration_population_test.clj
 
 | Line | Source | Replacement |
@@ -2918,6 +3132,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 71 | `(and (not (:seon.error/kind supplied)) (= supplied carried))))` | R8 |
 | 122 | `(is (= :seon.schema/missing-projection (:seon.error/kind failure)))` | R8 |
 | 136 | `:error (:seon.error/kind report)}))` | R8 |
+
 ### test/seon/db_test.clj
 
 | Line | Source | Replacement |
@@ -2961,6 +3176,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 2155 | `(is (= :seon.db/unreadable-declarations (:seon.error/kind refusal)))` | R8 |
 | 2182 | `(is (= :seon.db/unknown-read-operation (:seon.error/kind unknown)))` | R8 |
 | 2246 | `(is (= :seon.db/invalid-pulled-result (:seon.error/kind refusal))` | R8 |
+
 ### test/seon/dev/changed_test_test.clj
 
 | Line | Source | Replacement |
@@ -2968,16 +3184,19 @@ A line with several uses must convert each use; excerpts are source context, not
 | 117 | `(:seon.error/kind data)))` | R8 |
 | 136 | `(:seon.error/kind (ex-data failure))))))` | R8 |
 | 153 | `(:seon.error/kind (ex-data failure))))` | R8 |
+
 ### test/seon/dev/dependency_cache_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 275 | `(:seon.error/kind refusal)))` | R8 |
+
 ### test/seon/dev/edit_feedback_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 50 | `failure {:seon.error/kind :publication-failed` | R8 |
+
 ### test/seon/dev/fresh_operator_reset_test.clj
 
 | Line | Source | Replacement |
@@ -2985,6 +3204,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 67 | `(is (= :seon.operator/lock-acquisition-timeout (:seon.error/kind refusal)))` | R8 |
 | 389 | `(if (:seon.error/kind test-var#)` | R8 |
 | 399 | `[:seon.error/kind :seon.test/sym` | R8 |
+
 ### test/seon/dev/fresh_operator_test.clj
 
 | Line | Source | Replacement |
@@ -3001,18 +3221,21 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1843 | `(is (= :seon.fresh-operator/prepl-exception (:seon.error/kind data)))` | R8 |
 | 2062 | `(:seon.error/kind refusal))` | R8 |
 | 2207 | `(:seon.error/kind (:seon.dev.fresh-operator-test/data outcome)))` | R8 |
+
 ### test/seon/dev/hook_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 59 | `(is (= :seon.fresh-operator/publication-failed (:seon.error/kind failure)))` | R8 |
 | 126 | `(catch Exception e (:seon.error/kind (ex-data e))))` | R8 |
+
 ### test/seon/edit/jvm_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 85 | `(:seon.error/kind ((handler) request (policy root)))))` | R8 |
 | 138 | `(:seon.error/kind %))` | R8 |
+
 ### test/seon/edit_test.clj
 
 | Line | Source | Replacement |
@@ -3028,6 +3251,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 376 | `(is (= :seon.program/no-declaration-at (:seon.error/kind refusal)))` | R8 |
 | 414 | `(is (nil? (:seon.error/kind result)) (pr-str result))` | R8 |
 | 456 | `(is (= :my.fs/path-refused (:seon.error/kind refused))` | R8 |
+
 ### test/seon/effect_test.clj
 
 | Line | Source | Replacement |
@@ -3038,6 +3262,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 704 | `(is (= :seon.effect/request-too-large (:seon.error/kind result))` | R8 |
 | 739 | `(is (= :seon.effect/interrupted (:seon.error/kind result)))` | R8 |
 | 873 | `(is (nil? (:seon.error/kind written)) (pr-str written))` | R8 |
+
 ### test/seon/env_test.clj
 
 | Line | Source | Replacement |
@@ -3048,12 +3273,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 348 | `(is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))` | R8 |
 | 366 | `(is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))` | R8 |
 | 379 | `(is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))` | R8 |
+
 ### test/seon/error_class_schema_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 30 | `(true? (:seon.error/class (class-properties form))))` | R3 |
 | 87 | `(comp (filter #(true? (:seon.error/class %)))` | R3 |
+
 ### test/seon/error_test.clj
 
 | Line | Source | Replacement |
@@ -3104,11 +3331,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1006 | `(is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))` | R8 |
 | 1029 | `{:seon.error/kind :seon.turn/not-the-holder` | R8 |
 | 1266 | `(is (= :seon.db/invalid-write (:seon.error/kind result)) (pr-str result))` | R8 |
+
 ### test/seon/flow_configuration_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 47 | `(is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))` | R8 |
+
 ### test/seon/flow_test.clj
 
 | Line | Source | Replacement |
@@ -3122,6 +3351,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 577 | `(get-in result [::sut/value :seon.error/kind])))` | R8 |
 | 794 | `(is (= ::sut/unsupported-command (:seon.error/kind result)))` | R8 |
 | 868 | `{:seon.error/kind :seon.instrument/contract-violated` | R8 |
+
 ### test/seon/fn_test.clj
 
 | Line | Source | Replacement |
@@ -3154,6 +3384,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 2849 | `(pr-str (select-keys report [:seon.error/kind` | R8 |
 | 2858 | `(is (= :seon.db/invalid-write (:seon.error/kind refusal))` | R8 |
 | 2973 | `(is (= :seon.fn/index-refused (:seon.error/kind refusal)))` | R8 |
+
 ### test/seon/fs/jvm_test.clj
 
 | Line | Source | Replacement |
@@ -3167,22 +3398,26 @@ A line with several uses must convert each use; excerpts are source context, not
 | 316 | `{:seon.error/kind :my.fs/write-failed` | R8 |
 | 327 | `(is (= :my.fs/write-failed (:seon.error/kind result)))` | R8 |
 | 365 | `(:seon.error/kind %))` | R8 |
+
 ### test/seon/help_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 56 | `(is (nil? (:seon.error/kind opening)) (pr-str opening))` | R8 |
 | 124 | `(is (not (:seon.error/kind (turn/system-turn request))))` | R8 |
+
 ### test/seon/help_trial_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 66 | `(is (nil? (:seon.error/kind report)) (pr-str report)))` | R8 |
+
 ### test/seon/html_views_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 139 | `(let [fault {:seon.error/kind :example/failed :seon.error/message "Connection lost"}]` | R8 |
+
 ### test/seon/instrument_test.clj
 
 | Line | Source | Replacement |
@@ -3210,6 +3445,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1192 | `(is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))` | R8 |
 | 1197 | `(is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))` | R8 |
 | 1300 | `(:seon.error/kind (ex-data failure))))))))` | R8 |
+
 ### test/seon/issue/detect_test.clj
 
 | Line | Source | Replacement |
@@ -3218,11 +3454,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 78 | `(clojure.test/is (nil? (:seon.error/kind subjects)) (pr-str subjects))` | R8 |
 | 151 | `_ (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))` | R8 |
 | 185 | `_ (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))` | R8 |
+
 ### test/seon/issue_deletion_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 89 | `(is (= :seon.db/retention-refused (:seon.error/kind result)) (pr-str result))` | R8 |
+
 ### test/seon/issue_generate_test.clj
 
 | Line | Source | Replacement |
@@ -3231,6 +3469,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 73 | `(clojure.test/is (nil? (:seon.error/kind first-run)) (pr-str first-run))` | R8 |
 | 136 | `(clojure.test/is (= :seon.issue/subject-without-identity (:seon.error/kind result))` | R8 |
 | 145 | `(clojure.test/is (= :seon.issue/detector-unknown (:seon.error/kind unknown))` | R8 |
+
 ### test/seon/issue_settlement_test.clj
 
 | Line | Source | Replacement |
@@ -3243,6 +3482,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 317 | `(:seon.error/kind (write worker [[:db/retract issue :seon.issue/tests a]]))))` | R8 |
 | 321 | `(:seon.error/kind (write creator [[:db/retract issue :seon.issue/tests b]]))))` | R8 |
 | 324 | `(:seon.error/kind` | R8 |
+
 ### test/seon/issue_test.clj
 
 | Line | Source | Replacement |
@@ -3266,6 +3506,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 409 | `(clojure.test/is (nil? (:seon.error/kind started)) (pr-str started))` | R8 |
 | 415 | `(clojure.test/is (= :seon.issue/already-started (:seon.error/kind (seon.issue/start! start))))` | R8 |
 | 418 | `(:seon.error/kind (seon.issue/tests! {:seon.db/connection c :seon.agent/id "issue-author"` | R8 |
+
 ### test/seon/loop_proof_test.clj
 
 | Line | Source | Replacement |
@@ -3282,6 +3523,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 698 | `_ (is (nil? (:seon.error/kind written)) (pr-str written))` | R8 |
 | 735 | `(let [_ (is (nil? (:seon.error/kind` | R8 |
 | 806 | `(is (nil? (:seon.error/kind result)) (pr-str result))))))` | R8 |
+
 ### test/seon/maintenance_schema_test.clj
 
 | Line | Source | Replacement |
@@ -3290,6 +3532,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 298 | `{:seon.error/kind :seon.operator/collection-incomplete` | R8 |
 | 376 | `{:seon.error/kind :seon.operator/collection-incomplete` | R8 |
 | 385 | `(get-in stored [:seon.maintenance.result/cluster-cleanup-collection :seon.error/kind])))` | R8 |
+
 ### test/seon/maintenance_test.clj
 
 | Line | Source | Replacement |
@@ -3300,6 +3543,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 446 | `(let [refusal {:seon.error/kind :seon.operator/collection-incomplete` | R8 |
 | 466 | `[?collection :seon.error/kind ?kind]` | R8 |
 | 533 | `(:seon.error/kind answer)))` | R8 |
+
 ### test/seon/mcp_test.clj
 
 | Line | Source | Replacement |
@@ -3309,6 +3553,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 99 | `:seon.error/kind ::probe :seon.error/message "probe"})]` | R8 |
 | 110 | `(:seon.error/kind %)))` | R8 |
 | 126 | `(is (= :seon.dev.mcp/projection-failed (:seon.error/kind result))))))` | R8 |
+
 ### test/seon/no_provider_test.clj
 
 | Line | Source | Replacement |
@@ -3316,6 +3561,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 58 | `[_ :seon.error/kind ?kind]] @connection)))` | R8 |
 | 113 | `(is (not (:seon.error/kind result)) (pr-str result)))` | R8 |
 | 123 | `(pr-str (db/q '[:find [(pull ?error [:seon.error/kind :seon.error/message]) ...]` | R8 |
+
 ### test/seon/operator_test.clj
 
 | Line | Source | Replacement |
@@ -3345,17 +3591,20 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1412 | `(is (nil? (:seon.error/kind result)))` | R8 |
 | 1438 | `(:seon.error/kind (ex-data failure))))` | R8 |
 | 1444 | `(:seon.error/kind (ex-data failure))))` | R8 |
+
 ### test/seon/owned_value_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 34 | `(is (= :seon.db/invalid-write (:seon.error/kind result)) (pr-str result))` | R8 |
+
 ### test/seon/plan_completion_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 34 | `(is (= :my.plan/done-query-unsatisfied (:seon.error/kind failure)) (pr-str failure))` | R8 |
 | 70 | `(is (= :my.plan/done-query-failed (:seon.error/kind failure)) (pr-str failure))` | R8 |
+
 ### test/seon/problems_test.clj
 
 | Line | Source | Replacement |
@@ -3371,6 +3620,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 385 | `(is (= :seon.sci.eval/evaluation-failed (:seon.error/kind entry)))` | R8 |
 | 436 | `(:seon.error/kind %)) signatures))]` | R8 |
 | 486 | `(is (= :seon.schema/missing-projection (:seon.error/kind result)))` | R8 |
+
 ### test/seon/program_test.clj
 
 | Line | Source | Replacement |
@@ -3383,6 +3633,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 794 | `:seon.error/class true` | R3 |
 | 803 | `"(seon.schema/register! ::error [:map {:seon.error/class true :seon.render/ai sample/render-ai} [:seon.error/message :seon.error/message]])")` | R3 |
 | 805 | `(is (= true (:seon.error/class row)))` | R3 |
+
 ### test/seon/public_contract_test.clj
 
 | Line | Source | Replacement |
@@ -3390,6 +3641,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 49 | `:seon.error/kind` | R8 |
 | 55 | `:seon.error/kind ::unidentified-public-function` | R8 |
 | 85 | `(:seon.error/kind (ex-data failure))))` | R8 |
+
 ### test/seon/read_evidence_test.clj
 
 | Line | Source | Replacement |
@@ -3400,23 +3652,27 @@ A line with several uses must convert each use; excerpts are source context, not
 | 76 | `(is (not (:seon.error/kind` | R8 |
 | 114 | `(is (not (:seon.error/kind` | R8 |
 | 121 | `(is (not (:seon.error/kind` | R8 |
+
 ### test/seon/reconcile_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 122 | `(let [refusal {:seon.error/kind :seon.db/rejected` | R8 |
 | 135 | `(:seon.error/kind (db/history @connection)))` | R8 |
+
 ### test/seon/refusal_grammar_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 56 | `{:seon.error/kind :seon.db/invalid-read` | R8 |
 | 73 | `(is (= :seon.db/invalid-write (:seon.error/kind refusal))` | R8 |
+
 ### test/seon/registry_isolation_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 48 | `(is (not (:seon.error/kind result)) (pr-str (:seon.error/kind result)))` | R8 |
+
 ### test/seon/render/data_test.clj
 
 | Line | Source | Replacement |
@@ -3427,39 +3683,46 @@ A line with several uses must convert each use; excerpts are source context, not
 | 107 | `(:seon.error/kind (data/entity-observation` | R8 |
 | 128 | `(is (:seon.error/kind` | R8 |
 | 130 | `(is (:seon.error/kind` | R8 |
+
 ### test/seon/render/faults_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 27 | `{:seon.error/source {:seon.error/kind :seon.instrument/contract-violated` | R8 |
 | 76 | `(is (not (:seon.error/kind result)) (pr-str result))` | R8 |
+
 ### test/seon/render/hiccup_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 110 | `(doseq [refused [{:seon.error/kind :a/b} [1 2 3] #{:a}]]` | R8 |
+
 ### test/seon/render/history_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 188 | `{:seon.error/kind :seon.render/failure` | R8 |
+
 ### test/seon/render/lint_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 58 | `(is (= :seon.render.lint/absent-element (:seon.error/kind refusal)))` | R8 |
+
 ### test/seon/render/ns_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 131 | `(is (= :seon.db/invalid-read (:seon.error/kind ai)))` | R8 |
 | 352 | `[:map {:seon.error/class true` | R3 |
+
 ### test/seon/render/page_review_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 78 | `(is (:seon.error/kind (transcript/render-runtime-ai {:seon.db/db @connection})))` | R8 |
 | 109 | `(is (:seon.error/kind (evaluation/of-agent @connection "absent"))))))` | R8 |
+
 ### test/seon/render/retained_test.clj
 
 | Line | Source | Replacement |
@@ -3468,22 +3731,26 @@ A line with several uses must convert each use; excerpts are source context, not
 | 29 | `(is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message]))))` | R8 |
 | 88 | `(is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message]))))` | R8 |
 | 104 | `(is (= :seon.render/invalid-ai-output (:seon.error/kind (render/render-call (request))))` | R8 |
+
 ### test/seon/render/root_pull_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 147 | `(is (or (vector? result) (:seon.error/kind result))` | R8 |
 | 486 | `(is (not (:seon.error/kind tx)) (pr-str tx))` | R8 |
+
 ### test/seon/render/runtime_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 61 | `(:seon.error/kind (transcript/render-runtime-html` | R8 |
+
 ### test/seon/render/transcript_run_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 97 | `(:seon.error/kind missing)))` | R8 |
+
 ### test/seon/render/transcript_test.clj
 
 | Line | Source | Replacement |
@@ -3494,6 +3761,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 935 | `:seon.error/kind :generated/refusal` | R8 |
 | 1311 | `(is (nil? (:seon.error/kind committed))` | R8 |
 | 1312 | `(pr-str (select-keys committed [:seon.error/kind` | R8 |
+
 ### test/seon/render/value_test.clj
 
 | Line | Source | Replacement |
@@ -3503,6 +3771,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 84 | `(is (nil? (:seon.error/kind completed)) (pr-str completed))` | R8 |
 | 428 | `(mapv :seon.error/kind results)))` | R8 |
 | 563 | `(:seon.error/kind (:seon.render.value/window window))))` | R8 |
+
 ### test/seon/render/walk_test.clj
 
 | Line | Source | Replacement |
@@ -3511,6 +3780,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 105 | `(:seon.error/kind (:seon.error/value %)))` | R8 |
 | 127 | `(filter #(= ::walk/elided (:seon.error/kind %)))` | R8 |
 | 188 | `:seon.error/kind]))` | R8 |
+
 ### test/seon/render/web_debug_test.clj
 
 | Line | Source | Replacement |
@@ -3525,6 +3795,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 956 | `(is (nil? (:seon.error/kind rendered)) (pr-str rendered))` | R8 |
 | 1026 | `(is (nil? (:seon.error/kind composed)) (pr-str composed))` | R8 |
 | 1054 | `(is (nil? (:seon.error/kind added)) (pr-str added))` | R8 |
+
 ### test/seon/render/web_test.clj
 
 | Line | Source | Replacement |
@@ -3536,6 +3807,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 2004 | `(is (= :seon.db/rejected (:seon.error/kind result)))` | R8 |
 | 2203 | `{:seon.error/kind :seon.instrument/contract-violated` | R8 |
 | 2229 | `(ex-info "unrelated typed failure" {:seon.error/kind ::unrelated})]]` | R8 |
+
 ### test/seon/render_coverage_test.clj
 
 | Line | Source | Replacement |
@@ -3545,6 +3817,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 207 | `(is (nil? (:seon.error/kind settled)) (pr-str settled))` | R8 |
 | 380 | `(is (not (:seon.error/kind face))` | R8 |
 | 503 | `(is (= :seon.render/unknown (:seon.error/kind refused)))` | R8 |
+
 ### test/seon/render_simplification_test.clj
 
 | Line | Source | Replacement |
@@ -3557,6 +3830,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 625 | `[:seon.error/value :seon.error/kind])))` | R8 |
 | 743 | `(get-in (first capped) [:seon.error/value :seon.error/kind])))` | R8 |
 | 961 | `(let [failure {:seon.error/kind :render.test/broken` | R8 |
+
 ### test/seon/render_source_test.clj
 
 | Line | Source | Replacement |
@@ -3565,11 +3839,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 189 | `(is (:seon.error/kind` | R8 |
 | 199 | `(:seon.error/kind failure)))` | R8 |
 | 299 | `(is (= :seon.render.web/owner-not-ensured (:seon.error/kind refusal)))` | R8 |
+
 ### test/seon/repl_grammar_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 85 | `(is (not (:seon.error/kind opened)) (pr-str opened))` | R8 |
+
 ### test/seon/repl_parity_test.clj
 
 | Line | Source | Replacement |
@@ -3580,12 +3856,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 599 | `[(:seon.error/kind value)` | R8 |
 | 866 | `;; Asking the vector for \`:seon.error/kind\` got nil and compared it to the` | R6 |
 | 876 | `(:seon.error/kind (first errors)))))` | R8 |
+
 ### test/seon/repl_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 234 | `(is (nil? (repl/render-ai {:seon.error/kind :seon.render/refused` | R8 |
 | 237 | `(is (nil? (repl/render-html {:seon.error/kind :seon.render/refused` | R8 |
+
 ### test/seon/rereads_test.clj
 
 | Line | Source | Replacement |
@@ -3593,6 +3871,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 82 | `(is (nil? (:seon.error/kind preview)) (pr-str preview))` | R8 |
 | 87 | `(is (nil? (:seon.error/kind result)) (pr-str result))` | R8 |
 | 173 | `(is (nil? (:seon.error/kind result)) (pr-str result))` | R8 |
+
 ### test/seon/reset_edges_test.clj
 
 | Line | Source | Replacement |
@@ -3605,22 +3884,26 @@ A line with several uses must convert each use; excerpts are source context, not
 | 243 | `(is (= :seon.db/invalid-write (:seon.error/kind refusal)))` | R8 |
 | 247 | `(is (nil? (:seon.error/kind result)) (pr-str result)))` | R8 |
 | 367 | `(is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))` | R8 |
+
 ### test/seon/returned_error_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 37 | `(is (= :seon.db/invalid-write (:seon.error/kind diagnostic)) (pr-str result))` | R8 |
+
 ### test/seon/run4_install_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 71 | `(is (= :seon.test.accretion/install-refused (:seon.error/kind result)) (pr-str result))` | R8 |
+
 ### test/seon/run4_reader_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 26 | `(get-in delimiter [:seon.sci.admit/value :seon.error/kind])))` | R8 |
 | 34 | `(get-in comments [:seon.sci.admit/value :seon.error/kind])))` | R8 |
+
 ### test/seon/run6_db_test.clj
 
 | Line | Source | Replacement |
@@ -3628,12 +3911,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 24 | `(is (= :seon.instrument/contract-violated (:seon.error/kind failure)))` | R8 |
 | 34 | `(:seon.error/kind (support/refusal-data call))))))` | R8 |
 | 68 | `(:seon.error/kind (support/refusal-data call))))))))))` | R8 |
+
 ### test/seon/run6_stall_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 14 | `(when (:seon.error/kind result)` | R8 |
 | 39 | `{:seon.error/source {:seon.error/kind :seon.ai/unparseable-body` | R8 |
+
 ### test/seon/schedule_test.clj
 
 | Line | Source | Replacement |
@@ -3645,11 +3930,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 141 | `(is (not (:seon.error/kind result)) (pr-str result))` | R8 |
 | 183 | `(is (not (:seon.error/kind` | R8 |
 | 385 | `:where [_ :seon.error/kind ?kind]]` | R8 |
+
 ### test/seon/schema/admission_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 96 | `(:seon.error/kind (db/history @connection)))` | R8 |
+
 ### test/seon/schema/datahike_test.clj
 
 | Line | Source | Replacement |
@@ -3659,21 +3946,25 @@ A line with several uses must convert each use; excerpts are source context, not
 | 135 | `projection :seon.error/class))` | R3 |
 | 138 | `(is (contains? attributes :seon.error/class))` | R3 |
 | 193 | `(= :user-input (:seon.error/kind data)))))` | R8 |
+
 ### test/seon/schema/declaration_population_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 105 | `(:seon.error/kind (ex-data failure))))` | R8 |
+
 ### test/seon/schema/edn_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 333 | `(= :user-input (:seon.error/kind refusal)))))` | R8 |
+
 ### test/seon/schema/program_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 88 | `:seon.error/kind :seon.eval.drive/absent` | R8 |
+
 ### test/seon/schema_test.clj
 
 | Line | Source | Replacement |
@@ -3687,18 +3978,21 @@ A line with several uses must convert each use; excerpts are source context, not
 | 815 | `(:seon.error/kind mismatch-data)))` | R8 |
 | 1293 | `(let [poisoned {:seon.error/kind :seon.db/invalid-read` | R8 |
 | 1301 | `(is (= :seon.schema/invalid-projection-source (:seon.error/kind outcome)))` | R8 |
+
 ### test/seon/schema_usage_guard_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 53 | `(if (:seon.error/kind result)` | R8 |
 | 388 | `(get-in refusal [:error :seon.error/kind])))` | R8 |
+
 ### test/seon/sci/admit_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 382 | `(is (= :seon.sci.admit/projection-failed (:seon.error/kind data))` | R8 |
 | 513 | `(is (some? (:seon.error/kind refusal)))` | R8 |
+
 ### test/seon/sci/documentation_test.clj
 
 | Line | Source | Replacement |
@@ -3710,11 +4004,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 263 | `(is (= :seon.instrument/contract-violated (:seon.error/kind value)) (pr-str failed))` | R8 |
 | 294 | `(is (not (:seon.error/kind doc)))` | R8 |
 | 300 | `(is (= :seon.sci.eval/declaration-absent (:seon.error/kind value)) label)` | R8 |
+
 ### test/seon/sci/eval_instrumentation_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 67 | `[?error :seon.error/kind` | R8 |
+
 ### test/seon/sci/eval_test.clj
 
 | Line | Source | Replacement |
@@ -3750,11 +4046,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 2336 | `(:seon.error/kind invoked))` | R8 |
 | 2400 | `;; \`:seon.error/kind\` whose \`:seon.error/message\` is not a string. Reading` | R6 |
 | 2412 | `(str "{:seon.error/kind :probe/refused"` | R8 |
+
 ### test/seon/sci/kernel_arm_carriage_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 144 | `(is (= :seon.sci.kernel/already-armed (:seon.error/kind data)))` | R8 |
+
 ### test/seon/sci/reader_test.clj
 
 | Line | Source | Replacement |
@@ -3773,11 +4071,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 343 | `(get-in result [0 :seon.sci.reader/error :seon.error/kind])))` | R8 |
 | 358 | `(is (= :seon.sci.reader/refused-tag (:seon.error/kind result)))` | R8 |
 | 367 | `:seon.error/kind]))))))))))` | R8 |
+
 ### test/seon/sci/shown_text_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 14 | `(when (:seon.error/kind result)` | R8 |
+
 ### test/seon/shell/jvm_test.clj
 
 | Line | Source | Replacement |
@@ -3789,6 +4089,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 310 | `_ (is (not (:seon.error/kind configured)) (pr-str configured))` | R8 |
 | 341 | `(is (= :my.shell/time-limit (:seon.error/kind result)))` | R8 |
 | 396 | `(is (= :my.shell/time-limit (:seon.error/kind result)))` | R8 |
+
 ### test/seon/source_reconciliation_test.clj
 
 | Line | Source | Replacement |
@@ -3796,6 +4097,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 32 | `_ (is (not (:seon.error/kind setup)) (pr-str setup))` | R8 |
 | 58 | `(is (not (:seon.error/kind report)) (pr-str report))` | R8 |
 | 80 | `(is (not (:seon.error/kind result)))` | R8 |
+
 ### test/seon/supplied_documentation_test.clj
 
 | Line | Source | Replacement |
@@ -3804,12 +4106,14 @@ A line with several uses must convert each use; excerpts are source context, not
 | 58 | `(is (= :seon.instrument/contract-violated (:seon.error/kind value)))` | R8 |
 | 70 | `(is (= :seon.instrument/contract-violated (:seon.error/kind value)))` | R8 |
 | 90 | `(is (= :seon.instrument/missing-supplied-key (:seon.error/kind failure)))` | R8 |
+
 ### test/seon/test/check_request_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 17 | `(is (:seon.error/kind missing))` | R8 |
 | 24 | `(is (nil? (:seon.error/kind result)) (pr-str result))` | R8 |
+
 ### test/seon/test/runner_test.clj
 
 | Line | Source | Replacement |
@@ -3826,6 +4130,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 359 | `(:seon.error/kind (refused (assoc (request run other) :seon.test.run/deadline` | R8 |
 | 501 | `(:seon.error/kind (ex-data refusal)))))` | R8 |
 | 1122 | `(:seon.error/kind (ex-data refusal))))))` | R8 |
+
 ### test/seon/test/selection_test.clj
 
 | Line | Source | Replacement |
@@ -3840,6 +4145,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 189 | `(:seon.error/kind (select-request (assoc request :seon.db/db missing-inputs)))))` | R8 |
 | 191 | `(:seon.error/kind (select-request (assoc request :seon.db/db missing-analysis))))))))))` | R8 |
 | 339 | `(is (= ::selection/invalid-basis (:seon.error/kind refusal)))` | R8 |
+
 ### test/seon/test_failure_facts_test.clj
 
 | Line | Source | Replacement |
@@ -3847,16 +4153,19 @@ A line with several uses must convert each use; excerpts are source context, not
 | 43 | `(when (:seon.error/kind tx)` | R8 |
 | 297 | `(is (= :seon.test/unknown (:seon.error/kind (sut/changed-since-green (db/db connection) s))))` | R8 |
 | 345 | `(is (= :seon.test/unknown (:seon.error/kind (sut/changed-since-green (db/db connection) s))))` | R8 |
+
 ### test/seon/test_preparation_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 22 | `(is (nil? (:seon.error/kind @base)))` | R8 |
+
 ### test/seon/test_provenance_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 95 | `(let [refused {:seon.error/kind :seon.db/invalid-query` | R8 |
+
 ### test/seon/test_reaching_test.clj
 
 | Line | Source | Replacement |
@@ -3872,11 +4181,13 @@ A line with several uses must convert each use; excerpts are source context, not
 | 601 | `(is (= :seon.test/unknown (:seon.error/kind report)) (pr-str report))` | R8 |
 | 610 | `(is (= :seon.test/unknown (:seon.error/kind result)) (pr-str result))` | R8 |
 | 803 | `(is (nil? (:seon.error/kind result))` | R8 |
+
 ### test/seon/test_runner_failure_fixture.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 22 | `{:seon.error/kind error-class` | R8 |
+
 ### test/seon/test_runner_test.clj
 
 | Line | Source | Replacement |
@@ -3907,6 +4218,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 2841 | `(:seon.error/kind missing)))` | R8 |
 | 2851 | `(:seon.error/kind truncated)))` | R8 |
 | 2857 | `(:seon.error/kind not-a-map)))` | R8 |
+
 ### test/seon/test_support.clj
 
 | Line | Source | Replacement |
@@ -3919,6 +4231,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 530 | `(if (:seon.error/kind result)` | R8 |
 | 556 | `(remove :seon.error/kind))` | R8 |
 | 897 | `(if (and (map? result) (keyword? (:seon.error/kind result)))` | R8 |
+
 ### test/seon/test_support_test.clj
 
 | Line | Source | Replacement |
@@ -3932,6 +4245,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 395 | `(is (= {:seon.error/kind ::flat-refusal}` | R8 |
 | 397 | `(constantly {:seon.error/kind ::flat-refusal}))))` | R8 |
 | 532 | `(is (:seon.error/kind refusal)` | R8 |
+
 ### test/seon/test_test.clj
 
 | Line | Source | Replacement |
@@ -3944,6 +4258,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 223 | `(is (= :seon.test.run/immutable (:seon.error/kind refused)) (pr-str refused))` | R8 |
 | 282 | `(is (= :seon.test.run/immutable (:seon.error/kind refused)) (pr-str refused))` | R8 |
 | 302 | `(is (= :seon.test/program-mismatch (:seon.error/kind refused)) (pr-str refused))` | R8 |
+
 ### test/seon/transact_feedback_test.clj
 
 | Line | Source | Replacement |
@@ -3952,17 +4267,20 @@ A line with several uses must convert each use; excerpts are source context, not
 | 54 | `(is (= :seon.db/invalid-write (:seon.error/kind wrong)))` | R8 |
 | 63 | `(is (= :seon.db/invalid-write (:seon.error/kind result)) (pr-str result))` | R8 |
 | 160 | `(is (nil? (:seon.error/kind result)) (pr-str result))` | R8 |
+
 ### test/seon/transaction_result_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 38 | `(is (= :seon.db/invalid-write (:seon.error/kind refused)) (pr-str refused))` | R8 |
+
 ### test/seon/turn_continue_test.clj
 
 | Line | Source | Replacement |
 |---:|---|---|
 | 84 | `(is (nil? (:seon.error/kind` | R8 |
 | 221 | `(is (= :seon.ai/unparseable-body (:seon.error/kind refusal)))` | R8 |
+
 ### test/seon/turn_loop_test.clj
 
 | Line | Source | Replacement |
@@ -3984,6 +4302,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 1546 | `(is (nil? (:seon.error/kind` | R8 |
 | 1571 | `(get-in terminal [:seon.error/value :seon.error/kind]))` | R8 |
 | 1667 | `(:seon.error/kind (:refused-outcome settled)))` | R8 |
+
 ### test/seon/turn_test.clj
 
 | Line | Source | Replacement |
@@ -4011,6 +4330,7 @@ A line with several uses must convert each use; excerpts are source context, not
 | 2061 | `(cond-> {:seon.error/source {:seon.error/kind kind :seon.error/message message}` | R8 |
 | 2155 | `(:seon.error/kind (:seon.turn.loop/parked parked))))` | R8 |
 | 2164 | `(:seon.error/kind (ex-data (:clojure.core.async.flow/ex fault)))))` | R8 |
+
 ### test/seon/turn_work_test.clj
 
 | Line | Source | Replacement |
@@ -4369,7 +4689,7 @@ Literal true declarations in audit B’s slice: `:seon.db/diff-refused`, `:seon.
 
 ## Recognition caller migration boundary
 
-The one-error-predicate landing describes changes that are not present in this checked-out source. The nine original private predicates are still defined here. Removing their kind checks requires carrying the acquired base validator, including before store acquisition. This is a semantic prerequisite to the mechanical replacement, not permission to introduce a message-only fallback.
+Original nine-copy census, superseded by D12: the instrument copy is deleted. The eight external owners below must dissolve their helpers into pure required-member checks at each declared boundary. No validator acquisition or message-only fallback belongs in recognition; generic callee output declarations are explicit step-6 dependencies.
 
 | File | Private predicate | Required replacement |
 |---|---|---|
@@ -4384,7 +4704,6 @@ The one-error-predicate landing describes changes that are not present in this c
 | `src/seon/schedule.clj` | `flat-error?` | Delete the private predicate. Inline the required-member checks for each callee’s declared facet/union, without acquiring a projection (D12); list generic callee contracts as step-6 sites. |
 
 Cause-chain preservation also needs `src/seon/error/refusal.clj`, `src/seon/sci/kernel.clj`, and the filesystem/shell/edit failure readers to recognize the same base rather than kind. Those are follow-up paths, outside this assignment’s owned files.
-
 
 ## D12 follow-up: remove recognition by general predicate
 
@@ -4622,7 +4941,6 @@ is the copy at acquisition in `src/seon/sci/eval.clj`, per that note's final
 addendum. Their generic outputs must be converted together with their
 recognition sites.
 
-
 ## Measured marker consumer dependency — 1a continuation
 
 `src/seon/sci/eval.clj:882` and `:1867` read
@@ -4673,8 +4991,9 @@ are specified in the continuation sections. No foreign file was edited.
 This dated census supersedes owned-path pending statuses above. Current raw
 kind/class search: **2240 matching lines / 2266 literal matches / 317 files**.
 Owned source/resources/tests have zero matches. `seon.error/error?` is deleted,
-not retained as a compatibility predicate. Its remaining **75 calls on 74
-lines across five files** follow. `src/seon/test.clj` is held by test-selector-a1;
+not retained as a compatibility predicate. Its remaining **75 production calls on 74
+lines across five files** follow. Ten additional test calls are listed below.
+`src/seon/test.clj` is held by test-selector-a1;
 all external files stay read-only for 1a.
 
 For each any-error branch below, use the value-only expression
@@ -4690,6 +5009,17 @@ old kind-only values as valid base observations.
 
 | Exact site | Existing expression; replacement target |
 |---|---|
+| `src/seon/plan.clj:87` | `(error/error? value))` → Delete this private predicate; inline each caller’s declared error members. |
+| `src/seon/plan.clj:108` | `(if (error/error? result)` → Inline declared base members on each existing argument. |
+| `src/seon/plan.clj:151` | `(if (error/error? entity) entity (:db/id entity))))` → Inline declared base members on each existing argument. |
+| `src/seon/plan.clj:178` | `(error/error? subject) (read-result! subject)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:1101` | `(if (error/error? read-result)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:1540` | `(if (error/error? schema-read)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:1546` | `(if (error/error? symbol-read)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:1594` | `(when (error/error? missing)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:1673` | `(when (error/error? process-rows)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:2685` | `(if (error/error? open-runs)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:3485` | `_ (when (error/error? recovery)` → Inline declared base members on each existing argument. |
 | `src/seon/test.clj:557` | `(if (error/error? result)` → Inline declared base members on each existing argument. |
 | `src/seon/test.clj:910` | `(if (error/error? (ex-data failure)) (ex-data failure) (throw failure)))))` → Inline declared base members on each existing argument. |
 | `src/seon/test.clj:927` | `(cond (error/error? members) (reduced members)` → Inline declared base members on each existing argument. |
@@ -4719,6 +5049,22 @@ old kind-only values as valid base observations.
 | `src/seon/test.clj:1394` | `(error/error? selected) selected` → Inline declared base members on each existing argument. |
 | `src/seon/test.clj:1395` | `(error/error? destructive) (assoc destructive :seon.test/next-tier :none)` → Inline declared base members on each existing argument. |
 | `src/seon/test.clj:1552` | `(error/error? custody) custody` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:334` | `(error/error? turn)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:1131` | `(if (error/error? history)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:1143` | `(if (error/error? receipt)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:1161` | `(when (error/error? opening-database)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:1166` | `(if (error/error? opening-existing)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:1174` | `(if (error/error? written?)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2669` | `(or (some #(when (error/error? %) %) [issue-t replies closed])` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2684` | `(if (error/error? issue-budget)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2700` | `(or (some #(when (error/error? %) %) [limit spent])` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2722` | `(error/error? limit) limit` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2726` | `(if (error/error? declarations-refusal)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2730` | `(error/error? spent) spent` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2738` | `(if (error/error? since)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2752` | `(if (error/error? failed-attempt)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2870` | `(if (error/error? remaining)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2883` | `(if (error/error? deferred)` → Inline declared base members on each existing argument. |
 | `src/seon/fn.clj:1387` | `refusal (some #(when (error/error? %) %) [calls references subjects])]` → Inline declared base members on each existing argument. |
 | `src/seon/fn.clj:1417` | `refusal (some #(when (error/error? %) %)` → Inline declared base members on each existing argument. |
 | `src/seon/fn.clj:1434` | `(if (error/error? selected)` → Inline declared base members on each existing argument. |
@@ -4737,33 +5083,21 @@ old kind-only values as valid base observations.
 | `src/seon/fn.clj:2861` | `(if (error/error? attribute-rows)` → Inline declared base members on each existing argument. |
 | `src/seon/fn.clj:2891` | `(if (error/error? rows)` → Inline declared base members on each existing argument. |
 | `src/seon/fn.clj:2935` | `(if (error/error? tx-data)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:334` | `(error/error? turn)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:1131` | `(if (error/error? history)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:1143` | `(if (error/error? receipt)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:1161` | `(when (error/error? opening-database)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:1166` | `(if (error/error? opening-existing)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:1174` | `(if (error/error? written?)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:2669` | `(or (some #(when (error/error? %) %) [issue-t replies closed])` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:2684` | `(if (error/error? issue-budget)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:2700` | `(or (some #(when (error/error? %) %) [limit spent])` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:2722` | `(error/error? limit) limit` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:2726` | `(if (error/error? declarations-refusal)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:2730` | `(error/error? spent) spent` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:2738` | `(if (error/error? since)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:2752` | `(if (error/error? failed-attempt)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:2870` | `(if (error/error? remaining)` → Inline declared base members on each existing argument. |
-| `src/seon/turn.clj:2883` | `(if (error/error? deferred)` → Inline declared base members on each existing argument. |
-| `src/seon/plan.clj:87` | `(error/error? value))` → Delete this private predicate; inline each caller’s declared error members. |
-| `src/seon/plan.clj:108` | `(if (error/error? result)` → Inline declared base members on each existing argument. |
-| `src/seon/plan.clj:151` | `(if (error/error? entity) entity (:db/id entity))))` → Inline declared base members on each existing argument. |
-| `src/seon/plan.clj:178` | `(error/error? subject) (read-result! subject)` → Inline declared base members on each existing argument. |
-| `src/seon/cluster.clj:1101` | `(if (error/error? read-result)` → Inline declared base members on each existing argument. |
-| `src/seon/cluster.clj:1540` | `(if (error/error? schema-read)` → Inline declared base members on each existing argument. |
-| `src/seon/cluster.clj:1546` | `(if (error/error? symbol-read)` → Inline declared base members on each existing argument. |
-| `src/seon/cluster.clj:1594` | `(when (error/error? missing)` → Inline declared base members on each existing argument. |
-| `src/seon/cluster.clj:1673` | `(when (error/error? process-rows)` → Inline declared base members on each existing argument. |
-| `src/seon/cluster.clj:2685` | `(if (error/error? open-runs)` → Inline declared base members on each existing argument. |
-| `src/seon/cluster.clj:3485` | `_ (when (error/error? recovery)` → Inline declared base members on each existing argument. |
+
+External test assertions also retire the public predicate. Each site must
+assert the complete declared error schema using the canonical fixture's handed
+projection, or its required members when the boundary handles the base:
+
+- `test/my/plan_test.clj:73` — assert the plan writer's declared failure schema.
+- `test/my/plan_test.clj:440` — assert the plan writer's declared refusal schema.
+- `test/seon/cluster_test.clj:31` — assert the boot boundary's declared refusal schema.
+- `test/seon/cluster_test.clj:46` — assert the boot boundary's declared refusal schema.
+- `test/seon/cluster_test.clj:62` — assert the boot boundary's declared refusal schema.
+- `test/seon/cluster_test.clj:422` — assert the schema of the `:seon.boot/result` observation.
+- `test/seon/turn_test.clj:908` — assert the turn boundary's declared refusal schema.
+- `test/seon/turn_test.clj:926` — assert the turn boundary's declared refusal schema.
+- `test/seon/turn_test.clj:954` — assert the turn boundary's declared refusal schema.
+- `test/seon/fn_test.clj:2017` — assert the indexing boundary's declared error schema.
 
 The six external required kind members must be removed and replaced by the
 base's required at/layer/operation members (or by an explicit `:and` with
@@ -4783,7 +5117,9 @@ evidence. This is the exact current list:
 `:seon.error/at`, qualified `:seon.error/layer`, and qualified-symbol
 `:seon.error/operation`. The diagnostic-operation field remains evidence and
 cannot substitute for these required members. Owners then add their facet's
-required evidence and declare that facet in their outputs. The following
+required evidence AFTER base construction and declare that facet in their
+outputs. Concrete facet evidence left only on the diagnostic constructor
+request would be dropped: move it to the owner's composed return value. The following
 external call lines each need those three inputs; their old kind argument is
 deleted, never copied into a replacement tag:
 

@@ -303,7 +303,6 @@ records and tallies are retained above; lane-only temporary logs and census
 files were removed after recording the evidence. Unrelated working-tree edits
 were preserved.
 
-
 ## Step 2 continuation — complete observation reader
 
 The existing persistence relation is unchanged. `observation-selector` derives
@@ -338,7 +337,6 @@ Touched in this checkpoint: `src/seon/error.clj`, `test/seon/error_test.clj`,
 and this landing note. **RESET NEEDED attributes: `[]`** for this checkpoint.
 The owning relation and installed attribute types did not change.
 
-
 ## Step 3 continuation — instrument boundary
 
 Deleted `flat-error-value?` and `buried-error`. Contract reports no longer
@@ -359,7 +357,6 @@ and arglist (4), and step-6 registration/output completeness (2) assertions.
 The combined after-change run is pending. Touched here:
 `src/seon/instrument.clj`, `test/seon/instrument_test.clj`, this note.
 **RESET NEEDED attributes: `[]`** for this checkpoint.
-
 
 ## Step 4 continuation — owned class declarations
 
@@ -629,7 +626,6 @@ bin/test --platform
 The lane ran neither command. No default reset, refork, restart, adoption or
 lifecycle command was run. Runtime publication/reset proof remains owed.
 
-
 Remaining undeclared named functions in `error.clj`, from parsed source forms
 at `796a76314` (a dated completion checklist, not a runtime registry):
 
@@ -718,11 +714,12 @@ orchestrator's mechanical sweep; this cut deliberately retains no shim.
 
 ## Exact error-owner outputs
 
-The original 46 missing declarations are accounted for: eight obsolete
-classification/render helpers and the unused run-identity helper were deleted;
-`signature` acquired its contract in D13; `evidence-text` was replaced with a
-contracted evidence formatter; the remaining **37** functions now declare
-inputs and outputs. Parsed source census: **95/95 error-owner functions and
+The original 46 missing declarations are accounted for: eight old functions
+(`kind`, `class-properties`, `matched-error-classes`, `error-marker`,
+`error-evidence`, `evidence-text`, `default-ai-prose`, `run-identity`) were
+deleted; `signature` acquired its contract in D13; the remaining **37** functions now declare
+inputs and outputs. A new `evidence-text` formatter has its own complete
+contract and performs no classification. Parsed source census: **95/95 error-owner functions and
 34/34 instrumentation functions contracted**, zero missing declarations.
 Polymorphic observation pass-throughs explicitly enumerate their permitted
 base/facet union; database readers use the database owner's declared error
@@ -759,3 +756,95 @@ A fresh serial run of D13's runnable slice is pending below.
 
 Files in this contract step: `src/seon/error.clj`, `test/seon/error_test.clj`,
 this landing note. No additional RESET NEEDED attributes in this step.
+
+Acquisition refinement: a root/value reference is acquired before recording;
+a complete occurrence value (carrying its occurrence identity) is already the
+observation and is not fetched over. The D13 regression also adds its new facet
+to this acquired observation, so the old signature carried for navigation
+cannot erase the added evidence. The writer contract now requires the fact and
+occurrence identity its caller supplies. These final assertions remain owed
+behind the external predicate-load boundary.
+
+### RESET NEEDED — consolidated wave-1 batch
+
+Retired installed attributes:
+
+```clojure
+[:seon.error/unclassified :seon.error/refusal
+ :seon.instrument/contract-violated :seon.instrument/registration-failed
+ :seon.error/kind :seon.error/class]
+```
+
+Existing root attributes now required by the error-root schema:
+`[:seon.error/layer :seon.error/operation]`. No value-type changes were made.
+The owner resets once after the external consumer/schema sweep; this lane
+never resets, reforks, restarts or adopts default.
+
+The same external compile dependency also prevents schema-hook admission:
+[the recorded editing-surface symptom](../../../seon/issues/schema-edit-admission-cannot-load-after-error-predicate-retirement.md).
+That issue is owned externally and was read, not edited. Its requested
+verification belongs after the mechanical sweep, alongside the cold gate.
+
+## D13 final verification and handoff
+
+The serial armed run of the runnable D13 slice (`9c9b50e3c`, with the duplicate
+declaration removed) completed at 20:39:31 UTC: **87 tests / 586 assertions /
+17 failures / 1 error**, exit 1. The recurrence regression completed all eight
+assertions without a failure. This run predates public-predicate retirement
+and the final acquired-observation refinement; it is not a green claim for
+the final cut.
+
+The exact red distribution is:
+
+- One owned assertion expected six transcript notifications; D13 produces one
+  notification while retaining six occurrences. The expectation is corrected
+  to one. The transcript reader counts delivered notifications at
+  `src/seon/render/transcript.clj:2014`.
+- Fifteen failures follow the refused `error/prepare` request at
+  `src/seon/cluster.clj:3058`, which omits `:seon.schema/projection`: six in
+  `sci-installed-contracts-enforce-facets-and-refusals-in-both-dials`, eight in
+  `host-boundaries-enforce-per-arity-facets-in-both-modes`, and one in
+  `a-sovereign-sci-fork-acquires-its-own-recorder`. The exact external repair is
+  recorded in the inventory; the lane did not change that caller.
+- One failure in the sovereign SCI test is the previously recorded unarmed
+  fallback instead of a registration refusal.
+- One error in `applying-without-a-handed-projection-refuses-before-collection`
+  is the existing `seon.schema/call-with-projection-state` output contract:
+  `returned undeclared error facets #{:seon.instrument/registration-error}`.
+
+Final static verification: **95/95 error-owner and 34/34 instrument functions
+declare contracts**, zero missing; clj-kondo on the four owned Clojure files
+reports **0 errors / 81 warnings / 2 info**. `git diff --check` passes. Owned
+kind/class/public-predicate sites are zero. The fresh raw inventory remains
+**2,240 lines / 2,266 matches / 317 files**; the predicate sweep comprises
+**75 production calls on 74 lines in five files**, plus **10 test calls in
+four files**, with exact locations and replacement actions in the inventory.
+
+The final refinements preserve concrete edit/MCP/index evidence in their
+specialist renderers and update the fixture examples to their facet members.
+The final acquired-observation and missing-observation assertions remain
+subject to the complete cut's load boundary and the orchestrator's cold gate.
+Files in this final slice: `src/seon/error.clj`, `test/seon/error_test.clj`,
+this landing note, and the kind-retirement inventory. No additional reset
+attributes; the consolidated list above is complete for this lane.
+
+The final six-path snapshot was rerun after those refinements. It again exited
+**1 before namespace execution**, with exactly
+`Syntax error compiling at (seon/fn.clj:1387:36). No such var: error/error?`.
+There is no test/assertion tally for this final cut. The public predicate is
+retired without a shim as ruled; the inventoried external caller sweep must
+land before these final regressions and the cold command above can execute.
+No held file was changed.
+
+The documentation edit hook reported stale dependency-gitlink citations in
+`docs/prds/context-generation/research/agents-md-audit-2026-09-15.md`; that
+external audit was not changed. This does not substitute for the successful
+owned Clojure lint or the explicitly refused test load.
+
+Cleanup verified zero Java processes using the owned worktree. Both final
+launchers exited; all five reference/cache symlinks were unlinked before
+removing `tmp/error-family-d13-wt`, preserving their targets. Lane-only scratch
+files were removed after recording the results here. Foreign working edits
+and other worktrees were preserved. No cold gate or default lifecycle command
+was run. The orchestrator owes the external sweep, batched reset, named cold
+gate and platform proof; this bounded lane stops here.

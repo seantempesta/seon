@@ -1484,7 +1484,10 @@
 
 (defn commit-call
   "Upsert one error occurrence and its bounded notifications at the writer."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/commit-tx-request]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:and :seon.error/commit-tx-request
+                        [:map [:seon.error/fact :seon.error/fact]
+                         [:seon.error.occurrence/id :seon.error.occurrence/id]]]]
                   [:or :seon.store/transaction-data :seon.db/error-result]]}
   [database request]
   (let [fact (:seon.error/fact request)
@@ -1603,7 +1606,7 @@
                         (schema/projection-from-database database))
          source (:seon.error/source request)
          acquiring? (and (map? source) (:seon.error/signature source)
-                         (not (inst? (:seon.error/at source))))
+                         (not (:seon.error.occurrence/id source)))
          acquired (when acquiring?
                     (db/pull database
                              (observation-selector (:seon.schema/projection request))
@@ -2082,7 +2085,8 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        evidence (:seon.error/data value)]
+        evidence (merge (:seon.error/data value)
+                        (select-keys value [:my.edit/error-path :my.edit/edit-observation]))]
     (str/join
      "\n"
      (remove nil?
@@ -2139,7 +2143,8 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        evidence (:seon.error/data value)]
+        evidence (merge (:seon.error/data value)
+                        (select-keys value [:seon.dev.mcp/error-cluster :seon.dev.mcp/request-observation]))]
     (str/join
      "\n"
      (remove nil?
@@ -2152,7 +2157,8 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        evidence (:seon.error/data value)]
+        evidence (merge (:seon.error/data value)
+                        (select-keys value [:seon.fn/error-subject :seon.fn/analysis-phase]))]
     (str/join
      "\n"
      (remove nil?

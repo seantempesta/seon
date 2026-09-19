@@ -125,7 +125,7 @@
           (let [observed (db/q (second (second read-form)) database (last read-form))]
             (is (= 1 (count observed)) (pr-str observed)))
           (is (str/includes? (pr-str (error/render-faults-html [:seon.agent/id "error-graph-steward"] database)) "same error"))
-          (is (= 6 (:seon.render.transcript/count (first (#'seon.render.transcript/fault-problems database "error-graph-steward" [])))))
+          (is (= 1 (:seon.render.transcript/count (first (#'seon.render.transcript/fault-problems database "error-graph-steward" [])))))
           (is (:db-after (db/transact! connection [[:db/add (:seon.error/ref a) :seon.error/resolved-tx "datomic.tx"]])))
           (is (str/includes? (pr-str (error/render-html (read-error))) "Resolved"))
           (is (schema/valid-candidate-value? :seon.error/fact (:seon.error/fact (first (#'seon.problems/error-signatures (db/db connection)))))))
@@ -590,11 +590,9 @@
     (is (= "the transition refused" (:seon.error/message fact)))))
 
 (deftest the-observed-rule-comes-from-the-deepest-ex-data
-  (let [fact (error/normalize
-              (request (transform-error
-                        (refused-chain :seon.turn/not-the-holder))))]
-    (is (= :seon.turn/not-the-holder (:seon.turn/rule (error/refusal (refused-chain :seon.turn/not-the-holder))))
-        "the wrappers carry :error and {} — the rule is at the bottom")))
+  (is (= :seon.turn/not-the-holder
+         (:seon.turn/rule (error/refusal (refused-chain :seon.turn/not-the-holder))))
+      "The wrappers carry :error and {}; the observed rule is at the bottom."))
 
 (deftest an-unclassifiable-source-is-fail-closed-never-absent
   (doseq [source [42 "a string" {:not-an-error true} nil]]
@@ -696,8 +694,7 @@
 (deftest the-default-renderers-accept-an-attribute-shaped-error
   (test-support/with-database
    (fn [_]
-     (let [value {:my.fs/not-found "/tmp/missing.edn"
-                  :my.fs/path "/tmp/missing.edn"
+     (let [value {:my.fs/error-path "/tmp/missing.edn"
                   :seon.error/message "No file exists at that path."}
            ai (error/render-ai value)
            html (error/render-html value)]
@@ -709,18 +706,18 @@
 
 (deftest the-default-html-face-links-committed-evidence
   (let [html (error/render-html
-              {:seon.error/unclassified true
-               :seon.error/id "err-42"
+              {:seon.error/id "err-42"
                :seon.error/message "Nothing recognized this error."})
         href (get-in (last html) [2 1 :href])]
     (is (str/starts-with? href "/data?"))
     (is (str/includes? href "%3Aseon.error%2Fid"))))
 
-(deftest specialist-class-renderers-accept-flat-error-values
-  (testing "instrumentation names the failed arm and received value"
+(deftest specialist-renderers-use-their-declared-evidence
+  (test-support/with-database
+   (fn [_connection]
+    (testing "instrumentation names the failed arm and received value"
     (let [prose (error/instrumentation-prose
-                 {:seon.instrument/contract-violated true
-                  :seon.instrument/fn 'my.fs/read
+                 {:seon.instrument/fn 'my.fs/read
                   :seon.instrument/arm :input
                   :seon.instrument/expected ":my.fs/read-request"
                   :seon.instrument/args "[{:my.fs/path 42}]"
@@ -729,8 +726,7 @@
       (is (str/includes? prose "path 42"))))
   (testing "refusal names the transition, rule, and atomic result"
     (let [prose (error/refusal-prose
-                 {:seon.turn/refused true
-                  :seon.turn/id "run-7"
+                 {:seon.turn/id "run-7"
                   :seon.turn/rule :seon.turn/not-holder
                   :seon.turn/transition :seon.turn/close
                   :seon.error/message "The run is held elsewhere."})]
@@ -738,8 +734,7 @@
       (is (str/includes? prose "Nothing from this close committed"))))
   (testing "AI attempt prose exposes the decision attributes"
     (let [prose (error/ai-prose
-                 {:seon.ai/transport-failure true
-                  :seon.ai/request-transmitted? false
+                 {:seon.ai/request-transmitted? false
                   :seon.ai/response-started? false
                   :seon.ai/output-observed? false
                   :seon.error/message "The provider connection failed."})]
@@ -749,19 +744,20 @@
       (is (str/includes? prose "configured failover may be safe"))))
   (testing "time-limit prose explains the diagnostic without treating it as a limit"
     (let [prose (error/time-limit-prose
-                 {:seon.sci.eval/time-limit 271000000
+                 {:seon.eval/fn-entries 271000000
                   :seon.error/message "Evaluation reached its time limit."})]
       (is (str/includes? prose "Recorded function-body entries: 271000000"))
       (is (str/includes? prose "indicate a spin"))))
   (testing "edit prose asks for a narrower source selection"
     (let [prose (error/edit-prose
-                 {:my.edit/ambiguous-match "src/seon/error.clj"
+                 {:my.edit/error-path "src/seon/error.clj"
+                  :my.edit/edit-observation {:seon.error.evidence/attribute :my.edit/from-line
+                                             :seon.error.evidence/value 1}
                   :seon.error/message "More than one form matched."})]
       (is (str/includes? prose "src/seon/error.clj"))
       (is (str/includes? prose "narrow the edit selection"))))
   (testing "render-walk elision stays neutral in both projections"
-    (let [value {:seon.render.walk/elided true
-                 :seon.error/message "The bounded walk omitted content."}
+    (let [value {:seon.error/message "The bounded walk omitted content."}
           prose (error/elision-prose value)
           html (error/elision-html value)]
       (is (str/includes? prose "content was elided"))
@@ -769,26 +765,31 @@
       (is (= :aside (first html)))
       (is (= "seon-family-entry seon-render-elision"
              (get-in html [1 :class])))))
-  (testing "unclassified prose says that the declaration is missing"
+  (testing "unavailable domain evidence is explicit"
     (let [prose (error/unclassified-prose
-                 {:seon.error/unclassified true
-                  :seon.error/source {:unexpected/value 7}
+                 {:seon.error/source {:unexpected/value 7}
                   :seon.error/message "Nothing recognized the source."})]
-      (is (str/includes? prose "No registered error class recognized"))
-      (is (str/includes? prose "declare the missing class"))))
+      (is (str/includes? prose "did not supply complete domain evidence"))
+      (is (str/includes? prose "boundary contract"))))
   (testing "MCP lookup prose keeps the requested value identity"
     (let [digest (apply str (repeat 64 "a"))
           prose (error/mcp-prose
-                 {:seon.dev.mcp/value-not-found digest
+                 {:seon.dev.mcp/error-cluster "fixture"
+                  :seon.dev.mcp/request-observation
+                  {:seon.error.evidence/attribute :seon.blob/digest
+                   :seon.error.evidence/value digest}
                   :seon.error/message "The value was absent."})]
       (is (str/includes? prose digest))
       (is (str/includes? prose "current cluster status"))))
   (testing "index refusal prose names the stopped phase"
     (let [prose (error/index-refusal-prose
-                 {:seon.fn/index-transaction-refused :schema
+                 {:seon.fn/analysis-phase :seon.fn/schema
+                  :seon.fn/error-subject {:seon.instrument/actual "source.clj"
+                                          :seon.error.projection/bound-bytes 256
+                                          :seon.error/capped? false}
                   :seon.error/message "Schema indexing was refused."})]
-      (is (str/includes? prose ":schema"))
-      (is (str/includes? prose "rerun initialization")))))
+      (is (str/includes? prose ":seon.fn/schema"))
+      (is (str/includes? prose "rerun initialization")))))))
 
 (deftest the-log-line-is-one-line-and-derived
   (let [fact (fact)
@@ -1258,7 +1259,8 @@
          (is (= (:seon.error/ref first-record) (:seon.error/ref third-record)))
          (is (= 3 (:seon.error/occurrence-count (error/latest-fact (root first-record))))))
        (let [before (root first-record)
-             added-facet (record! (assoc observed :seon.turn/error-turn-id "observed-turn")
+             added-facet (record! (assoc (error/latest-fact before)
+                                        :seon.turn/error-turn-id "observed-turn")
                                  "d13-process-a")
              other-facet (record! (-> observed
                                      (dissoc :seon.agent/error-agent-id)
@@ -1293,7 +1295,7 @@
   (test-support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           request (commit-request {:seon.error/signature (apply str (repeat 64 "0"))})
+           request (commit-request {:seon.error/signature (apply str (repeat 64 "0"))} {})
            result (error/recording database request)]
        (is ((schema/projection-validator (schema/projection-from-database database)
                                           :seon.error/base) result))
