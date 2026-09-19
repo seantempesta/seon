@@ -385,3 +385,10 @@ this landing because `instrument.clj` is held.
 Scorecard today: (v) durable facts + blobs LANDED; (i) split, (ii) changed-function selection, (iii) full run from the record, (iv) shared in-flight execution PARTIAL; (vi) launcher MISSING. A4 needs the platform tier green first.
 
 **Wave 0 order:** Codex lane lands → db-contracts finish (3.25 h, one Opus lane) → A0 → gate both → reset default from clean HEAD → Juniper → `--platform` → merge to main → A1.
+
+## 8. Owner rulings D8–D11 (2026-09-19 ~18:20 UTC)
+
+- **D8 conflicts:** root agents are spun up as needed; a conflict task carries a FINGERPRINT identity (the same detector + subject-value derivation as every task) so only one instance arises for one conflict; root resolves it; the tests written for that task must pass; then it merges. No automatic re-apply first.
+- **D9 test system:** full runs are a last resort, even for root. The system RECORDS which functions changed — consistently across exploratory SCI branches, so the identity is the definition's content digest, never a branch-local id — and reruns only tests reaching them. "Stop thinking about agents running bash commands and start thinking of the system recording data and doing more at runtime." Platform tier: orchestrator's call — it stays in isolated worker JVMs launched at wave boundaries, because the runtime must be up before anything else can be proven; everything else runs at runtime from facts.
+- **D10 models:** launch astra lanes for reviews or implementation whenever useful. The Codex live-audit session finishes its lane and stops (D7).
+- **D11 parallelism:** orchestrator's call, game-time. Decision: Track A's A0/A1 run first; the error-family lane 1a starts the moment the Codex lane releases `instrument.clj`, file-disjoint from A1; the db-contracts finish lane runs now (its files are free).

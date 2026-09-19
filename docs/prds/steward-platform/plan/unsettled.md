@@ -4055,3 +4055,15 @@ Issue `the-edit-hook-published-every-markdown-edit` resolved. OWED: publish
 repair lands (shell write, no hook publication), then a cold
 `bin/test --paths src/seon/test/cache.clj test/seon/test_cache_test.clj
 bin/seon-hook -- seon.test-cache-test`.
+
+## 2026-09-19 ~18:25 UTC — one orchestrator; wave 0 lanes launched
+
+Owner rulings D4–D11 in the plan §6 and §8. Reviews: db-contracts slice
+SOUND (finish, ~3.25 h); stage 1 mixed (`runner/bulk-selection` dead and
+breaking bare `bin/test`; selector sound). Ruling: run policy is an
+eligibility scope; full runs a last resort; changed functions recorded by
+content digest across SCI branches. Launching: `db-contracts-finish` (astra
+low) and `unbreak-bare-test` (astra low); Codex lane still finishing its
+publication repair (holds fn.clj, instrument.clj, sci/eval.clj, cluster.clj
+and their tests + seon.instrument.edn). Next: cold gates, reset from clean
+HEAD, Juniper, `--platform`, merge to main, then A1.
