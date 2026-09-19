@@ -1458,18 +1458,19 @@
 (defn- source-index-path?
   "True for first-party files admitted to the current-src publication."
   [file-path]
-  (load-direct-check! 'seon.test.selection)
-  (let [lower (some-> file-path str/lower-case)
-        relative (str (.relativize (.toPath (.getCanonicalFile (root-file ".")))
-                                  (.toPath (.getCanonicalFile (io/file file-path)))))]
+  ;; Only program inputs publish: first-party Clojure under src/ and test/, the
+  ;; shipped config manifest, and schema resources. A path outside the program
+  ;; graph (docs, tmp, logs) is a gate-selection question for bin/test, never
+  ;; a publication: on 2026-09-19 every markdown edit ran a complete
+  ;; publication and adoption of default through the retired widening clause.
+  (let [lower (some-> file-path str/lower-case)]
     (or (and (or (str/ends-with? lower ".clj")
                  (str/ends-with? lower ".cljc"))
              (or (beneath? (root-file "src") file-path)
                  (beneath? (root-file "test") file-path)))
         (= (absolute-file-path (root-file "config/default.edn"))
            (absolute-file-path file-path))
-        (schema-resource-path? file-path)
-        ((requiring-resolve 'seon.test.selection/widening-path?) relative))))
+        (schema-resource-path? file-path))))
 
 (defn- publication-result [path]
   (let [result (edn/read-string (slurp path))]
