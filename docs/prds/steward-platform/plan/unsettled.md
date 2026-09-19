@@ -4357,3 +4357,13 @@ work, so the "second bare check executes zero" proof is owed with the cold
 gate after 1a lands. Launched `kind-sweep-turn-cluster` (gpt-5.6-sol LOW)
 from the PRD template — first sol data point. Running: 1a (high), render
 (low), turn-cluster (sol low).
+
+**Answer for `error-family-1a`'s scope question (hand over at its next stop):**
+(a) the three schema diagnostic producers `render-contract-refusal!`,
+`refuse-projection-source`, `pulled-selector-refusal` in src/seon/schema.clj
+are IN scope — give each its base members and exact facet (PRD 1.1) and
+update their contracts; (b) the two SCI acquisition catches in
+src/seon/sci/eval.clj that test the retired registration-failed marker are
+IN scope for exactly those two sites (convert per PRD 1.3, list them in the
+note), since the sci-fn-program sweep lane has not launched; nothing else in
+sci/eval.clj.
