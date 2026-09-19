@@ -2215,10 +2215,14 @@
 (defn reach-digests
   "Derive equality keys from the tested database's incremental reach index."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
-                  [:or :seon.test/reach-digests :seon.error/value]]}
+                  [:or :seon.test/reach-digests :seon.test/unknown-error]]}
   [database test-symbols]
   (let [entries (reach-entries database test-symbols)]
-    (if (:seon.error/kind entries) entries
+    (if (:seon.test/unknown entries)
+      (assoc (select-keys entries [:seon.error/message :seon.test/unknown])
+             :seon.error/at (java.util.Date.)
+             :seon.error/layer :seon.test/reach
+             :seon.error/operation 'seon.test.runner/reach-digests)
         (into {} (map (fn [[s entry]] [s (::reach-digest entry)])) entries))))
 
 (defn reach-memberships

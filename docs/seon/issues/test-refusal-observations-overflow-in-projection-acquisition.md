@@ -52,3 +52,17 @@ not evidence that restoring the retired kind key would be correct.
 The check regression also stops at `seon.sci.eval/acquisition-refusal`
 (`src/seon/sci/eval.clj:1580`), whose diagnostic invocation lacks the required
 base observation. Its second-check zero-execution assertion is not reached.
+
+## 2026-09-20 — results-reuse baseline and candidate
+
+The results-reuse lane's unchanged baseline at `c76a161a3` reproduces the
+noncanonical `seon.error/config-expectation-present?` compiled schema:
+8 tests, 56 assertions, 2 failures, 1 error. Its four-namespace candidate
+at `721b110b8` plus owned overlays records 45 tests, 354 assertions,
+8 failures, 16 errors, including that provenance boundary, refused
+propagation of admission/execution facets through `seon.error.refusal/refusal`,
+and the same missing base observation in SCI acquisition. One additional
+error was the new test's own missing database request key, subsequently
+corrected; the whole tally is not attributed to this issue.
+Raw logs and the exact snapshot commands are in
+[the lane note](../../prds/steward-platform/research/results-reuse-everywhere-2026-09-20.md).

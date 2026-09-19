@@ -64,6 +64,49 @@
                            :seon.test.member/error-count 0}) ids))))
     admission))
 
+(deftest named-selection-reuses-green-members-by-reachable-content
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "named-selection")
+     (support/transacted! connection [{:seon.ns/name 'selection.fixture}])
+     (install-selection-program!
+      connection
+      "(defn leaf [] 1)
+       (defn stranger [] 2)
+       (clojure.test/deftest direct (clojure.test/is (= 1 (leaf))))
+       (clojure.test/deftest unrelated (clojure.test/is (= 2 (stranger))))")
+     (let [database (db/db connection)
+           seal (or (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] database)
+                    (apply str (repeat 64 "a")))
+           _ (support/transacted! connection
+               [{:seon.source/digest seal :seon.source/test-input-digest (apply str (repeat 64 "b"))}])
+           request {:seon.db/db (db/db connection)
+                    :seon.test.run/cluster [:seon.cluster/name "named-selection"]
+                    :seon.test/namespaces #{'selection.fixture}}
+           select! #(sut/select (assoc request :seon.db/db (db/db connection)))
+           expected #{(fixture-symbol "direct") (fixture-symbol "unrelated")}
+           initial (select!)
+           _ (is (= expected (set (map :seon.test/sym (:seon.test.run/members initial))))
+                 (pr-str initial))
+           admitted (complete-selection! connection request)
+           reused (select!)]
+       (is (= [] (:seon.test.run/members reused)) (pr-str reused))
+       (is (= expected (set (map :seon.test/sym (:seon.test.selection/unchanged reused)))))
+       (is (every? #(and (:seon.test/unchanged %)
+                        (= (get-in admitted [:seon.test.run/provenance :seon.test.run/basis-t])
+                           (:seon.test.run/basis-t %))
+                        (string? (:seon.test.run/program-digest %))
+                        (string? (:seon.test.run/input-digest %)))
+                   (:seon.test.selection/unchanged reused)))
+       (support/transacted! connection
+         [[:db/add [:seon.fn/sym (fixture-symbol "leaf")]
+           :seon.fn/source "(defn leaf [] 3)"]])
+       (let [changed (select!)]
+         (is (= #{(fixture-symbol "direct")}
+                (set (map :seon.test/sym (:seon.test.run/members changed)))) (pr-str changed))
+         (is (= #{(fixture-symbol "unrelated")}
+                (set (map :seon.test/sym (:seon.test.selection/unchanged changed))))))))))
+
 (defn exercise-selection!
   "Canonical change history shared by the selector and both-host admission regression."
   {:malli/schema [:=> [:cat [:=> [:cat :seon.test.selection/request]

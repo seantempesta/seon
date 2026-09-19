@@ -23,3 +23,10 @@ expression and print only its intended diagnostic. A1 does not own the
 dirty `bin/test`; no cause beyond the observed output is asserted here.
 The recurring proof should positively observe a bounded admission
 announcement and absence of a rendered manifest on a successful overlay.
+
+The results-reuse baseline at `c76a161a3` reproduces a single **19,961,455-byte**
+manifest line in `tmp/results-reuse-everywhere/baseline.log`. Its
+HEAD-plus-selected-paths snapshot has no source differences, so the printing
+site is the exact-HEAD fast announcement at `bin/test:869–875`. The changed
+candidate snapshot takes the separate overlay-admission expression and
+does not print that value. No launcher bytes were changed by this lane.

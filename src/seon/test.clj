@@ -691,8 +691,10 @@
   "Select complete test memberships for one explicit cluster and immutable database.
   Baselines and outstanding work derive from admitted run/member facts, ordered
   by selection transaction. Calls, references and declared subjects use one
-  union gate walk. Unknown coverage refuses; matching recorded green work under every policy
-  has zero executable members, including zero platform tests. No filesystem reads occur."
+  union gate walk. Named requests retain their declared eligibility scope.
+  Green evidence from an earlier program is reusable when its reachable content
+  and external inputs still match; its tested provenance remains unchanged.
+  Unknown coverage refuses. No filesystem reads occur."
   {:malli/schema [:=> [:cat :seon.test.selection/request]
                   [:or :seon.test.selection/result :seon.test/selection-error :seon.test/unknown-error :seon.test.run/unavailable-error
                    :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
@@ -884,7 +886,8 @@
                                           (= "test" (one (one entity :seon.fn/file) :seon.fn.file/relative-root))
                                           (named? entry))
                                       (or include-long? (identities (first entry))
-                                          (not (one entity :seon.test/long)))))) tests)
+                                          (not (one entity :seon.test/long)))
+                                      (or (not= :named policy) (named? entry))))) tests)
             _ (doseq [symbol identities :when (not (get eligible symbol))]
                 (refuse! :seon.test/identity-unresolved "The requested test is not eligible." symbol))
             _ (doseq [ns-symbol namespaces
@@ -916,26 +919,47 @@
                     {} (sort-by #(one % :seon.test.run/selection-tx)
                                 (filter #(and (= branch (one % :seon.test.run/branch))
                                               (not (one % :seon.test.run/tested-branch))
-                                              (= digest (one % :seon.test.run/program-digest))
                                               (= input-digest (one % :seon.test.run/input-digest))
                                               (one % :seon.test.run/selection-tx)) run-ids)))
+            reuse-candidates (if (and (= :incremental policy) (not work?)) eligible reasons)
+            changed-program-candidates
+            (into {} (keep (fn [[test-symbol _]]
+                             (when-let [[run-eid member] (get latest test-symbol)]
+                               (when (and (green? member)
+                                          (not= digest (one run-eid :seon.test.run/program-digest)))
+                                 [test-symbol (one run-eid :seon.test.run/basis-t)]))))
+                  reuse-candidates)
+            current-reach (when (seq changed-program-candidates)
+                            (selection-read! (runner/reach-digests database (vec (keys changed-program-candidates)))))
+            recorded-reach
+            (reduce-kv (fn [result tested-basis entries]
+                         (merge result
+                                (selection-read!
+                                 (runner/reach-digests (db/as-of database tested-basis)
+                                                       (mapv first entries)))))
+                       {} (group-by val changed-program-candidates))
             reused (into (sorted-map)
                          (keep (fn [[test-symbol _]]
                                  (when-let [[run-eid member] (get latest test-symbol)]
                                    (when (and (green? member)
                                               (or (nil? supplied-basis) (= supplied-basis (one run-eid :seon.test.run/basis-t)))
-                                              (not (reached test-symbol)))
+                                              (not (reached test-symbol))
+                                              (or (= digest (one run-eid :seon.test.run/program-digest))
+                                                  (and (string? (get current-reach test-symbol))
+                                                       (= (get current-reach test-symbol)
+                                                          (get recorded-reach test-symbol)))))
                                      [test-symbol
                                       {:seon.test/sym test-symbol :seon.test/unchanged true
                                        :seon.test/run-basis-t (one run-eid :seon.test.run/basis-t)
                                        :seon.test.run/basis-t (one run-eid :seon.test.run/basis-t)
-                                       :seon.test.run/program-digest digest :seon.test.run/input-digest input-digest
+                                       :seon.test.run/program-digest (one run-eid :seon.test.run/program-digest)
+                                       :seon.test.run/input-digest input-digest
                                        :seon.test/run-at (one run-eid :seon.test.run/at)
                                        :seon.test/run [:seon.test.run/id (one run-eid :seon.test.run/id)]
                                        :seon.test/recorded-basis-t (one member :seon.test.member/completed-tx)
                                        :seon.test/pass-count (one member :seon.test.member/pass-count)
                                        :seon.test/fail-count 0 :seon.test/error-count 0}]))))
-                         (if (and (= :incremental policy) (not work?)) eligible reasons))
+                         reuse-candidates)
             reasons (apply dissoc reasons (keys reused))]
         (cond-> {:seon.test.run/basis-t basis-t
                  :seon.test.run/cluster cluster-id

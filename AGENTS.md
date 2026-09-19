@@ -980,8 +980,11 @@ recording failure fails the gate. Fast iterations do not persist that evidence.
 execution promise. Named/all/full/platform requests reuse each member whose
 recorded green matches the program digest, input digest and requested basis.
 Selection reports each such member as `:seon.test/unchanged` with all three
-confidence values; only members lacking that evidence execute. Executable
-platform members run first. An unchanged green request can execute zero tests
+confidence values; only members lacking that evidence execute. Named selection
+stays inside its requested namespace/identity scope. An earlier program's green
+member may also be reused when its reachable content and external inputs match;
+the returned confidence retains the original tested basis and program digest.
+Executable platform members run first. An unchanged green request can execute zero tests
 under any policy. `seon.test/select` owns set selection and reuse;
 `seon.test.runner/reusable-result` owns the single-test request used by
 `seon.test/run-owned`. `:seon.test/recorded-basis-t` distinguishes the result
