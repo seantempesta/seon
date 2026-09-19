@@ -1970,8 +1970,9 @@
      (let [database (db/db connection)
            refusal
            (error/diagnostic
-            {:seon.db/invalid-read true
-             :seon.error/kind :seon.db/invalid-read
+            {:seon.error/at (java.util.Date.)
+             :seon.error/layer :seon.db/reading
+             :seon.error/operation 'seon.db/q
              :seon.error/message "The program index read was refused."
              :seon.error/diagnostic-layer :database-read
              :seon.error/diagnostic-operation 'seon.db/q
