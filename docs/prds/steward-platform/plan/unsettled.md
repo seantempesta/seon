@@ -4563,3 +4563,17 @@ admits a foreign dirty caller at its HEAD bytes, names it, records it on the
 run — it is holding render and 1a in a circle. Then steps 2–5. Its baseline
 9/58/3F/2E is blocked by 1a's HEAD noncanonical-schema red at
 selection_test.clj:89 (boundary).
+
+## 2026-09-20 ~09:40 UTC — owner: are we creating our own problems in the bridge?
+
+Owner: "we wrote the bridge between the schemas and the database. Can we
+apply the recent learnings better? What are our pain points and are we
+creating our own problems?" Orchestrator's assessment: yes, three places —
+(1) a second schema compiler over Malli (3,854-line schema.clj: own
+registry, raw form walker, own compile pass and cache; every stall this
+week was that layer fighting Malli); (2) three sources of "the projection"
+(packaged forms, database rows, carried) behind both adoption bugs; (3) the
+whole-entity validator's cost on the serial writer behind the publication
+silence. Launched `bridge-dissolution-review` (astra HIGH, read-only): the
+pain-point ledger, the one-projection-value design, the validator's share,
+three options with migration order, a recommendation and the first lane.
