@@ -70,6 +70,45 @@ exact verification boundary when reporting.
 10. **Landing note** under `docs/prds/context-generation/research/`, dated,
     with exact bytes and measured numbers; issues under `docs/seon/issues/`
     for anything out of scope; never a finding left in chat.
+11. **One JVM per lane, two test JVMs per repository, three editing lanes**
+    (owner, 2026-09-20: "I'm tired of my machine dragging"). A lane never
+    launches a fast run or a probe JVM in the background and never overlaps
+    two; it takes its thread samples from the one running JVM. `bin/_test-slot`
+    bounds every worktree of one repository to two concurrent test JVMs
+    (derived from Git's common directory, `2cdb7ef8a`); the orchestrator runs
+    at most three editing lanes beside `default`. Seven JVMs at once (load 25)
+    is the incident this rule closes.
+12. **Lanes never create worktrees.** Iterate in the shared tree with
+    `bin/test-fast --paths <owned files…> -- <namespaces…>`; at an overlay
+    refusal naming a foreign dirty caller, STOP and report the path — never
+    work around it with `git worktree add`. Only the orchestrator baselines a
+    suspect snapshot in a worktree, and removes it in the same turn. (Owner:
+    worktrees cause more problems than they solve for structural edits.)
+13. **HEAD loads after every commit.** A retirement, rename or deletion of a
+    public Var and the conversion of every caller are ONE slice; a lane that
+    finds callers it cannot convert stops BEFORE deleting and lists them.
+    Prove it before each commit: `clojure -M -e "(require '<owned ns>…)"`.
+    On 2026-09-20 a retired predicate with 74 inventoried callers left HEAD
+    uncompilable and blocked every gate and lane for two hours.
+14. **Run roots are swept only when no JVM references them**
+    (`ps -eo command | grep java | grep test-runs`), never by a `pgrep` for
+    the root's name: `bin/test` keeps its root in a shell variable, so the
+    process table cannot prove absence. A root younger than the oldest live
+    `bin/test` is never swept.
+15. **Hook publication is paused during a multi-lane source cut and resumed
+    at the reset** (`.claude/seon-hook.edn` `:current-source :enabled`).
+    While three lanes edit `src/`, every edit otherwise queues a complete
+    publication and adoption of `default` (60–150 s under the lifecycle
+    lock), and each one is refused; the orchestrator records the pause and
+    the re-enable in the working edge. Documentation edits never publish
+    and never widen a gate: gate inputs are DECLARED
+    (`seon.test.cache/input-roots`), not "everything outside src and test".
+16. **Models for lanes** (owner, 2026-09-19/20): `gpt-6-astra` high for design
+    cuts, planning and review; `gpt-6-astra` low for bounded well-specified
+    slices; `gpt-5.6-sol` low for PRD-driven mechanical sweeps; Opus never
+    for implementation (it overdoes core work). A stopped lane on a Codex
+    usage limit is reported to the owner and resumed after the go-ahead,
+    never relaunched under a new name.
 
 ## How we work here
 
