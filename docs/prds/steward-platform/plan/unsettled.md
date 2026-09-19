@@ -4115,3 +4115,7 @@ must exit nonzero with the named refusal.
 shadowed-local warnings fixed in `8cf23ea4f`. A0's cold gate running
 (`a0-cold-2026-09-19.log`). Effort data point: astra LOW finished a
 3-hour-priced sound slice in ~50 min, cold green first time.
+
+## 2026-09-19 ~19:55 UTC — A0 gate refused at admission; lane resumed
+
+`bin/test --paths src/seon/test/runner.clj bin/test test/seon/test/runner_test.clj -- seon.test.runner-test` exited 64: "Incomplete --paths overlay; add changed caller files: src/seon/test.clj" (the inherited selector; tools-queue item 3). Rerun with the selector files in the overlay (`a0-stage1-cold-2026-09-19.log`): base prepared in 169 s (population 94,106 operations), three workers ready at ~30 s fixture priming, then the coordinator refused before any test: `:seon.test.runner/missing-fixture-observation` for A0's own regression `bare-selection-refuses-without-authority-before-launch` (reaches an expensive fixture through the real coordinator entry without a declared observation). Retained root `tmp/test-runs/run.ca77Ao` (sweep after the fix). `unbreak-bare-test` resumed (astra low) with the exact bytes; `error-family-1a` at 24 min.
