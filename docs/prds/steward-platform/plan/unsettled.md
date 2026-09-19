@@ -4506,3 +4506,15 @@ github.com/seantempesta/malli (branch `seon-ref-scope`), `.gitmodules`
 repointed (`5db1c989a`), gitlink committed. `kind-sweep-render` resumed in
 the freed slot. Running: 1a (high), results-reuse (medium), render (low).
 Review ranks 3–6, 9–12 remain for a `malli-compile-ownership` lane after 1a.
+
+## 2026-09-20 ~08:20 UTC — test-reuse gate ruled: one recording authority
+
+`results-reuse-everywhere` checkpoint `b26dc7904` (named selection compares
+reachable content; 9/58/3F/2E on the selector, blocked by the HEAD
+noncanonical-schema red 1a owns). Gate: how a fast run records. Ruled
+option 1 (lane's recommendation): a fast run records through the cold
+gate's admission and recorder against the published base it resolved, run
+identity = (base digest, overlay input digest, program digest, basis),
+honest that the tested program is the snapshot; ownership extended to
+cluster/source.clj's admission/recording region + seon.source.edn. Lane
+resumed for steps 2–5. Running: 1a (high), results-reuse (medium), render (low).
