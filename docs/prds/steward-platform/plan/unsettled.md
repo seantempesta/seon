@@ -4003,3 +4003,27 @@ file writer. Open disagreements include pre-acceptance merge testing,
 conversation fulfillment versus wake coverage, and whether existing
 `issue.opening/source` already supplies the forms a proposed render change
 would duplicate. Read the exchange before implementing either draft.
+
+## 2026-09-19 ~11:00 local — namespace agents: owner rulings D1–D3, plan and audits landed
+
+Plan: [namespace-agents-plan-2026-09-19.md](namespace-agents-plan-2026-09-19.md)
+(commit `1204bbf46` + this turn). Six audits under `../research/*-2026-09-19.md`.
+A parallel session (owner-launched) wrote
+[namespace-agents-design-2026-09-19.md](../research/namespace-agents-design-2026-09-19.md),
+the README's "Current proposed sequence" and four issues; the two sessions
+take turns in the plan's §5 until one sequence survives in the README.
+
+Rulings (question tool): **D1** `:seon.ns/agents` (cardinality-many) +
+`seon.task` (renamed `seon.issue`) + conversation derived from message facts;
+"steward"/"issue" are legacy spellings. **D2** a trigger maps to a TASK: an
+existing task with an agent gets the occurrence as an update (wake), no task
+→ create it and spin up an agent; division of labor and focus; namespace
+membership is never the routing key. **D3** data model first; kinds are
+always a problem; errors clear and well specified through really well
+written schemas — lane 1a (error family, astra high) goes first and deletes
+`:seon.error/kind` + the 52 class markers in one cut.
+
+State: default alive (pid 41822, started by the other session); adoption
+exits at the 30 s silence bound twice; dirty inherited slices (db contracts,
+stage 1) unchanged; no lanes launched by this session (design converges
+first, then launch once).

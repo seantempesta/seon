@@ -1,6 +1,6 @@
 ---
 type: plan
-status: proposed (owner decisions D1–D4 open; folds into README.md's sequence once ruled)
+status: ruled D1–D3 by the owner 2026-09-19 (see §3); the hybrid with the parallel session converges in §5, then this replaces the README's sequence
 created: 2026-09-19
 tags: [plan, namespace-agents, schema, data-model, instrumentation, isolation, templates]
 ---
@@ -62,9 +62,9 @@ Exit: adopted commit = source; MCP jvm/sci answer; platform green.
 
 | Lane | Owner | Owned files | Work (audit rows) | Regression / live proof |
 |---|---|---|---|---|
-| **1a Error family** | astra high | `seon.error*.edn`, `src/seon/error.clj`, `seon.instrument.edn` | B-R1 `:seon.error/observation-id` identity on the base and an owning root for facets; `seon.error/error?` accepts the base (B1 predicate); C1–C2 of audit B; `:seon.error/kind` deletion staged per D3; D1–D6 error-accuracy fixes in `instrument.clj`/`error.clj` (caller in the sentence; no relabelling; loaded Var's arglists; classified refusal; ex-data in the gate log) | transact one facet of every kind on the fixture: stored, pulled, rendered; a contract miss names function, arity, argument path, expected shape, offending value, caller |
+| **1a Error family (FIRST, D3)** | astra high, design reviewed | `seon.error*.edn`, `src/seon/error.clj`, `seon.instrument.edn` | B-R1 `:seon.error/observation-id` identity on the base and an owning root for facets; `seon.error/error?` accepts the base (B1 predicate); C1–C2 of audit B; `:seon.error/kind` and the 52 class markers deleted in this cut (D3); every function's contract lists its error facets (1q); D1–D6 error-accuracy fixes in `instrument.clj`/`error.clj` (caller in the sentence; no relabelling; loaded Var's arglists; classified refusal; ex-data in the gate log) | transact one facet of every kind on the fixture: stored, pulled, rendered; a contract miss names function, arity, argument path, expected shape, offending value, caller |
 | **1b Test evidence family** | sol | `seon.test*.edn`, `src/seon/test.clj` (after stage 1 lands), `src/seon/test/runner.clj` recorder seam | C-R1 required authority facts on run/member + `:seon.test/adoption-observed-tx`; `check-adoption` reads absence as unknown; dissolve the third failure encoding (`seon.test.report.edn`); contradictory accretion counts refused at the validator | fixture: an empty adoption set is a typed unknown; a run row without provenance refuses |
-| **1c Agent, namespace, turn, render** | sol | `seon.ns.edn`, `seon.agent.edn`, `seon.turn*.edn`, `seon.render.edn`, `src/seon/cluster/agent.clj`, `src/seon/turn.clj` state derivations, `error.clj:1954,2008` routing | `:seon.ns/agents` set + the steward rename (D1, D2 routing); the 4 non-derivable agent states made derivable (crashed-open vs running via boot-recovery `closed-tx` + proc-liveness fact = B6; assigned vs declined with a positive fact; unassigned vs deleted); delete `:seon.turn.work/situation` and both `trigger` attrs; render-pair union → `:qualified-symbol` | fixture: two agents on one namespace, a fault wakes both, one claim on `:seon.turn/handled`; every agent state answered by one query |
+| **1c Agent, namespace, turn, render** | sol | `seon.ns.edn`, `seon.agent.edn`, `seon.turn*.edn`, `seon.render.edn`, `src/seon/cluster/agent.clj`, `src/seon/turn.clj` state derivations, `error.clj:1954,2008` routing | `:seon.ns/agents` set + the steward rename (D1); routing by TASK identity at the writer (D2: existing task+agent → wake as update; none → create task, spin up agent); the 4 non-derivable agent states made derivable (crashed-open vs running via boot-recovery `closed-tx` + proc-liveness fact = B6; assigned vs declined with a positive fact; unassigned vs deleted); delete `:seon.turn.work/situation` and both `trigger` attrs; render-pair union → `:qualified-symbol` | fixture: two agents on one namespace with two tasks; a second fault occurrence of task A wakes only A's agent; a new fault class creates task B and spins up its agent; a third occurrence starts nothing; every agent state answered by one query |
 
 Serialized behind them (shared owners): **1d config + plan** (A-R1 dissolve `:seon.config/display`/settings, delete `:seon.ai.attempt/model`, declare the 3 undeclared properties, `:my.plan.item/needs` required) and **1e deletion-dial sweep** (118 refs: each docstring names cascade/sweep/refuse/value; a checker requiring a `:description` on every ref, failing the gate on drift) — mechanical, sol low or Opus.
 
@@ -102,12 +102,11 @@ The remaining ~1,800 functions are NOT a human campaign: with 2a landed they are
 
 F2/F3: pure (accepted entity, file bytes) → file bytes by span; the ordinary indexer reproduces the merged entities byte for byte; targeted + platform + fresh-boot gates; path-limited commit (never push without the owner). Then the demonstration: two namespace agents on one namespace, two forked clusters, one schema task and one function/render task, a disjoint merge and a deliberately conflicting one (refused with repair data), a malformed candidate refused before install, both accepted changes exported and committed, and a conversation handled by the same mechanism. Then the contract campaign as agent work.
 
-## 3. Owner decisions
+## 3. Owner rulings (2026-09-19, via the question tool)
 
-- **D1 names**: `:seon.ns/agents` + `seon.task` + derived conversation (recommended) / `:seon.ns/maintainers` / keep `seon.issue`.
-- **D2 fault routing with several namespace agents**: wake every namespace agent, the first settled claim on `:seon.turn/handled` owns it (recommended: derived, no new state) / deterministic pick (least-loaded by open turns) / notify one designated agent per namespace (re-introduces the singular model).
-- **D3 `:seon.error/kind` and the 52 class markers**: predicate accepts the base now, kind deleted at the wave-1 reset (recommended; 978 src + 947 test sites are mechanical) / delete both now inside 1a (blocks every other lane on `error.clj`) / keep kind as a derived render hint (against ruling 1o).
-- ~~D4~~ answered by the owner 2026-09-19: two sessions run in parallel and take turns iterating on the plan; §5 is the handoff surface.
+- **D1 names — RULED: `:seon.ns/agents` + `seon.task` + derived conversation.** Namespace agent is the term; `steward` and `issue` become legacy spellings in the vocabulary table.
+- **D2 routing — RULED, and it reshapes 1c: "the trigger should map to TASK, so if an agent is already spun up for that specific task it gets an update and if not we spin up a new one. So there is a division of labor and focus."** Consequences: a trigger (fault class, red test, unanswered request, detector finding) resolves to a task identity = detector + subject value (`seon.issue/subject-id` already derives it); the writer decides in one transaction whether that task exists and has an agent — if yes, the new occurrence is a wake for THAT agent (an update); if no, the task is created and an agent spun up for it. Namespace membership (`:seon.ns/agents`) is responsibility and context, never the routing key; "wake all namespace agents" is withdrawn. No second agent is ever started for one task (`start!` refuses while `:seon.task/agent` exists); several agents in one namespace exist because their tasks differ.
+- **D3 errors — RULED: fix the data model first; kinds are always a problem; errors must be clear and well specified so we know exactly what is in them, through really well written schemas. "Getting these right is very important."** Consequences: lane 1a is the FIRST lane of wave 1 and the one with the highest effort (astra high, design reviewed): the base + facets get identity and ownership so they store; every error the system returns is an entity whose schema IS its meaning (ruling 1o), every function lists the errors it returns (1q); `:seon.error/kind` and the 52 class markers are deleted in the same cut, not staged; `error.clj`, `seon.error*.edn` and the consumer sites are held by 1a until it lands; 1b and 1c proceed on disjoint files. The reset that follows carries 1a's type changes.
 
 ## 4. What this plan deliberately does not do
 
@@ -124,7 +123,7 @@ the reason, propose the merged text, sign with session and time. The README's
 file's §2 is ours; the converged sequence replaces both in the README so only
 one ordered list survives.
 
-**Turn 1 (this session, 2026-09-19 ~10:45 local).** Read
+**Turn 1 (this session, 2026-09-19 ~10:45 local; owner rulings D1–D3 added ~11:00, see §3 — they settle the Nouns row (two nouns) and change the routing model for both sessions: trigger → task → its agent).** Read
 [namespace-agents-design-2026-09-19.md](../research/namespace-agents-design-2026-09-19.md),
 the README sequence rows 0–5, the three `-native`/`-supplement` audits'
 headers and the four issues.
