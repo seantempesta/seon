@@ -4144,3 +4144,15 @@ fast 79/502/0/0; the kind-retirement inventory covers 2,357 lines in 323 files
 D12: no general predicate — contracts name the exact error schemas, the wrapper
 validates them, callers test the specific declared schema's required members.
 Lane resumed on D12 for steps 3–6.
+
+## 2026-09-19 ~21:00 UTC — A0 gate run 3: second masked offender
+
+`a0-stage1-cold-3`: refused again at `verify-fixture-observations!`, now on the
+pre-existing `seon.test.runner-test/the-platform-tier-declares-no-destructive-drill`
+(runner_test.clj:450), masked in run 2 because the check throws at the first
+offender. So `seon.test.runner-test` has never passed this admission since the
+check landed (destructive-tests-derived, 2026-09-17). Handed to lane
+`platform-drill-red` at its next stop (it owns that region and the checker).
+Tools-queue item 7: `verify-fixture-observations!` reports EVERY offender in
+one refusal, never the first alone (absence-as-health class: one fix, one new
+red, per gate run).
