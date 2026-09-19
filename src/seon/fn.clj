@@ -1384,7 +1384,10 @@
         (let [calls (db/datoms database :avet :seon.fn/calls target)
               references (db/datoms database :avet :seon.fn/references target)
               subjects (db/datoms database :avet :seon.test/subject target)
-              refusal (some #(when (error/error? %) %) [calls references subjects])]
+              refusal (some #(when (and (map? %)
+                                        (contains? % :seon.error/at)
+                                        (contains? % :seon.error/layer)
+                                        (contains? % :seon.error/operation)) %) [calls references subjects])]
           (if refusal
             refusal
             (let [referrers (into (get incoming target #{})
@@ -1414,7 +1417,10 @@
         handlers (db/q '[:find ?caller ?symbol
                          :where [?caller :seon.fn/sym]
                                 [?caller :seon.effect/capability ?symbol]] database)
-        refusal (some #(when (error/error? %) %)
+        refusal (some #(when (and (map? %)
+                                  (contains? % :seon.error/at)
+                                  (contains? % :seon.error/layer)
+                                  (contains? % :seon.error/operation)) %)
                       [identity-rows test-symbols declared file-references handlers])]
     (if refusal
       refusal
@@ -1431,7 +1437,10 @@
           (reduce (fn [result function-symbol]
                   (let [selected (gate-set-in database identities (set test-symbols)
                                               incoming [function-symbol])]
-                    (if (error/error? selected)
+                    (if (and (map? selected)
+                             (contains? selected :seon.error/at)
+                             (contains? selected :seon.error/layer)
+                             (contains? selected :seon.error/operation))
                       (reduced selected)
                       (assoc result function-symbol selected))))
                 {} (distinct function-symbols)))))))
@@ -1494,7 +1503,10 @@
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [database function-symbol]
   (let [result (gate-sets database [function-symbol])]
-    (if (error/error? result) result (get result function-symbol))))
+    (if (and (map? result)
+             (contains? result :seon.error/at)
+             (contains? result :seon.error/layer)
+             (contains? result :seon.error/operation)) result (get result function-symbol))))
 
 (defn tests-reaching
   "Compatibility spelling for the shared gate-set derivation."
@@ -2690,12 +2702,18 @@
     (letfn [(normalize-many [values]
               (reduce (fn [result value]
                         (let [normalized (normalize-value value)]
-                          (if (error/error? normalized)
+                          (if (and (map? normalized)
+                                   (contains? normalized :seon.error/at)
+                                   (contains? normalized :seon.error/layer)
+                                   (contains? normalized :seon.error/operation))
                             (reduced normalized)
                             (conj result normalized))))
                       #{} values))
             (normalize-map [row]
-              (if (error/error? row)
+              (if (and (map? row)
+                       (contains? row :seon.error/at)
+                       (contains? row :seon.error/layer)
+                       (contains? row :seon.error/operation))
                 row
                 (reduce-kv
                  (fn [result attribute value]
@@ -2707,7 +2725,10 @@
                                           [attribute :db/cardinality]))
                              (normalize-many value)
                              (normalize-value value))]
-                       (if (error/error? normalized)
+                       (if (and (map? normalized)
+                                (contains? normalized :seon.error/at)
+                                (contains? normalized :seon.error/layer)
+                                (contains? normalized :seon.error/operation))
                          (reduced normalized)
                          (assoc result attribute normalized)))))
                  {} row)))
@@ -2741,7 +2762,10 @@
     (loop [pending desired changes []]
       (if-let [row (first pending)]
         (let [current (entity (program/row-identity row))]
-          (if (error/error? current)
+          (if (and (map? current)
+                   (contains? current :seon.error/at)
+                   (contains? current :seon.error/layer)
+                   (contains? current :seon.error/operation))
             current
             (let [normalized-current
                   (normalized-index-row row-shapes database current
@@ -2749,7 +2773,10 @@
                   normalized-desired
                   (normalized-index-row row-shapes database row
                                         identity-attributes entity)
-                  refusal (some #(when (error/error? %) %)
+                  refusal (some #(when (and (map? %)
+                                            (contains? % :seon.error/at)
+                                            (contains? % :seon.error/layer)
+                                            (contains? % :seon.error/operation)) %)
                                 [normalized-current normalized-desired])]
               (cond
                 refusal refusal
@@ -2804,11 +2831,17 @@
   (let [entity (memoize #(db/pull database '[*] %))]
    (letfn [(reference [value]
             (let [pulled (entity (:db/id value))]
-              (if (error/error? pulled)
+              (if (and (map? pulled)
+                       (contains? pulled :seon.error/at)
+                       (contains? pulled :seon.error/layer)
+                       (contains? pulled :seon.error/operation))
                 pulled
                 (or (program/row-identity pulled) (row pulled)))))
           (row [entity]
-            (if (error/error? entity)
+            (if (and (map? entity)
+                     (contains? entity :seon.error/at)
+                     (contains? entity :seon.error/layer)
+                     (contains? entity :seon.error/operation))
               entity
               (reduce-kv
                (fn [result attribute value]
@@ -2824,7 +2857,10 @@
                              (loop [pending (seq value) values #{}]
                                (if-let [member (first pending)]
                                  (let [portable-member (reference member)]
-                                   (if (error/error? portable-member)
+                                   (if (and (map? portable-member)
+                                            (contains? portable-member :seon.error/at)
+                                            (contains? portable-member :seon.error/layer)
+                                            (contains? portable-member :seon.error/operation))
                                      portable-member
                                      (recur (next pending)
                                             (conj values portable-member))))
@@ -2835,7 +2871,10 @@
                                           [attribute :db/cardinality]))
                              (set value)
                              value))]
-                     (if (error/error? portable)
+                     (if (and (map? portable)
+                              (contains? portable :seon.error/at)
+                              (contains? portable :seon.error/layer)
+                              (contains? portable :seon.error/operation))
                        (reduced portable)
                        (assoc result attribute portable)))))
                {} entity)))]
@@ -2848,17 +2887,26 @@
               (db/q '[:find [?entity ...] :in $ ?attribute
                       :where [?entity ?attribute]]
                     database attribute)]
-          (if (error/error? entity-ids)
+          (if (and (map? entity-ids)
+                   (contains? entity-ids :seon.error/at)
+                   (contains? entity-ids :seon.error/layer)
+                   (contains? entity-ids :seon.error/operation))
             entity-ids
             (let [attribute-rows
                   (loop [pending (seq entity-ids) result []]
                     (if-let [entity-id (first pending)]
                       (let [portable (row (entity entity-id))]
-                        (if (error/error? portable)
+                        (if (and (map? portable)
+                                 (contains? portable :seon.error/at)
+                                 (contains? portable :seon.error/layer)
+                                 (contains? portable :seon.error/operation))
                           portable
                           (recur (next pending) (conj result portable))))
                       result))]
-              (if (error/error? attribute-rows)
+              (if (and (map? attribute-rows)
+                       (contains? attribute-rows :seon.error/at)
+                       (contains? attribute-rows :seon.error/layer)
+                       (contains? attribute-rows :seon.error/operation))
                 attribute-rows
                 (recur (next attributes) (into rows attribute-rows))))))
         rows)))))
@@ -2888,7 +2936,10 @@
          rows (if source-database
                 (published-index-rows source-database)
                 (desired-rows request progress!))]
-     (if (error/error? rows)
+     (if (and (map? rows)
+              (contains? rows :seon.error/at)
+              (contains? rows :seon.error/layer)
+              (contains? rows :seon.error/operation))
        rows
        (let [_ (when source-database
                  (report-index-progress! progress! "development published rows read"))
@@ -2932,7 +2983,10 @@
                                    projection
                                    #(reconcile-tx-in row-shapes database rows
                                                      previous-identities))]
-                              (if (error/error? tx-data)
+                              (if (and (map? tx-data)
+                                       (contains? tx-data :seon.error/at)
+                                       (contains? tx-data :seon.error/layer)
+                                       (contains? tx-data :seon.error/operation))
                                 (throw
                                  (ex-info (:seon.error/message tx-data)
                                           tx-data))
