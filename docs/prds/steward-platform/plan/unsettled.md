@@ -4259,3 +4259,18 @@ HEAD unloadable is not a coherent slice — the lane should have converted the
 callers or stopped before deleting the Var; the spec asked for an inventory
 and got exactly that. Orchestrator error: the spec split "retire" from
 "convert callers" across lanes without requiring HEAD to load in between.
+
+## 2026-09-20 ~01:40 UTC — HEAD loads again; kind schema references next
+
+`predicate-caller-sweep` (astra HIGH, ~35 min) landed `ef67f8a8b` … `9f0dac6e3`:
+all 74 production and 10 test call sites converted to base/facet member
+checks per boundary; cluster.clj's prepare request supplies its projection;
+`rg error/error?` = 0; HEAD load proofs pass (re-verified here: `:loads`).
+Its fast run was refused before tests: 18 references to the deleted
+`:seon.error/kind` remain as MEMBERS in 9 schema resources (cluster.eval,
+problems, maintenance.result, context.contribution, context.capture,
+turn.loop, test.accretion, render, eval.drive), so registration refuses at
+`seon.instrument/apply!`. Lane `kind-schema-references` (astra LOW) launched
+to make the tree armable (R4/R5 per site, iterate to a tally). The 937 src and
+882 test data-map uses of the key are the wave-1 batch sweep, after A1. A1
+stays paused until the fast loop arms.
