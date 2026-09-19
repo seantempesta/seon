@@ -106,6 +106,13 @@
                                                   (inc (db/basis-t (db/db connection))))))))
        (complete-selection! connection request)
        (is (= #{} (symbols (select!))) "A green bare rerun selects zero, including platform.")
+       (is (= (symbols first-selection)
+              (set (map :seon.test/sym (:seon.test.selection/unchanged (select!)))))
+           "A bare request reports the matching recorded members with their confidence.")
+       (complete-selection! connection request)
+       (is (= (symbols first-selection)
+              (set (map :seon.test/sym (:seon.test.selection/unchanged (select!)))))
+           "A zero-member admission does not erase earlier recorded green evidence.")
        (doseq [policy [:named :all :platform]]
          (let [selection (select-request
                           (cond-> (assoc request :seon.db/db (db/db connection)

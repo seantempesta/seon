@@ -837,6 +837,8 @@
               (selection-read! (db/q '[:find [?symbol ...] :where [_ :seon.test/sym ?symbol]] database))
               (into (into (into identities reached) (keys pending))
                     (concat
+                     (when (and (= :incremental policy) (not work?))
+                       (map #(one % :seon.test.member/symbol) (mapcat members runs)))
                      (when (seq namespaces)
                        (selection-read!
                         (db/q '[:find [?symbol ...] :in $ [?name ...]
@@ -932,7 +934,8 @@
                                        :seon.test/run [:seon.test.run/id (one run-eid :seon.test.run/id)]
                                        :seon.test/recorded-basis-t (one member :seon.test.member/completed-tx)
                                        :seon.test/pass-count (one member :seon.test.member/pass-count)
-                                       :seon.test/fail-count 0 :seon.test/error-count 0}])))) reasons)
+                                       :seon.test/fail-count 0 :seon.test/error-count 0}]))))
+                         (if (and (= :incremental policy) (not work?)) eligible reasons))
             reasons (apply dissoc reasons (keys reused))]
         (cond-> {:seon.test.run/basis-t basis-t
                  :seon.test.run/cluster cluster-id

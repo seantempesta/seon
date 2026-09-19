@@ -2278,6 +2278,7 @@
       :seon.error/operation 'seon.test.runner/program-digest
       :seon.test.run/unavailable true
       :seon.test.run/provenance-failure (or (ex-message failure) (.getName (class failure)))
+      :seon.error/data (or (ex-data failure) {})
       :seon.error/message (str "Test provenance unavailable: " (ex-message failure))})))
 
 (defn provenance
