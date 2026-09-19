@@ -242,7 +242,7 @@
                              :seon.test.member/reasons #{:first-run})
            request {:seon.test.run/provenance provenance
                     :seon.test.run/cluster [:seon.cluster/name "test-admission"]
-                    :seon.test.run/input-digest (id/digest 64 [:admission :inputs])
+                    :seon.test.run/input-digest (db/q '[:find ?digest . :where [_ :seon.source/test-input-digest ?digest]] database)
                     :seon.test.run/policy :incremental
                     :seon.test.run/include-long? false
                     :seon.test.run/members (mapv member (take 2 symbols))}
@@ -290,7 +290,7 @@
            request {::ignored :not-a-database-attribute
                     :seon.test.run/provenance (runner/provenance database)
                     :seon.test.run/cluster [:seon.cluster/name "test-admission-empty"]
-                    :seon.test.run/input-digest (id/digest 64 [:admission :inputs])
+                    :seon.test.run/input-digest (db/q '[:find ?digest . :where [_ :seon.source/test-input-digest ?digest]] database)
                     :seon.test.run/policy :incremental
                     :seon.test.run/include-long? false
                     :seon.test.run/members []}

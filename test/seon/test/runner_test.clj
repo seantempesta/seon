@@ -19,6 +19,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
             [seon.test.runner :as runner]
+            [seon.test.selection-test :as selection-tests]
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
 
@@ -46,6 +47,16 @@
                    :seon.db/db :published-database-value}
                   (get-in refusal [:seon.error/data :seon.error/diagnostic-expected])))
            (is (= name (get-in refusal [:seon.error/data :seon.error/diagnostic-offending])))))))))
+
+(deftest selection-is-one-function-on-both-hosts
+  (selection-tests/exercise-selection!
+   (fn [request]
+     (let [worker (runner/worker-request-admission request)
+           check (seon-test/check-request-admission request)
+           stable #(if (:seon.test.run/provenance %)
+                     (update % :seon.test.run/provenance dissoc :seon.test.run/id :seon.test.run/at) %)]
+       (is (= (stable worker) (stable check)))
+       (seon-test/select request)))))
 
 (deftest a-cold-worker-does-not-arm-its-base-around-host-test-bodies
   (test-support/preserving-instrumentation-state
@@ -184,6 +195,10 @@
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "claim-authority")
+     (test-support/transacted! connection
+       [{:seon.source/digest (or (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
+                                 (id/digest 64 [:fixture :program]))
+         :seon.source/test-input-digest (id/digest 64 [:claims :inputs])}])
      (let [child (.start (ProcessBuilder. ["cat"]))
            release (fn [process]
                      (.destroy ^Process process)
@@ -287,6 +302,10 @@
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "platform-claim")
+     (test-support/transacted! connection
+       [{:seon.source/digest (or (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
+                                 (id/digest 64 [:fixture :program]))
+         :seon.source/test-input-digest (id/digest 64 [:platform :inputs])}])
      (let [child (.start (ProcessBuilder. ["cat"]))]
        (with-open [owned (test-support/closeable
                           child #(do (.destroy ^Process %)
