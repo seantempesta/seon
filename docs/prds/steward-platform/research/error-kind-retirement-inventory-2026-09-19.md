@@ -4621,3 +4621,49 @@ belongs to `src/seon/test/runner.clj`. The additional SCI arity-parity defect
 is the copy at acquisition in `src/seon/sci/eval.clj`, per that note's final
 addendum. Their generic outputs must be converted together with their
 recognition sites.
+
+
+## Measured marker consumer dependency — 1a continuation
+
+`src/seon/sci/eval.clj:882` and `:1867` read
+`:seon.instrument/registration-failed` in exception data. After the owned
+stamp deletion, the canonical `a-sovereign-sci-fork-acquires-its-own-recorder`
+regression falsifies the guarantee that base construction refuses an unarmed
+SCI definition: the catch permits fallback instead. These are actual marker
+reads, beyond the kind/class-property search above. Replace both with required
+members of the producer's declared `:seon.instrument/registration-error`:
+`:seon.error/at`, `:seon.error/layer`, `:seon.error/operation`,
+`:seon.instrument/fn`, `:seon.instrument/registration-observation`. Use pure
+value checks; no general predicate or projection acquisition. The owned
+`wrap-interpreted` failure constructor now supplies the complete facet.
+This file is outside 1a ownership and was not edited.
+
+## Measured output-contract dependency — 1a continuation
+
+`src/seon/schema.clj:1069`, `call-with-projection-state`, returns its callback's
+value with a polymorphic `:any` declaration but no declared error facets.
+After `instrument/apply!` returns a complete registration observation, the
+armed wrapper correctly refuses this pass-through:
+
+```text
+seon.schema/call-with-projection-state returned undeclared error facets #{:seon.instrument/registration-error}.
+```
+
+This was observed by
+`seon.instrument-test/applying-without-a-handed-projection-refuses-before-collection`.
+The bootstrap facet validators now work without a program shape catalog; the
+new refusal identifies the next actual contract owner. The follow-up must
+declare the callback result's allowed error union at this polymorphic
+continuation boundary. Do not add an output-validation bypass or a general
+error predicate. `schema.clj` remains read-only for 1a.
+
+### Continuation census
+
+The same `rg --json` search against shared working bytes after `a7f013251`
+reports **2,348 matching lines / 2,384 matches / 322 files** (this raw search
+excludes the separately enumerated short namespaced `:kind` and `:class`
+definitions): src **979/997/85**, test **961/967/163**, resources
+**357/368/68**, script **47/48/5**, bin **4/4/1**, config **0/0/0**.
+The original complete per-file/per-line inventory above remains the dated
+conversion input; removed owned declarations and the new measured consumers
+are specified in the continuation sections. No foreign file was edited.

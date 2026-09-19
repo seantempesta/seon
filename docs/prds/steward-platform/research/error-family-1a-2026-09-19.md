@@ -488,3 +488,109 @@ rerun is in flight at this commit; no isolated step-5 green tally is claimed.
 Touched: `src/seon/error.clj`, `src/seon/instrument.clj`,
 `test/seon/instrument_test.clj`, this note. **RESET NEEDED attributes: `[]`**
 for this step.
+
+## Step 6 continuation — output guarantees at the wrapper
+
+Every named function in `src/seon/instrument.clj` now declares a Malli
+contract: source-form census **34 functions / 0 missing**. `apply!` returns
+`applied` or the exact `registration-error` facet. Its refusal constructor and
+`wrap-interpreted`'s acquisition failures supply observation time, responsible
+layer, actual operation, observed function and owned registration evidence.
+The former missing-recorder stamp is not restored.
+
+A facet declaration no longer accidentally grants permission to return its
+inherited bare base. The canonical armed regression proves that a complete
+declared agent facet passes and an incomplete base is refused even alongside
+a broad successful map arm. Existing host and SCI regressions prove that an
+undeclared facet is refused through the wrapper. Facet validators derive once
+from the supplied declarations, including boot projections that have no
+program shape catalog. They remain projection-owned; no general predicate or
+global/fetched registry was introduced.
+
+Loaded-Var and callable contracts are named nonpersistent schema declarations.
+Their canonical forms remain symbols; loaded metadata containing callable
+objects uses the genuine polymorphic schema-value grammar rather than the
+EDN-only definition grammar. This avoids turning compiler-internal values
+into fabricated stored forms.
+
+This is **not completion of 1q**. The source-form census of `error.clj` is
+**102 functions / 46 missing contracts**. The legacy normalization/recording
+cut remains, including generic outputs in `diagnostic` and `value`, and the
+actual D5 consumers `agent-exists?`, `entity-exists?`, `steward`, `recurrence`,
+`commit-call` and the fault readers. A `some?` around a refused database read
+still cannot truthfully establish entity existence. Those sites must propagate
+the precise declared read refusal, not guess success from its non-nil map.
+The existing explicitly enumerated unions on truly polymorphic pass-through
+helpers are not evidence that these producers have been converted.
+
+Intermediate verification failures were resolved in the owned seam as follows:
+
+- An arming attempt failed before tests because new internal contracts used
+  the EDN definition grammar for loaded callable-bearing schema metadata.
+  No test tally; changed those positions to `seon.schema/value`.
+- An attempted inline quoted Var predicate failed source indexing. That run
+  was terminated after repeated fixture-construction failures; no final tally.
+  Named `loaded-var` and `callable` declarations preserve canonical source.
+- **86 / 582 / 3 / 1** then exposed two D2 assertions, one external SCI
+  marker consumer and bootstrap facet discovery's absent shape catalog.
+  D2's catch and the shape-catalog dependency were removed.
+
+The final combined fast run and its exact tally are recorded below. The two
+measured external boundaries are listed in the inventory: SCI acquisition
+still reads `registration-failed` at `src/seon/sci/eval.clj:882,1867`, and
+`src/seon/schema.clj:1069` has no error union on its callback pass-through.
+The latter produces the correct typed `undeclared-error` refusal rather than
+silently accepting the newly complete registration error.
+
+Touched in this checkpoint: `src/seon/error.clj`, `src/seon/instrument.clj`,
+`resources/seon/schemas/seon.instrument.edn`, `test/seon/instrument_test.clj`,
+the inventory and this note. **Additional RESET NEEDED attributes: `[]`**;
+the new callable schemas declare values, not installed attributes.
+
+## Owner design gate — kindless recurrence identity
+
+D12 is accepted; this question does not reopen predicate recognition.
+`signature` currently hashes kind, Throwable class, observed function and
+frame (`src/seon/error.clj:313`). `prepare` obtains the function from legacy
+diagnostic data or a stack, not the base's operation. The existing canonical
+regressions verify that messages do not change this identity, different kinds
+do, and repeated observations share the writer-owned count. `commit-call`
+uses that count to suppress repeated notifications. Simply deleting kind
+from the digest changes which failures share a root and which notifications
+are suppressed. The target documents do not specify that replacement
+coalescing guarantee.
+
+Exactly three kindless choices, simplest first:
+
+1. **Group by observation site (recommended):** hash base layer and operation,
+   plus available Throwable class and frame, using the existing `seon.id/id`.
+   **Guarantee:** repeated errors at the same observed site share a root;
+   adding facets or changing message/data does not change recurrence identity.
+   **Cost:** approximately 2–4 hours for the normalizer, root declarations,
+   recurrence regressions and the already inventoried consumer publication.
+   **Give up:** distinct error facets at one site can share the count and
+   notification suppression. This is an explicit behavioral tradeoff.
+2. **Group by site and satisfied facet set:** add the sorted declared facet
+   keys derived from the supplied canonical projection to that digest input.
+   **Guarantee:** different complete facet combinations at one site have
+   separate recurrence counts; no kind or class stamp is stored.
+   **Cost:** approximately 3–5 hours including complete-value acquisition
+   and tests for composed/inherited facets across recorders/readers.
+   **Give up:** recurrence identity is no longer stable when a new facet is
+   added to otherwise identical evidence or its declaration changes.
+3. **Give each observation a fresh root identity:** retain complete independent
+   events, then derive recurrence and notification suppression from a declared
+   query over their evidence.
+   **Guarantee:** recording never combines different observations because a
+   signature was too coarse.
+   **Cost:** approximately 6–10 hours across recording, recurrence queries,
+   `seon.problems`, cluster status, transcript and their tests.
+   **Give up:** existing signature-root aggregation and constant-size repeat
+   updates; the grouping query becomes an explicit separate policy decision.
+
+Costs are coordination estimates, not measured runtimes. All three retain
+structural base/facets and remove the general predicate/kind in the completed
+cut. No production recurrence-identity change was made pending this ruling.
+The public predicate's 75 external calls and six external required kind
+members also require the orchestrator's already-planned mechanical follow-up
+before a loadable deletion; their exact files and actions are inventoried.

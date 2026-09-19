@@ -14,6 +14,7 @@
             [malli.instrument :as mi]
             [malli.registry :as mr]
             [malli.util :as mu]
+            [clojure.test.check.generators :as gen]
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.db :as db]
@@ -37,7 +38,7 @@
 
 (defn instrumented
   "Loaded Vars bearing their own host wrapper, derived without a registry."
-  {:malli/schema [:=> [:cat] [:set [:fn clojure.core/var?]]]}
+  {:malli/schema [:=> [:cat] [:set :seon.instrument/loaded-var]]}
   []
   (into #{}
         (comp (mapcat ns-interns)
@@ -57,6 +58,7 @@
   a `^long` hint therefore carries a declared contract that NOTHING can arm,
   on a live cluster exactly as here. Asking the question with malli's rule is
   what keeps `armable` and what `apply!` installs from ever disagreeing."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [candidate]
   (and (fn? candidate)
        (boolean
@@ -76,7 +78,7 @@
   cover this one is arming a smaller world than the cluster it claims to
   reproduce, and every contract in the difference is enforced in production
   and checked by nothing."
-  {:malli/schema [:=> [:cat [:sequential :symbol]] [:set [:fn clojure.core/var?]]]}
+  {:malli/schema [:=> [:cat [:sequential :symbol]] [:set :seon.instrument/loaded-var]]}
   [namespaces]
   (into #{}
         (comp (keep find-ns)
@@ -129,6 +131,7 @@
   surrounding args vector already represents. For a missing required key
   this path IS the key: naming it is the difference between \"missing
   required key\" and a refusal a reader can act on."
+  {:malli/schema [:=> [:cat :qualified-keyword :map] [:vector :seon.schema/value]]}
   [kind problem]
   (vec (cond-> (:in problem)
          (= :malli.core/invalid-input kind) next)))
@@ -140,6 +143,7 @@
    storable evidence (AGENTS §3: absent is no key, never a stored nil). The
    class name is what is genuinely known in that case, so this key is always
    present and always says something."
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:string {:min 1}]]}
   [^Throwable failure]
   (let [message (ex-message failure)]
     (if (or (nil? message) (= "" (.trim ^String message)))
@@ -147,6 +151,11 @@
       message)))
 
 (defn- program-graph-arglists
+  {:malli/schema [:=> [:cat :symbol] [:map
+     [:seon.instrument.lookup/status [:enum :found :missing :failed :no-program-graph]]
+     [:seon.instrument.lookup/cause {:optional true} [:string {:min 1}]]
+     [:seon.fn/arglists {:optional true} :string]
+     [:seon.instrument/arglists {:optional true} [:sequential [:sequential :seon.schema/value]]]]]}
   [function-symbol]
   (try
     (if-let [environment (env/of effect/*request-context*)]
@@ -218,6 +227,7 @@
           lookup)))))
 
 (defn- supplied-entry-problems
+  {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil [:set [:tuple :int :keyword]]]]}
   [function-symbol]
   (when-let [environment (env/of effect/*request-context*)]
     (when-let [connection (:seon.db/connection environment)]
@@ -227,6 +237,7 @@
           (into #{} (map (fn [[_ position entry-key]] [position entry-key])) entries))))))
 
 (defn- actionable-problem
+  {:malli/schema [:=> [:cat :seon.error/problem-description :map [:or :nil :boolean]] :seon.error/problem-description]}
   [description problem supplied?]
   (let [value (:value problem)
         entry-key (last (:seon.error/path description))
@@ -395,10 +406,12 @@
 (def ^:private interpreted-original ::interpreted-original)
 
 (defn- original-interpreted
+  {:malli/schema [:=> [:cat :seon.instrument/callable] :seon.instrument/callable]}
   [f]
   (or (some-> f meta interpreted-original) f))
 
 (defn- predicate-callable
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value] [:or :nil :seon.instrument/callable]]}
   [projection predicate]
   (or (get ((mi/-f->original schema/predicate-functions-in) projection)
            predicate)
@@ -407,6 +420,7 @@
 
 (defn- bind-contract-predicates
   "Bind named Malli predicates without opening Malli's code evaluator."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value] :seon.schema/value]}
   [projection contract]
   (walk/postwalk
    (fn [value]
@@ -434,7 +448,7 @@
        :else value))
    contract))
 
-(declare compiled-wrapper ^:dynamic *compiling-contract*)
+(declare compiled-wrapper registration-error ^:dynamic *compiling-contract*)
 
 (defn wrap-interpreted
   "Apply one committed agent function contract under the core-error dial.
@@ -443,31 +457,50 @@
   requires a recording operation acquired by the caller before installation."
   {:malli/schema
    [:function
-    [:=> [:cat :symbol :string :map :seon.config/on-core-error
-          [:or :seon.sci.admit/caps :seon.error/value] [:fn clojure.core/ifn?]]
-     [:fn clojure.core/ifn?]]
-    [:=> [:cat :symbol :string :map :seon.config/on-core-error
-          [:or :seon.sci.admit/caps :seon.error/value] [:fn clojure.core/ifn?]
+    [:=> [:cat :qualified-symbol :string :map :seon.config/on-core-error
+          [:or :seon.sci.admit/caps :seon.error/value] :seon.instrument/callable]
+     :seon.instrument/callable]
+    [:=> [:cat :qualified-symbol :string :map :seon.config/on-core-error
+          [:or :seon.sci.admit/caps :seon.error/value] :seon.instrument/callable
           [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]
            [:seon.config.error/max-evidence-bytes {:optional true}
             :seon.config.error/max-evidence-bytes]]]
-     [:fn clojure.core/ifn?]]]}
+     :seon.instrument/callable]]}
   ([function-symbol spec-edn projection mode caps f]
    (wrap-interpreted function-symbol spec-edn projection mode caps f {}))
   ([function-symbol spec-edn projection mode caps f arm-request]
   (let [original (original-interpreted f)]
     (when (and (= :record mode) (not (:seon.flow/commit-fault! arm-request)))
-      (throw (ex-info "Record-mode SCI instrumentation requires an acquired fault recorder."
-                      {:seon.error/kind ::missing-recorder
-                       :seon.error/message "Record-mode SCI instrumentation requires an acquired fault recorder."
-                       :seon.instrument/fn function-symbol
-                       :seon.error/expected-key :seon.flow/commit-fault!})))
-    (when (:seon.error/kind caps)
-      (throw
-       (ex-info
-        (str "Cannot arm the contract of " function-symbol
-             " under " mode ": " (:seon.error/message caps))
-        (assoc caps :seon.instrument/fn function-symbol))))
+      (let [failure
+            (registration-error
+             function-symbol
+             {:seon.error/kind ::missing-recorder
+              :seon.error/message "Record-mode SCI instrumentation requires an acquired fault recorder."
+              :seon.error/diagnostic-layer :instrumentation
+              :seon.error/diagnostic-operation 'seon.instrument/wrap-interpreted
+              :seon.error/diagnostic-member :seon.flow/commit-fault!
+              :seon.error/diagnostic-expected :seon.flow/commit-fault!
+              :seon.error/diagnostic-offending ::absent
+              :seon.error/diagnostic-cause ::missing-recorder
+              :seon.error/diagnostic-evidence nil})]
+        (throw (ex-info (:seon.error/message failure) failure))))
+    (when-not (and (map? caps)
+                   (pos-int? (:seon.config.eval.result/max-bytes caps))
+                   (pos-int? (:seon.config.eval.result/max-source caps)))
+      (let [failure
+            (registration-error
+             function-symbol
+             {:seon.error/kind ::invalid-caps
+              :seon.error/message (str "Cannot arm the contract of " function-symbol
+                                       ": admission caps were not acquired.")
+              :seon.error/diagnostic-layer :instrumentation
+              :seon.error/diagnostic-operation 'seon.instrument/wrap-interpreted
+              :seon.error/diagnostic-member :seon.sci.admit/caps
+              :seon.error/diagnostic-expected :seon.sci.admit/caps
+              :seon.error/diagnostic-offending caps
+              :seon.error/diagnostic-cause ::invalid-caps
+              :seon.error/diagnostic-evidence nil})]
+        (throw (ex-info (:seon.error/message failure) failure))))
       (let [wrapped (binding [*compiling-contract* true]
                       (compiled-wrapper projection function-symbol
                                         (edn/read-string spec-edn) original caps
@@ -486,11 +519,38 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- var-symbol
+  {:malli/schema [:=> [:cat :seon.instrument/loaded-var] :qualified-symbol]}
   [candidate-var]
   (let [{namespace-object :ns var-name :name} (meta candidate-var)]
     (symbol (str (ns-name namespace-object)) (str var-name))))
 
 (defn- registration-cause-data
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:or :seon.schema/value
+     :nil
+     :map
+     :seon.error/base
+     :my.background/error :my.edit/error :my.fs/error :my.message/error
+     :my.plan/error :my.shell/error :my.turn/error
+     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
+     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
+     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+     :seon.flow/error :seon.fn/error :seon.fn.binding/error
+     :seon.instrument/arity-error :seon.instrument/contract-error
+     :seon.instrument/registration-error :seon.instrument/undeclared-error
+     :seon.message/error :seon.operator/error :seon.operator.collect/error
+     :seon.problems/error :seon.program/error :seon.reconcile/error
+     :seon.render/error :seon.render.data/error :seon.render.value/error
+     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
+     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.sci.admit/error :seon.sci.eval/acquisition-error
+     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.test.run/error :seon.test.runner/error :seon.turn/error
+     :seon.turn.loop/error]]}
   [failure]
   (loop [deepest (ex-data failure)]
     (if-let [nested (and (map? deepest)
@@ -503,12 +563,39 @@
 (def ^:dynamic ^:private *compiling-contract* false)
 
 (defn- request-member
+  {:malli/schema [:=> [:cat :seon.schema/value :qualified-keyword] [:or :seon.schema/value
+     :nil
+     :map
+     :seon.error/base
+     :my.background/error :my.edit/error :my.fs/error :my.message/error
+     :my.plan/error :my.shell/error :my.turn/error
+     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
+     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
+     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+     :seon.flow/error :seon.fn/error :seon.fn.binding/error
+     :seon.instrument/arity-error :seon.instrument/contract-error
+     :seon.instrument/registration-error :seon.instrument/undeclared-error
+     :seon.message/error :seon.operator/error :seon.operator.collect/error
+     :seon.problems/error :seon.program/error :seon.reconcile/error
+     :seon.render/error :seon.render.data/error :seon.render.value/error
+     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
+     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.sci.admit/error :seon.sci.eval/acquisition-error
+     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.test.run/error :seon.test.runner/error :seon.turn/error
+     :seon.turn.loop/error]]}
   [value member]
   (when (map? value)
     (try (get value member)
          (catch ClassCastException _ nil))))
 
 (defn- supplied-projection
+  {:malli/schema [:=> [:cat [:sequential :seon.schema/value]] [:or :nil :seon.schema/projection]]}
   [arguments]
   (or (some (fn [argument]
               (some (fn [candidate]
@@ -539,8 +626,12 @@
                   (throw (ex-info "Cyclic error result declaration."
                                   {:seon.error/kind ::error-facet-analysis-unavailable
                                    :seon.error/expected-key node}))
-                  (cond-> (walk-result (get forms node) (conj seen node))
-                    (facets node) (conj node)))
+                  (let [inherited (walk-result (get forms node) (conj seen node))]
+                    ;; Extending the base promises this complete facet. It does
+                    ;; not separately permit an incomplete base-only result.
+                    (if (facets node)
+                      (conj (disj inherited :seon.error/base) node)
+                      inherited)))
                 (vector? node)
                 (let [tag (first node)
                       children (if (map? (second node)) (nnext node) (next node))]
@@ -632,6 +723,7 @@
                 :seon.instrument.explanations/items (set items)})))))
 
 (defn- compiled-wrapper
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value :seon.instrument/callable :seon.sci.admit/caps [:? [:or :nil :map]]] :seon.instrument/callable]}
   [projection function-symbol authored original caps & [policy]]
   ((mi/-f->original schema/projection-cache-value)
    projection [::wrapper function-symbol authored original policy]
@@ -684,13 +776,17 @@
                         permission (nth permissions index)
                         declared (::declared permission)
                         actual ((mi/-f->original error/facets) projection value)]
-                    (when (or (not (::base? permission))
+                    (when (or (and (empty? actual) (not (::base? permission)))
                               (seq (set/difference actual declared)))
                       (reject!
                        (cond->
                         {:seon.error/kind ::undeclared-error
-                         :seon.error/message (str function-symbol " returned undeclared error facets "
-                                                  (pr-str (set/difference actual declared)) ".")
+                         :seon.error/message
+                         (if (empty? actual)
+                           (str function-symbol " returned a base error without a complete declared facet."
+                                " Declared facets: " (pr-str declared) ".")
+                           (str function-symbol " returned undeclared error facets "
+                                (pr-str (set/difference actual declared)) "."))
                          :seon.error/at (java.util.Date.)
                          :seon.error/layer :seon.instrument/invocation
                          :seon.error/operation function-symbol
@@ -716,6 +812,7 @@
 
 (defn- contract-definitions
   "Canonical declarations closed over by a function contract, following Malli refs."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value] [:map-of :keyword :seon.schema/value]]}
   [projection contract]
   (let [projection (assoc projection :seon.schema.projection/compile-options
                           {:registry (mr/composite-registry
@@ -737,6 +834,7 @@
         definitions))))
 
 (defn- current-wrapper?
+  {:malli/schema [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.schema/value [:? [:or :nil :map]]] :boolean]}
   [candidate authored projection current & [policy]]
   (let [metadata (meta current)
         contract (get (:seon.schema.projection/function-contracts projection)
@@ -752,6 +850,7 @@
                          (keys definitions))))))
 
 (defn- arm-var!
+  {:malli/schema [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.schema/projection :seon.sci.admit/caps [:? [:or :nil :map]]] :seon.instrument/callable]}
   [candidate authored projection bootstrap caps & [policy]]
   (alter-var-root
    candidate
@@ -790,6 +889,7 @@
 
 (defn- collect-contracts!
   "Read declarations from the program loaded into this JVM, without Malli's registry."
+  {:malli/schema [:=> [:cat :seon.sci.admit/caps] [:map-of :seon.instrument/loaded-var :seon.schema/value]]}
   [_caps]
   (into {}
         (keep (fn [candidate]
@@ -798,6 +898,23 @@
                              (not (primitive-fn? @candidate)))
                     [candidate authored]))))
         (mapcat (comp vals ns-interns) (all-ns))))
+
+(defn- registration-error
+  "Describe the particular declaration or acquisition that could not be armed."
+  {:malli/schema
+   [:=> [:cat :qualified-symbol
+         [:map [:seon.error/diagnostic-member [:or :qualified-keyword :qualified-symbol]]
+          [:seon.error/diagnostic-operation :qualified-symbol]]]
+    :seon.instrument/registration-error]}
+  [function-symbol request]
+  (assoc (error/diagnostic request)
+         :seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.instrument/registration
+         :seon.error/operation (:seon.error/diagnostic-operation request)
+         :seon.instrument/fn function-symbol
+         :seon.instrument/registration-observation
+         {:seon.error.evidence/attribute :seon.error/diagnostic-member
+          :seon.error.evidence/value (:seon.error/diagnostic-member request)}))
 
 (defn apply!
   "Arm loaded Vars whose contract or referenced declarations changed.
@@ -809,7 +926,7 @@
   bootstrap declarations. Record-mode acquisition requires a recorder."
   {:malli/schema
    [:=> [:cat :seon.instrument/request]
-    [:or :seon.instrument/applied :seon.error/value]]}
+    [:or :seon.instrument/applied :seon.instrument/registration-error]]}
   [{mode :seon.config/on-core-error
     caps :seon.sci.admit/caps
     max-evidence-bytes :seon.config.error/max-evidence-bytes
@@ -817,7 +934,7 @@
     supplied-projection :seon.schema/projection}]
   (cond
     (and (= :record mode) (not (fn? commit-fault!)))
-    (error/diagnostic
+    (registration-error 'seon.instrument/apply!
      {:seon.error/kind ::missing-recorder
       :seon.error/message "Record-mode instrumentation requires an acquired fault recorder."
       :seon.error/diagnostic-layer :instrumentation
@@ -829,7 +946,7 @@
       :seon.error/diagnostic-evidence nil})
 
     (not (#{:panic :record} mode))
-    (error/diagnostic
+    (registration-error 'seon.instrument/apply!
        {:seon.error/kind ::invalid-mode
         :seon.error/message
         "Instrumentation requires :panic or :record core-error mode."
@@ -846,7 +963,7 @@
     :else
     (let [projection (or supplied-projection (schema/handed-projection))]
       (if-not projection
-        (error/diagnostic
+        (registration-error 'seon.instrument/apply!
          {:seon.error/kind ::missing-projection
           :seon.error/message
           "Instrumentation requires a handed schema projection."
@@ -881,7 +998,7 @@
               (catch Throwable failure
                 (let [data (registration-cause-data failure)
                       diagnostic
-                      (error/diagnostic
+                      (registration-error (var-symbol candidate)
                        {:seon.error/kind ::registration-failed
                          :seon.error/message "The loaded function contract cannot compile."
                         :seon.error/diagnostic-layer :instrumentation
@@ -924,7 +1041,7 @@
    [:=> [:cat]
     [:map
      [:seon.instrument/roots
-      [:map-of [:fn clojure.core/var?] [:fn clojure.core/ifn?]]]
+      [:map-of :seon.instrument/loaded-var :seon.instrument/callable]]
      [:seon.instrument/function-schemas :map]]]}
   []
   {:seon.instrument/roots (into {} (map (juxt identity deref)) (instrumented))
@@ -944,9 +1061,9 @@
    [:=> [:cat
          [:map
           [:seon.instrument/roots
-           [:map-of [:fn clojure.core/var?] [:fn clojure.core/ifn?]]]
+           [:map-of :seon.instrument/loaded-var :seon.instrument/callable]]
           [:seon.instrument/function-schemas :map]]]
-    [:set [:fn clojure.core/var?]]]}
+    [:set :seon.instrument/loaded-var]]}
   [state]
   (into #{}
         (keep (fn [[candidate captured]]
@@ -974,9 +1091,9 @@
    [:=> [:cat
          [:map
           [:seon.instrument/roots
-           [:map-of [:fn clojure.core/var?] [:fn clojure.core/ifn?]]]
+           [:map-of :seon.instrument/loaded-var :seon.instrument/callable]]
           [:seon.instrument/function-schemas :map]]]
-    [:set [:fn clojure.core/var?]]]}
+    [:set :seon.instrument/loaded-var]]}
   [state]
   (let [roots (:seon.instrument/roots state)
         replaced (replaced-definitions state)]
@@ -990,3 +1107,8 @@
                 :when (and (bound? candidate) (not (contains? replaced candidate)))]
           (alter-var-root candidate (constantly captured)))))
     replaced))
+
+
+(def loaded-var-generator
+  "A real Var from this owner for the loaded-Var contract."
+  (gen/return #'apply!))

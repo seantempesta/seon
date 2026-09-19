@@ -1745,6 +1745,33 @@
     error)))
 
 (defn- rendered-error-value
+  {:malli/schema [:=> [:cat :seon.error/source]
+    [:or :seon.error/source
+     :nil
+     :map
+     :seon.error/base
+     :my.background/error :my.edit/error :my.fs/error :my.message/error
+     :my.plan/error :my.shell/error :my.turn/error
+     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
+     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
+     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+     :seon.flow/error :seon.fn/error :seon.fn.binding/error
+     :seon.instrument/arity-error :seon.instrument/contract-error
+     :seon.instrument/registration-error :seon.instrument/undeclared-error
+     :seon.message/error :seon.operator/error :seon.operator.collect/error
+     :seon.problems/error :seon.program/error :seon.reconcile/error
+     :seon.render/error :seon.render.data/error :seon.render.value/error
+     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
+     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.sci.admit/error :seon.sci.eval/acquisition-error
+     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.test.run/error :seon.test.runner/error :seon.turn/error
+     :seon.turn.loop/error]]}
   [unit]
   (let [value (if (map? (:seon.render/value unit))
                 (:seon.render/value unit)
@@ -1793,24 +1820,20 @@
 
 (defn facets
   "All canonical error facets satisfied by a complete value in projection.
-  Candidate membership never substitutes for predicate-bearing validation."
+  Validators derive once from the supplied declarations, including at boot
+  before a program-graph shape catalog exists. Every facet predicate runs."
   {:malli/schema [:=> [:cat :map :seon.schema/value] [:set :qualified-keyword]]}
   [projection value]
-  (let [candidate-projection
+  (let [validators
         (schema/projection-cache-value
-         projection ::facet-projection
+         projection ::facet-validators
          (fn []
-           (let [allowed (facet-keys projection)]
-             (assoc projection
-                    :seon.schema.projection/shape-rows
-                    (select-keys (:seon.schema.projection/shape-rows projection) allowed)
-                    :seon.schema.projection/shape-index
-                    (into {} (map (fn [[attribute candidates]]
-                                    [attribute (filterv allowed candidates)]))
-                          (:seon.schema.projection/shape-index projection))))))]
+           (mapv (fn [facet]
+                   [facet (schema/projection-validator projection facet)])
+                 (sort (facet-keys projection)))))]
     (into #{}
-          (map :seon.schema/key)
-          (schema/matching-shapes-in candidate-projection value))))
+          (keep (fn [[facet valid?]] (when (valid? value) facet)))
+          validators)))
 
 (defn error?
   "True when `value` matches at least one declared error-class schema.

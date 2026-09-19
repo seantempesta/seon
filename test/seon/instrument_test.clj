@@ -83,6 +83,8 @@
   (let [result ((mi/-f->original instrument/apply!)
                 {:seon.config/on-core-error nil})]
     (is (= :seon.instrument/invalid-mode (:seon.error/kind result)))
+    (is ((schema/projection-validator (schema/handed-projection)
+                                     :seon.instrument/registration-error) result))
     (is (= {:seon.error/diagnostic-layer :instrumentation
             :seon.error/diagnostic-operation 'seon.instrument/apply!
             :seon.error/diagnostic-member :seon.config/on-core-error
@@ -442,8 +444,10 @@
                             ctx (* 1000 test-support/event-backstop-seconds)
                             (fn [_] [(test-support/refusal-data
                                       #(sci/eval-string* ctx "(seon.id/valid?)"))]))))]
-       (is (= :seon.instrument/missing-recorder (:seon.error/kind missing)))
-       (is (= :seon.instrument/missing-recorder (:seon.error/kind missing-base))
+       (is ((schema/projection-validator projection :seon.instrument/registration-error)
+            missing))
+       (is ((schema/projection-validator projection :seon.instrument/registration-error)
+            missing-base)
            "Construction cannot publish a context containing an unarmed definition.")
        (is ((schema/projection-validator projection :seon.instrument/arity-error)
             (invoke base)))
@@ -1336,22 +1340,6 @@
          (finally
            (remove-ns namespace-name)))))))
 
-(deftest instrumentation-observations-do-not-carry-legacy-class-stamps
-  (let [projection (schema/handed-projection)
-        forms (:seon.schema.projection/forms projection)
-        refusal (test-support/refusal-data #(prefix-contract "wrong"))
-        registration (instrument/apply! {:seon.config/on-core-error :record})]
-    (doseq [retired [:seon.instrument/contract-violated-error
-                     :seon.instrument/registration-failed-error
-                     :seon.error/unclassified-error
-                     :seon.instrument/contract-violated
-                     :seon.instrument/registration-failed
-                     :seon.error/unclassified :seon.error/refusal]]
-      (is (not (contains? forms retired)) (str retired)))
-    (is (not (contains? refusal :seon.instrument/contract-violated)))
-    (is (not (contains? registration :seon.instrument/registration-failed)))))
-
-
 (deftest the-caller-frame-is-part-of-the-refusal-sentence
   (let [refusal (test-support/refusal-data #(prefix-contract "wrong"))
         caller (get-in refusal [:seon.error/data :seon.instrument/caller])]
@@ -1377,6 +1365,43 @@
        (is (= '([value])
               (get-in refusal [:seon.error/data :seon.instrument/arglists])))
        (is (not (str/includes? (error/render-ai refusal) "stale-name")))))))
+
+(deftest a-broad-success-arm-cannot-admit-an-incomplete-declared-error
+  (let [projection (schema/handed-projection)
+        caps (config/result-caps (test-support/effective-config))
+        wrapped (instrument/wrap-interpreted
+                 'seon.instrument-test/precise-error-output
+                 "[:=> [:cat :map] [:or :map :seon.agent/error]]"
+                 projection :panic caps identity)
+        base {:seon.error/at #inst "2026-09-19T00:00:00Z"
+              :seon.error/layer :seon.instrument-test/body
+              :seon.error/operation 'seon.instrument-test/precise-error-output}
+        complete (assoc base :seon.agent/error-agent-id "observed")
+        refusal (test-support/refusal-data #(wrapped base))]
+    (is (= complete (wrapped complete)))
+    (is ((schema/projection-validator projection :seon.instrument/undeclared-error)
+         refusal)
+        "An ordinary map success arm cannot satisfy the promised error facet.")))
+
+(deftest instrumentation-observations-do-not-carry-legacy-class-stamps
+  (let [projection (schema/handed-projection)
+        forms (:seon.schema.projection/forms projection)
+        refusal (test-support/refusal-data #(prefix-contract "wrong"))
+        registration (instrument/apply! {:seon.config/on-core-error :record})]
+    (doseq [retired [:seon.instrument/contract-violated-error
+                     :seon.instrument/registration-failed-error
+                     :seon.error/unclassified-error
+                     :seon.instrument/contract-violated
+                     :seon.instrument/registration-failed
+                     :seon.error/unclassified :seon.error/refusal]]
+      (is (not (contains? forms retired)) (str retired)))
+    (is (not (contains? refusal :seon.instrument/contract-violated)))
+    (is (not (contains? registration :seon.instrument/registration-failed)))))
+
+(deftest every-instrument-function-declares-its-input-and-output
+  (doseq [[name candidate] (ns-interns 'seon.instrument)
+          :when (and (bound? candidate) (fn? @candidate))]
+    (is (some? (mi/-schema candidate)) (str name))))
 
 (deftest an-invalid-refusal-retains-its-evidence-at-the-kernel-boundary
   (let [canonical (schema/handed-projection)
