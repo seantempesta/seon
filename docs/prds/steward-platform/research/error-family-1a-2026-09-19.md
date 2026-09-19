@@ -684,3 +684,34 @@ Files in this step: `src/seon/error.clj`,
 No attribute type changes in this step. The external direct normalizer callers
 must supply their already acquired projection (included in the follow-up
 inventory). Cold and reset-boundary proof remain the orchestrator's.
+
+## D12 continuation — owned retirement
+
+Deleted the public `seon.error/error?`, class-discovery helpers, and all owned
+kind writes/reads/declarations. Diagnostics now require and return the complete
+base observation. Normalized facts and roots state layer and operation;
+rendering reads operation and concrete diagnostic evidence. Instrumentation
+constructs complete base/registration observations before composition.
+No replacement general predicate or acquisition-at-predicate-time was added.
+The supplied-entry reporter throws a complete registration observation when
+its external owner returns an error without an exact declared error contract.
+
+Tests assert the declared base, arity, contract or registration shapes instead
+of stamps; obsolete class-recognition tests are removed. Static verification:
+all four Clojure files parse; clj-kondo reports **0 errors**. The prior D13 run
+was stopped after four identical fixture-construction errors (no final tally);
+a diagnostic retry on the same canonical fixture is running to identify the
+exact duplicate-program-identity refusal. This is not a green recurrence claim.
+
+The inventory now lists **75 external public-predicate calls / 74 lines /
+5 files**, all six external required kind members, and the external diagnostic
+and normalization input changes. Current raw kind/class census:
+**2,240 lines / 2,266 matches / 317 files**. No external file was edited.
+Files in this step: both owned Clojure namespaces and test namespaces,
+`resources/seon/schemas/seon.error.edn`, the inventory and this landing note.
+
+**RESET NEEDED — additional retired installed attributes:**
+`[:seon.error/kind :seon.error/class]`. The previous four retired attributes
+remain in the wave-1 reset batch. No attribute type changes. Removal of the
+external required members and external class properties belongs to the
+orchestrator's mechanical sweep; this cut deliberately retains no shim.

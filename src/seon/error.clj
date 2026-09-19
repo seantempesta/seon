@@ -1,145 +1,16 @@
 (ns seon.error
-  "THE ONE NORMALIZER. Anything that went wrong becomes one fact here,
-  and nothing anywhere else formats an error.
+  "Error observations, complete declared component reads, and writer-owned recurrence.
 
-  Implemented and boot-wired (2026-07-27, steps 1-2 of the error-wiring
-  order), grounded in
-  `docs/prds/sci-execution-runtime/research/error-handling-grounding-2026-07-27.md`
-  in full, with §1.2, §3.2, §6.1-6.3 and §8 carrying the file:line
-  evidence for every claim below. Slice 1 landed the entity as
-  `:seon.fault/*`; the rename merged it into this one family, and
-  `:seon.fault/*` no longer exists.
+  D12: errors are structural base values with composable declared facets.
+  Callers branch on their boundary's required members; no general error
+  predicate or stored classification is used here. D13 identity derives from
+  layer, operation, satisfied facets, Throwable class/frame, violated schema
+  and location. Message, time, process and offending bytes do not identify a bug.
 
-  THIS NAMESPACE DOES NOT TRANSACT. It normalizes, it projects, and it
-  returns TRANSACTION DATA. Cause-chain reading lives in the lower
-  `seon.error.refusal` leaf so `seon.db` does not acquire this namespace's
-  rendering dependencies. Callers commit through the one boundary:
-  `seon.cluster/commit-fault!` for Throwables off flow's error channel,
-  the turn loop for a refused transaction, and maintenance settlement.
-
-  WHY ONE NORMALIZER. The quarry grew three independent bounding rules
-  and two hand-maintained blame lists because every catch site formatted
-  its own error (`src-old/seon/error.cljc:237-249, 519`;
-  `error/instrument.cljc:98-106`). The measured consequence was that the
-  SAME typo was classified `:core` on one path and `:agent` on another,
-  depending on ambient scope (`error.cljc:598-613`, live datoms
-  3689-3857). One function, no ambient state, and the classification
-  falls out of the source's own shape.
-
-  THE THREE INPUT FAMILIES, all total, detected structurally and never
-  by a flag the caller sets:
-
-  1. A `::flow/error` map — core.async.flow's error channel. THREE
-     incompatible shapes ride it and they do not share a key set
-     (`reference-code/core.async/.../flow/impl.clj:106-110, 312-320`):
-     a transform throw carries `#::flow{:pid :status :state :count :cid
-     :msg :op :step :ex}`, anything else in the proc loop carries the
-     same WITHOUT `:cid`/`:msg`/`:op`, and a channel xform throw carries
-     only `#::flow{:ex :pid :cid :xform}`. `::flow/ex` is the one key
-     all three share, which is what makes the family recognizable
-     without a shape list.
-  2. A flat `:seon.error/value` — what `db/transact!`, `ai/complete`,
-     `config/apply!` and `reconcile` return. Nothing throws into the run
-     loop, so a system failure normally arrives as a value.
-  3. A transition refusal's `ex-data` — the map `refusal` (below) digs
-     out of a cause chain. It is family 2's shape wearing family 1's
-     origin, and it normalizes as itself.
-
-  Anything else is family 4 by exclusion — a bare Throwable, or a value
-  no rule recognizes — and it normalizes FAIL-CLOSED rather than
-  refusing: `:seon.error/unclassified`, with the source projected into
-  `data-edn` like every other family. An error the error system will not
-  record is the one outcome this design cannot have.
-
-  CLASSIFICATION IS THE CHANNEL, NOT A PREDICATE, and that is why there
-  is no `agent-vs-core` function here. `seon.sci.eval/evaluate` never
-  throws, so an agent's mistake is by construction a VALUE and can only
-  become an evaluation result; anything arriving on `::flow/error` is a Throwable
-  that escaped our own code, which is definitionally ours
-  (`flow_test.clj:474-477` already asserts the negative half). Naming
-  the family is therefore free, and no lookup, list or ambient scope
-  decides blame.
-
-  KINDS ARE THE KEYWORDS THE SITES ALREADY CARRY. `:seon.error/kind` is
-  taken from the deepest non-empty `ex-data` in the cause chain, or from
-  a flat value's own `:seon.error/kind`, and it is never invented here.
-  There is no enumeration in this namespace and none in the schema: the
-  kind population is computed — today by reading the producers, and from
-  N5 by querying the program graph, where every literal
-  `:seon.error/kind` in the corpus is a fact. A `[:enum]` would be a
-  hand-maintained copy of everyone else's vocabulary.
-
-  ONE CODEC, AND IT IS `seon.sci.admit/admit`. The meaningful source is
-  projected through value admission before anything is printed. A flow
-  report's disposable `::flow/state` is excluded at this boundary. The caller's
-  declared admission caps remain authoritative. `(constantly nil)` is supplied
-  as the interrupt-fn, which is sound
-  because admission is pure given the value and the caps
-  (`admit.clj:128-129`). This is not a preference: two of flow's three
-  shapes carry `::flow/state`, which for the run loop is the proc's
-  whole init state holding a LIVE Datahike connection and executors
-  (`loop.clj:226-229`), and `pr-str` of a value holding a reference
-  cycle raises `StackOverflowError` — an Error, which `catch Exception`
-  does not even see (`admit.clj:82-92`, probed). Reusing the one codec
-  also deletes the possibility of the second bounded printer the quarry
-  grew. `:seon.error/capped?` rides along so a reader never has to guess
-  whether an elision marker was the original value.
-
-  THE ERROR PATH MAY NOT PANIC. Admission is called in `:record` mode
-  UNCONDITIONALLY, and `:seon.config/on-core-error` is deliberately not
-  a request key. R41's dial makes development loud about a codec hole,
-  but a panic here destroys the one record of the ORIGINAL failure and
-  turns recording an error into a second error — the quarry's recursion
-  fence (`error.cljc:738-745`), which is a measured failure mode rather
-  than a hypothesis. The hole stays visible: `:seon.sci.admit/opaque`
-  plus `::projection-error` markers in `data-edn`, and `capped?` true.
-  (Orchestrator: this is the THIRD R41-vs-marker tension in the tree,
-  after admission's projection failure and the router's totality. They
-  want one ruling, not three local judgements.)
-
-  THE SIGNATURE IS CONTENT, NOT A TALLY. `sha-256` over
-  the canonically ordered identity attributes (kind, Throwable class, function, frame) — deliberately WITHOUT the
-  message, because a message carrying an id, a path or a timestamp
-  makes every occurrence unique and recurrence undetectable, which is
-  exactly the count the escalation rule needs. One transaction function
-  increments the occurrence count; recurrence sums those counts through
-  occurrence process refs. The error identity contains no process identity.
-
-  ATTRIBUTION IS THE CALLER'S, and the reason is exactness rather than
-  convenience. The flow error map does not carry the agent: the loop's
-  state is `{cluster, turns}`. Deriving \"the run claimed by this
-  process and not closed at the fault's basis\" is EXACT today only
-  because turns are serial within a cluster (`loop.clj:36-40`), so the
-  derivation belongs to the caller that knows the basis — and the day
-  turns go concurrent it must move into the loop state. This namespace
-  stays pure and takes the ids it is given; a run/agent id that is
-  absent produces no ref rather than a nil one.
-
-  PROJECTIONS, ONE PER CONSUMER (owner direction, 2026-07-27 night).
-  A fact is not prose. `notice` derives the agent-facing unit and its explicit
-  AI producer; log consumers call the ordinary log function directly:
-
-  - `ai-prose` is the generic `:seon.render/ai` implementation: what
-    happened, why the reader is being told, and what it can do. A fact
-    with specialist evidence selects its specialist in `notice`, where
-    the unit is built; consumers still ask only for `:seon.render/ai`.
-    The result is STORED at commit time as the explanation message's
-    content, and that is not a stored-derived slip: a message is a
-    historical fact about what an agent WAS TOLD, and it must not
-    silently change when the error's context does.
-  - `log-line` is a structured single line, DERIVED
-    and never stored. Nothing durable depends on it, so it may change
-    shape freely. `seon.problems` COMPOSES it rather than reformatting
-    an error its own way, so there is one place that decides what an
-    error looks like in a log.
-
-  Crash walk. Normalization is PURE: it opens nothing, writes nothing,
-  and holds no lock. Killed before it, during it, or after it and before
-  the commit, the durable state is identical — a normalized fact that
-  was never transacted is a value on a dead thread. `commit-tx` is pure
-  too: the transaction either committed or it did not, and an error
-  that was never committed is an error the next boot never sees — which
-  is the same crash row as the work it was reporting on."
+  Normalization receives its projection and evidence policy. Recording acquires
+  them from its supplied database value, then returns transaction data; the
+  database writer decides occurrence counts and the first notification. Readers
+  acquire complete declared components before rendering."
   (:require [clojure.core.async.flow :as-alias flow]
             [clojure.edn :as edn]
             [clojure.string :as str]
@@ -196,10 +67,6 @@
 ;;; Reading the source — structure only, never a flag and never a scope
 ;;; ---------------------------------------------------------------------------
 
-;;; The fail-closed kind. Not a classification: the honest statement that
-;;; nothing recognized this source, which is still infinitely better than
-;;; refusing to record it.
-(def ^:private unclassified :seon.error/unclassified)
 
 (defn refusal
   "The deepest non-empty `ex-data` in a throwable's cause chain, or nil.
@@ -252,16 +119,7 @@
     (instance? Throwable source) source
     (and (map? source) (instance? Throwable (::flow/ex source))) (::flow/ex source)))
 
-(defn- kind
-  "The namespaced rule that failed, never invented here.
-  A flat value and a refusal's ex-data carry their own; a Throwable
-  carries one at the deepest non-empty `ex-data` in its cause chain,
-  which `refusal` above walks — one owner for that walk, and the store's
-  own `transact!` calls the same one."
-  [source failure]
-  (or (when (map? source) (:seon.error/kind source))
-      (when failure (:seon.error/kind (refusal failure)))
-      unclassified))
+
 
 (defn- root-cause
   "The deepest Throwable in the cause chain.
@@ -278,7 +136,7 @@
   "What a reader is told. Never absent, never blank.
   Taken from the ROOT CAUSE, not the outermost wrapper: measured on the
   first real projection, a Datahike-wrapped transition refusal produced
-  the message \"wrapper\" while the kind came from the bottom of the
+  the message \"wrapper\" while the observation came from the bottom of the
   chain, and an agent reading \"An error stopped work: wrapper\" has been
   told nothing. The chain is not recoverable from `data-edn` either —
   admission projects a Throwable to an opaque marker by design — so this
@@ -421,66 +279,39 @@
   [value]
   (if (nil? value) ::unknown value))
 
-(def ^:private diagnostic-request-keys
-  #{:seon.error/kind :seon.error/message :seon.error/data
-    :seon.error/diagnostic-layer :seon.error/diagnostic-operation
-    :seon.error/diagnostic-member :seon.error/diagnostic-expected
-    :seon.error/diagnostic-offending :seon.error/diagnostic-cause
-    :seon.error/diagnostic-evidence})
-
 (defn diagnostic
-  "An evidence-complete flat diagnostic from one boundary observation.
-
-  Every diagnostic carries the same layer, operation, member, expected value,
-  offending value or identity, cause, and evidence fields. A boundary that
-  cannot observe one of them gets the typed `:seon.error/unknown` value rather
-  than omitting the field or inventing success, failure, or absence. Evidence
-  availability is derived from the evidence supplied by the owning query:
-  present evidence is `:seon.error/known`; absent evidence is
-  `:seon.error/unknown`.
-
-  Optional `:seon.error/data` is additional boundary context. It is merged
-  first, so it cannot replace or drop the constructor-owned diagnostic fields."
+  "Construct the declared base observation and its diagnostic evidence.
+  Domain owners add and declare their own complete facets."
   {:malli/schema
-   [:=>
-    [:cat
-     [:map
-      [:seon.error/kind :seon.error/kind]
-      [:seon.error/message :seon.error/message]
-      [:seon.error/diagnostic-layer :seon.schema/value]
-      [:seon.error/diagnostic-operation :seon.schema/value]
-      [:seon.error/diagnostic-member :seon.schema/value]
-      [:seon.error/diagnostic-expected :seon.schema/value]
-      [:seon.error/diagnostic-offending :seon.schema/value]
-      [:seon.error/diagnostic-cause :seon.schema/value]
-      [:seon.error/diagnostic-evidence :seon.schema/value]
-      [:seon.error/data {:optional true} :map]]]
-    :seon.error/value]}
-  [{:seon.error/keys [kind message data
-                      diagnostic-layer diagnostic-operation diagnostic-member
-                      diagnostic-expected diagnostic-offending diagnostic-cause
-                      diagnostic-evidence]
-    :as request}]
-  (let [evidence-known? (and (contains? request ::diagnostic-evidence)
-                             (some? diagnostic-evidence))]
-    (merge
-     (apply dissoc request diagnostic-request-keys)
-     {:seon.error/kind (or kind unclassified)
-      :seon.error/message
-      (if (and (string? message) (not-empty message))
-        message
-        "A diagnostic was constructed without a message.")
-      :seon.error/data
-      (merge
-       (or data {})
-       {::diagnostic-layer (known-or-unknown diagnostic-layer)
-        ::diagnostic-operation (known-or-unknown diagnostic-operation)
-        ::diagnostic-member (known-or-unknown diagnostic-member)
-        ::diagnostic-expected (known-or-unknown diagnostic-expected)
-        ::diagnostic-offending (known-or-unknown diagnostic-offending)
-        ::diagnostic-cause (known-or-unknown diagnostic-cause)
-        ::diagnostic-evidence-availability (if evidence-known? ::known ::unknown)
-        ::diagnostic-evidence (known-or-unknown diagnostic-evidence)})})))
+   [:=> [:cat [:map
+                [:seon.error/at :seon.error/at]
+                [:seon.error/layer :seon.error/layer]
+                [:seon.error/operation :seon.error/operation]
+                [:seon.error/message :seon.error/message]
+                [:seon.error/diagnostic-layer :seon.schema/value]
+                [:seon.error/diagnostic-operation :seon.schema/value]
+                [:seon.error/diagnostic-member :seon.schema/value]
+                [:seon.error/diagnostic-expected :seon.schema/value]
+                [:seon.error/diagnostic-offending :seon.schema/value]
+                [:seon.error/diagnostic-cause :seon.schema/value]
+                [:seon.error/diagnostic-evidence :seon.schema/value]
+                [:seon.error/data {:optional true} :map]]]
+    :seon.error/base]}
+  [{:seon.error/keys [at layer operation message data diagnostic-layer
+                      diagnostic-operation diagnostic-member diagnostic-expected
+                      diagnostic-offending diagnostic-cause diagnostic-evidence]}]
+  {:seon.error/at at :seon.error/layer layer :seon.error/operation operation
+   :seon.error/message message
+   :seon.error/data
+   (merge data
+          {::diagnostic-layer (known-or-unknown diagnostic-layer)
+           ::diagnostic-operation (known-or-unknown diagnostic-operation)
+           ::diagnostic-member (known-or-unknown diagnostic-member)
+           ::diagnostic-expected (known-or-unknown diagnostic-expected)
+           ::diagnostic-offending (known-or-unknown diagnostic-offending)
+           ::diagnostic-cause (known-or-unknown diagnostic-cause)
+           ::diagnostic-evidence-availability (if (some? diagnostic-evidence) ::known ::unknown)
+           ::diagnostic-evidence (known-or-unknown diagnostic-evidence)})})
 
 ;;; ---------------------------------------------------------------------------
 ;;; The normalizer
@@ -535,9 +366,8 @@
 (def ^:private classifying-error-keys
   ;; Dated 2026-09-18 against error-entities PRD §2.2. These are the base
   ;; observations whose values must remain readable when the remainder is
-  ;; over-bound. The PRD's schemas are deliberately not implemented here.
-  [:seon.error/kind
-   :seon.error/at
+  ;; over-bound; their complete schemas are in the canonical population.
+  [:seon.error/at
    :seon.error/layer
    :seon.error/operation
    :seon.error/message
@@ -640,14 +470,14 @@
           (.getStackTrace failure))))
 
 (defn- contract-violation-data
-  "One contract violation's own data, from a source in any of its shapes."
+  "The reporter's declared function/arm evidence, from an admitted source."
   [source]
-  (let [error-value (if (map? (::flow/ex source))
-                      (:data (::flow/ex source))
-                      source)]
-    (when (= :seon.instrument/contract-violated
-             (:seon.error/kind error-value))
-      (:seon.error/data error-value))))
+  (let [observation (if (map? (::flow/ex source)) (:data (::flow/ex source)) source)
+        data (:seon.error/data observation)]
+    (when (and (map? data)
+               (qualified-symbol? (:seon.instrument/fn data))
+               (#{:input :output :guard} (:seon.instrument/arm data)))
+      data)))
 
 (defn- offending-entry
   "The map entry holding the value that actually broke the contract, if any.
@@ -746,7 +576,6 @@
     agent-id :seon.agent/id}]
   (let [failure (throwable source)
         class-name (when failure (.getName (class failure)))
-        error-kind (kind source failure)
         source (meaningful-source source)
         admitted (bounded-error-admission source failure caps)
         full-edn (:seon.sci.admit/edn admitted)
@@ -798,7 +627,8 @@
         (cond-> {:seon.error/id signature
                  :seon.error/at at
                  :seon.error/process process
-                 :seon.error/kind error-kind
+                 :seon.error/layer (:seon.error/layer observation)
+                 :seon.error/operation (:seon.error/operation observation)
                  :seon.error/signature signature
                  :seon.error/capped? true}
           (int? data-size) (assoc :seon.error/data-size (long data-size))
@@ -848,60 +678,21 @@
      :seon.error/data-content full-edn}))
 
 (defn normalize
-  "Any error into the one durable fact. Total, pure, and never throws.
-  Recognizes the source structurally — a map carrying `::flow/ex` is a
-  flow report (all three shapes), a map carrying `:seon.error/kind` is a
-  flat value or a transition refusal, a `Throwable` is itself, and
-  anything else is `:seon.error/unclassified` — then:
-
-  - takes `kind` from the deepest non-empty `ex-data` in the cause
-    chain, or from the flat value's own kind, and never invents one;
-  - takes `class` and `message` from the Throwable when there is one,
-    and from the value's own `message` when there is not. `class` is
-    ABSENT for a source that was never a Throwable; `message` is never
-    absent and never empty — for a source nothing recognizes it names
-    what arrived, because \"an error we cannot describe\" still has to
-    say that much;
-  - projects the meaningful source — retaining `::flow/msg` while excluding
-    disposable `::flow/state` — through `seon.sci.admit/admit` in `:record`
-    mode with the request's declared caps and `(constantly nil)` as the
-    interrupt-fn;
-  - stores a fitted projection in `data-edn`, records the full meaningful
-    projection's UTF-8 byte size in `data-size`, and marks `capped?` whenever
-    admission or inline fitting omitted evidence;
-  - lifts `::flow/pid`, `::flow/op` and `::flow/cid` into `proc`, `op`
-    and `cid`, each present exactly when the arriving shape carried it;
-  - computes `signature` as `sha-256` over
-    the canonically ordered identity attributes (kind, Throwable class, function, frame);
-  - emits `run` and `agent` as lookup refs (`[:seon.turn/id id]`)
-    exactly when the request supplied those ids.
-
-  The fact's `id` IS its `signature`: one failure class is one error
-  identity, derived from the canonical failure attributes rather than
-  minted per occurrence. The request's own `:seon.error/id` names the
-  NOTIFICATION, not the fact, so a caller that wants a ref to the fact
-  reads `(:seon.error/id result)` instead of reusing the name it supplied.
-  `at` and `process` are the caller's: the clock is not this function's to
-  invent, and a pure normalizer is a testable one. The result is
-  transactable as-is — every key is a declared attribute of
-  `:seon.error/fact` and nothing rides along."
-  {:malli/schema [:=> [:cat :seon.error/normalize-request] :seon.error/fact]}
+  "Normalize one observation with a supplied projection and bounded evidence.
+  The signature is D13's stable tuple; complete source facets remain on the
+  owned occurrence, while this fact carries the root's site and evidence link."
+  {:malli/schema [:=> [:cat :seon.error/normalize-request]
+                  [:or :seon.error/fact :seon.error/base]]}
   [request]
   (:seon.error/fact (prepare request)))
 
 (defn value
-  "The flat `:seon.error/value` a caller branches on, from a fact.
-  Total by construction, which is the point: `kind` and `message` are
-  required on the fact, so every normalization projects down to a valid
-  flat value and the two shapes can never diverge. `data` carries the
-  pointer to the durable evidence (`{:seon.error/id …}`) rather than a
-  copy of it — the fact is one pull away and duplicating its projection
-  into every value is how two renderings of one error start to drift."
-  {:malli/schema [:=> [:cat :seon.error/fact] :seon.error/value]}
+  "The recorded base observation with a link to its complete durable evidence."
+  {:malli/schema [:=> [:cat :seon.error/fact] :seon.error/base]}
   [fact]
-  {:seon.error/kind (:seon.error/kind fact)
-   :seon.error/message (:seon.error/message fact)
-   :seon.error/data {:seon.error/id (:seon.error/id fact)}})
+  (assoc (select-keys fact [:seon.error/at :seon.error/layer :seon.error/operation
+                          :seon.error/message :seon.error/signature])
+         :seon.error/data {:seon.error/id (:seon.error/id fact)}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The routing unit and its projections
@@ -919,12 +710,11 @@
   [{:seon.error/keys [fact reason occurrence occurrence-count notification-limit
                       notification]
     agent-id :seon.agent/id}]
-  (let [presentation (if (= :seon.instrument/contract-violated
-                            (:seon.error/kind fact))
+  (let [presentation (if (and (qualified-symbol? (:seon.instrument/fn fact))
+                                    (#{:input :output :guard} (:seon.instrument/arm fact)))
                        `instrumentation-prose
                        `ai-prose)]
     (cond-> {:seon.error/fact fact
-             :seon.error/kind (:seon.error/kind fact)
              :seon.error/evidence [:seon.error/id (:seon.error/id fact)]
              ;; The typed selector invokes this explicit producer through SCI.
              :seon.render/ai presentation}
@@ -951,7 +741,7 @@
 (defn- evidence-prose
   [fact]
   (str "Evidence: error " (:seon.error/id fact)
-       ", kind " (:seon.error/kind fact)
+       ", operation " (:seon.error/operation fact)
        ", signature " (:seon.error/signature fact) "."))
 
 (defn- value-description
@@ -1328,107 +1118,22 @@
              (str " " (evidence-prose fact))))))))
 
 (defn- notice-ai-prose
-  "`:seon.render/ai` — the steering prose an agent is told, from a notice.
-  Answers the four questions in order: WHAT happened, WHY it is being
-  told, WHAT that means for its work, and WHERE the evidence is. Every
-  clause is derived from a present fact and OMITTED when the fact is
-  absent — never a stored nil, never the word \"unknown\", and never
-  boilerplate.
-
-  Two rules the prose may not break:
-
-  - the why-clause is derived from `:seon.error/reason` and is the one
-    sentence an agent will act on: its own run was interrupted, or it is
-    the escalation owner and the error had no attributable agent, or the
-    same signature has now recurred. With no reason the clause is absent
-    entirely, because nobody is being contacted;
-  - it says \"may have\" wherever the committed facts do not establish
-    whether the interrupted operation completed. Claiming certainty is a
-    lie the agent then reasons from.
-
-  Sizes shown to anyone are estimated tokens, never characters — this
-  prose prints no character count.
-
-  Called by the router, by the explanation message's content at commit
-  time (where the string becomes a historical fact), by the `problems`
-  block, and by the failover notice. One derivation, four consumers."
+  "Describe recorded evidence and why this recipient receives its first notification."
   [notice]
   (let [{:seon.error/keys [fact reason]} notice
-        {:seon.error/keys [id kind message proc op run process signature]} fact
-        run-id (second run)
-        data (flat-data fact)
-        error-class (:seon.ai/error-class data)]
-    (cond
-      (= reason :failover)
-      (str "The primary model was not called: its connection failed before"
-           " send, so no output exists and this failover is safe. You are the"
-           " one backup attempt. Answer the unchanged user request below; do"
-           " not wait for or reconstruct a primary response.")
-
-      (= kind :seon.turn/refused)
-      (refusal-prose fact)
-
-      ;; The latest occurrence's OWN message and run ride this clause. An
-      ;; escalation that named only a kind and an id made the reader look
-      ;; the failure up before it could act — the detail the deleted
-      ;; hand-rolled run-phase escalation carried, folded into the one
-      ;; owner. Both are declared facts on the entity, omitted when absent.
-      (= reason :recurring)
-      (str/join
-       " "
-       (remove
-        nil?
-        [(if-let [occurrence (:seon.error/occurrence notice)]
-           (str "Core fault " kind " reached " occurrence
-                " occurrences in process " process " (notification limit "
-                (:seon.error/notification-limit notice) ").")
-           (str "Core fault " kind
-                " reached its final notification for signature "
-                signature "."))
-         (when message (str "Latest: " message))
-         (when run-id (str "It interrupted run " run-id "."))
-         (str "Further occurrences remain in seon.problems but will not"
-              " message you. Latest error: " id ". Signature: "
-              signature ".")]))
-
-      (= kind :seon.ai/no-credential)
-      (str "The model was not called: " message
-           " Configure the credential before retrying. "
-           (evidence-prose fact))
-
-      (= error-class :transport-before-send)
-      (str "The primary model was not called: the connection failed before"
-           " send. This attempt cost nothing; a configured backup may run"
-           " immediately. " (evidence-prose fact))
-
-      (= kind :seon.ai/unparseable-body)
-      (str "The model returned a response but no assistant text. Do not retry"
-           " automatically; inspect the response evidence first. "
-           (evidence-prose fact))
-
-      :else
-      (str/join
-       " "
-       (remove
-        nil?
-        [(str (if proc
-                (str "The " (or (some-> proc name) "proc") " " op
-                     " failed with " kind ".")
-                (str message " (" kind ").")))
-         ;; The run clause rides the RUN, not the reason. An agent
-         ;; attributed with no run took this branch and read "It
-         ;; interrupted run ." on a live cluster (2026-08-08 probe) —
-         ;; the omit-when-absent rule this docstring states, broken by
-         ;; the one clause that assumed its fact was always there.
-         (case reason
-           :your-run (when run-id (str "It interrupted run " run-id "."))
-           :no-attributable-agent "No agent or run could be attributed."
-           nil)
-         (str "Inspect error " id "; "
-              (if proc
-                "the proc survived and no work was re-executed."
-                "nothing was retried.")
-              " Signature: " signature ".")])))))
+        {:seon.error/keys [id message run signature]} fact]
+    (if (= reason :failover)
+      "The primary model was not called: its connection failed before send, so no output exists. Answer the unchanged request as the backup attempt."
+      (str/join " "
+                (remove nil?
+                        [message
+                         (case reason
+                           :your-run (when run (str "It interrupted run " (second run) "."))
+                           :no-attributable-agent "No agent or run could be attributed."
+                           :recurring "This fault belongs to a namespace assigned to you."
+                           nil)
+                         (str "Inspect error " id ". Signature: " signature ".")
+                         "Further occurrences share this record and do not send another notification."])))))
 
 (defn ai-prose
   "`:seon.render/ai` — AI-attempt evidence or a legacy error notice.
@@ -1479,13 +1184,13 @@
   means the operation halts and the system stays up precisely so the
   error can be dug into). So it carries what a REPL needs to pull the
   whole story: the `id` to pull the fact, the `signature` to count
-  recurrence, the `kind` to find the rule, and the run, process, proc,
+  recurrence, the operation to find the observed boundary, and the run, process, proc,
   op, cid and basis-t refs to find everything around it. Each is omitted
   when absent."
   {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
   [notice]
   (let [fact (:seon.error/fact notice)
-        {:seon.error/keys [id at kind message process signature
+        {:seon.error/keys [id at layer operation message process signature
                            throwable-class proc op cid run basis-t]} fact
         source (fact-source fact)
         data (flat-data fact)
@@ -1495,7 +1200,8 @@
      (remove
       nil?
       ["seon.error"
-       (str "kind=" kind)
+       (str "layer=" layer)
+       (str "operation=" operation)
        (when aggregate? (str "sig=" signature))
        (when aggregate? (str "occurrences=" aggregate?))
        (when proc (str "proc=" proc))
@@ -1508,7 +1214,7 @@
        (when-let [rule (:seon.turn/rule source)] (str "rule=" rule))
        (when-let [transition (:seon.turn/transition source)]
          (str "transition=" transition))
-       (when (= kind :seon.turn/refused) "committed=false")
+       (when (and (:seon.turn/rule source) (:seon.turn/transition source)) "committed=false")
        (when-let [phase (:seon.ai/error-class data)] (str "phase=" phase))
        (when (contains? data :seon.ai/request-transmitted?)
          (str "transmitted=" (:seon.ai/request-transmitted? data)))
@@ -1608,7 +1314,6 @@
                                                 notification)))
    :seon.message/about (:seon.error/signature fact)})
 
-(declare facets facet-keys)
 
 (defn commit-call
   "Upsert one error occurrence and its bounded notifications at the writer."
@@ -1678,7 +1383,7 @@
                      digest (assoc :seon.error.occurrence/data-blob
                                    [:seon.error.occurrence/blob-digest digest]))
         error-row (assoc (select-keys fact [:seon.error/signature :seon.error/id
-                                          :seon.error/kind :seon.instrument/fn :seon.error/frame
+                                          :seon.error/layer :seon.error/operation :seon.instrument/fn :seon.error/frame
                                           :seon.error/exception-class])
                          :seon.error/occurrences #{occurrence})
         notification {:seon.error/notification-id signature}
@@ -1734,7 +1439,8 @@
                                      (nil? turn-id) (assoc :seon.db.process/id (:seon.error/process fact)))))
          rows [{:db/id (fact-tempid (:seon.error/id request))
                 :seon.error/id signature :seon.error/signature signature
-                :seon.error/kind (:seon.error/kind fact)}]
+                :seon.error/layer (:seon.error/layer fact)
+                :seon.error/operation (:seon.error/operation fact)}]
          tx (conj rows [:db.fn/call #'commit-call
                         (assoc request :seon.error/fact fact :seon.error.occurrence/id occurrence-id)])]
      {:seon.error/fact fact
@@ -1886,20 +1592,9 @@
                 value)]
     (if (map? value) (latest-fact value) value)))
 
-(defn- class-properties
-  [forms schema-key]
-  (some-> (get forms schema-key)
-          schema.form/namespaced-properties))
 
-(defn- matched-error-classes
-  [value]
-  (when-let [projection (schema/current-projection)]
-    (let [forms (:seon.schema.projection/forms projection)]
-      (->> (schema/matching-shapes-in projection value)
-           (filter (fn [{schema-key :seon.schema/key}]
-                     (true? (:seon.error/class
-                             (class-properties forms schema-key)))))
-           vec))))
+
+
 
 (defn facet-keys
   "Canonical base-extension declarations in this projection, excluding aliases.
@@ -1937,65 +1632,15 @@
           (keep (fn [[facet valid?]] (when (valid? value) facet)))
           validators)))
 
-(defn error?
-  "True when `value` matches at least one declared error-class schema.
 
-  Registry-free leaves use the structural fallback: a map containing
-  `:seon.error/message`. Once a projection is active, its declared classes are
-  the complete authority and a message alone is not an error class."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [value]
-  (if (schema/current-projection)
-    (boolean (seq (matched-error-classes value)))
-    (and (map? value)
-         (contains? value :seon.error/message))))
 
-(defn- error-marker
-  [value]
-  (or
-   (when-let [class-row (first (matched-error-classes value))]
-     (let [marker-attributes
-           (disj (:seon.schema/required-attrs class-row)
-                 :seon.error/message)]
-       (first
-        (sort-by (comp str first)
-                 (select-keys value marker-attributes)))))
-   (when-let [kind (:seon.error/kind value)]
-     [:seon.error/kind kind])))
 
-(defn- error-evidence
-  [value marker]
-  (->> value
-       (remove (fn [[attribute _]]
-                 (or (= :seon.error/message attribute)
-                     (= (some-> marker first) attribute)
-                     (= :seon.error/id attribute)
-                     (contains? render-context-attributes attribute))))
-       (sort-by (comp str first))))
 
-(defn- evidence-text
-  [evidence]
-  (when (seq evidence)
-    (str "Evidence: "
-         (str/join ", "
-                   (map (fn [[attribute evidence-value]]
-                          (str attribute "=" (pr-str evidence-value)))
-                        evidence))
-         ".")))
 
-(defn- default-ai-prose
-  [value]
-  (let [marker (error-marker value)
-        evidence (error-evidence value marker)]
-    (str/join
-     "\n"
-     (remove
-      nil?
-      [(:seon.error/message value)
-       (when marker
-         (str "Failed: " (first marker) "=" (pr-str (second marker)) "."))
-       (evidence-text evidence)
-       "Re-read the current facts before retrying or changing state."]))))
+
+
+
+
 
 (defn- evidence-path
   [id]
@@ -2017,7 +1662,7 @@
            (str " Occurrences: " n ".")))))
 
 (defn render-html
-  "Render one fault's kind, message, time, function, turn, and evidence link."
+  "Render one fault's operation, message, time, function, turn, and evidence link."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.render/hiccup]}
   [unit]
   (let [value (rendered-error-value unit)
@@ -2028,7 +1673,7 @@
                    turn)]
     (into
      [:article {:class "seon-family-entry seon-error-entry"}
-      [:p {:class "seon-kicker"} (some-> (:seon.error/kind value) name)]
+      [:p {:class "seon-kicker"} (some-> (:seon.error/operation value) str)]
       [:h3 {:class "seon-error-message"}
        (or (refusal-text (assoc unit :seon.render/output :seon.render/html)
                          value (:seon.error/data value))
@@ -2065,23 +1710,16 @@
   [(if-let [at (:seon.error/at (latest-fact fault))] (- (.getTime ^java.util.Date at)) 0)
    (str (:seon.error/id fault))])
 
-(defn- run-identity
-  [database reference]
-  (let [eid (cond
-              (map? reference) (:db/id reference)
-              (integer? reference) reference)]
-    (or (:seon.turn/id reference)
-        (when eid
-          (let [row (db/pull database [:seon.turn/id] eid)]
-            (when-not (:seon.error/kind row)
-              (:seon.turn/id row)))))))
+
 
 (defn- fault-entities
   [faults]
   (->> (if (coll? faults) faults [])
        (map (fn [fault]
               (if (map? fault) fault
-                  {:seon.error/kind :seon.render/unavailable
+                  {:seon.error/at (java.util.Date.)
+                   :seon.error/layer :seon.error/reading
+                   :seon.error/operation 'seon.error/fault-entities
                    :seon.error/message (str "Fault entity was not acquired: " (pr-str fault))})))
        (sort-by fault-order)))
 
@@ -2172,7 +1810,9 @@
                                     [?error :seon.error/occurrences ?occurrence]))]
                     database faults))
         references (cond acquired? faults
-                         (:seon.error/kind row) [row]
+                         (and (map? row) (inst? (:seon.error/at row))
+                              (qualified-keyword? (:seon.error/layer row))
+                              (qualified-symbol? (:seon.error/operation row))) [row]
                          :else row)
         entities (fault-entities
                   (mapv #(if (map? %) %
@@ -2202,20 +1842,23 @@
                 (str "Recorded function-body entries: " entries "."))
               "Many entries indicate a spin; few indicate time spent inside a host call. Inspect the called function before retrying."]))))
 
+(defn- evidence-text
+  "Present the supplied diagnostic evidence without a classification lookup."
+  {:malli/schema [:=> [:cat [:or :nil :map]] [:or :nil :string]]}
+  [evidence]
+  (when (seq evidence)
+    (str/join "\n" (map (fn [[attribute value]] (str attribute "=" (pr-str value))) evidence))))
+
 (defn edit-prose
   "`:seon.render/ai` — selection evidence for an edit that did not apply."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        marker (error-marker value)
-        evidence (error-evidence value marker)]
+        evidence (:seon.error/data value)]
     (str/join
      "\n"
      (remove nil?
              [(:seon.error/message value)
-              (when marker
-                (str "Selection: " (first marker) "="
-                     (pr-str (second marker)) "."))
               (evidence-text evidence)
               "Re-read the exact source and narrow the edit selection before applying it again."]))))
 
@@ -2224,8 +1867,7 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        marker (error-marker value)
-        evidence (error-evidence value marker)]
+        evidence (:seon.error/data value)]
     (str/join
      " "
      (remove nil?
@@ -2238,8 +1880,7 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.render/hiccup]}
   [unit]
   (let [value (rendered-error-value unit)
-        marker (error-marker value)
-        evidence (error-evidence value marker)]
+        evidence (:seon.error/data value)]
     (into
      [:aside {:class "seon-family-entry seon-render-elision"}
       [:p "Additional render-walk content was elided by the active render profile."]]
@@ -2252,34 +1893,29 @@
               evidence)]))))
 
 (defn unclassified-prose
-  "`:seon.render/ai` — an honest failure projection with no class match."
+  "`:seon.render/ai` — evidence from an observation whose domain is unavailable."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        marker (error-marker value)
-        evidence (error-evidence value marker)]
+        evidence (:seon.error/data value)]
     (str/join
      "\n"
      (remove nil?
              [(:seon.error/message value)
-              "No registered error class recognized the original failure."
+              "The original boundary did not supply complete domain evidence."
               (evidence-text evidence)
-              "Inspect the admitted projection and declare the missing class before retrying."]))))
+              "Inspect the observation and its boundary contract before retrying."]))))
 
 (defn mcp-prose
   "`:seon.render/ai` — retrieval evidence for a failed MCP value lookup."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        marker (error-marker value)
-        evidence (error-evidence value marker)]
+        evidence (:seon.error/data value)]
     (str/join
      "\n"
      (remove nil?
              [(:seon.error/message value)
-              (when marker
-                (str "Lookup: " (first marker) "="
-                     (pr-str (second marker)) "."))
               (evidence-text evidence)
               "Re-read the current cluster status or value identity before requesting the data again."]))))
 
@@ -2288,19 +1924,15 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        marker (error-marker value)
-        evidence (error-evidence value marker)]
+        evidence (:seon.error/data value)]
     (str/join
      "\n"
      (remove nil?
              [(:seon.error/message value)
-              (when marker
-                (str "Indexing stopped at " (first marker) "="
-                     (pr-str (second marker)) "."))
               (evidence-text evidence)
               "Repair the named source or declaration evidence, then rerun initialization."]))))
 
-;;; Complete owned error observations; constructors remain on their old contracts.
+;;; Complete owned error observations.
 
 (defn- exclusive-members?
   "Exactly one of the supplied attributes is present on a candidate map."

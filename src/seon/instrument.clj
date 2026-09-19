@@ -233,8 +233,17 @@
     (when-let [connection (:seon.db/connection environment)]
       (let [entries (call-preparation/supplied-map-entries (db/db connection)
                                                            function-symbol)]
-        (when-not (:seon.error/kind entries)
-          (into #{} (map (fn [[_ position entry-key]] [position entry-key])) entries))))))
+        (if (vector? entries)
+          (into #{} (map (fn [[_ position entry-key]] [position entry-key])) entries)
+          (throw (ex-info "Supplied-entry errors are not declared by their owner."
+                          {:seon.error/at (java.util.Date.)
+                           :seon.error/layer :seon.instrument/registration
+                           :seon.error/operation 'seon.instrument/supplied-entry-problems
+                           :seon.instrument/fn function-symbol
+                           :seon.instrument/registration-observation
+                           {:seon.error.evidence/attribute :seon.fn/sym
+                            :seon.error.evidence/value 'seon.call-preparation/supplied-map-entries}
+                           :seon.error/data {:seon.error/cause entries}})))))))
 
 (defn- actionable-problem
   {:malli/schema [:=> [:cat :seon.error/problem-description :map [:or :nil :boolean]] :seon.error/problem-description]}
@@ -268,9 +277,7 @@
 
 (defn- violation
   "Retain the actual offending values; the error render pair owns projection."
-  {:malli/schema [:=> [:cat [:or :nil :seon.sci.admit/caps] :qualified-keyword :map] [:map
-     [:seon.error/message :seon.error/message]
-     [:seon.error/data :map]]]}
+  {:malli/schema [:=> [:cat [:or :nil :seon.sci.admit/caps] :qualified-keyword :map]  :seon.error/base]}
   [_caps kind data]
   (let [function-symbol (:fn-name data)
            {arglists ::arglists :as lookup} (diagnostic-arglists function-symbol)
@@ -366,10 +373,9 @@
            paths (into [] (comp (map :seon.error/path) (remove empty?)) problems)
            caller (caller-frame)]
        (error/diagnostic
-        {:seon.error/kind (if (some #(and (= :malli.core/missing-key (:type %))
-                                          (contains? supplied-entries (vec (:in %))))
-                                    (:errors explanation))
-                            ::missing-supplied-key ::contract-violated)
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.instrument/invocation
+         :seon.error/operation function-symbol
             :seon.error/message
          (str (error/problem-sentence
                function-symbol first-problem nil
@@ -441,7 +447,9 @@
             (ex-info
              (str "Contract predicate " (pr-str predicate)
                   " has no active callable.")
-              {:seon.error/kind :seon.schema/unresolved-predicate
+              {:seon.error/at (java.util.Date.)
+               :seon.error/layer :seon.instrument/registration
+               :seon.error/operation 'seon.instrument/bind-contract-predicates
                :seon.schema/unresolved-predicate predicate
                :seon.error/message "The schema predicate is unresolved."
                :seon.schema/predicate predicate}))))
@@ -458,10 +466,10 @@
   {:malli/schema
    [:function
     [:=> [:cat :qualified-symbol :string :map :seon.config/on-core-error
-          [:or :seon.sci.admit/caps :seon.error/value] :seon.instrument/callable]
+          [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable]
      :seon.instrument/callable]
     [:=> [:cat :qualified-symbol :string :map :seon.config/on-core-error
-          [:or :seon.sci.admit/caps :seon.error/value] :seon.instrument/callable
+          [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable
           [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]
            [:seon.config.error/max-evidence-bytes {:optional true}
             :seon.config.error/max-evidence-bytes]]]
@@ -474,8 +482,7 @@
       (let [failure
             (registration-error
              function-symbol
-             {:seon.error/kind ::missing-recorder
-              :seon.error/message "Record-mode SCI instrumentation requires an acquired fault recorder."
+             {:seon.error/message "Record-mode SCI instrumentation requires an acquired fault recorder."
               :seon.error/diagnostic-layer :instrumentation
               :seon.error/diagnostic-operation 'seon.instrument/wrap-interpreted
               :seon.error/diagnostic-member :seon.flow/commit-fault!
@@ -490,8 +497,7 @@
       (let [failure
             (registration-error
              function-symbol
-             {:seon.error/kind ::invalid-caps
-              :seon.error/message (str "Cannot arm the contract of " function-symbol
+             {:seon.error/message (str "Cannot arm the contract of " function-symbol
                                        ": admission caps were not acquired.")
               :seon.error/diagnostic-layer :instrumentation
               :seon.error/diagnostic-operation 'seon.instrument/wrap-interpreted
@@ -624,7 +630,9 @@
                 (and (keyword? node) (find forms node))
                 (if (seen node)
                   (throw (ex-info "Cyclic error result declaration."
-                                  {:seon.error/kind ::error-facet-analysis-unavailable
+                                  {:seon.error/at (java.util.Date.)
+                                   :seon.error/layer :seon.instrument/registration
+                                   :seon.error/operation 'seon.instrument/declared-result
                                    :seon.error/expected-key node}))
                   (let [inherited (walk-result (get forms node) (conj seen node))]
                     ;; Extending the base promises this complete facet. It does
@@ -642,7 +650,9 @@
                     (into #{} (mapcat #(walk-result (last %) seen)) children)
                     (= :merge tag)
                     (throw (ex-info "Unsupported error result declaration."
-                                    {:seon.error/kind ::error-facet-analysis-unavailable
+                                    {:seon.error/at (java.util.Date.)
+                                   :seon.error/layer :seon.instrument/registration
+                                   :seon.error/operation 'seon.instrument/declared-result
                                      :seon.error/expected node}))
                     :else #{}))
                 :else #{}))]
@@ -780,8 +790,7 @@
                               (seq (set/difference actual declared)))
                       (reject!
                        (cond->
-                        {:seon.error/kind ::undeclared-error
-                         :seon.error/message
+                        {:seon.error/message
                          (if (empty? actual)
                            (str function-symbol " returned a base error without a complete declared facet."
                                 " Declared facets: " (pr-str declared) ".")
@@ -907,10 +916,10 @@
           [:seon.error/diagnostic-operation :qualified-symbol]]]
     :seon.instrument/registration-error]}
   [function-symbol request]
-  (assoc (error/diagnostic request)
-         :seon.error/at (java.util.Date.)
-         :seon.error/layer :seon.instrument/registration
-         :seon.error/operation (:seon.error/diagnostic-operation request)
+  (assoc (error/diagnostic
+          (assoc request :seon.error/at (java.util.Date.)
+                         :seon.error/layer :seon.instrument/registration
+                         :seon.error/operation (:seon.error/diagnostic-operation request)))
          :seon.instrument/fn function-symbol
          :seon.instrument/registration-observation
          {:seon.error.evidence/attribute :seon.error/diagnostic-member
@@ -935,8 +944,7 @@
   (cond
     (and (= :record mode) (not (fn? commit-fault!)))
     (registration-error 'seon.instrument/apply!
-     {:seon.error/kind ::missing-recorder
-      :seon.error/message "Record-mode instrumentation requires an acquired fault recorder."
+     {:seon.error/message "Record-mode instrumentation requires an acquired fault recorder."
       :seon.error/diagnostic-layer :instrumentation
       :seon.error/diagnostic-operation 'seon.instrument/apply!
       :seon.error/diagnostic-member :seon.flow/commit-fault!
@@ -947,8 +955,7 @@
 
     (not (#{:panic :record} mode))
     (registration-error 'seon.instrument/apply!
-       {:seon.error/kind ::invalid-mode
-        :seon.error/message
+       {:seon.error/message
         "Instrumentation requires :panic or :record core-error mode."
         :seon.error/diagnostic-layer :instrumentation
         :seon.error/diagnostic-operation 'seon.instrument/apply!
@@ -964,8 +971,7 @@
     (let [projection (or supplied-projection (schema/handed-projection))]
       (if-not projection
         (registration-error 'seon.instrument/apply!
-         {:seon.error/kind ::missing-projection
-          :seon.error/message
+         {:seon.error/message
           "Instrumentation requires a handed schema projection."
           :seon.error/diagnostic-layer :instrumentation
           :seon.error/diagnostic-operation 'seon.instrument/apply!
@@ -999,8 +1005,7 @@
                 (let [data (registration-cause-data failure)
                       diagnostic
                       (registration-error (var-symbol candidate)
-                       {:seon.error/kind ::registration-failed
-                         :seon.error/message "The loaded function contract cannot compile."
+                       {:seon.error/message "The loaded function contract cannot compile."
                         :seon.error/diagnostic-layer :instrumentation
                         :seon.error/diagnostic-operation 'seon.instrument/apply!
                         :seon.error/diagnostic-member (var-symbol candidate)

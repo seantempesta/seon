@@ -9,7 +9,7 @@
 
   THE STANDING PROPERTY is `normalization-is-total`: over all three
   input families, every normalization validates `:seon.error/fact`,
-  projects to a valid flat `:seon.error/value`, and prints a `data-edn`
+  projects to a valid flat `:seon.error/base`, and prints a `data-edn`
   that READS BACK through `clojure.edn/read-string`. That last clause
   is what proves the one codec ran — a raw `pr-str` of a flow report
   carrying `::flow/state` does not read back, and for a state holding a
@@ -130,9 +130,7 @@
           (is (str/includes? (pr-str (error/render-html (read-error))) "Resolved"))
           (is (schema/valid-candidate-value? :seon.error/fact (:seon.error/fact (first (#'seon.problems/error-signatures (db/db connection)))))))
         (let [flat (error/recording (db/db connection)
-                                  (commit-request {:seon.error/kind :seon.error/unclassified
-                                                   :seon.error/message "flat error"
-                                                   :seon.error/data {:seon.error/diagnostic-operation 'seon.id/valid?}} {}))]
+                                  (commit-request {:seon.error/message "flat error", :seon.error/data {:seon.error/diagnostic-operation (quote seon.id/valid?)}} {}))]
           (is (:seon.error/ref flat))
           (is (= 'seon.id/valid? (:seon.instrument/fn (:seon.error/fact flat))))
           (is (not (contains? (:seon.error/fact flat) :seon.error/exception-class)))
@@ -142,8 +140,7 @@
   (test-support/with-database
     (fn [connection]
       (doseq [n [3 5]]
-        (let [request (commit-request {:seon.error/kind :seon.flow/fault-channel-overflow
-                                       :seon.error/message "dropped deliveries"} {})
+        (let [request (commit-request {:seon.error/message "dropped deliveries"} {})
               fact (assoc (error/normalize request)
                           :seon.error/dropped-fault-count n
                           :seon.error/dropped-fault-digest (apply str (repeat 64 "a")))
@@ -152,28 +149,17 @@
           (is (:db-after result))))
       (let [database (db/db connection)
             row (first (db/q '[:find [(pull ?o [*]) ...]
-                              :where [?e :seon.error/kind :seon.flow/fault-channel-overflow]
-                                     [?e :seon.error/occurrences ?o]] database))]
+                              :where [?o :seon.error/dropped-fault-count]] database))]
         (is (= 2 (:seon.error.occurrence/count row)))
         (is (= 8 (:seon.error/dropped-fault-count row)))
         (is (= (apply str (repeat 64 "a")) (:seon.error/dropped-fault-digest row)))))))
 
-(deftest error-class-recognition-uses-the-active-registry
-  (let [projection (schema/build-projection (schema/registered-schemas))]
-    (with-redefs [schema/current-projection (constantly projection)]
-      (is (true? (error/error? {:my.fs/not-found "tmp/absent"
-                                :seon.error/message "File not found."})))
-      (is (false? (error/error? {:seon.error/message "Only a message."})))
-      (is (false? (error/error? :not-a-map))))))
 
-(deftest error-class-recognition-has-a-registry-free-leaf-fallback
-  (with-redefs [schema/current-projection (constantly nil)]
-    (is (true? (error/error? {:seon.error/message "Reader refusal."})))
-    (is (false? (error/error? {})))
-    (is (false? (error/error? "Reader refusal.")))))
+
+
 
 ;;; ---------------------------------------------------------------------------
-;;; Fixtures — the three families, plus the hostile values
+;;; Fixtures — the three families, plus arbitrary observed values
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private caps
@@ -204,32 +190,11 @@
 (deftest diagnostic-construction-is-evidence-complete
   (let [complete
         (error/diagnostic
-         {:seon.error/kind :seon.error-test/invalid-call
-          :seon.error/message "The call was invalid."
-          :seon.error/diagnostic-layer :agent-boundary
-          :seon.error/diagnostic-operation 'seon.error-test/check
-          :seon.error/diagnostic-member :seon.error-test/value
-          :seon.error/diagnostic-expected :int
-          :seon.error/diagnostic-offending "not-an-int"
-          :seon.error/diagnostic-cause :seon.error-test/schema-mismatch
-          :seon.error/diagnostic-evidence {:seon.error-test/path [0]}
-          :seon.error/data {:seon.error-test/context :kept}})
+         {:seon.error/diagnostic-evidence {:seon.error-test/path [0]}, :seon.error/operation (quote seon.error-test/check), :seon.error/diagnostic-expected :int, :seon.error/diagnostic-member :seon.error-test/value, :seon.error/message "The call was invalid.", :seon.error/layer :seon.error-test/diagnostic, :seon.error/diagnostic-layer :agent-boundary, :seon.error/data {:seon.error-test/context :kept}, :seon.error/diagnostic-offending "not-an-int", :seon.error/diagnostic-operation (quote seon.error-test/check), :seon.error/at (java.util.Date.), :seon.error/diagnostic-cause :seon.error-test/schema-mismatch})
         unavailable
         (error/diagnostic
-         {:seon.error/kind :seon.error-test/unavailable
-          :seon.error/message "The evidence could not be observed."
-          :seon.error/diagnostic-layer nil
-          :seon.error/diagnostic-operation nil
-          :seon.error/diagnostic-member nil
-          :seon.error/diagnostic-expected nil
-          :seon.error/diagnostic-offending nil
-          :seon.error/diagnostic-cause nil
-          :seon.error/diagnostic-evidence nil
-          :seon.error/data
-          {:seon.error/diagnostic-layer :cannot-replace
-           :seon.error/diagnostic-evidence-availability :cannot-replace
-           :seon.error-test/context :kept}})]
-    (is (schema/valid-candidate-value? :seon.error/value complete))
+         {:seon.error/diagnostic-evidence nil, :seon.error/operation (quote seon.error-test/check), :seon.error/diagnostic-expected nil, :seon.error/diagnostic-member nil, :seon.error/message "The evidence could not be observed.", :seon.error/layer :seon.error-test/diagnostic, :seon.error/diagnostic-layer nil, :seon.error/data {:seon.error-test/context :kept, :seon.error/diagnostic-evidence-availability :cannot-replace, :seon.error/diagnostic-layer :cannot-replace}, :seon.error/diagnostic-offending nil, :seon.error/diagnostic-operation nil, :seon.error/at (java.util.Date.), :seon.error/diagnostic-cause nil})]
+    (is (schema/valid-candidate-value? :seon.error/base complete))
     (is (= {:seon.error-test/context :kept
             :seon.error/diagnostic-layer :agent-boundary
             :seon.error/diagnostic-operation 'seon.error-test/check
@@ -262,49 +227,7 @@
                          :seon.error/diagnostic-evidence]))
         "unavailable evidence is typed and boundary context cannot replace it")))
 
-(deftest exact-dispatch-producers-carry-their-class-markers
-  ;; THE SUBJECT IS THE CLASS MARKER, not the diagnostic constructor.
-  ;; `seon.error/diagnostic` declares every diagnostic field required, so
-  ;; building these representatives through it handed it a shape its contract
-  ;; forbids; each is an ordinary flat error value carrying one class marker,
-  ;; which is exactly what `error?` dispatches on.
-  (let [representatives
-        [ {:my.fs/stale-digest "tmp/stale"
-          :seon.error/kind :my.fs/stale-digest
-           :seon.error/message "stale"}
-          {:my.fs/invalid-utf8-window "tmp/not-utf8"
-          :seon.error/kind :my.fs/invalid-utf8-window
-           :seon.error/message "not UTF-8"}
-          {:seon.cluster.reply/refused-tag 'secret/tag
-          :seon.error/kind :seon.cluster.reply/refused-tag
-           :seon.error/message "tag refused"}
-          {:seon.db/transaction-outcome-unknown true
-          :seon.error/kind :seon.db/unknown-failure
-           :seon.error/message "outcome unknown"}
-          {:seon.render.walk/elided true
-          :seon.error/kind :seon.render.walk/elided
-           :seon.error/message "elided"}
-          {:seon.ai/stream-truncated true
-          :seon.error/kind :seon.ai/stream-truncated
-           :seon.error/message "stream truncated"}
-          {:seon.cluster.reply/unreadable "["
-          :seon.error/kind :seon.cluster.reply/unreadable
-           :seon.error/message "unreadable"}
-          {:seon.turn.loop/phase-failed true
-          :seon.error/kind :seon.turn.loop/phase-failed
-           :seon.error/message "phase failed"}
-          {:seon.turn.loop/lint-rejected true
-          :seon.error/kind :seon.turn.loop/lint-rejected
-           :seon.error/message "lint rejected"}
-          {:seon.operator/collection-incomplete true
-          :seon.error/kind :seon.operator/collection-incomplete
-           :seon.error/message "collection incomplete"}]
-        projection (schema/build-projection (schema/registered-schemas))]
-    (with-redefs [schema/current-projection (constantly projection)]
-      (doseq [value representatives]
-        (is (true? (error/error? value))
-            (str "class marker was not recognized for "
-                 (:seon.error/kind value)))))))
+
 
 (defn- cyclic-state
   "A proc state shaped like the run loop's, holding a live-object stand-in
@@ -363,7 +286,7 @@
            (ex-info "writer"
                     {:error :transact/cas}
                     (ex-info "the transition refused"
-                             {:seon.error/kind kind
+                             {:seon.turn/rule kind
                               :seon.turn/id "run-9"}))))
 
 ;;; ---------------------------------------------------------------------------
@@ -371,13 +294,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private throwable-gen
-  (gen/fmap (fn [[message kind]]
-              (ex-info message {:seon.error/kind kind}))
-            (gen/tuple (gen/not-empty gen/string-alphanumeric)
-                       (gen/elements [:seon.turn/refused
-                                      :seon.db/rejected
-                                      :seon.ai/timeout
-                                      :seon.boot/refused]))))
+  (gen/fmap #(ex-info % {}) (gen/not-empty gen/string-alphanumeric)))
 
 (def ^:private flow-error-gen
   (gen/fmap (fn [[shape throwable]] (shape throwable))
@@ -387,13 +304,13 @@
                        throwable-gen)))
 
 (def ^:private flat-value-gen
-  (gen/fmap (fn [[kind message data]]
-              (cond-> {:seon.error/kind kind :seon.error/message message}
+  (gen/fmap (fn [[message data]]
+              (cond-> {:seon.error/at #inst "2026-09-19T00:00:00Z"
+                       :seon.error/layer :seon.error-test/observation
+                       :seon.error/operation 'seon.error-test/observed
+                       :seon.error/message message}
                 data (assoc :seon.error/data data)))
-            (gen/tuple (gen/elements [:seon.ai/no-credential
-                                      :seon.db/unknown-failure
-                                      :seon.config/refused])
-                       (gen/not-empty gen/string-alphanumeric)
+            (gen/tuple (gen/not-empty gen/string-alphanumeric)
                        (gen/one-of [(gen/return nil)
                                     (gen/map gen/keyword-ns gen/small-integer)]))))
 
@@ -438,10 +355,9 @@
                 ;; good projection of a source that was nil
                 _read-back (edn/read-string (:seon.error/data-edn fact))]
             (and (seon.schema/valid-candidate-value? :seon.error/fact fact)
-                 (seon.schema/valid-candidate-value? :seon.error/value
+                 (seon.schema/valid-candidate-value? :seon.error/base
                                                      (error/value fact))
-                 ;; fail-closed, so a kind query can never silently miss
-                 (keyword? (:seon.error/kind fact))
+                 (schema/valid-candidate-value? :seon.error/base fact)
                  (re-matches #"^[0-9a-f]{64}$" (:seon.error/signature fact))
                  ;; attribution rides exactly when it was supplied
                  (= attributed? (contains? fact :seon.error/run))
@@ -482,24 +398,16 @@
   ;; not "contains a marker": a reference that was named rather than
   ;; entered is a complete projection of an unprojectable thing. Both
   ;; halves are asserted so the meaning cannot drift into the other one.
-  (let [small (error/normalize (request {:seon.error/kind :seon.ai/timeout
-                                         :seon.error/message "slow"}))
+  (let [small (error/normalize (request {:seon.error/message "slow"}))
         wide (error/normalize
-              (request {:seon.error/kind :seon.ai/timeout
-                        :seon.error/message "slow"
-                        :seon.error/data {:rows (vec (range 10000))}}))]
+              (request {:seon.error/message "slow", :seon.error/data {:rows (vec (range 10000))}}))]
     (is (false? (:seon.error/capped? small))
         "a source that fits is not reported as capped")
     (is (true? (:seon.error/capped? wide))
         "a source wider than the caps says so")))
 
 (deftest over-bound-fault-evidence-retains-its-classifying-base
-  (let [source {:seon.error/kind :seon.error-test/classified
-                :seon.error/layer :seon.agent/turn
-                :seon.error/operation 'seon.turn/step
-                :seon.error/member :seon.test/acquisition
-                :seon.error/message "classified failure"
-                :seon.error/data {:rows (vec (range 10000))}}
+  (let [source {:seon.error/operation (quote seon.turn/step), :seon.error/message "classified failure", :seon.error/layer :seon.agent/turn, :seon.error/member :seon.test/acquisition, :seon.error/data {:rows (vec (range 10000))}}
         prepared (error/prepare
                   (-> (request source)
                       (assoc-in [:seon.sci.admit/caps
@@ -509,16 +417,8 @@
         retained (#'admit/semantic-value
                   (edn/read-string (:seon.error/data-edn fact)))]
     (is (true? (:seon.error/capped? fact)))
-    (is (= (select-keys source [:seon.error/kind
-                                :seon.error/layer
-                                :seon.error/operation
-                                :seon.error/member
-                                :seon.error/message])
-           (select-keys retained [:seon.error/kind
-                                  :seon.error/layer
-                                  :seon.error/operation
-                                  :seon.error/member
-                                  :seon.error/message])))
+    (is (= (select-keys source [:seon.error/layer :seon.error/operation :seon.error/member :seon.error/message])
+           (select-keys retained [:seon.error/layer :seon.error/operation :seon.error/member :seon.error/message])))
     (is (= :over-bound
            (get-in retained [:seon.sci.admit/remainder
                              :seon.sci.admit/reason])))))
@@ -555,7 +455,7 @@
              prepared (error/prepare (request thrown))
              fact (:seon.error/fact prepared)
              fact-bytes (alength (.getBytes (pr-str fact) "UTF-8"))]
-         (is (= :seon.instrument/contract-violated (:seon.error/kind fact))
+         (is (schema/valid-candidate-value? :seon.instrument/contract-error (ex-data thrown))
              (pr-str fact))
          (is (str/includes? (:seon.instrument/actual fact) ":seon.ns/name")
              "the value at the violation path is kept, bounded by what it is")
@@ -582,12 +482,7 @@
         disposable (str "DISPOSABLE-PROC-STATE-" large)
         failure
         (ex-info large
-                 {:seon.error/kind :seon.instrument/contract-violated
-                  :seon.error/data
-                  {:seon.instrument/fn 'seon.render.data/at
-                   :seon.instrument/arm :input
-                   :seon.instrument/schema large
-                   :seon.instrument/args large}})
+                 {:seon.error/data {:seon.instrument/schema large, :seon.instrument/fn (quote seon.render.data/at), :seon.instrument/args large, :seon.instrument/arm :input}})
         prepared
         (error/prepare
          (assoc (request (assoc (transform-error failure)
@@ -615,23 +510,19 @@
     (is (true? (:seon.error/capped? fact))
         "a fact whose evidence was replaced says so")
     (is (every? #(some? (get fact %))
-                [:seon.error/id :seon.error/kind :seon.error/message
-                 :seon.error/signature :seon.error/data-edn
-                 :seon.error/data-size]))))
+                [:seon.error/id :seon.error/message :seon.error/signature :seon.error/data-edn :seon.error/data-size]))))
 
 (deftest fitting-can-require-a-blob-below-the-content-size-threshold
   (let [inline-limit 4096
         near-limit (apply str (repeat 2000 "q"))
         prepared
         (error/prepare
-         (assoc (request {:seon.error/kind :seon.error-test/near-limit
-                          :seon.error/message near-limit})
+         (assoc (request {:seon.error/message near-limit})
                 :seon.config.error/max-evidence-bytes inline-limit))
         fact (:seon.error/fact prepared)
         small
         (error/prepare
-         (assoc (request {:seon.error/kind :seon.error-test/short
-                          :seon.error/message "short"})
+         (assoc (request {:seon.error/message "short"})
                 :seon.config.error/max-evidence-bytes inline-limit))]
     (is (<= (:seon.error/data-size fact) inline-limit))
     (is (not= (:seon.error/data-edn fact)
@@ -649,9 +540,7 @@
   ;; mode unconditionally, so there is no dial under which this becomes
   ;; a second error.
   (let [exploding (lazy-seq (throw (ex-info "realizing me throws" {})))
-        fact (error/normalize (request {:seon.error/kind :seon.db/rejected
-                                        :seon.error/message "rejected"
-                                        :seon.error/data {:rows exploding}}))]
+        fact (error/normalize (request {:seon.error/message "rejected", :seon.error/data {:rows exploding}}))]
     (is (seon.schema/valid-candidate-value? :seon.error/fact fact))
     (is (str/includes? (:seon.error/data-edn fact) "seon.print/failed"))))
 
@@ -682,10 +571,9 @@
              (:seon.error/throwable-class three))))))
 
 (deftest a-value-that-was-never-a-throwable-has-no-class
-  (let [fact (error/normalize (request {:seon.error/kind :seon.ai/no-credential
-                                        :seon.error/message "unset"}))]
+  (let [fact (error/normalize (request {:seon.error/message "unset"}))]
     (is (not (contains? fact :seon.error/throwable-class)))
-    (is (= :seon.ai/no-credential (:seon.error/kind fact)))
+    (is (schema/valid-candidate-value? :seon.error/base fact))
     (is (= "unset" (:seon.error/message fact)))))
 
 (deftest the-message-comes-from-the-rule-not-the-wrapper
@@ -701,27 +589,25 @@
                         (refused-chain :seon.turn/not-the-holder))))]
     (is (= "the transition refused" (:seon.error/message fact)))))
 
-(deftest the-kind-comes-from-the-deepest-ex-data
+(deftest the-observed-rule-comes-from-the-deepest-ex-data
   (let [fact (error/normalize
               (request (transform-error
                         (refused-chain :seon.turn/not-the-holder))))]
-    (is (= :seon.turn/not-the-holder (:seon.error/kind fact))
+    (is (= :seon.turn/not-the-holder (:seon.turn/rule (error/refusal (refused-chain :seon.turn/not-the-holder))))
         "the wrappers carry :error and {} — the rule is at the bottom")))
 
 (deftest an-unclassifiable-source-is-fail-closed-never-absent
   (doseq [source [42 "a string" {:not-an-error true} nil]]
     (let [fact (error/normalize (request source))]
-      (is (= :seon.error/unclassified (:seon.error/kind fact))
+      (is (schema/valid-candidate-value? :seon.error/base fact)
           (str "source: " (pr-str source)))
       (is (seon.schema/valid-candidate-value? :seon.error/fact fact)))))
 
 (deftest attribution-is-a-lookup-ref-or-nothing
-  (let [with (error/normalize (request {:seon.error/kind :seon.db/rejected
-                                        :seon.error/message "no"}
+  (let [with (error/normalize (request {:seon.error/message "no"}
                                        {:seon.turn/id "run-9"
                                         :seon.agent/id "agent-3"}))
-        without (error/normalize (request {:seon.error/kind :seon.db/rejected
-                                           :seon.error/message "no"}))]
+        without (error/normalize (request {:seon.error/message "no"}))]
     (is (= [:seon.turn/id "run-9"] (:seon.error/run with)))
     (is (= [:seon.agent/id "agent-3"] (:seon.error/agent with)))
     (is (not (contains? without :seon.error/run)))
@@ -736,8 +622,7 @@
   (let [signature (fn [message]
                     (:seon.error/signature
                      (error/normalize
-                      (request {:seon.error/kind :seon.db/rejected
-                                :seon.error/message message}))))]
+                      (request {:seon.error/message message}))))]
     (is (= (signature "run 8b1c failed at 21:00:01")
            (signature "run 44de failed at 21:00:09"))
         "an id or a timestamp in the message must not make every occurrence unique")))
@@ -780,7 +665,7 @@
             line (rendered notice :log)]
         (and
          (seon.schema/valid-candidate-value? :seon.error/notice notice)
-         (= (:seon.error/kind fact) (:seon.error/kind notice))
+         (= fact (:seon.error/fact notice))
          (= [:seon.error/id (:seon.error/id fact)]
             (:seon.error/evidence notice))
          (qualified-symbol? (:seon.render/ai notice))
@@ -795,13 +680,7 @@
     (is (not (contains? fact :seon.render/ai)))))
 
 (deftest instrumentation-evidence-survives-normalization
-  (let [violation {:seon.error/kind :seon.instrument/contract-violated
-                   :seon.error/message "bad call"
-                   :seon.error/data
-                   {:seon.instrument/fn 'seon.error/value
-                    :seon.instrument/arm :input
-                    :seon.instrument/schema ":seon.error/fact"
-                    :seon.instrument/args "[\"not a fact\"]"}}
+  (let [violation {:seon.error/message "bad call", :seon.error/data {:seon.instrument/schema ":seon.error/fact", :seon.instrument/fn (quote seon.error/value), :seon.instrument/args "[\"not a fact\"]", :seon.instrument/arm :input}}
         fact (error/normalize
               (request (transform-error
                         (ex-info "bad call" violation))))]
@@ -920,8 +799,9 @@
 (deftest the-flat-value-projects-from-the-fact
   (let [fact (fact)
         value (error/value fact)]
-    (is (seon.schema/valid-candidate-value? :seon.error/value value))
-    (is (= (:seon.error/kind fact) (:seon.error/kind value)))
+    (is (seon.schema/valid-candidate-value? :seon.error/base value))
+    (is (= (select-keys fact [:seon.error/at :seon.error/layer :seon.error/operation])
+           (select-keys value [:seon.error/at :seon.error/layer :seon.error/operation])))
     (is (= (:seon.error/message fact) (:seon.error/message value)))
     (is (= (:seon.error/id fact) (:seon.error/id (:seon.error/data value)))
         "the value points at the durable evidence rather than copying it")))
@@ -1013,8 +893,7 @@
       say what happened, so the fact is recorded and nobody is mailed"
         (let [[facts messages]
               (commit! connection
-                       {:seon.error/kind :seon.turn/not-the-holder
-                        :seon.error/message "the run is held by another process"}
+                       {:seon.error/message "the run is held by another process"}
                        {:seon.agent/id "agent-3"
                         :seon.turn/id "run-9"})]
           (is (= 1 facts))
@@ -1249,7 +1128,7 @@
              segment (:v (first (db/datoms database :eavt location :seon.error.location/segments)))
              before (db/basis-t database)
              result (db/transact! connection [[:db/add segment :seon.error.location.segment/ordinal 3]])]
-         (is (= :seon.db/invalid-write (:seon.error/kind result)) (pr-str result))
+         (is (schema/valid-candidate-value? :seon.db.write/error result) (pr-str result))
          (is (= before (db/basis-t (db/db connection))))
          (is (= 2 (count (db/datoms database :eavt location :seon.error.location/segments)))))))))
 

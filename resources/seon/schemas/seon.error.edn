@@ -32,14 +32,8 @@
               [:example :string]
               [:in :seon.schema/value]
               [:out :seon.schema/value]],
-             :class [:= true],
              :evidence [:tuple [:enum :seon.error/id] :seon.error/id],
-             :value
-             [:map
-              [:seon.error/kind :seon.error/kind]
-              [:seon.error/message :seon.error/message]
-              [:seon.error/doc {:optional true} :seon.error/doc]
-              [:seon.error/data {:optional true} :seon.error/data]],
+             :value :seon.error/base,
              :notice-request
              [:map
               [:seon.error/fact :seon.error/fact]
@@ -111,8 +105,9 @@
               [:seon.error/id :seon.error/id]
               [:seon.error/at :seon.error/at]
               [:seon.error/process :seon.error/process]
-              [:seon.error/kind :seon.error/kind]
               [:seon.error/message :seon.error/message]
+              [:seon.error/layer :seon.error/layer]
+              [:seon.error/operation :seon.error/operation]
               [:seon.error/signature :seon.error/signature]
               [:seon.error/occurrences {:optional true} :seon.error/occurrences]
               [:seon.error/frame {:optional true} :seon.error/frame]
@@ -188,9 +183,10 @@
              [:map {:seon.db/attributes true
                     :seon.render/ai seon.error/render-ai
                     :seon.render/html seon.error/render-html}
+              [:seon.error/layer :seon.error/layer]
+              [:seon.error/operation :seon.error/operation]
               [:seon.error/signature :seon.error/signature]
               [:seon.error/id {:optional true} :seon.error/id]
-              [:seon.error/kind :seon.error/kind]
               [:seon.instrument/fn {:optional true} :seon.instrument/fn]
               [:seon.error/frame {:optional true} :seon.error/frame]
               [:seon.error/exception-class {:optional true} :seon.error/exception-class]
@@ -227,7 +223,6 @@
              :notice
              [:map
               [:seon.error/fact :seon.error/fact]
-              [:seon.error/kind :seon.error/kind]
               [:seon.error/evidence :seon.error/evidence]
               [:seon.render/ai :qualified-symbol]
               [:seon.error/reason {:optional true} :seon.error/reason]
@@ -254,7 +249,6 @@
                :seon.db/index true}
               :seon.db/ref],
              :data-size [:int {:min 0}],
-             :kind :keyword,
              :at :inst,
              :throwable-class [:string {:min 1}],
              :notification-limit [:int {:min 1}],

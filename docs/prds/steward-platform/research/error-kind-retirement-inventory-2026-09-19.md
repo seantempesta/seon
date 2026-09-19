@@ -4667,3 +4667,878 @@ definitions): src **979/997/85**, test **961/967/163**, resources
 The original complete per-file/per-line inventory above remains the dated
 conversion input; removed owned declarations and the new measured consumers
 are specified in the continuation sections. No foreign file was edited.
+
+## D12/D13 retirement handoff (d549c42a6, 2026-09-19)
+
+This dated census supersedes owned-path pending statuses above. Current raw
+kind/class search: **2240 matching lines / 2266 literal matches / 317 files**.
+Owned source/resources/tests have zero matches. `seon.error/error?` is deleted,
+not retained as a compatibility predicate. Its remaining **75 calls on 74
+lines across five files** follow. `src/seon/test.clj` is held by test-selector-a1;
+all external files stay read-only for 1a.
+
+For each any-error branch below, use the value-only expression
+`(let [observation VALUE] (and (map? observation) (inst? (:seon.error/at observation)) (qualified-keyword? (:seon.error/layer observation)) (qualified-symbol? (:seon.error/operation observation))))`.
+VALUE is the existing call argument shown at each site. No projection lookup,
+fetch or replacement general predicate. A domain-specific branch instead tests
+that boundary's declared facet members. Before this mechanical conversion,
+replace the callee's generic `:seon.error/value` output with its exact facet
+union; when that declaration is unavailable, return a complete typed boundary
+refusal naming the callee and unavailable output declaration, not a guessed
+classification. These are step-6 dependencies, not permission to treat the
+old kind-only values as valid base observations.
+
+| Exact site | Existing expression; replacement target |
+|---|---|
+| `src/seon/test.clj:557` | `(if (error/error? result)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:910` | `(if (error/error? (ex-data failure)) (ex-data failure) (throw failure)))))` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:927` | `(cond (error/error? members) (reduced members)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:938` | `(cond (error/error? known) (reduced known)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:954` | `(if (error/error? seeds) seeds` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:964` | `(if (error/error? selected) selected` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:966` | `(if (error/error? provenance) provenance` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1012` | `(when (error/error? ids)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1016` | `(when (or (error/error? row)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1083` | `(when (error/error? read-result)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1093` | `(when (or (error/error? digest)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1138` | `_ (when (error/error? runs)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1144` | `_ (when (error/error? candidate)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1316` | `seeds (when-not (error/error? file-symbols)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1318` | `(if (error/error? file-symbols) file-symbols` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1337` | `effective (when-not (error/error? selection) (config/effective database cluster))` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1341` | `selected (if (error/error? selection) selection` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1343` | `deferred (when-not (error/error? selected)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1363` | `destructive (when-not (error/error? selected)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1379` | `runnable (if (or (error/error? selected) (error/error? destructive)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1386` | `admitted (when (and (not (error/error? selected))` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1387` | `(not (error/error? destructive))` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1388` | `(not (error/error? effective)))` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1391` | `(error/error? effective) effective` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1392` | `(error/error? admitted) admitted` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1393` | `(error/error? provenance) provenance` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1394` | `(error/error? selected) selected` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1395` | `(error/error? destructive) (assoc destructive :seon.test/next-tier :none)` → Inline declared base members on each existing argument. |
+| `src/seon/test.clj:1552` | `(error/error? custody) custody` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:1387` | `refusal (some #(when (error/error? %) %) [calls references subjects])]` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:1417` | `refusal (some #(when (error/error? %) %)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:1434` | `(if (error/error? selected)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:1497` | `(if (error/error? result) result (get result function-symbol))))` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2693` | `(if (error/error? normalized)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2698` | `(if (error/error? row)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2710` | `(if (error/error? normalized)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2744` | `(if (error/error? current)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2752` | `refusal (some #(when (error/error? %) %)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2807` | `(if (error/error? pulled)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2811` | `(if (error/error? entity)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2827` | `(if (error/error? portable-member)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2838` | `(if (error/error? portable)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2851` | `(if (error/error? entity-ids)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2857` | `(if (error/error? portable)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2861` | `(if (error/error? attribute-rows)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2891` | `(if (error/error? rows)` → Inline declared base members on each existing argument. |
+| `src/seon/fn.clj:2935` | `(if (error/error? tx-data)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:334` | `(error/error? turn)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:1131` | `(if (error/error? history)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:1143` | `(if (error/error? receipt)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:1161` | `(when (error/error? opening-database)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:1166` | `(if (error/error? opening-existing)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:1174` | `(if (error/error? written?)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2669` | `(or (some #(when (error/error? %) %) [issue-t replies closed])` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2684` | `(if (error/error? issue-budget)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2700` | `(or (some #(when (error/error? %) %) [limit spent])` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2722` | `(error/error? limit) limit` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2726` | `(if (error/error? declarations-refusal)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2730` | `(error/error? spent) spent` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2738` | `(if (error/error? since)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2752` | `(if (error/error? failed-attempt)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2870` | `(if (error/error? remaining)` → Inline declared base members on each existing argument. |
+| `src/seon/turn.clj:2883` | `(if (error/error? deferred)` → Inline declared base members on each existing argument. |
+| `src/seon/plan.clj:87` | `(error/error? value))` → Delete this private predicate; inline each caller’s declared error members. |
+| `src/seon/plan.clj:108` | `(if (error/error? result)` → Inline declared base members on each existing argument. |
+| `src/seon/plan.clj:151` | `(if (error/error? entity) entity (:db/id entity))))` → Inline declared base members on each existing argument. |
+| `src/seon/plan.clj:178` | `(error/error? subject) (read-result! subject)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:1101` | `(if (error/error? read-result)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:1540` | `(if (error/error? schema-read)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:1546` | `(if (error/error? symbol-read)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:1594` | `(when (error/error? missing)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:1673` | `(when (error/error? process-rows)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:2685` | `(if (error/error? open-runs)` → Inline declared base members on each existing argument. |
+| `src/seon/cluster.clj:3485` | `_ (when (error/error? recovery)` → Inline declared base members on each existing argument. |
+
+The six external required kind members must be removed and replaced by the
+base's required at/layer/operation members (or by an explicit `:and` with
+`:seon.error/base`), preserving each enclosing boundary's additional required
+evidence. This is the exact current list:
+
+- `resources/seon/schemas/seon.problems.edn:13` — replace the required kind member with the base requirements; declare the enclosing boundary’s actual facet union.
+- `resources/seon/schemas/seon.problems.edn:26` — replace the required kind member with the base requirements; declare the enclosing boundary’s actual facet union.
+- `resources/seon/schemas/seon.problems.edn:120` — replace the required kind member with the base requirements; declare the enclosing boundary’s actual facet union.
+- `resources/seon/schemas/seon.eval.drive.edn:48` — replace the required kind member with the base requirements; declare the enclosing boundary’s actual facet union.
+- `resources/seon/schemas/seon.maintenance.result.edn:154` — replace the required kind member with the base requirements; declare the enclosing boundary’s actual facet union.
+- `resources/seon/schemas/seon.test.accretion.edn:107` — replace the required kind member with the base requirements; declare the enclosing boundary’s actual facet union.
+
+### Constructor inputs changed in the owned cut
+
+`diagnostic` now constructs exactly `:seon.error/base`: callers supply real
+`:seon.error/at`, qualified `:seon.error/layer`, and qualified-symbol
+`:seon.error/operation`. The diagnostic-operation field remains evidence and
+cannot substitute for these required members. Owners then add their facet's
+required evidence and declare that facet in their outputs. The following
+external call lines each need those three inputs; their old kind argument is
+deleted, never copied into a replacement tag:
+
+- `src/my/background.clj:15` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/background.clj:16` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/background.clj:17` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/background.clj:18` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/config.clj:431` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:25` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:29` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:30` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:31` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:32` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:33` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:34` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:35` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:57` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:61` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:62` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:63` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:64` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:65` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:66` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:67` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:358` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:362` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:363` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:364` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:365` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:366` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:367` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:368` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:386` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:391` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:392` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:393` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:394` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:395` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:396` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:397` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:452` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:576` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:580` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:581` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:582` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:583` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:584` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:585` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/my/program.clj:586` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:738` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:739` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:740` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:741` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:742` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:743` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:1083` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:1086` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:1087` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:1088` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:1089` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:1090` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:1091` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/flow.clj:1092` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/my/examples_test.clj:140` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/my/program_mutation_test.clj:73` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1216` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1219` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1220` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1222` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1223` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1224` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1225` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1226` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1580` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1585` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1586` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1587` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1588` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1589` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1590` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1592` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/eval.clj:1594` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render_source_test.clj:201` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/effect.clj:483` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/effect.clj:484` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/effect.clj:485` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/effect.clj:488` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/effect.clj:489` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/effect.clj:490` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/admit.clj:693` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/admit.clj:719` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/kernel.clj:583` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/kernel.clj:597` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/kernel.clj:598` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/kernel.clj:599` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/kernel.clj:600` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/kernel.clj:601` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/kernel.clj:603` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/sci/kernel.clj:605` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test_support_test.clj:364` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/eval.clj:35` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/eval.clj:38` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/eval.clj:39` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/eval.clj:40` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/eval.clj:41` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/eval.clj:42` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/eval.clj:43` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/eval.clj:44` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2060` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2063` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2064` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2065` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2066` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2067` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2068` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2069` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2088` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2091` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2092` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2093` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2094` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2095` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2096` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2097` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2267` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2270` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2271` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2272` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2273` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2274` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2275` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:2276` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:4952` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:4971` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:4972` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:4973` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:4974` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:4975` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:4976` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:4977` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:5070` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:5082` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:5083` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:5084` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:5085` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:5086` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:5087` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/turn.clj:5089` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:137` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:141` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:142` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:143` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:144` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:146` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:147` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:148` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:916` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:923` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:924` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:926` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:927` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:928` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:930` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:931` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1313` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1314` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1315` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1316` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1318` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1320` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1321` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1424` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1428` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1429` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1430` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1432` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1433` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1434` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render.clj:1435` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2312` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2315` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2316` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2317` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2318` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2319` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2320` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2321` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2764` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2767` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2768` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2769` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2770` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2771` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2772` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2773` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2949` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2952` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2953` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2954` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2955` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2956` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2957` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:2958` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:3274` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:3280` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:3281` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:3282` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:3283` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:3286` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:3287` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/runner.clj:3288` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/await_test.clj:8` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/await_test.clj:9` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/await_test.clj:10` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/await_test.clj:11` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/await_test.clj:12` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/await_test.clj:13` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/await_test.clj:49` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/await_test.clj:53` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/await_test.clj:74` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/await_test.clj:78` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/await_test.clj:91` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/await.clj:34` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/await.clj:35` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/await.clj:40` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/await.clj:41` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/await.clj:49` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/await.clj:50` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render_coverage_test.clj:148` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test/accretion.clj:108` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster_test.clj:163` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster_test.clj:173` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster_test.clj:355` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster_test.clj:368` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster_test.clj:394` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test/runner_test.clj:45` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test/runner_test.clj:48` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test/runner_test.clj:49` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/operator_test.clj:204` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:158` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:177` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:180` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:202` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:215` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:971` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:977` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:978` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:979` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:980` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:981` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:982` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/fn.clj:983` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:698` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:702` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:703` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:704` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:705` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:707` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:709` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:710` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:1014` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:1017` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:1018` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:1019` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:1020` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:1021` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:1022` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:1023` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:2373` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:2376` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:2377` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:2378` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:2379` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:2380` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:2381` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/transcript.clj:2382` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test/selection_test.clj:133` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test/selection_test.clj:136` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test/selection_test.clj:137` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test/selection_test.clj:138` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test/selection_test.clj:139` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test/selection_test.clj:140` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test/selection_test.clj:141` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test/selection_test.clj:142` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/lint.clj:221` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/lint.clj:225` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/lint.clj:226` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/lint.clj:227` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/lint.clj:228` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/lint.clj:229` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/lint.clj:230` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/lint.clj:231` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render/web_test.clj:107` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render/web_test.clj:2202` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render/web_test.clj:2205` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render/web_test.clj:2206` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render/web_test.clj:2207` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render/web_test.clj:2208` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render/web_test.clj:2209` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render/web_test.clj:2210` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render/web_test.clj:2211` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:696` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:700` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:701` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:702` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:703` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:704` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:705` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:706` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2668` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2669` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2670` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2671` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2672` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2673` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2694` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2695` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2696` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2697` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2698` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/render/web.clj:2699` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render/transcript_run_test.clj:100` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/shell/jvm.clj:122` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/shell/jvm.clj:123` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/shell/jvm.clj:124` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/shell/jvm.clj:125` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/shell/jvm.clj:126` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/shell/jvm.clj:127` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/render/lint_test.clj:61` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:51` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:983` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:984` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:985` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:986` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:987` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:988` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:989` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1191` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1192` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1193` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1194` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1195` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1196` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1197` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1351` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1352` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1353` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1354` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1357` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1358` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1359` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1382` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1383` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1384` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1385` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1386` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1387` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1388` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1397` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1398` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1399` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1400` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1401` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1403` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1406` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1460` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1461` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1462` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1463` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1465` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1466` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1467` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1827` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1828` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1829` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1830` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1831` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1832` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1833` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1884` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1885` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1886` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1887` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1888` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1889` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1890` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1989` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1990` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1991` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1992` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1994` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1995` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:1996` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2122` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2123` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2124` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2125` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2126` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2127` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2128` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2186` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2187` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2188` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2189` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2191` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2192` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2193` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2275` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2276` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2277` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2278` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2279` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2280` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2281` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2703` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2704` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2705` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2706` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2707` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2708` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:2709` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3188` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3267` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3268` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3269` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3270` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3271` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3272` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3274` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3400` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3501` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3754` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3755` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3756` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3757` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3758` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3759` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3760` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3807` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3808` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3809` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3810` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3811` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3812` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3813` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3848` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3849` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3850` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3851` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3852` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3853` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3854` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3927` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3928` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3929` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3930` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3931` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3932` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:3933` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4165` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4166` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4167` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4168` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4170` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4174` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4175` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4228` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4229` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4230` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4231` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4233` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4234` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/db.clj:4235` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:302` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:306` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:307` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:308` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:309` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:311` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:312` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:313` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:334` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:338` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:339` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:340` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:341` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:342` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:343` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:344` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:358` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:645` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:646` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster.clj:2570` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/context.clj:65` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/context.clj:68` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/context.clj:69` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/context.clj:70` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/context.clj:71` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/context.clj:73` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/context.clj:74` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/context.clj:75` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:42` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:1736` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:1737` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:1739` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:1740` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:1741` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:1742` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:1743` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2619` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2620` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2621` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2622` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2623` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2624` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2625` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2799` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2800` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2801` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2802` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2803` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2804` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/schema.clj:2805` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/sci/eval_test.clj:906` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/sci/eval_test.clj:908` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/sci/eval_test.clj:1631` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/sci/eval_test.clj:1815` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/sci/eval_test.clj:2307` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/sci/eval_test.clj:2315` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/agent_test.clj:1009` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/agent_test.clj:1065` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:582` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:586` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:587` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:588` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:589` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:590` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:591` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:592` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:621` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:625` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:626` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:627` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:629` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:630` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:631` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/agent.clj:633` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/env_test.clj:350` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/env_test.clj:368` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/env_test.clj:381` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:466` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:469` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:470` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:471` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:472` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:473` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:474` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:475` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:498` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:501` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:502` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:503` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:504` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:505` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:506` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/cluster/source.clj:507` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:289` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:290` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:291` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:292` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:293` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:294` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:295` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:296` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1483` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1486` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1489` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1492` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1548` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1573` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1576` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1579` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1589` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1592` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1598` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1684` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1708` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1711` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1729` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:1738` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:2157` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:2158` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:2183` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:2185` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/db_test.clj:2249` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/shell/jvm_test.clj:156` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/call_preparation_test.clj:495` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/call_preparation_test.clj:498` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/call_preparation_test.clj:507` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:114` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:117` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:118` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:119` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:120` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:121` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:122` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:123` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:167` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:168` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:169` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:170` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:171` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:172` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:390` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:404` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:405` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:406` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:407` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:408` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:409` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:410` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:541` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:543` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:544` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:545` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:546` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:547` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:548` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:549` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:988` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:991` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:992` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:993` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:994` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:995` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:996` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:997` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1223` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1225` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1226` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1227` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1228` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1229` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1230` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1231` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1571` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1572` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1573` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1574` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1575` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1576` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1733` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1734` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1735` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1736` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1737` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/test.clj:1738` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/maintenance.clj:340` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/maintenance.clj:344` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/maintenance.clj:345` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/maintenance.clj:346` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/maintenance.clj:347` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/maintenance.clj:348` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/maintenance.clj:349` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `src/seon/maintenance.clj:350` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/flow_test.clj:452` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/flow_test.clj:456` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/flow_test.clj:800` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/refusal_grammar_test.clj:55` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/refusal_grammar_test.clj:58` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/refusal_grammar_test.clj:59` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/refusal_grammar_test.clj:60` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/refusal_grammar_test.clj:61` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/refusal_grammar_test.clj:62` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/refusal_grammar_test.clj:63` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/refusal_grammar_test.clj:64` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/refusal_grammar_test.clj:89` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test_test.clj:226` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test_test.clj:229` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:233` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:234` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:235` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:236` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:238` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:240` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:241` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:243` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:247` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:248` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:249` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:250` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:251` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:252` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:253` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/cluster/mcp_test.clj:254` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/flow_configuration_test.clj:49` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/maintenance_test.clj:536` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/maintenance_test.clj:539` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/schema_test.clj:311` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/schema_test.clj:818` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/schema_test.clj:821` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/schema_test.clj:824` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/schema_test.clj:827` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/schema_test.clj:830` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/schema_test.clj:834` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/schema_test.clj:1303` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/schema_test.clj:1305` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/dev/dependency_cache_test.clj:278` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/dev/dependency_cache_test.clj:281` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/dev/dependency_cache_test.clj:284` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/dev/dependency_cache_test.clj:287` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:71` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1555` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1560` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1561` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1562` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1563` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1564` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1565` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1566` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1972` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1976` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1977` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1978` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1979` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1980` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1981` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:1982` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:2584` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:2587` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/fn_test.clj:2862` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/transact_feedback_test.clj:71` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/dev/fresh_operator_test.clj:228` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test_support.clj:515` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test_support.clj:520` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test_support.clj:521` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test_support.clj:522` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test_support.clj:523` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test_support.clj:524` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test_support.clj:526` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/test_support.clj:528` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/turn_test.clj:122` — supply the base three inputs at the observing boundary and declare its returned facet.
+- `test/seon/turn_test.clj:124` — supply the base three inputs at the observing boundary and declare its returned facet.
+
+Direct normalization requests require `:seon.schema/projection`:
+
+- `src/seon/cluster.clj:3058` — put the supplied database's acquired projection on the committer request before `error/prepare`.
+- `test/seon/run6_stall_test.clj:38` — use the canonical fixture's handed projection.
+- `test/seon/render/web_debug_test.clj:586` — use the canonical fixture's handed projection.
+
+`seon.call-preparation/supplied-map-entries` still declares generic errors;
+`instrument/supplied-entry-problems` now accepts its declared vector or throws
+a complete registration observation naming that unresolved owner contract.
+`seon.config/result-caps` likewise owes complete config observations. The
+existing SCI stamp checks and schema/call-with-projection-state output union
+remain the previously measured external boundaries. The error recorder no
+longer consumes the recurrence-limit dial; its external config declaration can
+be retired by its owner when other consumers are converted.
