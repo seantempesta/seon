@@ -20,8 +20,17 @@ identity or per-facet root is needed to repair C1.
 plan §8 supersedes the acquisition gate below: consumers branch on their
 specific declared error members; output contracts validate completeness. No
 new general predicate, global registry or per-call projection acquisition is
-part of the continuation. The old three options are retained only as dated
-evidence of the question the owner resolved.
+part of the continuation. The initial projection-acquisition gate is resolved; the current gate below
+concerns recurrence identity after kind retirement.
+
+**Latest continuation: partial, not integration-green.** Commits `06c4fe7fe`,
+`340a878b2`, `6891f4f5d`, `a7f013251`, and `796a76314` land the reader,
+instrument predicate removal, owned class stamps, accuracy fixes and wrapper
+contracts. Final fast tally: **86 tests / 579 assertions / 1 failure / 1 error**.
+Both remaining results identify read-only consumer boundaries, detailed below.
+The recurrence-identity design gate below has exactly three options. Public predicate/kind retirement and the remaining error-owner
+contracts are explicitly unfinished. The cold gate and wave reset are owed
+to the orchestrator.
 
 ## Authorities read
 
@@ -195,76 +204,13 @@ this checkpoint does not claim that orphan declaration is integrated.
 
 ## Superseded design gate — D12 removes the general predicate
 
-The storage question is settled. The next change crosses a different boundary:
-`error?` currently takes only a value, while the required authority is an
-**acquired projection**. A read-only MCP probe in the owner’s JVM found no
-handed projection. With the default connection explicitly supplied, the
-installed base validator accepted the three base fields, while `error?`
-returned false. There are still nine private predicate implementations in the
-checked-out source; the earlier one-predicate landing’s “eight replaced” claim
-is not current implementation evidence.
+The initial predicate/projection gate in accepted commit `431093b97` is
+resolved by D12. Its options are historical evidence in that commit, not
+current alternatives. Consumers use their declared error members and the
+wrapper validates complete declared output facets. The reader acquires
+complete components before rendering. No general predicate is the target.
 
-Measured JVM results (PID 41822, no mutation):
-
-```clojure
-{:projection? false :base-valid? nil :error? false :facet-count nil}
-{:base-valid? true :error? false :facet-count 63}
-```
-
-In addition, the stored arity refusal’s `declared-arities` is a vector of
-component maps after pull. `error/facets` validates complete authored values
-and reports `#{}` for that pulled representation; the selector-derived pull
-form validates it. A base with cardinality-many evidence has the same grammar
-question. This is not a reason to change Datahike’s pull vocabulary or widen
-individual stored attributes.
-
-A drop-in rewrite cannot guarantee projection-correct recognition at every
-pre-store and unscoped caller. Fetching a database or compiling a new packaged
-population while handling each failure violates PRD §4’s acquisition rule;
-a global schema-name cache violates its projection ownership; a message or
-three-key fallback creates a second error taxonomy. The persistence proof does
-not authorize any of those shortcuts.
-
-Exactly three concrete options, simplest first:
-
-1. **Pass the projection explicitly (recommended).** Make the one predicate
-   accept projection + complete observation value. Each caller receives the
-   projection it already owns; pre-store callers receive the packaged
-   projection from boot. The existing error read owner acquires complete
-   observation values from declared components before facet recognition;
-   generic pull remains selector-shaped. **Guarantee:** one schema authority,
-   no fetch or global fallback during failure handling, and one complete-value
-   grammar at error boundaries. **Cost:** estimated 2–4 hours across the nine
-   predicate owners, boot/SCI call sites and error readers; coordinated source
-   and regression changes, including currently held database paths. **Give up:**
-   drop-in one-argument host calls and treating arbitrary partial pull maps as
-   complete observations.
-2. **Carry an acquired predicate in the environment.** Compile the base
-   validator once with the projection and supply the resulting callable as
-   ordinary environment/proc/wrapper input; lower owners call that value.
-   Complete error acquisition remains at the error reader. **Guarantee:**
-   one-argument validation against the supplying environment’s exact schema,
-   including pre-store construction, without dynamic lookup. **Cost:** estimated
-   4–6 hours of environment contracts, boot/graph acquisition and caller changes
-   plus the reader work; the public helper still needs an explicit acquisition
-   argument. **Give up:** a universally callable process-global predicate with
-   only the error map as input.
-3. **Carry projection provenance with each observation value.** Keep validators
-   out of datoms; constructors and readers attach the acquired projection in
-   process-local metadata, and the one predicate validates through it. Plain
-   external maps require an explicit acquisition call before recognition.
-   **Guarantee:** the value retains the world its observations came from; no
-   database lookup or stored discriminator. **Cost:** estimated 6–10 hours across
-   constructors, readers, copying/serialization boundaries and metadata-loss
-   tests. **Give up:** unannotated-map interchangeability and simple reconstruction
-   after metadata-stripping operations.
-
-These are estimates for coordination, not measured implementation durations.
-All retain the already-ruled same-row occurrence persistence. No option proposes
-an identity per facet or an exclusive classification. The owner’s choice is
-needed under the assignment’s design-stop rule before production changes.
-
-## Accuracy and held-file follow-up
+## Initial checkpoint — accuracy and held-file follow-up
 
 - B1 is positively reproduced, as above. The real recorder also supplies an
   “unclassified” message for a valid message-free base observation. That is
@@ -298,7 +244,7 @@ expects in its acquired policy. The test now supplies that value from
 `test-support/effective-config`, as its production acquisition does. No
 production fallback was added. That fixture defect is independent of C1.
 
-## Inventory and verification
+## Initial checkpoint — inventory and verification
 
 [Kind retirement inventory](error-kind-retirement-inventory-2026-09-19.md):
 2,357 matching lines, 2,393 literal/destructuring matches, 323 files across
@@ -317,7 +263,7 @@ conversion itself has not been performed.
 | 1, first completed | 79 tests, 491 assertions, 15 failures, 0 errors. One wrong-grammar probe assertion; fourteen missing acquired-policy fixture assertions. |
 | 1, corrected | 79 tests, 502 assertions, 0 failures, 0 errors; exit 0. |
 | 2 | Persistence relation established by step 1; no production schema mutation required to make those facets storable. Full base/occurrence contract replacement remains pending. |
-| 3–6 | Not run or implemented; stopped at the acquisition design gate. |
+| 3–6, initial checkpoint | Initially stopped at the now-resolved acquisition gate; continuation evidence follows below. |
 
 Fast command for the final bytes:
 
@@ -337,13 +283,13 @@ hot-reloaded Var, development adoption or browser paint is claimed; no
 production behavior changed. MCP runtime status and the two read-only JVM
 forms answered. No default lifecycle or adoption command ran.
 
-## RESET NEEDED
+## Initial checkpoint — RESET NEEDED
 
 **None from this checkpoint: exact changed-attribute list `[]`.** No schema
 was edited. The planned kind/class deletion and future type changes remain
 in the wave-1 reset batch; do not claim them landed from this note.
 
-## Files touched and cleanup
+## Initial checkpoint — files touched and cleanup
 
 - `test/seon/error_test.clj`: canonical ownership/storage regression.
 - `test/seon/instrument_test.clj`: hand the current acquired evidence policy
@@ -594,3 +540,115 @@ cut. No production recurrence-identity change was made pending this ruling.
 The public predicate's 75 external calls and six external required kind
 members also require the orchestrator's already-planned mechanical follow-up
 before a loadable deletion; their exact files and actions are inventoried.
+
+## Final fast evidence, reset batch and handoff
+
+The final HEAD-plus-owned-paths fast run completed on the isolated
+`733d0f422` worktree at **2026-09-19T19:37:58Z**:
+
+```text
+Ran 86 tests containing 579 assertions.
+1 failures, 1 errors.
+```
+
+This is the combined after-change tally for steps 3–6, not a separate green
+claim for each intermediate commit. The step-2 reader-only run remains
+**42 / 250 / 0 / 0**. The accepted step-1 tally remains **79 / 502 / 0 / 0**.
+The final run passed D1, D2, D3, the current D4 evidence-retention probe,
+complete declared facet acceptance, undeclared facet refusal, incomplete-base
+refusal, complete 1,001-member observation reading, owned stamp removal and
+all 34 instrument-function contract assertions.
+
+The two remaining results, without changing their expectations:
+
+```text
+FAIL in (a-sovereign-sci-fork-acquires-its-own-recorder) (instrument_test.clj:449)
+Construction cannot publish a context containing an unarmed definition.
+expected: ((schema/projection-validator projection :seon.instrument/registration-error) missing-base)
+actual: false
+
+ERROR in (applying-without-a-handed-projection-refuses-before-collection) (instrument.clj:757)
+actual: clojure.lang.ExceptionInfo: seon.schema/call-with-projection-state returned undeclared error facets #{:seon.instrument/registration-error}.
+```
+
+These are measured consequences of the owned changes meeting unconverted
+consumers, not unrelated failures blamed on another lane. The exact repair
+sites and required-member/union conversions are in the inventory. No wrapper
+was disabled and no callback result was hidden to obtain a green tally.
+
+Hot-wrapper measurements (three batches of 20,000 calls; microseconds per
+call) are iteration measurements, not production latency guarantees:
+
+| Surface/value | Existing validation | Validation with facet enforcement |
+|---|---|---|
+| Host scalar | 0.215–0.248 | 0.264–0.286 |
+| Host ordinary map | 0.223–0.240 | 0.267–0.293 |
+| Host declared error | 0.226–0.233 | 18.369–18.933 |
+| SCI scalar | 0.306–0.445 | 0.342–0.403 |
+| SCI ordinary map | 0.356–0.367 | 0.376–0.430 |
+| SCI declared error | 0.325–0.355 | 16.028–18.193 |
+
+All files touched across the accepted calibration and continuation:
+
+- `resources/seon/schemas/seon.error.edn`
+- `resources/seon/schemas/seon.instrument.edn`
+- `src/seon/error.clj`
+- `src/seon/instrument.clj`
+- `test/seon/error_test.clj`
+- `test/seon/instrument_test.clj`
+- `docs/prds/steward-platform/research/error-kind-retirement-inventory-2026-09-19.md`
+- `docs/prds/steward-platform/research/error-family-1a-2026-09-19.md`
+
+**RESET NEEDED — exact retired installed attributes in the landed slice:**
+
+```clojure
+[:seon.error/unclassified
+ :seon.error/refusal
+ :seon.instrument/contract-violated
+ :seon.instrument/registration-failed]
+```
+
+No attribute type was changed. Removing `:seon.error/kind` and the shared class
+property remains pending, not falsely included in this landed list.
+`seon.failure.edn` needed no change: it already describes the fault relation
+and requested/stopped transaction observations, without a kind/class stamp.
+
+[Inventory](error-kind-retirement-inventory-2026-09-19.md) retains all original
+per-site actions and the current continuation counts/dependencies:
+original **2,357 lines / 2,393 matches / 323 files**, current raw search
+**2,348 / 2,384 / 322**. Outside source/resources were inspected, never edited.
+
+Cold gate owed to the orchestrator after the listed consumer repairs and
+completed retirement cut (the schema namespace is read-only for this lane):
+
+```bash
+bin/test --paths resources/seon/schemas/seon.error.edn resources/seon/schemas/seon.instrument.edn src/seon/error.clj src/seon/instrument.clj test/seon/error_test.clj test/seon/instrument_test.clj -- seon.error-test seon.instrument-test seon.schema-test
+bin/test --platform
+```
+
+The lane ran neither command. No default reset, refork, restart, adoption or
+lifecycle command was run. Runtime publication/reset proof remains owed.
+
+
+Remaining undeclared named functions in `error.clj`, from parsed source forms
+at `796a76314` (a dated completion checklist, not a runtime registry):
+
+```clojure
+[throwable kind root-cause message top-frame signature known-or-unknown
+ meaningful-source utf8-size evidence-caps bounded-admission
+ classifying-error-data bounded-error-admission bounded-text
+ stack-failing-function contract-violation-data offending-entry admitted-size
+ fit-fact-payload fact-source flat-data evidence-prose value-description
+ schema-expectation collection-member-problem refusal-value-text
+ reader-correction refusal-data refusal-text notice-ai-prose fact-tempid
+ agent-exists? entity-exists? recurrence message-tx class-properties
+ matched-error-classes error-marker error-evidence evidence-text default-ai-prose
+ evidence-path fault-order run-identity fault-entities faults-input]
+```
+
+Cleanup: the final lane launcher and JVM (8622/8905) exited. All six overlaid
+source/resource/test files were byte-identical to the committed main-tree
+files before cleanup. The owned worktree was removed after unlinking its
+reference-code and cache links; no symlink target was removed. Lane-only
+scratch copies, logs and thread dumps were removed after recording the exact
+results above. Foreign dirty files and all other worktrees were preserved.
