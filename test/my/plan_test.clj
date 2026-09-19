@@ -70,7 +70,10 @@
                                 :where [?entity :seon.audit/poison _]]
                               @connection)
                         (assoc :seon.error/data {:seon.agent/id "alice"}))]
-        (is (error/error? failure) (pr-str failure))
+        (is (and (map? failure)
+                 (contains? failure :seon.error/at)
+                 (contains? failure :seon.error/layer)
+                 (contains? failure :seon.error/operation)) (pr-str failure))
         (doseq [[subject line] [["Plan step" (plan/format-item-ai failure)]
                                 ["Ready work" (plan/format-ready-items-ai failure)]
                                 ["Plan" (plan/format-plan-ai failure)]]]
@@ -437,7 +440,10 @@
                           :where [?agent :seon.agent/id "alice"]]
                         database)
             query db/q]
-        (is (error/error? refusal) (pr-str refusal))
+        (is (and (map? refusal)
+                 (contains? refusal :seon.error/at)
+                 (contains? refusal :seon.error/layer)
+                 (contains? refusal :seon.error/operation)) (pr-str refusal))
         (with-redefs [db/q (fn [& arguments]
                             (let [form (first arguments)]
                               (if (#{'[:find ?step .
