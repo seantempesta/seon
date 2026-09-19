@@ -4119,3 +4119,16 @@ shadowed-local warnings fixed in `8cf23ea4f`. A0's cold gate running
 ## 2026-09-19 ~19:55 UTC — A0 gate refused at admission; lane resumed
 
 `bin/test --paths src/seon/test/runner.clj bin/test test/seon/test/runner_test.clj -- seon.test.runner-test` exited 64: "Incomplete --paths overlay; add changed caller files: src/seon/test.clj" (the inherited selector; tools-queue item 3). Rerun with the selector files in the overlay (`a0-stage1-cold-2026-09-19.log`): base prepared in 169 s (population 94,106 operations), three workers ready at ~30 s fixture priming, then the coordinator refused before any test: `:seon.test.runner/missing-fixture-observation` for A0's own regression `bare-selection-refuses-without-authority-before-launch` (reaches an expensive fixture through the real coordinator entry without a declared observation). Retained root `tmp/test-runs/run.ca77Ao` (sweep after the fix). `unbreak-bare-test` resumed (astra low) with the exact bytes; `error-family-1a` at 24 min.
+
+## 2026-09-19 ~20:20 UTC — orchestrator error: swept a live gate's run root
+
+A0's fix landed `0aee224c5`. The gate rerun (`a0-stage1-cold-2`) died at
+line 496 "tmp/test-runs/run.0L708C/test-run.txt: No such file" because the
+orchestrator swept that root mid-run as "holderless": the check was a
+process-table grep for the root's name, but `bin/test` keeps the path in a
+shell variable, never on a command line, so the grep proves nothing. Rule
+from now: a run root younger than the oldest live `bin/test` process is
+never swept; use the launcher's own orphan announcement (slot preamble) as
+the holder authority. Tools-queue item 6: `bin/test` writes a holder record
+(pid + start instant) in its run root so a sweep can verify liveness
+exactly. Third run: `a0-stage1-cold-3-2026-09-19.log`.
