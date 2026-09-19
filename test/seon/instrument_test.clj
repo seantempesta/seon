@@ -642,29 +642,16 @@
     (is (seq (get-in violation [:seon.error/data
                                 :seon.instrument.lookup/cause])))))
 
-(deftest a-flat-error-value-at-a-contract-boundary-is-its-own-face
-  (let [violation @#'instrument/violation
-        inner {:seon.error/kind :seon.db/missing-connection-binding
-               :seon.error/message "No connection is bound on this thread."
-               :seon.error/data {:seon.db/binding 'seon.db/*conn*}}]
-    (testing "the inner error is the answer, never buried in wrapper prose"
-      (is (= inner
-             (violation nil :malli.core/invalid-input
-                        {:fn-name 'seon.config/effective
-                         :input [:cat :map]
-                         :args [inner]})))
-      (is (= inner
-             (violation nil :malli.core/invalid-output
-                        {:fn-name 'seon.config/effective
-                         :output :map
-                         :value inner}))))
-    (testing "an ordinary contract violation still reports as one"
-      (is (= :seon.instrument/contract-violated
-             (:seon.error/kind
-              (violation nil :malli.core/invalid-input
-                         {:fn-name 'seon.config/effective
-                          :input [:cat :map]
-                          :args [42]})))))))
+(deftest an-error-shaped-argument-does-not-bypass-the-declared-input
+  (let [observed {:seon.error/at #inst "2026-09-19T00:00:00Z"
+                  :seon.error/layer :seon.db/custody
+                  :seon.error/operation 'seon.db/db}
+        refusal (test-support/refusal-data #(prefix-contract observed))]
+    (is ((schema/projection-validator (schema/handed-projection)
+                                     :seon.instrument/contract-error) refusal))
+    (is (= :input (:seon.instrument/check refusal)))
+    (is (= [observed]
+           (get-in refusal [:seon.error/data :seon.error/diagnostic-offending])))))
 
 (deftest contract-problems-are-semantic-once-never-a-serialized-print-tree
   (let [caps (assoc (config/result-caps (test-support/effective-config))

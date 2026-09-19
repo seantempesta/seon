@@ -93,28 +93,6 @@
 ;;; The reporter
 ;;; ---------------------------------------------------------------------------
 
-(defn- flat-error-value?
-  [value]
-  (and (map? value)
-       (keyword? (:seon.error/kind value))
-       (string? (:seon.error/message value))))
-
-(defn- buried-error
-  "The flat error value a contract report would otherwise bury, if any.
-
-   Seon's boundaries answer with `:seon.error` values, so one arriving at a
-   contract seam is the real answer, already in the honest shape. Reporting it
-   as a schema problem replaces a one-line cause with a wall of humanized
-   Malli text — reported 2026-08-07, where `seon.config/effective` surfaced
-   `... violated its contract (invalid-input)` instead of the inner
-   `seon.db/missing-connection-binding` and its remedy."
-  [kind data]
-  (case kind
-    :malli.core/invalid-input (first (filter flat-error-value? (:args data)))
-    :malli.core/invalid-output (when (flat-error-value? (:value data))
-                                 (:value data))
-    nil))
-
 (def ^:private non-caller-namespace-prefixes
   ;; DERIVED FROM WHAT THESE FRAMES ARE, not from a hand list of ours: the
   ;; host, the language, the contract library's own wrapper, and this
@@ -173,7 +151,7 @@
     (if-let [environment (env/of effect/*request-context*)]
       (if-let [connection (:seon.db/connection environment)]
         (let [database (db/db connection)]
-          (if (flat-error-value? database)
+          (if-not (db/database-value? database)
             {:seon.instrument.lookup/status :failed}
             (let [result
                   (db/q '[:find ?arglists .
@@ -183,9 +161,6 @@
                           [?function :seon.fn/arglists ?arglists]]
                         database function-symbol)]
               (cond
-                (flat-error-value? result)
-                {:seon.instrument.lookup/status :failed}
-
                 (string? result)
                 {:seon.instrument.lookup/status :found
                  :seon.fn/arglists result}
@@ -303,9 +278,7 @@
   "Retain the actual offending values; the error render pair owns projection."
   [_caps kind data]
   (try
-    (or
-     (when-not (::boundary? data) (buried-error kind data))
-     (let [function-symbol (:fn-name data)
+    (let [function-symbol (:fn-name data)
            {arglists ::arglists :as lookup} (diagnostic-arglists function-symbol)
            arguments (:args data)
            arglist (some #(when (or (= (count %) (count arguments))
@@ -430,7 +403,7 @@
            arity? (assoc ::arity (:arity data))
            arglists (assoc ::arglists arglists)
            (seq paths) (assoc ::problem-paths paths)
-           caller (assoc ::caller caller))})))
+           caller (assoc ::caller caller))}))
     (catch Throwable failure
       ;; A BOUND FIRING IS ITS OWN REPORT. Composing this value runs the
       ;; contract's own predicates again (`m/explain` re-checks the value

@@ -391,3 +391,25 @@ tally. No foreign file or session was changed.
 Touched in this checkpoint: `src/seon/error.clj`, `test/seon/error_test.clj`,
 and this landing note. **RESET NEEDED attributes: `[]`** for this checkpoint.
 The owning relation and installed attribute types did not change.
+
+
+## Step 3 continuation — instrument boundary
+
+Deleted `flat-error-value?` and `buried-error`. Contract reports no longer
+short-circuit on an error-shaped argument. The actual armed regression passes
+an observation to an integer boundary and verifies its input refusal retains
+the observation as offending evidence. Program-graph arglist lookup checks
+its declared successful results (database value, string, or absent), and gives
+an explicit failed lookup for any other result; no error predicate or
+projection acquisition replaces the deleted predicate.
+
+The public `seon.error/error?` and the other eight private copies still need
+the external caller/contract cut described in the inventory. This checkpoint
+is the owned instrumentation portion, not a claim that all nine are retired.
+
+Before-change instrumentation run: **41 / 292 / 15 / 0**. The armed argument
+regression passes; the 15 failures are the new step-4 marker (9), step-5 caller
+and arglist (4), and step-6 registration/output completeness (2) assertions.
+The combined after-change run is pending. Touched here:
+`src/seon/instrument.clj`, `test/seon/instrument_test.clj`, this note.
+**RESET NEEDED attributes: `[]`** for this checkpoint.
