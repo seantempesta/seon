@@ -554,7 +554,10 @@
   "Carry a polymorphic query result unchanged; preserve a refused read exactly."
   {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
   [result]
-  (if (error/error? result)
+  (if (and (map? result)
+           (contains? result :seon.error/at)
+           (contains? result :seon.error/layer)
+           (contains? result :seon.error/operation))
     (throw (ex-info (:seon.error/message result) result))
     result))
 
@@ -864,7 +867,10 @@
           (seq namespaces) (assoc :seon.test.run/namespaces namespaces)
           (seq identities) (assoc :seon.test.run/identities identities))))
     (catch clojure.lang.ExceptionInfo failure
-      (if (error/error? (ex-data failure)) (ex-data failure) (throw failure)))))
+      (if (and (map? (ex-data failure))
+               (contains? (ex-data failure) :seon.error/at)
+               (contains? (ex-data failure) :seon.error/layer)
+               (contains? (ex-data failure) :seon.error/operation)) (ex-data failure) (throw failure)))))
 
 (defn- selection-seeds
   "Resolve supplied definition and namespace identities in this database."
@@ -881,7 +887,10 @@
                                (or-join [?e ?n] [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])
                                (or [?e :seon.fn/sym ?symbol] [?e :seon.test/sym ?symbol])]
                              database value)]
-           (cond (error/error? members) (reduced members)
+           (cond (and (map? members)
+                      (contains? members :seon.error/at)
+                      (contains? members :seon.error/layer)
+                      (contains? members :seon.error/operation)) (reduced members)
                  (empty? members) (reduced (unknown change "Namespace has no analyzed definitions."))
                  :else (into seeds members)))
          (if (qualified-symbol? value)
@@ -892,7 +901,10 @@
                                           [?e :seon.fn/references ?symbol]
                                           [?e :seon.test/subject ?symbol])]
                              (db/history database) value)]
-             (cond (error/error? known) (reduced known)
+             (cond (and (map? known)
+                        (contains? known :seon.error/at)
+                        (contains? known :seon.error/layer)
+                        (contains? known :seon.error/operation)) (reduced known)
                    known (conj seeds value)
                    :else (reduced (selection-refusal database :seon.test/identity-unresolved
                                    "Changed identity has no definition, history or incoming edge."
@@ -908,7 +920,10 @@
                    :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [{database :seon.db/db changed :seon.test/changed}]
   (let [seeds (selection-seeds database changed)]
-    (if (error/error? seeds) seeds
+    (if (and (map? seeds)
+             (contains? seeds :seon.error/at)
+             (contains? seeds :seon.error/layer)
+             (contains? seeds :seon.error/operation)) seeds
       (functions/gate-sets {:seon.db/db database :seon.fn/seeds seeds}))))
 
 (defn selection-admission
@@ -918,9 +933,15 @@
                    :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [{database :seon.db/db :as request}]
   (let [selected (select request)]
-    (if (error/error? selected) selected
+    (if (and (map? selected)
+             (contains? selected :seon.error/at)
+             (contains? selected :seon.error/layer)
+             (contains? selected :seon.error/operation)) selected
       (let [provenance (runner/provenance database)]
-        (if (error/error? provenance) provenance
+        (if (and (map? provenance)
+                 (contains? provenance :seon.error/at)
+                 (contains? provenance :seon.error/layer)
+                 (contains? provenance :seon.error/operation)) provenance
           (-> selected
               (dissoc :seon.test.run/basis-t)
               (assoc :seon.test.run/provenance provenance)
@@ -966,11 +987,17 @@
                     :where [?run ?attribute ?member]]
                   database run-eid
                   [:seon.test.run/members :seon.test.run/covered-by])]
-    (when (error/error? ids)
+    (when (and (map? ids)
+               (contains? ids :seon.error/at)
+               (contains? ids :seon.error/layer)
+               (contains? ids :seon.error/operation))
       (throw (ex-info (:seon.error/message ids) ids)))
     (mapv #(let [row (db/pull database
                              [:db/id :seon.test.member/symbol :seon.test.member/reasons] %)]
-             (when (or (error/error? row)
+             (when (or (and (map? row)
+                            (contains? row :seon.error/at)
+                            (contains? row :seon.error/layer)
+                            (contains? row :seon.error/operation))
                        (not (:seon.test.member/symbol row))
                        (not (seq (:seon.test.member/reasons row))))
                (admission-refusal! :seon.test/population-unknown run-id
@@ -1037,7 +1064,10 @@
                                      :seon.test.run/namespaces :seon.test.run/identities)))
         previous (db/pull database selector [:seon.test.run/id run-id])]
     (doseq [read-result [cluster-row previous]]
-      (when (error/error? read-result)
+      (when (and (map? read-result)
+                 (contains? read-result :seon.error/at)
+                 (contains? read-result :seon.error/layer)
+                 (contains? read-result :seon.error/operation))
         (throw (ex-info (:seon.error/message read-result) read-result))))
     (when-not (:seon.cluster/name cluster-row)
       (admission-refusal! :seon.test/cluster-unavailable run-id
@@ -1047,7 +1077,10 @@
       (admission-refusal! :seon.test/cluster-mismatch run-id branch
                           (select-keys run [:seon.test.run/branch
                                             :seon.test.run/tested-branch])))
-    (when (or (error/error? digest)
+    (when (or (and (map? digest)
+                   (contains? digest :seon.error/at)
+                   (contains? digest :seon.error/layer)
+                   (contains? digest :seon.error/operation))
               (not= digest (:seon.test.run/program-digest run)))
       (admission-refusal! :seon.test/program-mismatch run-id digest
                           (:seon.test.run/program-digest run)))
@@ -1092,13 +1125,19 @@
                                 [?run :seon.test.run/input-digest ?inputs]
                                 [?run :seon.test.run/selection-tx]]
                        database cluster-id digest (:seon.test.run/input-digest row))
-            _ (when (error/error? runs)
+            _ (when (and (map? runs)
+                         (contains? runs :seon.error/at)
+                         (contains? runs :seon.error/layer)
+                         (contains? runs :seon.error/operation))
                 (throw (ex-info (:seon.error/message runs) runs)))
             existing
             (into {}
                   (mapcat (fn [run-eid]
                             (let [candidate (db/pull database selector run-eid)
-                                  _ (when (error/error? candidate)
+                                  _ (when (and (map? candidate)
+                                               (contains? candidate :seon.error/at)
+                                               (contains? candidate :seon.error/layer)
+                                               (contains? candidate :seon.error/operation))
                                       (throw (ex-info (:seon.error/message candidate) candidate)))
                                   candidate (assoc candidate :seon.test.run/cluster
                                                    (get-in candidate [:seon.test.run/cluster :db/id]))]
@@ -1270,13 +1309,22 @@
                                       (or [?entity :seon.fn/sym ?symbol]
                                           [?entity :seon.test/sym ?symbol])]
                              database (mapv relative-path paths)))
-        tests (when (and (not (error/error? file-symbols))
+        tests (when (and (not (and (map? file-symbols)
+                                   (contains? file-symbols :seon.error/at)
+                                   (contains? file-symbols :seon.error/layer)
+                                   (contains? file-symbols :seon.error/operation)))
                          (or (seq changed) (seq file-symbols)))
                 (reaching {:seon.db/db database
                            :seon.test/changed (vec (concat changed file-symbols))}))]
     (cond
-      (error/error? file-symbols) file-symbols
-      (error/error? tests) tests
+      (and (map? file-symbols)
+           (contains? file-symbols :seon.error/at)
+           (contains? file-symbols :seon.error/layer)
+           (contains? file-symbols :seon.error/operation)) file-symbols
+      (and (map? tests)
+           (contains? tests :seon.error/at)
+           (contains? tests :seon.error/layer)
+           (contains? tests :seon.error/operation)) tests
       :else
       (check-request-admission (cond-> {:seon.db/db database
                        :seon.test/namespaces (set (:seon.test/namespaces request))
@@ -1297,13 +1345,22 @@
   (let [started (System/nanoTime)
         database (db/db connection)
         selection (check-admission database request)
-        effective (when-not (error/error? selection) (config/effective database cluster))
+        effective (when-not (and (map? selection)
+                                 (contains? selection :seon.error/at)
+                                 (contains? selection :seon.error/layer)
+                                 (contains? selection :seon.error/operation)) (config/effective database cluster))
         paths (mapv relative-path paths)
         widened (when (some #((:seon.test.member/reasons %) :first-run)
                             (:seon.test.run/members selection)) ["first run for these gate inputs"])
-        selected (if (error/error? selection) selection
+        selected (if (and (map? selection)
+                          (contains? selection :seon.error/at)
+                          (contains? selection :seon.error/layer)
+                          (contains? selection :seon.error/operation)) selection
                    (mapv :seon.test.member/symbol (:seon.test.run/members selection)))
-        deferred (when-not (error/error? selected)
+        deferred (when-not (and (map? selected)
+                                (contains? selected :seon.error/at)
+                                (contains? selected :seon.error/layer)
+                                (contains? selected :seon.error/operation))
                    (into []
                          (keep (fn [test-symbol]
                                  (when-let [reason (:seon.test/fixture-observation
@@ -1323,7 +1380,10 @@
         declared (if-let [entry (find request :seon.test/declared-root)]
                    (val entry)
                    (store/declared-operator-root))
-        destructive (when-not (error/error? selected)
+        destructive (when-not (and (map? selected)
+                                   (contains? selected :seon.error/at)
+                                   (contains? selected :seon.error/layer)
+                                   (contains? selected :seon.error/operation))
                       (let [owners (when (development-root declared)
                                      (destroyers database))
                             reach (cond
@@ -1339,23 +1399,53 @@
         excluded (if (vector? destructive)
                    (set (map :seon.test/sym destructive))
                    #{})
-        runnable (if (or (error/error? selected) (error/error? destructive)
+        runnable (if (or (and (map? selected)
+                              (contains? selected :seon.error/at)
+                              (contains? selected :seon.error/layer)
+                              (contains? selected :seon.error/operation)) (and (map? destructive)
+                                                      (contains? destructive :seon.error/at)
+                                                      (contains? destructive :seon.error/layer)
+                                                      (contains? destructive :seon.error/operation))
                          (and widened defer?)) []
                      (filterv (complement (-> excluded
                                               (into (map :seon.test/sym) deferred)
                                               (into (map :seon.test/sym) long-excluded)))
                               selected))
         provenance (:seon.test.run/provenance selection)
-        admitted (when (and (not (error/error? selected))
-                            (not (error/error? destructive))
-                            (not (error/error? effective)))
+        admitted (when (and (not (and (map? selected)
+                                      (contains? selected :seon.error/at)
+                                      (contains? selected :seon.error/layer)
+                                      (contains? selected :seon.error/operation)))
+                            (not (and (map? destructive)
+                                      (contains? destructive :seon.error/at)
+                                      (contains? destructive :seon.error/layer)
+                                      (contains? destructive :seon.error/operation)))
+                            (not (and (map? effective)
+                                      (contains? effective :seon.error/at)
+                                      (contains? effective :seon.error/layer)
+                                      (contains? effective :seon.error/operation))))
                    (db/transact! connection [[:db.fn/call admit-run selection]]))]
     (cond
-      (error/error? effective) effective
-      (error/error? admitted) admitted
-      (error/error? provenance) provenance
-      (error/error? selected) selected
-      (error/error? destructive) (assoc destructive :seon.test/next-tier :none)
+      (and (map? effective)
+           (contains? effective :seon.error/at)
+           (contains? effective :seon.error/layer)
+           (contains? effective :seon.error/operation)) effective
+      (and (map? admitted)
+           (contains? admitted :seon.error/at)
+           (contains? admitted :seon.error/layer)
+           (contains? admitted :seon.error/operation)) admitted
+      (and (map? provenance)
+           (contains? provenance :seon.error/at)
+           (contains? provenance :seon.error/layer)
+           (contains? provenance :seon.error/operation)) provenance
+      (and (map? selected)
+           (contains? selected :seon.error/at)
+           (contains? selected :seon.error/layer)
+           (contains? selected :seon.error/operation)) selected
+      (and (map? destructive)
+           (contains? destructive :seon.error/at)
+           (contains? destructive :seon.error/layer)
+           (contains? destructive :seon.error/operation)) (assoc destructive :seon.test/next-tier :none)
       :else
       (let [selected (vec (sort selected))
             namespaces (vec (sort (distinct (or (seq namespaces)
@@ -1512,7 +1602,10 @@
         effective (when (:seon.cluster/name custody) (config/effective database cluster))]
     (cond
       (nil? cluster) (selection-refusal database :seon.test/cluster-required "Check requires explicit cluster custody." :absent)
-      (error/error? custody) custody
+      (and (map? custody)
+           (contains? custody :seon.error/at)
+           (contains? custody :seon.error/layer)
+           (contains? custody :seon.error/operation)) custody
       (not (:seon.cluster/name custody)) (selection-refusal database :seon.test/cluster-unavailable "The requested cluster is absent." cluster)
       (:seon.error/kind effective) (assoc effective :seon.test/next-tier :none)
       (not (:seon.test/check-time-limit-ms effective))
