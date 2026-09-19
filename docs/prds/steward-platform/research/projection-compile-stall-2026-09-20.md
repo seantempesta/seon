@@ -213,7 +213,11 @@ confirmed absent before serial measurement resumed.
 
 The post-commit HEAD load check uses a fresh detached worktree and
 `clojure -M:test` to require `seon.schema-test`, `seon.instrument-test`,
-and `seon.cluster.source-test`. This is a load check, not another gate.
+and `seon.cluster.source-test`. This is a load check, not another gate. At committed HEAD `4806aad03`,
+it exited 0 and printed `:head-load-ok`. The detached worktree, task-owned
+sample directory and all task-owned probe logs were then removed; only the
+committed evidence and regressions remain. This final documentation update
+changes no program bytes from that successful load.
 
 Cold proof owed to the orchestrator after the gitlink lands:
 
