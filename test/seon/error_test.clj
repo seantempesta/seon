@@ -1266,3 +1266,61 @@
          (is (= :seon.db/invalid-write (:seon.error/kind result)) (pr-str result))
          (is (= before (db/basis-t (db/db connection))))
          (is (= 2 (count (db/datoms database :eavt location :seon.error.location/segments)))))))))
+
+
+(deftest error-facets-persist-through-the-real-occurrence-owner
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "error-family-1a")
+     (let [projection (schema/projection-from-database (db/db connection))
+           observed {:seon.error/at #inst "2026-09-19T00:00:00Z"
+                     :seon.error/layer :seon.agent/lifecycle
+                     :seon.error/operation 'seon.agent/by-id
+                     :seon.agent/error-agent-id "error-family-observed"
+                     :seon.turn/error-turn-id "error-family-turn"}
+           before (db/basis-t (db/db connection))
+           unowned (test-support/refusal-data
+                    #(test-support/transacted! connection [observed]))
+           armed (test-support/refusal-data #(apply seon.id/valid? []))]
+       (is ((schema/projection-validator projection :seon.turn/error) observed))
+       (is (= :seon.db/unowned-entity
+              (get-in unowned [:seon.error/data :seon.db/diagnostic-cause]))
+           (pr-str unowned))
+       (is (= before (db/basis-t (db/db connection))))
+       (prn {::unowned-refusal unowned})
+       (is ((schema/projection-validator projection :seon.instrument/arity-error) armed)
+           (pr-str armed))
+       (doseq [[source required-facets]
+               [[observed #{:seon.agent/error :seon.turn/error}]
+                [armed #{:seon.instrument/arity-error}]]]
+         (let [recording (error/recording (db/db connection)
+                                           (commit-request source {:seon.error/at (:seon.error/at source)}))
+               report (test-support/transacted! connection (:seon.db/tx-data recording))
+               database (db/db connection)
+               occurrence (db/pull database '[*] (:seon.error.occurrence/ref recording))
+               root (db/pull database '[*] (:seon.error/ref recording))]
+           (is (seq (:tx-data report)))
+           (is (= required-facets (error/facets projection source)))
+           ;; Stored entity contracts and pull-result contracts have distinct
+           ;; collection grammars. Validate the read through its derived form.
+           (doseq [facet required-facets]
+             (let [pulled-form (schema/pulled-form-in projection facet '[*])
+                   forms (:seon.schema.projection/forms projection)
+                   scalar-attributes
+                   (remove #(-> (get forms %) schema.form/attr-form-properties
+                                :seon.db/component)
+                           (map first (schema.form/map-entries forms (get forms facet))))]
+               (is (malli.core/validate pulled-form occurrence
+                                        (:seon.schema.projection/compile-options projection))
+                   (pr-str {:facet facet :form pulled-form :value occurrence}))
+               (is (= (select-keys source scalar-attributes)
+                      (select-keys occurrence scalar-attributes)))))
+           (when-let [bounds (:seon.instrument/declared-arities source)]
+             (is (= bounds (set (map #(dissoc % :db/id)
+                                    (:seon.instrument/declared-arities occurrence))))))
+           (is (some #(= (:db/id occurrence) (:db/id %)) (:seon.error/occurrences root)))
+           ;; Record the acquisition question without asserting that a stored
+           ;; entity validator is a pull-result validator.
+           (prn {::stored-occurrence occurrence ::required-facets required-facets
+                 ::authored-facets (error/facets projection source)
+                 ::pulled-facets (error/facets projection occurrence)})))))))

@@ -208,6 +208,9 @@
          (doseq [mode [:panic :record]]
            (#'instrument/arm-var! candidate contract projection projection caps
                                  {:seon.config/on-core-error mode
+                                  :seon.config.error/max-evidence-bytes
+                                  (:seon.config.error/max-evidence-bytes
+                                   (test-support/effective-config))
                                   :seon.flow/commit-fault! recorder})
            (let [before @calls
                  input (test-support/refusal-data #(candidate 42))
