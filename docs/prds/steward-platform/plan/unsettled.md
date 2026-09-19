@@ -4367,3 +4367,15 @@ src/seon/sci/eval.clj that test the retired registration-failed marker are
 IN scope for exactly those two sites (convert per PRD 1.3, list them in the
 note), since the sci-fn-program sweep lane has not launched; nothing else in
 sci/eval.clj.
+
+## 2026-09-20 ~04:50 UTC — write-facet gate ruled; 1a resumed to finish greening
+
+1a stopped at 118/4,150/27F/4E (error-test 42/42 green) on a second gate:
+the stored `:seon.db.write/error` requires a projected attempt, so the new
+writer helper bounded at the producer, against the render ruling. Ruled
+(orchestrator, option 2 = lane's recommendation): producer returns a RAW
+validation-refusal facet (request identity, observed basis, actual
+transaction as data); the recorder projects it into the unchanged stored
+write facet. Scope answers (schema producers, two sci/eval catches,
+semantic-value union) handed over; lane resumed (high). Three lanes running:
+1a, render (low), turn-cluster (sol low).
