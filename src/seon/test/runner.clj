@@ -3397,77 +3397,27 @@
       (System/getProperty "seon.test.root")
       "."))
 
-(defn- requested-changed-paths
-  "Repository-relative paths the launcher named with `--changed`."
-  []
-  (let [file (some-> (System/getProperty "seon.test.changed-paths-file")
-                     io/file)]
-    (if (and file (.isFile file))
-      (->> (str/split-lines (slurp file))
-           (remove str/blank?)
-           (mapv str/trim))
-      [])))
-
-(defn- reaching-selection
-  "Bulk-tier test symbols for one set of changed repository-relative paths."
-  [manifest changed-paths]
-  (let [artifacts (:seon.fn.manifest/artifacts manifest)
-        tests (selection/reaching-tests artifacts changed-paths)]
-    {::symbols (set tests)
-     ::reason (str (count tests) " test(s) reach "
-                   (count changed-paths) " changed path(s)" )}))
-
-(defn- bulk-selection
-  "Resolve the bulk tier: every eligible test, a reaching subset, or none.
-
-  Widening is loud and named. A missing basis, a removed file, or a change to
-  a declared gate input no call edge can reach all widen to every eligible
-  test rather than guessing a narrower answer."
-  [selection-mode manifest]
-  (case selection-mode
-    ("all" "full") {::symbols :all
-                    ::reason (str "the " selection-mode " tier")
-                    ::digests (selection/input-digests ".")}
-    "platform" {::symbols #{} ::reason "platform tier only"}
-    "changed"
-    (let [explicit (requested-changed-paths)]
-      (if (seq explicit)
-        (if-let [widening (seq (filter selection/widening-path? explicit))]
-          {::symbols :all
-           ::reason (str "changed gate input outside the program graph: "
-                         (str/join ", " (take 5 widening)))}
-          (reaching-selection manifest explicit))
-        (if-let [basis (selection/read-basis (source-root))]
-          (let [current (selection/input-digests ".")
-                {changed :seon.test.selection/changed
-                 removed :seon.test.selection/removed}
-                (selection/changed-inputs
-                 (:seon.test.basis/digests basis) current)]
-            (cond
-              (seq removed)
-              {::symbols :all
-               ::reason (str "input(s) removed since the green basis: "
-                             (str/join ", " (take 5 removed)))
-               ::digests current}
-
-              (empty? changed)
-              {::symbols #{}
-               ::reason (str "no input changed since the green basis recorded "
-                             (:seon.test.basis/at basis))
-               ::digests current}
-
-              :else
-              (if-let [widening (seq (filter selection/widening-path? changed))]
-                {::symbols :all
-                 ::reason (str "changed gate input outside the program graph: "
-                               (str/join ", " (take 5 widening)))
-                 ::digests current}
-                (assoc (reaching-selection manifest changed)
-                       ::digests current
-                       ::changed changed))))
-          {::symbols :all
-           ::reason "no green basis is recorded yet"
-           ::digests (selection/input-digests ".")})))))
+(defn- bare-selection-refusal
+  "Refuse checkout selection until the launcher supplies named-cluster custody."
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name] :seon.error/value]}
+  [cluster-name]
+  (error/diagnostic
+   {:seon.error/kind (if (= "-" cluster-name)
+                       :seon.test/cluster-required
+                       :seon.test/selection-authority-unavailable)
+    :seon.error/message
+    "Bare bin/test requires an explicitly named cluster and its immutable published database at seon.test/select; the checkout coordinator has only publication provenance."
+    :seon.error/diagnostic-layer :test
+    :seon.error/diagnostic-operation 'seon.test/select
+    :seon.error/diagnostic-member :seon.db/db
+    :seon.error/diagnostic-expected
+    {:seon.test.run/cluster :explicit-cluster-ref
+     :seon.db/db :published-database-value}
+    :seon.error/diagnostic-offending cluster-name
+    :seon.error/diagnostic-cause :seon.test/selection-authority-unavailable
+    :seon.error/diagnostic-evidence
+    {:seon.boot/cluster-name cluster-name
+     :seon.test.run/policy :incremental}}))
 
 (defn- record-green-basis!
   {:seon.fn/external-sink :codec-storage
@@ -4440,11 +4390,10 @@
 (defn- run-coordinator!
   "Run selected tests with progress and a liveness backstop.
 
-  Every tiered invocation runs the declared `:seon.test/platform` moving-part
-  regressions FIRST and stops there when they are red. The bulk tier follows:
-  every eligible test under `all`/`full`, or only the tests reaching code
-  changed since the last recorded GREEN basis under the bare `changed`
-  default. Record results in either the explicitly named non-default cluster
+  Explicit tiers run the declared `:seon.test/platform` regressions first
+  and stop there when red. Bare `changed` requests return a typed refusal
+  before worker startup until named-cluster selection custody is supplied.
+  Record results in either the explicitly named non-default cluster
   or the persistent operator-owned branch selected by the launcher, then exit
   zero exactly when no test failed or errored and its evidence was recorded."
   {:malli/schema
@@ -4459,6 +4408,8 @@
       {:seon.error/kind ::invalid-selection-mode
        ::selection-mode selection-mode
        ::known selection-modes :seon.test.runner/invalid-selection-mode selection-mode})))
+  (if (= "changed" selection-mode)
+    (do (prn (bare-selection-refusal cluster-name)) 2)
   (let [manifest (program-manifest)
         ;; Named namespaces are the selection; with none named, the gate's
         ;; membership is a FACT read from the manifest the base already
@@ -4542,7 +4493,12 @@
                   (swap! workers* conj worker)
                   (initialize-worker! worker namespaces)))
               explicit? (= "explicit" selection-mode)
-              bulk (when-not explicit? (bulk-selection selection-mode manifest))
+              bulk (case selection-mode
+                     ("all" "full")
+                     {::symbols :all ::reason (str "the " selection-mode " tier")
+                      ::digests (selection/input-digests ".")}
+                     "platform" {::symbols #{} ::reason "platform tier only"}
+                     nil)
               all-vars (test-vars-in namespaces)
               declarations (long-declarations manifest)
               _ (verify-long-declarations-indexed! declarations all-vars)
@@ -4639,7 +4595,7 @@
         (.shutdownNow backstop)
         (try
           (.removeShutdownHook (Runtime/getRuntime) shutdown-hook)
-          (catch IllegalStateException _))))))
+          (catch IllegalStateException _)))))))
 
 (defn- coordinator-main!
   [cluster-name root git-sha selection-mode namespace-names]

@@ -22,6 +22,29 @@
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
 
+(deftest bare-selection-refuses-without-authority-before-launch
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "bare-selection")
+     (let [database (db/db connection)
+           cluster (db/pull database [:seon.cluster/name]
+                            [:seon.cluster/name "bare-selection"])]
+       (is (= {:seon.cluster/name "bare-selection"} cluster))
+       (doseq [[name expected] [[(:seon.cluster/name cluster)
+                                :seon.test/selection-authority-unavailable]
+                               ["-" :seon.test/cluster-required]]]
+         (let [output (with-out-str
+                        (is (= 2 (#'runner/run-coordinator!
+                                  name "tmp/a0-no-worker-root" "a0" "changed" []))))
+               refusal (edn/read-string output)]
+           (is (= expected (:seon.error/kind refusal)))
+           (is (= 'seon.test/select
+                  (get-in refusal [:seon.error/data :seon.error/diagnostic-operation])))
+           (is (= {:seon.test.run/cluster :explicit-cluster-ref
+                   :seon.db/db :published-database-value}
+                  (get-in refusal [:seon.error/data :seon.error/diagnostic-expected])))
+           (is (= name (get-in refusal [:seon.error/data :seon.error/diagnostic-offending])))))))))
+
 (deftest a-cold-worker-does-not-arm-its-base-around-host-test-bodies
   (test-support/preserving-instrumentation-state
    (fn []
