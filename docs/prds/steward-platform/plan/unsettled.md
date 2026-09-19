@@ -4426,3 +4426,14 @@ directory derives from Git's common directory (shared by every worktree of
 one repository; a separate clone keeps its own), count 2; proven with a
 probe worktree. Lane stopped (all pids verified exited) and resumed under an
 explicit one-JVM rule. Tools-queue item 8 resolved by this commit.
+
+## 2026-09-20 ~06:20 UTC — owner: no worktrees for lanes
+
+Owner: "is it wise to use worktrees? I find they cause more problems than
+they solve when you are making structural edits." Ruled: lanes never create
+worktrees; the orchestrator alone may baseline a suspect snapshot in one.
+Lanes iterate in the shared tree with `bin/test-fast --paths`, one JVM at a
+time, and STOP at an overlay refusal naming a foreign dirty caller. The
+enabling fix is tools-queue item 3 (`--paths` admits a foreign dirty caller
+at its HEAD bytes, naming it) — next editing lane to launch when a slot
+frees. PRD lane template amended.
