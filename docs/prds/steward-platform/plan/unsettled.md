@@ -4541,3 +4541,13 @@ render-reaching sites deferred to the render lane and listed. Resumed.
 `error-family-1a` landed `b85380b2e`: composite observations preserved
 through the leaf constructor (`seon.error.refusal/diagnostic`) and the
 wrapper (review ranks 7–8 done). Running: 1a, results-reuse, 1d.
+
+## 2026-09-20 ~09:05 UTC — circular overlay hold broken for 1a
+
+1a's --paths run refused (exit 64) naming the paused render lane's
+uncommitted callers, while render waits on 1a's error.clj: a circular hold
+created by the overlay admission. Until results-reuse lands the admission
+fix (tools item 3), 1a iterates with the plain working-tree form
+`bin/test-fast <namespaces>` and reports render-caused reds as a boundary.
+1a's baseline 120/4,161/27F/4E; landed the leaf constructor. Running: 1a
+(high), results-reuse (medium), 1d (low).
