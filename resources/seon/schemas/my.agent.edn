@@ -1,6 +1,6 @@
-{:my.agent/id :string
- :my.agent/namespace :symbol
- :my.agent/steward :string
+{:my.agent/id [:and {:description "The agent this identity names."} :seon.agent/id]
+ :my.agent/namespace [:and {:description "Its assigned namespace's name."} :seon.ns/name]
+ :my.agent/steward [:and {:description "The agent responsible for that namespace."} :seon.agent/id]
  :my.agent/turns-left [:int {:min 0 :seon.wake/context-inert true}]
  :my.agent/identity [:map [:my.agent/id :my.agent/id]
                      [:my.agent/namespace {:optional true} :my.agent/namespace]

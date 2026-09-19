@@ -47,7 +47,7 @@
               [:seon.db/connection :seon.db/connection]
               [:seon.agent/id :seon.agent/id]],
  :my.message/reason [:string {:min 1}],
- :my.message/to [:string {:min 1}],
+ :my.message/to :seon.agent/id,
  :my.message/value
              [:or
               :my.message/message

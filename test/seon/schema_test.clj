@@ -69,6 +69,28 @@
                   :function-contracts (count function-contracts)
                   :validator-registry-merges @enumerations})))))
 
+(deftest agent-surface-identities-use-the-owning-formats
+  (test-support/with-database
+    (fn [connection]
+      (let [database (seon.db/db connection)
+            projection (schema/projection-from-database database)
+            options {:registry (:seon.schema.projection/registry projection)}]
+        (doseq [[surface owner valid invalid]
+                [[:my.agent/id :seon.agent/id "root" ""]
+                 [:my.agent/steward :seon.agent/id "root" ""]
+                 [:my.agent/namespace :seon.ns/name 'my.example "my.example"]
+                 [:my.message/to :seon.agent/id "root" ""]]]
+          (let [row (seon.db/pull database
+                                 [:seon.schema/key :seon.schema/form]
+                                 [:seon.schema/key surface])]
+            (is (= surface (:seon.schema/key row)))
+            (is (seq (:seon.schema/form row)))
+            (is (m/validate surface valid options))
+            (is (not (m/validate surface invalid options)))
+            (doseq [value [valid invalid nil 42 :root 'root]]
+              (is (= (m/validate owner value options)
+                     (m/validate surface value options))))))))))
+
 (defn- legacy-canonical-data-string
   [value]
   (letfn [(framed [tag payload]
