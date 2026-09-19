@@ -4577,3 +4577,17 @@ whole-entity validator's cost on the serial writer behind the publication
 silence. Launched `bridge-dissolution-review` (astra HIGH, read-only): the
 pain-point ledger, the one-projection-value design, the validator's share,
 three options with migration order, a recommendation and the first lane.
+
+## 2026-09-20 ~10:00 UTC — RULING: stop fighting Malli; PRD drafted for astra review
+
+Owner: "stop fighting malli and use its internals to make everything fast
+and simple. However you think we can improve our applications and
+definitions to the database schema sketch it out and run everything by
+astra with links to malli source so we stop reinventing the wheel."
+Drafted [malli-native-bridge-prd-2026-09-20.md](malli-native-bridge-prd-2026-09-20.md):
+one compiled registry is the projection, attributes derived by m/walk, the
+raw walker deleted, three projection sources become one carried value, the
+writer validator diet, instrumentation on the registry; deletions as the
+success measure; five-step migration keeping HEAD loading; every [verify]
+claim owes a Malli/Datahike file:line from the astra review (the running
+`bridge-dissolution-review` reviews it at its next stop).
