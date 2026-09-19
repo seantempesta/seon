@@ -1163,6 +1163,8 @@
                  (str " Input: " (refusal-value-text unit input nil) "."))
                (when result-contract
                  (str " Result contract: " (refusal-value-text unit result-contract nil) "."))
+               (when (and (zero? index) (:seon.instrument/caller data))
+                 (str " Called from " (:seon.instrument/caller data) "."))
                " Example: " (or example "No docstring example is available."))))
         problems)))))
 

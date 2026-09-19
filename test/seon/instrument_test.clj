@@ -630,17 +630,10 @@
               (:seon.error/diagnostic-offending (:seon.error/data data)))
            "re-arming without caps cannot replace the shared reporter")))))
 
-(deftest diagnostic-failures-retain-their-cause
-  (let [lookup (#'instrument/diagnostic-arglists 'unqualified)
-        violation (#'instrument/violation
-                   nil :malli.core/invalid-input
-                   {:fn-name 'seon.instrument-test/missing
-                    :input [:not-a-malli-schema] :args [42]})]
+(deftest arglist-lookup-failures-retain-their-cause
+  (let [lookup (#'instrument/diagnostic-arglists 'unqualified)]
     (is (= :failed (:seon.instrument.lookup/status lookup)))
-    (is (seq (:seon.instrument.lookup/cause lookup)))
-    (is (= ::instrument/contract-violated (:seon.error/kind violation)))
-    (is (seq (get-in violation [:seon.error/data
-                                :seon.instrument.lookup/cause])))))
+    (is (seq (:seon.instrument.lookup/cause lookup)))))
 
 (deftest an-error-shaped-argument-does-not-bypass-the-declared-input
   (let [observed {:seon.error/at #inst "2026-09-19T00:00:00Z"
@@ -1358,3 +1351,84 @@
     (is (not (contains? refusal :seon.instrument/contract-violated)))
     (is (not (contains? registration :seon.instrument/registration-failed)))))
 
+
+(deftest the-caller-frame-is-part-of-the-refusal-sentence
+  (let [refusal (test-support/refusal-data #(prefix-contract "wrong"))
+        caller (get-in refusal [:seon.error/data :seon.instrument/caller])]
+    (is (string? caller))
+    (is (str/starts-with? caller "seon.instrument-test "))
+    (is (str/includes? (:seon.error/message refusal) caller))
+    (is (str/includes? (error/render-ai refusal) caller))))
+
+(deftest host-diagnostics-use-the-loaded-vars-arglists
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted!
+      connection
+      [(test-support/program-fn-row
+        (db/db connection) 'seon.instrument-test/prefix-contract
+        "(defn prefix-contract [stale-name] stale-name)")])
+     (let [environment (env/environment
+                        {:seon.boot/cluster-name "instrument-test"
+                         :seon.db/connection connection})
+           refusal (binding [effect/*request-context*
+                             {:seon.env/environment environment}]
+                     (test-support/refusal-data #(apply prefix-contract [])))]
+       (is (= '([value])
+              (get-in refusal [:seon.error/data :seon.instrument/arglists])))
+       (is (not (str/includes? (error/render-ai refusal) "stale-name")))))))
+
+(deftest an-invalid-refusal-retains-its-evidence-at-the-kernel-boundary
+  (let [canonical (schema/handed-projection)
+        ;; A complete canonical population with a deliberately incompatible
+        ;; refusal declaration probes drift at the actual compiled wrapper.
+        projection (schema/build-projection
+                    (assoc (:seon.schema.projection/forms canonical)
+                           :seon.instrument/refusal-result :int))
+        caps (config/result-caps (test-support/effective-config))
+        wrapped (instrument/wrap-interpreted
+                 'seon.instrument-test/refusal-drift
+                 "[:=> [:cat :int] :int]" projection :panic caps identity)
+        thrown (try (wrapped "wrong") (catch Throwable failure failure))
+        options (kernel/context-options)
+        ctx (assoc (sci/init {:interrupt-fn (:interrupt-fn options)})
+                   :seon.sci.kernel/guard (:seon.sci.kernel/guard options))]
+    (is (= "Instrumentation constructed an invalid refusal." (ex-message thrown)))
+    (kernel/with-arm
+     ctx (* 1000 test-support/event-backstop-seconds)
+     (fn [armed]
+       (let [outcome (kernel/failure-value
+                      {:seon.sci.kernel/time-limit-kind :seon.sci.eval/time-limit
+                       :seon.sci.kernel/failure-kind :seon.sci.eval/evaluation-failed}
+                      thrown ((:seon.sci.kernel/record armed) :error))]
+         (is ((schema/projection-validator canonical :seon.instrument/contract-error)
+              outcome))
+         (is (= (select-keys (ex-data thrown)
+                            [:seon.instrument/check :seon.error/expected-shape
+                             :seon.instrument/explanations :seon.instrument/fn])
+                (select-keys outcome
+                             [:seon.instrument/check :seon.error/expected-shape
+                              :seon.instrument/explanations :seon.instrument/fn]))))))))
+
+(defn reporting-failure
+  "A declared humanizer that fails while the real reporter explains a value."
+  {:malli/schema [:=> [:cat :map :map] :string]}
+  [_problem _options]
+  (throw (ex-info "The contract humanizer failed."
+                  {:seon.instrument-test/reporting-evidence "original cause"})))
+
+(deftest a-reporter-failure-is-not-relabelled-as-a-contract-violation
+  (let [canonical (schema/handed-projection)
+        projection (schema/with-predicate-functions
+                    canonical
+                    (assoc (schema/predicate-functions-in canonical)
+                           'seon.instrument-test/reporting-failure #'reporting-failure))
+        wrapped (instrument/wrap-interpreted
+                 'seon.instrument-test/reporting-boundary
+                 "[:=> [:cat [:fn {:error/fn seon.instrument-test/reporting-failure} clojure.core/int?]] :int]"
+                 projection :panic
+                 (config/result-caps (test-support/effective-config)) identity)
+        failure (try (wrapped "wrong") (catch Throwable thrown thrown))]
+    (is (= "The contract humanizer failed." (ex-message failure)))
+    (is (= "original cause" (:seon.instrument-test/reporting-evidence (ex-data failure))))
+    (is (not= :seon.instrument/contract-violated (:seon.error/kind (ex-data failure))))))

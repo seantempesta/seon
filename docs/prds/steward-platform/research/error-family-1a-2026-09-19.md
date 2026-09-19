@@ -446,3 +446,45 @@ Retired installed attributes in this checkpoint:
   :seon.instrument/contract-violated :seon.instrument/registration-failed]`.
 The three removed class schemas are declarations, not additional physical
 attribute names. No reset, adoption, restart or refork was performed.
+
+## Step 5 continuation — diagnostic accuracy
+
+D1: the first caller outside instrumentation is part of both the flat refusal
+sentence and its rendered sentence. Namespace exclusion is exact for this
+owner, so `seon.instrument-test` is not excluded with it. The armed regression
+checks the actual caller namespace and both rendered surfaces.
+
+D2: deleted `minimal-violation` and the reporter's catch. A humanizer failure
+now propagates its original Throwable and ex-data. It cannot acquire a
+contract-violation label from a fallback. The regression uses the real compiled
+wrapper and a declared failing humanizer; before the deletion, both original
+message and original evidence assertions failed.
+
+D3: loaded Var metadata supplies host arglists. Only an established JVM miss
+consults the program graph for an interpreted function. The fixture transacts
+an intentionally stale program declaration through `program-fn-row` and
+`transacted!`; the armed call must report the loaded `[value]` binding, not
+stored `[stale-name]`.
+
+D4: the canonical-projection probe deliberately makes `refusal-result`
+incompatible, then passes the actual thrown invalid-refusal to the real SCI
+kernel boundary. **The current kind-bearing boundary retains the complete
+contract-error and its check, expected-shape, explanations and function.**
+The historical D4 loss is not reproduced here. No guessed repair is made.
+Kindless propagation still requires the inventoried external
+`seon.error.refusal` and `seon.sci.kernel` conversions.
+
+D5 is the database-consumer output-contract gap, not the gate reporter. D6 is
+the gate reporter's ex-data loss; `src/seon/test/runner.clj` remains outside
+ownership. The SCI parity note's final addendum locates its remaining defect
+in SCI function acquisition; changing reporter prose does not repair it.
+
+Fast evidence: the initial step-5 assertions contributed **4 failures** to
+**41 / 292 / 15 / 0**. The later combined run was
+**86 / 582 / 3 / 1**: two D2 assertions, one external SCI stamp-consumer
+assertion, and one bootstrap facet-discovery error. The final combined
+rerun is in flight at this commit; no isolated step-5 green tally is claimed.
+
+Touched: `src/seon/error.clj`, `src/seon/instrument.clj`,
+`test/seon/instrument_test.clj`, this note. **RESET NEEDED attributes: `[]`**
+for this step.

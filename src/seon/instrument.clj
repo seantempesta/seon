@@ -23,8 +23,7 @@
             [seon.error :as error]
             [seon.id]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]
-            [seon.sci.kernel :as sci.kernel]))
+            [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -99,7 +98,7 @@
   ;; reporter are the machinery that CAUGHT the violation. None of them is a
   ;; place to go and edit, and naming one is how a refusal ends up pointing
   ;; the reader at the checker instead of the caller.
-  ["malli." "clojure." "java." "jdk." "sun." "seon.instrument"])
+  ["malli." "clojure." "java." "jdk." "sun."])
 
 (defn- caller-frame
   "The first stack frame that is neither the contract machinery nor the host.
@@ -108,6 +107,7 @@
   contracts armed, malli's instrumented wrapper sits between the caller and
   the refusal, so the nearest outside frame is `malli.core` and a reader
   following it lands in a dependency."
+  {:malli/schema [:=> [:cat] [:or :nil :string]]}
   []
   (some (fn [^StackTraceElement frame]
           (let [demunged (clojure.lang.Compiler/demunge (.getClassName frame))
@@ -115,8 +115,9 @@
                 frame-ns (if (neg? separator)
                            demunged
                            (subs demunged 0 separator))]
-            (when-not (some #(.startsWith ^String frame-ns ^String %)
-                            non-caller-namespace-prefixes)
+            (when-not (or (= frame-ns "seon.instrument")
+                          (some #(.startsWith ^String frame-ns ^String %)
+                                non-caller-namespace-prefixes))
               (str frame-ns " (" (.getFileName frame)
                    ":" (.getLineNumber frame) ")"))))
         (.getStackTrace (Thread/currentThread))))
@@ -177,9 +178,16 @@
        :seon.instrument.lookup/cause (failure-cause failure)})))
 
 (defn- jvm-arglists
+  {:malli/schema [:=> [:cat :symbol] [:map
+     [:seon.instrument.lookup/status [:enum :found :missing :failed :no-program-graph]]
+     [:seon.instrument.lookup/cause {:optional true} [:string {:min 1}]]
+     [:seon.fn/arglists {:optional true} :string]
+     [:seon.instrument/arglists {:optional true} [:sequential [:sequential :seon.schema/value]]]]]}
   [function-symbol]
   (try
-    (if-let [arglists (some-> function-symbol find-var meta :arglists)]
+    (if-let [arglists (when (or (not (qualified-symbol? function-symbol))
+                               (find-ns (symbol (namespace function-symbol))))
+                       (some-> function-symbol find-var meta :arglists))]
       {:seon.instrument.lookup/status :found ::arglists arglists}
       {:seon.instrument.lookup/status :missing})
     (catch Throwable failure
@@ -187,53 +195,27 @@
        :seon.instrument.lookup/cause (failure-cause failure)})))
 
 (defn- diagnostic-arglists
+  "The loaded Var owns host arglists; the program row describes SCI-only code."
+  {:malli/schema [:=> [:cat :symbol] [:map
+     [:seon.instrument.lookup/status [:enum :found :missing :failed :no-program-graph]]
+     [:seon.instrument.lookup/cause {:optional true} [:string {:min 1}]]
+     [:seon.fn/arglists {:optional true} :string]
+     [:seon.instrument/arglists {:optional true} [:sequential [:sequential :seon.schema/value]]]]]}
   [function-symbol]
-  (let [{status :seon.instrument.lookup/status
-         stored :seon.fn/arglists :as lookup}
-        (program-graph-arglists function-symbol)]
-    (case status
-      :found (try
-               {:seon.instrument.lookup/status :found
-                ::arglists (edn/read-string stored)}
-               (catch Throwable failure
-                 {:seon.instrument.lookup/status :failed
-                  :seon.instrument.lookup/cause (failure-cause failure)}))
-      ;; With a graph, only an established miss reaches JVM metadata. Outside
-      ;; an evaluation there is no program graph to consult; that is the
-      ;; system-side, compiled-function case this fallback exists for.
-      (:missing :no-program-graph)
-      (let [result (jvm-arglists function-symbol)]
-        (if (= :missing (:seon.instrument.lookup/status result))
-          {:seon.instrument.lookup/status status}
-          result))
-      lookup)))
-
-(defn- minimal-violation
-  [kind data]
-  (let [function-symbol (:fn-name data)
-        arity? (= :malli.core/invalid-arity kind)]
-    (error/diagnostic
-     {:seon.error/kind ::contract-violated
-      :seon.error/message
-      (if arity?
-        (str "Wrong number of args (" (:arity data) ") passed to: "
-             function-symbol)
-        (str function-symbol " violated its contract (" kind ")."))
-      :seon.error/diagnostic-layer :instrumentation
-      :seon.error/diagnostic-operation function-symbol
-      :seon.error/diagnostic-member
-      (if (= :malli.core/invalid-output kind) :return :arguments)
-      :seon.error/diagnostic-expected
-      (if arity? ::declared-arglists (or (:guard data) (:output data) (:input data)))
-      :seon.error/diagnostic-offending
-      (if arity? (:arity data) (or (:value data) (:args data)))
-      :seon.error/diagnostic-cause kind
-      :seon.error/diagnostic-evidence nil
-      :seon.error/data
-      (cond-> {::malli kind
-               ::arm (if (= :malli.core/invalid-output kind) :output :input)}
-        arity? (assoc ::arity (:arity data))
-        function-symbol (assoc ::fn function-symbol))})))
+  (let [loaded (jvm-arglists function-symbol)]
+    (if (not= :missing (:seon.instrument.lookup/status loaded))
+      loaded
+      (let [{status :seon.instrument.lookup/status
+             stored :seon.fn/arglists :as lookup}
+            (program-graph-arglists function-symbol)]
+        (if (= :found status)
+          (try
+            {:seon.instrument.lookup/status :found
+             ::arglists (edn/read-string stored)}
+            (catch Throwable failure
+              {:seon.instrument.lookup/status :failed
+               :seon.instrument.lookup/cause (failure-cause failure)}))
+          lookup)))))
 
 (defn- supplied-entry-problems
   [function-symbol]
@@ -275,9 +257,11 @@
 
 (defn- violation
   "Retain the actual offending values; the error render pair owns projection."
+  {:malli/schema [:=> [:cat [:or :nil :seon.sci.admit/caps] :qualified-keyword :map] [:map
+     [:seon.error/message :seon.error/message]
+     [:seon.error/data :map]]]}
   [_caps kind data]
-  (try
-    (let [function-symbol (:fn-name data)
+  (let [function-symbol (:fn-name data)
            {arglists ::arglists :as lookup} (diagnostic-arglists function-symbol)
            arguments (:args data)
            arglist (some #(when (or (= (count %) (count arguments))
@@ -380,7 +364,8 @@
                function-symbol first-problem nil
                (error/scalar-text (:seon.error/offending first-problem)))
               (when (qualified-keyword? expected)
-                (str " Contract: " expected ".")))
+                (str " Contract: " expected "."))
+              (when caller (str " Called from " caller ".")))
          :seon.error/diagnostic-layer :instrumentation
          :seon.error/diagnostic-operation function-symbol
          :seon.error/diagnostic-member (case arm :output :return :guard :guard
@@ -401,25 +386,7 @@
            arity? (assoc ::arity (:arity data))
            arglists (assoc ::arglists arglists)
            (seq paths) (assoc ::problem-paths paths)
-           caller (assoc ::caller caller))}))
-    (catch Throwable failure
-      ;; A BOUND FIRING IS ITS OWN REPORT. Composing this value runs the
-      ;; contract's own predicates again (`m/explain` re-checks the value
-      ;; that failed), so an evaluation's deadline can close while the
-      ;; reporter is mid-sentence. Converting that interrupt into
-      ;; `minimal-violation` gave the interrupt a `:seon.error/kind` of
-      ;; `::contract-violated`, which `seon.sci.kernel/failure-value` then
-      ;; keeps as the boundary's own answer (`src/seon/sci/kernel.clj:486`)
-      ;; — so a 2000 ms bound firing around a 10 ms refusal was read as
-      ;; "Wrong number of args … passed to: …", naming the wrong defect for
-      ;; whoever read the fault. The interrupt is uncatchable by design
-      ;; (`reference-code/sci/src/sci/interrupt.cljc`); it leaves here
-      ;; unchanged so the bound reports what never arrived.
-      (when (sci.kernel/interrupted? failure)
-        (throw failure))
-      (assoc-in (minimal-violation kind data)
-                [:seon.error/data :seon.instrument.lookup/cause]
-                (failure-cause failure)))))
+           caller (assoc ::caller caller))})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Interpreted function contracts
