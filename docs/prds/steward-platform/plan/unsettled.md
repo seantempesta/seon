@@ -4208,3 +4208,10 @@ declared error outputs; its fast run of seon.error-test was mid-flight).
 limit line yet; if it stops, its session is also preserved. Owner asked to be
 messaged; no relaunch, no move to Opus, until the go-ahead. The A0/stage-1
 gate 4 keeps running (a gate, not a lane).
+
+## 2026-09-19 ~22:30 UTC — credits restored; 1a resumed
+
+Owner re-upped Codex credits. `error-family-1a` stopped cleanly (pids
+verified exited) and resumed from its preserved session on its uncommitted
+partial edits; `reset-boot-readiness` never hit the limit and continues.
+Gate 4 (`a0-stage1-cold-4`) still executing.
