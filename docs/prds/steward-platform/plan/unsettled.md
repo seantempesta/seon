@@ -4518,3 +4518,16 @@ identity = (base digest, overlay input digest, program digest, basis),
 honest that the tested program is the snapshot; ownership extended to
 cluster/source.clj's admission/recording region + seon.source.edn. Lane
 resumed for steps 2–5. Running: 1a (high), results-reuse (medium), render (low).
+
+## 2026-09-20 ~08:35 UTC — render stopped at the overlay refusal (rule 12); tools item 3 assigned
+
+`kind-sweep-render` stopped correctly: `--paths` admission demanded the
+foreign dirty callers src/seon/error.clj (1a), src/seon/test/runner.clj
+(results-reuse), test/seon/error_test.clj. Its 23 drafts carry zero retired
+references (18 remain in render/{hiccup,lint,ns,test,value}, the render-2
+group), uncommitted in the shared tree and HELD; last run 113/792/49F/19E.
+Three lanes hit this refusal today. Tools item 3 goes to
+`results-reuse-everywhere` at its next stop: overlay admission admits a
+foreign dirty caller at its HEAD bytes and NAMES it, never refuses. Render
+resumes when 1a and results-reuse commit. Freed slot → wave-1d config/plan
+family lane (audit A).
