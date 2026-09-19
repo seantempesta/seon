@@ -4081,3 +4081,11 @@ Running: `db-contracts-finish` (astra low), `unbreak-bare-test` (astra low),
 mechanical follow-up). Background: `bin/seon init --dev default --changed
 src/seon/test/cache.clj test/seon/test_cache_test.clj`
 (tmp/probe/publish-cache-fix.log).
+
+## Tools queue (owner 2026-09-19: "keep improving our tools, hooks, shell commands")
+
+1. Shell writes under src/test are scanned by the hook but not published; a lane's shell edit is only live after a manual `bin/seon init --dev default --changed <paths>`. Make the scan queue the same publication.
+2. Complete publication ~150 s (Codex landing note); the incremental path is 24 s. Profile the complete path's phases; publication progress events inside the population commit and acquisition (issue `an-aborted-publication-leaves-no-record`).
+3. `bin/test-fast --paths` refuses on foreign dirty caller files; a lane cannot iterate when a neighbour holds a caller. Admit the neighbour's HEAD bytes for those callers, naming them, instead of refusing.
+4. `bin/test` as a launcher of the runtime's own selection/execution functions (Track A4); tally as a query (A5).
+5. Gate source warnings (shadowed-var) should name the fix and be fixable by a mechanical lane; today they scroll past.
