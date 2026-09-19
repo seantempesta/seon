@@ -4067,3 +4067,17 @@ low) and `unbreak-bare-test` (astra low); Codex lane still finishing its
 publication repair (holds fn.clj, instrument.clj, sci/eval.clj, cluster.clj
 and their tests + seon.instrument.edn). Next: cold gates, reset from clean
 HEAD, Juniper, `--platform`, merge to main, then A1.
+
+## 2026-09-19 ~18:40 UTC — Codex lane landed; three lanes running; publication owed run
+
+Codex repair landed `5ad9ea70c` (lost construction projection; instrumentation
+policy acquired once); live publication + adoption converged at
+`6aaec3db-f99e-5125-b8aa-db32567affc8` without restarting default; 32
+assertions in-process; its `--paths` fast run refused on the dirty caller
+files, so the cold gate is owed by the orchestrator. Complete publication
+still ~150 s (open). Codex session stopped; one orchestrator.
+Running: `db-contracts-finish` (astra low), `unbreak-bare-test` (astra low),
+`error-family-1a` (astra high; D3 first cut; kind-retirement inventory for a
+mechanical follow-up). Background: `bin/seon init --dev default --changed
+src/seon/test/cache.clj test/seon/test_cache_test.clj`
+(tmp/probe/publish-cache-fix.log).
