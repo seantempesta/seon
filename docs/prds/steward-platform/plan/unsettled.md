@@ -4493,3 +4493,16 @@ schema/internal.cljc, seon.schema.edn, sci/kernel.clj for its three named
 items; the constructor-leaf move, rank 8 pass-through and rank 7 wrapper
 semantics handed over. Running: 1a (high), stall (medium), results-reuse
 (medium).
+
+## 2026-09-20 ~08:00 UTC — projection stall fixed; Malli fork pushed; render resumed
+
+`projection-compile-stall` (astra MEDIUM) landed `4806aad03` `9ad085939` +
+Malli fork `606083c5` ("Use the resolving registry as ref validation scope"):
+100 candidate validations 644 → 23 ms; 2,000 → 0 registry merges; canonical
+regression 1.49 s over 1,365 function contracts. Its broader run stays red
+on 1a's in-flight constructor and a source-publication timeout inside writer
+ownership validation (the 150 s publication class). Fork created at
+github.com/seantempesta/malli (branch `seon-ref-scope`), `.gitmodules`
+repointed (`5db1c989a`), gitlink committed. `kind-sweep-render` resumed in
+the freed slot. Running: 1a (high), results-reuse (medium), render (low).
+Review ranks 3–6, 9–12 remain for a `malli-compile-ownership` lane after 1a.
