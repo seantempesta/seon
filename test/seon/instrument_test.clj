@@ -108,7 +108,7 @@
   (instrument/apply! {:seon.config/on-core-error :panic})
   (let [refusal (test-support/refusal-data
                  #(instrument/apply! {:seon.config/on-core-error :degrade}))]
-    (is (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] refusal))
+    (is (schema/valid-candidate-value? :seon.instrument/contract-error refusal))
     (is (= 'seon.instrument/apply!
            (:seon.error/diagnostic-operation (:seon.error/data refusal))))))
 
@@ -268,7 +268,7 @@
                (try
                  (fs/delete-recursively! base (.getPath outside) nil)
                  (catch Exception thrown thrown))]
-           (is (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] (ex-data failure))
+           (is (schema/valid-candidate-value? :seon.instrument/contract-error (ex-data failure))
                "the direct three-arity still requires its options map"))))
       (finally
         (fs/delete-recursively! base base)))))
@@ -284,7 +284,7 @@
                      (catch Exception thrown thrown))
            data (ex-data failure)]
        (is (some? failure) "the call was stopped, not merely observed")
-       (is (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] data)
+       (is (schema/valid-candidate-value? :seon.instrument/contract-error data)
            "and it arrives as OUR flat error kind, not as malli's — so
             when this throw escapes a proc, the fault path classifies it
             from the cause chain like any other refusal")
@@ -329,7 +329,7 @@
          projection :panic caps original)
         failure (try (wrapped "wrong")
                      (catch Exception thrown thrown))]
-    (is (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] (ex-data failure)))
+    (is (schema/valid-candidate-value? :seon.instrument/contract-error (ex-data failure)))
     (is (= 'my.agents.contract/value
            (get-in (ex-data failure)
                    [:seon.error/data :seon.error/diagnostic-operation])))
@@ -468,7 +468,7 @@
     (instrument/apply! {:seon.config/on-core-error :panic :seon.schema/projection projection})
     (doseq [call [#(guarded-result 1) #(interpreted 1)]]
       (let [failure (test-support/refusal-data call)]
-        (is (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] failure))
+        (is (schema/valid-candidate-value? :seon.instrument/contract-error failure))
         (is (= :malli.core/invalid-guard
                (get-in failure [:seon.error/data :seon.instrument/malli])))
         (is (str/includes? (:seon.error/message failure) "The guard was evaluated."))))))
@@ -538,7 +538,7 @@
                "the bound fired while the contract reporter was composing")
            (is (kernel/interrupted? thrown)
                "the contract reporter re-raises the bound's own interrupt")
-           (is (not (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] (ex-data thrown)))
+           (is (not (schema/valid-candidate-value? :seon.instrument/contract-error (ex-data thrown)))
                "a bound firing is never reported as a contract violation")
            (is (nat-int? (:seon.sci.eval/time-limit outcome))
                "the evaluation boundary names the bound that fired"))
@@ -898,7 +898,7 @@
            (is (= {::value "new input"} (candidate {::value "new input"})))
            (let [failure (try (candidate {::value false})
                               (catch Exception refusal refusal))]
-             (is (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] (ex-data failure)))
+             (is (schema/valid-candidate-value? :seon.instrument/contract-error (ex-data failure)))
              (is (str/includes? (ex-message failure) (str new-key))))
            (let [current @candidate]
              (instrument/apply! {:seon.config/on-core-error :panic
@@ -995,7 +995,7 @@
                 ['seon.instrument-test/prefix-contract-in
                  #(apply prefix-contract-in [7])]]]
          (let [failure (try (invoke) (catch Exception thrown thrown))]
-           (is (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] (ex-data failure)))
+           (is (schema/valid-candidate-value? :seon.instrument/arity-error (ex-data failure)))
            (is (= expected-function
                   (get-in (ex-data failure)
                           [:seon.error/data
@@ -1167,12 +1167,12 @@
               [[:input #(private-integer-boundary "not an integer")]
                [:output #(private-integer-boundary 0)]]]
         (let [refusal (test-support/refusal-data call)]
-          (is (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] refusal))
+          (is (schema/valid-candidate-value? :seon.instrument/contract-error refusal))
           (is (= kind (get-in refusal [:seon.error/data :seon.instrument/arm])))
           (is (= 'seon.instrument-test/private-integer-boundary
                  (get-in refusal [:seon.error/data :seon.error/diagnostic-operation])))))
       (let [refusal (test-support/refusal-data #(private-integer-boundary original-error))]
-        (is (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] refusal))
+        (is (schema/valid-candidate-value? :seon.instrument/contract-error refusal))
         (is (= original-error
                (get-in refusal [:seon.error/data :seon.error/problems 0 :seon.error/offending]))
             "The consumer refuses its input and retains the causal value.")))))
@@ -1274,7 +1274,7 @@
                       (try
                         (markdown/parse {:seon.dev.markdown/content 1})
                         (catch Exception thrown thrown))]]
-       (is (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] (ex-data failure)))))))
+       (is (schema/valid-candidate-value? :seon.instrument/contract-error (ex-data failure)))))))
 
 (deftest restoring-instrumentation-state-never-reinstalls-a-replaced-definition
   ;; THE CLASS (gate batch 88, worker pool-1, run tmp/test-runs/run.j9rx0e):
@@ -1446,4 +1446,4 @@
         failure (try (wrapped "wrong") (catch Throwable thrown thrown))]
     (is (= "The contract humanizer failed." (ex-message failure)))
     (is (= "original cause" (:seon.instrument-test/reporting-evidence (ex-data failure))))
-    (is (not (schema/valid-candidate-value? [:or :seon.instrument/arity-error :seon.instrument/contract-error] (ex-data failure))))))
+    (is (not (schema/valid-candidate-value? :seon.instrument/contract-error (ex-data failure))))))
