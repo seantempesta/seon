@@ -47,3 +47,75 @@ bin/test
 ```
 
 The bare command must currently exit nonzero with the named typed refusal, not throw or silently run everything. The orchestrator owns platform and later successful bare-selection proof.
+
+## Followup — cold-gate fixture observation admission
+
+The orchestrator's cold gate stopped before test execution with
+`:seon.test.runner/missing-fixture-observation`, naming
+`seon.test.runner-test/bare-selection-refuses-without-authority-before-launch`.
+Read the bounded tail of `tmp/orchestrator/gates/a0-stage1-cold-2026-09-19.log`;
+left retained root `tmp/test-runs/run.ca77Ao` untouched.
+
+Read `marker-reason`, `expensive-fixture-tests`, and
+`verify-fixture-observations!` end to end, the existing observation examples,
+and roadmap row B4. The check is correct: its call graph follows the whole
+coordinator, including branches this request does not execute. Removing the
+canonical fixture alone would not remove that reach. Calling only the private
+`bare-selection-refusal` constructor would avoid it but stop proving that the
+real coordinator exits before startup. No production seam or gate policy was
+changed merely to accommodate the regression.
+
+Chose the existing pre-acquisition observation pattern from
+`expensive-fixtures-require-a-declared-observation` in the same test namespace.
+Added this exact test metadata:
+
+```clojure
+^{:seon.test/fixture-observation
+  "Observes the real coordinator refusing before manifest loading and expensive fixture acquisition; no expensive fixture is acquired. Run: bin/test seon.test.runner-test"}
+```
+
+This observes refusal at the real expensive-fixture entry path, not acquisition
+of a fresh store. The reason says so explicitly. The original 11 assertions
+and real coordinator calls remain unchanged. The declaration also lets the
+post-adoption check defer the observation according to B4.
+
+Static admission proof: the source test symbol carries a nonblank string;
+`marker-reason` chooses test metadata before namespace metadata, returns that
+string, and `verify-fixture-observations!` accepts every expensive test with
+such a reason. A read-only JVM probe read the first deftest form directly from
+the edited source and passed its metadata, on an immutable metadata carrier,
+to the actual loaded `seon.test.runner/marker-reason`. It returned the exact
+string above and `:exact-command-present? true` in **5 ms**. No test Var or
+runtime code was redefined. Reproducible probe:
+
+```clojure
+(with-open [reader (java.io.PushbackReader.
+                    (clojure.java.io/reader "test/seon/test/runner_test.clj"))]
+  (read reader)
+  (let [form (read reader)
+        test-symbol (second form)
+        declaration (meta test-symbol)
+        observed (#'seon.test.runner/marker-reason
+                  (with-meta (fn []) (assoc declaration :ns (find-ns 'user)))
+                  :seon.test/fixture-observation)]
+    {:test test-symbol
+     :marker-reason observed
+     :exact-command-present?
+     (clojure.string/includes? observed "Run: bin/test seon.test.runner-test")}))
+```
+
+Fast verification uses isolated HEAD `cf0a93753ec17407b9ac22f224f225b738f12c37`
+plus only the metadata edit, with linked dependencies and the existing cache.
+Command: `bin/test-fast --paths test/seon/test/runner_test.clj -- seon.test.runner-test`.
+The launcher reported published graph
+`170c6f9ffe2db4d571c9a67e454ac393a8d5e5046341475f57ffd3e56b2a9cb9`, one commit
+behind HEAD. Fast tally: **24 tests / 194 assertions / 0 failures / 1 error**,
+exit 1. The edited regression began at 17:58:04.335933Z and ended at
+17:58:05.433060Z with its 11 assertions passing. The only outer error remains
+`the-canonical-platform-tier-preserves-file-local-uncertainty`, naming the same
+two reset tests recorded above; no production change or foreign repair was
+made. `git diff --check` passed. The owned JVM exited and the scratch worktree
+was removed after verification.
+
+Followup touches only the test declaration and this note. The orchestrator
+still owns the cold rerun; no cold gate or lifecycle command was run here.

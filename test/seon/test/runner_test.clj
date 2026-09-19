@@ -22,7 +22,9 @@
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
 
-(deftest bare-selection-refuses-without-authority-before-launch
+(deftest ^{:seon.test/fixture-observation
+           "Observes the real coordinator refusing before manifest loading and expensive fixture acquisition; no expensive fixture is acquired. Run: bin/test seon.test.runner-test"}
+  bare-selection-refuses-without-authority-before-launch
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "bare-selection")
