@@ -21,8 +21,13 @@
                             :where [?entity :seon.audit/poison _]]
                           database)
             before (db/basis-t database)
+            recovered (#'cluster/recover-runs! connection)
             result (with-redefs [db/q (fn [& _] refusal)]
                      (#'cluster/recover-runs! connection))]
+        (is (= {:seon.boot/recovered-runs 0
+                :seon.boot/recovery-operations 0}
+               recovered)
+            "a fresh canonical database positively completes recovery")
         (is (error/error? refusal) (pr-str refusal))
         (is (= refusal result)
             "boot recovery returns the failed read instead of recovering zero turns")

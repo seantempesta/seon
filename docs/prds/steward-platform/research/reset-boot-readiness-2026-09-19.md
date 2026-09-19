@@ -204,3 +204,98 @@ readiness socket and process termination remain real.
       (spit "/Users/sean/src/seon/tmp/reset-boot-readiness-evidence/interference-after-cleanup-child.log" (slurp child-log)))
     (finally (invoke 'down! root ["--force"]))))
 ```
+
+### Concrete fixture repair for its owner
+
+Keep the 300,000 ms declared acquisition/hold bounds. Supply the lifecycle
+request's existing progress atom and advance it at the actual boundaries:
+publication, fork, boot, in-process test, cleanup. Put the test's `try/finally`
+**inside** the lifecycle transition so the holder also owns cleanup. Then a
+waiter timing out cannot start `down!` concurrently with its own holder.
+Each existing operator subprocess/readiness/evaluation bound remains intact.
+Do not merely lengthen the bound or retry readiness after killing the child.
+
+### Cleanup
+
+The three owned operator roots each reported `0/0 clusters alive` and
+`orphan seon JVMs: none`; their operation logs were captured under
+`tmp/reset-boot-readiness-evidence/` and the roots were removed. The original
+reproduction worktree was removed after its operator calls returned. The
+verification worktree is removed after the fast invocation finishes.
+
+### Full-sequence probe retained for reproduction
+
+The following was run via `bb --config bb.edn --deps-root . --classpath
+script:src:resources /absolute/path/to/probe.clj` from the detached worktree.
+The second run changed only the root name to `reset-boot-readiness-exact2-root`.
+Both retained the declared 300,000 ms outer bound and 180,000 ms publication
+subprocess bound; both stopped at the latter before launching a cluster.
+
+```clojure
+(require '[seon.fresh-operator] '[seon.operator.state :as state] '[clojure.java.io :as io])
+(let [root "/Users/sean/src/seon/tmp/reset-boot-readiness-exact-root"
+      invoke (fn [sym & args] (apply (var-get (ns-resolve 'seon.fresh-operator sym)) args))
+      mark (fn [event value] (prn {:probe/at (str (java.time.Instant/now)) :probe/event event :probe/value value}) (flush))
+      child-log (io/file root "data/clusters/default/logs/seon.log")
+      capture (fn [stage] (when (.exists child-log) (spit (str "/Users/sean/src/seon/tmp/reset-boot-readiness-evidence/" stage "-child.log") (slurp child-log))))]
+  (.mkdirs (io/file root))
+  (try
+    (mark :begin root)
+    (state/with-lifecycle-lock!
+     {:seon.operator.lock/path (state/root-lifecycle-lock-path root)
+      :seon.operator.lock/command "boot without test namespaces"
+      :seon.operator.lock/acquisition-timeout-ms 300000
+      :seon.operator.lock/hold-timeout-ms 300000}
+     (fn []
+       (doseq [[sym args] [['init! []] ['init! ["default"]] ['start! ["default"]]]]
+         (mark :begin-operation sym)
+         (try
+           (invoke sym root args)
+           (mark :complete-operation sym)
+           (catch Throwable t (mark :operation-failed {:message (ex-message t) :data (ex-data t)}) (throw t))))))
+    (mark :ready true)
+    (catch Throwable t (mark :outer-failed {:message (ex-message t) :data (ex-data t)}))
+    (finally
+      (capture "exact-before-cleanup")
+      (mark :cleanup-begin true)
+      (invoke 'down! root ["--force"])
+      (capture "exact-after-cleanup")
+      (mark :cleanup-complete true))))
+```
+
+## Final bounded-lane result
+
+The owned regression passed its added positive assertion and its existing
+refused-query assertions under armed contracts. The clean HEAD worktree fast
+run completed **12 tests / 60 assertions / 1 failure / 0 errors**, with the
+same pre-existing schema-row-convergence failure as the 12/59 baseline.
+It is not a green namespace tally. Log:
+`tmp/reset-boot-readiness-fast-isolated.log`; final test ended
+2026-09-19T18:40:02.828607Z. No cold gate was run.
+
+Files touched by this lane:
+
+- `test/seon/cluster_test.clj` — extend the existing canonical recovery
+  regression with a positive fresh-database completion assertion.
+- `docs/seon/issues/isolated-reset-boot-test-closes-readiness-during-recovery.md`
+  — diagnosis, evidence, explicit remaining fixture repair; stays open.
+- This landing note — child bytes, operations evidence, reproduction scripts,
+  falsified hypotheses, counts and ownership boundary.
+
+No production change was justified in the assigned boot/recovery/readiness
+regions. The actual lifecycle repair remains in the explicitly held reset
+fixture. No held source, default lifecycle, or another lane's session was
+modified. Both lane-owned worktrees and all three scratch roots were removed
+after their processes/commands returned. Evidence logs remain under `tmp/`;
+the causal script and relevant child bytes are preserved above.
+
+Orchestrator cold proof still owed:
+
+```sh
+bin/test --paths test/seon/cluster_test.clj -- seon.cluster-test
+bin/test --platform
+```
+
+After its owner lands the fixture lifecycle repair, the named real reset
+boot test must also pass with logs retained on failure. A green recovery
+unit test alone cannot prove that fixture's asynchronous cleanup ownership.
