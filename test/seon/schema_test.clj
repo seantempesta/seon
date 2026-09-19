@@ -1235,11 +1235,11 @@
                 [:and :seon.error/base [:map]]
                 [:and :seon.error/base [:map [::domain-marker ::domain-marker]]]
                 [:and :seon.error/base [:map [::raw-payload ::raw-payload]]]]]
-         (let [refusal (try (schema/build-projection
+         (let [outcome (try (schema/build-projection
                             (assoc forms ::domain-marker :boolean ::raw-payload :map
                                    ::invalid-facet definition))
                            nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-           (is (map? refusal) (str "Declaration must refuse: " definition))))))))
+           (is (map? outcome) (str "Declaration must refuse: " definition))))))))
 
 (deftest error-facets-and-their-owned-members-are-storable
   (test-support/with-database
@@ -1292,17 +1292,17 @@
    (fn [connection]
      (let [poisoned {:seon.error/kind :seon.db/invalid-read
                      :seon.error/message "the read refused"}
-           refusal (try (schema/projection-from-database poisoned)
+           outcome (try (schema/projection-from-database poisoned)
                         ::no-refusal
                         (catch clojure.lang.ExceptionInfo failure
                           (ex-data failure)))]
-       (is (not= ::no-refusal refusal)
+       (is (not= ::no-refusal outcome)
            "a poisoned database value may not answer as a projection")
-       (is (= :seon.schema/invalid-projection-source (:seon.error/kind refusal)))
+       (is (= :seon.schema/invalid-projection-source (:seon.error/kind outcome)))
        (is (= :seon.schema/database-value
-              (:seon.error/diagnostic-member (:seon.error/data refusal))))
+              (:seon.error/diagnostic-member (:seon.error/data outcome))))
        (is (= poisoned
-              (:seon.error/diagnostic-offending (:seon.error/data refusal))))
+              (:seon.error/diagnostic-offending (:seon.error/data outcome))))
        (is (seq (:seon.schema.projection/forms
                  (schema/projection-from-database @connection)))
            "a real database still derives a populated projection")))))
