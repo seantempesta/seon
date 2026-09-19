@@ -4274,3 +4274,15 @@ turn.loop, test.accretion, render, eval.drive), so registration refuses at
 to make the tree armable (R4/R5 per site, iterate to a tally). The 937 src and
 882 test data-map uses of the key are the wave-1 batch sweep, after A1. A1
 stays paused until the fast loop arms.
+
+## 2026-09-20 ~02:20 UTC — arming works again; suites red on kind data-map residue; A1 resumed
+
+`kind-schema-references` (astra LOW, ~30 min) landed `c0a99068f` `e02bd118c`:
+zero `:seon.error/kind` in resources; load proofs pass; fast
+`seon.error-test seon.instrument-test seon.schema-test` = **118/3,843/46F/23E**
+— arming succeeded, the suites are red on the remaining kind data-map uses
+(937 src refs in 83 files; 882 test refs in 160 files): the wave-1 batch
+sweep. A1 resumed (astra MEDIUM) on its clean diff. Next: classify the 69
+reds into producer classes from the lane's note, then launch the batch
+sweep by file owner (file-disjoint low lanes), then the 1a cold gate again,
+`--platform`, reset, merge.
