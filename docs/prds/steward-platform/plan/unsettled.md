@@ -4400,3 +4400,16 @@ through the hook, each refused (lock-hold-timeout / silence) after burning
 default for a minute; `.claude/seon-hook.edn` `:current-source :enabled
 false` for the cut — RE-ENABLE AT THE RESET. Swept three finished run roots
 (2.6 GB) after confirming no JVM uses one.
+
+## 2026-09-20 ~05:50 UTC — owner: review the error composition against Malli internals
+
+Owner: "look into how we are declaring our error construct and the malli
+internals — we might not be doing it right. We should be able to specify a
+composite error without causing all these problems. The errors are just
+data right?" Launched `error-composition-review` (astra HIGH, read-only):
+is `[:and base [:map]]` + our expansion the right declaration of composite
+error DATA; measure compile cost for :and vs flat map vs malli.util/merge vs
+:multi at N facets; three options; whether the fix belongs in the fork or in
+our expansion; what the mechanical stall fix leaves unresolved. Four lanes
+running (1a, render, projection-compile-stall, this review — the review is
+read-only and does not count against the three-worker cap).
