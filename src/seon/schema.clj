@@ -1060,7 +1060,7 @@
 
 (defn call-with-projection
   "Call `f` with one immutable database-derived projection for this operation."
-  {:malli/schema [:=> [:cat :map [:fn clojure.core/ifn?]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]}
+  {:malli/schema [:=> [:cat :map [:fn clojure.core/ifn?]] [:or :seon.error/base :seon.instrument/registration-error [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The callback preserves declaration data or returns the writer's base diagnostic or instrumentation registration refusal unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [projection f]
   (binding [*projection* projection
             *projection-state* nil]
