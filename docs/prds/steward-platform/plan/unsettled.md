@@ -4171,3 +4171,14 @@ masked second offender + report-all refusal (tools item 7). New lane
 recovery defect with its own scratch root. Three lanes running: 1a (high),
 drill (low), readiness (medium). Fixture-path bug waits for the drill lane
 to release its file.
+
+## 2026-09-19 ~21:45 UTC — preflight fixture path landed
+
+`preflight-fixture-path` (astra low, ~12 min) landed `d199f53c0`: Git's
+common directory resolved with `Path.resolve` (absolute in a worktree,
+relative in the checkout); three affected platform tests reach their
+assertions; fast 12/146/1F/1E, both residue of the publication timeout the
+`reset-boot-readiness` lane is diagnosing. Issue resolved by the landing.
+Running: 1a (high), readiness (medium); gate 4 (`a0-stage1-cold-4`) in flight.
+Effort report given to the owner at ~21:40 UTC (low = workhorse for bounded
+specs; high for design/review; medium pending).
