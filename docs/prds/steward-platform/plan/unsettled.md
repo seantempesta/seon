@@ -4331,3 +4331,13 @@ render). Three lanes running (1a, A1, render); the first sol PRD lane
 (turn/cluster group: turn.clj, cluster.clj, cluster/{message,agent,prompt,
 source,wake}, agent.clj; tests turn_test, cluster_test, test/seon/cluster/*)
 launches when a slot frees.
+
+## Design queue — recursive rendering of nested data (owner, 2026-09-20 ~04:20 UTC)
+
+Owner: "rendering happens at the edges but yeah I do want to look into a
+possible recursive rendering system if we have nested data." Queued as a
+design item for wave 3 (render pairs): a block rendering an entity applies
+the pairs of its components/refs recursively, the render profile bounding
+depth and child count as the ONE clipping spot; the walk today renders the
+agent's units at distance 1 only (`walk.clj:667`, audit 6 gap 2). Design
+before any lane; no new clipping spot.
