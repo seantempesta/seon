@@ -1631,7 +1631,6 @@
            :seon.cluster.eval/error]
           [:seon.cluster.eval/interrupted-at {:optional true}
            :seon.cluster.eval/interrupted-at]
-          [:seon.error/kind {:optional true} :seon.error/kind]
           [:seon.cluster.eval/output {:optional true}
            :seon.cluster.eval/output]
           [:seon.cluster.eval/read-evidence {:optional true}
