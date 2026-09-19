@@ -4156,3 +4156,18 @@ check landed (destructive-tests-derived, 2026-09-17). Handed to lane
 Tools-queue item 7: `verify-fixture-observations!` reports EVERY offender in
 one refusal, never the first alone (absence-as-health class: one fix, one new
 red, per gate run).
+
+## 2026-09-19 ~21:15 UTC — drill red landed; two boot defects filed; lanes
+
+`platform-drill-red` landed `8dcd6faf7` (option a: the namespace-level
+platform marker had pulled two cleanup drills into the tier; checker
+unchanged; 114 platform tests admitted). Its isolated fast run exposed two
+boot/platform defects, filed: `preflight-source-fixture-rejects-absolute-git-common-directory`
+(fixture path bug, fresh_operator_reset_test.clj:124-125) and
+`isolated-reset-boot-test-closes-readiness-during-recovery` (child JVM closed
+readiness in phase recovery; cause not established). Lane resumed for the
+masked second offender + report-all refusal (tools item 7). New lane
+`reset-boot-readiness` (astra MEDIUM — first workhorse data point) on the
+recovery defect with its own scratch root. Three lanes running: 1a (high),
+drill (low), readiness (medium). Fixture-path bug waits for the drill lane
+to release its file.
