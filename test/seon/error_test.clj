@@ -116,8 +116,13 @@
               read-form (:seon.repl/form (error/faults-form unit))]
           (is (= 6 (:seon.error/occurrence-count (error/latest-fact row))))
           (is (= 6 (:seon.problems/occurrences summary)))
-          (is (= 6 (get (into {} (:seon.cluster.status/faults (seon.cluster.status/snapshot {:seon.db/db database :seon.db/connection connection})))
-                        (second (:seon.error/ref a)))))
+          (let [status (seon.cluster.status/snapshot {:seon.db/db database :seon.db/connection connection})]
+            (is (= 6 (get (into {} (:seon.cluster.status/faults status))
+                          (second (:seon.error/ref a)))))
+            (is (schema/valid-candidate-value? :seon.error/base
+                                             (:seon.cluster.status/store-bytes status)))
+            (is (str/includes? (:seon.error/message (:seon.cluster.status/store-bytes status))
+                               "not scanned")))
           (is (str/includes? (pr-str (#'seon.render.transcript/fault-problems database "error-graph-steward" [])) "occurrences: 6"))
           (is (str/includes? (error/log-line (error/notice {:seon.error/fact (:seon.error/fact summary) :seon.error/occurrence-count 6})) "occurrences=6"))
           (is (str/includes? (error/render-ai row) "Occurrences: 6"))
@@ -1065,6 +1070,7 @@
      {::test-support/extra-schema
       (schema.datahike/malli->datahike-schema-in projection [::manifest-id ::manifest-location ::manifest-observation ::manifest-explanations])}
      (fn [connection]
+       (test-support/apply-config! connection "error-manifest" {})
        (db/carry-connection-projection-state!
         connection (sci.eval/projection-state @connection projection))
        (test-support/transacted! connection [{::manifest-id "root-path"
@@ -1130,6 +1136,7 @@
              before (db/basis-t database)
              result (db/transact! connection [[:db/add segment :seon.error.location.segment/ordinal 3]])]
          (is (schema/valid-candidate-value? :seon.db.write/error result) (pr-str result))
+         (is (= before (get-in result [:seon.error/basis :seon.error.basis/t])))
          (is (= before (db/basis-t (db/db connection))))
          (is (= 2 (count (db/datoms database :eavt location :seon.error.location/segments)))))))))
 

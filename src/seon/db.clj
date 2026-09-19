@@ -29,6 +29,7 @@
             [seon.ai.tokens :as tokens]
             [seon.env :as env]
             [seon.error.refusal :as error.refusal]
+            [seon.id :as id]
             [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -49,6 +50,12 @@
 ;;; `requiring-resolve` on every call (AGENTS §2.1).
 (defonce ^:private error-diagnostic
   (delay (requiring-resolve 'seon.error/diagnostic)))
+(defonce ^:private error-project-observation
+  (delay (requiring-resolve 'seon.error/project-observation)))
+(defonce ^:private config-effective
+  (delay (requiring-resolve 'seon.config/effective)))
+(defonce ^:private config-result-caps
+  (delay (requiring-resolve 'seon.config/result-caps)))
 (defonce ^:private error-explain-problem
   (delay (requiring-resolve 'seon.error/explain-problem)))
 (defonce ^:private error-problem-sentence
@@ -170,8 +177,15 @@
    :seon.error/data data})
 
 (defn- diagnostic
+  {:malli/schema [:=> [:cat :map] :seon.error/base]}
   [request]
-  (@error-diagnostic request))
+  (let [operation (:seon.error/diagnostic-operation request)]
+    (@error-diagnostic
+     (assoc request
+            :seon.error/at (java.util.Date.)
+            :seon.error/layer (keyword "seon.db" (name (:seon.error/diagnostic-layer request)))
+            :seon.error/operation (if (symbol? operation) operation
+                                     (symbol (namespace operation) (name operation)))))))
 
 (defn- dependency-error
   [operation error]
@@ -2165,7 +2179,9 @@
   [projection public-operation schema-key selector value]
   (let [projected (schema/projection-with-pulled-form-in
                    projection schema-key selector)]
-    (if (error-value? projected)
+    (if (and (map? projected) (inst? (:seon.error/at projected))
+             (qualified-keyword? (:seon.error/layer projected))
+             (qualified-symbol? (:seon.error/operation projected)))
       ;; THE DERIVATION REFUSED, NOT THE READ. `pulled-form-in` declines
       ;; recursion and wildcard component cycles, so a `'[*]` pull over
       ;; `:seon.fn/fn` (whose bindings revisit `:seon.fn.binding/row`) has no
@@ -3524,14 +3540,22 @@
                 (throw (ex-info "Owned entity validation refused."
                                 {::owned-refusal
                                  (assoc
-                                  (error-value
-                                   ::invalid-write
-                                   (str "Complete component validation refused: " (name cause) "; bound "
-                                        :seon.config.db/validation-node-limit "=" limit "; " (pr-str data) ".")
-                                   (merge {::diagnostic-cause cause
-                                           ::validation-bound :seon.config.db/validation-node-limit
-                                           ::validation-limit limit}
-                                          data))
+                                  (diagnostic
+                                   {:seon.error/message
+                                    (str "Complete component validation refused: " (name cause) "; bound "
+                                         :seon.config.db/validation-node-limit "=" limit "; " (pr-str data) ".")
+                                    :seon.error/diagnostic-layer :database-write
+                                    :seon.error/diagnostic-operation 'seon.db/transact!
+                                    :seon.error/diagnostic-member (::entity data)
+                                    :seon.error/diagnostic-expected :seon.db/component-schema
+                                    :seon.error/diagnostic-offending data
+                                    :seon.error/diagnostic-cause cause
+                                    :seon.error/diagnostic-evidence data
+                                    :seon.error/data
+                                    (merge {::diagnostic-cause cause
+                                            ::validation-bound :seon.config.db/validation-node-limit
+                                            ::validation-limit limit}
+                                           data)})
                                   ::transaction-refused true)})))
         charge! (fn [phase entity-id]
                   (let [cache-key [phase entity-id]]
@@ -4077,6 +4101,39 @@
                              (catch Throwable _ nil))]
            (seq (d/datoms database :eavt eid :seon.agent/id))))))))
 
+(defn- write-observation
+  "Complete a refused write with the request and its immutable pre-write basis.
+  Before a branch has one selected configuration, retain the base refusal and
+  state why its bounded request projection could not be acquired."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction :seon.error/base]
+                  :seon.db/error-result]}
+  [database transaction observation]
+  (let [cluster-names (d/q '[:find [?name ...]
+                            :where [?cluster :seon.cluster/config ?configuration]
+                                   [?configuration :seon.config/cluster ?name]] database)
+        config-names (if (seq cluster-names) cluster-names
+                        (d/q '[:find [?name ...] :where [_ :seon.config/cluster ?name]] database))]
+    (if-not (= 1 (count config-names))
+      (assoc-in observation [:seon.error/data ::observation-unavailable]
+                "The write basis does not select exactly one configuration for bounded evidence.")
+      (let [configuration (@config-effective database (first config-names))
+            caps (@config-result-caps configuration)
+            at (:seon.error/at observation)]
+        (if-not (and (pos-int? (:seon.config.eval.result/max-bytes caps))
+                     (pos-int? (:seon.config.eval.result/max-source caps)))
+          (assoc-in observation [:seon.error/data ::observation-unavailable] caps)
+          (assoc observation
+                 :seon.db.write/attempt
+                 {:seon.db.write.attempt/request-id (id/id)
+                  :seon.db.write.attempt/observed-at at
+                  :seon.db.write.attempt/operations
+                  (@error-project-observation caps transaction)}
+                 :seon.error/basis
+                 {:seon.error.basis/store (datahike.store/store-identity (:store (dbi/-config database)))
+                  :seon.error.basis/branch (:branch (dbi/-config database))
+                  :seon.error.basis/commit (d/commit-id database)
+                  :seon.error.basis/t (dbi/-max-tx database)}))))))
+
 (defn- transact-call
   {:malli/schema
    [:=> [:cat [:or :seon.db/connection :seon.error/value]
@@ -4192,11 +4249,16 @@
       (catch Throwable throwable
         (let [data (error.refusal/refusal throwable)]
           (cond
-            (error-value? (:datahike/validation-refusal data))
+            (let [observation (:datahike/validation-refusal data)]
+              (and (map? observation) (inst? (:seon.error/at observation))
+                   (qualified-keyword? (:seon.error/layer observation))
+                   (qualified-symbol? (:seon.error/operation observation))))
             (:datahike/validation-refusal data)
 
             ;; A Seon transition refusal returns its own value verbatim.
-            (some? (:seon.error/kind data))
+            (and (map? data) (inst? (:seon.error/at data))
+                 (qualified-keyword? (:seon.error/layer data))
+                 (qualified-symbol? (:seon.error/operation data)))
             data
 
             ;; A Datahike abort keeps the dependency's classification.
@@ -4334,7 +4396,9 @@
    [:=> [:cat [:or :seon.db/transaction-report :seon.db/error-result]]
     [:or :seon.db/transaction-result :seon.db/error-result]]}
   [report]
-  (if (error-value? report)
+  (if (and (map? report) (inst? (:seon.error/at report))
+           (qualified-keyword? (:seon.error/layer report))
+           (qualified-symbol? (:seon.error/operation report)))
     report
     (let [before (:db-before report)
           after (:db-after report)
@@ -4389,20 +4453,26 @@
     [:=> [:cat [:or :seon.db/connection :seon.error/value] :seon.store/transaction]
      [:or :seon.db/transaction-report :seon.db/error-result]]]}
   ([transaction]
-   (or (missing-transaction-data-error transaction)
-       (transaction-result (transact-call (current-connection) transaction))))
+   (transaction-result (transact! (current-connection) transaction)))
   ([connection transaction]
-   (or
-    (missing-transaction-data-error transaction)
-    (cond
-      (error-value? connection) connection
+   (let [database (when (connection? connection) (resolve-database-value connection))
+         result
+         (or
+          (missing-transaction-data-error transaction)
+          (cond
+            (error-value? connection) connection
 
-      (not (connection? connection))
-      (dependency-error
-       ::transact!
-       (ex-info "The explicit transaction connection is not live."
-                {::connection connection}))
+            (not (connection? connection))
+            (dependency-error
+             ::transact!
+             (ex-info "The explicit transaction connection is not live."
+                      {::connection connection}))
 
-      :else
-      (or (foreign-connection-error connection)
-          (transact-call connection transaction))))))
+            :else
+            (or (foreign-connection-error connection)
+                (transact-call connection transaction))))]
+     (if (and (database-value? database) (map? result) (inst? (:seon.error/at result))
+              (qualified-keyword? (:seon.error/layer result))
+              (qualified-symbol? (:seon.error/operation result)))
+       (write-observation database transaction result)
+       result))))
