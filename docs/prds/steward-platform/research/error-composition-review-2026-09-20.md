@@ -409,10 +409,7 @@ Both exit codes were 0. The pinned core copy differs from `3517a3cd9271b2083780a
 ```diff
 --- malli/core.cljc at 3517a3c
 +++ pinned probe core.cljc
-@@ -1941,12 +1941,11 @@
- ;; useful for detecting cycles.
- ;; copied to malli.generator
- (defn- -identify-ref-schema [schema]
+@@ -1944,6 +1944,5 @@
 -  ;; TODO mr/-schemas doesn't seem right, making defn private for now.
 -  ;; e.g., we only care about property registry entries, not schema constructors.
 -  ;; a better approach might be to accumulate a 'seen' map from name => ?schema
@@ -424,9 +421,6 @@ Both exit codes were 0. The pinned core copy differs from `3517a3cd9271b2083780a
 +  ;; entire registry. Keep the actual scope that resolves this ref instead.
 +  ;; Keep raw map registries too: -registry would wrap those afresh per call.
 +  {:scope (or (-> schema -options :registry) default-registry)
-    :name (-ref schema)})
- 
- (def ^:dynamic ^:private *ref-validators* {})
 ```
 
 Exact final composition output follows; the long per-facet inventory line is omitted because the census and full regenerating script are retained. Output is Clojure `println` text, not a claimed EDN serialization.
