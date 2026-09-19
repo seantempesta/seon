@@ -1,9 +1,8 @@
-(ns ^{:seon.test/platform
-      "Reset preflight and recovery are required before the bulk tier."
-      :seon.test/long
+(ns ^{:seon.test/long
       "The namespace boots real isolated operator roots."
       :seon.test/long-ms 600000}
     seon.dev.fresh-operator-reset-test
+  "Destructive cleanup drills remain long-only; platform reasons belong to individual regressions."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -25,7 +24,8 @@
 (def ^:private immediate-refusal-bound-ms 5000)
 (def ^:private real-boot-bound-ms 300000)
 
-(deftest lifecycle-holder-evidence-is-immediate-and-stale-records-are-reclaimed
+(deftest ^{:seon.test/platform "Reset preflight and recovery are required before the bulk tier."}
+  lifecycle-holder-evidence-is-immediate-and-stale-records-are-reclaimed
   (let [root (fresh-root)
         path (operator.state/root-lifecycle-lock-path (str root))
         holder-file (str path ".holder.edn")
@@ -152,7 +152,8 @@
 ;;; declared dependency set changed, carries its own bound, and its elapsed
 ;;; time is subtracted from the preflight's.
 
-(deftest ^{:seon.test/long "Builds a committed source checkout with a copied clj-kondo cache."
+(deftest ^{:seon.test/platform "Source preflight bounds and cache reuse are required before the bulk tier."
+           :seon.test/long "Builds a committed source checkout with a copied clj-kondo cache."
            :seon.test/long-ms 600000}
   an-unchanged-dependency-digest-preflights-without-a-cache-population
   (let [source (preflight-source-checkout!)
@@ -189,7 +190,8 @@
       (finally
         (delete-recursively! source)))))
 
-(deftest ^{:seon.test/long "Builds a committed source checkout with a copied clj-kondo cache."
+(deftest ^{:seon.test/platform "Source preflight bounds and cache reuse are required before the bulk tier."
+           :seon.test/long "Builds a committed source checkout with a copied clj-kondo cache."
            :seon.test/long-ms 600000}
   an-exceeded-preflight-bound-names-its-phase-and-subprocess
   (let [root (fresh-root)
@@ -217,6 +219,7 @@
         (delete-recursively! source)
         (delete-recursively! root)))))
 
+;; This drill invokes the declared destroyer; keep it outside the platform tier.
 (deftest source-syntax-refuses-before-lock-or-destruction
   (let [root (fresh-root)
         source (preflight-source-checkout!)
@@ -324,7 +327,8 @@
         (delete-recursively! source)
         (delete-recursively! root)))))
 
-(deftest cluster-boot-omits-test-namespaces-and-in-process-run-loads-one
+(deftest ^{:seon.test/platform "Reset preflight and recovery are required before the bulk tier."}
+  cluster-boot-omits-test-namespaces-and-in-process-run-loads-one
   (let [root (fresh-root)
         project-root @#'operator-test/project-root
         broken (io/file project-root "test/seon/boot_unloadable_test.clj")
@@ -419,7 +423,8 @@
         (.delete runnable)
         (delete-recursively! root)))))
 
-(deftest reset-phase-failure-stops-the-command-and-retains-evidence
+(deftest ^{:seon.test/platform "Reset preflight and recovery are required before the bulk tier."}
+  reset-phase-failure-stops-the-command-and-retains-evidence
   (let [root (fresh-root)
         phases [:down :destroy :republish :refork :start :adopt]]
     (try
@@ -454,7 +459,8 @@
           (is (< (/ (- (System/nanoTime) started) 1000000) immediate-refusal-bound-ms))))
       (finally (delete-recursively! root)))))
 
-(deftest reset-phase-records-derive-incomplete-status-and-continuation
+(deftest ^{:seon.test/platform "Reset preflight and recovery are required before the bulk tier."}
+  reset-phase-records-derive-incomplete-status-and-continuation
   (let [root (fresh-root)
         operations (io/file root "data/operator/operations")
         operation-id "4242"]
@@ -510,6 +516,7 @@
         (is (not (str/includes? output "reset incomplete at")) output))
       (finally (delete-recursively! root)))))
 
+;; This drill invokes the declared destroyer; keep it outside the platform tier.
 (deftest managed-root-cleanup-loads-no-program-and-never-follows-symlinks
   (let [root (fresh-root)
         outside (fresh-root)
@@ -529,7 +536,8 @@
         (is (= "outside" (slurp sentinel))))
       (finally (delete-recursively! root) (delete-recursively! outside)))))
 
-(deftest reset-census-and-stale-repair-name-the-source-process-and-log
+(deftest ^{:seon.test/platform "Reset preflight and recovery are required before the bulk tier."}
+  reset-census-and-stale-repair-name-the-source-process-and-log
   (let [root (fresh-root)
         source (io/file root "src/seon/db.clj")
         log (io/file root "logs/default/seon.log")
@@ -558,7 +566,8 @@
         (is (not (.exists advertisement))))
       (finally (delete-recursively! root)))))
 
-(deftest a-child-deadline-keeps-output-and-stops-at-its-phase
+(deftest ^{:seon.test/platform "Reset preflight and recovery are required before the bulk tier."}
+  a-child-deadline-keeps-output-and-stops-at-its-phase
   (let [root (fresh-root)
         started (System/nanoTime)]
     (try
@@ -581,7 +590,8 @@
         (is (< (/ (- (System/nanoTime) started) 1000000) immediate-refusal-bound-ms)))
       (finally (delete-recursively! root)))))
 
-(deftest phase-duration-is-visible-on-success-and-refusal
+(deftest ^{:seon.test/platform "Reset preflight and recovery are required before the bulk tier."}
+  phase-duration-is-visible-on-success-and-refusal
   (let [root (fresh-root)]
     (try
       (doseq [refuse? [false true]]

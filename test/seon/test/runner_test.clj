@@ -427,6 +427,19 @@
         (is (= :seon.test.host/in-process (:seon.test/host report)) (pr-str report))
         (is (nil? (#'runner/verify-platform-tier-carries-no-destructive-drill!
                    manifest platform-vars)))
+        (doseq [test-symbol '[seon.dev.fresh-operator-reset-test/source-syntax-refuses-before-lock-or-destruction
+                             seon.dev.fresh-operator-reset-test/managed-root-cleanup-loads-no-program-and-never-follows-symlinks]]
+          (let [test-var (requiring-resolve test-symbol)
+                refusal (try
+                          (#'runner/verify-platform-tier-carries-no-destructive-drill!
+                           manifest [test-var])
+                          (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+            (is (nil? (get declarations test-symbol)))
+            (is (= [{:seon.test/sym test-symbol
+                     :seon.test.runner/destructive-path
+                     [test-symbol 'seon.operator.state/cleanup-root-under-lock!]}]
+                   (:seon.test.runner/destructive-platform-tests refusal))
+                "Scratch custody does not exempt a declared destroyer from the first tier.")))
         (println "Canonical platform destroyer check:" (count platform-vars) "tests admitted")))))
 
 (deftest the-platform-tier-declares-no-destructive-drill
