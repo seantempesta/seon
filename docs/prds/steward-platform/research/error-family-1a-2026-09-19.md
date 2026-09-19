@@ -1103,3 +1103,443 @@ bin/test --paths \
 Add any newly authorized producer/resource files to that path list when those
 repairs land. This lane stops at the documented design gate, without claiming
 that a passing error namespace proves the unresolved combined contract.
+
+## Raw write-refusal continuation — 2026-09-19
+
+The orchestrator accepted the previous landing through `0a5b7355b` and
+ruled the producer/recorder split: the producer carries request identity,
+the immutable observed basis entity, and actual transaction data; `prepare`
+admits that data into the existing stored write attempt. The stored
+`:seon.db.write/error` shape remains unchanged. This continuation resumes
+that work; the preceding stop statement describes the previous turn.
+
+The revised canonical writer/recorder regression was run before the
+implementation with `bin/test-fast --paths test/seon/error_test.clj --
+seon.error-test`. At 2026-09-19T22:41:23Z it measured **42 tests / 349
+assertions / 4 failures / 1 error**. Every failure/error is in
+`complete-error-children-validate-through-the-writer`: the raw facet is
+not registered (`:malli.core/invalid-schema`), actual submitted transaction
+data is absent, observed basis is absent both in the return and occurrence,
+and the stored attempt's projection is absent. The fixture no longer
+installs configuration solely for the producer. The recorder test decodes
+the projection through `seon.sci.admit/semantic-value`, the codec's owner.
+
+The first prospective schema edit was refused by the shared-tree admission
+hook: `:seon.agent/context-state (unregistered-predicate)` naming
+`seon.flow/atom-reference?`. A detached HEAD worktree at `16a869b2f`, linked
+to the same dependency sources, ran the unchanged schema admission and
+returned `()`, meaning zero error findings. Its required namespace load
+printed `:loads`. No admission loading repair is justified by this probe.
+The owner cluster remains PID 41822; read-only MCP health answered alive.
+No lifecycle or adoption command was run.
+
+The actual raw-facet admission then produced a different, reproducible
+refusal in that worktree:
+
+```text
+:seon.schema.admission/declaration :seon.db.write/validation-refusal
+:type :schema-malli-compilation
+"Schema population did not compile through Malli: A stored error member must have a storable registered attribute."
+```
+
+`src/seon/schema/internal.cljc:161` applies the stored-member check to
+every base extension. The bounded extension requested is to retain all
+structural base/facet checks and apply storage checks to declarations
+marked `:seon.db/attributes`, preserving the distinction already used by
+the schema bridge. The raw facet explicitly asserts
+`:seon.db/attributes false`; its transaction data never becomes datoms.
+The canonical schema regression must continue refusing an unstoreable
+member on a stored declaration while accepting a transient raw facet.
+
+Additional scope requested, still pending at this checkpoint:
+
+- `src/seon/schema/internal.cljc`, the storage-check condition above.
+- `resources/seon/schemas/seon.schema.edn`, a raw schema-refusal declaration:
+  the existing stored facet requires two projections, so producer-side
+  bounding cannot honestly satisfy it.
+- `src/seon/sci/kernel.clj`, only `failure-value`, for the two previously
+  measured instrument-test errors.
+
+The independent code-only slice accretes the nine measured test facets
+into `semantic-value`, `refusal`, `latest-fact` and the observation grammar
+restorer; the two authorized SCI acquisition catches now inspect the
+required registration-observation member. Its serial three-suite run is
+in progress. The raw-facet implementation is isolated in the lane worktree
+until the admission boundary is resolved and verified.
+
+### Unlanded raw-facet draft
+
+The following patch is against the shared tree's code-only slice, not a
+landed implementation. It deliberately does not edit the pending admission
+owner. The existing writer regression in `test/seon/error_test.clj` is
+already in the shared tree and is not repeated here. These bytes preserve
+the reviewable draft while allowing disposable worktrees to be removed.
+
+<details>
+<summary>Raw write producer, recorder, reader and schema regression draft</summary>
+
+```diff
+--- a/resources/seon/schemas/seon.db.edn
++++ b/resources/seon/schemas/seon.db.edn
+@@ -14,6 +14,7 @@
+            :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+            :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+            :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++           :seon.db.write/validation-refusal
+            :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+            :seon.flow/error :seon.fn/error :seon.fn.binding/error
+            :seon.instrument/arity-error :seon.instrument/contract-error
+--- a/resources/seon/schemas/seon.db.write.edn
++++ b/resources/seon/schemas/seon.db.write.edn
+@@ -1,5 +1,16 @@
+ {
+  ; Additive error declaration manifest, 2026-09-18.
++
++ :seon.db.write/validation-refusal
++ [:and
++  {:seon.db/attributes false
++   :description "Raw refused request and its observed basis. Recorder admission projects the transaction data into the stored write attempt; this transient value is not a stored entity."}
++  :seon.error/base
++  [:map
++   [:seon.db.write.attempt/request-id :seon.db.write.attempt/request-id]
++   [:seon.error/basis :seon.error/basis]
++   [:seon.error/data
++    [:map [:seon.db.write.attempt/transaction :seon.db.write.attempt/transaction]]]]]
+
+  :seon.db.write/attempt
+  [:and
+--- a/resources/seon/schemas/seon.db.write.attempt.edn
++++ b/resources/seon/schemas/seon.db.write.attempt.edn
+@@ -1,5 +1,9 @@
+ {
+  ; Additive error declaration manifest, 2026-09-18.
++
++ :seon.db.write.attempt/transaction
++ [:schema {:description "Actual submitted transaction, carried as data to recorder admission. Never a database attribute or an executable recorder request."}
++  :seon.store/transaction]
+
+  :seon.db.write.attempt/bound-ms
+  [:int {:min 1}]
+--- a/resources/seon/schemas/seon.error.edn
++++ b/resources/seon/schemas/seon.error.edn
+@@ -207,6 +207,7 @@
+              :prepared
+              [:map
+               [:seon.error/fact :seon.error/fact]
++              [:seon.error/source :seon.error/source]
+               [:seon.error/data-content :seon.error/data-content]],
+              :steward :seon.db/ref,
+              :of-steward
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -50,12 +50,6 @@
+ ;;; `requiring-resolve` on every call (AGENTS §2.1).
+ (defonce ^:private error-diagnostic
+   (delay (requiring-resolve 'seon.error/diagnostic)))
+-(defonce ^:private error-project-observation
+-  (delay (requiring-resolve 'seon.error/project-observation)))
+-(defonce ^:private config-effective
+-  (delay (requiring-resolve 'seon.config/effective)))
+-(defonce ^:private config-result-caps
+-  (delay (requiring-resolve 'seon.config/result-caps)))
+ (defonce ^:private error-explain-problem
+   (delay (requiring-resolve 'seon.error/explain-problem)))
+ (defonce ^:private error-problem-sentence
+@@ -4102,37 +4096,19 @@
+            (seq (d/datoms database :eavt eid :seon.agent/id))))))))
+
+ (defn- write-observation
+-  "Complete a refused write with the request and its immutable pre-write basis.
+-  Before a branch has one selected configuration, retain the base refusal and
+-  state why its bounded request projection could not be acquired."
++  "Carry the actual refused request and immutable pre-write basis as data.
++  Recorder admission owns its bounded stored projection."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction :seon.error/base]
+-                  :seon.db/error-result]}
++                  [:and :seon.db.write/validation-refusal :seon.db/error-result]]}
+   [database transaction observation]
+-  (let [cluster-names (d/q '[:find [?name ...]
+-                            :where [?cluster :seon.cluster/config ?configuration]
+-                                   [?configuration :seon.config/cluster ?name]] database)
+-        config-names (if (seq cluster-names) cluster-names
+-                        (d/q '[:find [?name ...] :where [_ :seon.config/cluster ?name]] database))]
+-    (if-not (= 1 (count config-names))
+-      (assoc-in observation [:seon.error/data ::observation-unavailable]
+-                "The write basis does not select exactly one configuration for bounded evidence.")
+-      (let [configuration (@config-effective database (first config-names))
+-            caps (@config-result-caps configuration)
+-            at (:seon.error/at observation)]
+-        (if-not (and (pos-int? (:seon.config.eval.result/max-bytes caps))
+-                     (pos-int? (:seon.config.eval.result/max-source caps)))
+-          (assoc-in observation [:seon.error/data ::observation-unavailable] caps)
+-          (assoc observation
+-                 :seon.db.write/attempt
+-                 {:seon.db.write.attempt/request-id (id/id)
+-                  :seon.db.write.attempt/observed-at at
+-                  :seon.db.write.attempt/operations
+-                  (@error-project-observation caps transaction)}
+-                 :seon.error/basis
+-                 {:seon.error.basis/store (datahike.store/store-identity (:store (dbi/-config database)))
+-                  :seon.error.basis/branch (:branch (dbi/-config database))
+-                  :seon.error.basis/commit (d/commit-id database)
+-                  :seon.error.basis/t (dbi/-max-tx database)}))))))
++  (-> observation
++      (assoc :seon.db.write.attempt/request-id (id/id)
++             :seon.error/basis
++             {:seon.error.basis/store (datahike.store/store-identity (:store (dbi/-config database)))
++              :seon.error.basis/branch (:branch (dbi/-config database))
++              :seon.error.basis/commit (d/commit-id database)
++              :seon.error.basis/t (dbi/-max-tx database)})
++      (assoc-in [:seon.error/data :seon.db.write.attempt/transaction] transaction)))
+
+ (defn- transact-call
+   {:malli/schema
+--- a/src/seon/error.clj
++++ b/src/seon/error.clj
+@@ -91,7 +91,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+@@ -226,7 +226,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+@@ -251,6 +251,7 @@
+          projection ::observation-attributes
+          (fn []
+            (let [forms (:seon.schema.projection/forms projection)
++                 stored-attributes (set (schema.form/database-attributes forms))
+                  attributes
+                  (loop [pending (vec (conj (facet-keys projection) :seon.error/base))
+                         seen #{} result #{}]
+@@ -264,8 +265,9 @@
+                                 (into result members))))
+                      result))]
+              (into {}
+-                   (map (fn [attribute]
+-                          [attribute (schema.datahike/malli->datahike-attr-in projection attribute)]))
++                   (comp (filter stored-attributes)
++                         (map (fn [attribute]
++                                [attribute (schema.datahike/malli->datahike-attr-in projection attribute)])))
+                    attributes))))]
+     (letfn [(restore [value]
+               (if-not (map? value)
+@@ -302,7 +304,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+@@ -369,7 +371,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+@@ -690,6 +692,17 @@
+                             :seon.error/layer :seon.error/normalization
+                             :seon.error/operation (or function 'seon.error/normalize)}
+                            (when (map? error-value) error-value))
++        observation
++        (if ((schema/projection-validator projection :seon.db.write/validation-refusal) observation)
++          (-> observation
++              (assoc :seon.db.write/attempt
++                     {:seon.db.write.attempt/request-id (:seon.db.write.attempt/request-id observation)
++                      :seon.db.write.attempt/observed-at (:seon.error/at observation)
++                      :seon.db.write.attempt/operations
++                      (project-observation caps (get-in observation [:seon.error/data :seon.db.write.attempt/transaction]))})
++              (dissoc :seon.db.write.attempt/request-id)
++              (update :seon.error/data dissoc :seon.db.write.attempt/transaction))
++          observation)
+         signature (signature projection observation
+                              (or (some-> class-name symbol)
+                                  (:seon.error/exception-class observation))
+@@ -763,6 +776,7 @@
+                                  (not= full-edn
+                                        (:seon.error/data-edn fact)))))]
+     {:seon.error/fact fact
++     :seon.error/source observation
+      :seon.error/data-content full-edn}))
+
+ (defn normalize
+@@ -824,7 +838,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+@@ -860,7 +874,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+@@ -1636,7 +1650,9 @@
+          request (cond-> request (map? source)
+                    (assoc :seon.error/source
+                           (stored-observation (:seon.schema/projection request) source)))
+-         fact (or (:seon.error/fact request) (normalize request))
++         prepared (prepare request)
++         request (assoc request :seon.error/source (:seon.error/source prepared))
++         fact (or (:seon.error/fact request) (:seon.error/fact prepared))
+          signature (:seon.error/signature fact)
+          agent-id (second (:seon.error/agent fact))
+          turn-id (second (:seon.error/run fact))
+@@ -1686,10 +1702,12 @@
+    projection ::observation-selector
+    (fn []
+      (let [forms (:seon.schema.projection/forms projection)
++           stored-attributes (set (schema.form/database-attributes forms))
+            observation-keys (conj (facet-keys projection)
+                                   :seon.error/base :seon.error.occurrence/occurrence)]
+        (letfn [(members [schemas]
+-                 (sort (into #{} (mapcat #(map first (schema.form/map-entries forms (get forms %)))) schemas)))
++                 (sort (into #{} (comp (mapcat #(map first (schema.form/map-entries forms (get forms %))))
++                                       (filter stored-attributes)) schemas)))
+                (selector [schemas active]
+                  (into [:db/id]
+                        (map (fn [attribute]
+@@ -1717,7 +1735,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+@@ -1772,7 +1790,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+@@ -1947,7 +1965,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+--- a/src/seon/instrument.clj
++++ b/src/seon/instrument.clj
+@@ -542,7 +542,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+@@ -580,7 +580,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+--- a/src/seon/sci/admit.clj
++++ b/src/seon/sci/admit.clj
+@@ -555,7 +555,7 @@
+      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
++     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
+      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+      :seon.flow/error :seon.fn/error :seon.fn.binding/error
+      :seon.instrument/arity-error :seon.instrument/contract-error
+--- a/test/seon/schema_test.clj
++++ b/test/seon/schema_test.clj
+@@ -1239,12 +1239,24 @@
+                 [:and :seon.error/base [:map [:seon.error/at :string]]]
+                 [:and :seon.error/base [:map]]
+                 [:and :seon.error/base [:map [::domain-marker ::domain-marker]]]
+-                [:and :seon.error/base [:map [::raw-payload ::raw-payload]]]]]
++                [:and {:seon.db/attributes true} :seon.error/base
++                 [:map {:seon.db/attributes true} [::raw-payload ::raw-payload]]]]]
+          (let [outcome (try (schema/build-projection
+                             (assoc forms ::domain-marker :boolean ::raw-payload :map
+                                    ::invalid-facet definition))
+                            nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+-           (is (map? outcome) (str "Declaration must refuse: " definition))))))))
++           (is (map? outcome) (str "Declaration must refuse: " definition))))
++       (let [raw (schema/build-projection
++                  (assoc forms ::raw-payload :map
++                         ::raw-facet [:and {:seon.db/attributes false} :seon.error/base
++                                      [:map [::raw-payload ::raw-payload]]]))
++             observation {:seon.error/at (java.util.Date.)
++                          :seon.error/layer ::admission
++                          :seon.error/operation 'seon.schema-test/error-declarations-expand-all-inherited-members
++                          ::raw-payload {::observed (Object.)}}]
++         (is ((schema/projection-validator raw ::raw-facet) observation))
++         (is (not (some #{::raw-payload}
++                        (schema.form/database-attributes (:seon.schema.projection/forms raw))))))))))
+
+ (deftest error-facets-and-their-owned-members-are-storable
+   (test-support/with-database
+@@ -1254,6 +1266,7 @@
+            facets (into #{:seon.error/base}
+                         (keep (fn [[k definition]]
+                                 (when (and (vector? definition)
++                                           (:seon.db/attributes (schema.form/schema-properties definition))
+                                            (schema.form/extends-schema? forms definition :seon.error/base)) k)))
+                         forms)
+            declarations
+```
+
+</details>
+
+The necessary admission change, pending scope, is:
+
+```diff
+--- a/src/seon/schema/internal.cljc
++++ b/src/seon/schema/internal.cljc
+@@
+-        (owned-storage! definition #{identity}))
++        (when (:seon.db/attributes (form/schema-properties forms definition))
++          (owned-storage! definition #{identity})))
+```
+
+This uses the schema bridge's same storage declaration and retains every
+base-member, required-domain-member and boolean-marker check above it.
+
+### Contract declaration checkpoint
+
+The isolated run at `16a869b2f` reached
+`semantic-admission-explicitly-declares-every-error-facet` at
+2026-09-19T22:56:55Z: **1 test / 6 assertions / 0 failures / 0 errors**.
+The nine-facet additions land in `src/seon/error.clj` and
+`src/seon/sci/admit.clj`; the same nine are declared by the owned observation
+grammar restorer, which also preserves a returned observation. The full
+three-suite tally is still pending at this checkpoint.

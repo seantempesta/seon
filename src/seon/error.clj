@@ -103,6 +103,10 @@
      :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+     :seon.test/admission-error :seon.test/execution-error :seon.test/expired
+     :seon.test/not-runnable-error :seon.test/resolution-error
+     :seon.test/selection-error :seon.test/unknown-error
+     :seon.test.run/immutable-error :seon.test.run/unavailable-error
      :seon.search/error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
@@ -234,6 +238,10 @@
      :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+     :seon.test/admission-error :seon.test/execution-error :seon.test/expired
+     :seon.test/not-runnable-error :seon.test/resolution-error
+     :seon.test/selection-error :seon.test/unknown-error
+     :seon.test.run/immutable-error :seon.test.run/unavailable-error
      :seon.search/error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
@@ -1721,6 +1729,10 @@
      :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+     :seon.test/admission-error :seon.test/execution-error :seon.test/expired
+     :seon.test/not-runnable-error :seon.test/resolution-error
+     :seon.test/selection-error :seon.test/unknown-error
+     :seon.test.run/immutable-error :seon.test.run/unavailable-error
      :seon.search/error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
