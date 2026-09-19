@@ -95,7 +95,8 @@
   It carries the operator's own sources, this checkout's clj-kondo
   configuration and populated cache, and its own git work tree, so
   `source-preflight!` enumerates and lints exactly what the fixture changes."
-  []
+  ([] (preflight-source-checkout! []))
+  ([git-path-options]
   (let [source (fresh-root)
         project @#'operator-test/project-root
         subprocess! (fn [argv directory]
@@ -124,10 +125,13 @@
        (.toPath (io/file source path))
        (.toPath (io/file project path))
        (make-array java.nio.file.attribute.FileAttribute 0)))
-    (let [git-common (subprocess! ["git" "rev-parse" "--git-common-dir"] project)
-          checkout (-> (io/file project
-                                (str/trim (:seon.operator.subprocess/output
-                                           git-common)))
+    (let [git-common (subprocess! (into ["git" "rev-parse"]
+                                       (conj git-path-options "--git-common-dir"))
+                                 project)
+          checkout (-> (.toPath (io/file project))
+                       (.resolve (str/trim (:seon.operator.subprocess/output
+                                            git-common)))
+                       .toFile
                        .getCanonicalFile
                        .getParentFile)]
       (subprocess! ["cp" "-R" (str (io/file checkout ".clj-kondo/.cache"))
@@ -139,7 +143,25 @@
            "-c" "user.name=Test" "-c" "user.email=test@example.invalid"
            "commit" "-qm" "fixture"]
           source)
-    source))
+    source)))
+
+(deftest preflight-source-checkout-accepts-both-git-common-directory-spellings
+  (let [trees (for [spelling ["relative" "absolute"]]
+                (let [source (preflight-source-checkout!
+                              [(str "--path-format=" spelling)])]
+                  (try
+                    (let [result (operator.state/run-process!
+                                  {:seon.operator.subprocess/argv
+                                   ["git" "rev-parse" "HEAD^{tree}"]
+                                   :seon.operator.subprocess/directory (str source)
+                                   :seon.operator.subprocess/deadline-ms real-boot-bound-ms
+                                   :seon.operator.subprocess/merge-error? true})]
+                      (is (zero? (:seon.operator.subprocess/exit result))
+                          (pr-str result))
+                      (is (.isDirectory (io/file source ".clj-kondo/.cache")))
+                      (str/trim (:seon.operator.subprocess/output result)))
+                    (finally (delete-recursively! source)))))]
+    (is (apply = trees) "Both Git spellings construct the same committed source tree.")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The preflight bound covers the LINT, and the dependency cache is ensured

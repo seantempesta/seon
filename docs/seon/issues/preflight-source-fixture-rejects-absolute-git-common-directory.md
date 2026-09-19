@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-19
 tags: [testing, fixture, worktree]
@@ -38,3 +38,16 @@ The existing three preflight tests construct their source fixtures from both
 an ordinary checkout and an isolated Git worktree, using Git's actual common
 directory in either absolute or relative spelling. Their preflight assertions
 run through the normal armed fast runner.
+
+## Resolution — 2026-09-19
+
+Verified `.git` in the main checkout and `/Users/sean/src/seon/.git` in a
+throwaway worktree. The fixture now resolves Git's output with Path.resolve.
+One regression uses real Git's relative and absolute path formats and proves
+both fixtures have the same committed source tree and populated cache.
+All three existing preflight tests passed their assertions in the armed
+HEAD-plus-owned-path fast run. The complete namespace ran 12 tests / 146
+assertions, with one failure and one error in the separate isolated boot test
+(publication child process-exit deadline, 180000 ms). Cold platform proof is
+owed by the orchestrator. See
+[the landing evidence](../../prds/steward-platform/research/preflight-fixture-path-2026-09-19.md).
