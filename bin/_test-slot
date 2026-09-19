@@ -11,7 +11,12 @@
 # directories whose mkdir is atomic; orphaned holders are announced and left
 # for the orchestrator to reclaim. SEON_TEST_SLOTS overrides the count; SEON_TEST_SLOT_WAIT_SECONDS
 # the bound; SEON_TEST_SLOT_ANNOUNCE_SECONDS the progress interval.
-test_slot_count=3
+# Two at once, machine-wide per repository: on 2026-09-20 seven test JVMs
+# (~40 GB, load 25) ran because each worktree of this repository counted its
+# own slots. The slot directory now derives from Git's common directory, so
+# every worktree of one repository shares one bound; a genuinely separate
+# checkout (another clone) keeps its own.
+test_slot_count=2
 for test_override in SEON_TEST_SILENCE_SECONDS SEON_TEST_SLOTS; do
   if [ "${!test_override+x}" = x ]; then
     if [ -n "${SEON_CODEX_LANE:-}" ] || [ "${SEON_TEST_ORCHESTRATOR:-}" != 1 ]; then
@@ -34,7 +39,12 @@ done
 test_slot_count=${SEON_TEST_SLOTS:-$test_slot_count}
 test_slot_wait_seconds=${SEON_TEST_SLOT_WAIT_SECONDS:-1800}
 test_slot_announce_seconds=${SEON_TEST_SLOT_ANNOUNCE_SECONDS:-60}
-test_slot_parent="${source_root:-$PWD}/tmp/test-slots"
+test_slot_repository=$(git -C "${source_root:-$PWD}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+if [ -n "$test_slot_repository" ]; then
+  test_slot_parent="$(dirname "$test_slot_repository")/tmp/test-slots"
+else
+  test_slot_parent="${source_root:-$PWD}/tmp/test-slots"
+fi
 held_test_slot=
 
 test_slot_runner_pid() {
