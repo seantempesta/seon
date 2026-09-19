@@ -162,3 +162,104 @@ bin/test --platform
 ```
 
 The orchestrator also owns resolving and rerunning the recorded reset-namespace failures; the fast runner executed the long tests in this run.
+
+## Followup — complete fixture-observation refusals (2026-09-19)
+
+The orchestrator accepted `8dcd6faf7` and supplied the next masked offender.
+Read `tmp/orchestrator/gates/a0-stage1-cold-3-2026-09-19.log`, the existing
+fixture-observation regression, and `expensive-fixture-tests`,
+`verify-fixture-observations!`, `marker-reason`, and selector reference reach.
+Reused the previously read Clojure/testing/REPL skills. No lifecycle operation.
+
+**Decision: declare the observation; retain reach semantics.** The published
+manifest `ef38fb0f0f60f42767cd2fbb2ebc02196f1acbc3fd83e977767e36261a726df3`
+contains `populate-published-root!` in this test's `:seon.fn/references`, not
+its `:seon.fn/calls` (complete set-membership probe: call? false, reference?
+true). Read-only JVM evaluation of the existing expensive-fixture selector
+returned reached=true and the shortest path `[test populate-published-root!]`
+in 1022 ms. The returned full call collection was presentation-elided; the
+separate complete membership probe, rather than that display, proves absence
+from calls.
+
+The test at `test/seon/test/runner_test.clj:478` analyzes support/operator
+source, writes and loads generated test definitions, and checks quoted owner
+symbols (`:511` onward). It never invokes the generated test Var. Its scratch
+root and source artifacts are not expensive fixture acquisition. The selector
+intentionally follows references (`src/seon/test/selection.clj:60–70`), as the
+file-boundary ruling requires, and cannot distinguish an asserted name from
+an executed capability by dropping every reference. No reach weakening or
+special-case exemption was introduced. Exact new metadata:
+
+```clojure
+^{:seon.test/fixture-observation
+  "Observes platform refusal from analyzed destroyer declarations and generated test source; no expensive fixture is acquired. Run: bin/test seon.test.runner-test"}
+```
+
+Static admissibility of **both** the A0 test and this test was verified by
+reading their actual source metadata and passing it on an immutable metadata
+carrier to the loaded `marker-reason`. It returned each complete nonblank
+reason with `Run: bin/test seon.test.runner-test` present, in **5 ms**; no
+Var was mutated and no fixture was acquired. Reproducible JVM form:
+
+```clojure
+(let [source (slurp "test/seon/test/runner_test.clj")]
+  (mapv
+   (fn [test-name]
+     (let [end (.indexOf source (str "\n  " test-name))
+           start (.lastIndexOf source "(deftest ^" end)
+           metadata-start (+ start (count "(deftest ^"))
+           metadata (read-string (subs source metadata-start end))
+           reason (#'seon.test.runner/marker-reason
+                   (with-meta (fn []) (assoc metadata :ns (find-ns 'user)))
+                   :seon.test/fixture-observation)]
+       {:test test-name :reason reason
+        :command-present
+        (clojure.string/includes? reason "Run: bin/test seon.test.runner-test")}))
+   ["bare-selection-refuses-without-authority-before-launch"
+    "the-platform-tier-declares-no-destructive-drill"]))
+```
+
+**Tools-queue item 7:** `verify-fixture-observations!`
+(`src/seon/test/runner.clj:1177`) now derives the complete offending selection,
+deduplicates and sorts symbols, and throws once. `:seon.test/syms` carries the
+sorted vector; `:seon.test/sym` retains its first member for compatibility.
+The message names the complete set. Existing invalid-marker validation remains
+unchanged. The existing `expensive-fixtures-require-a-declared-observation`
+regression supplies two undeclared tests, an admissible reasoned test, an
+ordinary test, and a duplicate in reverse order. Three new assertions prove
+the refusal category, exact sorted vector and compatible first member. It
+uses real analyzed fixture declarations and generated source, not a mocked
+selector. No additional test namespace or schema population was invented.
+
+The shared overlay refused before tests (exit 64): `Incomplete --paths overlay;
+add changed caller files: src/seon/test.clj`. That held admission work was not
+included. Isolated worktree `tmp/fixture-observation-wt` at `8dcd6faf7` contains
+only the checker change and test changes, with dependencies and the existing
+published-base cache linked. The source snapshot reports graph `ef38fb0f…`,
+five commits behind its HEAD. No cold gate or baseline publication.
+
+Followup fast run exited **0**: **24 tests, 201 assertions, 0 failures,
+0 errors**. The JVM armed **1231** functions and completed at
+**18:21:42Z**. The new multi-offender assertions and the declared-observation
+test passed; the canonical platform checker again admitted **114** tests.
+Raw output: `tmp/fixture-observation-fast.log`. Command:
+
+```sh
+bin/test-fast --paths src/seon/test/runner.clj test/seon/test/runner_test.clj -- seon.test.runner-test
+```
+
+`git diff --check` passed. The fast JVM exited and its snapshot was removed;
+the owned worktree was removed before reporting. No reload/adoption of the
+changed checker in default is claimed: the static marker probe used its
+unchanged loaded reader, while the changed checker ran in the isolated,
+armed fast JVM.
+
+Followup owned files: checker region only in `src/seon/test/runner.clj`,
+metadata and the one extended fixture-observation regression in
+`test/seon/test/runner_test.clj`, and this note. Inherited hunks are excluded
+from the commit and remain in the shared tree. Orchestrator cold proof owed:
+
+```sh
+bin/test --paths src/seon/test/runner.clj test/seon/test/runner_test.clj -- seon.test.runner-test
+bin/test --platform
+```

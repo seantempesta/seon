@@ -391,6 +391,18 @@
            (is (not (contains? expensive (symbol (str namespace-name) "ordinary"))))
            (is (thrown? clojure.lang.ExceptionInfo
                         (#'runner/verify-fixture-observations! manifest (selected 'unreasoned))))
+           (let [refusal (try
+                           (#'runner/verify-fixture-observations!
+                            manifest (mapv #(ns-resolve namespace-name %)
+                                           '[unreasoned reasoned ordinary fresh unreasoned]))
+                           (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
+                 expected [(symbol (str namespace-name) "fresh")
+                           (symbol (str namespace-name) "unreasoned")]]
+             (is (= :seon.test.runner/missing-fixture-observation
+                    (:seon.error/kind refusal)))
+             (is (= expected (:seon.test/syms refusal))
+                 "One refusal names every undeclared test, sorted and without duplicates.")
+             (is (= (first expected) (:seon.test/sym refusal))))
            (is (nil? (#'runner/verify-fixture-observations! manifest (selected 'reasoned))))
            (is (nil? (#'runner/verify-fixture-observations! manifest (selected 'ordinary))))
            (is (thrown? clojure.lang.ExceptionInfo
@@ -442,7 +454,9 @@
                 "Scratch custody does not exempt a declared destroyer from the first tier.")))
         (println "Canonical platform destroyer check:" (count platform-vars) "tests admitted")))))
 
-(deftest the-platform-tier-declares-no-destructive-drill
+(deftest ^{:seon.test/fixture-observation
+           "Observes platform refusal from analyzed destroyer declarations and generated test source; no expensive fixture is acquired. Run: bin/test seon.test.runner-test"}
+  the-platform-tier-declares-no-destructive-drill
   ;; The platform tier runs FIRST on every bin/test invocation. A test there
   ;; that deletes a filesystem path deletes before the run has produced any
   ;; evidence — on 2026-09-17 that emptied the development store

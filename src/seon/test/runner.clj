@@ -1177,13 +1177,19 @@
 (defn- verify-fixture-observations!
   [manifest selected-vars]
   (when (seq selected-vars)
-    (let [expensive (expensive-fixture-tests manifest)]
-      (doseq [test-var selected-vars
-              :when (expensive (var-symbol test-var))]
-        (when-not (marker-reason test-var :seon.test/fixture-observation)
-          (throw (ex-info "Selected test reaches an expensive fixture without a declared observation."
-                          {:seon.error/kind ::missing-fixture-observation
-                           :seon.test/sym (var-symbol test-var)}))))))
+    (let [expensive (expensive-fixture-tests manifest)
+          offenders (->> selected-vars
+                         (filter #(expensive (var-symbol %)))
+                         (remove #(marker-reason % :seon.test/fixture-observation))
+                         (map var-symbol)
+                         distinct sort vec)]
+      (when (seq offenders)
+        (throw (ex-info
+                (str "Selected tests reach an expensive fixture without a declared observation: "
+                     (str/join ", " offenders) ".")
+                {:seon.error/kind ::missing-fixture-observation
+                 :seon.test/syms offenders
+                 :seon.test/sym (first offenders)})))))
   nil)
 
 (defn- run-selected-tests
