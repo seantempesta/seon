@@ -4318,3 +4318,16 @@ predicate by hand); the PRD makes replacing it with facet-member branches an
 acceptance criterion, with a debt comment convention until callees declare
 exact facets. Sweep lanes run on `gpt-5.6-sol` low; two at a time beside 1a
 and A1 as slots free (render lane already running on astra low).
+
+## 2026-09-20 ~04:00 UTC — render lane gate ruled: producers never bound evidence
+
+`kind-sweep-render` stopped at "who bounds `render.data/at`'s offending
+value" with three options. Ruled by the orchestrator under the existing
+design: a producer carries the offending value as data; bounding happens
+only at the recorder's admission (`seon.error/prepare` → bounded admission,
+error.clj:462) and at the render profile (the one clipping spot). Lane
+resumed with the error-conversion PRD as its binding text (49 refs left in
+render). Three lanes running (1a, A1, render); the first sol PRD lane
+(turn/cluster group: turn.clj, cluster.clj, cluster/{message,agent,prompt,
+source,wake}, agent.clj; tests turn_test, cluster_test, test/seon/cluster/*)
+launches when a slot frees.
