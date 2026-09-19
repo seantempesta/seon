@@ -4531,3 +4531,13 @@ Three lanes hit this refusal today. Tools item 3 goes to
 foreign dirty caller at its HEAD bytes and NAMES it, never refuses. Render
 resumes when 1a and results-reuse commit. Freed slot → wave-1d config/plan
 family lane (audit A).
+
+## 2026-09-20 ~08:50 UTC — 1d gate ruled; 1a landed the leaf constructor
+
+`config-plan-family-1d` stopped at its ownership gate (`e46307a66`): R2 needs
+turn.clj's attempt recorder; C14 reaches held render files. Ruled: option 1
++ turn.clj `record-attempt!` region and turn_test released for R2 only; C14
+render-reaching sites deferred to the render lane and listed. Resumed.
+`error-family-1a` landed `b85380b2e`: composite observations preserved
+through the leaf constructor (`seon.error.refusal/diagnostic`) and the
+wrapper (review ranks 7–8 done). Running: 1a, results-reuse, 1d.
