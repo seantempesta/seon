@@ -215,14 +215,17 @@
                                    (test-support/effective-config))
                                   :seon.flow/commit-fault! recorder})
            (let [before @calls
-                 input (test-support/refusal-data #(candidate 42))
-                 arity (test-support/refusal-data #(candidate))]
+                 input (if (= :panic mode)
+                         (test-support/refusal-data #(candidate 42)) (candidate 42))
+                 arity (if (= :panic mode)
+                         (test-support/refusal-data #(candidate)) (candidate))]
              (is (= before @calls) "Input and arity checks precede the body.")
              (doseq [[refusal facet] [[input :seon.instrument/contract-error]
                                       [arity :seon.instrument/arity-error]]]
                (is ((schema/projection-validator projection facet) refusal)
                    (pr-str refusal))))
-           (let [refusal (test-support/refusal-data #(candidate domain))]
+           (let [refusal (if (= :panic mode)
+                           (test-support/refusal-data #(candidate domain)) (candidate domain))]
              (is (= #{:seon.agent/error} (:seon.instrument/actual-facets refusal)) (pr-str refusal))
              (is (= 1 (:seon.instrument/arity refusal)))
              (is ((schema/projection-validator projection :seon.instrument/undeclared-error) refusal))
@@ -230,7 +233,8 @@
                (is (identical? refusal (first (peek @committed)))
                    "The call returns the exact flat value handed to the committer."))
              (is (= domain (candidate domain 1)) "Only the declaring arity permits this facet."))
-           (let [refusal (test-support/refusal-data #(candidate base))]
+           (let [refusal (if (= :panic mode)
+                           (test-support/refusal-data #(candidate base)) (candidate base))]
              (is (= 0 (:seon.instrument/actual-facet-count refusal)))
              (is ((schema/projection-validator projection :seon.instrument/undeclared-error) refusal))))
          (is (= 4 (count @committed)))
@@ -379,7 +383,8 @@
                            (fn [_]
                              (let [invoke #(sci/eval-form
                                             ctx (cons name (map (fn [value] (list 'quote value)) args)))]
-                               [(if facet (test-support/refusal-data invoke) (invoke))])))]
+                               [(if (and facet (= :panic mode))
+                                  (test-support/refusal-data invoke) (invoke))])))]
              (is (= (+ before (if ran? 1 0)) (sci/eval-string* ctx "@calls")))
              (if facet
                (do
