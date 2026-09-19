@@ -4467,3 +4467,20 @@ the tree and its files stay held). Launched `results-reuse-everywhere`
 runs record; tally as a query; launchers thin; in-process host reuses; proof
 = a second unchanged run executes zero. Editing lanes: 1a, stall,
 results-reuse (cap 3); review read-only.
+
+## 2026-09-20 ~07:20 UTC — Malli composition review landed; routing
+
+`error-composition-review` (astra HIGH, read-only, ~35 min) landed
+`562412e53` `c76a161a3`. Decision: KEEP `[:and base [:map]]` — it is the
+correct declaration of overlapping open-map facet data; `mu/merge` weakens
+required fields through right-hand overrides and would touch 86 compositions
+in 59 resources; `:multi` cannot express D13's satisfied-facet set. The cost
+is compilation ownership, not the model: with the `-identify-ref-schema`
+scope patch, 64 facets compile in 3.924 ms. Part 2 ranks 12 findings.
+Routing: ranks 1–5 (registry scope, fresh compilation at candidate
+validation, per-declaration full-registry allocation, repeated dependency
+walks, recursive deref bypassing caches) → `projection-compile-stall` lane
+(its scope, at its next stop); ranks 7–8 (wrapper stricter than the PRD;
+`error/diagnostic` drops supplied domain members) → PRD corrected, lane 1a
+at its next stop; ranks 6, 9–12 → a later `malli-compile-ownership` lane
+(sol low) after the stall fix lands.

@@ -64,6 +64,11 @@ improvises.
 
 Rules: `operation` is the function that OBSERVED the failure (the one whose
 body constructs the value), not a guessed namespace and not a string.
+The constructor PASSES THROUGH every domain member it is handed (the
+facet's members in the example above): the review's rank 8 found
+`error/diagnostic` rebuilding a fresh map from the base members only
+(`error.clj:323-355`), which silently drops the facet — corrected by lane
+1a with the move to the `seon.error.refusal` leaf.
 
 `layer` is the boundary the owner's resource declares for that facet. The
 facet's required members come from the owner's `.edn`; if the resource does
@@ -99,7 +104,12 @@ time, never a private copy. (Landing: lane error-family-1a, next stop.)
 
 The armed wrapper is the guarantee (landed): returning a value that
 satisfies none of the declared facets is a contract violation at the
-wrapper; a declared, complete facet passes. A function that merely passes a
+wrapper; a declared, complete facet passes. **A value that satisfies a
+declared facet AND other facets besides passes** — maps are open, and a
+caller declares what it handles, not every facet a value may also satisfy.
+(The review `error-composition-review-2026-09-20.md` rank 7 found the
+landed wrapper stricter than this sentence at `instrument.clj:778-790`;
+the wrapper follows the sentence, corrected by lane 1a.) A function that merely passes a
 callee's error through declares that callee's facets in its own output.
 `:seon.error/value` (an alias of the base) is admissible ONLY as an input
 type at a genuinely polymorphic inspection boundary (a renderer, a recorder),
