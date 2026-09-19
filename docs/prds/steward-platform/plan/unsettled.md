@@ -4027,3 +4027,18 @@ State: default alive (pid 41822, started by the other session); adoption
 exits at the 30 s silence bound twice; dirty inherited slices (db contracts,
 stage 1) unchanged; no lanes launched by this session (design converges
 first, then launch once).
+
+## 2026-09-19 ~17:25 UTC — adoption silence diagnosed; Codex owns the repair; Turn 3 written
+
+Silent phase named with stack samples: the 74,366-operation population
+commit (no progress event inside it; writer validator 20+ s) and, in the
+captured 393.7 s run, a minutes-long config validator compile caused by the
+broken reference model Codex found (`fn/index!` deriving from zero persisted
+schema declarations). Idle measurements afterwards: 67 ms fresh JVM, 30–280 ms
+live. Note `research/adoption-silence-diagnosis-2026-09-19.md`; issue
+`an-aborted-publication-leaves-no-record` (abort leaves no record; the bound
+spans eventless phases). Codex holds publication/adoption and default's
+lifecycle; this session runs nothing there and writes docs via the shell so
+the edit hook queues no competing publication. Plan §5 Turn 3 accepts Turn 2's
+calibrations, proposes the six final README rows, and the ownership order:
+repair → wave 0 → 1a (Claude) → 1b/2a (Codex) → 1c (Claude).
