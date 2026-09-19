@@ -4234,3 +4234,12 @@ smoke error-count)/0E). `error-family-1a` landed `06c4fe7fe` `340a878b2`
 (reader acquires complete owned observations; instrumentation error
 predicate and contract bypass removed) and continues. Next: 1a lands →
 `--platform` → reset → merge to main → A1.
+
+## 2026-09-20 ~00:20 UTC — 1a cold gate: 118/3779/1F/2E (consumer sites of the stricter contracts)
+
+`bin/test --paths seon.error.edn seon.instrument.edn error.clj instrument.clj error_test.clj instrument_test.clj -- seon.error-test seon.instrument-test seon.schema-test`
+(log `tmp/orchestrator/gates/error-family-1a-cold-2026-09-19.log`): 
+- FAIL `seon.instrument-test/a-sovereign-sci-fork-acquires-its-own-recorder` (instrument_test.clj:449): the projection validator for `:seon.instrument/registration-error` does not accept the produced value (the lane's note already names it).
+- ERROR `applying-without-a-handed-projection-refuses-before-collection`: `seon.schema/call-with-projection-state` returned undeclared error facets `#{:seon.instrument/registration-error}` — the new wrapper enforcement (796a76314) working as ruled (1q); schema.clj's contract must declare the facet (schema.clj is free).
+- ERROR `a-projection-with-no-bound-predicates-compiles-every-declared-shape`: the test hands `{}` as caps; `compiled-wrapper`'s contract now requires `:seon.config.eval.result/max-bytes` — test fixture to supply the declared caps.
+For lane `error-family-1a` at its next stop (running on D13); D13 ruled `1b89e70a0`. A1 launched (`test-selector-a1`, astra MEDIUM).
