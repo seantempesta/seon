@@ -4302,3 +4302,19 @@ maintenance 8 + config 8 + context 9 + edit 9 + problems 10 + my/* ;
 E the remaining render/* (hiccup, lint, ns, test, value) and test/ files
 (882 refs) by the same groups. Held by 1a: db.clj, schema.clj, status.clj;
 by A1: test.clj, runner.clj, selection.clj, accretion.clj, arm.clj.
+
+## 2026-09-20 ~03:40 UTC — error conversion PRD for cheap lanes
+
+Owner: "don't waste astra credits if it's simple, but I want proper error
+messages done correctly … write up a complete PRD and hand off to simpler
+agents"; "sol 5.6 is pretty good too." Written:
+[error-conversion-prd-2026-09-20.md](error-conversion-prd-2026-09-20.md) —
+the four shapes (producer, contract, consumer, message grammar), R1–R8 made
+literal with before/after from landed commits, facet declaration rules, the
+per-commit verification list, the file-disjoint partition, a verbatim lane
+spec template, and whole-conversion acceptance. Finding recorded there: the
+urgent predicate sweep inlined the base-three check at 74 sites (the general
+predicate by hand); the PRD makes replacing it with facet-member branches an
+acceptance criterion, with a debt comment convention until callees declare
+exact facets. Sweep lanes run on `gpt-5.6-sol` low; two at a time beside 1a
+and A1 as slots free (render lane already running on astra low).
