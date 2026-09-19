@@ -879,7 +879,7 @@
                     (install-function-from-database! ctx db function-symbol))
                   :interpreted
                   (catch Throwable failure
-                    (when (:seon.instrument/registration-failed (ex-data failure))
+                    (when (:seon.instrument/registration-observation (error/refusal failure))
                       (throw failure))
                     (if (install-jvm-root! ctx function-symbol)
                       {:seon.sci.eval/load-state :jvm-fallback
@@ -1864,7 +1864,7 @@
                                  (get-in installed [:seon.sci.eval/load-result :seon.error/message]))
                             {:seon.sci.eval/load-state :jvm-fallback}))))))
             (catch Throwable failure
-              (when (:seon.instrument/registration-failed (ex-data failure))
+              (when (:seon.instrument/registration-observation (error/refusal failure))
                 (throw failure))
               (update state ::acquisition-refusals (fnil conj [])
                       (acquisition-refusal row failure)))))]

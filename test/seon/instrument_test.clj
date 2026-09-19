@@ -415,7 +415,10 @@
                          :seon.schema.admission/source :agent
                          :seon.fn/source
                          "(defn valid? [length id] true)")])
-     (let [base (sci.eval/base-ctx (db/db connection))
+     (let [committed (db/pull (db/db connection) '[*] [:seon.fn/sym 'seon.id/valid?])
+            _ (is (= "(defn valid? [length id] true)" (:seon.fn/source committed))
+                  (pr-str (select-keys committed [:seon.error/operation :seon.error/message])))
+            base (sci.eval/base-ctx (db/db connection))
            _ (is (::instrument/interpreted-original
                   (meta @(sci/resolve base 'seon.id/valid?)))
                  "The source context holds a real interpreted wrapper.")
@@ -436,20 +439,22 @@
            missing-base (test-support/refusal-data #(sci.eval/base-ctx database))
            fork (sci.eval/fork-cluster-ctx base database connection state
                                           {:seon.flow/commit-fault! recorder})
-           invoke (fn [ctx]
+           invoke (fn [ctx mode]
                     (first (kernel/with-arm
                             ctx (* 1000 test-support/event-backstop-seconds)
-                            (fn [_] [(test-support/refusal-data
-                                      #(sci/eval-string* ctx "(seon.id/valid?)"))]))))]
+                            (fn [_] [(if (= :panic mode)
+                                       (test-support/refusal-data
+                                        #(sci/eval-string* ctx "(seon.id/valid?)"))
+                                       (sci/eval-string* ctx "(seon.id/valid?)"))]))))]
        (is ((schema/projection-validator projection :seon.instrument/registration-error)
             missing))
        (is ((schema/projection-validator projection :seon.instrument/registration-error)
             missing-base)
            "Construction cannot publish a context containing an unarmed definition.")
        (is ((schema/projection-validator projection :seon.instrument/arity-error)
-            (invoke base)))
+            (invoke base :panic)))
        (is (empty? @recorded) "The source context keeps its panic policy.")
-       (let [result (invoke fork)
+       (let [result (invoke fork :record)
              [value [_ outcome]] (first @recorded)]
          (is (= 1 (count @recorded)))
          (is (= :seon.flow/committed outcome))

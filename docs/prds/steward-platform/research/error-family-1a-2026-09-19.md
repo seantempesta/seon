@@ -1171,8 +1171,8 @@ until the admission boundary is resolved and verified.
 
 The following patch is against the shared tree's code-only slice, not a
 landed implementation. It deliberately does not edit the pending admission
-owner. The existing writer regression in `test/seon/error_test.clj` is
-already in the shared tree and is not repeated here. These bytes preserve
+owner. The writer regression follows in its own draft section below.
+These bytes preserve
 the reviewable draft while allowing disposable worktrees to be removed.
 
 <details>
@@ -1543,3 +1543,185 @@ The nine-facet additions land in `src/seon/error.clj` and
 `src/seon/sci/admit.clj`; the same nine are declared by the owned observation
 grammar restorer, which also preserves a returned observation. The full
 three-suite tally is still pending at this checkpoint.
+
+At 2026-09-19T23:02:37Z the isolated three-suite run finished: **118 tests /
+4,150 assertions / 24 failures / 4 errors**. Error tests remain **42 / 0F /
+0E**; instrument tests are **44 / 0F / 3E**; schema tests remain **32 / 24F /
+1E**. The three manifest assertions are now green. The sovereign-fork
+acquisition still reached `seon.sci.eval/acquisition-refusal`; replacing
+the marker on the outer `ex-data` alone did not establish the cause.
+
+Commit `524aa07d6` passes the required HEAD namespace load in a fresh
+worktree: exit 0 and `:loads`. Its loading worktree has been removed.
+The independent SCI follow-up now reads the original refusal with the
+existing pure cause-chain owner before testing its registration member;
+SCI's wrapper stores the original exception as its cause
+(`reference-code/sci/src/sci/impl/utils.cljc:180`). The owned sovereign-fork
+regression observes record-mode values directly and retains panic-mode
+ex-data capture. A serial instrument-only run is verifying these changes.
+
+The shared-tree fast attempt preceding this isolated run exited **64**
+before launching tests: overlay admission requested dirty callers in held
+render files and `src/seon/cluster/source.clj`, plus the pending raw writer
+regression. The isolated HEAD worktree excluded all those uncommitted
+inputs. This is the exact foreign verification boundary, not a test red.
+
+### Raw writer/recorder regression draft
+
+This regression belongs with the unlanded raw model, and is preserved here
+so the shared tree can retain the accepted stored-model tests while scope
+is resolved. The preceding 42/349/4F/1E run measured its initial version;
+the draft below also checks that recording never executes the refused
+transaction and decodes the admitted print node through its owner.
+
+```diff
+diff --git a/test/seon/error_test.clj b/test/seon/error_test.clj
+index b203384fc..b624b6316 100644
+--- a/test/seon/error_test.clj
++++ b/test/seon/error_test.clj
+@@ -1070,7 +1070,6 @@
+      {::test-support/extra-schema
+       (schema.datahike/malli->datahike-schema-in projection [::manifest-id ::manifest-location ::manifest-observation ::manifest-explanations])}
+      (fn [connection]
+-       (test-support/apply-config! connection "error-manifest" {})
+        (db/carry-connection-projection-state!
+         connection (sci.eval/projection-state @connection projection))
+        (test-support/transacted! connection [{::manifest-id "root-path"
+@@ -1135,10 +1134,29 @@
+              segment (:v (first (db/datoms database :eavt location :seon.error.location/segments)))
+              before (db/basis-t database)
+              result (db/transact! connection [[:db/add segment :seon.error.location.segment/ordinal 3]])]
+-         (is (schema/valid-candidate-value? :seon.db.write/error result) (pr-str result))
++         (is (schema/valid-candidate-value? :seon.db.write/validation-refusal result) (pr-str result))
++         (is (= [[:db/add segment :seon.error.location.segment/ordinal 3]]
++                (get-in result [:seon.error/data :seon.db.write.attempt/transaction])))
+          (is (= before (get-in result [:seon.error/basis :seon.error.basis/t])))
+          (is (= before (db/basis-t (db/db connection))))
+-         (is (= 2 (count (db/datoms database :eavt location :seon.error.location/segments)))))))))
++         (is (= 2 (count (db/datoms database :eavt location :seon.error.location/segments))))
++         (let [recording (error/recording database (commit-request result {}))
++               report (test-support/transacted! connection (:seon.db/tx-data recording))
++               occurrence (first (:seon.error/occurrences
++                                  (db/pull (:db-after report) (error/observation-selector projection)
++                                           (:seon.error/ref recording))))
++               attempt (:seon.db.write/attempt occurrence)]
++           (is (= (:seon.db.write.attempt/request-id result)
++                  (:seon.db.write.attempt/request-id attempt)))
++           (is (= before (get-in occurrence [:seon.error/basis :seon.error.basis/t])))
++           (is (= (mapv :v (db/datoms database :eavt segment :seon.error.location.segment/ordinal))
++                  (mapv :v (db/datoms (:db-after report) :eavt segment :seon.error.location.segment/ordinal)))
++               "The recorder stores the submitted transaction as evidence; it never executes it.")
++           (is (= (get-in result [:seon.error/data :seon.db.write.attempt/transaction])
++                  (admit/semantic-value
++                   (edn/read-string (get-in attempt [:seon.db.write.attempt/operations :seon.instrument/actual])))))
++           (is (false? (get-in attempt [:seon.db.write.attempt/operations :seon.error/capped?])))
++           (is (not (contains? occurrence :seon.db.write.attempt/request-id)))))))))
+
+ (deftest error-facets-persist-through-the-real-occurrence-owner
+```
+
+### Final scope boundary and measured SCI cause
+
+The first focused SCI run finished at 2026-09-19T23:07:17Z:
+**44 tests / 319 assertions / 0 failures / 3 errors**. Its compact acquisition
+evidence identified `:seon.sci.eval/install-source-mismatch` for
+`[:seon.fn/sym seon.id/valid?]`, with the message
+`Committed declaration source does not match install request.`
+
+The next canonical-fixture regression asserted the wildcard read's source
+before acquisition. At 2026-09-19T23:15:52Z it measured **44 tests / 320
+assertions / 1 failure / 3 errors**. The new assertion falsified the read:
+
+```text
+expected: (= "(defn valid? [length id] true)" (:seon.fn/source committed))
+actual: (not (= "(defn valid? [length id] true)" nil))
+seon.error/diagnostic refused argument 0 ... missing :seon.error/at.
+Called from seon.schema (schema.clj:2796).
+```
+
+Thus the sovereign-fork source mismatch is downstream of the incomplete
+`pulled-selector-refusal` producer, the same producer behind the recursive
+pull-shape failures. It is not evidence that the actual committed source
+changed. The two acquisition catches still require their retirement:
+they now examine the registration facet's required member on the original
+cause-chain refusal. The test observes record-mode return values directly,
+retains panic-mode ex-data capture, and preserves the new upstream read
+assertion. Temporary diagnostic printing was removed after recording the
+evidence above; no assertion was removed or weakened.
+
+The raw model ruling stands. Completion needs these three scope extensions,
+requested during this turn and unanswered:
+
+1. `src/seon/schema/internal.cljc`: apply its stored-member checks to the
+   declarations marked for storage. The exact proposed condition and its
+   canonical fixture regression are above.
+2. `resources/seon/schemas/seon.schema.edn`: declare raw producer evidence
+   for the three authorized schema diagnostic producers, then admit it in
+   the recorder to the existing stored schema facet. Both existing stored
+   members require projections; supplying raw values there would change
+   their meaning, while producer-side projection would contradict the ruling.
+3. `src/seon/sci/kernel.clj`: `failure-value` only, for the two measured
+   missing-base errors in the kernel regressions.
+
+The pending raw producer/recorder and its regression are preserved as
+reviewable patches in this note. They are not installed in the shared tree:
+the accepted error tests remain unchanged until the admission change can
+land coherently. No schema resource or database producer change is claimed
+as landed by this continuation. The completed production/test slice touches
+`src/seon/error.clj`, `src/seon/sci/admit.clj`, `src/seon/sci/eval.clj`,
+`test/seon/instrument_test.clj`, and this landing note.
+
+A foreign uncommitted `base-extending-facet-compiles-without-enumerating-the-registry`
+test appeared in `test/seon/schema_test.clj` during this run; it was preserved
+and excluded from this lane's commits and snapshots. The load/tree-discipline
+update in `9f9ff4fe3` was read when it appeared. The last focused run was the
+lane's only active JVM, and no new worktree was created after that update.
+The required shared-tree namespace load now exits 0 and prints `:loads`.
+
+### RESET NEEDED and cold proof still owed
+
+No additional reset attributes in the completed contract/catch slice.
+The raw draft introduces `:seon.db.write.attempt/transaction` as a transient
+schema key, not a stored attribute. It changes no existing stored type.
+The earlier consolidated reset obligations remain owed to the orchestrator;
+this lane ran no lifecycle, reset, refork, restart, adoption or cold gate.
+
+After the pending scope lands, the orchestrator owes the cold command below
+and platform/live proof. Include the pending resource/admission/kernel paths
+when they land, and include the complete error-resource/reset batch from
+the earlier landing sections.
+
+```sh
+bin/test --paths \
+  src/seon/error.clj src/seon/instrument.clj src/seon/schema.clj \
+  src/seon/db.clj src/seon/cluster/status.clj \
+  src/seon/sci/admit.clj src/seon/sci/eval.clj \
+  test/seon/error_test.clj test/seon/instrument_test.clj test/seon/schema_test.clj \
+  docs/prds/steward-platform/research/error-family-1a-2026-09-19.md \
+  -- seon.error-test seon.instrument-test seon.schema-test \
+     seon.db-test seon.cluster-test seon.sci.eval-test
+```
+
+### Probe artifacts and cleanup
+
+The lane's test and load JVMs exited. No Java process referenced the
+remaining lane worktree before cleanup; its five shared-target symlinks
+were unlinked first. All three lane worktrees have been removed, and no
+foreign worktree, run root or session was changed. The declaration and
+writer/recorder regression drafts remain in this note, rather than as
+uncommitted failing schema/test changes in the shared tree.
+
+| Iteration | Log bytes | SHA-256 |
+|---|---:|---|
+| Raw regression before implementation | 25,007 | `7775c4b65facabd26a88ad0f623181eb0580c96b1abbe25c5c592f277b19a477` |
+| Shared overlay refusal | 914 | `2af4e78fce18bbcb0cd7f27c469f6334be109fc11fbbfd9052af2808b0716293` |
+| Isolated three-suite run | 127,131 | `ef4f66a0b2e24c4798ca20c952960887004c0ff7f9bc7ce5de6eac6e54f320b1` |
+| SCI cause-chain run | 22,501 | `3b6dff7dea5d9878c8cbb56357e3edebd1799c665873c804b75e832cc826782d` |
+| SCI source-read probe | 23,014 | `1a6132691ff4ed67bdf65a9afe2ea1a503fefe40dda709a274c319961d8264c5` |
+| Unchanged HEAD schema admission | 763 | `08f75f81a92826ba15d973a8650156cff155a608d0b173a4a86d1df44d4f6f64` |
+| Raw-facet admission refusal | 1,129 | `90c1d70da21ab87960876526b35af27740b17f21310c59bd504e355a494d57ba` |
+
+The completed slices introduce no kind or general error predicate. The
+three-suite task remains **not green**, with the exact remaining producer,
+admission and kernel boundaries above. Cold and live proof remain with the
+orchestrator.
