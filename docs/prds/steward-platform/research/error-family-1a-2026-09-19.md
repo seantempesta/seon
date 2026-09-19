@@ -715,3 +715,47 @@ Files in this step: both owned Clojure namespaces and test namespaces,
 remain in the wave-1 reset batch. No attribute type changes. Removal of the
 external required members and external class properties belongs to the
 orchestrator's mechanical sweep; this cut deliberately retains no shim.
+
+## Exact error-owner outputs
+
+The original 46 missing declarations are accounted for: eight obsolete
+classification/render helpers and the unused run-identity helper were deleted;
+`signature` acquired its contract in D13; `evidence-text` was replaced with a
+contracted evidence formatter; the remaining **37** functions now declare
+inputs and outputs. Parsed source census: **95/95 error-owner functions and
+34/34 instrumentation functions contracted**, zero missing declarations.
+Polymorphic observation pass-throughs explicitly enumerate their permitted
+base/facet union; database readers use the database owner's declared error
+union. No owned function contract uses generic `:seon.error/value`.
+
+Read failures are no longer truthy presence, a zero recurrence count, an absent
+example, or successful recording: the corresponding exact output union
+propagates them. A missing requested observation produces a complete base
+refusal naming `seon.error/recording` and `:seon.error/error`. Canonical fixture
+regressions cover that refusal and the named-function declaration census;
+the previously landed armed host/SCI tests still cover complete declared
+facets passing and undeclared facets being refused.
+
+The complete owned cut's fast attempt exited **1 before namespace execution**:
+
+```text
+Syntax error compiling at (seon/fn.clj:1387:36).
+No such var: error/error?
+```
+
+There is no test/assertion tally for this pre-load boundary. The caller is an
+explicitly inventoried external sweep site; no shim or external edit was used.
+All four owned Clojure files parse and clj-kondo reports **0 errors**.
+The extra canonical refusal regression was added after that load refusal; it
+is owed with the final integration gate, not claimed as executed.
+
+The earlier fixture duplicate was local and is fixed: two redundant `declare`
+findings at `src/seon/error.clj:1611:1` produced the identical lint identity
+`29330d0581c3` (`seon.fn/lint-rows` hashes `[owner type row col]`). The exact
+refusal carried `:seon.fn/identity [:seon.lint/id "29330d0581c3"]`. Removing the
+redundant declaration let the corrected snapshot build the canonical fixture.
+That run later exited **143**, without a final tally or cause attribution.
+A fresh serial run of D13's runnable slice is pending below.
+
+Files in this contract step: `src/seon/error.clj`, `test/seon/error_test.clj`,
+this landing note. No additional RESET NEEDED attributes in this step.

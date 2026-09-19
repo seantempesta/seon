@@ -1281,3 +1281,23 @@
          (is (= before (root first-record)) "Adding a facet leaves prior occurrences untouched.")
          (is (= 5 (count (db/q '[:find ?root :where [?root :seon.error/signature]]
                                (db/db connection))))))))))
+
+(deftest every-error-owner-function-declares-its-input-and-output
+  (test-support/with-database
+   (fn [_connection]
+     (doseq [[function candidate] (ns-interns 'seon.error)
+             :when (and (bound? candidate) (fn? @candidate))]
+       (is (some? (:malli/schema (meta candidate))) (str function))))))
+
+(deftest recording-refuses-an-unavailable-complete-observation
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           request (commit-request {:seon.error/signature (apply str (repeat 64 "0"))})
+           result (error/recording database request)]
+       (is ((schema/projection-validator (schema/projection-from-database database)
+                                          :seon.error/base) result))
+       (is (= 'seon.error/recording (:seon.error/operation result)))
+       (is (= :seon.error/error (:seon.error/expected-key result)))
+       (is (= result (error/commit-tx database request)))
+       (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]] database)))))))
