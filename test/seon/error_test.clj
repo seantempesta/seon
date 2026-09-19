@@ -1292,35 +1292,66 @@
            (pr-str armed))
        (doseq [[source required-facets]
                [[observed #{:seon.agent/error :seon.turn/error}]
-                [armed #{:seon.instrument/arity-error}]]]
+                [armed #{:seon.instrument/arity-error}]
+                [(assoc observed :seon.error/location
+                        {:seon.error.location/length 1001
+                         :seon.error.location/segments
+                         (set (for [ordinal (range 1001)]
+                                {:seon.error.location.segment/ordinal ordinal
+                                 :seon.error.location.segment/key
+                                 {:seon.error.key/projection (str ordinal)
+                                  :seon.error.key/capped? false
+                                  :seon.error.key/bound-bytes 256}}))})
+                 #{:seon.agent/error :seon.turn/error}]]]
          (let [recording (error/recording (db/db connection)
                                            (commit-request source {:seon.error/at (:seon.error/at source)}))
                report (test-support/transacted! connection (:seon.db/tx-data recording))
                database (db/db connection)
-               occurrence (db/pull database '[*] (:seon.error.occurrence/ref recording))
-               root (db/pull database '[*] (:seon.error/ref recording))]
+               root (db/pull database (error/observation-selector projection) (:seon.error/ref recording))
+               occurrence (first (:seon.error/occurrences root))]
            (is (seq (:tx-data report)))
            (is (= required-facets (error/facets projection source)))
            ;; Stored entity contracts and pull-result contracts have distinct
            ;; collection grammars. Validate the read through its derived form.
            (doseq [facet required-facets]
-             (let [pulled-form (schema/pulled-form-in projection facet '[*])
+             (let [occurrence-selector
+                   (some #(when (map? %)
+                            (get % [:seon.error/occurrences :limit nil]))
+                         (error/observation-selector projection))
+                   pulled-form (schema/pulled-form-in projection facet occurrence-selector)
                    forms (:seon.schema.projection/forms projection)
                    scalar-attributes
                    (remove #(-> (get forms %) schema.form/attr-form-properties
                                 :seon.db/component)
                            (map first (schema.form/map-entries forms (get forms facet))))]
-               (is (malli.core/validate pulled-form occurrence
-                                        (:seon.schema.projection/compile-options projection))
-                   (pr-str {:facet facet :form pulled-form :value occurrence}))
+               (is (true? (malli.core/validate pulled-form occurrence
+                                               (:seon.schema.projection/compile-options projection)))
+                   (pr-str {:facet facet :location-length
+                            (get-in occurrence [:seon.error/location :seon.error.location/length])}))
                (is (= (select-keys source scalar-attributes)
                       (select-keys occurrence scalar-attributes)))))
            (when-let [bounds (:seon.instrument/declared-arities source)]
              (is (= bounds (set (map #(dissoc % :db/id)
                                     (:seon.instrument/declared-arities occurrence))))))
+           (let [acquired (db/pull database (error/observation-selector projection)
+                                   (:seon.error/ref recording))
+                 latest (error/latest-fact acquired)]
+             (is (= (:seon.error/layer source) (:seon.error/layer latest)))
+             (when-let [location (:seon.error/location source)]
+               (is (= (:seon.error.location/length location)
+                      (count (get-in latest [:seon.error/location :seon.error.location/segments])))))
+             (is (= latest (#'error/rendered-error-value
+                            {:seon.db/db database :seon.render/value root}))))
+           (let [latest (error/latest-fact root)]
+             (is (= (:seon.error/operation source) (:seon.error/operation latest)))
+             (is (= (:seon.instrument/declared-arities occurrence)
+                    (:seon.instrument/declared-arities latest)))
+             (is (= (:seon.agent/error-agent-id source)
+                    (:seon.agent/error-agent-id latest))))
            (is (some #(= (:db/id occurrence) (:db/id %)) (:seon.error/occurrences root)))
            ;; Record the acquisition question without asserting that a stored
            ;; entity validator is a pull-result validator.
-           (prn {::stored-occurrence occurrence ::required-facets required-facets
-                 ::authored-facets (error/facets projection source)
-                 ::pulled-facets (error/facets projection occurrence)})))))))
+           (when-not (:seon.error/location source)
+             (prn {::stored-occurrence occurrence ::required-facets required-facets
+                   ::authored-facets (error/facets projection source)
+                   ::pulled-facets (error/facets projection occurrence)}))))))))

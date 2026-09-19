@@ -15,12 +15,13 @@ refusal, including its owned arity-bound component. A standalone identity-less
 observation is correctly refused as `:seon.db/unowned-entity`. No observation
 identity or per-facet root is needed to repair C1.
 
-**This is a calibration checkpoint, not completion of lane 1a.** No production
-source or schema has changed. Steps 3–6 remain unimplemented. The acquisition
-decision below must be settled before replacing recognition across pre-store,
-JVM and stored-value consumers. The assignment’s explicit design stop rule and
-AGENTS §2.5 require three options when the change creates hours of cross-owner
-work; that is the stop boundary, not a foreign test failure.
+**Continuation under D12.** The accepted calibration is commit `431093b97`
+(79 tests / 502 assertions / 0 failures / 0 errors). D12 in the namespace-agent
+plan §8 supersedes the acquisition gate below: consumers branch on their
+specific declared error members; output contracts validate completeness. No
+new general predicate, global registry or per-call projection acquisition is
+part of the continuation. The old three options are retained only as dated
+evidence of the question the owner resolved.
 
 ## Authorities read
 
@@ -192,7 +193,7 @@ production constructor in this source. Do not mint a root for an event that
 nothing observes. Its eventual observing seam must supply the owning relation;
 this checkpoint does not claim that orphan declaration is integrated.
 
-## Design gate — who carries the validator and the complete value?
+## Superseded design gate — D12 removes the general predicate
 
 The storage question is settled. The next change crosses a different boundary:
 `error?` currently takes only a value, while the required authority is an
@@ -355,3 +356,38 @@ owned snapshot roots; no scratch worktree or cluster was created. Exact proof
 records and tallies are retained above; lane-only temporary logs and census
 files were removed after recording the evidence. Unrelated working-tree edits
 were preserved.
+
+
+## Step 2 continuation — complete observation reader
+
+The existing persistence relation is unchanged. `observation-selector` derives
+explicit unlimited component selectors from canonical base/facet declarations;
+peer refs remain refs. `latest-fact` retains all acquired occurrence members.
+AI and HTML readers acquire this complete value before rendering and no longer
+collapse its owned evidence back to entity IDs.
+
+Canonical regression: the real recorder stores a composed agent/turn observation
+with **1,001 location segments**, and an armed arity refusal with its owned
+arity bounds. The derived pulled schema uses the actual selector; wildcard
+pull's implicit 1,000-member grammar is not substituted for it.
+
+Fast evidence in tests / assertions / failures / errors:
+
+- Before reader change: **79 / 510 / 6 / 0** (both namespaces).
+- First reader iteration: **79 / 525 / 2 / 0**; both failures were the new
+  regression validating the unlimited read through a wildcard-derived form.
+  Corrected the regression to derive from its actual selector.
+- Interrupted combined continuation: **no final tally**; TERM terminated it.
+- Corrected reader checkpoint: **42 / 250 / 0 / 0**, `seon.error-test`.
+
+The main-tree overlay refused dirty caller paths `src/seon/test.clj`,
+`src/seon/test/runner.clj`, and `test/seon/test/selection_test.clj`. Continued
+from detached `733d0f422` in `tmp/error-family-1a-wt`, linked `reference-code`,
+and copied only owned edits. One narrower reader invocation additionally
+refused the dirty owned `test/seon/instrument_test.clj`; adding that overlay
+path allowed the reader namespace to run. Neither pre-JVM refusal has a test
+tally. No foreign file or session was changed.
+
+Touched in this checkpoint: `src/seon/error.clj`, `test/seon/error_test.clj`,
+and this landing note. **RESET NEEDED attributes: `[]`** for this checkpoint.
+The owning relation and installed attribute types did not change.

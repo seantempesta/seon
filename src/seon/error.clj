@@ -1668,6 +1668,33 @@
     :seon.render/distance
     :seon.render/value})
 
+(defn observation-selector
+  "Read every declared observation member and owned child without pull's
+  implicit cardinality limit. Peer references remain references."
+  {:malli/schema [:=> [:cat :seon.schema/projection] :seon.db/pull-selector]}
+  [projection]
+  (schema/projection-cache-value
+   projection ::observation-selector
+   (fn []
+     (let [forms (:seon.schema.projection/forms projection)
+           observation-keys (conj (facet-keys projection)
+                                  :seon.error/base :seon.error.occurrence/occurrence)]
+       (letfn [(members [schemas]
+                 (sort (into #{} (mapcat #(map first (schema.form/map-entries forms (get forms %)))) schemas)))
+               (selector [schemas active]
+                 (into [:db/id]
+                       (map (fn [attribute]
+                              (let [child (:seon.db/component-schema
+                                           (schema.form/attr-form-properties (get forms attribute)))]
+                                (if (and child (not (contains? active child)))
+                                  {[attribute :limit nil]
+                                   (selector (if (= child :seon.error.occurrence/occurrence)
+                                               observation-keys #{child})
+                                             (conj active child))}
+                                  [attribute :limit nil]))))
+                       (members schemas)))]
+         (selector #{:seon.error/error} #{:seon.error/error}))))))
+
 (defn latest-fact
   "Project an error's latest occurrence for the existing diagnostic renderers."
   {:malli/schema
@@ -1702,16 +1729,11 @@
     (if-let [occurrence (last (sort-by :seon.error.occurrence/last-at
                                     (:seon.error/occurrences error)))]
     (cond-> (merge (dissoc error :seon.error/occurrences)
-                   (select-keys occurrence [:seon.error/process :seon.error/data-edn
-                                            :seon.error/data-size :seon.error/capped?
-                                            :seon.error/throwable-class :seon.error/proc
-                                            :seon.error/op :seon.error/cid
-                                            :seon.instrument/fn :seon.instrument/arm
-                                            :seon.instrument/expected :seon.instrument/args
-                                            :seon.instrument/actual
-                                            :seon.instrument/actual-size])
-                   {:seon.error/at (:seon.error.occurrence/last-at occurrence)
-                    :seon.error/message (:seon.error.occurrence/message occurrence)
+                   (dissoc occurrence :db/id)
+                   {:seon.error/at (or (:seon.error/at occurrence)
+                                        (:seon.error.occurrence/last-at occurrence))
+                    :seon.error/message (or (:seon.error/message occurrence)
+                                             (:seon.error.occurrence/message occurrence))
                     :seon.error/occurrence-count
                     (reduce + 0 (map :seon.error.occurrence/count (:seon.error/occurrences error)))})
       (:seon.error.occurrence/agent occurrence)
@@ -1724,8 +1746,14 @@
   [unit]
   (let [value (if (map? (:seon.render/value unit))
                 (:seon.render/value unit)
-                unit)]
-    (render.value/transacted (if (map? value) (latest-fact value) value))))
+                unit)
+        database (:seon.db/db unit)
+        value (if (and database (:seon.error/signature value))
+                (db/pull database
+                         (observation-selector (schema/projection-from-database database))
+                         [:seon.error/signature (:seon.error/signature value)])
+                value)]
+    (if (map? value) (latest-fact value) value)))
 
 (defn- class-properties
   [forms schema-key]
@@ -1865,8 +1893,7 @@
   "Render one fault's kind, message, time, function, turn, and evidence link."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.render/hiccup]}
   [unit]
-  (let [value (if (map? (:seon.render/value unit)) (:seon.render/value unit) unit)
-        value (if (map? value) (latest-fact value) value)
+  (let [value (rendered-error-value unit)
         turn (:seon.error/run value)
         turn-ref (if (map? turn)
                    (if-let [id (:seon.turn/id turn)]
@@ -1978,7 +2005,13 @@
       {:seon.repl/comment
        "Inspect errors in the namespaces assigned to me and in my own turns."
        :seon.repl/form
-       (list 'seon.db/q (list 'quote agent-faults-query) agent-id)}))))
+       (list 'seon.db/q
+             (list 'quote
+                   (assoc-in agent-faults-query [1 0]
+                             (list 'pull '?error
+                                   (observation-selector
+                                    (schema/projection-from-database (:seon.db/db unit))))))
+             agent-id)}))))
 
 (defn render-faults-ai
   "Emit the steward's read, or render already acquired fault entities."
@@ -1999,8 +2032,7 @@
   ([faults database]
   (let [acquired? (and (sequential? faults) (not (keyword? (first faults))))
         row (when-not acquired?
-              (db/q '[:find [(pull ?error [*
-                                             {:seon.error/occurrences [* {:seon.error.occurrence/turn [:seon.turn/id]}]}]) ...]
+              (db/q '[:find [?error ...]
                       :in $ ?agent
                       :where
                       [?error :seon.error/signature]
@@ -2017,12 +2049,13 @@
                          :else row)
         entities (fault-entities
                   (mapv #(if (map? %) %
-                             (db/pull database '[* {:seon.error/run [:db/id :seon.turn/id]}] %))
+                             (db/pull database
+                                      (observation-selector (schema/projection-from-database database)) %))
                         references))]
     (into [:section {:class "seon-family-entry seon-error-faults"}
            [:h2 (str "Faults (" (count entities) ")")]]
           (if (seq entities)
-            (map render-html entities)
+            (map #(render-html {:seon.db/db database :seon.render/value %}) entities)
             [[:p {:class "seon-error-faults-empty"}
               (if acquired? "No fault is recorded against this agent."
                   "No fault is routed to this agent.")]])))))
