@@ -10,6 +10,7 @@
             [malli.core :as m]
             [malli.error :as me]
             [malli.generator :as mg]
+            [malli.registry :as mr]
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.db]
@@ -20,6 +21,53 @@
             [seon.schema.form :as schema.form]
             [seon.schema.internal :as schema.internal]
             [seon.test-support :as test-support]))
+
+(deftest base-extending-facet-compiles-without-enumerating-the-registry
+  (test-support/with-database
+    (fn [connection]
+      (let [current-projection (schema/projection-from-database
+                                (seon.db/db connection))
+            population (:seon.schema.projection/forms current-projection)
+            function-contracts
+            (:seon.schema.projection/function-contracts current-projection)
+            forms (assoc population
+                         ::facet-member :string
+                         ::facet [:and :seon.error/base
+                                  [:map [::facet-member ::facet-member]]])
+            started (System/nanoTime)
+            projection (test-support/await-event!
+                        (future
+                          (schema/build-projection
+                           forms
+                           function-contracts))
+                        ::base-extending-facet-projection)
+            elapsed-ms (/ (- (System/nanoTime) started) 1e6)
+            enumerations (atom 0)
+            registry (:seon.schema.projection/registry projection)
+            observed-registry
+            (reify mr/Registry
+              (-schema [_ schema-key] (mr/-schema registry schema-key))
+              (-schemas [_]
+                (swap! enumerations inc)
+                (mr/-schemas registry)))
+            validate (m/validator ::facet {:registry observed-registry})
+            value {:seon.error/at (java.util.Date.)
+                   :seon.error/layer ::boundary
+                   :seon.error/operation 'seon.schema-test/facet
+                   ::facet-member "evidence"}]
+        (is (contains? (:seon.schema.projection/forms projection) ::facet))
+        (is (seq function-contracts)
+            "The fixture must supply the real program's function contracts")
+        (is (< elapsed-ms (* 1000 test-support/event-backstop-seconds)))
+        (is (validate value))
+        (is (not (validate (dissoc value :seon.error/operation))))
+        (is (not (validate (assoc value ::facet-member 42))))
+        (is (zero? @enumerations)
+            "Ref validation must not enumerate/merge the complete registry")
+        (println "base-extending facet projection:"
+                 {:elapsed-ms elapsed-ms
+                  :function-contracts (count function-contracts)
+                  :validator-registry-merges @enumerations})))))
 
 (defn- legacy-canonical-data-string
   [value]
