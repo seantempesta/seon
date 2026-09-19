@@ -4286,3 +4286,19 @@ sweep. A1 resumed (astra MEDIUM) on its clean diff. Next: classify the 69
 reds into producer classes from the lane's note, then launch the batch
 sweep by file owner (file-disjoint low lanes), then the 1a cold gate again,
 `--platform`, reset, merge.
+
+## 2026-09-20 ~03:05 UTC — three lanes in parallel; kind sweep partitioned
+
+Running: `error-family-1a` (high; greening error/instrument/schema suites;
+`1b732b28e` `77b06482b` `487d7e4eb` landed), `test-selector-a1` (medium;
+selector, admission, both-hosts), `kind-sweep-render` (low; 143 refs in
+render.clj, transcript, web, walk, data + tests). Kind data-map partition
+queue (file-disjoint, launch as slots free, ≤3 workers): B turn.clj 68 +
+cluster.clj 33 + cluster/{message,agent,prompt,source} 52 + agent.clj 13;
+C sci/eval.clj 39 + sci/kernel 8 + fn.clj 25 + program.cljc 11 + schema/edn
+12; D ai.clj 26 + shell/jvm 17 + operator{,/state} 27 + effect 12 +
+bootstrap 12 + schedule 10 + flow 10 + env 10 + issue{,/detect} 23 +
+maintenance 8 + config 8 + context 9 + edit 9 + problems 10 + my/* ;
+E the remaining render/* (hiccup, lint, ns, test, value) and test/ files
+(882 refs) by the same groups. Held by 1a: db.clj, schema.clj, status.clj;
+by A1: test.clj, runner.clj, selection.clj, accretion.clj, arm.clj.
