@@ -331,7 +331,10 @@
   [database operation request]
   (let [turn (current-run database (::id request))]
     (cond
-      (error/error? turn)
+      (and (map? turn)
+           (contains? turn :seon.error/at)
+           (contains? turn :seon.error/layer)
+           (contains? turn :seon.error/operation))
       (throw (ex-info (:seon.error/message turn) turn))
 
       (nil? turn) (refuse! operation ::no-such-run request)
@@ -1128,7 +1131,10 @@
                   [:or :boolean :seon.error/value]]}
   [db identity-attribute identity-value run-id]
   (let [history (db/history db)]
-    (if (error/error? history)
+    (if (and (map? history)
+             (contains? history :seon.error/at)
+             (contains? history :seon.error/layer)
+             (contains? history :seon.error/operation))
       history
       (let [receipt
             (db/q '[:find ?receipt .
@@ -1140,7 +1146,10 @@
                     [?receipt :seon.cluster.eval/run ?run]
                     [?run :seon.turn/id ?run-id]]
                   history identity-attribute identity-value run-id)]
-        (if (error/error? receipt)
+        (if (and (map? receipt)
+                 (contains? receipt :seon.error/at)
+                 (contains? receipt :seon.error/layer)
+                 (contains? receipt :seon.error/operation))
           receipt
           (boolean receipt))))))
 
@@ -1158,12 +1167,18 @@
   [db request identity-attribute identity-value existing]
   (if-some [run-id (::id request)]
     (let [opening-database (opening-db db run-id)]
-      (when (error/error? opening-database)
+      (when (and (map? opening-database)
+                 (contains? opening-database :seon.error/at)
+                 (contains? opening-database :seon.error/layer)
+                 (contains? opening-database :seon.error/operation))
         (throw (ex-info (:seon.error/message opening-database)
                         opening-database)))
       (let [opening-existing
             (db/pull opening-database '[*] [identity-attribute identity-value])]
-        (if (error/error? opening-existing)
+        (if (and (map? opening-existing)
+                 (contains? opening-existing :seon.error/at)
+                 (contains? opening-existing :seon.error/layer)
+                 (contains? opening-existing :seon.error/operation))
           (throw (ex-info (:seon.error/message opening-existing)
                           opening-existing))
           (when (not= (declared-content db opening-existing)
@@ -1171,7 +1186,10 @@
             (let [written?
                   (declaration-written-by-run?
                    db identity-attribute identity-value run-id)]
-              (if (error/error? written?)
+              (if (and (map? written?)
+                       (contains? written? :seon.error/at)
+                       (contains? written? :seon.error/layer)
+                       (contains? written? :seon.error/operation))
                 (throw (ex-info (:seon.error/message written?) written?))
                 (not written?)))))))
     false))
@@ -2666,7 +2684,10 @@
                           [?run :seon.turn.work/situation :call]
                           [?run :seon.turn/closed-tx ?closed]
                           [(> ?closed ?tx)]] db agent-id since)]
-    (or (some #(when (error/error? %) %) [issue-t replies closed])
+    (or (some #(when (and (map? %)
+                          (contains? % :seon.error/at)
+                          (contains? % :seon.error/layer)
+                          (contains? % :seon.error/operation)) %) [issue-t replies closed])
         (count (into (set replies) closed)))))
 
 (defn- max-episode-runs
@@ -2681,7 +2702,10 @@
         (db/q '[:find ?budget . :in $ ?id :where
                 [?agent :seon.agent/id ?id] [?issue :seon.issue/agent ?agent]
                 [?issue :seon.issue/budget ?budget]] database agent-id)]
-    (if (error/error? issue-budget)
+    (if (and (map? issue-budget)
+             (contains? issue-budget :seon.error/at)
+             (contains? issue-budget :seon.error/layer)
+             (contains? issue-budget :seon.error/operation))
       issue-budget
       (or issue-budget
           (:seon.config.run/max-episode-runs
@@ -2697,7 +2721,10 @@
   [database agent-id]
   (let [limit (max-episode-runs database agent-id)
         spent (episode-runs database agent-id)]
-    (or (some #(when (error/error? %) %) [limit spent])
+    (or (some #(when (and (map? %)
+                          (contains? % :seon.error/at)
+                          (contains? % :seon.error/layer)
+                          (contains? % :seon.error/operation)) %) [limit spent])
         (long (max 0 (- (or limit 0) spent))))))
 
 (defn- opening-deferred?
@@ -2719,15 +2746,24 @@
   [db agent-id]
   (let [limit (max-episode-runs db agent-id)]
     (cond
-      (error/error? limit) limit
+      (and (map? limit)
+           (contains? limit :seon.error/at)
+           (contains? limit :seon.error/layer)
+           (contains? limit :seon.error/operation)) limit
       (nil? limit) true
       :else
       (let [declarations-refusal (wake/declarations-refusal db)]
-        (if (error/error? declarations-refusal)
+        (if (and (map? declarations-refusal)
+                 (contains? declarations-refusal :seon.error/at)
+                 (contains? declarations-refusal :seon.error/layer)
+                 (contains? declarations-refusal :seon.error/operation))
           declarations-refusal
           (let [spent (episode-runs db agent-id)]
             (cond
-              (error/error? spent) spent
+              (and (map? spent)
+                   (contains? spent :seon.error/at)
+                   (contains? spent :seon.error/layer)
+                   (contains? spent :seon.error/operation)) spent
               (>= spent limit) true
               :else
               ;; A terminal provider refusal leaves the wake unanswered, but
@@ -2735,7 +2771,10 @@
               ;; moves this basis and permits another turn.
               (let [since (outside-wake-t db agent-id)
                     failed-attempt
-                    (if (error/error? since)
+                    (if (and (map? since)
+                             (contains? since :seon.error/at)
+                             (contains? since :seon.error/layer)
+                             (contains? since :seon.error/operation))
                       since
                       (db/q '[:find ?turn .
                               :in $ ?agent-id ?since
@@ -2749,7 +2788,10 @@
                               [?turn :seon.turn/attempts ?attempt]
                               [?attempt :seon.ai.attempt/error _]]
                             db agent-id since))]
-                (if (error/error? failed-attempt)
+                (if (and (map? failed-attempt)
+                         (contains? failed-attempt :seon.error/at)
+                         (contains? failed-attempt :seon.error/layer)
+                         (contains? failed-attempt :seon.error/operation))
                   failed-attempt
                   (some? failed-attempt))))))))))
 
@@ -2867,7 +2909,10 @@
 
       issue
       (let [remaining (turns-left db agent-id)]
-        (if (error/error? remaining)
+        (if (and (map? remaining)
+                 (contains? remaining :seon.error/at)
+                 (contains? remaining :seon.error/layer)
+                 (contains? remaining :seon.error/operation))
           remaining
           (when (and (not (:seon.issue/resolved-tx issue))
                      (not (:seon.issue/budget-exhausted-tx issue))
@@ -2880,7 +2925,10 @@
       ;; claimed; the wakes are named only so a consumer can say what it
       ;; is about to answer. Handling claims are recorded at settlement.
       (let [deferred (opening-deferred? db agent-id)]
-        (if (error/error? deferred)
+        (if (and (map? deferred)
+                 (contains? deferred :seon.error/at)
+                 (contains? deferred :seon.error/layer)
+                 (contains? deferred :seon.error/operation))
           deferred
           (when-not deferred
             (let [wakes (unanswered-wakes db agent-id {})]
