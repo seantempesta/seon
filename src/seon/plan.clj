@@ -82,10 +82,6 @@
     {:my.plan.item/needs [:my.plan.item/id]}
     {:my.plan.item/steps 8}])
 
-(defn- error-value?
-  [value]
-  (error/error? value))
-
 (defn- refuse!
   [kind message data]
   (throw
@@ -105,7 +101,10 @@
 (defn- read-result!
   "Return an ordinary database-read result or refuse with its error value."
   [result]
-  (if (error/error? result)
+  (if (and (map? result)
+           (contains? result :seon.error/at)
+           (contains? result :seon.error/layer)
+           (contains? result :seon.error/operation))
     (throw (ex-info (:seon.error/message result) result))
     result))
 
@@ -148,7 +147,10 @@
      :seon.schema/missing-projection-error]]}
   [database reference]
   (let [entity (db/entity database reference)]
-    (if (error/error? entity) entity (:db/id entity))))
+    (if (and (map? entity)
+             (contains? entity :seon.error/at)
+             (contains? entity :seon.error/layer)
+             (contains? entity :seon.error/operation)) entity (:db/id entity))))
 
 (defn- subject-eid
   [database token]
@@ -175,7 +177,10 @@
   [database token]
   (let [subject (subject-eid database token)]
     (cond
-      (error/error? subject) (read-result! subject)
+      (and (map? subject)
+           (contains? subject :seon.error/at)
+           (contains? subject :seon.error/layer)
+           (contains? subject :seon.error/operation)) (read-result! subject)
       subject subject
       :else
       (refuse! :my.plan/subject-not-found
@@ -193,7 +198,10 @@
 (defn- owned-ids
   [database agent-id]
   (let [ids (db/q owned-ids-query database rules agent-id)]
-    (if (error-value? ids) ids (set ids))))
+    (if (and (map? ids)
+             (contains? ids :seon.error/at)
+             (contains? ids :seon.error/layer)
+             (contains? ids :seon.error/operation)) ids (set ids))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pulled tree to derived render steps
@@ -228,10 +236,16 @@
   (reduce (fn [result item-id]
             (let [entity (step-eid database item-id)]
               (cond
-                (error-value? entity) (reduced entity)
+                (and (map? entity)
+                     (contains? entity :seon.error/at)
+                     (contains? entity :seon.error/layer)
+                     (contains? entity :seon.error/operation)) (reduced entity)
                 (nil? entity) (assoc result item-id false)
                 :else (let [row (db/pull database step-selector entity)]
-                        (if (error-value? row)
+                        (if (and (map? row)
+                                 (contains? row :seon.error/at)
+                                 (contains? row :seon.error/layer)
+                                 (contains? row :seon.error/operation))
                           (reduced row)
                           (assoc result item-id (open-work? row)))))))
           {}
@@ -253,7 +267,10 @@
         foreign (if (seq foreign-ids)
                   (foreign-open-work database foreign-ids)
                   {})]
-    (if (error-value? foreign)
+    (if (and (map? foreign)
+             (contains? foreign :seon.error/at)
+             (contains? foreign :seon.error/layer)
+             (contains? foreign :seon.error/operation))
       foreign
       (let [open? (fn [item-id]
                     (if (contains? open-by-id item-id)
@@ -344,7 +361,10 @@
                         {:my.plan/current-step [:my.plan.item/id]}
                         {:my.plan/steps step-selector}]}]
                      [:seon.agent/id agent-id])]
-    (if (error-value? row) row (:seon.agent/plan row))))
+    (if (and (map? row)
+             (contains? row :seon.error/at)
+             (contains? row :seon.error/layer)
+             (contains? row :seon.error/operation)) row (:seon.agent/plan row))))
 
 (defn plan
   "Read this agent's whole plan as one derived current value.
@@ -358,7 +378,10 @@
   [{database :seon.db/db agent-id :seon.agent/id}]
   (let [agent-entity (agent-eid database agent-id)]
     (cond
-      (error-value? agent-entity) agent-entity
+      (and (map? agent-entity)
+           (contains? agent-entity :seon.error/at)
+           (contains? agent-entity :seon.error/layer)
+           (contains? agent-entity :seon.error/operation)) agent-entity
 
       (nil? agent-entity)
       {:my.plan/agent-not-found true
@@ -368,13 +391,19 @@
 
       :else
       (let [pulled (agent-plan-pull database agent-id)
-            frontier (when-not (error-value? pulled)
+            frontier (when-not (and (map? pulled)
+                                    (contains? pulled :seon.error/at)
+                                    (contains? pulled :seon.error/layer)
+                                    (contains? pulled :seon.error/operation))
                        (derived-frontier database
                                          (tree-nodes (:my.plan/steps pulled))))
             ready-ids (:my.plan/ready frontier)
             blocked-ids (:my.plan/blocked frontier)
             values [pulled frontier]]
-        (if-let [error (some #(when (error-value? %) %) values)]
+        (if-let [error (some #(when (and (map? %)
+                                         (contains? % :seon.error/at)
+                                         (contains? % :seon.error/layer)
+                                         (contains? % :seon.error/operation)) %) values)]
           (update error :seon.error/data
                   #(assoc (or % {}) :seon.agent/id agent-id))
           (let [current-id (get-in pulled [:my.plan/current-step
@@ -405,7 +434,10 @@
   [{database :seon.db/db item-id :my.plan.item/id}]
   (let [entity (step-eid database item-id)]
     (cond
-      (error-value? entity) entity
+      (and (map? entity)
+           (contains? entity :seon.error/at)
+           (contains? entity :seon.error/layer)
+           (contains? entity :seon.error/operation)) entity
 
       (nil? entity)
       {:my.plan/not-found true
@@ -420,16 +452,25 @@
                                     [?agent :seon.agent/id ?id]]
                            database rules entity)]
         (cond
-          (error-value? agent-id) agent-id
+          (and (map? agent-id)
+               (contains? agent-id :seon.error/at)
+               (contains? agent-id :seon.error/layer)
+               (contains? agent-id :seon.error/operation)) agent-id
           agent-id
           (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
-            (if (error-value? view)
+            (if (and (map? view)
+                     (contains? view :seon.error/at)
+                     (contains? view :seon.error/layer)
+                     (contains? view :seon.error/operation))
               view
               (first (filter #(= item-id (:my.plan.item/id %))
                              (:my.plan/steps view)))))
           :else
           (let [pulled (db/pull database step-selector entity)]
-            (if (error-value? pulled)
+            (if (and (map? pulled)
+                     (contains? pulled :seon.error/at)
+                     (contains? pulled :seon.error/layer)
+                     (contains? pulled :seon.error/operation))
               pulled
               (first (derived-steps [pulled] nil #{} #{})))))))))
 
@@ -441,14 +482,20 @@
   [{database :seon.db/db item-ids :my.plan/item-ids}]
   (reduce (fn [result item-id]
             (let [step (item {:seon.db/db database :my.plan.item/id item-id})]
-              (if (error-value? step)
+              (if (and (map? step)
+                       (contains? step :seon.error/at)
+                       (contains? step :seon.error/layer)
+                       (contains? step :seon.error/operation))
                 (reduced step)
                 (conj result step))))
           [] item-ids))
 
 (defn- step-summary
   [step]
-  (if (error-value? step)
+  (if (and (map? step)
+           (contains? step :seon.error/at)
+           (contains? step :seon.error/layer)
+           (contains? step :seon.error/operation))
     step
     (assoc (select-keys step [:my.plan.item/id :my.plan.item/title
                                      :my.plan.item/done-when
@@ -464,7 +511,10 @@
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})
         current-id (get-in view [:my.plan/current-step :my.plan.item/id])]
-    (if (error-value? view)
+    (if (and (map? view)
+             (contains? view :seon.error/at)
+             (contains? view :seon.error/layer)
+             (contains? view :seon.error/operation))
       view
       (or (some #(when (= current-id (:my.plan.item/id %)) (step-summary %))
                 (:my.plan/steps view))
@@ -476,7 +526,10 @@
                   [:or [:vector :my.plan/step-summary] :seon.error/value]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
-    (if (error-value? view) view (mapv step-summary (:my.plan/blocked view)))))
+    (if (and (map? view)
+             (contains? view :seon.error/at)
+             (contains? view :seon.error/layer)
+             (contains? view :seon.error/operation)) view (mapv step-summary (:my.plan/blocked view)))))
 
 (defn steps
   "Read your plan steps in their authored tree order."
@@ -484,7 +537,10 @@
                   [:or [:vector :my.plan/step-summary] :seon.error/value]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
-    (if (error-value? view) view (mapv step-summary (:my.plan/steps view)))))
+    (if (and (map? view)
+             (contains? view :seon.error/at)
+             (contains? view :seon.error/layer)
+             (contains? view :seon.error/operation)) view (mapv step-summary (:my.plan/steps view)))))
 
 (defn ready
   "Read your ready steps; complete one with my.plan/complete!."
@@ -493,7 +549,10 @@
     [:or [:vector :my.plan/step-summary] :seon.error/value]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
-    (if (error-value? view) view (mapv step-summary (:my.plan/ready view)))))
+    (if (and (map? view)
+             (contains? view :seon.error/at)
+             (contains? view :seon.error/layer)
+             (contains? view :seon.error/operation)) view (mapv step-summary (:my.plan/ready view)))))
 
 (defn ready-subjects
   "List the resolved subject entities named by this agent's ready steps.
@@ -505,7 +564,10 @@
     [:or :my.plan/intent-subjects :seon.error/value]]}
   [database agent-id]
   (let [steps (ready database agent-id)]
-    (if (error-value? steps)
+    (if (and (map? steps)
+             (contains? steps :seon.error/at)
+             (contains? steps :seon.error/layer)
+             (contains? steps :seon.error/operation))
       steps
       (try
         (into []
@@ -638,7 +700,10 @@
                       [?i :seon.issue/agent ?a]
                       (not [?i :seon.issue/resolved-tx])
                       [?i :seon.issue/tests ?test]] database agent-id)]
-    (when (error-value? tests)
+    (when (and (map? tests)
+               (contains? tests :seon.error/at)
+               (contains? tests :seon.error/layer)
+               (contains? tests :seon.error/operation))
       (throw (ex-info (:seon.error/message tests) tests)))
     (let [named (mapv (fn [test-eid]
                         [test-eid (:seon.test/sym
@@ -646,7 +711,10 @@
                       (sort tests))
           stale (seon.test/stale
                  database (into [] (keep second) named))]
-      (when (error-value? stale)
+      (when (and (map? stale)
+                 (contains? stale :seon.error/at)
+                 (contains? stale :seon.error/layer)
+                 (contains? stale :seon.error/operation))
         (throw (ex-info (:seon.error/message stale) stale)))
       (let [changed (set stale)]
         (filterv (fn [[_ test-symbol]]
@@ -668,7 +736,10 @@
       (let [deadline (query-deadline database agent-id)
             provenance (test.runner/provenance database)
             ctx (@cluster-agent-acquire-context! cluster agent-id)]
-        (when (error-value? provenance)
+        (when (and (map? provenance)
+                   (contains? provenance :seon.error/at)
+                   (contains? provenance :seon.error/layer)
+                   (contains? provenance :seon.error/operation))
           (throw (ex-info (:seon.error/message provenance) provenance)))
         (doseq [[test-eid test-symbol] pending]
           (let [remaining-ms (quot (- deadline (System/nanoTime)) 1000000)
@@ -718,7 +789,10 @@
                         :seon.test/fail-count 0 :seon.test/error-count 1
                         :seon.test/failure-message
                         "The issue test set exhausted its configured evaluation deadline before this test."}]})))]
-            (when (error-value? result)
+            (when (and (map? result)
+                       (contains? result :seon.error/at)
+                       (contains? result :seon.error/layer)
+                       (contains? result :seon.error/operation))
               (throw (ex-info (:seon.error/message result) result)))))))
     nil))
 
@@ -733,7 +807,10 @@
                            :args (cond-> [database] subject (conj subject))
                            :cancel (reify clojure.lang.IDeref
                                      (deref [_] (> (System/nanoTime) deadline)))))]
-    (when (error-value? result)
+    (when (and (map? result)
+               (contains? result :seon.error/at)
+               (contains? result :seon.error/layer)
+               (contains? result :seon.error/operation))
       (refuse! :my.plan/done-query-failed
                (str "Completion query failed: " (pr-str query) "; found " (pr-str result))
                {:my.plan.item/id (:my.plan.item/id step)
@@ -818,7 +895,10 @@
 (defn- changed-item
   [database agent-id item-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
-    (if (error-value? view) view
+    (if (and (map? view)
+             (contains? view :seon.error/at)
+             (contains? view :seon.error/layer)
+             (contains? view :seon.error/operation)) view
         (step-summary (first (filter #(= item-id (:my.plan.item/id %))
                                     (:my.plan/steps view)))))))
 
@@ -835,7 +915,10 @@
         request (assoc step :seon.agent/id agent-id)
         result (transact-plan! connection agent-id
                                [[:db.fn/call #'add-step-call request]])]
-    (if (error-value? result)
+    (if (and (map? result)
+             (contains? result :seon.error/at)
+             (contains? result :seon.error/layer)
+             (contains? result :seon.error/operation))
       result
       (changed-item (:db-after result) agent-id (:my.plan.item/id step)))))
 
@@ -850,7 +933,10 @@
                         [[:db.fn/call #'complete-step-call
                           {:my.plan.item/id item-id
                            :seon.agent/id agent-id}]])]
-    (if (error-value? result)
+    (if (and (map? result)
+             (contains? result :seon.error/at)
+             (contains? result :seon.error/layer)
+             (contains? result :seon.error/operation))
       result
       (changed-item (:db-after result) agent-id item-id))))
 
@@ -878,7 +964,10 @@
   [item-id connection agent-id]
   (let [result (transact-plan! connection agent-id
                                [[:db.fn/call #'start-step-call agent-id item-id]])]
-    (if (error-value? result)
+    (if (and (map? result)
+             (contains? result :seon.error/at)
+             (contains? result :seon.error/layer)
+             (contains? result :seon.error/operation))
       result
       (changed-item (:db-after result) agent-id item-id))))
 
@@ -903,7 +992,10 @@
   [changes connection agent-id]
   (let [result (transact-plan! connection agent-id
                                [[:db.fn/call #'update-step-call agent-id changes]])]
-    (if (error-value? result) result
+    (if (and (map? result)
+             (contains? result :seon.error/at)
+             (contains? result :seon.error/layer)
+             (contains? result :seon.error/operation)) result
         (changed-item (:db-after result) agent-id (:my.plan.item/id changes)))))
 
 ;;; ---------------------------------------------------------------------------
@@ -1036,7 +1128,10 @@
   [database ids]
   (let [rows (db/pull-many database comparable-selector
                            (mapv (fn [id] [:my.plan.item/id id]) (sort ids)))
-        rows (if (error-value? rows) [] rows)
+        rows (if (and (map? rows)
+                      (contains? rows :seon.error/at)
+                      (contains? rows :seon.error/layer)
+                      (contains? rows :seon.error/operation)) [] rows)
         parents (into {}
                       (mapcat (fn [row]
                                 (map (fn [child]
@@ -1247,7 +1342,10 @@
                {:tx-data (:my.plan/tx-data compiled)
                 :datahike/expected-basis-t basis
                 :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
-          (if (error-value? result)
+          (if (and (map? result)
+                   (contains? result :seon.error/at)
+                   (contains? result :seon.error/layer)
+                   (contains? result :seon.error/operation))
             result
             {:my.plan/converged? false
              :my.plan/basis-t basis
@@ -1314,7 +1412,10 @@
   {:malli/schema [:=> [:cat [:or :my.plan/render-step :seon.error/value]]
                   [:or :string :seon.error/value]]}
   [step]
-  (if (error-value? step)
+  (if (and (map? step)
+           (contains? step :seon.error/at)
+           (contains? step :seon.error/layer)
+           (contains? step :seon.error/operation))
     (refusal-line "Plan step" step)
     (str "Plan step [" (:my.plan.item/id step) "] "
          (step-line (str (inc (get step :my.plan.item/position 0))) step))))
@@ -1366,7 +1467,10 @@
   {:malli/schema [:=> [:cat [:or :my.plan/ready-items :seon.error/value]]
                   [:or :string :seon.error/value]]}
   [steps]
-  (if (error-value? steps)
+  (if (and (map? steps)
+           (contains? steps :seon.error/at)
+           (contains? steps :seon.error/layer)
+           (contains? steps :seon.error/operation))
     (refusal-line "Ready work" steps)
     (if (seq steps)
       (str "Ready work (" (count steps) "):\n"
@@ -1423,7 +1527,10 @@
   {:malli/schema [:=> [:cat [:or :my.plan/component-view :seon.error/value]]
                   [:or :string :seon.error/value]]}
   [view]
-  (if (error-value? view)
+  (if (and (map? view)
+           (contains? view :seon.error/at)
+           (contains? view :seon.error/layer)
+           (contains? view :seon.error/operation))
     (refusal-line "Plan" view)
     (let [steps (:my.plan/steps view)
           current-id (get-in view [:my.plan/current-step :my.plan.item/id])
@@ -1460,7 +1567,10 @@
                                    (if (map? selected) (:db/id selected) selected))))
                        (get-in derivation [:my.plan/current-step
                                            :my.plan.item/id]))]
-    (if (error-value? derivation)
+    (if (and (map? derivation)
+             (contains? derivation :seon.error/at)
+             (contains? derivation :seon.error/layer)
+             (contains? derivation :seon.error/operation))
       ;; The derivation refused. The agent still reads a typed line through
       ;; this plan's own AI pair — never a bare exception message where its
       ;; instructions belong — and the refusal stays a `:seon.error` value.
@@ -1492,7 +1602,10 @@
         view (if (and database agent-id)
                (plan {:seon.db/db database :seon.agent/id agent-id})
                component)]
-    (if (error-value? view)
+    (if (and (map? view)
+             (contains? view :seon.error/at)
+             (contains? view :seon.error/layer)
+             (contains? view :seon.error/operation))
       view
       (let [steps (:my.plan/steps view)
             done (count (filter :my.plan.item/completed-tx steps))]
