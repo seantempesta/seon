@@ -1098,7 +1098,10 @@
         (db/q '[:find [?id ...]
                 :where [_ :seon.db.process/id ?id]]
               db)]
-    (if (error/error? read-result)
+    (if (and (map? read-result)
+             (contains? read-result :seon.error/at)
+             (contains? read-result :seon.error/layer)
+             (contains? read-result :seon.error/operation))
       read-result
       (let [present (set read-result)]
         (into
@@ -1537,13 +1540,19 @@
         (db/q '[:find [?key ...]
                 :where [?schema :seon.schema/key ?key]]
               database)]
-    (if (error/error? schema-read)
+    (if (and (map? schema-read)
+             (contains? schema-read :seon.error/at)
+             (contains? schema-read :seon.error/layer)
+             (contains? schema-read :seon.error/operation))
       schema-read
       (let [symbol-read
             (db/q '[:find [?symbol ...]
                     :where [?function :seon.fn/sym ?symbol]]
                   database)]
-        (if (error/error? symbol-read)
+        (if (and (map? symbol-read)
+                 (contains? symbol-read :seon.error/at)
+                 (contains? symbol-read :seon.error/layer)
+                 (contains? symbol-read :seon.error/operation))
           symbol-read
           (let [database-schemas (set schema-read)
                 installed-attributes (set (keys (:schema database)))
@@ -1591,7 +1600,10 @@
         (if closure
           (closure-fact-missing database closure lookup-rows)
           [{:seon.activation/schema-key :seon.activation/closure}])]
-    (when (error/error? missing)
+    (when (and (map? missing)
+               (contains? missing :seon.error/at)
+               (contains? missing :seon.error/layer)
+               (contains? missing :seon.error/operation))
       (throw (ex-info (:seon.error/message missing) missing)))
     (when (seq missing)
       (let [refusal (source/activation-refusal missing)]
@@ -1670,7 +1682,10 @@
                (db/transact! connection {:tx-data declarations})
                {:seon.boot/population :seon.schema/declarations})))
           (let [process-rows (missing-process-rows (db/db connection))]
-            (when (error/error? process-rows)
+            (when (and (map? process-rows)
+                       (contains? process-rows :seon.error/at)
+                       (contains? process-rows :seon.error/layer)
+                       (contains? process-rows :seon.error/operation))
               (throw (ex-info (:seon.error/message process-rows)
                               process-rows)))
             (when (seq process-rows)
@@ -2682,7 +2697,10 @@
                          (not [?run :seon.turn/closed-tx _])]
                        db)
         result
-        (if (error/error? open-runs)
+        (if (and (map? open-runs)
+                 (contains? open-runs :seon.error/at)
+                 (contains? open-runs :seon.error/layer)
+                 (contains? open-runs :seon.error/operation))
           open-runs
           (let [;; the decision moved INSIDE the transaction (custody revision,
                 ;; Revision 4): `recover-call` reads each run's receipts at
@@ -3028,7 +3046,8 @@
           dropped-count (::flow/dropped-fault-count source-fault)
           threshold (:seon.config.eval.result/blob-threshold dials)
           request
-          (cond-> {:seon.error/source source-fault
+          (cond-> {:seon.schema/projection (db/carried-projection db)
+                   :seon.error/source source-fault
                    :seon.error/id (str (random-uuid))
                    :seon.error/at (java.util.Date.)
                    :seon.error/process process
@@ -3482,7 +3501,10 @@
    projection-state
    (fn []
      (let [recovery (recover-runs! connection)
-           _ (when (error/error? recovery)
+           _ (when (and (map? recovery)
+                        (contains? recovery :seon.error/at)
+                        (contains? recovery :seon.error/layer)
+                        (contains? recovery :seon.error/operation))
                (throw (ex-info (:seon.error/message recovery) recovery)))
            instance (publish! (merge instance recovery))
            instance (publish!
