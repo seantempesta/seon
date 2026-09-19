@@ -4379,3 +4379,24 @@ transaction as data); the recorder projects it into the unchanged stored
 write facet. Scope answers (schema producers, two sci/eval catches,
 semantic-value union) handed over; lane resumed (high). Three lanes running:
 1a, render (low), turn-cluster (sol low).
+
+## 2026-09-20 ~05:30 UTC — sol lane blocked by two real defects; hook publication disabled; stall lane
+
+`kind-sweep-turn-cluster` (gpt-5.6-sol LOW, ~35 min) landed only its note
+`def133ef1`, correctly: (1) `seon.cluster.wake` cannot require
+`seon.error/diagnostic` — cycle `seon.ai → seon.repl → seon.error →
+seon.cluster.wake → seon.render.value → seon.ai`; (2) declaring ONE new
+facet in `seon.cluster.source.edn` stalled its isolated fast run 320 s in
+recursive projection construction (`fold-contract-validations` →
+`build-projection`) — the same class as the adoption silence (Malli
+`-identify-ref-schema` re-merging the candidate registry per ref). Both
+block every PRD lane. Actions: PRD amended (constructor moves to the leaf
+`seon.error.refusal`; 1a's next item); lane `projection-compile-stall`
+(astra MEDIUM; may change the Malli fork per owner authorization) launched;
+sol lane resumes after both land. Sol data point: stopped at the right
+boundaries with exact evidence; landed nothing because the blockers were
+real. Also: every lane src edit was queuing `init --dev default --changed`
+through the hook, each refused (lock-hold-timeout / silence) after burning
+default for a minute; `.claude/seon-hook.edn` `:current-source :enabled
+false` for the cut — RE-ENABLE AT THE RESET. Swept three finished run roots
+(2.6 GB) after confirming no JVM uses one.

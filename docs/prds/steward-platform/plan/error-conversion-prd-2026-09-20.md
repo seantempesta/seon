@@ -64,6 +64,20 @@ improvises.
 
 Rules: `operation` is the function that OBSERVED the failure (the one whose
 body constructs the value), not a guessed namespace and not a string.
+
+**Where the constructor lives (amended 2026-09-20 after the turn-cluster
+lane found the cycle `seon.ai → seon.repl → seon.error → seon.cluster.wake →
+seon.render.value → seon.ai`).** `seon.error` is the recorder and renderer
+and requires the render and REPL stack; a producer that sits below those
+(`seon.cluster.wake`, `seon.render.value`, `seon.ai`, `seon.repl`, anything
+they require) cannot require it. The pure constructor is therefore owned by
+the leaf namespace `seon.error.refusal` (no heavy requires; it already owns
+the pure cause-chain reader): `seon.error.refusal/diagnostic` builds the base
+value; `seon.error/diagnostic` delegates to it unchanged, so no caller
+breaks. A producer requires the leaf when requiring `seon.error` would
+create a cycle, and the leaf otherwise only when it needs nothing else from
+`seon.error`. Never a second constructor, never `requiring-resolve` at call
+time, never a private copy. (Landing: lane error-family-1a, next stop.)
 `layer` is the boundary the owner's resource declares for that facet. The
 facet's required members come from the owner's `.edn`; if the resource does
 not yet declare a facet for this failure, the lane declares one there

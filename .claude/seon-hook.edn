@@ -38,8 +38,14 @@
  ;; the main operator root, cluster `default`. Every admitted edit publishes
  ;; to current-src and `default` adopts it in place. No side root, no
  ;; special name; fixtures (Juniper) are data seeded into it.
+ ;; 2026-09-20 (orchestrator): publication DISABLED for the wave-1 error cut.
+ ;; Three lanes edit src concurrently; every edit queued a complete
+ ;; publication + adoption of default (60–150 s under the lifecycle lock),
+ ;; and every one of the last dozen was refused (lock-hold-timeout /
+ ;; prepl-response-silent), burning the default JVM for nothing. Re-enable
+ ;; at the wave-1 reset, when adoption is fast and the tree is quiet.
  :current-source
- {:enabled true
+ {:enabled false
   :root "."
   :cluster "default"
   :check-tests true
