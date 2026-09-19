@@ -98,19 +98,30 @@
         sort
         vec)})
 
-(defn- classpath-roots-declared
-  "Checkout-relative roots deps.edn puts on the gate's classpath: `:paths`
-  plus the `:test` alias's `:extra-paths`, without `.` (the checkout itself,
-  never an input boundary) and without the program-graph roots."
+(defn- declared-input-roots
+  "Checkout-relative roots deps.edn declares as gate inputs: `:paths`, the
+  `:test` alias's `:extra-paths`, and every `:local/root` dependency (the
+  vendored forks under reference-code/, whose gitlinks are inputs), without
+  `.` (the checkout itself, never an input boundary) and without the
+  program-graph roots."
   {:malli/schema [:=> [:cat [:string {:min 1}]] [:set [:string {:min 1}]]]}
   [root]
-  (let [deps (edn/read-string (slurp (io/file root "deps.edn")))]
+  (let [manifest (io/file root "deps.edn")
+        ;; A checkout without a manifest declares no roots; the manifest's
+        ;; own presence is a gate input file, so its removal still changes
+        ;; the inventory digest.
+        deps (if (.isFile manifest) (edn/read-string (slurp manifest)) {})
+        local-roots (fn [dependencies]
+                      (keep (fn [[_ coordinate]] (:local/root coordinate)) dependencies))]
     (into #{}
           (comp (map str)
                 (remove #{"."})
                 (remove (set graph-roots)))
           (concat (:paths deps)
-                  (get-in deps [:aliases :test :extra-paths])))))
+                  (get-in deps [:aliases :test :extra-paths])
+                  (local-roots (:deps deps))
+                  (mapcat (fn [[_ alias]] (local-roots (:extra-deps alias)))
+                          (:aliases deps))))))
 
 (def gate-input-files
   "Files outside every root that decide what a gate runs or loads: the
@@ -122,20 +133,43 @@
   read: the shipped config manifests."
   #{"config"})
 
+(declare gitlink-digests)
+
+(defn input-roots
+  "Every checkout-relative root or file whose change is a gate input, for
+  one checkout: deps.edn's declared roots and local/root dependencies, the
+  pinned gitlinks Git records for that checkout (a vendored dependency is an
+  input whether or not deps.edn names it), the config directory, the
+  dependency manifest and the launchers. Computed once per question; a
+  caller classifying many paths holds the set."
+  {:malli/schema [:=> [:cat [:string {:min 1}]] [:set [:string {:min 1}]]]}
+  [root]
+  (into (into gate-input-files gate-input-directories)
+        (concat (declared-input-roots root)
+                (keys (gitlink-digests (.getCanonicalPath (io/file root)))))))
+
+(defn input-path?
+  "True when `path` is one of `roots` or lies under one of them."
+  {:malli/schema [:=> [:cat [:set [:string {:min 1}]] [:string {:min 1}]] :boolean]}
+  [roots path]
+  (boolean
+   (some (fn [root]
+           (or (= path root)
+               (str/starts-with? path (str root "/"))))
+         roots)))
+
 (defn widening-path?
-  "True when a changed path is a gate input outside the program graph: a
-  file on a declared non-graph classpath root (resources, script), a shipped
-  config manifest, the dependency manifest, or a launcher. A documentation
-  note, a scratch file or a log is not an input and never widens a gate
-  (2026-09-19: the previous complement-of-roots definition widened every
-  gate, and published default, on each markdown edit)."
+  "True when a changed path is a gate input outside the program graph of
+  THIS checkout: a file on a declared non-graph classpath root (resources,
+  script), a vendored dependency's gitlink or file (deps.edn `:local/root`
+  or a recorded gitlink), a shipped config manifest, the dependency manifest,
+  or a launcher. A documentation note, a scratch file or a log is not an
+  input and never widens a gate (2026-09-19: the previous complement-of-roots
+  definition widened every gate, and published default, on each markdown
+  edit). Classifying many paths: use [[input-roots]] once with [[input-path?]]."
   {:malli/schema [:=> [:cat [:string {:min 1}]] :boolean]}
   [path]
-  (let [under? (fn [directory] (str/starts-with? path (str directory "/")))]
-    (boolean
-     (or (contains? gate-input-files path)
-         (some under? gate-input-directories)
-         (some under? (classpath-roots-declared "."))))))
+  (input-path? (input-roots ".") path))
 
 (defn- gitlink-digests
   "Hash pinned gitlink identities; recorded snapshot pins win over the live index."
@@ -173,12 +207,19 @@
     (into (file-input-digests root) (gitlink-digests root))))
 
 (defn test-input-digest
-  "Digest the sorted inventory outside the program graph, including gitlinks."
-  {:malli/schema [:=> [:cat [:map-of :string :string]] :seon.source/digest]}
-  [inputs]
-  (sha-256 (.getBytes (pr-str (into (sorted-map)
-                                   (filter (fn [[path _]] (widening-path? path)))
-                                   inputs)) "UTF-8")))
+  "Digest the sorted inventory of gate inputs outside the program graph,
+  gitlinks included, for one checkout (`root` names the checkout the
+  `inputs` were inventoried from; the one-argument arity is the current
+  checkout)."
+  {:malli/schema [:function
+                  [:=> [:cat [:map-of :string :string]] :seon.source/digest]
+                  [:=> [:cat [:string {:min 1}] [:map-of :string :string]] :seon.source/digest]]}
+  ([inputs] (test-input-digest "." inputs))
+  ([root inputs]
+   (let [roots (input-roots root)]
+     (sha-256 (.getBytes (pr-str (into (sorted-map)
+                                      (filter (fn [[path _]] (input-path? roots path)))
+                                      inputs)) "UTF-8")))))
 
 (defn- read-edn [file]
   (when (.isFile (io/file file))
@@ -299,8 +340,9 @@
       ;; The selector already declares which changed paths are outside the
       ;; program graph; re-deriving that boundary here would be a second
       ;; authority for the same question.
-      (when-not (some widening-path? paths)
-        paths))))
+      (let [roots (input-roots ".")]
+        (when-not (some #(input-path? roots %) paths)
+          paths)))))
 
 (defn- retained-base
   [parent inputs]

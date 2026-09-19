@@ -93,9 +93,14 @@
   (is (selection/widening-path? "config/default.edn"))
   (is (not (selection/widening-path? "src/seon/db.clj")))
   (is (not (selection/widening-path? "test/seon/db_test.clj")))
-  (is (selection/widening-path? "resources-of-mine.edn"))
-  (is (selection/widening-path? "new-gate-input/custom.edn"))
-  (is (selection/widening-path? "src-other/example.clj"))
+  ;; Inputs are DECLARED (deps.edn roots and local/root dependencies, the
+  ;; recorded gitlinks, config, the manifest, the launchers); a path that is
+  ;; none of those is not an input and never widens a gate (2026-09-19).
+  (is (not (selection/widening-path? "resources-of-mine.edn")))
+  (is (not (selection/widening-path? "new-gate-input/custom.edn")))
+  (is (not (selection/widening-path? "src-other/example.clj")))
+  (is (selection/widening-path? "reference-code/datahike"))
+  (is (selection/widening-path? "reference-code/datahike/src/datahike/api.cljc"))
   (doseq [root selection/graph-roots]
     (is (not (selection/widening-path? root)))
     (is (not (selection/widening-path? (str root "/example.clj"))))))

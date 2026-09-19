@@ -493,7 +493,7 @@
   {:malli/schema [:=> [:cat :string] :seon.source/digest]}
   [directory]
   (try
-    (test.cache/test-input-digest (test.cache/input-digests directory))
+    (test.cache/test-input-digest directory (test.cache/input-digests directory))
     (catch Exception failure
       (let [refusal (error/diagnostic
                      {:seon.error/kind :seon.test/input-evidence-unavailable
