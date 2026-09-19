@@ -413,3 +413,36 @@ and arglist (4), and step-6 registration/output completeness (2) assertions.
 The combined after-change run is pending. Touched here:
 `src/seon/instrument.clj`, `test/seon/instrument_test.clj`, this note.
 **RESET NEEDED attributes: `[]`** for this checkpoint.
+
+
+## Step 4 continuation — owned class declarations
+
+Removed the three owned legacy class schemas and four scalar stamps:
+`:seon.error/unclassified-error`,
+`:seon.instrument/contract-violated-error`,
+`:seon.instrument/registration-failed-error`,
+`:seon.error/unclassified`, `:seon.error/refusal`,
+`:seon.instrument/contract-violated`, and
+`:seon.instrument/registration-failed`. Instrumentation no longer emits its
+two stamps. The old representative asserting its instrument class stamp was
+removed; real armed output is covered by the facet regression.
+
+The before-change marker regression records **9 failing assertions**, within
+**41 / 292 / 15 / 0** above. Combined after-change verification is pending.
+The shared `:seon.error/class` declaration, kind declaration and public
+predicate await the external declaration/caller cut. This is not full kind
+retirement. The inventory's D12 actions replace every old recommendation to
+call the general predicate.
+
+Touched here: `resources/seon/schemas/seon.error.edn`,
+`resources/seon/schemas/seon.instrument.edn`, `src/seon/instrument.clj`,
+`test/seon/error_test.clj`, `test/seon/instrument_test.clj`, the inventory,
+and this note.
+
+### RESET NEEDED
+
+Retired installed attributes in this checkpoint:
+`[:seon.error/unclassified :seon.error/refusal
+  :seon.instrument/contract-violated :seon.instrument/registration-failed]`.
+The three removed class schemas are declarations, not additional physical
+attribute names. No reset, adoption, restart or refork was performed.

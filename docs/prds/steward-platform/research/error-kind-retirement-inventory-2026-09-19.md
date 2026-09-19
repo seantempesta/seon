@@ -10,7 +10,7 @@ Point-in-time source census at HEAD `8cf23ea4f3ddb632b16802500ce97439297075f1`, 
 
 Scope: `src/`, `test/`, `resources/`, `script/`, `bin/`, `config/`. Search: `rg --json ":seon\.error/(kind|class)|:seon\.error/keys[^\n]*\bkind\b"` plus the short `:kind`/`:class` declarations in namespaced `seon.error*.edn` maps. Counts below are matching lines and literal matches; multiple sites on one line are retained together.
 
-Replacements obey the [error PRD](../plan/error-entities-prd-2026-09-17.md) §§2–5: preserve concrete evidence, validate all promised facets, never copy the old kind into a new discriminator. A generic error branch uses `seon.error/error?`; a branch about a particular failure checks its facet and required observation. Constructor conversion must acquire real observation time, responsible layer and operation. Unknown evidence stays explicitly unavailable.
+Replacements obey the [error PRD](../plan/error-entities-prd-2026-09-17.md) §§2–5: preserve concrete evidence, validate all promised facets, never copy the old kind into a new discriminator. D12 retires the general predicate: each branch checks the required members of the specific error schema declared by its callee; a declared base boundary checks `:seon.error/at`, `:seon.error/layer`, and `:seon.error/operation`. Constructor conversion must acquire real observation time, responsible layer and operation. Unknown evidence stays explicitly unavailable.
 
 | Area | Matching lines | Literal matches | Files |
 |---|---:|---:|---:|
@@ -358,10 +358,10 @@ Total: **2357 matching lines; 2393 matches; 323 files**.
 Replacement actions (each site below names its action):
 
 - **R1:** Replace constructor stamp with observed at/layer/operation and the PRD owner facet’s required payload. Keep cause/evidence; update this producer’s output contract.
-- **R2:** Use error/error? for generic propagation. For a specific condition validate the producer’s exact facet and inspect its concrete required evidence; preserve the original error value.
+- **R2:** Under D12, inspect the required members of the producer’s exact declared error facet or union; preserve the original value. A callee still declaring generic `:seon.error/value` is a step-6 contract site, not permission to infer its errors.
 - **R3:** Remove class metadata/stamp; retain substantive members and extend the declared base/facet. Delete boolean-only class schemas per PRD §3; update their references.
 - **R4:** Remove kind declaration/member. Domain result contracts enumerate exact facets; generic inspection may alias base. Occurrence storage uses the existing owning relation.
-- **R5:** Remove kind projection/selection and carry base plus relevant facet evidence. Update callers that depended on the selected kind; generic recognition uses error/error?.
+- **R5:** Remove kind projection/selection and carry base plus relevant facet evidence. Update callers that depended on the selected kind; recognition checks only the specific boundary’s declared required members (D12).
 - **R6:** Rewrite the explanation around base recognition and the actual observation; remove the kind-based claim.
 - **R7:** Remove kind destructuring and route consumers by base/facets or concrete observation fields; update every use in this function.
 - **R8:** Construct a valid base plus the producer’s declared facets; replace kind assertion/branch with facet validation and the specific operation or evidence assertion.
@@ -4373,14 +4373,251 @@ The one-error-predicate landing describes changes that are not present in this c
 
 | File | Private predicate | Required replacement |
 |---|---|---|
-| `src/seon/db.clj` | `error-value?` | Replace with the one `seon.error/error?` using an acquired projection; pass the same world through every existing caller. See the 1a landing decision. |
-| `src/seon/operator.clj` | `error-value?` | Replace with the one `seon.error/error?` using an acquired projection; pass the same world through every existing caller. See the 1a landing decision. |
-| `src/seon/plan.clj` | `error-value?` | Replace with the one `seon.error/error?` using an acquired projection; pass the same world through every existing caller. See the 1a landing decision. |
-| `src/seon/call_preparation.clj` | `error-value?` | Replace with the one `seon.error/error?` using an acquired projection; pass the same world through every existing caller. See the 1a landing decision. |
-| `src/seon/note.clj` | `error-value?` | Replace with the one `seon.error/error?` using an acquired projection; pass the same world through every existing caller. See the 1a landing decision. |
-| `src/seon/cluster/message.clj` | `error-value?` | Replace with the one `seon.error/error?` using an acquired projection; pass the same world through every existing caller. See the 1a landing decision. |
-| `src/seon/render/ns.clj` | `error-value?` | Replace with the one `seon.error/error?` using an acquired projection; pass the same world through every existing caller. See the 1a landing decision. |
-| `src/seon/instrument.clj` | `flat-error-value?` | Replace with the one `seon.error/error?` using an acquired projection; pass the same world through every existing caller. See the 1a landing decision. |
-| `src/seon/schedule.clj` | `flat-error?` | Replace with the one `seon.error/error?` using an acquired projection; pass the same world through every existing caller. See the 1a landing decision. |
+| `src/seon/db.clj` | `error-value?` | Delete the private predicate. Inline the required-member checks for each callee’s declared facet/union, without acquiring a projection (D12); list generic callee contracts as step-6 sites. |
+| `src/seon/operator.clj` | `error-value?` | Delete the private predicate. Inline the required-member checks for each callee’s declared facet/union, without acquiring a projection (D12); list generic callee contracts as step-6 sites. |
+| `src/seon/plan.clj` | `error-value?` | Delete the private predicate. Inline the required-member checks for each callee’s declared facet/union, without acquiring a projection (D12); list generic callee contracts as step-6 sites. |
+| `src/seon/call_preparation.clj` | `error-value?` | Delete the private predicate. Inline the required-member checks for each callee’s declared facet/union, without acquiring a projection (D12); list generic callee contracts as step-6 sites. |
+| `src/seon/note.clj` | `error-value?` | Delete the private predicate. Inline the required-member checks for each callee’s declared facet/union, without acquiring a projection (D12); list generic callee contracts as step-6 sites. |
+| `src/seon/cluster/message.clj` | `error-value?` | Delete the private predicate. Inline the required-member checks for each callee’s declared facet/union, without acquiring a projection (D12); list generic callee contracts as step-6 sites. |
+| `src/seon/render/ns.clj` | `error-value?` | Delete the private predicate. Inline the required-member checks for each callee’s declared facet/union, without acquiring a projection (D12); list generic callee contracts as step-6 sites. |
+| `src/seon/instrument.clj` | `flat-error-value?` | Delete the private predicate. Inline the required-member checks for each callee’s declared facet/union, without acquiring a projection (D12); list generic callee contracts as step-6 sites. |
+| `src/seon/schedule.clj` | `flat-error?` | Delete the private predicate. Inline the required-member checks for each callee’s declared facet/union, without acquiring a projection (D12); list generic callee contracts as step-6 sites. |
 
 Cause-chain preservation also needs `src/seon/error/refusal.clj`, `src/seon/sci/kernel.clj`, and the filesystem/shell/edit failure readers to recognize the same base rather than kind. Those are follow-up paths, outside this assignment’s owned files.
+
+
+## D12 follow-up: remove recognition by general predicate
+
+Owner D12 supersedes every earlier replacement instruction that calls
+`seon.error/error?`. Do not introduce a replacement general predicate. At each
+site below, inspect the callee's output contract and test the required members
+of its declared error facet (or the base's at/layer/operation members where the
+boundary passes arbitrary declared errors). Convert generic callee outputs
+first. Non-owned sites are the mechanical follow-up lane's input; deletion of
+the public Var must share a loadable publication with these callers.
+
+The following is an exact dated source/test inventory from `rg -n`, including
+private copies whose bodies currently delegate to the public Var.
+
+```text
+test/my/plan_test.clj:73:        (is (error/error? failure) (pr-str failure))
+test/my/plan_test.clj:440:        (is (error/error? refusal) (pr-str refusal))
+src/seon/note.clj:30:(defn- error-value?
+src/seon/render/ns.clj:54:(defn- error-value?
+test/seon/fn_test.clj:2017:         (is (error/error? result))
+src/seon/call_preparation.clj:116:(defn- error-value?
+test/seon/error_test.clj:164:      (is (true? (error/error? {:my.fs/not-found "tmp/absent"
+test/seon/error_test.clj:166:      (is (false? (error/error? {:seon.error/message "Only a message."})))
+test/seon/error_test.clj:167:      (is (false? (error/error? :not-a-map))))))
+test/seon/error_test.clj:171:    (is (true? (error/error? {:seon.error/message "Reader refusal."})))
+test/seon/error_test.clj:172:    (is (false? (error/error? {})))
+test/seon/error_test.clj:173:    (is (false? (error/error? "Reader refusal.")))))
+test/seon/error_test.clj:307:        (is (true? (error/error? value))
+src/seon/cluster.clj:1101:    (if (error/error? read-result)
+src/seon/cluster.clj:1540:    (if (error/error? schema-read)
+src/seon/cluster.clj:1546:        (if (error/error? symbol-read)
+src/seon/cluster.clj:1594:    (when (error/error? missing)
+src/seon/cluster.clj:1673:            (when (error/error? process-rows)
+src/seon/cluster.clj:2685:        (if (error/error? open-runs)
+src/seon/cluster.clj:3485:           _ (when (error/error? recovery)
+src/seon/plan.clj:85:(defn- error-value?
+src/seon/plan.clj:87:  (error/error? value))
+src/seon/plan.clj:108:  (if (error/error? result)
+src/seon/plan.clj:151:    (if (error/error? entity) entity (:db/id entity))))
+src/seon/plan.clj:178:      (error/error? subject) (read-result! subject)
+test/seon/ai_test.clj:40:(defn- error? [value]
+test/seon/cluster_test.clj:26:        (is (error/error? refusal) (pr-str refusal))
+test/seon/cluster_test.clj:41:        (is (error/error? refusal) (pr-str refusal))
+test/seon/cluster_test.clj:57:        (is (error/error? refusal) (pr-str refusal))
+test/seon/cluster_test.clj:417:        (is (error/error? (:seon.boot/result offense))
+test/seon/turn_test.clj:908:        (is (error/error? refusal) (pr-str refusal))
+test/seon/turn_test.clj:926:        (is (error/error? refusal) (pr-str refusal))
+test/seon/turn_test.clj:954:        (is (error/error? refusal) (pr-str refusal))
+src/seon/db.clj:188:(defn- error-value?
+test/seon/cluster/reply_test.clj:43:(defn- error? [value]
+src/seon/instrument.clj:96:(defn- flat-error-value?
+src/seon/turn.clj:334:      (error/error? turn)
+src/seon/turn.clj:1131:    (if (error/error? history)
+src/seon/turn.clj:1143:        (if (error/error? receipt)
+src/seon/turn.clj:1161:      (when (error/error? opening-database)
+src/seon/turn.clj:1166:        (if (error/error? opening-existing)
+src/seon/turn.clj:1174:              (if (error/error? written?)
+src/seon/turn.clj:2669:    (or (some #(when (error/error? %) %) [issue-t replies closed])
+src/seon/turn.clj:2684:    (if (error/error? issue-budget)
+src/seon/turn.clj:2700:    (or (some #(when (error/error? %) %) [limit spent])
+src/seon/turn.clj:2722:      (error/error? limit) limit
+src/seon/turn.clj:2726:        (if (error/error? declarations-refusal)
+src/seon/turn.clj:2730:              (error/error? spent) spent
+src/seon/turn.clj:2738:                    (if (error/error? since)
+src/seon/turn.clj:2752:                (if (error/error? failed-attempt)
+src/seon/turn.clj:2870:        (if (error/error? remaining)
+src/seon/turn.clj:2883:        (if (error/error? deferred)
+src/seon/fn.clj:1387:              refusal (some #(when (error/error? %) %) [calls references subjects])]
+src/seon/fn.clj:1417:        refusal (some #(when (error/error? %) %)
+src/seon/fn.clj:1434:                    (if (error/error? selected)
+src/seon/fn.clj:1497:    (if (error/error? result) result (get result function-symbol))))
+src/seon/fn.clj:2693:                          (if (error/error? normalized)
+src/seon/fn.clj:2698:              (if (error/error? row)
+src/seon/fn.clj:2710:                       (if (error/error? normalized)
+src/seon/fn.clj:2744:          (if (error/error? current)
+src/seon/fn.clj:2752:                  refusal (some #(when (error/error? %) %)
+src/seon/fn.clj:2807:              (if (error/error? pulled)
+src/seon/fn.clj:2811:            (if (error/error? entity)
+src/seon/fn.clj:2827:                                   (if (error/error? portable-member)
+src/seon/fn.clj:2838:                     (if (error/error? portable)
+src/seon/fn.clj:2851:          (if (error/error? entity-ids)
+src/seon/fn.clj:2857:                        (if (error/error? portable)
+src/seon/fn.clj:2861:              (if (error/error? attribute-rows)
+src/seon/fn.clj:2891:     (if (error/error? rows)
+src/seon/fn.clj:2935:                              (if (error/error? tx-data)
+src/seon/operator.clj:54:(defn- error-value?
+src/seon/error.clj:1785:(defn error?
+src/seon/cluster/message.clj:486:(defn- error-value?
+src/seon/test.clj:556:  (if (error/error? result)
+src/seon/test.clj:809:      (if (error/error? (ex-data failure)) (ex-data failure) (throw failure)))))
+src/seon/test.clj:826:           (cond (error/error? members) (reduced members)
+src/seon/test.clj:837:             (cond (error/error? known) (reduced known)
+src/seon/test.clj:853:    (if (error/error? seeds) seeds
+src/seon/test.clj:863:    (if (error/error? selected) selected
+src/seon/test.clj:865:        (if (error/error? provenance) provenance
+src/seon/test.clj:911:    (when (error/error? ids)
+src/seon/test.clj:915:             (when (or (error/error? row)
+src/seon/test.clj:982:      (when (error/error? read-result)
+src/seon/test.clj:992:    (when (or (error/error? digest)
+src/seon/test.clj:1037:            _ (when (error/error? runs)
+src/seon/test.clj:1043:                                  _ (when (error/error? candidate)
+src/seon/test.clj:1215:        tests (when (and (not (error/error? file-symbols))
+src/seon/test.clj:1220:      (error/error? file-symbols) file-symbols
+src/seon/test.clj:1221:      (error/error? tests) tests
+src/seon/test.clj:1242:        effective (when-not (error/error? selection) (config/effective database cluster))
+src/seon/test.clj:1246:        selected (if (error/error? selection) selection
+src/seon/test.clj:1248:        deferred (when-not (error/error? selected)
+src/seon/test.clj:1268:        destructive (when-not (error/error? selected)
+src/seon/test.clj:1284:        runnable (if (or (error/error? selected) (error/error? destructive)
+src/seon/test.clj:1291:        admitted (when (and (not (error/error? selected))
+src/seon/test.clj:1292:                            (not (error/error? destructive))
+src/seon/test.clj:1293:                            (not (error/error? effective)))
+src/seon/test.clj:1296:      (error/error? effective) effective
+src/seon/test.clj:1297:      (error/error? admitted) admitted
+src/seon/test.clj:1298:      (error/error? provenance) provenance
+src/seon/test.clj:1299:      (error/error? selected) selected
+src/seon/test.clj:1300:      (error/error? destructive) (assoc destructive :seon.test/next-tier :none)
+src/seon/test.clj:1457:      (error/error? custody) custody
+test/seon/sci/reader_test.clj:36:(defn- error?
+```
+
+Predicate inventory: **104 matching lines in 21 files**.
+
+### Step-6 generic result declarations and consumers
+
+Each generic schema reference below needs inspection in its enclosing contract:
+replace result-position references by the exact possible facets, retaining
+input schemas only when they honestly describe the boundary's inputs. A map
+that happens to have a message is not evidence of a declared error.
+
+```text
+src/seon/sci/kernel.clj:541:    [:or :seon.error/value :seon.error/base
+src/seon/schema.clj:2613:    :seon.error/value]}
+src/seon/schema.clj:2794:    :seon.error/value]}
+src/seon/test/runner.clj:2212:                  [:or :seon.test/reach-digests :seon.error/value]]}
+src/seon/test/runner.clj:2221:                  [:or :seon.test/reaches :seon.error/value]]}
+src/seon/test/runner.clj:2234:                  [:or :seon.test.run/program-digest :seon.error/value]]}
+src/seon/test/runner.clj:2280:                  [:or :seon.test.run/provenance :seon.error/value]]}
+src/seon/test/runner.clj:2293:                  [:or :seon.test.run/admission :seon.error/value
+src/seon/test/runner.clj:2978:    [:or :seon.test/results :seon.error/value]]}
+src/seon/test/runner.clj:3048:                  [:or :seon.test/results :seon.error/value]]}
+src/seon/test/runner.clj:3266:  {:malli/schema [:=> [:cat :seon.boot/cluster-name] :seon.error/value]}
+src/seon/test.clj:59:                   :seon.error/value]]}
+src/seon/test.clj:107:                  [:or :seon.test/class-loader :seon.error/value]]}
+src/seon/test.clj:236:                  [:or [:map-of :seon.fn/sym :seon.fn/destroys] :seon.error/value]]}
+src/seon/test.clj:324:                  [:or :seon.test/host-report :seon.error/value]]}
+src/seon/test.clj:416:    [:=> [:cat :seon.test/var :seon.db/connection] [:or :seon.test/result :seon.error/value]]
+src/seon/test.clj:419:     [:or :seon.test/result :seon.error/value]]]}
+src/seon/test.clj:507:                  [:or :seon.test/result :seon.error/value]]}
+src/seon/test.clj:538:                  :seon.error/value]}
+src/seon/test.clj:620:                  [:or :seon.test.selection/result :seon.error/value
+src/seon/test.clj:814:                  [:or [:set :qualified-symbol] :seon.error/value
+src/seon/test.clj:849:                  [:or [:vector :seon.test/sym] :seon.error/value
+src/seon/test.clj:859:                  [:or :seon.test.run/admission :seon.error/value
+src/seon/test.clj:878:                  [:or :seon.test.run/admission :seon.error/value
+src/seon/test.clj:1060:                  [:or :seon.test/reach-digest :seon.error/value]]}
+src/seon/test.clj:1095:     [:or [:vector :seon.test/sym] :seon.error/value]]
+src/seon/test.clj:1097:     [:or [:vector :seon.test/sym] :seon.error/value]]]}
+src/seon/test.clj:1117:                  [:or :seon.test/var :seon.error/value]]}
+src/seon/test.clj:1204:                  [:or :seon.test.run/admission :seon.error/value
+src/seon/test.clj:1449:                  [:or :seon.test/check-result :seon.error/value
+src/seon/test.clj:1501:                  [:or :seon.test/check-result :seon.error/value
+src/seon/test.clj:1529:  {:malli/schema [:=> [:cat [:or :seon.test/check-result :seon.error/value]] :string]}
+src/seon/test.clj:1667:    [:=> [:cat :seon.db/database-value :seon.test/sym] [:or :boolean :seon.error/value]]
+src/seon/test.clj:1669:     [:or :boolean :seon.error/value]]]}
+src/seon/db.clj:236:   [:=> [:cat [:or :seon.db/database-value :seon.error/value]
+src/seon/db.clj:238:    [:or :seon.db/database-value :seon.error/value]]}
+src/seon/db.clj:323:   [:=> [:cat [:or :seon.db/connection :seon.error/value]]
+src/seon/db.clj:324:    [:or :seon.db/connection-identity :seon.error/value]]}
+src/seon/db.clj:392:   [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
+src/seon/db.clj:393:    [:or :seon.db/database-value-identity :seon.error/value]]}
+src/seon/db.clj:418:   [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
+src/seon/db.clj:419:    [:or :int :seon.error/value]]}
+src/seon/db.clj:1059:  {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.error/value]
+src/seon/db.clj:1152:  {:malli/schema [:=> [:cat :qualified-symbol] :seon.error/value]}
+src/seon/db.clj:1735:     [:or :seon.db/database-value :seon.error/value]]
+src/seon/db.clj:1736:    [:=> [:cat [:or :seon.db/connection :seon.error/value]]
+src/seon/db.clj:1737:     [:or :seon.db/database-value :seon.error/value]]]}
+src/seon/db.clj:1773:    [:or :seon.db/database-value :seon.error/value]]}
+src/seon/db.clj:1796:    [:or :seon.db/connection :seon.error/value]]}
+src/seon/db.clj:1925:   [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.db/error-result] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
+src/seon/db.clj:2095:    [:or :nil :seon.schema/registry-key :seon.error/value]]}
+src/seon/db.clj:2336:          [:or :seon.db/database-value :seon.error/value
+src/seon/db.clj:2342:     [:cat [:or :seon.db/database-value :seon.error/value]
+src/seon/db.clj:2386:      [:or :seon.db/database-value :seon.error/value
+src/seon/db.clj:2393:     [:cat [:or :seon.db/database-value :seon.error/value]
+src/seon/db.clj:2445:    [:=> [:cat [:or :seon.db/database-value :seon.error/value]
+src/seon/db.clj:2538:   [:=> [:cat [:or :seon.db/database-value :seon.error/value :seon.db/index-lookup :keyword] [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike index components include arbitrary attribute values. The function guard checks index, component count and argument-map exclusivity.", :gen/elements [[]]} :seon.schema/value]] [:or :seon.db/datoms :seon.db/error-result] [:fn #:error{:message "Use (seon.db/datoms index & components) or (seon.db/datoms database index & components); an index argument map takes no trailing arguments, and an index has at most four components."} seon.db/datoms-call-valid?]]}
+src/seon/db.clj:2552:    [:=> [:catn [::database [:or ::database-value :seon.error/value]]
+src/seon/db.clj:2619:    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
+src/seon/db.clj:2632:    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
+src/seon/db.clj:2649:    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
+src/seon/db.clj:2662:    [:=> [:cat [:or :seon.db/database-value :seon.error/value]
+src/seon/db.clj:2676:    [:=> [:cat [:or :seon.db/database-value :seon.error/value]
+src/seon/db.clj:3821:                  [:maybe :seon.error/value]]}
+src/seon/db.clj:4082:   [:=> [:cat [:or :seon.db/connection :seon.error/value]
+src/seon/db.clj:4389:    [:=> [:cat [:or :seon.db/connection :seon.error/value] :seon.store/transaction]
+```
+
+### Retirement publication prerequisites (D12 continuation)
+
+The public predicate has 75 production call sites in the current shared-tree
+bytes: `src/seon/fn.clj` (18), `src/seon/turn.clj` (16),
+`src/seon/cluster.clj` (7), `src/seon/plan.clj` (4), and
+`src/seon/test.clj` (30). These are outside lane 1a's owned paths. At the
+2026-09-19 continuation check, only `src/seon/test.clj` in that list was dirty;
+the other four are outside scope, not described as held. Convert these calls
+before deleting the public Var in a loadable publication.
+
+The nine private recognition owners are `src/seon/db.clj:188`,
+`src/seon/operator.clj:54`, `src/seon/plan.clj:85`,
+`src/seon/call_preparation.clj:116`, `src/seon/note.clj:30`,
+`src/seon/cluster/message.clj:486`, `src/seon/render/ns.clj:54`,
+`src/seon/instrument.clj:96`, and `src/seon/schedule.clj:491`.
+`flat-error?` in schedule is included here in addition to the search above.
+
+Six required schema members outside ownership still name the definition
+`:seon.error/kind`: `seon.problems.edn:13,26,120`, `seon.eval.drive.edn:48`,
+`seon.test.accretion.edn:107`, `seon.maintenance.result.edn:154` (all under
+`resources/seon/schemas/`). Remove those required members and convert their
+readers before removing the shared attribute definition. This is a schema
+reference dependency, not permission to retain kind as the target design.
+
+Changing `seon.error/diagnostic` to produce base observations also requires
+the callers' output contracts to name their promised facets: the armed wrapper
+correctly refuses base observations through a legacy `:seon.error/value`
+output. Merely retaining the old kind alongside the base cannot repair that
+contract mismatch. The source inventory above owns those replacement sites.
+
+Accuracy boundaries outside ownership: D4's cause-chain recognition is
+`src/seon/error/refusal.clj` plus `src/seon/sci/kernel.clj:572`; D5 covers the
+listed database-consumer output contracts; D6's reporter exception evidence
+belongs to `src/seon/test/runner.clj`. The additional SCI arity-parity defect
+is the copy at acquisition in `src/seon/sci/eval.clj`, per that note's final
+addendum. Their generic outputs must be converted together with their
+recognition sites.

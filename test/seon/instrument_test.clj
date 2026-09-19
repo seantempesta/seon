@@ -1342,3 +1342,19 @@
                  "and nothing else is armed or unarmed by it")))
          (finally
            (remove-ns namespace-name)))))))
+
+(deftest instrumentation-observations-do-not-carry-legacy-class-stamps
+  (let [projection (schema/handed-projection)
+        forms (:seon.schema.projection/forms projection)
+        refusal (test-support/refusal-data #(prefix-contract "wrong"))
+        registration (instrument/apply! {:seon.config/on-core-error :record})]
+    (doseq [retired [:seon.instrument/contract-violated-error
+                     :seon.instrument/registration-failed-error
+                     :seon.error/unclassified-error
+                     :seon.instrument/contract-violated
+                     :seon.instrument/registration-failed
+                     :seon.error/unclassified :seon.error/refusal]]
+      (is (not (contains? forms retired)) (str retired)))
+    (is (not (contains? refusal :seon.instrument/contract-violated)))
+    (is (not (contains? registration :seon.instrument/registration-failed)))))
+

@@ -225,15 +225,6 @@
               :seon.db/ref],
              :data-content :string,
              :occurrence [:int {:min 1}],
-             :unclassified-error
-             [:map
-              {:seon.error/class true,
-               :seon.render/ai seon.error/unclassified-prose,
-               :seon.render/html seon.error/render-html,
-               :error/message
-               "must mark a failure that no registered error class recognized"}
-              [:seon.error/unclassified :seon.error/unclassified]
-              [:seon.error/message :seon.error/message]],
              :notice
              [:map
               [:seon.error/fact :seon.error/fact]
@@ -254,7 +245,6 @@
                {:optional true}
                :seon.error/notification]
               [:seon.agent/id {:optional true} :seon.agent/id]],
-             :refusal [:= true],
              :basis-t [:int {:min 0}],
              :agent
              [:and
@@ -270,7 +260,6 @@
              :throwable-class [:string {:min 1}],
              :notification-limit [:int {:min 1}],
              :notification [:enum :final],
-             :unclassified [:= true],
              :dropped-fault-count [:int {:min 1}],
              :signature [:string {:min 64 :max 64 :seon.db/identity true}],
              :frame [:tuple :symbol :symbol :string :int],

@@ -214,7 +214,6 @@
         arity? (= :malli.core/invalid-arity kind)]
     (error/diagnostic
      {:seon.error/kind ::contract-violated
-      :seon.instrument/contract-violated function-symbol
       :seon.error/message
       (if arity?
         (str "Wrong number of args (" (:arity data) ") passed to: "
@@ -376,8 +375,7 @@
                                           (contains? supplied-entries (vec (:in %))))
                                     (:errors explanation))
                             ::missing-supplied-key ::contract-violated)
-         :seon.instrument/contract-violated function-symbol
-         :seon.error/message
+            :seon.error/message
          (str (error/problem-sentence
                function-symbol first-problem nil
                (error/scalar-text (:seon.error/offending first-problem)))
@@ -495,7 +493,6 @@
       (throw (ex-info "Record-mode SCI instrumentation requires an acquired fault recorder."
                       {:seon.error/kind ::missing-recorder
                        :seon.error/message "Record-mode SCI instrumentation requires an acquired fault recorder."
-                       :seon.instrument/registration-failed true
                        :seon.instrument/fn function-symbol
                        :seon.error/expected-key :seon.flow/commit-fault!})))
     (when (:seon.error/kind caps)
@@ -503,8 +500,7 @@
        (ex-info
         (str "Cannot arm the contract of " function-symbol
              " under " mode ": " (:seon.error/message caps))
-        (assoc caps :seon.instrument/fn function-symbol
-                    :seon.instrument/registration-failed true))))
+        (assoc caps :seon.instrument/fn function-symbol))))
       (let [wrapped (binding [*compiling-contract* true]
                       (compiled-wrapper projection function-symbol
                                         (edn/read-string spec-edn) original caps
@@ -856,7 +852,6 @@
     (and (= :record mode) (not (fn? commit-fault!)))
     (error/diagnostic
      {:seon.error/kind ::missing-recorder
-      :seon.instrument/registration-failed true
       :seon.error/message "Record-mode instrumentation requires an acquired fault recorder."
       :seon.error/diagnostic-layer :instrumentation
       :seon.error/diagnostic-operation 'seon.instrument/apply!
@@ -921,8 +916,7 @@
                       diagnostic
                       (error/diagnostic
                        {:seon.error/kind ::registration-failed
-                        :seon.instrument/registration-failed true
-                        :seon.error/message "The loaded function contract cannot compile."
+                         :seon.error/message "The loaded function contract cannot compile."
                         :seon.error/diagnostic-layer :instrumentation
                         :seon.error/diagnostic-operation 'seon.instrument/apply!
                         :seon.error/diagnostic-member (var-symbol candidate)

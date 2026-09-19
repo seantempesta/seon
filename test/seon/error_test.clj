@@ -280,9 +280,6 @@
           {:seon.db/transaction-outcome-unknown true
           :seon.error/kind :seon.db/unknown-failure
            :seon.error/message "outcome unknown"}
-          {:seon.instrument/contract-violated 'sample/fn
-          :seon.error/kind :seon.instrument/contract-violated
-           :seon.error/message "contract violated"}
           {:seon.render.walk/elided true
           :seon.error/kind :seon.render.walk/elided
            :seon.error/message "elided"}
