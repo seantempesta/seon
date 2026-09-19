@@ -28,7 +28,10 @@
                 :seon.boot/recovery-operations 0}
                recovered)
             "a fresh canonical database positively completes recovery")
-        (is (error/error? refusal) (pr-str refusal))
+        (is (and (map? refusal)
+                 (contains? refusal :seon.error/at)
+                 (contains? refusal :seon.error/layer)
+                 (contains? refusal :seon.error/operation)) (pr-str refusal))
         (is (= refusal result)
             "boot recovery returns the failed read instead of recovering zero turns")
         (is (= before (db/basis-t (db/db connection)))
@@ -43,7 +46,10 @@
                           database)
             missing-process-rows
             (#'cluster/missing-process-rows refusal)]
-        (is (error/error? refusal) (pr-str refusal))
+        (is (and (map? refusal)
+                 (contains? refusal :seon.error/at)
+                 (contains? refusal :seon.error/layer)
+                 (contains? refusal :seon.error/operation)) (pr-str refusal))
         (is (= refusal missing-process-rows)
             "process identities are not rebuilt from error-map entries")))))
 
@@ -59,7 +65,10 @@
              refusal
              {:seon.activation/source-digest (apply str (repeat 64 "a"))}
              [])]
-        (is (error/error? refusal) (pr-str refusal))
+        (is (and (map? refusal)
+                 (contains? refusal :seon.error/at)
+                 (contains? refusal :seon.error/layer)
+                 (contains? refusal :seon.error/operation)) (pr-str refusal))
         (is (= refusal closure-fact-missing)
             "activation facts are not reported missing when their read refused")))))
 
@@ -419,7 +428,10 @@
         (is (= :seon.ai.model/provider-id
                (:seon.activation/lookup-attribute offense))
             (pr-str offense))
-        (is (error/error? (:seon.boot/result offense))
+        (is (and (map? (:seon.boot/result offense))
+                 (contains? (:seon.boot/result offense) :seon.error/at)
+                 (contains? (:seon.boot/result offense) :seon.error/layer)
+                 (contains? (:seon.boot/result offense) :seon.error/operation))
             "the read's own refusal is carried verbatim")
         (is (= before (db/basis-t (db/db connection)))
             "a refused readiness read commits nothing")))))
