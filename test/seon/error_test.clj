@@ -189,7 +189,8 @@
   "A normalize request over `source`, with optional attribution."
   ([source] (request source {}))
   ([source extra]
-   (merge {:seon.error/source source
+   (merge {:seon.schema/projection (schema/handed-projection)
+           :seon.error/source source
            :seon.error/id "err-1"
            :seon.error/at #inst "2026-07-27T21:00:00.000-00:00"
            :seon.error/process process
@@ -741,10 +742,10 @@
            (signature "run 44de failed at 21:00:09"))
         "an id or a timestamp in the message must not make every occurrence unique")))
 
-(deftest the-signature-separates-different-errors
-  (let [signature (fn [kind]
+(deftest the-signature-separates-different-violated-schemas
+  (let [signature (fn [expected]
                     (:seon.error/signature
-                     (error/normalize (request {:seon.error/kind kind
+                     (error/normalize (request {:seon.error/expected-key expected
                                                 :seon.error/message "same"}))))]
     (is (not= (signature :seon.db/rejected) (signature :seon.ai/timeout)))))
 
@@ -954,7 +955,8 @@
 
 (defn- commit-request
   [source extra]
-  (merge {:seon.error/source source
+  (merge {:seon.schema/projection (schema/handed-projection)
+           :seon.error/source source
           :seon.error/id (str (random-uuid))
           :seon.error/at #inst "2026-07-27T21:00:00.000-00:00"
           :seon.error/process process
@@ -983,29 +985,17 @@
                   [?agent :seon.agent/id ?to]]
                 db)))]))
 
-(deftest a-missing-recurrence-limit-refuses-at-the-declared-contract
-  ;; the recursion fence extended to OUR bugs: `(> 1 nil)` thrown out of
-  ;; the recorder would mean an error that destroyed its own record. The
-  ;; fence is now the DECLARED CONTRACT — `:seon.config.error/recurrence-limit`
-  ;; is a required member of `:seon.error/commit-tx-request` — and under the
-  ;; contracts every cluster arms it refuses first, at the same crossing,
-  ;; naming the same function and the offending argument. This asserts that
-  ;; refusal as the value it is; nothing invents a default and nothing
-  ;; reaches the recorder's comparison.
+(deftest recurrence-counting-does-not-require-a-notification-threshold
   (with-db
     (fn [connection]
-      (let [refusal
-            (test-support/refusal-data
-             #(error/commit-tx
-               @connection
-               (dissoc (commit-request (transform-error (ex-info "boom" {})) {})
-                       :seon.config.error/recurrence-limit)))]
-        (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
-        (is (= 'seon.error/commit-tx
-               (:seon.error/diagnostic-operation
-                (:seon.error/data refusal))))
-        (is (empty? (db/q '[:find ?e :where [?e :seon.error/id _]] @connection))
-            "and the refused call committed nothing")))))
+      (let [request (dissoc (commit-request (transform-error (ex-info "boom" {})) {})
+                            :seon.config.error/recurrence-limit)]
+        (test-support/transacted! connection (error/commit-tx @connection request))
+        (test-support/transacted! connection (error/commit-tx @connection request))
+        (is (= 2 (db/q '[:find (sum ?n) . :where [_ :seon.error.occurrence/count ?n]]
+                        (db/db connection))))
+        (is (= 1 (count (db/q '[:find ?m :where [?m :seon.message/about]]
+                              (db/db connection)))))))))
 
 (deftest only-a-throwable-tells-the-attributed-agent
   (with-db
@@ -1074,9 +1064,8 @@
             [facts messages] (last outcomes)]
         (is (= 1 facts) "one entity represents the repeated error")
         (is (= 6 (db/q '[:find (sum ?n) . :where [_ :seon.error.occurrence/count ?n]] (db/db connection))))
-        (is (= {"root" 3} messages)
-            "two ordinary escalations, one final message at the limit, then
-             silence")))))
+        (is (= {"root" 1} messages)
+            "D13: one notification for the root, independent of repeat count")))))
 
 (deftest a-prepared-message-keeps-its-id-when-the-transaction-repeats
   (with-db
@@ -1352,3 +1341,64 @@
              (prn {::stored-occurrence occurrence ::required-facets required-facets
                    ::authored-facets (error/facets projection source)
                    ::pulled-facets (error/facets projection occurrence)}))))))))
+
+(deftest recurrence-identity-is-the-complete-observations-stable-evidence
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "error-family-d13")
+     (let [projection (schema/projection-from-database (db/db connection))
+           observed {:seon.error/at #inst "2026-09-19T00:00:00Z"
+                     :seon.error/layer :seon.agent/lifecycle
+                     :seon.error/operation 'seon.agent/by-id
+                     :seon.error/expected-key :seon.agent/id
+                     :seon.agent/error-agent-id "observed-agent"}
+           record! (fn [source process]
+                     (let [recorded (error/recording
+                                     (db/db connection)
+                                     (commit-request source {:seon.error/process process}))]
+                       (test-support/transacted! connection (:seon.db/tx-data recorded))
+                       recorded))
+           root (fn [recorded]
+                  (db/pull (db/db connection) (error/observation-selector projection)
+                           (:seon.error/ref recorded)))
+           first-record (record! observed "d13-process-a")
+           second-record (record! observed "d13-process-a")
+           after-two (root first-record)]
+       (is (= (:seon.error/ref first-record) (:seon.error/ref second-record)))
+       (is (= 2 (:seon.error.occurrence/count (first (:seon.error/occurrences after-two)))))
+       (is (= (second (:seon.error/ref first-record))
+              (:seon.error/signature
+               (error/normalize (request (error/latest-fact after-two)))))
+           "A complete acquired observation has the same identity as its authored value.")
+       (let [changed-incidental
+             (assoc observed :seon.error/at #inst "2026-09-20T00:00:00Z"
+                             :seon.error/message "Different explanation"
+                             :seon.error/data {:seon.error/diagnostic-offending "different bytes"}
+                             :seon.agent/error-agent-id "another-observed-agent")
+             third-record (record! changed-incidental "d13-process-b")]
+         (is (= (:seon.error/ref first-record) (:seon.error/ref third-record)))
+         (is (= 3 (:seon.error/occurrence-count (error/latest-fact (root first-record))))))
+       (let [before (root first-record)
+             added-facet (record! (assoc observed :seon.turn/error-turn-id "observed-turn")
+                                 "d13-process-a")
+             other-facet (record! (-> observed
+                                     (dissoc :seon.agent/error-agent-id)
+                                     (assoc :seon.turn/error-turn-id "observed-turn"))
+                                 "d13-process-a")
+             other-schema (record! (assoc observed :seon.error/expected-key :seon.turn/id)
+                                  "d13-process-a")
+             other-path (record! (assoc observed :seon.error/location
+                                       {:seon.error.location/length 1
+                                        :seon.error.location/segments
+                                        #{{:seon.error.location.segment/ordinal 0
+                                           :seon.error.location.segment/key
+                                           {:seon.error.key/scalar :seon.agent/id
+                                            :seon.error.key/projection ":seon.agent/id"
+                                            :seon.error.key/capped? false
+                                            :seon.error.key/bound-bytes 256}}}})
+                                "d13-process-a")]
+         (is (= 5 (count (set (map :seon.error/ref
+                                   [first-record added-facet other-facet other-schema other-path])))))
+         (is (= before (root first-record)) "Adding a facet leaves prior occurrences untouched.")
+         (is (= 5 (count (db/q '[:find ?root :where [?root :seon.error/signature]]
+                               (db/db connection))))))))))

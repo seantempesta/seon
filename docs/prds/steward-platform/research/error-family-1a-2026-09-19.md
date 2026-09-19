@@ -652,3 +652,35 @@ files before cleanup. The owned worktree was removed after unlinking its
 reference-code and cache links; no symlink target was removed. Lane-only
 scratch copies, logs and thread dumps were removed after recording the exact
 results above. Foreign dirty files and all other worktrees were preserved.
+
+## D13 continuation — recurrence identity (2026-09-19)
+
+D13 in plan §8 supersedes the preceding recurrence design gate. Signature now
+hashes the complete observation's layer, operation, sorted satisfied facet
+keys, Throwable class/top frame, violated expected key/shape and location
+path through `seon.id/id`. Message, offending bytes, time and process do not
+enter it. Acquisition restores declared collection/ref representations before
+facet validation; it keeps owned component evidence. Normalization now requires
+its projection explicitly; recording acquires it from its supplied database.
+
+The canonical armed before-change regression completed **87 tests / 586
+assertions / 4 failures / 1 error**. Three failures reproduce D13 (facet,
+expected-schema and path variants collapsed and changed the old occurrence).
+The other failure/error are the already recorded SCI/schema boundaries. Main
+`--paths` admission exited 64 before the JVM because dirty callers
+`src/seon/test.clj` and `src/seon/test/runner.clj` were omitted. The prescribed
+HEAD worktree `tmp/error-family-d13-wt` at `23f1f4975` excludes those edits;
+its after-change run is in flight at this checkpoint.
+
+Occurrences retain their existing process/turn custody; recurrence and the
+first-notification decision query the complete root at the writer. There is
+one notification identity per signature/recipient, with one chosen recipient
+on the first occurrence. The future task writer consumes this same root; this
+lane does not introduce a second task mechanism. The recurrence-limit input
+is no longer required to record or deduplicate faults.
+
+Files in this step: `src/seon/error.clj`,
+`resources/seon/schemas/seon.error.edn`, `test/seon/error_test.clj`, this note.
+No attribute type changes in this step. The external direct normalizer callers
+must supply their already acquired projection (included in the follow-up
+inventory). Cold and reset-boundary proof remain the orchestrator's.

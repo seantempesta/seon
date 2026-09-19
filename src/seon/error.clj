@@ -156,6 +156,7 @@
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.datahike :as schema.datahike]
             [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit])
   (:import [java.nio.charset StandardCharsets]))
@@ -310,15 +311,107 @@
       [(symbol (.getClassName frame)) (symbol (.getMethodName frame))
        file (long (.getLineNumber frame))])))
 
+(declare facets facet-keys stored-observation observation-selector latest-fact)
+
 (defn- signature
-  "Identity of what failed, independent of process, agent, turn and message."
-  [error-kind class-name function frame]
-  (id/id (into (sorted-map)
-               (cond-> {:seon.error/kind error-kind}
-                 class-name (assoc :seon.error/throwable-class (symbol class-name))
-                 function (assoc :seon.instrument/fn (symbol function))
-                 frame (assoc :seon.error/frame frame)))
-         64))
+  "D13: identity of the observed site, satisfied facets, violated schema and path.
+  Incidental time, process, message and offending bytes never enter this tuple."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map
+                       [:or :nil :symbol] [:or :nil :seon.error/frame]]
+                  :seon.error/signature]}
+  [projection observation throwable-class frame]
+  (let [observation (stored-observation projection observation)
+        location (:seon.error/location observation)
+        path (mapv (fn [segment]
+                     (let [key (:seon.error.location.segment/key segment)]
+                       (if-let [scalar (find key :seon.error.key/scalar)]
+                         (val scalar)
+                         (:seon.error.key/projection key))))
+                   (sort-by :seon.error.location.segment/ordinal
+                            (:seon.error.location/segments location)))
+        path (if-let [omission (:seon.error.location/omission location)]
+               [path (into (sorted-map) (dissoc omission :db/id))]
+               path)]
+    (id/id [(:seon.error/layer observation)
+            (:seon.error/operation observation)
+            (into (sorted-set) (facets projection observation))
+            throwable-class frame
+            (into (sorted-map)
+                  (select-keys observation [:seon.error/expected-key :seon.error/expected-shape]))
+            path]
+           64)))
+
+(defn- stored-observation
+  "Restore the declared stored collection/ref grammar of a complete acquired
+  observation. Only declared attributes are transformed; owned children keep
+  their complete values, peer refs keep their entity identity."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map] [:or
+     :nil
+     :map
+     :seon.error/base
+     :my.background/error :my.edit/error :my.fs/error :my.message/error
+     :my.plan/error :my.shell/error :my.turn/error
+     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
+     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
+     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
+     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
+     :seon.flow/error :seon.fn/error :seon.fn.binding/error
+     :seon.instrument/arity-error :seon.instrument/contract-error
+     :seon.instrument/registration-error :seon.instrument/undeclared-error
+     :seon.message/error :seon.operator/error :seon.operator.collect/error
+     :seon.problems/error :seon.program/error :seon.reconcile/error
+     :seon.render/error :seon.render.data/error :seon.render.value/error
+     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
+     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.sci.admit/error :seon.sci.eval/acquisition-error
+     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.test.run/error :seon.test.runner/error :seon.turn/error
+     :seon.turn.loop/error]]}
+  [projection observation]
+  (let [attributes
+        (schema/projection-cache-value
+         projection ::observation-attributes
+         (fn []
+           (let [forms (:seon.schema.projection/forms projection)
+                 attributes
+                 (loop [pending (vec (conj (facet-keys projection) :seon.error/base))
+                        seen #{} result #{}]
+                   (if-let [entity (peek pending)]
+                     (if (seen entity)
+                       (recur (pop pending) seen result)
+                       (let [members (map first (schema.form/map-entries forms (get forms entity)))
+                             children (keep #(-> (get forms %) schema.form/attr-form-properties
+                                                  :seon.db/component-schema) members)]
+                         (recur (into (pop pending) children) (conj seen entity)
+                                (into result members))))
+                     result))]
+             (into {}
+                   (map (fn [attribute]
+                          [attribute (schema.datahike/malli->datahike-attr-in projection attribute)]))
+                   attributes))))]
+    (letfn [(restore [value]
+              (if-not (map? value)
+                value
+                (into {}
+                      (keep (fn [[attribute observed]]
+                              (when (not= :db/id attribute)
+                                (let [declaration (get attributes attribute)
+                                      convert (fn [member]
+                                                (cond
+                                                  (:db/isComponent declaration) (restore member)
+                                                  (and (= :db.type/ref (:db/valueType declaration))
+                                                       (map? member)) (:db/id member)
+                                                  :else member))]
+                                  [attribute (if (and (= :db.cardinality/many (:db/cardinality declaration))
+                                                      (coll? observed))
+                                               (into #{} (map convert) observed)
+                                               (convert observed))]))))
+                      value)))]
+      (restore observation))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Flat diagnostics — one evidence-complete construction
@@ -647,6 +740,7 @@
                   :seon.error/prepared]}
   [{:seon.error/keys [source at process basis-t]
     evidence-bytes :seon.config.error/max-evidence-bytes
+    projection :seon.schema/projection
     :seon.sci.admit/keys [caps]
     run-id :seon.turn/id
     agent-id :seon.agent/id}]
@@ -669,13 +763,20 @@
         instrument-data (contract-violation-data projected-source)
         flow? (map? source)
         error-value (if failure (refusal failure) source)
-        operation (get-in error-value
-                          [:seon.error/data :seon.error/diagnostic-operation])
+        operation (or (:seon.error/operation error-value)
+                      (get-in error-value [:seon.error/data :seon.error/diagnostic-operation]))
         function (or (when (qualified-symbol? operation) operation)
                      (:seon.instrument/fn instrument-data)
                      (stack-failing-function failure))
         frame (top-frame failure)
-        signature (signature error-kind class-name function frame)
+        observation (merge {:seon.error/at at
+                            :seon.error/layer :seon.error/normalization
+                            :seon.error/operation (or function 'seon.error/normalize)}
+                           (when (map? error-value) error-value))
+        signature (signature projection observation
+                             (or (some-> class-name symbol)
+                                 (:seon.error/exception-class observation))
+                             (or frame (:seon.error/frame observation)))
         ;; THE SIZE IS THE SOURCE'S, NOT THE SUBSTITUTE'S. When the whole
         ;; evidence went over the storage bound the marker is a few dozen
         ;; bytes, and reporting those as `data-size` said the evidence was
@@ -1487,20 +1588,18 @@
           database function)))
 
 (defn- recurrence
-  [database signature process]
+  [database signature]
   (reduce + 0
           (map second
-               (db/q '[:find ?occurrence ?count :in $ ?signature ?process
+               (db/q '[:find ?occurrence ?count :in $ ?signature
                        :where [?error :seon.error/signature ?signature]
                               [?error :seon.error/occurrences ?occurrence]
-                              [?occurrence :seon.error.occurrence/process ?p]
-                              [?p :seon.db.process/id ?process]
                               [?occurrence :seon.error.occurrence/count ?count]]
-                     database signature process))))
+                     database signature))))
 
 (defn- message-tx
   [fact sender recipient reason notification]
-  {:seon.message/id (id/id [(:seon.error/notification-id notification) recipient reason])
+  {:seon.message/id (id/id [(:seon.error/signature fact) recipient])
    :seon.message/to [:seon.agent/id recipient]
    :seon.message/from [:seon.agent/id sender]
    :seon.message/content (ai-prose (notice (merge {:seon.error/fact fact
@@ -1541,10 +1640,7 @@
         fact (cond-> fact (nil? agent-id) (dissoc :seon.error/agent)
                          (nil? turn-id) (dissoc :seon.error/run))
         count (inc (or (:seon.error.occurrence/count old) 0))
-        process-count (inc (recurrence database signature process))
-        limit (:seon.config.error/recurrence-limit request)
-        recurring? (= process-count limit)
-        silent? (> process-count limit)
+        first-occurrence? (zero? (recurrence database signature))
         interrupted? (some? (:seon.error/exception-class fact))
         escalate-to (:seon.config.error/escalate-to request)
         steward-id (steward database fact)
@@ -1585,18 +1681,13 @@
                                           :seon.error/kind :seon.instrument/fn :seon.error/frame
                                           :seon.error/exception-class])
                          :seon.error/occurrences #{occurrence})
-        notification (cond-> {:seon.error/notification-id (:seon.error/id request)}
-                       recurring? (assoc :seon.error/occurrence process-count
-                                         :seon.error/notification-limit limit
-                                         :seon.error/notification :final))
-        recipients (cond-> {}
-                     (and interrupted? agent-id (not recurring?) (not silent?))
-                     (assoc agent-id :your-run)
-                     (and interrupted? (nil? agent-id) (not recurring?) (not silent?) escalate-to)
-                     (assoc escalate-to :no-attributable-agent)
-                     (and recurring? escalate-to (not= escalate-to agent-id))
-                     (assoc escalate-to :recurring)
-                     (and steward-id (not silent?)) (assoc steward-id :recurring))]
+        notification {:seon.error/notification-id signature}
+        recipients (when first-occurrence?
+                     (cond
+                       steward-id {steward-id :recurring}
+                       (and interrupted? agent-id) {agent-id :your-run}
+                       (and interrupted? escalate-to) {escalate-to :no-attributable-agent}
+                       :else {}))]
     (into (cond-> (into [{:seon.db.process/id process}] replacements)
             digest (conj {:seon.error.occurrence/blob-digest digest :seon.error/data-blob digest})
             (and (nil? digest) (:seon.error.occurrence/data-blob old))
@@ -1620,8 +1711,19 @@
    [:function
     [:=> [:cat :seon.db/database-value :seon.error/commit-tx-request] :seon.error/recording]
     [:=> [:cat :map :seon.db/database-value :seon.error/source :inst :map] :seon.error/recording]]}
-  ([_database request]
-   (let [fact (or (:seon.error/fact request) (normalize request))
+  ([database request]
+   (let [request (assoc request :seon.schema/projection
+                        (schema/projection-from-database database))
+         source (:seon.error/source request)
+         source (if (and (map? source) (:seon.error/signature source))
+                  (latest-fact (db/pull database
+                                        (observation-selector (:seon.schema/projection request))
+                                        [:seon.error/signature (:seon.error/signature source)]))
+                  source)
+         request (cond-> request (map? source)
+                   (assoc :seon.error/source
+                          (stored-observation (:seon.schema/projection request) source)))
+         fact (or (:seon.error/fact request) (normalize request))
          signature (:seon.error/signature fact)
          agent-id (second (:seon.error/agent fact))
          turn-id (second (:seon.error/run fact))

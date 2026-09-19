@@ -85,6 +85,7 @@
                [nil true 0 "failure" :failure [] {} #{}]}],
              :normalize-request
              [:map
+              [:seon.schema/projection :seon.schema/projection]
               [:seon.error/source :seon.error/source]
               [:seon.error/id :seon.error/id]
               [:seon.error/at :seon.error/at]
@@ -172,8 +173,6 @@
               [:seon.error/at :seon.error/at]
               [:seon.error/process :seon.error/process]
               [:seon.sci.admit/caps :seon.sci.admit/caps]
-              [:seon.config.error/recurrence-limit
-               :seon.config.error/recurrence-limit]
               [:seon.error/basis-t
                {:optional true}
                :seon.error/basis-t]
