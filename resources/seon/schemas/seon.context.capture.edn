@@ -24,9 +24,6 @@
                         [:seon.context.capture/contributions
                          {:optional true}
                          :seon.context.capture/contributions]
-                        [:seon.error/kind
-                         {:optional true}
-                         :seon.error/kind]
                         [:seon.error/message
                          {:optional true}
                          :seon.error/message]

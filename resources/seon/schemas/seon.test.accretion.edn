@@ -104,7 +104,9 @@
                           :error/message "must identify a refused green-to-install decision"}
                          [:seon.test.accretion/install-refused
                           :seon.test.accretion/install-refused]
-                         [:seon.error/kind :seon.error/kind]
+                         [:seon.error/at :seon.error/at]
+                         [:seon.error/layer :seon.error/layer]
+                         [:seon.error/operation :seon.error/operation]
                          [:seon.error/message :seon.error/message]
                          [:seon.test.accretion/arguments {:optional true}
                           :seon.schema/arguments]

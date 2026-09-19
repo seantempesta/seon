@@ -20,9 +20,6 @@
                              [:seon.context.contribution/evaluations
                               {:optional true}
                               :seon.context.contribution/evaluations]
-                             [:seon.error/kind
-                              {:optional true}
-                              :seon.error/kind]
                              [:seon.context.contribution/error
                               {:optional true}
                               :seon.context.contribution/error]],

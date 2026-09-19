@@ -74,9 +74,6 @@
                      [:seon.problems/id
                       {:optional true}
                       :seon.problems/id]
-                     [:seon.error/kind
-                      {:optional true}
-                      :seon.error/kind]
                      [:seon.cluster.eval/output
                       {:optional true}
                       :seon.cluster.eval/output]
@@ -136,9 +133,6 @@
                      [:seon.cluster.eval/interrupted-at
                       {:optional true}
                       :seon.cluster.eval/interrupted-at]
-                     [:seon.error/kind
-                      {:optional true}
-                      :seon.error/kind]
                      [:seon.cluster.eval/output
                       {:optional true}
                       :seon.cluster.eval/output]

@@ -154,9 +154,6 @@
                [:seon.render.unknown/output
                 {:optional true}
                 :seon.render/output]
-               [:seon.render.unknown/refusal
-                {:optional true}
-                :seon.error/kind]
                [:seon.render.unknown/throwable
                 {:optional true}
                 :seon.error/throwable-class]

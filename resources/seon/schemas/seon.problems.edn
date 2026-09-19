@@ -10,7 +10,9 @@
                  [:seon.cluster.eval/ordinal
                   :seon.cluster.eval/ordinal]
                  [:seon.cluster.eval/source :seon.cluster.eval/source]
-                 [:seon.error/kind :seon.error/kind]
+                 [:seon.error/at :seon.error/at]
+                 [:seon.error/layer :seon.error/layer]
+                 [:seon.error/operation :seon.error/operation]
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
                 :id [:string {:min 1, :seon.db/identity true}],
                 :form-problem
@@ -23,7 +25,9 @@
                  [:seon.cluster.eval/source :seon.cluster.eval/source]
                  [:seon.agent/id :seon.agent/id]
                  [:seon.problems/author :seon.agent/id]
-                 [:seon.error/kind :seon.error/kind]
+                 [:seon.error/at :seon.error/at]
+                 [:seon.error/layer :seon.error/layer]
+                 [:seon.error/operation :seon.error/operation]
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
                 :evaluation-failed-error
                 [:map
@@ -117,7 +121,9 @@
                 :error-signature
                 [:map
                  [:seon.error/signature :seon.error/signature]
-                 [:seon.error/kind :seon.error/kind]
+                 [:seon.error/at :seon.error/at]
+                 [:seon.error/layer :seon.error/layer]
+                 [:seon.error/operation :seon.error/operation]
                  [:seon.problems/occurrences
                   :seon.problems/occurrences]
                  [:seon.error/fact :seon.error/fact]],

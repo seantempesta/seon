@@ -94,9 +94,6 @@
                            [:seon.operator.claim/path
                             {:optional true}
                             :seon.operator.claim/path]
-                           [:seon.error/kind
-                            {:optional true}
-                            :seon.error/kind]
                            [:seon.error/message :seon.error/message]],
                           :process-census-component
                           [:map
@@ -151,7 +148,9 @@
                           :collection-error
                           [:map
                            {:seon.db/attributes true}
-                           [:seon.error/kind :seon.error/kind]
+                           [:seon.error/at :seon.error/at]
+                           [:seon.error/layer :seon.error/layer]
+                           [:seon.error/operation :seon.error/operation]
                            [:seon.error/message :seon.error/message]],
                           ;; The maintenance mirror of
                           ;; `:seon.operator.cluster-cleanup/collection`, which
