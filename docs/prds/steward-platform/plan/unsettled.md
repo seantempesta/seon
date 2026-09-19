@@ -4413,3 +4413,16 @@ error DATA; measure compile cost for :and vs flat map vs malli.util/merge vs
 our expansion; what the mechanical stall fix leaves unresolved. Four lanes
 running (1a, render, projection-compile-stall, this review — the review is
 read-only and does not count against the three-worker cap).
+
+## 2026-09-20 ~06:10 UTC — seven JVMs, load 25: slot cap was per checkout
+
+Owner: "why are my java instances overwhelming my machine?" Not gates (none
+running): the `projection-compile-stall` lane had three `bin/test-fast` JVMs
+(7–8 GB each) plus a raw java alive at once from its isolated worktree,
+beside render's and 1a's one each and default. Cause: `bin/_test-slot`
+derived its slot directory from the checkout, so a lane's worktree of the
+SAME repository counted its own three slots. Fixed `2cdb7ef8a`: the slot
+directory derives from Git's common directory (shared by every worktree of
+one repository; a separate clone keeps its own), count 2; proven with a
+probe worktree. Lane stopped (all pids verified exited) and resumed under an
+explicit one-JVM rule. Tools-queue item 8 resolved by this commit.
