@@ -7,6 +7,7 @@
             [clojure.test :as test :refer [deftest is]]
             [sci.core :as sci]
             [seon.db :as db]
+            [seon.config :as config]
             [seon.env :as env]
             [seon.fn :as program-fn]
             [seon.id :as id]
@@ -19,7 +20,6 @@
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
             [seon.test.runner :as runner]
-            [seon.test.selection-test :as selection-tests]
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
 
@@ -49,14 +49,61 @@
            (is (= name (get-in refusal [:seon.error/data :seon.error/diagnostic-offending])))))))))
 
 (deftest selection-is-one-function-on-both-hosts
-  (selection-tests/exercise-selection!
-   (fn [request]
-     (let [worker (runner/worker-request-admission request)
-           check (seon-test/check-request-admission request)
-           stable #(if (:seon.test.run/provenance %)
-                     (update % :seon.test.run/provenance dissoc :seon.test.run/id :seon.test.run/at) %)]
-       (is (= (stable worker) (stable check)))
-       (seon-test/select request)))))
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "both-hosts")
+     (test-support/transacted! connection
+       [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
+         :seon.source/test-input-digest (id/digest 64 [:both-hosts :inputs])}])
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           evaluation (sci.eval/evaluate
+                       {:seon.sci.eval/ctx ctx
+                        :seon.cluster.eval/source
+                        "(clojure.test/deftest custody-observation (clojure.test/is (= \"both-hosts\" (:seon.cluster/name (seon.db/pull (seon.db/db) [:seon.cluster/name] [:seon.cluster/name \"both-hosts\"])))))"
+                        :seon.cluster.eval/ns [:seon.ns/name 'seon.test.runner-test]
+                        :seon.sci.admit/caps (config/result-caps (config/defaults))
+                        :seon.sci.eval/time-limit-ms 120000 :seon.config/on-core-error :panic})
+           declaration (program/declaration-row (:seon.program/row evaluation) :all :agent)
+           target (symbol "seon.test.runner-test" "custody-observation")]
+       (is (map? declaration) (pr-str evaluation))
+       (test-support/transacted! connection [declaration])
+       (sci.eval/install-evaluated-rows!
+        {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+         :seon.sci.eval/installations [{:seon.program/row declaration :seon.sci.eval/evaluation evaluation}]})
+       (let [database (db/db connection)
+             request {:seon.db/db database :seon.test.run/cluster [:seon.cluster/name "both-hosts"]
+                      :seon.test/identities #{target}}
+             host (seon-test/select request)
+             interpreted (test-support/agent-value
+                          ctx (str "(seon.test/select (assoc '" (pr-str (dissoc request :seon.db/db))
+                                   " :seon.db/db (seon.db/db)))") 'seon.test.runner-test)
+             admission (runner/worker-request-admission request)
+             provenance (:seon.test.run/provenance admission)]
+         (is (some #(= target (:seon.test/sym %)) (:seon.test.run/members host)) (pr-str host))
+         (is (= host interpreted) (pr-str interpreted))
+         (test-support/transacted! connection [[:db.fn/call seon-test/admit-run admission]])
+         (let [executed (#'runner/run-task!
+                         {:seon.test.runner/task-namespace "seon.test.runner-test"
+                          :seon.test.runner/task-symbols [(str target)]}
+                         {:seon.db/db database :seon.db/connection connection :seon.sci.eval/ctx ctx
+                          :seon.schema/projection (schema/projection-from-database database)
+                          :seon.test/class-loader (clojure.lang.RT/baseLoader)
+                          :seon.db/custody-request {:seon.db/connection connection}})
+               recorded (runner/commit-results!
+                         connection {:seon.test.run/provenance provenance
+                                     :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
+                                     :seon.test/run-at (:seon.test.run/at provenance)
+                                     :seon.test.run/terminated? true
+                                     :seon.test.runner/results (:seon.test.runner/task-results executed)})]
+           (is (vector? recorded) (pr-str recorded))
+           (is (= #{[1 0 0]}
+                  (db/q '[:find ?pass ?fail ?error :in $ ?run-id ?symbol
+                          :where [?run :seon.test.run/id ?run-id] [?run :seon.test.run/members ?member]
+                                 [?member :seon.test.member/symbol ?symbol]
+                                 [?member :seon.test.member/pass-count ?pass]
+                                 [?member :seon.test.member/fail-count ?fail]
+                                 [?member :seon.test.member/error-count ?error]]
+                        (db/db connection) (:seon.test.run/id provenance) target)))))))))
 
 (deftest a-cold-worker-does-not-arm-its-base-around-host-test-bodies
   (test-support/preserving-instrumentation-state
