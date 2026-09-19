@@ -1,11 +1,59 @@
 ---
 type: research
-status: blocked
+status: active
 created: 2026-09-20
 tags: [schema, config, plan, data-model]
 ---
 
 # Wave 1d — config and plan family
+
+## Resumed ruling and C7 result
+
+The orchestrator approved option 1 plus the bounded R2 extension in
+`src/seon/turn.clj`'s attempt recorder and `test/seon/turn_test.clj`.
+C14 changes reaching render files remain deferred. The original stop record
+below is historical; this section and subsequent results supersede its status.
+
+C7 changes `:seon.config.agent/show-all-settings` and
+`:seon.config.ai/retain-reasoning` from `:boolean` to `[:= true]`.
+Their docstrings state that absence disables the setting and retraction clears
+it. Runtime consumers (`src/seon/agent.clj:137`, `src/seon/turn.clj:3913`)
+already test truth and need no change. `config/default.edn` already declares
+both absent.
+
+The new `optional-setting-flags-assert-only-true` regression uses the canonical
+fixture and `test-support/apply-config!`, pulls the two stored true facts,
+validates true/false/nil against the database's acquired projection, then
+reconciles their absence and pulls the surviving config identity. It passed.
+Fast command:
+`bin/test-fast --paths resources/seon/schemas/seon.config.agent.edn resources/seon/schemas/seon.config.ai.edn test/seon/config_test.clj -- seon.config-test`.
+Tally: **22 tests, 105 assertions, 8 failures, 3 errors**; log
+`tmp/config-plan-1d-c7-fast.log`. The failures include existing missing-cluster
+and error-diagnostic contract paths; this is not a green namespace proof.
+The requested five-namespace load completed with **exit 0, :loads** before
+commit. The test namespace itself includes a subprocess-loading regression;
+no second test invocation was launched by this lane.
+
+**RESET NEEDED (C7):** the two attributes above wherever stored overlays contain
+explicit false. No lifecycle command or reset was run. The unowned
+`test/seon/data_shapes_test.clj:217–233` still writes and expects false for
+retain-reasoning; its owner must convert that case to absence.
+
+R3 is implemented and its new fixture regression passed, including pulls of
+all four installed schema declarations. The schema namespace tally is
+**34 tests, 3,535 assertions, 24 failures, 1 error**. Existing calls to
+`seon.error/diagnostic` at `src/seon/schema.clj:2796` omit the now-required
+base observation; related render-contract and projection-source refusal tests
+also fail. No such foreign owner hunk was changed. A concurrently added hunk
+in `test/seon/schema_test.clj` is preserved and excluded from this lane's
+commit. The first four-namespace request executed no tests because
+`seon.plan-test` does not yet exist; the R3 iteration then selected
+`seon.schema-test` alone.
+
+Cold proof owed for C7:
+`bin/test --paths resources/seon/schemas/seon.config.agent.edn resources/seon/schemas/seon.config.ai.edn test/seon/config_test.clj -- seon.config-test`,
+then orchestrator `bin/test --platform`. Hook publication is configured off;
+these fixture observations do not claim default-cluster adoption.
 
 ## Decision boundary before production edits
 

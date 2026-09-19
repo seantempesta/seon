@@ -23,6 +23,30 @@
         (comp (filter vector?) (map first))
         (schema/schema-definition :seon.config/manifest)))
 
+(deftest optional-setting-flags-assert-only-true
+  (test-support/with-database
+    (fn [connection]
+      (let [flags {:seon.config.agent/show-all-settings true
+                   :seon.config.ai/retain-reasoning true}]
+        (test-support/apply-config! connection "flag-test" flags)
+        (let [database (db/db connection)
+              projection (schema/projection-from-database database)
+              row (db/pull database (vec (keys flags))
+                           [:seon.config/cluster "flag-test"])]
+          (is (= flags row))
+          (doseq [attribute (keys flags)]
+            (let [valid? (schema/projection-validator projection attribute)]
+              (is (valid? true))
+              (is (not (valid? false)))
+              (is (not (valid? nil))))))
+        (test-support/apply-config! connection "flag-test" {})
+        (let [row (db/pull (db/db connection)
+                           [:seon.config/cluster
+                            :seon.config.agent/show-all-settings
+                            :seon.config.ai/retain-reasoning]
+                           [:seon.config/cluster "flag-test"])]
+          (is (= {:seon.config/cluster "flag-test"} row)))))))
+
 (defn- with-default-document
   [document body]
   (let [resource io/resource

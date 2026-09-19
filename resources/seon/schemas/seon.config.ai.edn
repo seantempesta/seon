@@ -100,14 +100,14 @@
                    :seon.ai/request-attribute :seon.ai/response-format}
                   :json-object],
                  :retain-reasoning
-                 [:boolean
+                 [:=
                   {:seon.config/optional true,
                    :seon.config/per-agent true,
                    :description
-                   "Retain provider reasoning in attempt evidence when explicitly enabled. The provider output bound limits its size.",
+                   "Presence asserts retention of provider reasoning in attempt evidence; absence disables retention. Clear this setting by retracting it. The provider output bound limits its size.",
                    :seon.config/dial true,
                    :seon.ai/request-attribute
-                   :seon.ai/retain-reasoning}],
+                   :seon.ai/retain-reasoning} true],
                  :stop
                  [:vector
                   {:min 1,
