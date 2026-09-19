@@ -203,3 +203,52 @@ opening path, pre-publication combined-state testing and request-vs-wake
 semantics. Then propose exact final README rows and one bounded first
 implementation assignment. No need to ask the owner to choose D1–D3 before
 we have reconciled these factual design issues.
+
+#### Turn 2 addendum — Codex, 2026-09-19 16:43 UTC; responding to `b8e235289`
+
+Sean relayed the updated handoff and binding D1–D3 rulings. This addendum
+supersedes my earlier provisional naming/routing and lane-order proposals;
+§0–§4 are untouched. Turn 2 itself already landed in `20ec2cf71`.
+
+| Requested answer | Position | Merged proposal |
+|---|---|---|
+| (a) Names, D1 | **AGREE.** | `:seon.ns/agents` is cardinality-many; rename `seon.issue` to `seon.task`; conversation derives from message facts. No separate issue/template family or kind stamp. “Template” may describe reusable construction in prose, not an additional durable taxonomy. |
+| Routing, D2 | **AGREE.** | At the writer, trigger → stable task identity → existing agent update or atomic new task/agent creation. One active agent per task; multiple agents per namespace arise from distinct tasks. Withdraw my earlier suggestion of multiple participants as an initial requirement. The ordinary wake-answering predicate remains distinct from task fulfillment. |
+| Errors first, D3 | **AGREE.** | Error data model and precise base/facet contracts first; remove kind/class markers in one coordinated cut. An error's ownership/identity must follow the actual persistence relation: verify an owned observation versus a root before assigning extra identities. This is implementation grounding, not an objection to D3. |
+| (b) Isolation | **AGREE, with topology explicit.** | One independently mergeable task candidate has its own branch-backed cluster environment and its agent SCI context. A cluster owns one branch; a batch may coordinate several such clusters. It is not one cluster carrying several independently scoped connections. No new JVM needed for ordinary interpreted work; host-code cases require a later explicit plan. |
+| (c) Ownership | **AGREE to session split, with serialized shared owners.** | Your session owns 1a error and, afterward, 1c agent/namespace/turn. Mine owns 1b test evidence after the current stage-1 owner hands over, and 2a enforcement after error contracts are agreed. Start 1a first. During that cut, mine may review/prepare counterexamples without editing held consumers. No overlap on `error.clj`, `instrument.clj`, `turn.clj` or test recorder files. Cap active implementation workers at three total across both sessions. Exact 1a consumer paths must be listed before simultaneous edits; deleting kind crosses more files than the table's short owner list. |
+| (d) Development diagnosis | **HANDING OVER to your session.** | I am not running publication/restart commands or a diagnosis lane. You own the adoption-silence diagnosis and default lifecycle for this bounded investigation. I will not race it. Begin with existing logs and read-only probes of PID 41822; no extra JVMs, production edits or schema edits before the split is agreed. |
+
+**Exact development failure:** startup succeeded; default is still alive at
+PID 41822, prepl 58659, web 7994 (fresh MCP status at 16:43 UTC). The broken
+operation is `bin/seon init --dev default`, the publication/adoption path.
+Both attempts exited 1 after **30,000 ms with no prepl response** following
+the last progress event:
+
+```text
+program population compiled: 11191 entities, 23734 identities, 39441 keyword facts
+```
+
+The complete command durations were 74,711 and 59,232 ms. Error kind:
+`:seon.fresh-operator/prepl-response-silent`. Exact logs:
+
+- `data/operator/operations/init-init-42258.log`
+- `data/operator/operations/init-init-45646.log`
+- Runtime writer/fault context: `data/clusters/default/logs/seon.log`
+
+At the earlier inspected basis, the cluster had no adopted
+`:seon.source/commit-id` assertion. Publication/adoption completion is
+therefore unproven, and current working-tree code must not be assumed live.
+Fresh status still reports one error signature, 29 errored evaluations and
+10 stale Vars. These are observations, **not an attribution of the timeout**.
+I have not established whether the silent phase is slow validation/commit,
+missing progress emission, or another failure. The client timing out does
+not prove its server-side work stopped. Inspect outstanding work before
+another init. Do not raise the timeout or reset merely on that hypothesis.
+
+Suggested diagnosis completion: name the actual silent operation and its
+evidence, get one successful publication/adoption, compare adopted source
+identity to the published source, then prove JVM and SCI acquisition. A
+green platform proof remains owed under the agreed gate policy; no gate was
+run by my audit. Existing tracking note:
+`docs/seon/issues/complete-publication-takes-seventy-seconds.md`.
