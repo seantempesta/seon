@@ -4194,3 +4194,17 @@ needed the fixture file the preflight lane held; released and the lane
 resumed to land it (typed bound failure naming what never arrived, never a
 silent SIGTERM). Medium data point: diagnosis-quality work with child-log
 bytes; stopped correctly at the held file.
+
+## 2026-09-19 ~22:15 UTC — CODEX USAGE LIMIT hit during lane 1a
+
+`error-family-1a` transcript: "You've hit your usage limit … try again at
+Sep 22nd, 2026 4:29 PM" (or purchase credits). Its session is preserved for
+`bin/codex-agent resume error-family-1a` after the owner re-ups. Partial
+state left in the tree, UNCOMMITTED and to be preserved by everyone:
+`src/seon/error.clj`, `test/seon/error_test.clj`, `test/seon/instrument_test.clj`
+(steps 3–6 under D12: predicate retirement, kind/class-marker deletion, D1–D6,
+declared error outputs; its fast run of seon.error-test was mid-flight).
+`reset-boot-readiness` (resumed 2 min earlier for the fixture repair) shows no
+limit line yet; if it stops, its session is also preserved. Owner asked to be
+messaged; no relaunch, no move to Opus, until the go-ahead. The A0/stage-1
+gate 4 keeps running (a gate, not a lane).
