@@ -4132,3 +4132,15 @@ never swept; use the launcher's own orphan announcement (slot preamble) as
 the holder authority. Tools-queue item 6: `bin/test` writes a holder record
 (pid + start instant) in its run root so a sweep can verify liveness
 exactly. Third run: `a0-stage1-cold-3-2026-09-19.log`.
+
+## 2026-09-19 ~20:45 UTC — 1a step 1 landed; D12 rules out a general error predicate
+
+`error-family-1a` (astra high) landed `431093b97`: audit B's C1 REFUTED — facets
+persist through the real occurrence owner (`:seon.error/occurrences` component,
+`error.clj:1560-1617`), regression `error-facets-persist-through-the-real-occurrence-owner`,
+fast 79/502/0/0; the kind-retirement inventory covers 2,357 lines in 323 files
+(`error-kind-retirement-inventory-2026-09-19.md`). It stopped at the design gate
+"who carries the projection for `error?`" with three options; the owner ruled
+D12: no general predicate — contracts name the exact error schemas, the wrapper
+validates them, callers test the specific declared schema's required members.
+Lane resumed on D12 for steps 3–6.
