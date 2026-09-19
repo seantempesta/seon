@@ -1,0 +1,16 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+boot phase: namespaces
+Warning: environ value /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home for key :java-home has been overwritten with /opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home
+boot phase: repl
+boot phase: store
+boot phase: branch
+boot phase: recovery
+boot phase: config
+Sep 19, 2026 12:24:58 PM org.apache.lucene.internal.vectorization.PanamaVectorizationProvider <init>
+INFO: Java vector incubator API enabled; uses preferredBitSize=128
+boot phase: program
+boot phase: work-launcher
+boot phase: agents
+2026-09-19T18:25:09.517Z seans-m5-macbook-pro WARN [seon.cluster:2954] - seon default view: port 7994 was taken, serving on http://127.0.0.1:62552 instead — a bookmark on 7994 will not reach this cluster
+boot phase: web
+boot phase: ready

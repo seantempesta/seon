@@ -1,0 +1,17 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+boot phase: namespaces
+boot phase: repl
+boot phase: store
+boot phase: branch
+boot phase: recovery
+boot phase: config
+Sep 19, 2026 1:03:35 PM org.apache.lucene.internal.vectorization.PanamaVectorizationProvider <init>
+INFO: Java vector incubator API enabled; uses preferredBitSize=128
+boot phase: program
+boot phase: work-launcher
+boot phase: agents
+2026-09-19T19:03:42.296Z seans-m5-macbook-pro WARN [seon.cluster:2954] - seon default view: port 7994 was taken, serving on http://127.0.0.1:64042 instead — a bookmark on 7994 will not reach this cluster
+boot phase: web
+boot phase: ready
+
+Testing seon.boot-runner-smoke-test

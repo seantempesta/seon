@@ -2236,10 +2236,19 @@
 
 (defn- await-advertisement!
   [root name pid ^ServerSocket ready-server silence-ms]
-  (let [handle
+  (let [started (System/nanoTime)
+        handle
         (or (live-process-handle pid)
             (fail! "The cluster JVM exited before readiness."
-                   {:seon.fresh-operator/name name
+                   {:seon.error/kind :seon.fresh-operator/boot-process-exited
+                    :seon.fresh-operator/phase "launch"
+                    :seon.fresh-operator/awaited-event "READY"
+                    :seon.fresh-operator/elapsed-ms
+                    (quot (- (System/nanoTime) started) 1000000)
+                    :seon.fresh-operator/child-log
+                    (let [file (io/file (str (log-path root name)))]
+                      (if (.isFile file) (slurp file) ""))
+                    :seon.fresh-operator/name name
                     :seon.boot/pid pid}))
         events (LinkedBlockingQueue.)]
     (CompletableFuture/runAsync
@@ -2280,8 +2289,12 @@
      (reify Runnable
        (run [_]
          (.offer events {:seon.fresh-operator/event :exit}))))
-    (loop [phase "launch"]
-      (let [event (.poll events silence-ms TimeUnit/MILLISECONDS)]
+    (loop [phase "launch"
+           phase-started (System/nanoTime)
+           closed? false]
+      (let [remaining-ms (max 0 (- silence-ms
+                                   (quot (- (System/nanoTime) phase-started) 1000000)))
+            event (.poll events remaining-ms TimeUnit/MILLISECONDS)]
         (when-not event
           (report-silence-backstop!
            (str "cluster boot phase " phase) silence-ms)
@@ -2292,6 +2305,12 @@
                   :seon.fresh-operator/name name
                   :seon.boot/pid pid
                   :seon.fresh-operator/phase phase
+                  :seon.fresh-operator/awaited-event (if closed? "READY or child exit" "READY")
+                  :seon.fresh-operator/elapsed-ms
+                  (quot (- (System/nanoTime) started) 1000000)
+                  :seon.fresh-operator/child-log
+                  (let [file (io/file (str (log-path root name)))]
+                    (if (.isFile file) (slurp file) ""))
                   :seon.fresh-operator/silence-backstop-ms silence-ms
                   :seon.config/attribute
                   :seon.config.operator/event-silence-backstop-ms}))
@@ -2300,7 +2319,7 @@
           (let [next-phase (:seon.fresh-operator/phase event)]
             (println (str "● " name " boot: " next-phase))
             (flush)
-            (recur next-phase))
+            (recur next-phase (System/nanoTime) false))
 
           :ready nil
 
@@ -2310,7 +2329,13 @@
                   :seon.fresh-operator/boot-process-exited
                   :seon.fresh-operator/name name
                   :seon.boot/pid pid
-                  :seon.fresh-operator/phase phase})
+                  :seon.fresh-operator/phase phase
+                  :seon.fresh-operator/awaited-event "READY"
+                  :seon.fresh-operator/elapsed-ms
+                  (quot (- (System/nanoTime) started) 1000000)
+                  :seon.fresh-operator/child-log
+                  (let [file (io/file (str (log-path root name)))]
+                    (if (.isFile file) (slurp file) ""))})
 
           :failure
           (fail! (:seon.fresh-operator/message event)
@@ -2327,12 +2352,9 @@
                           (:seon.fresh-operator/error-kind event))))
 
           :closed
-          (fail! "The cluster JVM closed readiness before READY."
-                 {:seon.error/kind
-                  :seon.fresh-operator/readiness-closed
-                  :seon.fresh-operator/name name
-                  :seon.boot/pid pid
-                  :seon.fresh-operator/phase phase})
+          ;; EOF can precede ProcessHandle.onExit. Keep the original phase
+          ;; deadline while awaiting that terminal event; EOF is not a cause.
+          (recur phase phase-started true)
 
           :reader-error
           (throw (:seon.fresh-operator/cause event))

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-19
 tags: [testing, boot, readiness]
@@ -67,11 +67,37 @@ bytes. Two repetitions of the unmodified full sequence encountered the
 publication subprocess's separate 180,000 ms deadline before any cluster
 child existed; those do not independently reproduce the original timing.
 
-The repair belongs to fixture lifecycle/cleanup ownership. The assigned
-lane is explicitly forbidden to edit that held file, and it remains dirty
-from its owner's work. This issue remains open; changing recovery code
-would not fix the verified race. The owned canonical recovery regression
-now also requires a positive zero-work result before its refused-query case.
+The repair belongs to fixture lifecycle/cleanup ownership. At the first
+landing the assigned lane was forbidden to edit that held file, so the
+issue remained open pending release. Changing recovery code would not fix
+the verified race. The canonical recovery regression also requires a
+positive zero-work result before its refused-query case. The subsequent
+release and repair are recorded below.
 
 Detailed evidence and the reproduction script:
 [reset-boot-readiness-2026-09-19.md](../../prds/steward-platform/research/reset-boot-readiness-2026-09-19.md).
+
+
+## Repair — 2026-09-19
+
+After `d199f53c0` the orchestrator released the fixture. Cleanup now runs
+inside the lifecycle holder, after the operator's READY or terminal boot
+failure observation. A caller hold timeout cannot invoke `down!` while
+its holder is still booting. Actual fixture phase events renew the existing
+hold deadline; every existing bound remains. Timeout evidence names the
+missing READY/terminal outcome, phase, elapsed milliseconds and child log.
+
+The readiness owner waits through socket EOF for the already-subscribed
+child-exit event, using the remaining original phase deadline. A dead child
+reports `boot-process-exited` with its phase and log. A live child whose
+readiness stream closes fails at that deadline with `boot-phase-silent`,
+naming READY or child exit as the missing event. Neither case reports an
+unexplained `readiness-closed`.
+
+The single fixture regression `boot-cleanup-awaits-readiness-or-child-exit`
+verifies the caller can time out without cleaning its live child, delayed
+READY succeeds, actual process exit preserves recovery-phase evidence, and
+EOF without a terminal event fails boundedly. The canonical recovery test
+continues to verify fresh zero-work recovery and typed query refusal.
+Cold platform proof remains the orchestrator's obligation; measured fast
+results and durable child-log archives are in the linked landing note.

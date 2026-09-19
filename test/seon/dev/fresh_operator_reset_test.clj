@@ -24,6 +24,120 @@
 (def ^:private immediate-refusal-bound-ms 5000)
 (def ^:private real-boot-bound-ms 300000)
 
+(defn- with-boot-cleanup!
+  "The holder owns cleanup, including after its caller's wait bound expires.
+  The transition must await READY or a terminal boot failure before returning."
+  [root bound-ms progress transition cleanup]
+  (let [started (System/nanoTime)]
+    (try
+      (operator.state/with-lifecycle-lock!
+       {:seon.operator.lock/path
+        (operator.state/root-lifecycle-lock-path (str root))
+        :seon.operator.lock/command "boot without test namespaces"
+        :seon.operator.lock/progress progress
+        :seon.operator.lock/acquisition-timeout-ms bound-ms
+        :seon.operator.lock/hold-timeout-ms bound-ms}
+       (fn []
+         (try
+           (transition)
+           (catch Throwable failure
+             (let [file (io/file root "data/clusters/default/logs/seon.log")]
+               (throw (ex-info (ex-message failure)
+                               (assoc (ex-data failure)
+                                      ::child-log (if (.isFile file) (slurp file) ""))
+                               failure))))
+           (finally (cleanup)))))
+      (catch Throwable failure
+        (if (= :seon.operator/lock-hold-timeout (:seon.error/kind (ex-data failure)))
+          (let [file (io/file root "data/clusters/default/logs/seon.log")]
+            (throw (ex-info "Fixture bound expired awaiting READY or terminal boot failure; holder retains cleanup."
+                            (assoc (ex-data failure)
+                                   ::awaited-event "READY or terminal boot failure"
+                                   ::phase @progress
+                                   ::elapsed-ms (quot (- (System/nanoTime) started) 1000000)
+                                   ::child-log (if (.isFile file) (slurp file) ""))
+                            failure)))
+          (throw failure))))))
+
+(deftest ^{:seon.test/platform "Fixture cleanup must follow terminal boot readiness."}
+  boot-cleanup-awaits-readiness-or-child-exit
+  (doseq [mode [:ready :exit :silent]]
+    (let [root (fresh-root)
+          child (#'operator-test/start-disposable-process!)
+          server (java.net.ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))
+          release (promise)
+          completed (promise)
+          outcome (promise)
+          cleaned (atom false)
+          directory (io/file root "data/clusters/default")
+          log (io/file directory "logs/seon.log")
+          writer (Thread.
+                  (fn []
+                    (with-open [socket (java.net.Socket. "127.0.0.1" (.getLocalPort server))
+                                output (io/writer (.getOutputStream socket))]
+                      (.write output "recovery\n")
+                      (.flush output)
+                      (when (= :release (deref release real-boot-bound-ms :timeout))
+                        (case mode
+                          :ready (do (.write output "ready\n") (.flush output))
+                          :exit (.destroyForcibly child)
+                          :silent nil)))))
+          progress (atom "await READY")]
+      (.mkdirs (.getParentFile log))
+      (spit log "child reached recovery\n")
+      (spit (io/file directory "prepl.edn")
+            (pr-str {:seon.boot/cluster-name "default"
+                     :seon.boot/pid (.pid child)
+                     :seon.boot/start-instant (#'operator-test/process-start-date child)
+                     :seon.boot/prepl-port 1
+                     :seon.render.web/url "http://127.0.0.1:1"}))
+      (.setDaemon writer true)
+      (.start writer)
+      (try
+        (let [waiter (future
+                       (try
+                         (with-boot-cleanup!
+                          root 250 progress
+                          (fn []
+                            (deliver outcome
+                                     (operator-private-outcome
+                                      'await-advertisement! (str root) "default"
+                                      (.pid child) server 2000)))
+                          (fn []
+                            (reset! cleaned true)
+                            (deliver completed :cleaned)))
+                         (catch Throwable failure (ex-data failure))))
+              expired (deref waiter immediate-refusal-bound-ms ::timeout)]
+          (is (= :seon.operator/lock-hold-timeout (:seon.error/kind expired)))
+          (is (= "READY or terminal boot failure" (::awaited-event expired)))
+          (is (= "await READY" (::phase expired)))
+          (is (pos? (::elapsed-ms expired)))
+          (is (= "child reached recovery\n" (::child-log expired)))
+          (is (false? @cleaned) "An expired caller cannot clean a boot still awaiting READY.")
+          (is (.isAlive child))
+          (deliver release :release)
+          (is (= :cleaned (deref completed immediate-refusal-bound-ms ::timeout)))
+          (let [result (deref outcome immediate-refusal-bound-ms ::timeout)
+                data (::data result)]
+            (when (= :ready mode)
+              (is (= "default" (:seon.boot/cluster-name (::value result)))))
+            (when (#{:exit :silent} mode)
+              (is (= (if (= :exit mode)
+                       :seon.fresh-operator/boot-process-exited
+                       :seon.fresh-operator/boot-phase-silent)
+                     (:seon.error/kind data)))
+              (is (= "recovery" (:seon.fresh-operator/phase data)))
+              (is (str/includes? (:seon.fresh-operator/awaited-event data) "READY"))
+              (is (pos? (:seon.fresh-operator/elapsed-ms data)))
+              (is (= "child reached recovery\n" (:seon.fresh-operator/child-log data))))))
+        (finally
+          (deliver release :release)
+          (.close server)
+          (.destroyForcibly child)
+          (.get (.onExit (.toHandle child)) 5 java.util.concurrent.TimeUnit/SECONDS)
+          (.join writer immediate-refusal-bound-ms)
+          (delete-recursively! root))))))
+
 (deftest ^{:seon.test/platform "Reset preflight and recovery are required before the bulk tier."}
   lifecycle-holder-evidence-is-immediate-and-stale-records-are-reclaimed
   (let [root (fresh-root)
@@ -354,8 +468,11 @@
   (let [root (fresh-root)
         project-root @#'operator-test/project-root
         broken (io/file project-root "test/seon/boot_unloadable_test.clj")
-        runnable (io/file project-root "test/seon/boot_runner_smoke_test.clj")]
-    (try
+        runnable (io/file project-root "test/seon/boot_runner_smoke_test.clj")
+        progress (atom "fixture preparation")]
+    (with-boot-cleanup!
+     root real-boot-bound-ms progress
+     (fn []
       (let [cache (dev.kondo/ensure-dependency-cache! (str project-root))]
         (is (#{:current :warmed} (::dev.kondo/status cache)) (pr-str cache)))
       (spit broken
@@ -365,22 +482,17 @@
             (str "(ns seon.boot-runner-smoke-test\n"
                  "  (:require [clojure.test :refer [deftest is]]))\n"
                  "(deftest indexed-smoke (is (= 4 (+ 2 2))))\n"))
-      (operator.state/with-lifecycle-lock!
-       {:seon.operator.lock/path
-        (operator.state/root-lifecycle-lock-path (str root))
-        :seon.operator.lock/command "boot without test namespaces"
-        :seon.operator.lock/acquisition-timeout-ms real-boot-bound-ms
-        :seon.operator.lock/hold-timeout-ms real-boot-bound-ms}
-       (fn []
-         (doseq [[function-name arguments]
-                 [['init! []] ['init! ["default"]]
-                  ['start! ["default"]]]]
-           (let [outcome (operator-private-outcome
-                          function-name (str root) arguments)]
-             (is (nil? (::message outcome)) (pr-str outcome))
-             (when (::message outcome)
-               (throw (ex-info "The isolated operator phase refused."
-                               (::data outcome))))))))
+       (doseq [[phase function-name arguments]
+               [["publication" 'init! []] ["fork" 'init! ["default"]]
+                ["await READY" 'start! ["default"]]]]
+         (reset! progress phase)
+         (let [outcome (operator-private-outcome
+                        function-name (str root) arguments)]
+           (is (nil? (::message outcome)) (pr-str outcome))
+           (when (::message outcome)
+             (throw (ex-info "The isolated operator phase refused."
+                             (::data outcome))))))
+      (reset! progress "in-process test after READY")
       (let [advertisement
             (edn/read-string
              (slurp (io/file root "data/clusters/default/prepl.edn")))
@@ -438,8 +550,9 @@
                 :seon.test/fail-count 0
                 :seon.test/error-count 0}
                result)
-            (pr-str result)))
-      (finally
+            (pr-str result))))
+     (fn []
+        (reset! progress "cleanup after terminal boot outcome")
         (operator-private-outcome 'down! (str root) ["--force"])
         (.delete broken)
         (.delete runnable)

@@ -299,3 +299,169 @@ bin/test --platform
 After its owner lands the fixture lifecycle repair, the named real reset
 boot test must also pass with logs retained on failure. A green recovery
 unit test alone cannot prove that fixture's asynchronous cleanup ownership.
+
+
+## Released fixture repair — 2026-09-19
+
+The orchestrator accepted `9851d239e` and `0c98a5344`, then released the
+fixture after `d199f53c0`. The Path.resolve common-directory fix and all
+existing platform metadata are preserved. The previous held-file boundary
+above is historical; this followup implements the repair at that owner.
+
+`with-boot-cleanup!` puts the complete fixture and cleanup in the lifecycle
+holder. Its caller can expire without entering cleanup concurrently. The
+holder awaits the existing operator READY or terminal-failure event before
+cleanup. Publication, fork, start, in-process test and cleanup publish actual
+phase transitions to the existing progress atom. The 300,000 ms acquisition
+and hold bounds and all underlying operator bounds remain. An expired
+fixture waiter reports its awaited READY/terminal event, phase, elapsed
+milliseconds and child log; it leaves cleanup with the running holder.
+
+At the readiness owner, EOF no longer masquerades as the failure cause.
+It waits for the already-subscribed ProcessHandle exit event under the
+remaining original phase deadline. Exit reports `boot-process-exited` with
+phase, elapsed milliseconds, missing READY and child log. If neither READY
+nor exit arrives, the same bound reports `boot-phase-silent`, naming what
+never arrived. EOF does not renew that deadline. Explicit child failure
+messages keep their existing handling.
+
+One fixture regression, `boot-cleanup-awaits-readiness-or-child-exit`, uses
+real lifecycle locking, sockets and disposable child processes. Its caller
+bound expires while readiness remains pending; it verifies cleanup has not
+run and the child remains alive, then releases either READY, child exit,
+or EOF from a live child. It verifies delayed READY succeeds, a dead child
+reports recovery and its log, and missing terminal events fail boundedly.
+It neither replaces the canonical database fixture nor changes recovery.
+The earlier canonical positive/refused recovery regression remains.
+
+### The earlier one pre-existing failure, exactly
+
+`seon.cluster-test/schema-row-convergence-uses-the-stores-own-semantics`
+failed this assertion:
+
+```clojure
+(= [] (changes database (schema/registered-schemas)))
+```
+
+Actual changes contained schema rows, including
+`:seon.config.ai.retry/base-delay-ms`, `jitter-fraction`,
+`maximum-delay-ms`, `maximum-retries`, `maximum-total-delay-ms`, and
+`multiplier`, whose forms reference their `:seon.ai.retry/*` aliases.
+The prior baseline was 12 tests / 59 assertions / 1 failure / 0 errors;
+the positive recovery assertion made it 12 / 60 / 1 / 0. This is **not**
+the preflight lane's publication-timeout residue. That lane reported
+`seon.operator.subprocess/deadline-exceeded` for publication child 92606
+at its 180,000 ms process-exit deadline, before any cluster JVM existed;
+its last progress was “program population compiled: 30619 entities, 23656
+identities, 39295 keyword facts.” Read its
+[landing note](preflight-fixture-path-2026-09-19.md) end to end.
+
+### Durable evidence
+
+The original `tmp/reset-boot-readiness-*` evidence cited above is archived
+under [reset-boot-readiness-evidence-2026-09-19/](reset-boot-readiness-evidence-2026-09-19/).
+The child logs are unchanged raw bytes (`success-child.log` and
+`interference-{before,after}-cleanup-child.log`). `operator-operations.tar.gz`
+retains the three roots' `data/operator/operations` captures. The other
+`.log.gz` files preserve full earlier output with the original prefix
+removed: `interference`, `exact`, `exact2`, `fast-baseline`, `fast-isolated`,
+`init`, `init2`, `start`, and `fast` (the refused overlay admission).
+The reproduction scripts are already included in this note. These archives
+supersede the disposable `tmp/` locations; the original platform-drill log
+belongs to its producer and was left alone.
+
+### Followup fast verification
+
+The combined HEAD-plus-owned-paths run at `76ed03e3` completed at
+2026-09-19T18:57:01Z: **25 tests / 241 assertions / 2 failures / 1 error**.
+The new readiness/cleanup regression passed all **35 assertions**, covering
+READY, exit and silent EOF, from 18:51:56.289Z to 18:51:59.002Z. The canonical
+recovery regression also passed. The two remaining boundaries were:
+
+1. The existing schema-convergence assertion quoted above.
+2. The full boot fixture's publication subprocess, pid 1883, exceeded its
+   180,000 ms process-exit deadline, was reaped, and produced one assertion
+   failure plus one exception. Cleanup observed zero process records and
+   no cluster JVM. This repeats the preflight lane's publication boundary;
+   it did not report readiness-closed or run cleanup against a booting child.
+
+Command:
+
+```sh
+bin/test-fast --paths script/seon/fresh_operator.clj test/seon/dev/fresh_operator_reset_test.clj test/seon/cluster_test.clj -- seon.cluster-test seon.dev.fresh-operator-reset-test
+```
+
+Full output: [repair-fast.log.gz](reset-boot-readiness-evidence-2026-09-19/repair-fast.log.gz).
+An earlier initialization attempt captured an unfinished parenthesis while
+this lane was editing; it ran no tests, was corrected, and is not a tally.
+The final reset-only run follows the last fixture phase-label additions and
+initially-dead-child diagnostic fields. No foreign dirty source was included
+in these snapshots. The old error-family overlay boundary remains historical;
+this followup required no extra worktree and did not touch held files.
+
+### Final bytes: real READY observed, later test-result boundary
+
+The final reset-only snapshot at `76ed03e3` completed at
+2026-09-19T19:04:17Z: **13 tests / 184 assertions / 1 failure / 0 errors**.
+The new regression again passed all 35 assertions (18:58:34.009Z–18:58:36.690Z).
+This time publication completed within its bound, fork succeeded, and
+isolated cluster child **4654 reached READY**. The child's own log records
+recovery → config → program → work-launcher → agents → web → ready, then
+`Testing seon.boot-runner-smoke-test`. At 19:04:05Z the fixture finished
+its test observation and cleanup reaped child 4654 with SIGTERM. Cleanup
+therefore followed READY and test completion, rather than causing EOF
+while boot awaited READY.
+
+Command:
+
+```sh
+bin/test-fast --paths script/seon/fresh_operator.clj test/seon/dev/fresh_operator_reset_test.clj -- seon.dev.fresh-operator-reset-test
+```
+
+The remaining assertion is in
+`cluster-boot-omits-test-namespaces-and-in-process-run-loads-one`:
+
+```clojure
+(= {:seon.test/sym 'seon.boot-runner-smoke-test/indexed-smoke
+    :seon.test/pass-count 1
+    :seon.test/fail-count 0
+    :seon.test/error-count 0}
+   result)
+```
+
+Actual result has the same symbol, pass-count 1 and fail-count 0, but
+**error-count 1**. This is after READY, not the publication-timeout residue
+and not readiness-closed. The existing result projection omits additional
+error detail, so this note does not attribute its cause. That in-process
+test-result boundary belongs to the held test-system owners; its assertion
+and result bytes are preserved in
+[repair-final-fast.log.gz](reset-boot-readiness-evidence-2026-09-19/repair-final-fast.log.gz).
+The boot/cleanup repair is verified; the complete namespace is not green.
+
+[final-boot-child.log](reset-boot-readiness-evidence-2026-09-19/final-boot-child.log)
+is the raw 681-byte child snapshot taken after READY and smoke-test entry,
+before cleanup. It is not claimed to contain later test-result diagnostics.
+`final-operator-operations.tar.gz` retains the operation-log snapshots taken
+before READY; publication had completed. The full parent log above retains
+READY, the exact later assertion and cleanup's recorded process identity.
+
+Files in this repair commit: `script/seon/fresh_operator.clj` (readiness
+only), `test/seon/dev/fresh_operator_reset_test.clj` (fixture lifecycle,
+cleanup and one regression), the issue note, this landing note, and its
+dated evidence directory. The previously accepted `test/seon/cluster_test.clj`
+change remains. No recovery production code needed changing. The released
+fixture's Path.resolve fix and existing platform metadata remain intact.
+
+All owned test launchers and children have exited; their snapshots and
+scratch roots are removed. The cited logs now live in the dated evidence
+directory; no `tmp/reset-boot-readiness-*` artifacts remain. No default
+lifecycle operation, foreign session operation, cold gate or foreign edit
+was performed. Shared HEAD advanced while the named snapshots ran; the
+snapshot commits above identify exactly what they exercised.
+
+The orchestrator still owes the cold gates:
+
+```sh
+bin/test --paths script/seon/fresh_operator.clj test/seon/dev/fresh_operator_reset_test.clj test/seon/cluster_test.clj -- seon.cluster-test seon.dev.fresh-operator-reset-test
+bin/test --platform
+```
