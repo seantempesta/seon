@@ -8,6 +8,7 @@
   (:require [clojure.test :as test]
             [seon.schema :as schema]
             [seon.test.arm :as arm]
+            [seon.test.selection :as selection]
             [seon.test.runner :as runner]))
 
 (defn -main
@@ -42,10 +43,11 @@
                                  (#'runner/reassert-contracts! arming "test-fast"))
                                (report event))]
                      (#'runner/run-request!
-                      {:seon.test.runner/namespaces namespaces
-                       :seon.test.run/id (str (random-uuid))
-                       :seon.test.run/at (java.util.Date.)
-                       :seon.test.run/git-sha "working-tree"}
+                      (merge (selection/overlay-provenance ".")
+                             {:seon.test.runner/namespaces namespaces
+                              :seon.test.run/id (str (random-uuid))
+                              :seon.test.run/at (java.util.Date.)
+                              :seon.test.run/git-sha "working-tree"})
                       progress nil))
                    summary (:seon.test.runner/summary result)]
                (if (zero? (+ (:seon.test.runner/fail-count summary)

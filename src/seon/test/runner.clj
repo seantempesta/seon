@@ -1286,6 +1286,8 @@
       :seon.test.run/git-sha (:seon.test.run/git-sha request)
       :seon.test.runner/summary summary
       :seon.test.runner/results (captured-results @capture)}
+      (seq (:seon.test.run/callers-at-head request))
+      (assoc :seon.test.run/callers-at-head (:seon.test.run/callers-at-head request))
       stopped-after (assoc ::stopped-after stopped-after))))
 
 (defonce ^:private resolve-admitted-test
@@ -2589,7 +2591,13 @@
         forms (:seon.schema.projection/forms (db/carried-projection database))
         provenance-attributes (mapv first (filter vector? (rest (get forms :seon.test.run/provenance))))
         recorded-run (execution-read
-                      (db/pull database provenance-attributes [:seon.test.run/id run-id]))
+                      (db/pull database
+                               (conj (vec (remove #{:seon.test.run/callers-at-head} provenance-attributes))
+                                     [:seon.test.run/callers-at-head :limit nil])
+                               [:seon.test.run/id run-id]))
+        recorded-run (cond-> recorded-run
+                       (:seon.test.run/callers-at-head recorded-run)
+                       (update :seon.test.run/callers-at-head set))
         _ (when (not= (select-keys run provenance-attributes)
                       (dissoc recorded-run :db/id))
             (execution-refusal! operation run-id :seon.test.run/immutable
@@ -2758,7 +2766,12 @@
               failure
               (cond-> (dissoc failure :seon.test.failure/file)
                 reported-path? (assoc :seon.test.failure/reported-file path)))))
-        previous (db/pull database (vec (keys run)) run-ref)]
+        previous (db/pull database
+                          (conj (vec (remove #{:seon.test.run/callers-at-head} (keys run)))
+                                [:seon.test.run/callers-at-head :limit nil]) run-ref)
+        previous (cond-> previous
+                   (:seon.test.run/callers-at-head previous)
+                   (update :seon.test.run/callers-at-head set))]
     (when (and (map? previous) (contains? previous :seon.error/at) (contains? previous :seon.error/layer) (contains? previous :seon.error/operation))
       (throw (ex-info (:seon.error/message previous) previous)))
     (when (and previous (not= run (dissoc previous :db/id)))
@@ -3082,6 +3095,7 @@
              (select-keys run-result
                           [:seon.test.run/id :seon.test.run/at
                            :seon.test.run/git-sha :seon.test.run/program-digest
+                           :seon.test.run/callers-at-head
                            :seon.test.run/basis-t :seon.test.run/branch])}]
         (commit-results! connection completion))
       (finally
@@ -3101,6 +3115,7 @@
     :seon.test.run/provenance
     (select-keys run-result [:seon.test.run/id :seon.test.run/at
                             :seon.test.run/git-sha :seon.test.run/program-digest
+                            :seon.test.run/callers-at-head
                             :seon.test.run/basis-t :seon.test.run/branch])}))
 
 (defn- staged-completion
@@ -4354,7 +4369,7 @@
                               (slurp (io/file
                                       (System/getProperty "seon.test.published-base")
                                       "provenance.edn")))
-              run-provenance (assoc tested-program
+              run-provenance (assoc (merge tested-program (selection/overlay-provenance "."))
                                     :seon.test.run/id (id/id)
                                     :seon.test.run/at (java.util.Date.)
                                     :seon.test.run/git-sha git-sha)

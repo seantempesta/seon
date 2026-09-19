@@ -3,6 +3,7 @@
                 :id [:string {:min 1, :seon.db/identity true}],
                 :program-digest [:and {:seon.db/identity false} :seon.source/digest],
                 :basis-t :seon.db/basis-t,
+                :callers-at-head [:set {:description "Observed paths of dirty checkout callers omitted from the selected overlay. The tested snapshot contains their HEAD versions, not their dirty checkout bytes. Path values survive file deletion."} :seon.source/path],
                 :branch [:and {:description "Durable destination branch of the result commit, addressable in its store. A publication scratch branch is never the destination; tested-branch records execution provenance separately."} :seon.source/branch],
                 :tested-branch [:and {:description "Branch of the immutable database tested, when different from the result destination. basis-t belongs to this branch; it must not be interpreted as destination history."} :seon.source/branch],
                 :cluster [:and {:description "Explicit authority cluster that owns this run and its results. Required at admission; the optional stored ref sweeps on cluster deletion, leaving authority unavailable."} :seon.db/ref],
@@ -61,6 +62,7 @@
                   [:seon.test.run/provenance-failure :seon.test.run/provenance-failure]]],
                 :provenance
                 [:map
+                 [:seon.test.run/callers-at-head {:optional true} :seon.test.run/callers-at-head]
                  [:seon.test.run/id :seon.test.run/id]
                  [:seon.test.run/at :seon.test.run/at]
                  [:seon.test.run/git-sha {:optional true} :seon.test.run/git-sha]
@@ -74,6 +76,7 @@
                 :run
                 [:map
                  #:seon.db{:attributes true}
+                 [:seon.test.run/callers-at-head {:optional true} :seon.test.run/callers-at-head]
                  [:seon.test.run/id :seon.test.run/id]
                  [:seon.test.run/at :seon.test.run/at]
                  [:seon.test.run/git-sha {:optional true} :seon.test.run/git-sha]

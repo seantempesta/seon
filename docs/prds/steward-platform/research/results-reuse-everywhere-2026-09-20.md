@@ -1,6 +1,6 @@
 ---
 type: research
-status: design-gate
+status: active
 created: 2026-09-20
 tags: [testing, selection, provenance]
 ---
@@ -292,3 +292,78 @@ The same four-namespace `clojure -M -e` load command recorded above then
 completed with `:loads`, exit 0, in `resume-precommit-load.log`. Repository
 Markdown lint still reports the existing dependency-pin citation findings;
 no repository-wide lint success is claimed.
+
+## Identity ruling and urgent overlay admission
+
+The orchestrator settled the identity question: runs are fresh events. The
+four-value tuple is snapshot provenance on each run, not its unique event
+ID. Immutable admission and retries remain unchanged. The source recording
+authority and identity gates are both closed.
+
+The next separately committed slice changes omitted dirty callers from an
+overlay refusal into an observation: each path is printed with the fact
+that its HEAD bytes are in the tested snapshot. Admission writes the
+observation into the snapshot's transient handoff, and both runtime entries
+carry `:seon.test.run/callers-at-head`. The declared set is retained by
+admission and both existing result-recording paths. Pulls disable the
+cardinality-many default limit and normalize the collection for immutable
+replay comparison. The checkout's dirty caller contents are never copied
+or read by overlay admission.
+
+`omitted-dirty-callers-use-head-and-carry-recordable-provenance` builds a
+real Git fixture and an analyzed two-file manifest. It changes the leaf in
+the selected snapshot, leaves the caller at HEAD, and makes the checkout
+caller unreadable Clojure. It checks admission, the printed path, exact
+HEAD bytes, unchanged dirty checkout bytes, and recorded run provenance
+through `commit-results!` in the canonical database fixture. No test
+result or execution count is fabricated: the recording probe has zero
+test results. The candidate also checks replay of the same provenance.
+
+First fast command:
+
+```sh
+bin/test-fast --paths src/seon/test.clj src/seon/test/runner.clj src/seon/test/selection.clj src/seon/test/fast.clj resources/seon/schemas/seon.test.run.edn test/seon/test/selection_test.clj -- seon.test.selection-test
+```
+
+`callers-head-fast.log`: **10 tests, 65 assertions, 3 failures, 2 errors**,
+exit 1. All seven assertions of the new overlay regression passed. The
+known HEAD noncanonical-schema refusal remains at the initial selection
+assertion (now `selection_test.clj:91`) and the pre-existing selector at
+lines 143–144, followed by their fixture writer errors. Those failures do
+not involve the new overlay regression. A sample from the one running JVM
+is retained as `callers-head-threads.json`; it shows canonical fixture
+acquisition, not a diagnosis of its cost.
+
+This slice touches `src/seon/test/selection.clj`, `src/seon/test/runner.clj`,
+`src/seon/test/fast.clj`, `src/seon/test.clj`,
+`resources/seon/schemas/seon.test.run.edn`,
+`test/seon/test/selection_test.clj`, AGENTS section 5 and this note.
+`src/seon/test/fast.clj` is the existing runtime entry needed to carry the
+new field. The inherited `bin/test` diff remains unchanged and uncommitted.
+Bash lines deleted: **0**. Fast durable recording itself and the two-run
+zero-execution proof remain the next slice, not a claim of this commit.
+
+The final overlay candidate was then run with the same six paths and all
+four assigned namespaces: `seon.test.selection-test seon.test-test
+seon.test.runner-test seon.test-cache-test`. `callers-head-fast-2.log`:
+**46 tests, 368 assertions, 7 failures, 7 errors**, exit 1. The new
+regression passed all eight assertions, including immutable replay. Other
+failures include the HEAD provenance refusal, error-facet propagation in
+`recording-distinguishes-run-replay-from-a-new-event` at
+`test/seon/test_test.clj:270,277–281`, and SCI acquisition/instrumentation
+refusals. The full log is the boundary evidence; no aggregate green is
+claimed and no foreign source was edited.
+
+| Log under `tmp/results-reuse-everywhere/` | Bytes | SHA-256 |
+|---|---:|---|
+| `callers-head-fast.log` | 101,226 | `c7010c1cada42bacaab22727e79a171f474df83b41a33f22d243c399bad74be9` |
+| `callers-head-fast-2.log` | 239,098 | `e073c069c42d2a7a1d989c045fe4df145d4f599462d40abb27bebd3d07d3e46b` |
+
+Both fast JVMs exited. The cold gate owed for this slice is the first
+command above with `bin/test-fast` replaced by `bin/test`, plus the same
+four-namespace set and the orchestrator's platform proof. The later bare
+twice and fast twice zero-execution obligations remain unchanged.
+
+Before committing, `clojure -M -e` requiring `seon.test`,
+`seon.test.runner`, `seon.test.selection` and `seon.test.fast` completed
+with `:loads`, exit 0 (`callers-head-precommit-load.log`).

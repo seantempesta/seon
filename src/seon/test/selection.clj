@@ -179,7 +179,7 @@
     ["git" "ls-files" "--others" "--exclude-standard" "-z"]]))
 
 (defn assert-complete-overlay!
-  "Refuse changed caller files missing from the immutable selected snapshot."
+  "Admit the selected snapshot and record omitted dirty callers at HEAD."
   {:malli/schema [:=> [:cat :seon.fn.manifest/manifest :string :string :string
                        [:sequential :string]] :nil]}
   [manifest source snapshot git-sha overlay-paths]
@@ -194,12 +194,22 @@
                     artifacts)
         missing (missing-overlay-callers artifacts texts overlay-paths
                                          (changed-working-paths source git-sha))]
-    (when (seq missing)
-      (throw (ex-info
-              (str "Incomplete --paths overlay; add changed caller files: "
-                   (str/join " " missing))
-              {::missing-callers missing})))
+    (doseq [path missing]
+      (println "bin/test: caller" path "uses HEAD bytes in this snapshot; checkout edits are excluded"))
+    (let [file (io/file snapshot "tmp" "test-overlay-provenance.edn")]
+      (io/make-parents file)
+      (spit file (pr-str (if (seq missing)
+                          {:seon.test.run/callers-at-head (set missing)} {}))))
     nil))
+
+(defn overlay-provenance
+  "Read the launcher observation carried by this immutable snapshot."
+  {:malli/schema [:=> [:cat :string]
+                  [:map [:seon.test.run/callers-at-head {:optional true}
+                         :seon.test.run/callers-at-head]]]}
+  [snapshot]
+  (let [file (io/file snapshot "tmp" "test-overlay-provenance.edn")]
+    (if (.isFile file) (edn/read-string (slurp file)) {})))
 
 (defn- basis-file
   "The recorded green-basis artifact below one checkout root.

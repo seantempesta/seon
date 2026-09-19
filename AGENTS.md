@@ -934,9 +934,10 @@ HEAD (explicitly unknown for legacy records without Git provenance). It cannot
 publish: only absence of every published base causes the pre-JVM baseline
 refusal naming that orchestrator command.
 The explicit preparation uses HEAD alone, without workers or tests. The check follows
-published `:seon.fn/calls` edges from changed public declarations and refuses
-dirty caller files omitted from the overlay, naming the paths to add. A caller
-unchanged from HEAD needs no overlay. Lanes cannot prepare the baseline.
+published `:seon.fn/calls` edges from changed public declarations and reports
+dirty caller files omitted from the overlay: their HEAD bytes are tested.
+Those paths travel in `:seon.test.run/callers-at-head` provenance; admission
+never substitutes checkout bytes for them. Lanes cannot prepare the baseline.
 
 Both entry points acquire a slot through `bin/_test-slot:14` before launching
 test JVMs and release it on exit. That shell declaration owns the default

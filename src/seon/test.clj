@@ -1136,14 +1136,17 @@
                        (select-keys run
                                     [:seon.test.run/id :seon.test.run/at :seon.test.run/git-sha
                                      :seon.test.run/program-digest :seon.test.run/basis-t
+                                     :seon.test.run/callers-at-head
                                      :seon.test.run/branch :seon.test.run/tested-branch]))
                 (assoc :seon.test.run/cluster cluster-id))
         selector (into [:db/id :seon.test.run/selection-tx
+                        [:seon.test.run/callers-at-head :limit nil]
                         [:seon.test.run/namespaces :limit nil]
                         [:seon.test.run/exclusions :limit nil]
                         [:seon.test.run/identities :limit nil]]
                        (keys (dissoc row :seon.test.run/members
                                      :seon.test.run/namespaces :seon.test.run/identities
+                                     :seon.test.run/callers-at-head
                                      :seon.test.run/exclusions)))
         previous (db/pull database selector [:seon.test.run/id run-id])]
     (doseq [read-result [cluster-row previous]]
@@ -1191,6 +1194,8 @@
                       (assoc :seon.test.run/cluster
                              (get-in previous [:seon.test.run/cluster :db/id])))
             normalize #(-> %
+                           (cond-> (:seon.test.run/callers-at-head %)
+                             (update :seon.test.run/callers-at-head set))
                            (update :seon.test.run/exclusions
                                    (fn [rows] (set (map (fn [row] (dissoc row :db/id)) rows))))
                            (dissoc :seon.test.run/namespaces :seon.test.run/identities)

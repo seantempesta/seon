@@ -16,6 +16,8 @@
             [seon.test.selection :as selection]
             [seon.test.cache :as cache]
             [seon.test :as sut]
+            [seon.test.runner :as runner]
+            [seon.id :as id]
             [seon.db :as db]
             [seon.error :as error]
             [datahike.api :as d]
@@ -358,6 +360,73 @@
   (doseq [root cache/graph-roots]
     (is (not (cache/widening-path? root)))
     (is (not (cache/widening-path? (str root "/example.clj"))))))
+
+(deftest omitted-dirty-callers-use-head-and-carry-recordable-provenance
+  (let [root (.toFile (Files/createTempDirectory
+                       (.toPath (io/file "tmp")) "overlay-head-"
+                       (into-array FileAttribute [])))
+        checkout (io/file root "checkout")
+        snapshot (io/file root "snapshot")
+        leaf "src/overlay/leaf.clj"
+        caller "src/overlay/caller.clj"
+        head-leaf "(ns overlay.leaf)\n(defn value {:malli/schema [:=> [:cat] :int]} [] 1)\n"
+        head-caller "(ns overlay.caller (:require [overlay.leaf :as leaf]))\n(defn value {:malli/schema [:=> [:cat] :int]} [] (leaf/value))\n"
+        git! (fn [& args]
+               (let [child (process/process (into ["git"] args)
+                                            {:dir (.getPath checkout) :out :string :err :string})]
+                 (try
+                   (:out (process/check (deref child 30000 {:exit 124 :err "Git fixture bound expired"})))
+                   (finally (process/destroy-tree child)))))]
+    (try
+      (doseq [directory [checkout snapshot] path [leaf caller]]
+        (io/make-parents (io/file directory path)))
+      (git! "init")
+      (spit (io/file checkout leaf) head-leaf)
+      (spit (io/file checkout caller) head-caller)
+      (git! "add" "src")
+      (git! "-c" "user.name=Fixture" "-c" "user.email=fixture@example.invalid"
+            "-c" "core.hooksPath=/dev/null" "commit" "-m" "Fixture HEAD")
+      (let [head (str/trim (git! "rev-parse" "HEAD"))
+            manifest (functions/build-manifest {:seon.fn/root (.getCanonicalPath checkout)
+                                                :seon.fn/roots ["src"]})]
+        (doseq [path [leaf caller]]
+          (spit (io/file snapshot path) (git! "show" (str head ":" path))))
+        (spit (io/file snapshot leaf) (str/replace head-leaf "[] 1" "[] 2"))
+        (spit (io/file checkout caller) "UNREADABLE DIRTY CALLER (((")
+        (let [output (with-out-str
+                       (is (nil? (selection/assert-complete-overlay!
+                                  manifest (.getCanonicalPath checkout)
+                                  (.getCanonicalPath snapshot) head [leaf]))))
+              provenance (selection/overlay-provenance (.getCanonicalPath snapshot))]
+          (is (str/includes? output (str "caller " caller " uses HEAD bytes")))
+          (is (= #{caller} (:seon.test.run/callers-at-head provenance)))
+          (is (= head-caller (slurp (io/file snapshot caller))))
+          (is (= "UNREADABLE DIRTY CALLER (((" (slurp (io/file checkout caller))))
+          (support/with-database
+           (fn [connection]
+             (let [database (db/db connection)
+                   run (merge provenance
+                              {:seon.test.run/id (id/id)
+                               :seon.test.run/at (java.util.Date.)
+                               :seon.test.run/program-digest (:seon.fn.manifest/digest manifest)
+                               :seon.test.run/basis-t (db/basis-t database)
+                               :seon.test.run/branch (get-in database [:config :branch])})
+                   completion {:seon.test.run/provenance run
+                                         :seon.test/run-basis-t (:seon.test.run/basis-t run)
+                                         :seon.test/run-at (:seon.test.run/at run)
+                                         :seon.test.runner/results []}
+                   recorded (runner/commit-results! connection completion)]
+               (is (vector? recorded) (pr-str recorded))
+               (is (vector? (runner/commit-results! connection completion))
+                   "Replaying the same set-valued provenance remains immutable.")
+               (is (= #{caller}
+                      (set (db/q '[:find [?path ...] :in $ ?id
+                                   :where [?run :seon.test.run/id ?id]
+                                          [?run :seon.test.run/callers-at-head ?path]]
+                                 (db/db connection) (:seon.test.run/id run))))))))))
+      (finally
+        ((requiring-resolve 'seon.fs/delete-recursively!)
+         (.getCanonicalPath (io/file "tmp")) (.getCanonicalPath root))))))
 
 (deftest changed-inputs-are-decided-by-content-not-modification-time
   (let [root (.toFile (Files/createTempDirectory
