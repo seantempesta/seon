@@ -2014,7 +2014,10 @@
        (is (empty? @submitted)
            "a refused publication read submits no transaction data")
        (doseq [result [index-result reconcile-result]]
-         (is (error/error? result))
+         (is (and (map? result)
+                  (contains? result :seon.error/at)
+                  (contains? result :seon.error/layer)
+                  (contains? result :seon.error/operation)))
          (is (not (vector? result))
              "error keys are never presented as a vector of program rows"))))))
 
