@@ -4042,3 +4042,16 @@ lifecycle; this session runs nothing there and writes docs via the shell so
 the edit hook queues no competing publication. Plan §5 Turn 3 accepts Turn 2's
 calibrations, proposes the six final README rows, and the ownership order:
 repair → wave 0 → 1a (Claude) → 1b/2a (Codex) → 1c (Claude).
+
+## 2026-09-19 ~17:15 UTC — docs no longer publish or widen gates
+
+Owner: "that's fucking stupid that a doc update should rerun all tests." Two
+fixes: `bin/seon-hook` publishes only program inputs (`fb178cc7f`);
+`seon.test.cache/widening-path?` derives gate inputs from deps.edn's
+non-graph classpath roots plus config, deps.edn and the launchers, with the
+class regression `a-documentation-edit-never-widens-a-gate` (fast 3/44/0).
+Issue `the-edit-hook-published-every-markdown-edit` resolved. OWED: publish
+`src/seon/test/cache.clj` and its test to default after Codex's publication
+repair lands (shell write, no hook publication), then a cold
+`bin/test --paths src/seon/test/cache.clj test/seon/test_cache_test.clj
+bin/seon-hook -- seon.test-cache-test`.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved (bin/seon-hook clause removed 2026-09-19; the misdefined predicate in seon.test.cache remains open below)
+status: resolved (2026-09-19: hook clause removed fb178cc7f; predicate redefined from declared gate inputs with a class regression)
 severity: blocker
 created: 2026-09-19
 tags: [issue, hook, publication, operator, test-selection]
@@ -37,10 +37,13 @@ first-party Clojure under `src/` and `test/`, `config/default.edn`, and schema
 resources only. Regression owed: a hook event for a markdown path queues no
 publication (the hook's own test surface).
 
-## Still open (stage-1 owner, `src/seon/test/cache.clj`)
+## The predicate (resolved the same day)
 
-`widening-path?` should name the declared gate inputs (`deps.edn`, `bin/test`,
-`bin/_test-slot`, `.claude/seon-hook.edn`, `config/`, `resources/seon/schemas/`)
-rather than the complement of two roots, so a documentation-only change never
-widens a gate. `bin/test` reads the same predicate through
-`seon.test.selection`.
+`seon.test.cache/widening-path?` now derives its inputs: the non-graph
+classpath roots deps.edn declares (`resources`, `script`), the shipped config
+directory, the dependency manifest and the launchers. Documentation, scratch
+files, logs and hook config never widen. Class regression
+`seon.test-cache-test/a-documentation-edit-never-widens-a-gate` (fast tally
+3 tests / 44 assertions / 0 failures on 2026-09-19). The source edit was a
+shell write, so its publication to default is owed once the publication
+repair lands (`bin/seon init --dev default --changed src/seon/test/cache.clj`).

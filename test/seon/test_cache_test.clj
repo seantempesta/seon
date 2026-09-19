@@ -38,8 +38,33 @@
     (testing "Cache-owner and dependency inputs have the same authority."
       (doseq [index [1 2]]
         (is (nil? (#'cache/compatible-changes inputs (assoc inputs index "changed"))))))
-    (testing "A graph-root prefix is a path boundary."
+    (testing "A root prefix is a path boundary, for graph roots and inputs alike."
+      (let [twin (str (first selection/graph-roots) "-other/file.clj")]
+        ;; Outside every root: not program source, not an input, so the
+        ;; change is compatible and reported, never a silent widening.
+        (is (= [twin] (#'cache/compatible-changes
+                       inputs (assoc-in inputs [0 twin] "new-bytes")))))
       (is (nil? (#'cache/compatible-changes
-                 inputs (assoc-in inputs [0 (str (first selection/graph-roots)
-                                                 "-other/file.clj")]
-                                  "new-bytes")))))))
+                 inputs (assoc-in inputs [0 "resources/seon/schemas/probe.edn"] "new-bytes"))))
+      (is (= ["resources-other/probe.edn"]
+             (#'cache/compatible-changes
+              inputs (assoc-in inputs [0 "resources-other/probe.edn"] "new-bytes")))))))
+
+(deftest a-documentation-edit-never-widens-a-gate
+  (testing "Program-graph paths select by reach; they are not widening inputs."
+    (is (false? (cache/widening-path? "src/seon/db.clj")))
+    (is (false? (cache/widening-path? "test/seon/db_test.clj"))))
+  (testing "Paths the gate neither loads nor reads never widen."
+    (doseq [path ["docs/prds/steward-platform/plan/README.md"
+                  "docs/seon/issues/some-note.md"
+                  "AGENTS.md"
+                  "tmp/probe/scratch.clj"
+                  "logs/current-source-failure.log"
+                  ".claude/seon-hook.edn"]]
+      (is (false? (cache/widening-path? path)) path)))
+  (testing "Declared inputs outside the program graph widen."
+    (doseq [path ["deps.edn" "bin/test" "bin/test-fast"
+                  "config/default.edn"
+                  "resources/seon/schemas/seon.db.edn"
+                  "script/seon/fresh_operator.clj"]]
+      (is (true? (cache/widening-path? path)) path))))

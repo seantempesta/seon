@@ -98,15 +98,44 @@
         sort
         vec)})
 
+(defn- classpath-roots-declared
+  "Checkout-relative roots deps.edn puts on the gate's classpath: `:paths`
+  plus the `:test` alias's `:extra-paths`, without `.` (the checkout itself,
+  never an input boundary) and without the program-graph roots."
+  {:malli/schema [:=> [:cat [:string {:min 1}]] [:set [:string {:min 1}]]]}
+  [root]
+  (let [deps (edn/read-string (slurp (io/file root "deps.edn")))]
+    (into #{}
+          (comp (map str)
+                (remove #{"."})
+                (remove (set graph-roots)))
+          (concat (:paths deps)
+                  (get-in deps [:aliases :test :extra-paths])))))
+
+(def gate-input-files
+  "Files outside every root that decide what a gate runs or loads: the
+  dependency manifest and the launchers. A change to one widens the gate."
+  #{"deps.edn" "bin/test" "bin/test-fast" "bin/_test-slot" "bin/test-check"})
+
+(def gate-input-directories
+  "Directories outside the classpath whose files the gate or its fixtures
+  read: the shipped config manifests."
+  #{"config"})
+
 (defn widening-path?
-  "True when a changed path is a gate input outside the program graph."
+  "True when a changed path is a gate input outside the program graph: a
+  file on a declared non-graph classpath root (resources, script), a shipped
+  config manifest, the dependency manifest, or a launcher. A documentation
+  note, a scratch file or a log is not an input and never widens a gate
+  (2026-09-19: the previous complement-of-roots definition widened every
+  gate, and published default, on each markdown edit)."
   {:malli/schema [:=> [:cat [:string {:min 1}]] :boolean]}
   [path]
-  (not
-   (some (fn [input]
-           (or (= path input)
-               (str/starts-with? path (str input "/"))))
-         graph-roots)))
+  (let [under? (fn [directory] (str/starts-with? path (str directory "/")))]
+    (boolean
+     (or (contains? gate-input-files path)
+         (some under? gate-input-directories)
+         (some under? (classpath-roots-declared "."))))))
 
 (defn- gitlink-digests
   "Hash pinned gitlink identities; recorded snapshot pins win over the live index."
