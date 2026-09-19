@@ -4437,3 +4437,23 @@ time, and STOP at an overlay refusal naming a foreign dirty caller. The
 enabling fix is tools-queue item 3 (`--paths` admits a foreign dirty caller
 at its HEAD bytes, naming it) — next editing lane to launch when a slot
 frees. PRD lane template amended.
+
+## 2026-09-20 ~06:40 UTC — owner: "record results, never rerun the same tests; everything that can use it uses it"
+
+Gap named: the cold gate records, bare requests reuse, but `--paths` with
+named namespaces and `bin/test-fast` execute everything named and the fast
+loop records nothing. NEXT EDITING LANE (astra MEDIUM, launches when the
+render sweep lands; files free since A1): `results-reuse-everywhere` =
+A4 + A5 + fast recording: (1) named/--paths requests pass through the
+eligibility scope — a member with recorded green at (program digest, input
+digest, basis) is reported `:unchanged` with the three values, never
+executed; (2) `bin/test-fast` records its results keyed by its snapshot
+digests so an unchanged second fast run executes zero; (3) `bin/test` and
+`bin/test-fast` become launchers of the runtime's selection/execution/
+recording functions; tally as a query; file green basis deleted;
+(4) the confidence statement per member. Owned: src/seon/test.clj,
+src/seon/test/{runner,selection,cache}.clj, bin/test, bin/test-fast,
+seon.test*.edn, their tests. Proof: a named-namespace gate run twice with
+no edit executes zero the second time and prints the same tally with
+`:unchanged` evidence; the in-process `seon.test/run` reuses the same rows.
+Target: in the tree and cold-gated by 2026-09-22.
