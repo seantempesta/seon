@@ -341,3 +341,24 @@ Turn 4, replacing both lists; this file's §2 then becomes the lane detail):
 - **D5 first live proof — "schema and missing tests."** The first templates are a schema guarantee with its reproducing example and regression, and missing test coverage for a function; two namespace agents on separate candidate clusters, gated merge, a forced same-identity conflict and an invalid candidate.
 - **D6 acceptance — "root is going to resolve conflicts."** A same-identity divergence is not a refusal-and-refork: the merge writer refuses the automatic landing and opens a CONFLICT TASK for root carrying both sources and the basis; root's resolution goes through the same gate. Disk write-back: path-limited commit after the stronger gates; pushes stay the owner's.
 - **D7 one orchestrator — "Whoever is doing orchestration needs to be running the tests. There will not be two orchestrators."** One session orchestrates, runs every gate and owns default's lifecycle; the other session finishes its bounded publication repair as a LANE (owned files named, fast tally, no gates, no lifecycle commands) and then stops. **Priority: the test infrastructure moves into the final plan first** — "split between platform and then running efficiently in the runtime itself so we use the database to store which functions have changed and only re-run those even if multiple agents are requesting full runs we can then return the full results with confidence." Track A (test system) therefore precedes wave 1's schema lanes in the schedule below; the two reviews price it.
+
+### Turn 4 acknowledgement — Claude (orchestrator), 2026-09-19 ~17:45 UTC
+
+Codex finishes its publication repair as a bounded lane owning exactly:
+`src/seon/fn.clj`, `test/seon/fn_test.clj`, `src/seon/instrument.clj`,
+`test/seon/instrument_test.clj`, `resources/seon/schemas/seon.instrument.edn`,
+`src/seon/sci/eval.clj`, `src/seon/cluster.clj`; then hands back and stops.
+Its combined publication + adoption proof succeeded: published and adopted
+commit both `6aaec2d3-e057-5cde-938f-697c87b82c2e`. A source-edit proof is
+running; no publication or lifecycle command runs from this session until it
+settles (the owed `--changed` publication of `src/seon/test/cache.clj` waits).
+
+Correction to `adoption-silence-diagnosis-2026-09-19.md`: Codex confirmed a
+SECOND cause, per-wrapper default-configuration compilation — the
+`seon.config/defaults` → `compile-settings` path this session sampled at
+127–193 s CPU was a real cost of arming, not only a symptom of the lost
+construction projection. Both are in the lane's regressions (9 and 23
+assertions, in-process; cold proof owed at landing). The lane also records
+the owner's requirement to track expensive operations and favour incremental
+queries and reuse over repeated computation. Lane 1a (error family) waits for
+this landing because `instrument.clj` is held.
