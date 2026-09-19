@@ -10,8 +10,12 @@
   (:import [java.lang.management ManagementFactory]
            [com.sun.management HotSpotDiagnosticMXBean HotSpotDiagnosticMXBean$ThreadDumpFormat]))
 
-(defn- unknown [message]
-  {:seon.error/kind :seon.cluster.status/unavailable
+(defn- unknown
+  {:malli/schema [:=> [:cat :string] :seon.error/base]}
+  [message]
+  {:seon.error/at (java.util.Date.)
+   :seon.error/layer :seon.cluster.status/observation
+   :seon.error/operation 'seon.cluster.status/unknown
    :seon.error/message message})
 
 (defn- boot-time []
@@ -50,7 +54,7 @@
 
   Example: (seon.cluster.status/snapshot {})"
   {:malli/schema [:=> [:cat :seon.cluster.status/request]
-                  [:or :seon.cluster.status/value :seon.error/value]]}
+                  [:or :seon.cluster.status/value :seon.error/base]]}
   [{database :seon.db/db connection :seon.db/connection}]
   (try
     (let [cluster (db/q '[:find (pull ?c [:seon.cluster/name :seon.source/commit-id]) .
