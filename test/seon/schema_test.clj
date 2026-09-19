@@ -11,6 +11,7 @@
             [malli.error :as me]
             [malli.generator :as mg]
             [seon.call-preparation :as call-preparation]
+            [seon.config :as config]
             [seon.db]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
@@ -230,11 +231,13 @@
        (println "Canonical populated reference attributes:" (count populated)
                 "declared:" (count attributes))
        (doseq [[attribute entity] populated]
-         (let [value (get (seon.db/pull database [attribute] entity) attribute)
+         (let [pulled (seon.db/pull database [attribute] entity)
+               value (get pulled attribute)
                many? (= :db.cardinality/many (get-in database [:schema attribute :db/cardinality]))
                ids (if many? (map :db/id value) [(:db/id value)])
                expected (set (map :v (seon.db/datoms database :eavt entity attribute)))]
-           (is (if many? (vector? value) (map? value)) (str attribute))
+           (is (if many? (vector? value) (map? value))
+               (str attribute " " (pr-str (select-keys pulled [:seon.error/message :seon.error/data]))))
            (is (and (seq ids) (every? expected ids))
                (str "Pulled ids come from the actual relation: " attribute))))))))
 
@@ -303,8 +306,7 @@
        (let [selector '[{:seon.ns/steward 2}]
              refused (schema/pulled-form-in
                       projection :seon.ns/ns selector)]
-         (is (= :seon.schema/unsupported-pull-selector
-                (:seon.error/kind refused)))
+         (is (= 'seon.schema/pulled-form-in (:seon.error/operation refused)))
          (is (= {:seon.ns/steward 2}
                 (get-in refused
                         [:seon.error/data
@@ -811,8 +813,8 @@
         mismatch-data (ex-data mismatch)]
     (testing "a mismatch refuses with both declared sides and the reason"
       (is (instance? clojure.lang.ExceptionInfo mismatch))
-      (is (= :seon.schema/render-contract-incoherent
-             (:seon.error/kind mismatch-data)))
+      (is (= 'seon.schema/render-contract-coherence
+             (:seon.error/operation mismatch-data)))
       (is (= shape
              (get-in mismatch-data
                      [:seon.error/data :seon.error/diagnostic-expected])))
@@ -1062,12 +1064,15 @@
        (testing "the arm's own two readers are total"
          (is (nil? (#'instrument/predicate-callable
                     bare 'seon.schema-test/no-such-predicate)))
-         (let [function-symbol (first (sort (keys contracts)))]
+         (let [function-symbol (first (sort (keys contracts)))
+               configuration (test-support/effective-config)]
            (is (some? (#'instrument/compiled-wrapper
                        bare function-symbol
                        (get contracts function-symbol)
                        (fn [& _] nil)
-                       {})))))
+                       (config/result-caps configuration)
+                       (select-keys configuration [:seon.config/on-core-error
+                                                   :seon.config.error/max-evidence-bytes]))))))
        (testing "call preparation's argument validators compile"
          (let [with-slots
                (->> (keys contracts)
@@ -1290,7 +1295,9 @@
   ;; nothing. The derivation refuses instead, naming the offending value.
   (test-support/with-database
    (fn [connection]
-     (let [poisoned {:seon.error/kind :seon.db/invalid-read
+     (let [poisoned {:seon.error/at #inst "2026-09-20T00:00:00Z"
+                     :seon.error/layer :seon.db/read
+                     :seon.error/operation 'seon.db/db
                      :seon.error/message "the read refused"}
            outcome (try (schema/projection-from-database poisoned)
                         ::no-refusal
@@ -1298,7 +1305,8 @@
                           (ex-data failure)))]
        (is (not= ::no-refusal outcome)
            "a poisoned database value may not answer as a projection")
-       (is (= :seon.schema/invalid-projection-source (:seon.error/kind outcome)))
+       (is (= :seon.schema/invalid-projection-source
+              (get-in outcome [:seon.error/data :seon.error/diagnostic-cause])))
        (is (= :seon.schema/database-value
               (:seon.error/diagnostic-member (:seon.error/data outcome))))
        (is (= poisoned
