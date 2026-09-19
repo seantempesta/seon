@@ -56,7 +56,8 @@ the fixes, reproduced all three failures, and was stopped deliberately
 Its older published fixture lacked the input fact entirely, so the fixture
 now establishes the source input observation before deriving admission.
 The second fast snapshot passes all three targeted regressions, including
-an explicit wrong-input refusal. Its complete tally is still pending.
+an explicit wrong-input refusal: **39 tests, 367 assertions, zero failures,
+zero errors** (`tmp/a1-fast-2.log`, exit 0).
 
 ## Selection measurements
 
@@ -81,6 +82,32 @@ namespace and file eligibility through entity-bound queries. It removes
 the every-function analysis sweep; analyzed provenance is checked on the
 selected tests, with publication owning whole-population completeness.
 After measurements and verification remain pending.
+
+## Integration boundaries observed during the next slice
+
+The third fast snapshot, at `d549c42a6`, repeatedly refused canonical fixture
+construction before test bodies. It was stopped deliberately (exit 143),
+without a final tally. The exact duplicate is
+`[:seon.lint/id "29330d0581c3"]`: two `:redundant-declare` findings for
+`facets` and `facet-keys`, both `src/seon/error.clj:1611:1`. The error owner
+records its later repair in
+[error-family-1a-2026-09-19.md](error-family-1a-2026-09-19.md).
+That owner's next commit, `bc8152438`, removes `error/error?`; its external
+consumer sweep is still required before the shared tree loads. A1 does not
+restore the predicate or edit its held owners.
+
+The shared schema edit hook separately refuses an additive request key with
+unregistered `seon.cluster/cluster-name?`. Recorded in
+[the schema admission issue](../../../seon/issues/schema-edit-admission-cannot-load-after-error-predicate-retirement.md).
+The third launcher also printed a 19,961,455-byte complete manifest line;
+recorded in
+[the overlay output issue](../../../seon/issues/fast-overlay-admission-prints-the-complete-program-manifest.md).
+Neither launcher nor schema admission owner is edited by A1.
+
+The fourth fast iteration uses a disposable worktree at `23f1f4975`, the
+previously loadable baseline, plus only A1's owned source/schema/test changes.
+Its explicit boundary excludes both intervening error-owner changes. It is
+an iteration proof, not current-HEAD integration or live adoption.
 
 ## Integration owed
 
