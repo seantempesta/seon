@@ -4484,3 +4484,12 @@ walks, recursive deref bypassing caches) → `projection-compile-stall` lane
 `error/diagnostic` drops supplied domain members) → PRD corrected, lane 1a
 at its next stop; ranks 6, 9–12 → a later `malli-compile-ownership` lane
 (sol low) after the stall fix lands.
+
+## 2026-09-20 ~07:40 UTC — 1a at 24F/4E; scope extended; review items handed over
+
+1a landed `524aa07d6` `721b110b8` (SCI registration observations recognised;
+refused source reads exposed); combined 118/4,150/24F/4E. Scope extended to
+schema/internal.cljc, seon.schema.edn, sci/kernel.clj for its three named
+items; the constructor-leaf move, rank 8 pass-through and rank 7 wrapper
+semantics handed over. Running: 1a (high), stall (medium), results-reuse
+(medium).
