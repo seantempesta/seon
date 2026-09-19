@@ -4457,3 +4457,13 @@ seon.test*.edn, their tests. Proof: a named-namespace gate run twice with
 no edit executes zero the second time and prints the same tally with
 `:unchanged` evidence; the in-process `seon.test/run` reuses the same rows.
 Target: in the tree and cold-gated by 2026-09-22.
+
+## 2026-09-20 ~06:50 UTC — owner: prioritize test-result reuse; render paused
+
+Owner: "prioritize this since it's slowing down all progress." Paused
+`kind-sweep-render` (session preserved; its uncommitted render edits stay in
+the tree and its files stay held). Launched `results-reuse-everywhere`
+(astra MEDIUM): named/--paths requests through the eligibility scope; fast
+runs record; tally as a query; launchers thin; in-process host reuses; proof
+= a second unchanged run executes zero. Editing lanes: 1a, stall,
+results-reuse (cap 3); review read-only.
