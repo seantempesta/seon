@@ -170,7 +170,9 @@ Three options presented to the owner; estimates are not measurements:
    Cost: roughly half a lane-day. Give up: arbitrary unpublished `--paths`
    reuse and the required live proof, so this narrows the assignment.
 
-No implementation of these alternatives has begun.
+The orchestrator subsequently ruled option 1 and extended ownership to the
+admission/recording region of `src/seon/cluster/source.clj` and
+`resources/seon/schemas/seon.source.edn`. That authority decision is settled.
 
 Files changed by this slice:
 
@@ -200,3 +202,93 @@ bin/test --paths src/seon/test.clj src/seon/test/runner.clj test/seon/test/selec
 
 The required two consecutive fast reuse logs do not exist yet; baseline
 and candidate logs are different snapshots and are not that proof.
+
+## Resume: recording authority settled; identity decision
+
+Resumed at `4b3c4b5f3`. The extended source owner and source schema were
+clean. Preserved the inherited `bin/test` diff (13 insertions, 4 deletions)
+and all foreign edits. Also read the data-modeling skill. No worktree,
+cold gate, publication, default mutation or second concurrent JVM.
+
+The new ruling names the run identity as `(published base digest, overlay
+input digest, program digest, basis)`. Before writing that tuple into the
+unique `:seon.test.run/id`, the existing immutable-admission contract needs
+one distinction resolved:
+
+- `resources/seon/schemas/seon.test.run.edn:4` declares `/id` a unique identity.
+- `src/seon/test.clj:1148` reads the existing row by that identity.
+- `src/seon/test.clj:1200` compares the existing run with the entire new
+  admission, including namespace/identity scope, timestamp and members;
+  a changed replay refuses with `:seon.test.run/immutable` at line 1205.
+- `src/seon/test/runner.clj`, `complete-members`, similarly refuses changed
+  terminal outcomes. The canonical regression at
+  `test/seon/test/runner_test.clj:339` expects that refusal.
+
+Two requests for different namespaces can share all four snapshot values.
+They cannot share one immutable run row with different scopes and members.
+A retry after a red result also needs a distinct execution observation if
+its terminal outcome changes. This is a source-contract finding; the
+fixture refusal below prevents a new live admission proof.
+
+Three options, with estimates rather than measured timings:
+
+1. **Recommended: the four values identify the tested snapshot; each
+   admission retains a fresh run event ID.** Guarantee: exact snapshot
+   provenance, immutable runs, arbitrary scopes and red retries; green
+   reuse remains a query over earlier runs. Cost: an additive snapshot
+   provenance declaration within the authorized recording work, with no
+   redesign of admission or completion. Give up: using the four-value
+   tuple alone as the unique run ID.
+2. **Add request scope to the deterministic run identity.** Guarantee:
+   different named requests do not collide; identical requests address
+   the same immutable run. Cost: revise identity derivation and replay
+   admission (including timestamp handling), roughly half a lane-day
+   beyond recording. Give up: unchanged red requests cannot produce a new
+   terminal observation without an additional attempt identity.
+3. **One mutable run per snapshot, with growing membership and separate
+   execution attempts.** Guarantee: the four-value tuple identifies one
+   aggregate containing every request and retry. Cost: replace immutable
+   admission/completion, claim ownership, and tally contracts; several
+   lane-days. Give up: the existing immutable run invariant.
+
+The question is pending before production admission/recording edits. A
+small base-descriptor handoff was explored and then removed using only
+this lane's hunks; no partial launcher behavior is left behind. This
+resume changes only documentation. Bash lines deleted: **0**. Steps 2–5
+and both zero-execution fast logs remain owed.
+
+### Resume verification
+
+```sh
+bin/test-fast --paths src/seon/test.clj src/seon/test/runner.clj test/seon/test/selection_test.clj -- seon.test.selection-test
+```
+
+Snapshot `4b3c4b5f3`, no source differences from HEAD. Published overlay
+graph `c7c66f815606ca3f11a53ab24f6067df22c9449f4e8eef83d6a3b20fcef150c3`,
+**71 commits behind**. Result: **9 tests, 58 assertions, 3 failures,
+2 errors**, exit 1. `resume-baseline.log`: **20,062,155 bytes**, SHA-256
+`16483a23d03b4973ec722a295941413eddb00c875ca858b1fe5ccc09cd9de2ef`.
+
+The exact blocking assertion is
+`named-selection-reuses-green-members-by-reachable-content`,
+`test/seon/test/selection_test.clj:89`: its initial member set receives
+`program-digest`'s unavailable result. The cause is
+`:seon.schema.shape/noncanonical-compiled-form`, with compiled
+`seon.error/config-expectation-present?` carrying a `:gen/gen` Generator
+object. The pre-existing selector regression similarly fails at lines
+141–142. Subsequent admission receives the refused provenance and fails
+the canonical fixture writer at `test_support.clj:331`. No zero-execution
+assertion is reached. This is the HEAD boundary identified by the
+orchestrator, not foreign working-tree contamination, and not the reason
+for the identity design gate.
+
+One sample of the running JVM, PID 87966, is retained in
+`tmp/results-reuse-everywhere/resume-baseline-threads.json`: the main
+thread awaits canonical fixture acquisition; the fixture thread awaits a
+database transaction. This does not attribute the transaction's cost.
+The JVM exited and its launcher removed its snapshot.
+
+The same four-namespace `clojure -M -e` load command recorded above then
+completed with `:loads`, exit 0, in `resume-precommit-load.log`. Repository
+Markdown lint still reports the existing dependency-pin citation findings;
+no repository-wide lint success is claimed.
