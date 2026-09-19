@@ -4551,3 +4551,15 @@ fix (tools item 3), 1a iterates with the plain working-tree form
 `bin/test-fast <namespaces>` and reports render-caused reds as a boundary.
 1a's baseline 120/4,161/27F/4E; landed the leaf constructor. Running: 1a
 (high), results-reuse (medium), 1d (low).
+
+## 2026-09-20 ~09:20 UTC — run identity ruled; overlay admission fix first
+
+`results-reuse-everywhere` stopped (`c6c72b832`) at the run-identity gate:
+`admit-run` refuses different scopes under one immutable run id. Ruled
+option 1: a run is a fresh event (fresh id per request); the four-value
+tuple is snapshot PROVENANCE on the run; reuse matches (provenance, member,
+recorded green). Ordered FIRST: the overlay admission at selection.clj:199
+admits a foreign dirty caller at its HEAD bytes, names it, records it on the
+run — it is holding render and 1a in a circle. Then steps 2–5. Its baseline
+9/58/3F/2E is blocked by 1a's HEAD noncanonical-schema red at
+selection_test.clj:89 (boundary).
