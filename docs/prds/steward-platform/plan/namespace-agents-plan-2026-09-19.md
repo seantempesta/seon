@@ -362,3 +362,26 @@ assertions, in-process; cold proof owed at landing). The lane also records
 the owner's requirement to track expensive operations and favour incremental
 queries and reuse over repeated computation. Lane 1a (error family) waits for
 this landing because `instrument.clj` is held.
+
+## 7. Wave 0 verdict and Track A (from the two reviews, 2026-09-19 ~18:00 UTC)
+
+**Inherited db-contracts slice — SOUND, finish it** (`../research/review-inherited-db-contracts-slice-2026-09-19.md`): five groups (error unions §1q; read seams #18–#20 through `with-declarations`; `pull`'s derived pulled form, option B; ruling 1r's provenance-derived write bound; `projection-from-database` refusing a non-database), all on the canonical fixture, nothing foreign; the `[:db/id]`-pull wedge is already repaired in the tree. Remaining ~3.25 lane-hours: two assertions that read absence as behaviour (`db_test.clj:2225` vacuous `every?`; `(not (:seon.error/kind report))`), contracts on `with-declarations` and `validate-pulled-result`, the note's stale §1 table. Gate: `bin/test --paths src/seon/db.clj src/seon/schema.clj resources/seon/schemas/seon.db.edn test/seon/db_test.clj test/seon/schema_test.clj -- seon.db-test seon.schema-test seon.cluster-test`, then `--platform`.
+
+**Inherited stage-1 slice — mixed** (`../research/review-stage1-and-test-system-target-2026-09-19.md`): SOUND = `select`, `changed-definition-symbols`, `selection-seeds`/`reaching`, `seon.test.selection.edn`, the `bin/test` snapshot inventory, the rewritten `selection_test.clj`. RESET today = `runner/bulk-selection` (`runner.clj:3275`; calls `select` without a cluster, reads a key `select` never returns, builds its database with a test fixture from production code) — **bare `bin/test` is broken in this tree because of it**. HALF-BAKED, fix inside L1 = `selection-facts` materialising 35 attributes over the whole graph per call; `check-in-process` admitting members it never executes so `last-green` can never exist and "unchanged rerun executes zero" cannot hold; `check-admission` doing its own reach walk so `:reaches-changed` is dead and `long-excluded` is `[]`; a both-hosts regression that compares two shims of one function.
+
+**Ruling taken from the owner's own sentence (D7), superseding the design's "explicit all/full/platform requests never become incremental aliases" and AGENTS.md §5's bare-only scoping:** a run policy is an ELIGIBILITY SCOPE, never an execution promise. Any member whose recorded green matches the current program digest, input digest and basis is answered from the record and reported `:unchanged` with those three values, whatever the policy; only members with no such evidence execute. A full run therefore returns full results with confidence stated as (basis, program digest, input digest) per member. Vetoable by the owner; two sentences of doc and two terms removed from `select`.
+
+**Track A lanes, shortest path to the target** (owner's priority; each with proof, sequential unless marked):
+
+| Lane | Work | Hours | Files |
+|---|---|---|---|
+| A0 | delete `bulk-selection`; bare `bin/test` selects through `select` with the cluster named | 0.5 | `runner.clj`, `bin/test` |
+| A1 | finish the selector: seeded indexed reads replace `selection-facts`; `check-admission` hands seeds to `select` so `:reaches-changed` is live; long tests excluded by declaration; `check-in-process` admits only what it executes (deferred/excluded members recorded as such, never as pending) so `last-green` exists | 8–12 | `test.clj`, `selection.clj`, `seon.test.selection.edn`, `selection_test.clj` |
+| A2 ∥ A3 | A2 a real both-hosts regression (one function, two custody paths, same facts); A3 admission ownership settled (one owner for run/member admission) | 3–5 ∥ 2–3 | `test.clj`, `runner.clj` tests |
+| A4 | `bin/test` becomes a launcher of the same functions; the file green basis deleted (one mechanism: the derived basis) | 8–12 | `bin/test`, `selection.clj` |
+| A5 | tally is a query; the confidence statement (basis, program digest, input digest) on every reported member; set-level reuse (not single-test) | 4–6 | `runner.clj`, `seon.test.run.edn` |
+| A6 | platform tier only in worker JVMs; everything else in the runtime JVM | 6–10 | `bin/test`, `runner.clj` |
+
+Scorecard today: (v) durable facts + blobs LANDED; (i) split, (ii) changed-function selection, (iii) full run from the record, (iv) shared in-flight execution PARTIAL; (vi) launcher MISSING. A4 needs the platform tier green first.
+
+**Wave 0 order:** Codex lane lands → db-contracts finish (3.25 h, one Opus lane) → A0 → gate both → reset default from clean HEAD → Juniper → `--platform` → merge to main → A1.
