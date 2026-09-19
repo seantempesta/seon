@@ -4106,3 +4106,12 @@ members) — observed on HEAD, not A0's; owner to assign. Confirmed tools-queue
 item 3: the shared-tree fast overlay refused A0 for the foreign dirty
 `src/seon/test.clj`. Owed: A0 cold gate after the db gate, then bare `bin/test`
 must exit nonzero with the named refusal.
+
+## 2026-09-19 ~19:40 UTC — db-contracts cold gate GREEN
+
+`bin/test --paths src/seon/db.clj src/seon/schema.clj resources/seon/schemas/seon.db.edn test/seon/db_test.clj test/seon/schema_test.clj -- seon.db-test seon.schema-test seon.cluster-test`:
+**107 tests / 3,727 assertions / 0 failures / 0 errors** (log
+`tmp/orchestrator/gates/db-contracts-cold-2026-09-19.log`). The two
+shadowed-local warnings fixed in `8cf23ea4f`. A0's cold gate running
+(`a0-cold-2026-09-19.log`). Effort data point: astra LOW finished a
+3-hour-priced sound slice in ~50 min, cold green first time.
