@@ -4243,3 +4243,19 @@ predicate and contract bypass removed) and continues. Next: 1a lands →
 - ERROR `applying-without-a-handed-projection-refuses-before-collection`: `seon.schema/call-with-projection-state` returned undeclared error facets `#{:seon.instrument/registration-error}` — the new wrapper enforcement (796a76314) working as ruled (1q); schema.clj's contract must declare the facet (schema.clj is free).
 - ERROR `a-projection-with-no-bound-predicates-compiles-every-declared-shape`: the test hands `{}` as caps; `compiled-wrapper`'s contract now requires `:seon.config.eval.result/max-bytes` — test fixture to supply the declared caps.
 For lane `error-family-1a` at its next stop (running on D13); D13 ruled `1b89e70a0`. A1 launched (`test-selector-a1`, astra MEDIUM).
+
+## 2026-09-20 ~01:00 UTC — HEAD UNLOADABLE after the predicate retirement; sweep launched
+
+`error-family-1a` landed through `b50bb67fc` (D13 identity; owned kind and
+predicate retired; 129/129 owned contracts declared; 87/586/17F/1E on the
+runnable slice, reds explained in its note). Consequence: HEAD does not load
+— `clojure -M -e "(require 'seon.fn)"` fails at `seon/fn.clj:1387` "No such
+var: error/error?" (verified in a fresh JVM). 74 production call sites remain
+(test.clj 29, fn.clj 18, turn.clj 16, cluster.clj 7, plan.clj 4) plus four test
+files. A1 paused (session preserved; test.clj carries its uncommitted hunks);
+`predicate-caller-sweep` (astra HIGH) launched with fn.clj first so HEAD loads
+again at its first commit. Lesson for the ledger: a retirement that leaves
+HEAD unloadable is not a coherent slice — the lane should have converted the
+callers or stopped before deleting the Var; the spec asked for an inventory
+and got exactly that. Orchestrator error: the spec split "retire" from
+"convert callers" across lanes without requiring HEAD to load in between.
