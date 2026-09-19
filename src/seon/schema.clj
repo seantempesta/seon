@@ -1068,7 +1068,7 @@
 
 (defn call-with-projection-state
   "Call `f` with one cluster-owned, advanceable schema projection state."
-  {:malli/schema [:=> [:cat [:fn clojure.core/deref] [:fn clojure.core/ifn?]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]}
+  {:malli/schema [:=> [:cat [:fn clojure.core/deref] [:fn clojure.core/ifn?]] [:or :seon.instrument/registration-error [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The body returns its polymorphic result unchanged; instrumentation acquisition can return its declared registration refusal.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [projection-state f]
   (binding [*projection-state* projection-state
             *projection* nil
