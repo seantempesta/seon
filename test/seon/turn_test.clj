@@ -905,7 +905,10 @@
             result (support/refusal-data
                     #(#'turn/require-open-run
                       refusal `turn/close-call {:seon.turn/id "unreadable"}))]
-        (is (error/error? refusal) (pr-str refusal))
+        (is (and (map? refusal)
+                 (contains? refusal :seon.error/at)
+                 (contains? refusal :seon.error/layer)
+                 (contains? refusal :seon.error/operation)) (pr-str refusal))
         (is (= refusal result)
             "the serial eligibility read is the refusal; it is never absence or an open turn")
         (is (= before (db/basis-t (db/db connection)))
@@ -923,7 +926,10 @@
               [?agent :seon.agent/id ?id] [?issue :seon.issue/agent ?agent]
               [?issue :seon.issue/budget ?budget]]
             query db/q]
-        (is (error/error? refusal) (pr-str refusal))
+        (is (and (map? refusal)
+                 (contains? refusal :seon.error/at)
+                 (contains? refusal :seon.error/layer)
+                 (contains? refusal :seon.error/operation)) (pr-str refusal))
         (with-redefs [db/q
                       (fn [form & arguments]
                         (if (= issue-budget-query form)
@@ -951,7 +957,10 @@
                   (#'turn/declaration-diverged-since-open?
                    database {:seon.turn/id "history-refused"}
                    :seon.schema/key :seon.audit/diverged existing))))]
-        (is (error/error? refusal) (pr-str refusal))
+        (is (and (map? refusal)
+                 (contains? refusal :seon.error/at)
+                 (contains? refusal :seon.error/layer)
+                 (contains? refusal :seon.error/operation)) (pr-str refusal))
         (is (= refusal result)
             "an unreadable history is the divergence refusal, never evidence that the run wrote the declaration")))))
 
