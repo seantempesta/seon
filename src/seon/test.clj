@@ -9,6 +9,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.fn :as functions]
+            [seon.id :as id]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
@@ -558,16 +559,37 @@
     result))
 
 (defn- selection-facts
-  "Acquire the requested scalar and many-valued datoms once, without pull limits."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :qualified-keyword]]
+  "Read complete selected attributes through bound entity indexes."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :int] [:vector :qualified-keyword]]
                   [:map-of :int [:map-of :qualified-keyword [:set :seon.schema/value]]]]}
-  [database attributes]
+  [database entities attributes]
   (reduce (fn [facts [entity attribute value]]
             (update-in facts [entity attribute] (fnil conj #{}) value))
           {} (selection-read!
               (db/q '[:find ?entity ?attribute ?value
-                      :in $ [?attribute ...] :where [?entity ?attribute ?value]]
-                    database attributes))))
+                      :in $ [?entity ...] [?attribute ...] :where [?entity ?attribute ?value]]
+                    database entities attributes))))
+
+(defn- definition-digests
+  "Identify selected definition content, independently of branch-local entities."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
+                  [:map-of :qualified-symbol :seon.source/digest]]}
+  [database symbols]
+  (let [rows (selection-read!
+              (db/q '[:find ?symbol ?attribute ?value
+                      :in $ [?symbol ...] [?attribute ...]
+                      :where (or [?entity :seon.fn/sym ?symbol]
+                                 [?entity :seon.test/sym ?symbol])
+                             [?entity ?attribute ?value]]
+                    database symbols
+                    [:seon.program/analyzed-source-digest
+                     :seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references
+                     :seon.test/source :seon.test/subject :seon.test/platform
+                     :seon.test/fixture :seon.test/fixture-observation :seon.test/long
+                     :seon.schema.admission/source]))]
+    (into {} (map (fn [[symbol facts]]
+                    [symbol (id/digest 64 (vec (sort-by pr-str (map #(subvec % 1) facts))))]))
+          (group-by first rows))))
 
 (defn- changed-definition-symbols
   "Read assertion and retraction identities in the same lineage, including namespace bindings."
@@ -586,7 +608,11 @@
                       [:seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references
                        :seon.fn/sym :seon.test/sym :seon.test/source :seon.test/subject
                        :seon.test/platform :seon.test/fixture :seon.test/fixture-observation
-                       :seon.test/long :seon.schema.admission/source]))
+                       :seon.test/long :seon.schema.admission/source
+                       :seon.program/analyzed-source-digest]))
+        before (definition-digests (db/as-of database basis) (vec direct))
+        after (definition-digests database (vec direct))
+        direct (filter #(not= (get before %) (get after %)) direct)
         namespaces (selection-read!
                     (db/q '[:find [?ns ...] :in $history $changes [?attribute ...]
                             :where [$changes ?entity ?attribute]
@@ -647,13 +673,17 @@
             policy (or (:seon.test.run/policy request)
                        (when (or (seq namespaces) (seq identities)) :named) :incremental)
             include-long? (or (= :full policy) (true? (:seon.test/include-long? request)))
-            facts (selection-facts database
-                    [:seon.fn/sym :seon.test/sym :seon.test/ns :seon.fn/ns :seon.fn/file
-                     :seon.fn.file/relative-path :seon.fn.file/relative-root :seon.fn.file/digest
-                     :seon.program/analyzed-source-digest :seon.schema.admission/source
-                     :seon.ns/name :seon.test/fixture :seon.test/fixture-observation
-                     :seon.test/platform :seon.test/long
-                     :seon.source/digest :seon.source/test-input-digest
+            run-ids (selection-read!
+                     (db/q '[:find [?run ...] :in $ ?cluster
+                             :where [?run :seon.test.run/cluster ?cluster]] database cluster-id))
+            source-ids (selection-read!
+                        (db/q '[:find [?source ...] :where [?source :seon.source/digest]] database))
+            member-ids (selection-read!
+                        (db/q '[:find [?member ...] :in $ [?run ...] [?attribute ...]
+                                :where [?run ?attribute ?member]]
+                              database run-ids [:seon.test.run/members :seon.test.run/covered-by]))
+            facts (selection-facts database (concat run-ids source-ids member-ids)
+                    [:seon.source/digest :seon.source/test-input-digest
                      :seon.test.run/id :seon.test.run/cluster :seon.test.run/policy
                      :seon.test.run/branch :seon.test.run/tested-branch
                      :seon.test.run/include-long? :seon.test.run/input-digest
@@ -666,44 +696,16 @@
                      :seon.test.member/pass-count :seon.test.member/fail-count
                      :seon.test.member/error-count :seon.test.member/error])
             one (fn [entity attribute] (first (get-in facts [entity attribute])))
-            sources (filter #(one % :seon.source/digest) (keys facts))
+            sources source-ids
             input-digest (when (= 1 (count sources))
                            (one (first sources) :seon.source/test-input-digest))
             _ (when-not input-digest
                 (refuse! :seon.test/input-evidence-unavailable
                          "The publication has no unique external-input identity." (vec sources)))
-            tests (into {} (keep (fn [entity]
-                                  (when-let [symbol (one entity :seon.test/sym)] [symbol entity])))
-                        (keys facts))
-            _ (when (empty? tests)
+            _ (when-not (selection-read!
+                          (db/q '[:find ?test . :where [?test :seon.test/sym]] database))
                 (refuse! :seon.test/population-unknown "No indexed test population is available." :absent))
-            _ (doseq [entity (keys facts)
-                      :when (or (one entity :seon.fn/sym) (one entity :seon.test/sym))]
-                (when-not (one entity :seon.program/analyzed-source-digest)
-                  (refuse! :seon.test/analysis-unknown "Program analysis provenance is absent."
-                           (or (one entity :seon.fn/sym) (one entity :seon.test/sym)))))
-            named? (fn [[symbol entity]]
-                     (or (identities symbol)
-                         (namespaces (one (one entity :seon.test/ns) :seon.ns/name))))
-            excluded? (fn [[_ entity]]
-                        (or (one entity :seon.test/fixture)
-                            (one entity :seon.test/fixture-observation)))
-            _ (doseq [entry tests :when (and (named? entry) (excluded? entry))]
-                (refuse! :seon.test/fixture-excluded "Explicit fixture material is not gate membership." (first entry)))
-            eligible (into {}
-                       (filter (fn [[_ entity :as entry]]
-                                 (and (not (excluded? entry))
-                                      (or (= :agent (one entity :seon.schema.admission/source))
-                                          (= "test" (one (one entity :seon.fn/file) :seon.fn.file/relative-root))
-                                          (named? entry))
-                                      (or include-long? (named? entry)
-                                          (not (one entity :seon.test/long)))))) tests)
-            _ (doseq [symbol identities :when (not (get eligible symbol))]
-                (refuse! :seon.test/identity-unresolved "The requested test is not eligible." symbol))
-            _ (doseq [ns-symbol namespaces
-                      :when (not-any? #(= ns-symbol (one (one % :seon.test/ns) :seon.ns/name)) (vals eligible))]
-                (refuse! :seon.test/namespace-unresolved "The requested namespace has no eligible tests." ns-symbol))
-            runs (->> (keys facts)
+            runs (->> run-ids
                       (filter #(and (one % :seon.test.run/id)
                                     (= cluster-id (one % :seon.test.run/cluster))
                                     (= branch (one % :seon.test.run/branch))
@@ -718,7 +720,7 @@
                       (sort-by #(one % :seon.test.run/selection-tx)))
             members (fn [run] (into (get-in facts [run :seon.test.run/members] #{})
                                    (get-in facts [run :seon.test.run/covered-by] #{})))
-            admitted-members (selection-facts (db/history database)
+            admitted-members (selection-facts (db/history database) runs
                                [:seon.test.run/members :seon.test.run/covered-by])
             _ (doseq [run runs]
                 (let [admitted (into (get-in admitted-members [run :seon.test.run/members] #{})
@@ -776,6 +778,62 @@
                       (selection-read! (functions/gate-sets {:seon.db/db database :seon.fn/seeds changed})) [])
             work? (or first-run? (seq changed) (seq pending) (not= :incremental policy))
             reached (set reached)
+            candidates
+            (if (or first-run? (#{:all :full} policy))
+              (selection-read! (db/q '[:find [?symbol ...] :where [_ :seon.test/sym ?symbol]] database))
+              (into (into (into identities reached) (keys pending))
+                    (concat
+                     (when (seq namespaces)
+                       (selection-read!
+                        (db/q '[:find [?symbol ...] :in $ [?name ...]
+                                :where [?ns :seon.ns/name ?name]
+                                       [?test :seon.test/ns ?ns] [?test :seon.test/sym ?symbol]]
+                              database namespaces)))
+                     (when work?
+                       (selection-read!
+                        (db/q '[:find [?symbol ...]
+                                :where [?test :seon.test/platform] [?test :seon.test/sym ?symbol]] database))))))
+            tests (into {} (selection-read!
+                            (db/q '[:find ?symbol ?entity :in $ [?symbol ...]
+                                    :where [?entity :seon.test/sym ?symbol]] database candidates)))
+            candidate-data (selection-facts database (vec (vals tests))
+                             [:seon.test/sym :seon.test/ns :seon.fn/file
+                              :seon.schema.admission/source :seon.program/analyzed-source-digest
+                              :seon.test/fixture :seon.test/fixture-observation
+                              :seon.test/long :seon.test/platform])
+            related-ids (into #{} (mapcat (fn [row]
+                                           (concat (:seon.test/ns row) (:seon.fn/file row))))
+                              (vals candidate-data))
+            candidate-data (merge candidate-data
+                                  (selection-facts database (vec related-ids)
+                                    [:seon.ns/name :seon.fn.file/relative-root]))
+            one (fn [entity attribute]
+                  (first (get (or (get candidate-data entity) (get facts entity)) attribute)))
+            _ (doseq [entity (vals tests)]
+                (when-not (one entity :seon.program/analyzed-source-digest)
+                  (refuse! :seon.test/analysis-unknown "Program analysis provenance is absent."
+                           (or (one entity :seon.fn/sym) (one entity :seon.test/sym)))))
+            named? (fn [[symbol entity]]
+                     (or (identities symbol)
+                         (namespaces (one (one entity :seon.test/ns) :seon.ns/name))))
+            excluded? (fn [[_ entity]]
+                        (or (one entity :seon.test/fixture)
+                            (one entity :seon.test/fixture-observation)))
+            _ (doseq [entry tests :when (and (named? entry) (excluded? entry))]
+                (refuse! :seon.test/fixture-excluded "Explicit fixture material is not gate membership." (first entry)))
+            eligible (into {}
+                       (filter (fn [[_ entity :as entry]]
+                                 (and (not (excluded? entry))
+                                      (or (= :agent (one entity :seon.schema.admission/source))
+                                          (= "test" (one (one entity :seon.fn/file) :seon.fn.file/relative-root))
+                                          (named? entry))
+                                      (or include-long? (named? entry)
+                                          (not (one entity :seon.test/long)))))) tests)
+            _ (doseq [symbol identities :when (not (get eligible symbol))]
+                (refuse! :seon.test/identity-unresolved "The requested test is not eligible." symbol))
+            _ (doseq [ns-symbol namespaces
+                      :when (not-any? #(= ns-symbol (one (one % :seon.test/ns) :seon.ns/name)) (vals eligible))]
+                (refuse! :seon.test/namespace-unresolved "The requested namespace has no eligible tests." ns-symbol))
             reasons (reduce-kv
                      (fn [result symbol entity]
                        (let [entry [symbol entity]
@@ -799,7 +857,7 @@
                                                (= :incremental (one % :seon.test.run/policy))
                                                (one % :seon.test.run/selection-tx)
                                                (not= input-digest (one % :seon.test.run/input-digest)))
-                                         (keys facts)) :outside-program-graph
+                                         run-ids) :outside-program-graph
                                    :else :missing-basis)])
           (seq removed-files) (assoc :seon.test.selection/removed (vec (sort removed-files)))
           comparison (assoc :seon.test.run/change-basis-t comparison)

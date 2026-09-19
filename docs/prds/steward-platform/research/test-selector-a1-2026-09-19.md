@@ -50,7 +50,37 @@ refusal before the missing counts. The writer now excludes this request
 observation from the stored test row; admitted member termination remains
 owned by `complete-members`.
 
-Verification in progress. No green or completion claim yet.
+Checkpoint `23f1f4975` lands this slice. The first fast snapshot preceded
+the fixes, reproduced all three failures, and was stopped deliberately
+(exit 143) after that evidence; no full tally is claimed for it.
+Its older published fixture lacked the input fact entirely, so the fixture
+now establishes the source input observation before deriving admission.
+The second fast snapshot passes all three targeted regressions, including
+an explicit wrong-input refusal. Its complete tally is still pending.
+
+## Selection measurements
+
+The committed regression's measurement form takes the canonical database
+after establishing terminal selection evidence and uses immutable `d/with`
+snapshots changing the specs of the first 1, 10, and 100 sorted function
+symbols. It times the complete `select` call, with armed contracts. It
+does not execute or modify those function bodies. These are individual
+observations under current machine load, not latency guarantees.
+
+Before indexed acquisition, `tmp/a1-fast-2.log`:
+
+| Changed definitions | Full selector ms | Selected members |
+|---|---:|---:|
+| 1 | 4449.082208 | 309 |
+| 10 | 4768.752833 | 314 |
+| 100 | 5008.789583 | 1641 |
+
+The replacement bounds run/member reads by the selected cluster, reads
+history membership only for those runs, and acquires candidate test,
+namespace and file eligibility through entity-bound queries. It removes
+the every-function analysis sweep; analyzed provenance is checked on the
+selected tests, with publication owning whole-population completeness.
+After measurements and verification remain pending.
 
 ## Integration owed
 

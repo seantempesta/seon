@@ -106,7 +106,8 @@
                             :my.program/context
                             {:seon.sci.eval/ctx ctx :my.program/base-ctx ctx
                              :seon.db/connection connection}})]
-               (is (= [1 0 0] (mapv result [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count]))))))
+               (is (= [1 0 0] (mapv result [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count]))
+                   (pr-str result)))))
          (let [core-symbol (first (db/q '[:find [?symbol ...]
                                          :in $ ?namespace
                                          :where [?ns :seon.ns/name ?namespace]
@@ -233,6 +234,9 @@
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "test-admission")
+     (test-support/transacted! connection
+       [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
+         :seon.source/test-input-digest (id/digest 64 [:admission :inputs])}])
      (let [database (db/db connection)
            provenance (runner/provenance database)
            symbols (->> (db/q '[:find [?symbol ...]
@@ -286,6 +290,9 @@
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "test-admission-empty")
+     (test-support/transacted! connection
+       [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
+         :seon.source/test-input-digest (id/digest 64 [:admission :inputs])}])
      (let [database (db/db connection)
            request {::ignored :not-a-database-attribute
                     :seon.test.run/provenance (runner/provenance database)
@@ -301,6 +308,13 @@
                                  (id/digest 64 [:different :program]))]])]
        (is (= :seon.test/program-mismatch (:seon.error/kind refused)) (pr-str refused))
        (is (= before (db/basis-t (db/db connection))))
+       (let [wrong-input (db/transact! connection
+                           [[:db.fn/call runner/admit-run
+                             (assoc request :seon.test.run/input-digest
+                                    (id/digest 64 [:different :inputs]))]])]
+         (is (= :seon.test/program-mismatch (:seon.error/kind wrong-input))
+             (pr-str wrong-input))
+         (is (= before (db/basis-t (db/db connection)))))
        (let [report (test-support/transacted!
                      connection [[:db.fn/call runner/admit-run request]])
              row (db/pull (:db-after report)

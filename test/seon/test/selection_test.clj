@@ -106,6 +106,21 @@
                                                   (inc (db/basis-t (db/db connection))))))))
        (complete-selection! connection request)
        (is (= #{} (symbols (select!))) "A green bare rerun selects zero, including platform.")
+       (let [database (db/db connection)
+             definitions (sort (db/q '[:find [?symbol ...]
+                                       :where [_ :seon.fn/sym ?symbol]] database))]
+         (doseq [n [1 10 100]]
+           (let [snapshot (:db-after (d/with database
+                                      (mapv (fn [symbol]
+                                              [:db/add [:seon.fn/sym symbol] :seon.fn/spec
+                                               "[:=> [:cat] :boolean]"])
+                                            (take n definitions))))
+                 started (System/nanoTime)
+                 selected (sut/select (assoc request :seon.db/db snapshot))]
+             (is (vector? (:seon.test.run/members selected)) (pr-str selected))
+             (println "A1 selection measurement"
+                      {:seeds n :elapsed-ms (/ (double (- (System/nanoTime) started)) 1e6)
+                       :members (count (:seon.test.run/members selected))}))))
        (complete-selection! connection (assoc request :seon.test/identities #{(fixture-symbol "unrelated")}))
        (install-selection-program! connection (str/replace source "leaf [] 1" "leaf [] 3"))
        (let [changed (select!)]
@@ -192,6 +207,33 @@
 
 (deftest selection-derives-bases-obligations-and-exact-symbol-reach
   (exercise-selection! sut/select))
+
+(deftest definition-content-agrees-across-exploratory-branches
+  (support/with-database
+   (fn [left]
+     (support/with-database
+      (fn [right]
+        (support/transacted! left [{:seon.ns/name 'selection.fixture}])
+        (support/transacted! right [{:seon.ns/name 'selection.offset}
+                                   {:seon.ns/name 'selection.fixture}])
+        (let [left-basis (db/basis-t (db/db left))
+              right-basis (db/basis-t (db/db right))
+              target (fixture-symbol "branch-leaf")
+              content #(get (#'sut/definition-digests (db/db %) [target]) target)]
+          (doseq [connection [left right]]
+            (install-selection-program! connection "(defn branch-leaf [] 1)"))
+          (is (not= (get-in (db/db left) [:config :branch])
+                    (get-in (db/db right) [:config :branch])))
+          (is (not= (:db/id (db/pull (db/db left) [:db/id] [:seon.fn/sym target]))
+                    (:db/id (db/pull (db/db right) [:db/id] [:seon.fn/sym target]))))
+          (is (string? (content left)))
+          (is (= (content left) (content right)))
+          (is (= #{target} (#'sut/changed-definition-symbols (db/db left) left-basis)
+                          (#'sut/changed-definition-symbols (db/db right) right-basis)))
+          (let [basis (db/basis-t (db/db right))]
+            (install-selection-program! right "(defn branch-leaf [] 2)")
+            (is (not= (content left) (content right)))
+            (is (= #{target} (#'sut/changed-definition-symbols (db/db right) basis))))))))))
 
 (deftest fileless-sci-tests-use-the-same-selection
   (support/with-database
