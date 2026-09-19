@@ -4089,3 +4089,20 @@ src/seon/test/cache.clj test/seon/test_cache_test.clj`
 3. `bin/test-fast --paths` refuses on foreign dirty caller files; a lane cannot iterate when a neighbour holds a caller. Admit the neighbour's HEAD bytes for those callers, naming them, instead of refusing.
 4. `bin/test` as a launcher of the runtime's own selection/execution functions (Track A4); tally as a query (A5).
 5. Gate source warnings (shadowed-var) should name the fix and be fixable by a mechanical lane; today they scroll past.
+
+## 2026-09-19 ~19:05 UTC — A0 and db-contracts landed; cold gates
+
+`db-contracts-finish` landed `23dc23684` (astra low, ~50 min, fast 95/3,650/0);
+cold gate running (`tmp/orchestrator/gates/db-contracts-cold-2026-09-19.log`;
+two shadowed-var source warnings in schema_test.clj:1238/1295 to clean).
+`unbreak-bare-test` landed `25c50bcdc` (astra low, <10 min): `bulk-selection`
+deleted; bare `bin/test` refuses typed (`:seon.test/cluster-required` /
+`:seon.test/selection-authority-unavailable`) before any worker starts; the
+successful bare selection needs the stage-1 publication/admission handoff
+(A1/A4). Its fast run on an isolated HEAD worktree: 24/194/0F/1E, the error
+`the-canonical-platform-tier-preserves-file-local-uncertainty` (platform-tier
+destructive-drill check refusing two `seon.dev.fresh-operator-reset-test`
+members) — observed on HEAD, not A0's; owner to assign. Confirmed tools-queue
+item 3: the shared-tree fast overlay refused A0 for the foreign dirty
+`src/seon/test.clj`. Owed: A0 cold gate after the db gate, then bare `bin/test`
+must exit nonzero with the named refusal.
