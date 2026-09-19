@@ -666,23 +666,27 @@
   decides what to do with each."
   [db]
   (let [effective (database-effective-config db)]
-    {:seon.config/on-core-error
-     (or (:seon.config/on-core-error effective) :record)
-     :seon.sci.admit/caps (config/result-caps effective)}))
+    (merge {:seon.config/on-core-error
+            (or (:seon.config/on-core-error effective) :record)
+            :seon.sci.admit/caps (config/result-caps effective)}
+           (select-keys effective [:seon.config.error/max-evidence-bytes]))))
 
 (defn- install-function-contract!
   [ctx committed projection db]
   (when-let [spec-edn (:seon.fn/spec committed)]
     (let [function-symbol (:seon.fn/sym committed)
           sci-var (sci/resolve ctx function-symbol)
-          {:keys [:seon.config/on-core-error :seon.sci.admit/caps]}
+          {:keys [:seon.config/on-core-error :seon.sci.admit/caps
+                  :seon.config.error/max-evidence-bytes]}
           (instrumentation-config db)]
       (sci/bind-root!
        ctx sci-var
        (instrument/wrap-interpreted
         function-symbol spec-edn projection on-core-error caps @sci-var
-        (select-keys @(::kernel/program-snapshot ctx)
-                     [:seon.flow/commit-fault!])))))
+        (cond-> (select-keys @(::kernel/program-snapshot ctx)
+                             [:seon.flow/commit-fault!])
+          max-evidence-bytes
+          (assoc :seon.config.error/max-evidence-bytes max-evidence-bytes))))))
   nil)
 
 (declare install-declared-classes!)

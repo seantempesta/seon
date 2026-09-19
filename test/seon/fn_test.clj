@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [my.program :as my.program]
+            [seon.cluster :as cluster]
             [seon.cluster.store :as store]
             [datahike.api :as d]
             [seon.test.selection :as selection]
@@ -1703,6 +1704,88 @@
            (seon.fn/index! {:seon.db/connection connection
                            :seon.db/process boot-process
                            :seon.source/database @connection}))))))
+
+(deftest ^{:seon.test/long
+           "One complete canonical program population into a fresh memory store verifies transaction-local shape sharing."
+           :seon.test/long-ms 180000}
+  fresh-population-flattens-with-its-supplied-declarations
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :commit-graph? false
+                       :keep-history? true
+                       :schema-flexibility :write}
+        projection (schema/declaration-projection (schema.edn/packaged-forms))
+        manifest @test-support/source-manifest
+        caller (Thread/currentThread)
+        compiled (atom nil)
+        compile-population @#'seon.fn/compile-index-transaction]
+    (d/create-database configuration)
+    (try
+      (with-open [held (test-support/closeable (d/connect configuration) d/release)]
+        (let [connection @held]
+          (schema/call-with-projection
+           projection
+           (fn []
+             ;; This is the complete-publication seam: physical attributes and
+             ;; process facts exist, while canonical schema rows arrive with
+             ;; the program transaction they describe.
+             (#'cluster/accrete-schema-population! connection nil false)
+             (is (empty? (db/q '[:find ?key :where [_ :seon.schema/key ?key]]
+                                  (db/db connection))))
+             (is (= :db.type/ref
+                    (get-in @connection [:schema :seon.fn/arities :db/valueType])))
+             (with-redefs-fn
+               {#'seon.fn/compile-index-transaction
+                (fn [supplied rows identities]
+                  (let [result (compile-population supplied rows identities)]
+                    (when (identical? caller (Thread/currentThread))
+                      (reset! compiled result))
+                    result))}
+               #(let [result (seon.fn/index!
+                              {:seon.db/connection connection
+                               :seon.db/process boot-process
+                               :seon.fn/manifest manifest})]
+                  (is (pos? (:seon.reconcile/operations result)) (pr-str result))))
+             (let [entities (:seon.fn/index-entities @compiled)
+                   shape-ids (into #{}
+                                   (keep (fn [[_ eid attribute]]
+                                           (when (= :seon.schema.shape/fingerprint attribute)
+                                             eid)))
+                                   (:seon.fn/index-identity-operations @compiled))
+                   shape-rows (filter #(shape-ids (:db/id %)) entities)
+                   nested-shapes
+                   (for [entity entities
+                         value (rest (tree-seq coll? seq entity))
+                         :when (and (map? value) (:seon.schema.shape/fingerprint value))]
+                     value)
+                   database (db/db connection)
+                   component-attributes
+                   (into []
+                         (keep (fn [[attribute declaration]]
+                                 (when (:db/isComponent declaration) attribute)))
+                         (:schema database))
+                   fingerprints (db/q '[:find ?fingerprint
+                                        :where [_ :seon.schema.shape/fingerprint ?fingerprint]]
+                                      database)]
+               (is (seq shape-ids) "the subject includes real shared contract shapes")
+               (is (empty? nested-shapes)
+                   "identified shapes are emitted once, never repeated inside declarations")
+               (is (= (count shape-ids) (count shape-rows) (count fingerprints)))
+               (is (seq (db/q '[:find ?shape
+                                :where [?a :seon.fn.arity/input-schema ?shape]
+                                       [?b :seon.fn.arity/input-schema ?shape]
+                                       [(not= ?a ?b)]] database))
+                   "distinct arities retain their shared shape reference")
+               (is (seq component-attributes)
+                   "the installed schema declares the component relationships checked")
+               (is (empty?
+                    (db/q '[:find ?child ?first ?second
+                            :in $ [?name ...]
+                            :where [?first ?name ?child]
+                                   [?second ?name ?child]
+                                   [(not= ?first ?second)]] database component-attributes))
+                   "flattening preserves exclusive ownership of component children"))))))
+      (finally
+        (d/delete-database configuration)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; ONE EVALUATION POINT — the census's own regression (ruling 71)

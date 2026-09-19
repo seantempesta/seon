@@ -2550,6 +2550,8 @@
                                       (process-identity (:seon.boot/advertisement instance))
                                       (config/result-caps effective) %)
                       :seon.sci.admit/caps (config/result-caps effective)
+                      :seon.config.error/max-evidence-bytes
+                      (:seon.config.error/max-evidence-bytes effective)
                       :seon.schema/projection projection})]
          (when (or (:seon.error/kind result)
                    (and (= :panic (:seon.config/on-core-error effective))

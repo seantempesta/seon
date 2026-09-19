@@ -510,7 +510,9 @@
      [:fn clojure.core/ifn?]]
     [:=> [:cat :symbol :string :map :seon.config/on-core-error
           [:or :seon.sci.admit/caps :seon.error/value] [:fn clojure.core/ifn?]
-          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]]]
+          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]
+           [:seon.config.error/max-evidence-bytes {:optional true}
+            :seon.config.error/max-evidence-bytes]]]
      [:fn clojure.core/ifn?]]]}
   ([function-symbol spec-edn projection mode caps f]
    (wrap-interpreted function-symbol spec-edn projection mode caps f {}))
@@ -533,7 +535,13 @@
       (let [wrapped (binding [*compiling-contract* true]
                       (compiled-wrapper projection function-symbol
                                         (edn/read-string spec-edn) original caps
-                                        (assoc arm-request :seon.config/on-core-error mode)))]
+                                        (assoc arm-request
+                                               :seon.config/on-core-error mode
+                                               :seon.sci.admit/caps caps
+                                               :seon.config.error/max-evidence-bytes
+                                               (or (:seon.config.error/max-evidence-bytes arm-request)
+                                                   (:seon.config.error/max-evidence-bytes
+                                                    (config/defaults))))))]
         (with-meta wrapped
           (assoc (meta wrapped) interpreted-original original))))))
 
@@ -699,10 +707,9 @@
                   ((mi/-f->original schema/compilable-form)
                    contract
                    ((mi/-f->original schema/predicate-functions-in) projection)))
-           caps (assoc (or caps (config/result-caps (config/defaults)))
+           caps (assoc caps
                        :seon.config.eval.result/max-bytes
-                       (or (:seon.config.error/max-evidence-bytes policy)
-                           (:seon.config.error/max-evidence-bytes (config/defaults))))
+                       (:seon.config.error/max-evidence-bytes policy))
            options {:registry (mr/composite-registry
                                (:seon.schema.projection/registry projection)
                                (mr/var-registry))}
@@ -869,6 +876,7 @@
     [:or :seon.instrument/applied :seon.error/value]]}
   [{mode :seon.config/on-core-error
     caps :seon.sci.admit/caps
+    max-evidence-bytes :seon.config.error/max-evidence-bytes
     commit-fault! :seon.flow/commit-fault!
     supplied-projection :seon.schema/projection}]
   (cond
@@ -914,8 +922,13 @@
           :seon.error/diagnostic-offending :seon.instrument/missing-projection
           :seon.error/diagnostic-cause ::missing-projection
           :seon.error/diagnostic-evidence nil})
-        (let [caps (or caps (config/result-caps (config/defaults)))
-              policy (cond-> {:seon.config/on-core-error mode}
+        (let [defaults (delay (config/defaults))
+              caps (or caps (config/result-caps @defaults))
+              policy (cond-> {:seon.config/on-core-error mode
+                              :seon.sci.admit/caps caps
+                              :seon.config.error/max-evidence-bytes
+                              (or max-evidence-bytes
+                                  (:seon.config.error/max-evidence-bytes @defaults))}
                        (and (= :record mode) commit-fault!)
                        (assoc :seon.flow/commit-fault! commit-fault!))
               contracts (collect-contracts! caps)

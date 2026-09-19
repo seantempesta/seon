@@ -7,6 +7,22 @@ tags: [issue, operator, database, class/n9, wave/publication-velocity]
 
 # Complete source publication takes ~70 s against the ten-second law
 
+## Publication repair handoff, 2026-09-19
+
+Two confirmed defects were repaired: fresh compilation discarded its supplied
+construction projection, and instrumentation rebuilt config defaults per
+wrapper. Complete publication/adoption now succeeds in default PID 41822,
+without restart or weakened validation. Requests 64089 and 64570 took
+159,359 ms and 150,095 ms respectively. The second adopted the published
+commit `6aaec3db-f99e-5125-b8aa-db32567affc8`.
+
+This issue stays open: successful completion is not acceptable incremental
+latency. Population still took 25–26 s; reading published rows took 25–26 s.
+The changed-file follow-up overlapped other program identity changes, so it
+does not establish the isolated incremental path's cost. Exact measurements,
+verification limits and dependency-keyed reuse recommendations are in the
+[repair landing note](../../prds/context-generation/research/publication-update-repair-2026-09-19.md).
+
 ## Re-observed at the namespace-agent audit, 2026-09-19
 
 After starting default PID 41822 and proving both MCP modes reachable,

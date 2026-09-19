@@ -2870,7 +2870,8 @@
   are derived and after each ordered phase commits. Observation never changes
   transaction boundaries; the scratch branch remains unpublished until every
   phase and the source seal commit. An explicit previous source database
-  selects in-place reconciliation for an opted-in development cluster."
+  selects in-place reconciliation for an opted-in development cluster.
+  Fresh publication uses its supplied construction projection."
   {:malli/schema
    [:function
     [:=> [:cat :seon.fn/index-request]
@@ -2971,7 +2972,10 @@
          {:seon.reconcile/converged? (empty? changed-identities)
           :seon.reconcile/operations (count changed-identities)
           :seon.program/identities (vec changed-identities)})
-       (let [database @connection
+       ;; Fresh branches have installed attributes, but their canonical schema
+       ;; rows arrive in this transaction. Capture the supplied construction
+       ;; projection instead of deriving an empty declaration world from @conn.
+       (let [database (db/db connection)
              projection (or (db/carried-projection database)
                             (schema/projection-from-database database))
              identity-attributes (db/identity-attributes database)
