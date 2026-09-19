@@ -4182,3 +4182,15 @@ assertions; fast 12/146/1F/1E, both residue of the publication timeout the
 Running: 1a (high), readiness (medium); gate 4 (`a0-stage1-cold-4`) in flight.
 Effort report given to the owner at ~21:40 UTC (low = workhorse for bounded
 specs; high for design/review; medium pending).
+
+## 2026-09-19 ~22:05 UTC — readiness cause found (medium lane); repair resumed
+
+`reset-boot-readiness` (astra MEDIUM, ~35 min to diagnosis) landed
+`9851d239e` `0c98a5344`: cause reproduced on a scratch root — the fixture's
+cleanup sends SIGTERM while boot still awaits READY, so the child reports
+`readiness-closed` at completed recovery; regression asserts positive fresh
+recovery alongside refused reads. Fast 12/60/1F(pre-existing)/0E. The repair
+needed the fixture file the preflight lane held; released and the lane
+resumed to land it (typed bound failure naming what never arrived, never a
+silent SIGTERM). Medium data point: diagnosis-quality work with child-log
+bytes; stopped correctly at the held file.
