@@ -910,7 +910,8 @@
              (assoc :seon.db/read-result stable-result))))
          captured)))
 
-(declare decode-index-page decode-query-result decode-pull-result read-declarations encode-query-request)
+(declare decode-index-page decode-query-result decode-pull-result read-declarations
+         with-declarations encode-query-request)
 
 (defn- pull-plan-with-evidence
   [& arguments]
@@ -923,43 +924,71 @@
          arguments))
 
 (defn- replay-read
+  "Replay one recorded read against `database`.
+
+   The declarations are refused once, before any decoding, so a value that
+   could not be decoded is never returned as though it had been (critical
+   finding #18). The operation itself is a declared enum and an unknown
+   member is a typed refusal naming the attribute, never `case`'s
+   `IllegalArgumentException` into the since-diff that runs before every
+   agent turn (critical finding #19)."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.db/read-request]
+    [:or :seon.schema/value :seon.db/error-result]]}
   [database request]
-  (case (:seon.db/read-operation request)
-    :q
-    (let [query-request
-          (update (:seon.db/query-request request) :args
-                  (fn [arguments]
-                    (mapv #(if (= ::database %) database %) arguments)))
-          parsed-query (query/memoized-parse-query (:query query-request))
-          response (d/q-with-evidence
-                    (encode-query-request (read-declarations database 'seon.db/replay-read)
-                                          query-request parsed-query))]
-      (decode-query-result (read-declarations database 'seon.db/replay-read)
-                           query-request
-                           parsed-query
-                           (:datahike.query/result response)))
+  (with-declarations database 'seon.db/replay-read
+    (fn [declarations]
+      (case (:seon.db/read-operation request)
+        :q
+        (let [query-request
+              (update (:seon.db/query-request request) :args
+                      (fn [arguments]
+                        (mapv #(if (= ::database %) database %) arguments)))
+              parsed-query (query/memoized-parse-query (:query query-request))
+              response (d/q-with-evidence
+                        (encode-query-request declarations
+                                              query-request parsed-query))]
+          (decode-query-result declarations
+                               query-request
+                               parsed-query
+                               (:datahike.query/result response)))
 
-    :pull
-    (let [arguments (:seon.db/pull-arguments request)
-          response (apply pull-plan-with-evidence database arguments)]
-      (decode-pull-result (read-declarations database 'seon.db/replay-read)
-                          (:datahike.pull/plan response)
-                          :datahike.pull/result
-                          (:datahike.pull/result response)))
+        :pull
+        (let [arguments (:seon.db/pull-arguments request)
+              response (apply pull-plan-with-evidence database arguments)]
+          (decode-pull-result declarations
+                              (:datahike.pull/plan response)
+                              :datahike.pull/result
+                              (:datahike.pull/result response)))
 
-    :pull-many
-    (let [arguments (:seon.db/pull-arguments request)
-          response (apply pull-many-plan-with-evidence database arguments)]
-      (decode-pull-result (read-declarations database 'seon.db/replay-read)
-                          (:datahike.pull/plan response)
-                          :datahike.pull-many/result
-                          (:datahike.pull-many/result response)))
+        :pull-many
+        (let [arguments (:seon.db/pull-arguments request)
+              response (apply pull-many-plan-with-evidence database arguments)]
+          (decode-pull-result declarations
+                              (:datahike.pull/plan response)
+                              :datahike.pull-many/result
+                              (:datahike.pull-many/result response)))
 
-    :index-page
-    (decode-index-page (read-declarations database 'seon.db/replay-read)
-                       database
-                       (d/index-page database
-                                     (:seon.db/index-page-options request)))))
+        :index-page
+        (decode-index-page declarations
+                           database
+                           (d/index-page database
+                                         (:seon.db/index-page-options request)))
+
+        (diagnostic
+         {:seon.error/kind ::unknown-read-operation
+          :seon.error/message
+          (str "seon.db/replay-read cannot replay the read operation "
+               (pr-str (:seon.db/read-operation request)) ".")
+          :seon.error/diagnostic-layer :database-read
+          :seon.error/diagnostic-operation 'seon.db/replay-read
+          :seon.error/diagnostic-member :seon.db/read-operation
+          :seon.error/diagnostic-expected :seon.db/read-operation
+          :seon.error/diagnostic-offending (:seon.db/read-operation request)
+          :seon.error/diagnostic-cause ::unknown-read-operation
+          :seon.error/diagnostic-evidence
+          {:seon.db/read-request request}
+          :seon.db/invalid-read true})))))
 
 (defn- index-pattern-change
   [changes pattern]
@@ -985,9 +1014,10 @@
   entity or value constraint that their reader did not retain."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:vector :seon.db/read-evidence] :seon.db/basis-t]
-                  :seon.db/datoms]}
+                  [:or :seon.db/datoms :seon.db/error-result]]}
   [database retained basis]
-  (let [declarations (read-declarations database 'seon.db/read-evidence-changes)]
+  (with-declarations database 'seon.db/read-evidence-changes
+   (fn [declarations]
    (into []
         (comp (map #(datom->data declarations database %)) (distinct))
         (mapcat
@@ -1004,7 +1034,7 @@
                  changes (d/since (d/history database)
                                   (or (:seon.db/read-basis-t source) basis))]
              (keep #(index-pattern-change changes %) patterns))))
-         retained))))
+         retained)))))
 
 (defn- index-evidence-current
   "An exact index check when historical datoms retain the read's dependencies.
@@ -1028,7 +1058,7 @@
   "True when `database` still satisfies every retained dependency revision."
   {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.error/value]
                        [:vector :seon.db/read-evidence]]
-                  [:or :boolean :seon.error/value]]}
+                  [:or :boolean :seon.db/error-result]]}
   [database retained]
   (if (error-value? database)
     database
@@ -1137,14 +1167,71 @@
   (:seon.schema/projection (meta (schema-database database))))
 
 (defn- read-declarations
+  "The declaration table for one read, or the flat refusal naming what is missing.
+
+   Before this returned a table whose `::installed-schema` was `nil` whenever
+   the supplied value was not a database, and `edn-encoded?` then answered
+   false for EVERY attribute: each decoded value silently lost its declared
+   decoding, with no signal anywhere (critical finding #18). An absent
+   installed schema is the refusal; consumers branch on it."
   [database operation]
-  (let [origin (when database (schema-database database))]
-    {::installed-schema (:schema origin)
-     ::read-projection
-     (delay (or (when origin (carried-projection origin))
-                (schema/handed-projection)
-                (let [failure (projection-fallback operation)]
-                  (throw (ex-info (:seon.error/message failure) failure)))))}))
+  (let [origin (when (db.utils/db? database) (schema-database database))
+        installed (:schema origin)]
+    (if (seq installed)
+      {::installed-schema installed
+       ::read-projection
+       (delay (or (carried-projection origin)
+                  (schema/handed-projection)
+                  (let [failure (projection-fallback operation)]
+                    (throw (ex-info (:seon.error/message failure) failure)))))}
+      (diagnostic
+       {:seon.error/kind ::unreadable-declarations
+        :seon.error/message
+        (str operation " cannot decode a read: the supplied value carries no installed database schema.")
+        :seon.error/diagnostic-layer :database-read
+        :seon.error/diagnostic-operation operation
+        :seon.error/diagnostic-member ::installed-schema
+        :seon.error/diagnostic-expected :seon.db/database-value
+        :seon.error/diagnostic-offending database
+        :seon.error/diagnostic-cause ::unreadable-declarations
+        :seon.error/diagnostic-evidence {:seon.db/db database}
+        :seon.db/invalid-read true}))))
+
+(def ^:private relation-only-declarations
+  "The declaration table for a read with no database source.
+
+   Its installed schema is EMPTY because there are no stored values in the
+   answer, not because the table could not be read. Every walker therefore
+   decodes nothing, correctly."
+  {::installed-schema {}
+   ::read-projection (delay (schema/handed-projection))})
+
+(defn- with-declarations
+  "Call `continue` with the read's declarations, or return their refusal.
+
+   `absent` is what a read that genuinely has no database source passes for
+   `database`; anything else missing an installed schema is the refusal.
+   The candidate database is deliberately polymorphic so malformed values reach
+   that diagnostic; the continuation owns its result shape (query, pull,
+   datoms, or diff), which this seam returns unchanged."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.schema/value :qualified-symbol
+          [:=> [:cat :map] :seon.schema/value]]
+     [:or :seon.schema/value :seon.db/error-result]]
+    [:=> [:cat :seon.schema/value :qualified-symbol
+          [:or :nil [:= :seon.db/relation-only]]
+          [:=> [:cat :map] :seon.schema/value]]
+     [:or :seon.schema/value :seon.db/error-result]]]}
+  ([database operation continue]
+   (with-declarations database operation nil continue))
+  ([database operation absent continue]
+   (if (and (nil? database) (= :seon.db/relation-only absent))
+     (continue relation-only-declarations)
+     (let [declarations (read-declarations database operation)]
+       (if (error-value? declarations)
+         declarations
+         (continue declarations))))))
 
 (defn- ask-declarations
   "Ask one declaration question with the population both PASSED and SUPPLIED.
@@ -1639,6 +1726,11 @@
   "Current immutable database value for an explicit or ambient connection."
   {:malli/schema
    [:function
+    ;; A SUPPLIER'S DECLARED RETURN IS READ BY `seon.call-preparation`, which
+    ;; refuses a default whose declaration is wider than the argument it fills.
+    ;; Widening these three to the full facet union made every prepared
+    ;; `:seon.db/db` and `:seon.db/connection` inadmissible, and `seon.db/diff`
+    ;; then reported `:seon.db/database-input-absent` (measured 2026-09-18).
     [:=> [:cat]
      [:or :seon.db/database-value :seon.error/value]]
     [:=> [:cat [:or :seon.db/connection :seon.error/value]]
@@ -1862,17 +1954,23 @@
                 parsed-query (query/memoized-parse-query (:query request))]
             (or (malformed-query-pattern-error request parsed-query)
                 (query-attribute-error request parsed-query)
-                (let [declarations (read-declarations
-                                    (some #(when (db.utils/db? %) %) aligned) 'seon.db/q)
-                      response (d/q-with-evidence (encode-query-request declarations request parsed-query))
-                      result (decode-query-result
-                              (read-declarations
-                               (some #(when (db.utils/db? %) %) aligned)
-                               'seon.db/q)
-                              request parsed-query
-                              (:datahike.query/result response))]
-                  (append-query-evidence! request response result)
-                  result)))))
+                (with-declarations
+                  (some #(when (db.utils/db? %) %) aligned) 'seon.db/q
+                  ;; A RELATION-ONLY QUERY HAS NO DATABASE SOURCE AT ALL. Every
+                  ;; binding came from the caller's own relation, so there is no
+                  ;; stored value to decode and no installed schema to miss.
+                  ;; Refusing there is the mirror of the defect this seam fixes:
+                  ;; it reads "nothing to decode" as "cannot decode".
+                  :seon.db/relation-only
+                  (fn [declarations]
+                    (let [response (d/q-with-evidence
+                                    (encode-query-request declarations request parsed-query))
+                          result (decode-query-result
+                                  declarations
+                                  request parsed-query
+                                  (:datahike.query/result response))]
+                      (append-query-evidence! request response result)
+                      result)))))))
         (catch Throwable cause
           (when explicit-database?
             (append-database-evidence! query-or-database :all))
@@ -1973,6 +2071,185 @@
 
       :else arguments)))
 
+(defn- pulled-entity-schema-key
+  "The entity schema `entity-id` satisfies: a key, nil, or a refusal.
+
+   Identity is never inferred from a name; only declared facts decide, and
+   the three answers are deliberately distinct.
+
+   - The `:seon.program/row-schema` the present attributes declare. Exactly
+     one is the key. MORE THAN ONE is the only genuine contradiction here —
+     the attributes on one entity disagree about the schema that states them
+     — and it is the one case that refuses.
+   - Otherwise the projection's own shape index: the entity schemas that
+     declare a present attribute and whose required attributes are all
+     present. Exactly one is the key; none or several leaves it undecided,
+     because the index is an over-approximation, not a declaration.
+   - nil means NOTHING declares this entity's schema. That is a gap in the
+     declared facts — this tree has many, the provider descriptor rows among
+     them — and the caller passes the value through unvalidated rather than
+     converting a missing declaration into a refused read."
+  {:malli/schema
+   [:=> [:cat :seon.schema/projection :seon.db/database-value
+         :seon.db/entity-id]
+    [:or :nil :seon.schema/registry-key :seon.error/value]]}
+  [projection database entity-id]
+  (let [forms (:seon.schema.projection/forms projection)
+        rows (:seon.schema.projection/shape-rows projection)
+        required (:seon.schema.projection/required-by-key projection)
+        index (:seon.schema.projection/shape-index projection)
+        eid (try (db.utils/entid database entity-id) (catch Throwable _ nil))
+        attributes (when eid
+                     (into #{} (map :a) (d/datoms database :eavt eid)))
+        declared
+        (into #{}
+              (keep (fn [attribute]
+                      (:seon.program/row-schema
+                       (schema.form/attr-form-properties
+                        (schema.datahike/resolve-malli-form-in
+                         projection (get forms attribute))))))
+              attributes)]
+    (cond
+      (= 1 (count declared)) (first declared)
+
+      (< 1 (count declared))
+      (diagnostic
+       {:seon.error/kind ::disagreeing-pull-schema
+        :seon.error/message
+        (str "The attributes present on this entity declare more than one "
+             "row schema " (pr-str (vec (sort declared)))
+             ". Supply :schema-key with the selector.")
+        :seon.error/diagnostic-layer :database-read
+        :seon.error/diagnostic-operation 'seon.db/pull
+        :seon.error/diagnostic-member :seon.program/row-schema
+        :seon.error/diagnostic-expected :seon.schema/registry-key
+        :seon.error/diagnostic-offending (vec (sort declared))
+        :seon.error/diagnostic-cause ::disagreeing-pull-schema
+        :seon.error/diagnostic-evidence
+        {:seon.db/entity-id entity-id
+         :seon.db/attributes (vec (sort attributes))}
+        :seon.db/invalid-read true})
+
+      :else
+      (let [candidates
+            (into #{}
+                  (filter (fn [candidate]
+                            (and (true? (:seon.schema/entity? (get rows candidate)))
+                                 (seq (get required candidate))
+                                 (set/subset? (get required candidate) attributes))))
+                  (mapcat #(get index % []) attributes))]
+        (when (= 1 (count candidates)) (first candidates))))))
+
+(defn- selector-names-attributes?
+  "True when the selector asks for anything beyond `:db/id`.
+
+   A `[:db/id]`-only pull result DECLARES ITSELF: `{:db/id 5}` needs no
+   entity schema to be a complete, checked answer, and the readiness probes
+   that use it (`seon.cluster/transact-initialization!`) must never meet a
+   refusal there."
+  {:malli/schema [:=> [:cat :seon.db/pull-selector] :boolean]}
+  [selector]
+  (boolean (some #(not= :db/id %) selector)))
+
+(defn- validate-pulled-value
+  "Validate one pulled map against the form derived for (schema-key, selector).
+
+   This is the derived pulled form of the pulled-form study, not a
+   hand-written mirror: `seon.schema/pulled-form-in` derives it from the
+   entity schema and the exact literal selector Datahike was handed, and a
+   refused derivation refuses the read."
+  {:malli/schema
+   [:=> [:cat :seon.schema/projection :qualified-symbol
+         :seon.schema/registry-key :seon.db/pull-selector :map]
+    [:or :map :seon.db/error-result]]}
+  [projection public-operation schema-key selector value]
+  (let [projected (schema/projection-with-pulled-form-in
+                   projection schema-key selector)]
+    (if (error-value? projected)
+      ;; THE DERIVATION REFUSED, NOT THE READ. `pulled-form-in` declines
+      ;; recursion and wildcard component cycles, so a `'[*]` pull over
+      ;; `:seon.fn/fn` (whose bindings revisit `:seon.fn.binding/row`) has no
+      ;; derivable form. Returning that refusal turned a gap in OUR machinery
+      ;; into a failed read for a whole entity family — the same disease one
+      ;; level up. The value passes through, and the gap is a finding.
+      value
+      (let [derived-key (schema/pulled-schema-key schema-key selector)
+            validator (schema/projection-validator projected derived-key)]
+        (if (validator value)
+          value
+          (diagnostic
+           {:seon.error/kind ::invalid-pulled-result
+            :seon.error/message
+            (str public-operation
+                 " returned a value that does not satisfy the derived pulled form "
+                 derived-key " of " schema-key ".")
+            :seon.error/diagnostic-layer :database-read
+            :seon.error/diagnostic-operation public-operation
+            :seon.error/diagnostic-member derived-key
+            :seon.error/diagnostic-expected
+            (get (:seon.schema.projection/forms projected) derived-key)
+            :seon.error/diagnostic-offending value
+            :seon.error/diagnostic-cause ::invalid-pulled-result
+            :seon.error/diagnostic-evidence
+            {:seon.schema/key schema-key :seon.db/pull-selector selector}
+            :seon.db/invalid-read true}))))))
+
+(defn- validate-pulled-result
+  "Validate every pulled map a read returns against its derived form.
+
+   Four outcomes, and the differences between them are the whole point:
+
+   - A selector that names nothing beyond `:db/id` needs no entity schema at
+     all: `{:db/id 5}` declares itself, and the value is returned unchanged.
+   - `nil` is a LEGITIMATE ABSENCE — the entity does not exist. It carries no
+     derived form and is returned unchanged.
+     `seon.cluster/transact-initialization!` reads exactly this to decide a
+     row is not ready YET, so a refusal here makes every row unready forever
+     (measured 2026-09-18: it did).
+   - A pulled map whose entity schema IS named — by the caller's
+     `:schema-key`, or by the declared facts `pulled-entity-schema-key` reads
+     — is validated against the form derived for (schema-key, selector), and
+     a value that does not satisfy it refuses.
+   - A pulled map whose entity schema nothing declares is returned unchanged.
+     That is a gap in the declared facts, not a bad read; the repair is the
+     caller carrying its `:schema-key` (the named follow-up in
+     `research/pulled-form-derivation-2026-09-17.md`). Only attributes that
+     DISAGREE about their row schema refuse, and that refusal comes from
+     `pulled-entity-schema-key` itself."
+  {:malli/schema
+   [:=> [:cat :seon.schema/projection :qualified-symbol
+         [:or :nil :seon.schema/registry-key] :seon.db/pull-selector
+         :seon.db/database-value [:vector :seon.db/entity-id]
+         [:or :nil :seon.db/pulled-entity
+          [:vector [:or :nil :seon.db/pulled-entity]]]]
+    [:or :nil :seon.db/pulled-entity
+     [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result]]}
+  [projection public-operation declared-key selector database entity-ids value]
+  (if-not (selector-names-attributes? selector)
+    value
+    (let [values (if (vector? value) value [value])
+          refusal
+          (reduce
+           (fn [_ [entity-id element]]
+             (if (nil? element)
+               nil
+               (let [schema-key (or declared-key
+                                    (pulled-entity-schema-key
+                                     projection database entity-id))]
+                 (cond
+                   (error-value? schema-key) (reduced schema-key)
+
+                   (nil? schema-key) nil
+
+                   :else
+                   (let [checked (validate-pulled-value
+                                  projection public-operation schema-key
+                                  selector element)]
+                     (if (error-value? checked) (reduced checked) nil))))))
+           nil
+           (map vector entity-ids values))]
+      (or refusal value))))
+
 (defn- pull-call
   [database arguments operation operation-key result-key public-operation]
   (if (error-value? database)
@@ -2007,15 +2284,34 @@
           (lookup-ref-error public-operation database
                             (pull-entity-id arguments)))
         (try
-      (let [arguments (total-pull-arguments arguments)
-            response (apply operation database arguments)
-            result (decode-pull-result
-                    (read-declarations database public-operation)
-                    (:datahike.pull/plan response)
-                    result-key
-                    (get response result-key))]
-        (append-pull-evidence! database arguments operation-key response result)
-        result)
+      (with-declarations database public-operation
+        (fn [declarations]
+          (let [projection @(::read-projection declarations)
+                many? (= :pull-many operation-key)
+                options (when (map? (first arguments)) (first arguments))
+                declared-key (:schema-key options)
+                entity-ids (if options
+                             (if many? (vec (:eids options)) [(:eid options)])
+                             (if many?
+                               (vec (second arguments))
+                               [(second arguments)]))
+                arguments (cond-> arguments
+                            options (update 0 dissoc :schema-key))
+                arguments (total-pull-arguments arguments)
+                selector (if (map? (first arguments))
+                           (:selector (first arguments))
+                           (first arguments))
+                response (apply operation database arguments)
+                result (decode-pull-result
+                        declarations
+                        (:datahike.pull/plan response)
+                        result-key
+                        (get response result-key))
+                checked (validate-pulled-result
+                         projection public-operation declared-key selector
+                         database entity-ids result)]
+            (append-pull-evidence! database arguments operation-key response result)
+            checked)))
       (catch Throwable cause
         (append-database-evidence! database :all)
         (dependency-error result-key cause))))))
@@ -2034,19 +2330,19 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/pull-options]
-     [:or :nil :map :seon.db/error-result]
+     [:or :nil :seon.db/pulled-entity :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]
     [:=> [:cat
           [:or :seon.db/database-value :seon.error/value
            :seon.db/pull-selector]
           [:or :seon.db/pull-options :seon.db/entity-id]]
-     [:or :nil :map :seon.db/error-result]
+     [:or :nil :seon.db/pulled-entity :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat [:or :seon.db/database-value :seon.error/value]
       :seon.db/pull-selector
       :seon.db/entity-id]
-     [:or :nil :map :seon.db/error-result]
+     [:or :nil :seon.db/pulled-entity :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]]}
   ([options]
    (pull-call (current-database-value)
@@ -2083,7 +2379,7 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/pull-many-options]
-     [:or [:vector [:or :nil :map]] :seon.db/error-result]
+     [:or [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat
@@ -2091,13 +2387,13 @@
        :seon.db/pull-selector]
       [:or :seon.db/pull-many-options
        [:sequential :seon.db/entity-id]]]
-     [:or [:vector [:or :nil :map]] :seon.db/error-result]
+     [:or [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat [:or :seon.db/database-value :seon.error/value]
       :seon.db/pull-selector
       [:sequential :seon.db/entity-id]]
-     [:or [:vector [:or :nil :map]] :seon.db/error-result]
+     [:or [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result]
      [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]]}
   ([options]
    (pull-call (current-database-value)
@@ -2145,10 +2441,10 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/entity-id]
-     [:or :nil :map :seon.error/value]]
+     [:or :nil :seon.db/pulled-entity :seon.db/error-result]]
     [:=> [:cat [:or :seon.db/database-value :seon.error/value]
           :seon.db/entity-id]
-     [:or :nil :map :seon.error/value]]]}
+     [:or :nil :seon.db/pulled-entity :seon.db/error-result]]]}
   ([entity-id]
    (entity-call (current-database-value) entity-id))
   ([database entity-id]
@@ -2186,10 +2482,11 @@
     (try
       ;; Datahike's index cursor is lazy and each element is a host Datom.
       ;; Realize both layers here so no process-local cursor escapes to SCI.
-      (let [declarations (read-declarations database 'seon.db/datoms)
-            result (mapv #(datom->data declarations database %)
-                         (apply d/datoms database arguments))]
-        (let [options (first arguments)
+      (with-declarations database 'seon.db/datoms
+       (fn [declarations]
+        (let [result (mapv #(datom->data declarations database %)
+                           (apply d/datoms database arguments))
+              options (first arguments)
               index (if (map? options) (:index options) options)
               components (if (map? options) (:components options) (rest arguments))
               pattern-keys (case index
@@ -2218,8 +2515,8 @@
                     :seon.db/source-argument-position 0
                     :datahike.read/dependency-plan plan}
              (instance? DB database)
-             (assoc :seon.db/read-index-patterns [pattern]))))
-        result)
+             (assoc :seon.db/read-index-patterns [pattern])))
+          result)))
       (catch Throwable cause
         (append-database-evidence! database :all)
         (dependency-error ::datoms cause)))))
@@ -2238,7 +2535,7 @@
 (defn datoms
   "Eager ordinary datoms from an explicit or current database value."
   {:malli/schema
-   [:=> [:cat [:or :seon.db/database-value :seon.error/value :seon.db/index-lookup :keyword] [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike index components include arbitrary attribute values. The function guard checks index, component count and argument-map exclusivity.", :gen/elements [[]]} :seon.schema/value]] [:or :seon.db/datoms :seon.error/value] [:fn #:error{:message "Use (seon.db/datoms index & components) or (seon.db/datoms database index & components); an index argument map takes no trailing arguments, and an index has at most four components."} seon.db/datoms-call-valid?]]}
+   [:=> [:cat [:or :seon.db/database-value :seon.error/value :seon.db/index-lookup :keyword] [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike index components include arbitrary attribute values. The function guard checks index, component count and argument-map exclusivity.", :gen/elements [[]]} :seon.schema/value]] [:or :seon.db/datoms :seon.db/error-result] [:fn #:error{:message "Use (seon.db/datoms index & components) or (seon.db/datoms database index & components); an index argument map takes no trailing arguments, and an index has at most four components."} seon.db/datoms-call-valid?]]}
   [database-or-index & arguments]
   (if (or (db.utils/db? database-or-index)
           (error-value? database-or-index))
@@ -2251,26 +2548,28 @@
   {:malli/schema
    [:function
     [:=> [:catn [::options ::index-page-options]]
-     [:or ::index-page-result :seon.error/value]]
+     [:or ::index-page-result :seon.db/error-result]]
     [:=> [:catn [::database [:or ::database-value :seon.error/value]]
           [::options ::index-page-options]]
-     [:or ::index-page-result :seon.error/value]]]}
+     [:or ::index-page-result :seon.db/error-result]]]}
   ([options] (index-page (current-database-value) options))
   ([database options]
    (if (error-value? database)
      database
      (try
-       (let [page (decode-index-page (read-declarations database 'seon.db/index-page)
-                                     database
-                                     (d/index-page database options))]
-         (append-read-evidence!
-          {:seon.db/db database
-           :seon.db/source-argument-position 0
-           :datahike.read/dependency-plan :all
-           :seon.db/read-request {:seon.db/read-operation :index-page
-                                  :seon.db/index-page-options options}
-           :seon.db/read-result page})
-         page)
+       (with-declarations database 'seon.db/index-page
+        (fn [declarations]
+          (let [page (decode-index-page declarations
+                                        database
+                                        (d/index-page database options))]
+            (append-read-evidence!
+             {:seon.db/db database
+              :seon.db/source-argument-position 0
+              :datahike.read/dependency-plan :all
+              :seon.db/read-request {:seon.db/read-operation :index-page
+                                     :seon.db/index-page-options options}
+              :seon.db/read-result page})
+            page)))
        (catch Throwable cause
          (append-database-evidence! database :all)
          (dependency-error ::index-page cause))))))
@@ -2316,9 +2615,9 @@
   {:malli/schema
    [:function
     [:=> [:cat]
-     [:or :nil :uuid :seon.error/value]]
+     [:or :nil :uuid :seon.db/error-result]]
     [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
-     [:or :nil :uuid :seon.error/value]]]}
+     [:or :nil :uuid :seon.db/error-result]]]}
   ([]
    (database-identity d/commit-id ::commit-id (current-database-value)))
   ([database]
@@ -2329,9 +2628,9 @@
   {:malli/schema
    [:function
     [:=> [:cat]
-     [:or :nil :map :seon.error/value]]
+     [:or :nil :map :seon.db/error-result]]
     [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
-     [:or :nil :map :seon.error/value]]]}
+     [:or :nil :map :seon.db/error-result]]]}
   ([]
    (database-identity d/committed-value-identity
                       ::committed-value-identity
@@ -2346,9 +2645,9 @@
   {:malli/schema
    [:function
     [:=> [:cat]
-     [:or :seon.db/database-value :seon.error/value]]
+     [:or :seon.db/database-value :seon.db/error-result]]
     [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
-     [:or :seon.db/database-value :seon.error/value]]]}
+     [:or :seon.db/database-value :seon.db/error-result]]]}
   ([]
    (database-view d/history (current-database-value) []))
   ([database]
@@ -2359,10 +2658,10 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/time-point]
-     [:or :seon.db/database-value :seon.error/value]]
+     [:or :seon.db/database-value :seon.db/error-result]]
     [:=> [:cat [:or :seon.db/database-value :seon.error/value]
           :seon.db/time-point]
-     [:or :seon.db/database-value :seon.error/value]]]}
+     [:or :seon.db/database-value :seon.db/error-result]]]}
   ([time-point]
    (database-view d/as-of (current-database-value) [time-point]))
   ([database time-point]
@@ -2373,10 +2672,10 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/time-point]
-     [:or :seon.db/database-value :seon.error/value]]
+     [:or :seon.db/database-value :seon.db/error-result]]
     [:=> [:cat [:or :seon.db/database-value :seon.error/value]
           :seon.db/time-point]
-     [:or :seon.db/database-value :seon.error/value]]]}
+     [:or :seon.db/database-value :seon.db/error-result]]]}
   ([time-point]
    (database-view d/since (current-database-value) [time-point]))
   ([database time-point]
@@ -2762,7 +3061,7 @@
 (defn diff
   "Compare shown values, or replay a pure database read since a basis."
   {:malli/schema
-   [:function [:=> [:cat :seon.db.diff/values-request] :seon.db.diff/paths] [:=> [:cat :seon.db/basis-t :seon.test/var [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Arguments are forwarded to the supplied Var; its program-graph contract and read plan own their shapes and arity.", :gen/elements [[]]} :seon.schema/value]] [:or :seon.db.diff/result :seon.error/value]]]}
+   [:function [:=> [:cat :seon.db.diff/values-request] :seon.db.diff/paths] [:=> [:cat :seon.db/basis-t :seon.test/var [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Arguments are forwarded to the supplied Var; its program-graph contract and read plan own their shapes and arity.", :gen/elements [[]]} :seon.schema/value]] [:or :seon.db.diff/result :seon.db/error-result]]]}
   ([{before :seon.db.diff/before after :seon.db.diff/after}]
    (value-changes before after))
   ([basis function-var & arguments]
@@ -2792,14 +3091,15 @@
             :seon.fn/external-sink (vec (sort sinks))})
 
           :else
-          (let [projection @(::read-projection
-                             (read-declarations database 'seon.db/diff))
-                plan (diff-plan database projection function-symbol
-                                (count arguments))]
-            (if (error-value? plan)
-              plan
-              (perform-diff database projection plan basis function-var
-                            arguments function-symbol)))))))))
+          (with-declarations database 'seon.db/diff
+            (fn [declarations]
+              (let [projection @(::read-projection declarations)
+                    plan (diff-plan database projection function-symbol
+                                    (count arguments))]
+                (if (error-value? plan)
+                  plan
+                  (perform-diff database projection plan basis function-var
+                                arguments function-symbol)))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Writes through the one synchronous transaction boundary
@@ -3422,7 +3722,7 @@
   beside a zero `:seon.fn/arity-checked` reports that nothing was compared,
   never that everything agrees."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or :seon.fn/arity-mismatch-report :seon.error/value]]}
+                  [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
   [database]
   (arity-mismatches-with q database (or (carried-projection database)
                                            (schema/handed-projection))))
@@ -3754,6 +4054,29 @@
                        (fn [after]
                          (retention-check before (retention-snapshot after rules) actor))])))] ])))))
 
+(defn- agent-provenance?
+  "True when the write's own provenance metadata names an agent user.
+
+   Ruling 1r (owner, 2026-09-18 02:15-02:30Z): \"root access (system) for no
+   limits, and then agents\" — and \"we don't have access control in the
+   database explicitly but we have the user metadata so we can still write it
+   in\". So the per-write bound is decided here, by the `:seon.db/user` the
+   transaction already carries, and by nothing else. A write with no user
+   (a `:seon.db/process` publication, adoption, reseed, boot recovery or
+   collection) and a user that is not an agent are both system writes: their
+   own lifecycle deadline is the bound that reports."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :map] :boolean]}
+  [database prepared]
+  (let [user (get-in prepared [:tx-meta :seon.db/user])]
+    (boolean
+     (when (some? user)
+       (if (and (sequential? user) (= :seon.agent/id (first user)))
+         true
+         (when-let [eid (try (db.utils/entid database user)
+                             (catch Throwable _ nil))]
+           (seq (d/datoms database :eavt eid :seon.agent/id))))))))
+
 (defn- transact-call
   {:malli/schema
    [:=> [:cat [:or :seon.db/connection :seon.error/value]
@@ -3781,26 +4104,36 @@
                    (schema.form/attr-form-properties
                     (get (:seon.schema.projection/forms projection)
                          bound-attribute)))
+                  prepared
+                  (jdk-integers->long
+                   (let [request (stamp-receipt transaction)
+                         request (if (map? request) request {:tx-data request})]
+                     (assoc-in request [:tx-meta :datahike/validate-report]
+                               (write-report-validator projection))))
+                  ;; Ruling 1r (2026-09-18): the bound derives from the write's
+                  ;; own provenance metadata, not from a second access-control
+                  ;; mechanism. An agent user keeps the short, loud dial; root
+                  ;; and system processes carry no per-write bound, because the
+                  ;; operation's own lifecycle deadline is the one that reports
+                  ;; and root can re-run a transaction an agent bound refused.
+                  agent-write? (agent-provenance? database prepared)
                   write-time-limit-ms
-                  (if (seq configured-bounds)
-                    (apply min configured-bounds)
-                    declared-bound)
+                  (when agent-write?
+                    (if (seq configured-bounds)
+                      (apply min configured-bounds)
+                      declared-bound))
                   request
                   (retain-transaction
                    projection
-                   (schema.datahike/encode-transaction-in
-                    projection
-                    (jdk-integers->long
-                     (let [request (stamp-receipt transaction)
-                           request (if (map? request) request {:tx-data request})]
-                       (assoc-in request [:tx-meta :datahike/validate-report]
-                                 (write-report-validator projection))))))
+                   (schema.datahike/encode-transaction-in projection prepared))
                   pending (d/transact! connection request)
                   timeout (Object.)
                   started (System/nanoTime)
                   report
                   (try
-                    (deref pending write-time-limit-ms timeout)
+                    (if write-time-limit-ms
+                      (deref pending write-time-limit-ms timeout)
+                      (deref pending))
                     (catch Throwable throwable
                       ;; Datahike's throwable-promise wraps the JDK timeout in
                       ;; ExceptionInfo. Preserve every delivered writer error.
@@ -3817,6 +4150,10 @@
                        :seon.store/branch (:branch (:config database))
                        :seon.config.db/write-time-limit-ms write-time-limit-ms
                        :seon.db/write-wait-elapsed-ms elapsed-ms
+                       ;; Ruling 1r: the refusal hands back the transaction so
+                       ;; root can re-run exactly what the agent bound stopped
+                       ;; waiting for.
+                       :seon.store/transaction transaction
                        :seon.db/transaction-outcome-unknown true}]
                   (diagnostic
                    {:seon.error/kind ::write-bound-exceeded

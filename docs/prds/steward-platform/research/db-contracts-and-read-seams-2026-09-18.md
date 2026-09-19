@@ -25,9 +25,9 @@ declared now.
 
 | Function | Declared output union |
 |---|---|
-| `seon.db/db` | `[:or :seon.db/database-value :seon.db/error-result]` |
-| `seon.db/supplied-database-value` | `[:or :seon.db/database-value :seon.db/error-result]` |
-| `seon.db/supplied-connection` | `[:or :seon.db/connection :seon.db/error-result]` |
+| `seon.db/db` | `[:or :seon.db/database-value :seon.error/value]` (deliberately unchanged) |
+| `seon.db/supplied-database-value` | `[:or :seon.db/database-value :seon.error/value]` (deliberately unchanged) |
+| `seon.db/supplied-connection` | `[:or :seon.db/connection :seon.error/value]` (deliberately unchanged) |
 | `seon.db/q` | `[:or :seon.schema/value :seon.db/error-result]` (landed `1695b43b2`) |
 | `seon.db/pull` | `[:or :nil :seon.db/pulled-entity :seon.db/error-result]` |
 | `seon.db/pull-many` | `[:or [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result]` |
@@ -44,13 +44,19 @@ declared now.
 | `seon.db/transact!` / `transact-call` | `[:or :seon.db/transaction-report\|-result :seon.db/error-result]` (landed `1695b43b2`) |
 | `seon.db/replay-read` (new contract) | `[:or :seon.schema/value :seon.db/error-result]` |
 
+The three suppliers above deliberately retain `:seon.error/value`:
+`seon.call-preparation` compares supplier returns with the argument being
+filled; widening these declarations makes prepared database and connection
+arguments inadmissible (`src/seon/db.clj`, comment above `db`).
+
 Input positions keep `:seon.error/value`: an upstream refusal passed INTO a
 read is the pass-through the reader returns verbatim, not a facet it produces.
 
 ## 2. The pulled form is derived, never mirrored (§ pulled-form study)
 
-`seon.db/pull` and `pull-many` now validate every non-nil map they return
-against `seon.schema/pulled-form-in` for `(schema-key, selector)` on the
+`seon.db/pull` and `pull-many` validate non-nil maps when their entity schema
+is named and their pulled form is derivable. The form comes from
+`seon.schema/pulled-form-in` for `(schema-key, selector)` on the
 value's carried projection, using the exact literal selector Datahike was
 handed (`src/seon/db.clj`, `pull-call` → `validate-pulled-result` →
 `validate-pulled-value`).
@@ -60,11 +66,16 @@ handed (`src/seon/db.clj`, `pull-call` → `validate-pulled-result` →
   `:seon.db/pull-many-options`), otherwise from the entity's OWN attributes:
   the declared `:seon.program/row-schema` of the schema that states them
   (`pulled-entity-schema-key`). Identity is never inferred from a name.
-- A refused derivation refuses the read (`::invalid-pulled-result` /
-  the derivation's own `:seon.schema/unsupported-pull-selector`).
+- An unsupported derivation leaves the read unchanged; a value failing a
+  successfully derived form refuses with `::invalid-pulled-result`.
 - A `nil` element is the declared absence of an entity and carries no form.
-- A pulled map whose row schema the present attributes do not uniquely
-  declare is `::unknown-pull-schema`, naming `:schema-key` as what to supply.
+- A selector naming nothing beyond `:db/id` is returned unchanged: the value
+  declares itself.
+- A pulled map whose entity schema nothing declares is returned unchanged; the
+  gap is a finding (§8), not a refused read.
+- Present attributes that declare MORE THAN ONE `:seon.program/row-schema`
+  are `::disagreeing-pull-schema` — the one genuine contradiction — naming
+  `:schema-key` as what to supply.
 
 `:seon.db/pulled-entity` names that guarantee in the contract. The derived
 registry key is per (schema-key, selector) and cannot be named statically in
@@ -92,11 +103,10 @@ a fixed contract; `seon.schema/pulled-schema-key` is where it lives.
   `:seon.schema/invalid-projection-source`, naming the offending value. The
   refusal is delivered as `ex-info` carrying the complete diagnostic value
   rather than as a returned value, because `projection-from-database`'s
-  output contract is `::projection` and more than one hundred callers read it
-  as one; the sibling refusals inside `projection-from-rows` already use that
-  delivery. **This is the one design decision in this note that a reviewer
-  may want to overturn** — the alternative is widening the output union of
-  `projection-from-database`, which is a cross-owner change.
+  output contract is `::projection` and the review counted approximately twenty
+  first-party call sites reading it as one; sibling refusals inside
+  `projection-from-rows` already use that delivery. The review accepts this
+  internal derivation contract; widening it would require a cross-owner change.
 
 ## 4. Two write bounds, decided by the write's own provenance (§1r)
 
@@ -126,6 +136,9 @@ mechanism:
 | `a-refused-projection-source-never-yields-a-projection-with-no-forms` | `seon.schema-test` | #20 |
 
 ## 6. Verification boundary and tallies
+
+This section records the 2026-09-18 attempts. The completed slice's current
+verification is in [the finishing note](db-contracts-finish-2026-09-19.md).
 
 **No test tally is claimed.** Three `bin/test-fast` launches were started and
 none produced one:
@@ -178,12 +191,21 @@ on a handful of attributes only (`seon.fn`, `seon.fn.file`, `seon.ns`,
 `seon.lint`, …) — so the schema key was undecided and a successful read
 became a refusal.
 
-**The repair, measured:** an undecided schema key is a gap in the DECLARED
-FACTS, not a bad read. `validate-pulled-result` now validates only when the
-key is named (by the caller's `:schema-key`, by `:seon.program/row-schema`,
-or by a unique projection shape-index match whose required attributes are all
-present), returns `nil` elements unchanged, and returns an unnamed pulled map
-unchanged. With that in place the instrumented probe counted **0 refused
+**The repair, measured, in three parts** (the second and third from the
+cluster-side investigation, `1ccf15ac8` and
+[the issue](../../../seon/issues/pull-validation-refuses-a-db-id-selector.md)):
+
+1. A selector naming nothing beyond `:db/id` needs no entity schema at all —
+   `{:db/id 5}` declares itself — so it is never derived against one.
+2. An undecided schema key is a gap in the DECLARED FACTS, not a bad read.  `validate-pulled-result` validates only when the
+   key is named (by the caller's `:schema-key`, by `:seon.program/row-schema`,
+   or by a unique projection shape-index match whose required attributes are
+   all present), and returns an unnamed pulled map unchanged.
+3. Only a genuine CONTRADICTION refuses: present attributes that declare more
+   than one `:seon.program/row-schema` (`::disagreeing-pull-schema`). A
+   shape-index multi-match is an over-approximation, not a declaration, and
+   leaves the key undecided. `nil` for a nonexistent entity is preserved
+   throughout. With that in place the instrumented probe counted **0 refused
 pulls** during canonical fixture construction, and the fixture's remaining
 refusal is a FOREIGN in-flight edit, not this work:
 

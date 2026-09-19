@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-18
 tags: [issue, database-read, pull, schema, boot, wave/core]
@@ -51,3 +51,13 @@ Two observations for the owning change:
 Until this is decided, boot is blocked. `seon.cluster` no longer hides it:
 the readiness probe surfaces this refusal verbatim
 ([the absence-as-health defect it used to hide](initialization-readiness-read-absence-as-health.md)).
+
+## Resolution — 2026-09-19
+
+`seon.db/validate-pulled-result` returns `[:db/id]`-only results unchanged,
+preserves absent entities as nil, and leaves an undecided row schema readable.
+Evidence: `pull-validates-its-result-against-the-derived-pulled-form` in
+`test/seon/db_test.clj`; a read-only JVM probe on default with an explicitly
+supplied projection returned `{:db/id 35835}` for the provider selector.
+The finishing fast tally and cold verification boundary are recorded in
+[the landing note](../../prds/steward-platform/research/db-contracts-finish-2026-09-19.md).

@@ -8,6 +8,7 @@
             [datahike.writer :as datahike.writer]
             [datahike.writing :as datahike.writing]
             [malli.core :as m]
+            [malli.instrument :as mi]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
@@ -1163,7 +1164,9 @@
               (select-keys data [:error :expected :new])))
        (is (instance? datahike.datom.Datom (:old data)))))))
 
-(deftest a-writer-that-does-not-deliver-refuses-at-the-declared-bound
+(deftest an-agent-write-that-does-not-deliver-refuses-at-the-declared-bound
+  ;; Ruling 1r (owner, 2026-09-18): the dial bounds AGENT/turn writes. The
+  ;; provenance user this transaction carries is what selects it.
   (test-support/with-database
    (fn [connection]
      (let [cluster-name "bounded-write-deref"
@@ -1171,6 +1174,8 @@
            started (CountDownLatch. 1)
            release (CountDownLatch. 1)
            old-writer (:writer @connection)]
+       (test-support/transacted!
+        connection [{:seon.agent/id "bounded-write-deref-agent"}])
        (test-support/apply-config!
         connection cluster-name
         {:seon.config.db/write-time-limit-ms write-time-limit-ms})
@@ -1198,7 +1203,9 @@
                  outcome (future
                            (db/transact!
                             connection
-                            [{:seon.agent/id "bounded-write-deref-agent"}]))]
+                            {:tx-data [{:seon.agent/id "bounded-write-deref-target"}]
+                             :tx-meta {:seon.db/user
+                                       [:seon.agent/id "bounded-write-deref-agent"]}}))]
              (test-support/await-event!
               started "the real Datahike writer to enter the blocked transaction")
              (let [refusal
@@ -1223,12 +1230,70 @@
              (test-support/await-event!
               connection "the timed-out transaction to settle later"
               #(> (db/basis-t %) before))
-             (is (= "bounded-write-deref-agent"
+             (is (= "bounded-write-deref-target"
                     (:seon.agent/id
                      (db/pull @connection
                               [:seon.agent/id]
-                              [:seon.agent/id "bounded-write-deref-agent"])))
+                              [:seon.agent/id "bounded-write-deref-target"])))
                  "the unknown transaction may commit after the caller stops waiting"))
+           (finally
+             (.countDown release))))))))
+
+(deftest a-system-write-carries-no-per-write-bound
+  ;; Ruling 1r, the other half: "root access (system) for no limits, and then
+  ;; agents; if they fail, root can re-run whatever transaction it is." A write
+  ;; whose provenance names no agent waits for its own operation's lifecycle
+  ;; deadline; the database dial does not stop it. The same blocked writer that
+  ;; refuses an agent write above therefore does not refuse this one.
+  (test-support/with-database
+   (fn [connection]
+     (let [cluster-name "unbounded-system-write"
+           write-time-limit-ms 25
+           started (CountDownLatch. 1)
+           release (CountDownLatch. 1)
+           old-writer (:writer @connection)]
+       (test-support/apply-config!
+        connection cluster-name
+        {:seon.config.db/write-time-limit-ms write-time-limit-ms})
+       (test-support/await-event!
+        (datahike.writer/shutdown old-writer)
+        "the canonical fixture writer to stop before replacement")
+       (let [blocked-writer
+             (datahike.writer/create-writer
+              {:backend :self
+               :write-fn-map
+               {'transact!
+                (fn [database request]
+                  (.countDown started)
+                  (when-not (.await release
+                                    test-support/event-backstop-seconds
+                                    TimeUnit/SECONDS)
+                    (throw
+                     (ex-info "The test did not release its blocked writer."
+                              {:seon.test/event :blocked-writer-release})))
+                  (datahike.writing/transact! database request))}}
+              connection)]
+         (swap! (:wrapped-atom connection) assoc :writer blocked-writer)
+         (try
+           (let [outcome (future
+                           (db/transact!
+                            connection
+                            [{:seon.agent/id "unbounded-system-write-target"}]))]
+             (test-support/await-event!
+              started "the real Datahike writer to enter the blocked transaction")
+             (is (= ::still-waiting
+                    (deref outcome (* 40 write-time-limit-ms) ::still-waiting))
+                 "a system write is not refused at the agent dial")
+             (.countDown release)
+             (let [report (test-support/await-event!
+                           outcome "the unbounded system write to settle")]
+               (is (schema/valid-candidate-value? :seon.db/transaction-report report)
+                   "the system write settles as a report, never a bound refusal")
+               (is (= "unbounded-system-write-target"
+                      (:seon.agent/id
+                       (db/pull @connection
+                                [:seon.agent/id]
+                                [:seon.agent/id "unbounded-system-write-target"]))))))
            (finally
              (.countDown release))))))))
 
@@ -2069,3 +2134,136 @@
        (is (empty? (:seon.activation/missing result)) (pr-str (:seon.activation/missing result)))
        (is (every? qualified-symbol? (:seon.activation/executable-symbols closure)))
        (is (every? (:seon.activation/executable-symbols closure) requested))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Read seams: the declarations table, the replayed operation, the pulled form
+;;; ---------------------------------------------------------------------------
+
+(deftest a-refused-declarations-read-refuses-decoding
+  ;; CLASS: absence of signal read as health. `read-declarations` answered with
+  ;; a table whose installed schema was `nil` whenever the supplied value was
+  ;; not a database, and `edn-encoded?` then answered false for EVERY
+  ;; attribute: each decoded value silently lost its declared decoding, with no
+  ;; signal anywhere (critical finding #18). The refusal is the answer now, and
+  ;; no decode continuation runs behind it.
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           decoded? (atom false)
+           refusal (@#'db/read-declarations {:not :a-database} 'seon.db/pull)
+           data (:seon.error/data refusal)]
+       (is (= :seon.db/unreadable-declarations (:seon.error/kind refusal)))
+       (is (= :seon.db/installed-schema
+              (:seon.error/diagnostic-member data)))
+       (is (= 'seon.db/pull (:seon.error/diagnostic-operation data)))
+       (is (= refusal
+              (@#'db/with-declarations
+               {:not :a-database} 'seon.db/pull
+               (fn [_] (reset! decoded? true) ::decoded))))
+       (is (false? @decoded?)
+           "no decode continuation may run on a refused declarations read")
+       (is (= ::decoded
+              (@#'db/with-declarations database 'seon.db/pull
+               (constantly ::decoded)))
+           "a real database still hands its declarations to the decoder")))))
+
+(deftest an-unknown-read-operation-refuses-naming-the-attribute
+  ;; CLASS: no-matching-clause (critical finding #19). `replay-read`'s `case`
+  ;; had four arms and no default, so a fifth value threw
+  ;; IllegalArgumentException naming nothing into the since-diff that runs
+  ;; before every agent turn.
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           replay (mi/-f->original @#'db/replay-read)
+           unknown (replay database
+                           {:seon.db/read-operation :seon.db/not-an-operation})
+           data (:seon.error/data unknown)]
+       (is (= :seon.db/unknown-read-operation (:seon.error/kind unknown)))
+       (is (= :seon.db/read-operation (:seon.error/diagnostic-member data)))
+       (is (= :seon.db/not-an-operation
+              (:seon.error/diagnostic-offending data)))))))
+
+(deftest pull-validates-its-result-against-the-derived-pulled-form
+  ;; The pulled shape DERIVES from the entity schema under the reader's exact
+  ;; selector; it is never a hand-written mirror. `seon.db/pull` now validates
+  ;; every non-nil map it returns against that derived form before returning
+  ;; it, and refuses a value that does not satisfy it.
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           projection (schema/projection-from-database database)]
+       (is (= {:seon.ns/name 'my.message}
+              (db/pull database [:seon.ns/name] [:seon.ns/name 'my.message]))
+           "a real pull on the canonical fixture validates and returns")
+       (is (nil? (db/pull database [:seon.ns/name] [:seon.ns/name 'no.such.ns]))
+           "an absent entity is nil and carries no derived form")
+       ;; THE CLASS THAT BROKE CLUSTER INITIALIZATION (2026-09-18): the
+       ;; validation turned a SUCCESSFUL read of an EXISTING entity into a
+       ;; refusal whenever nothing declared that entity's row schema, and
+       ;; `seon.cluster/transact-initialization!` read the refusal as absence,
+       ;; so no row was ever ready. Three shapes may never refuse.
+       (is (= {:db/id (:db/id (db/pull database [:db/id]
+                                       [:seon.ai.model/provider-id "openrouter"]))}
+              (db/pull database [:db/id]
+                       [:seon.ai.model/provider-id "openrouter"]))
+           "a :db/id-only selector declares itself and needs no entity schema")
+       (is (int? (:db/id (db/pull database [:db/id]
+                                  [:seon.ai.model/provider-id "openrouter"])))
+           "the readiness probe reads an entity id, never a refusal")
+       (is (nil? (db/pull database [:db/id]
+                          [:seon.ai.model/provider-id "no-such-provider"]))
+           "a lookup ref to a nonexistent entity stays nil, never an error")
+       (is (not (@#'db/error-value?
+                 (@#'db/pulled-entity-schema-key
+                  projection database
+                  [:seon.ai.model/provider-id "openrouter"])))
+           "no attribute present declaring a row schema is undecided, not refused")
+       (is (string? (:seon.config.ai/endpoint
+                     (db/pull database [:seon.config.ai/endpoint]
+                              [:seon.ai.model/provider-id "openrouter"])))
+           "a provider descriptor attribute reads as its value, never a refusal")
+       (let [expected-id (:db/id (db/pull database [:db/id]
+                                         [:seon.fn/sym 'my.message/send]))
+             entity-ids (db/q '[:find [?f ...]
+                               :where [?f :seon.fn/sym my.message/send]]
+                             database)]
+         (is (int? expected-id))
+         (is (= #{expected-id} (set entity-ids))
+             "the query returns exactly the present send declaration")
+         (is (= #{'my.message/send}
+                (set (map :seon.fn/sym
+                          (db/pull-many database '[*] (vec entity-ids)))))
+             "a wildcard pull whose form the derivation declines still reads"))
+       (let [schema-key (@#'db/pulled-entity-schema-key
+                         projection database [:seon.ns/name 'my.message])]
+         (is (keyword? schema-key)
+             "the entity's own attributes declare its row schema")
+         (let [refusal (@#'db/validate-pulled-value
+                        projection 'seon.db/pull schema-key [:seon.ns/name]
+                        {:seon.ns/name "my.message"})
+               data (:seon.error/data refusal)]
+           (is (= :seon.db/invalid-pulled-result (:seon.error/kind refusal))
+               "a wrong-typed expectation fails: the name is a symbol, not a string")
+           (is (= {:seon.ns/name "my.message"}
+                  (:seon.error/diagnostic-offending data)))))))))
+
+(deftest the-write-bound-derives-from-the-writes-own-provenance
+  ;; Ruling 1r (owner, 2026-09-18): root/system writes carry NO per-write
+  ;; timeout — their operation's own lifecycle deadline is the bound that
+  ;; reports — while agent/turn writes keep the short database dial. The
+  ;; decision is the `:seon.db/user` the transaction already carries; there is
+  ;; no second access-control mechanism.
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection]
+       (is (true? (@#'db/agent-provenance?
+                   database
+                   {:tx-meta {:seon.db/user [:seon.agent/id "any-agent"]}})))
+       (is (false? (@#'db/agent-provenance?
+                    database
+                    {:tx-meta {:seon.db/process
+                               [:seon.db.process/id "publication"]}}))
+           "a system process write carries no agent user and no per-write bound")
+       (is (false? (@#'db/agent-provenance? database {}))
+           "a write with no provenance user at all is a system write")))))

@@ -1280,3 +1280,29 @@
            (test-support/assert-check!
             (tc/quick-check 20 (prop/for-all [value generator] (validate value)) :seed 20260918)
             (str "Whole-parent generator " k " " generator-symbol))))))))
+
+(deftest a-refused-projection-source-never-yields-a-projection-with-no-forms
+  ;; CLASS: absence of signal read as health, at the schema authority
+  ;; (critical finding #20). A refused read handed on as `db` produced a
+  ;; projection whose forms table was empty, and every downstream
+  ;; `storable-attribute-in?` then answered from that empty table — the law
+  ;; (§2.1) that every other contract's key names rest on, answering from
+  ;; nothing. The derivation refuses instead, naming the offending value.
+  (test-support/with-database
+   (fn [connection]
+     (let [poisoned {:seon.error/kind :seon.db/invalid-read
+                     :seon.error/message "the read refused"}
+           refusal (try (schema/projection-from-database poisoned)
+                        ::no-refusal
+                        (catch clojure.lang.ExceptionInfo failure
+                          (ex-data failure)))]
+       (is (not= ::no-refusal refusal)
+           "a poisoned database value may not answer as a projection")
+       (is (= :seon.schema/invalid-projection-source (:seon.error/kind refusal)))
+       (is (= :seon.schema/database-value
+              (:seon.error/diagnostic-member (:seon.error/data refusal))))
+       (is (= poisoned
+              (:seon.error/diagnostic-offending (:seon.error/data refusal))))
+       (is (seq (:seon.schema.projection/forms
+                 (schema/projection-from-database @connection)))
+           "a real database still derives a populated projection")))))

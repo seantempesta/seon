@@ -26,6 +26,7 @@
             [datahike.api :as d]
             [datahike.pull-api :as pull-api]
             [datahike.db.interface :as dbi]
+            [datahike.db.utils :as db-utils]
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
             [clojure.edn :as edn]
@@ -2594,8 +2595,41 @@
           :seon.schema/predicate-functions {}
           :seon.schema/validate-render-contracts? true})))))))
 
+(defn- refuse-projection-source
+  "Typed refusal naming the value handed in place of a database.
+
+   The class this closes: a refused read handed on as `db` produced a
+   projection whose forms table was empty, and every downstream
+   `storable-attribute-in?` then answered from that empty table. Absence of
+   schema rows is never health here, so the derivation refuses loudly with
+   the offending value instead of returning a projection with no forms
+   (critical finding #20)."
+  {:malli/schema
+   [:=> [:cat [:any {:seon.schema.admission/exemption
+                     :seon.schema.admission/polymorphic-boundary
+                     :seon.schema.admission/reason
+                     "The refused value is whatever a caller handed in place of a database value."
+                     :gen/elements [nil false {} :k]}]]
+    :seon.error/value]}
+  [db]
+  (@error-diagnostic
+   {:seon.error/kind :seon.schema/invalid-projection-source
+    :seon.error/message
+    "The program projection requires a Datahike database value; a projection with no forms is never derived from one that is not."
+    :seon.error/diagnostic-layer :schema-derivation
+    :seon.error/diagnostic-operation 'seon.schema/projection-from-database
+    :seon.error/diagnostic-member :seon.schema/database-value
+    :seon.error/diagnostic-expected :seon.db/database-value
+    :seon.error/diagnostic-offending db
+    :seon.error/diagnostic-cause :seon.schema/invalid-projection-source
+    :seon.error/diagnostic-evidence
+    {:seon.schema/database-value db}}))
+
 (defn- derive-projection-from-database
   [db reusable-projection]
+  (when-not (db-utils/db? db)
+    (let [refusal (refuse-projection-source db)]
+      (throw (ex-info (:seon.error/message refusal) refusal))))
   (projection-from-rows
    {:seon.schema/database-value db
     :seon.schema/schema-rows

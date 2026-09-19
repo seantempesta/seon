@@ -244,8 +244,32 @@
             [:or :nil [:sequential :seon.schema/value]]]],
           :process [:and #:seon.db{:index true} :seon.db/ref],
           :receipt [:and #:seon.db{:index true} :seon.db/ref],
+          ;; `seon.db/pull` and `seon.db/pull-many` validate a returned map
+          ;; INSIDE the read against the form `seon.schema/pulled-form-in`
+          ;; derives from the pulled entity's schema and the exact literal
+          ;; selector Datahike was handed, WHENEVER that schema is named: by
+          ;; the caller's `:schema-key`, or by the declared facts on the
+          ;; attributes present. A value that does not satisfy the derived form
+          ;; refuses, and so does an entity whose present attributes DISAGREE
+          ;; about the row schema they declare.
+          ;;
+          ;; Three shapes are deliberately NOT refusals, because each would
+          ;; convert something ordinary into an outage: `nil` (the entity does
+          ;; not exist — `seon.cluster/transact-initialization!` reads exactly
+          ;; that to decide a row is not ready yet), a selector naming nothing
+          ;; beyond `:db/id` (`{:db/id 5}` declares itself), and an entity
+          ;; nothing declares a schema for (a gap in the declared facts, whose
+          ;; repair is the caller carrying its `:schema-key`).
+          ;;
+          ;; The selector is per call, so the derived key cannot be named
+          ;; statically here: this row names the guarantee, and
+          ;; `seon.schema/pulled-schema-key` names the registry entry that carries
+          ;; it for one (schema-key, selector) pair.
+          :pulled-entity
+          [:map {:description "One pulled entity map, validated against its derived pulled form whenever that form is derivable."}],
           :pull-many-options
           [:map
+           [:schema-key {:optional true} :seon.schema/registry-key]
            [:selector :seon.db/pull-selector]
            [:eids [:sequential :seon.db/entity-id]]
            [:max-work {:optional true} [:int {:min 1}]]
@@ -253,6 +277,7 @@
            [:max-result-weight {:optional true} [:int {:min 1}]]],
           :pull-options
           [:map
+           [:schema-key {:optional true} :seon.schema/registry-key]
            [:selector :seon.db/pull-selector]
            [:eid :seon.db/entity-id]
            [:max-work {:optional true} [:int {:min 1}]]
