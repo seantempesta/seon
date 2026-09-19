@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-19
 tags: [testing, tooling, schema, error]
@@ -30,3 +30,10 @@ predicate should be restored.
 Verification owed after the external error-consumer sweep: admit this schema
 edit through the normal hook and run the canonical fixture. A1 neither edits
 the held error owners nor reloads the owner's default cluster.
+
+Resolved 2026-09-19 after the caller/schema sweeps: the normal edit hook admitted
+the selection/run schemas in `f07d4eb64`, and subsequently the complete test
+error-facet resource edit (publication queue `815f3784-897a-4255-a5b8-36b1c7439479`).
+The sixth fast iteration constructed the canonical fixture and ran 41 tests.
+Its remaining refusal/instrumentation failures are a separate observation in
+[the projection-acquisition issue](../test-refusal-observations-overflow-in-projection-acquisition.md).
