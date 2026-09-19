@@ -848,3 +848,258 @@ files were removed after recording the results here. Foreign working edits
 and other worktrees were preserved. No cold gate or default lifecycle command
 was run. The orchestrator owes the external sweep, batched reset, named cold
 gate and platform proof; this bounded lane stops here.
+
+## Green-suite continuation — 2026-09-20
+
+Read the complete kind-schema-references landing, including its final per-test
+tally, and the Clojure/data modeling/testing/datahike/REPL skills. The inherited
+dirty files were `bin/test`, `src/seon/test.clj`, and A1's landing note; later A1
+changes were also preserved. The default advertisement and MCP health answered
+at PID 41822. A read-only metadata probe found the live diagnostic still
+declares the retired kind input, so that JVM is not evidence for this cut.
+No reload, adoption, reset or lifecycle action was performed.
+
+The fresh canonical armed baseline reproduced exactly **118 tests / 3,843
+assertions / 46 failures / 23 errors**, exit 1, ending at
+2026-09-19T21:38:30Z. It used HEAD `f71a00a9f` with the ten owned source/test/
+resource paths selected. This independently verifies the prior report.
+
+The first coherent repairs are:
+
+- `1b732b28e`: instrument assertions pass their exact contract-error or
+  arity-error registry key. `valid-candidate-value?` explicitly validates a
+  candidate registry key; its API was not widened for a test's inline union.
+- `77b06482b`: projection-state callback output explicitly admits the
+  registration-error facet it passes through.
+- `487d7e4eb`: unavailable cluster measurements are complete base observations.
+  The existing measurement schema already admits that union; the producer's
+  old kind-only map was wrong, not the integer arm. No store scan was added.
+- `bcf240408`: the 13 SCI and eight host failures come from the fixture
+  helper at `test/seon/test_support.clj:897`, which replaces marker-free
+  returned errors with `:seon.test-support/committed`. Recording and the
+  persistence assertions already succeed. Owned tests now inspect the direct
+  record-mode return and retain thrown-evidence handling in panic mode. Every
+  facet, arity, identity and persistence assertion is preserved.
+
+The raw requested namespace-load command exited zero after each checkpoint.
+The second combined fast iteration is pending; these are not green-suite
+claims. The cold command remains the orchestrator's and will include every
+path touched by this continuation plus `seon.db-test` and `seon.cluster-test`.
+
+Scope clarification requested before external production edits: three schema
+diagnostic producers (`render-contract-refusal!`, `refuse-projection-source`,
+`pulled-selector-refusal`) omit the mandatory base inputs, but this assignment
+permits only schema contract sites; two SCI acquisition catches still test
+the retired registration-failed marker in `src/seon/sci/eval.clj`, outside the
+owned paths. Neither producer-body set has been edited pending that answer.
+
+The second iteration additionally verifies the writer callback boundary:
+`call-with-projection` replaced the complete base diagnostic with
+`:seon.instrument/undeclared-error` (declared facets `#{}`). `b9195cb97`
+declares the returned base and registration observations explicitly; its
+required namespace-load command exited zero and printed `:loads`.
+
+The write observation records the immutable input database's store, branch,
+commit and basis transaction, plus the supplied transaction's bounded
+projection. This is the request's observed basis, not a claim about a writer
+queue position. Datahike owns `store-identity` (`store.cljc:35`) and `commit-id`
+(`api/impl.cljc:371`). Configuration follows the cluster's actual config ref,
+or the sole config row before cluster construction; zero or ambiguous rows
+retain the complete base refusal and explicitly report evidence unavailable.
+The component regression now applies config through the canonical helper
+before expecting a complete write facet. No default-cluster operation or
+invented evidence bound is used.
+
+`dc5dbbfb4` lands the database observation producer and its canonical fixture
+regressions. The shared diagnostic constructor supplies `at` from the actual
+observation, qualifies the supplied diagnostic layer under `seon.db`, and
+preserves the supplied qualified operation. Its output is exactly
+`:seon.error/base`; the transaction boundary composes the complete
+`:seon.db.write/error` when bounded request evidence is available.
+The 21 constructor call sites at this commit are:
+
+| `src/seon/db.clj` producer | Line(s) | Layer / operation |
+|---|---:|---|
+| `replay-read` | 992 | database-read / `seon.db/replay-read` |
+| `read-declarations` | 1201 | database-read / supplied operation |
+| `unknown-attribute-error` | 1360 | database-read / supplied operation |
+| `lookup-ref-error` | 1391, 1405 | database-read / supplied operation |
+| `malformed-query-pattern-error` | 1470 | database-read / `seon.db/q` |
+| `query-input-shape-error` | 1838 | database-read / `seon.db/q` |
+| `missing-query-error` | 1894 | database-read / `seon.db/q` |
+| `missing-pull-selector-error` | 1999 | database-read / supplied public operation |
+| `pulled-entity-schema-key` | 2130 | database-read / `seon.db/pull` |
+| `validate-pulled-value` | 2196 | database-read / supplied public operation |
+| `pull-call` | 2283 | database-read / supplied public operation |
+| `diff-refusal` | 2715 | agent-boundary / `seon.db/diff` |
+| `invalid-write` | 3271 | database-write / `seon.db/transact!` |
+| `write-owned-values-error` | 3543 | database-write / `seon.db/transact!` |
+| `write-render-target-error` | 3774 | database-write / `seon.db/transact!` |
+| `removed-definition-error` | 3827 | database-write / `seon.db/transact!` |
+| `write-agent-retraction-error` | 3868 | database-write / `seon.db/transact!` |
+| `write-report-error` | 3947 | database-write / `seon.db/transact!` |
+| `transact-call` | 4215 | database-write / `seon.db/transact!` |
+| `missing-transaction-data-error` | 4286 | database-write / `seon.db/transact!` |
+
+`a931e68b8` updates schema probes to inspect required observation evidence and
+hands the private compiled-wrapper probe real canonical config caps. It does
+not widen a production input contract or relax a facet assertion.
+
+The first repair iteration completed **118 tests / 3,853 assertions /
+27 failures / 5 errors**, exit 1, at 2026-09-19T21:57:34Z. Its snapshot preceded
+`b9195cb97`, the final database observation changes, and the caps fixture fix.
+Both former multi-assertion failures are now zero: SCI 13 → 0, host 8 → 0.
+The remaining kernel error positively identifies `failure-value` at
+`src/seon/sci/kernel.clj:583`: its old kind check reconstructs a complete
+instrumentation refusal, and its diagnostic request lacks the base members.
+The deadline regression reaches that same producer. Scope for this function
+was requested separately; it is outside the owned paths and remains unchanged.
+
+The fourteen reference-grammar assertions now report their actual upstream
+refusal: `seon.schema/pulled-selector-refusal` calls the diagnostic without
+`at`, `layer`, or `operation`. The returned shapes were not changed by an error
+schema resource edit in this continuation; the recursive component derivation
+refusal is being obscured before the read can apply its existing fallback.
+
+The load command passed after `dc5dbbfb4`. After `a931e68b8`, the shared tree
+failed at `seon/render/walk.clj:766:21`, `No such namespace: error`; the
+uncommitted render diff adds that reference without the alias. No render file
+was edited. A detached `tmp/error-family-green-wt` at `a931e68b8`, with the
+existing reference-code linked, passed the exact load command (exit 0,
+`:loads`). The next serial fast run uses that HEAD worktree and the same ten
+owned paths. No foreign edit or session is included or operated.
+
+### Design gate discovered during final verification
+
+Read the new error-conversion PRD end to end and the newly landed working-edge
+ruling `6ebb5b5de` (the render gate). It says: "a producer carries the offending
+value as data; bounding happens only at the recorder's admission". The existing
+write facet requires `:seon.db.write.attempt/operations`, a component with
+`:seon.error.projection/entity` grammar. Consequently the new helper in
+`dc5dbbfb4` bounds the transaction before returning that facet, which conflicts
+with this ruling. A green writer regression does not settle that model conflict.
+No further production edit was made after identifying it. The helper is
+committed and reviewable, but is not claimed ready for acceptance under the new
+ruling. Exactly three options, simplest first:
+
+1. **Return the complete base with raw transaction evidence for now.**
+   Guarantee: no producer admission; required base and original writer cause
+   remain complete, and the recorder receives the actual request. Cost: remove
+   the new projection/config acquisition and explicitly revise the writer
+   regression's promised output. Given up: a complete domain write facet at
+   this boundary until its schema is resolved.
+2. **Add a raw validation-refusal facet (recommended).** Guarantee: the returned
+   error has required request identity and observed basis, with the actual
+   transaction carried as data for recorder admission. Cost: extend ownership
+   to the database write/attempt resources and database output union, declare
+   the precise facet, and update the fixture assertion and consumers. Given up:
+   the existing projection-required `:seon.db.write/error` as the transient
+   validation-refusal shape; its stored declaration can remain unchanged.
+3. **Separate transient and stored write-error schemas at the recorder.**
+   Guarantee: producers retain raw requests and the recorder constructs the
+   existing complete stored projection facet. Cost: coordinated recorder,
+   reader, wrapper/output-contract and schema changes across owners, with
+   additional persistence regressions. Given up: one unchanged error shape
+   from the producer through storage; this is the larger cross-owner change.
+
+The owner question names this conflict explicitly. It is separate from the
+pending scope requests for schema producer bodies and SCI kernel/acquisition.
+
+The final snapshot also includes the newer test-facet declarations. Its
+`semantic-admission-explicitly-declares-every-error-facet` regression reports
+three stale pass-through unions: `seon.sci.admit/semantic-value`,
+`seon.error/refusal`, and `seon.error/latest-fact`. A separate read-only
+declaration probe on the same HEAD, using `facet-keys` and `declared-result`,
+exited zero and derived the same nine missing keys for each:
+
+```clojure
+(:seon.test/admission-error :seon.test/execution-error :seon.test/expired
+ :seon.test/not-runnable-error :seon.test/resolution-error
+ :seon.test/selection-error :seon.test/unknown-error
+ :seon.test.run/immutable-error :seon.test.run/unavailable-error)
+```
+
+These unions remain an explicit continuation item after the design gate;
+the assertion is retained. The first two error-owner functions are owned here;
+`seon.sci.admit/semantic-value` is outside the assignment. New facets require
+the actual pass-through output declarations to accrete them, not exclusion
+from structural discovery or a relaxed regression.
+
+### Final measured tally and handoff
+
+The final serial fast run, on HEAD `a931e68b8` with the ten selected owned
+paths, exited **1** at 2026-09-19T22:19:00Z:
+
+```text
+Ran 118 tests containing 4150 assertions.
+27 failures, 4 errors.
+```
+
+| Namespace | Tests | Failures | Errors |
+|---|---:|---:|---:|
+| `seon.error-test` | 42 | 0 | 0 |
+| `seon.instrument-test` | 44 | 3 | 3 |
+| `seon.schema-test` | 32 | 24 | 1 |
+
+The write facet, original unowned-entity cause, unchanged write basis,
+cluster measurement, and both host/SCI multi-assertion regressions pass.
+The caps fixture error also passes. The three-suite goal is **not green**.
+Remaining work is explicit:
+
+- `src/seon/schema.clj:1724,2598,2789`: the three diagnostic producer bodies
+  need the base members; the last two output contracts still need exact
+  declarations. They account for 24 failures and one error. Body edits are
+  outside the assignment's "contract sites only" restriction.
+- `src/seon/sci/kernel.clj:519`: preserve the existing declared refusal in
+  `failure-value`, and construct a complete observation for a new guarded
+  failure. This accounts for two errors; scope was requested.
+- `src/seon/sci/eval.clj:882,1867`: recognize registration observations by
+  their required facet members. The current fallback reaches the incomplete
+  acquisition diagnostic at `:1580`; one error remains. Scope was requested.
+- `src/seon/error.clj:71,1699` and `src/seon/sci/admit.clj:536`: accrete the
+  nine measured facets into these pass-through output unions. Three
+  assertions remain; the first two sites are owned, the third is not.
+- Resolve the three-option database evidence gate above before accepting
+  `dc5dbbfb4` as the final implementation.
+
+Files touched by this continuation (seven): `src/seon/db.clj`,
+`src/seon/schema.clj`, `src/seon/cluster/status.clj`,
+`test/seon/error_test.clj`, `test/seon/instrument_test.clj`,
+`test/seon/schema_test.clj`, and this landing note. Every production/test
+change is in a path-limited commit. No error resource changed in this
+continuation. Foreign A1 and render edits were preserved. The later A1
+commit `04d044538` was not an input to the final fast snapshot.
+
+Log measurements before removing lane-only scratch logs:
+
+| Run | Bytes | SHA-256 |
+|---|---:|---|
+| Baseline | 20,128,500 | `711bb31f780462d430cdd349bcd5d51e1bbbdff5e817c3b310ed8b451d2e5fdc` |
+| First repair iteration | 218,720 | `5eb894b7dcf67dbb598f9d3a8c59df813e2d46dc87ec417f923e43a8e047de2a` |
+| Final iteration | 20,094,773 | `209546b3e52381e5d943ee247e63ffa412400f42f8bf51eef78a591ff380e3c8` |
+
+Both fast launchers and the final JVM (PID 45128) exited. The five dependency/
+cache symlinks were unlinked before removing `tmp/error-family-green-wt`;
+their shared targets were preserved. The documentation hook still reports
+the already recorded stale gitlink citations in the external AGENTS audit.
+
+### RESET NEEDED
+
+No additional attributes in this continuation. The earlier consolidated
+attribute list remains the wave-1 reset obligation. No reset, refork,
+restart, adoption, cold gate, or default lifecycle command was run.
+
+After resolving the gate and remaining producers/unions, the orchestrator
+owes this cold command and the platform/live proof:
+
+```sh
+bin/test --paths \
+  src/seon/db.clj src/seon/schema.clj src/seon/cluster/status.clj \
+  test/seon/error_test.clj test/seon/instrument_test.clj test/seon/schema_test.clj \
+  docs/prds/steward-platform/research/error-family-1a-2026-09-19.md \
+  -- seon.error-test seon.instrument-test seon.schema-test seon.db-test seon.cluster-test
+```
+
+Add any newly authorized producer/resource files to that path list when those
+repairs land. This lane stops at the documented design gate, without claiming
+that a passing error namespace proves the unresolved combined contract.
