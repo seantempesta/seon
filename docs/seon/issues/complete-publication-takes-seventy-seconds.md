@@ -7,6 +7,25 @@ tags: [issue, operator, database, class/n9, wave/publication-velocity]
 
 # Complete source publication takes ~70 s against the ten-second law
 
+## Re-observed at the namespace-agent audit, 2026-09-19
+
+After starting default PID 41822 and proving both MCP modes reachable,
+two `bin/seon init --dev default` requests exited 1 at the declared
+30,000 ms silence boundary after the compiled-population progress event
+(11,191 entities, 23,734 identities, 39,441 keyword facts). Command totals
+were 74,711 ms and 59,232 ms. Logs are
+`data/operator/operations/init-init-42258.log` and
+`data/operator/operations/init-init-45646.log`. The inspected cluster had
+no `:seon.source/commit-id` assertion; successful adoption is not claimed.
+REPL research continued on the running cluster with explicit basis evidence.
+
+This is a recurrence of bounded publication failure, not proof of the old
+cause or a permanent writer hang. The tree contains inherited database and
+test-system edits. Attribute the silent phase against those actual bytes
+before changing a timeout or resetting. The
+[audit design note](../../prds/steward-platform/research/namespace-agents-design-2026-09-19.md)
+records the startup and verification boundary.
+
 ## Turn-test continuation observation, 2026-09-16
 
 Hook publication `733b79b5-89d6-40d5-9b05-ee872281ad71`, queued for the turn

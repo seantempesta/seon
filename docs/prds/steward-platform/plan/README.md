@@ -7,6 +7,48 @@ tags: [plan, steward, roadmap]
 
 # Self-building Seon — the index of real tasks
 
+## Current proposed sequence — 2026-09-19
+
+The owner now explicitly requires multiple **namespace agents**, reusable
+task context including conversation, and strong data guarantees before live
+parallel self-repair. This sequence supersedes the execution priority of the
+older schedules below; their inventories and landing history remain useful.
+The [design and measured audit](../research/namespace-agents-design-2026-09-19.md)
+owns the rationale, isolation choices and complete acceptance conditions.
+This is a proposed implementation sequence, not a declaration of green gates.
+
+| Order | Work and dependency | Parallel ownership | Exit evidence |
+|---|---|---|---|
+| 0 | Reconcile inherited database/test-system edits; diagnose publication silence; establish adopted default and a green platform basis. | Orchestrator coordinates existing owners; no competing edits to `db`, `schema`, test runner or their schema resources. | Recorded adoption matches source; MCP JVM/SCI answer; platform gate is green; runtime faults are named. Default is running now, but adoption failed twice. |
+| 1 | Make validation and instrumentation coverage truthful. Convert audit counterexamples into canonical-fixture regressions; repair final-state relation checks, test-result evidence and original-cause diagnostics. | Up to three lanes: database/shape invariants; contract census/arming; test-result/error evidence. Assign exact files before launch and serialize any shared schema/error owner. | Direct datoms and child edits cannot bypass invariants; missing contracts are positively reported; invalid JVM/SCI calls fail before body execution; source-derived findings either reproduced or explicitly refuted. |
+| 2 | Model plural namespace responsibility and generalize existing issue/plan work into task templates, including reply tasks. | One model/settlement owner; one rendering owner can work against agreed shapes; third lane verifies invariants without editing those owners. | Two agents cover one namespace; work is not duplicated by routing; conversation needs no fabricated defect; linked facts generate useful AI/HTML context and real SCI forms. |
+| 3 | Give each independently merged change its SCI context and Datahike branch; finish current acquisition work. Add acceptance against the tested target head. | SCI/acquisition owner and program/branch acceptance owner, with a third verifier on conflict/custody tests. Shared program/schema edits land together. | Candidate writes leave main unchanged; conflicting concurrent changes refuse; the proposed combined program passes armed tests and schema validation before atomic acceptance. |
+| 4 | Export accepted changes to existing source files with exact-byte conflict checks, ordinary reindex round-trip and stronger gates. | Export/source owner; test/boot verifier; render/template improvements only on disjoint files. | Indexed exported facts match accepted facts; targeted + platform + relevant integration + fresh-boot proofs pass; path-limited commit records the change. |
+| 5 | Run the bounded two-agent demonstration, then broaden namespace coverage. | Two live namespace agents plus one verifier; orchestrator owns serial integration. | Real schema/function/render repairs travel template → isolated candidate → cluster → disk. A bad candidate and a same-identity conflict are visibly refused; a reply task uses the same context mechanism. |
+
+Use **three active workers plus the orchestrator** as the initial concurrency
+budget, reducing it when shared owners or JVM work serialize. Research can
+partition schemas freely; implementation must partition invariant ownership,
+not alphabetical files. Lanes use `bin/test-fast`; the orchestrator runs one
+cold integration gate at a time and batches incompatible schema changes into
+one controlled refork. Do not launch thousands of contract edits before the
+coverage gate and the first end-to-end slice are sound.
+
+The recommendation is SCI context plus Datahike branch per independent
+change; context-only and separate-process alternatives, with guarantees and
+costs, are in the design note. Final relationship names and that cross-owner
+implementation choice are decisions to settle before production edits.
+
+**Owner clarification, 2026-09-19:** all these gates consume the in-flight
+database-backed test-system overhaul. Individual-agent and cluster requests
+share selection, dependency invalidation, execution and saved results.
+Compatible unchanged evidence is reused; missing/changed evidence reruns.
+Large durable outputs use `seon.blob` in Konserve with database-linked digests.
+The disk gate requests stronger evidence, not a second runner or blanket
+reruns. [The shared review](../research/namespace-agent-plan-review-2026-09-19.md)
+is the handoff between the two parallel analyses; the other analyst has the
+next review round.
+
 > Owner, 2026-09-16 01:20Z: the DATA comes first. Read
 > [namespace-data-model-2026-09-16.md](namespace-data-model-2026-09-16.md)
 > before this index; sections B–F here are its consumers.

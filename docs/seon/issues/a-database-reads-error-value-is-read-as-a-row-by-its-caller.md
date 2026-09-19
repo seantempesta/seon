@@ -113,3 +113,29 @@ verified through `seon.test.arm/arm-contracts!` in
 `seon.instrument-test/the-selection-is-declared-vars-with-schemas-and-nothing-else`:
 30 tests / 157 assertions, zero failures/errors in the full namespace.
 The consumer wave and the host-wrapper mismatch remain open for review.
+
+## Independent coverage census — 2026-09-19
+
+The [live audit](../../prds/steward-platform/research/schema-audit-a-native-2026-09-19.md)
+at basis 536871515 found 3,573 bound nonmacro function Vars across 110 loaded
+source namespaces: 1,239 contracts, 1,238 wrappers and 2,334 missing
+contracts (2,269 private, 65 public). The contracted exception is the
+primitive-return `seon.sci.admit/required-cap`. The report includes the
+exact population, exclusions, probe and received envelope. This extends
+the existing consumer-contract class; it is not one new issue per function.
+
+The arming comparison sees declared nonprimitive functions on both sides,
+so its successful parity cannot establish universal declaration coverage.
+The current coverage repair must independently compare canonical executable
+declarations, complete contracts and actual callable enforcement, including
+private functions. Classify primitive, protocol/method, generated and unloaded
+cases explicitly; fail an absent subject population. Add public and private
+missing-contract counterexamples to the canonical harness. Invalid calls
+must not execute the body, and refusals must retain the original failure.
+
+The earlier wrapper description above is a dated observation, not today's
+universal behavior: current `wrap-interpreted` invokes the compiled wrapper
+and requires record-mode custody. Audit C records that correction. No new
+tests were run by this research pass; declaration and enforcement completeness
+remain open. The resolved public-only census issue is insufficient for the
+owner's all-functions requirement.

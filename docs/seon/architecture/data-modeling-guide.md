@@ -750,7 +750,7 @@ production code requires the owner's permission.*
 
 ## 7. What is still undecided
 
-### 7.1 The running `datahike-modeling-study` — the marked override slot
+### 7.1 The Datahike modeling study and its overrides
 
 **Ruling 1i** (owner, 2026-09-17 ~06:35Z, verbatim): *"learn from the datahike
 modeling and override our previous decisions on the schemas and refs vs
@@ -762,14 +762,16 @@ are **the authority that overrides this guide** wherever they correct G1–G6,
 corrections before the reset, and **every override is written into the PRD
 with the Datahike line that decided it**.
 
-**Status at this writing: the study's note is NOT in the tree.** The lane is
-mid-flight. But it has already written corrections into
-[the data-modeling skill](../../../.claude/skills/data-modeling/SKILL.md),
-which cites the note by path, and further corrections into
-[the datahike skill](../../../.claude/skills/datahike/SKILL.md). Those nine are
-carried into this guide at the sections named below, each marked —
-**provisionally, on the skills' authority, not the note's**, because the note
-that grounds them cannot yet be read:
+**Verified 2026-09-19:** the complete
+[study](../../prds/steward-platform/research/datahike-modeling-study-2026-09-17.md)
+is in the tree and was read end to end during the namespace-agent audit.
+The overrides below are grounded by that note and its dependency evidence,
+not by an unavailable future artifact. The
+[data-modeling](../../../.agents/skills/data-modeling/SKILL.md) and
+[Datahike](../../../.agents/skills/datahike/SKILL.md) skills carry the same
+corrections. Current implementation status still requires source and live
+verification; the study's dated missing-mechanism claims are not current
+proof of absence.
 
 | # | Override | Carried at | Datahike line |
 |---|---|---|---|

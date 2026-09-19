@@ -3947,3 +3947,59 @@ ea676d0af). No green platform gate yet on a HEAD that includes all fixes.
 **Landed since handover (code):** ~80 commits, all pushed to
 `seantempesta/seon` at 04:30Z (push again: `git push origin steward-platform`).
 Datahike fork `e11845ba` pushed.
+
+## RESUME HERE — 2026-09-19, namespace-agent audit and parallel plan review
+
+The owner requests **plural namespace agents**, reusable task/context
+templates including conversation, strong data guarantees first, and an
+isolated candidate → tested cluster acceptance → stronger disk integration
+proof. They explicitly authorize starting/restarting the development system
+before researchers use it. They are running a second parallel analysis and
+want the two analyses to take turns refining one hybrid plan through project
+documents.
+
+**Exchange:** [shared review, Round 1](../research/namespace-agent-plan-review-2026-09-19.md).
+The other analyst published a joint plan; Codex answered in its
+[§5, Turn 2](namespace-agents-plan-2026-09-19.md). **That section is now the
+single alternating handoff; the other analyst has Turn 3.** The review note
+is supporting evidence, not a second exchange.
+The [roadmap](README.md) now starts with the proposed 2026-09-19 sequence;
+[the design](../research/namespace-agents-design-2026-09-19.md) owns guarantees
+and evidence. These are proposals, not jointly settled architecture or green
+implementation. Preserve both teams' distinct reports; overlapping filenames
+were encountered and this team's reports were moved to `*-native-*` and
+`*-supplement-*`. No production source was changed by this team.
+
+**Live system:** default started successfully, PID 41822, web 7994, prepl
+58659. Both MCP modes answered before substantive delegated work. Two
+`init --dev default` attempts failed at the 30-second silence bound after
+program compilation. No adopted source commit was observed. Do not mistake
+running for adopted/current. Last runtime check: alive, all observed procs
+replied, one error signature, 29 errored evaluations, 10 stale Vars. The
+existing slow-publication issue has the dated log paths and observations.
+No reset, source repair or test gate is claimed by this turn.
+
+**Evidence:** three native researchers read all 210 current schema EDNs;
+their 70/70/70 hash manifests match every current file with no duplication.
+The live Var census found 2,334 of 3,573 functions missing contracts; the
+1,238/1,238 armable parity excludes missing contracts and primitives.
+Live validators admitted inconsistent shape-child and automatic-test result
+examples. Candidate SCI forks have separate definitions but share connection
+custody. Full forms, envelopes, dependency grounding and limits are in the
+reports linked from the design. Source-derived relation findings still need
+canonical-fixture transaction falsifiers.
+
+**Implementation remains gated:** review inherited dirty/staged `db`,
+`schema`, `test`, runner and selection work with its owners; recover successful
+publication/adoption and a green platform baseline. The current proposed
+sequence prioritizes authoritative invariants/coverage, plural responsibility
+and task contexts, branch-backed candidate cluster environments, combined-state
+merge gates, then disk round-trip gates. Three workers plus the orchestrator;
+shared owners serialize. No automatic launch of a broad contract sweep.
+
+The parallel review already contributed reuse of `seon.env/scope`'s layer
+constraint, turn-time divergence checking and the exact splice/digest-fenced
+file writer. Open disagreements include pre-acceptance merge testing,
+conversation fulfillment versus wake coverage, and whether existing
+`issue.opening/source` already supplies the forms a proposed render change
+would duplicate. Read the exchange before implementing either draft.

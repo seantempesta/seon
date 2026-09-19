@@ -1079,6 +1079,30 @@ numerically and a bare cross-citation is a defect to fix on sight.
 
 ## Parked explicitly (owner said not yet / needs design first)
 
+### 2026-09-19 owner clarification — plural responsibility and reusable context
+
+The owner rejects the singular namespace-responsibility assumption and the
+name “steward.” Multiple agents must be able to care for one namespace,
+including concurrent isolated experiments with tests gating cluster and disk
+integration. This supersedes the single-steward part of entry 70; shared
+evaluation namespace and responsibility remain different relationships.
+
+Issues under development are intended to provide reusable work context:
+refactoring, schema improvement, tests and error response. Conversation
+needs the same data/rendering approach without pretending to be a defect.
+The agent's linked facts should generate concise explanatory context and
+forms through render functions; agents must be able to author those functions
+for both user and agent consumption. Generic value printing is the fallback.
+First strengthen the database model and verify actual instrumentation.
+
+“Namespace agents,” “task templates” and “conversations” are the current
+recommended terms; the final attribute model is under joint review, not
+implemented by this entry. The owner requests alternating review of the two
+parallel analyses through proper project documents. The
+[review exchange](../../steward-platform/research/namespace-agent-plan-review-2026-09-19.md)
+records proposals and disagreements; the
+[roadmap](../../steward-platform/plan/README.md) owns the execution order.
+
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
     options owed to the owner before any edit.
 16. **Effectful re-execution tag** (`idempotent-read`) — pre-approved

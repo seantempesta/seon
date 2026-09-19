@@ -1,0 +1,8 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"seon.dev.mcp/namespace\":\"user\",\"seon.dev.mcp/session-id\":\"plan-research\",\"seon.dev.mcp/cluster\":\"default\",\"seon.dev.mcp/mode\":\"jvm\",\"seon.dev.mcp/events\":[{\"tag\":\"ret\",\"val\":{\"seon.dev.mcp/value\":{\"audit/a\":\"a\",\"audit/b\":\"b\",\"audit/base-has-name?\":false,\"audit/basis\":536871516,\"audit/connection-present?\":true,\"audit/same-connection?\":true},\"seon.dev.mcp/windowed?\":false},\"ns\":\"user\",\"ms\":36}],\"seon.dev.mcp/runtime\":\"clj\",\"seon.dev.mcp/cluster-state\":\"alive\",\"seon.dev.mcp/form\":\"(let [instance (get @(var-get (find-var 'seon.operator.runtime/running-instances)) \\\"default\\\") base (:seon.sci.eval/ctx instance) connection (seon.operator/connection \\\"default\\\") db (seon.db/db connection) request {:seon.sci.eval/ctx base :seon.db/db db :seon.agent/id \\\"root\\\" :seon.db/connection connection} a (seon.sci.eval/fork-candidate-ctx request) b (seon.sci.eval/fork-candidate-ctx request)] (sci.core/eval-string* a \\\"(def audit-private-20260919 :a)\\\") (sci.core/eval-string* b \\\"(def audit-private-20260919 :b)\\\") {:audit/basis (:max-tx db) :audit/a (sci.core/eval-string* a \\\"audit-private-20260919\\\") :audit/b (sci.core/eval-string* b \\\"audit-private-20260919\\\") :audit/base-has-name? (boolean (sci.core/resolve base 'user/audit-private-20260919)) :audit/same-connection? (identical? (get-in a [:seon.sci.eval/custody :seon.db/connection]) (get-in b [:seon.sci.eval/custody :seon.db/connection])) :audit/connection-present? (some? (get-in a [:seon.sci.eval/custody :seon.db/connection]))})\",\"seon.dev.mcp/root\":\"/Users/sean/src/seon\"}"
+    }
+  ]
+}

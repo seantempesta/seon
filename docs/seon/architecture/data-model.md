@@ -88,9 +88,10 @@ The full algorithm and diagrams live in [agent runtime](agent-runtime.md).
 
 A wake is an assertion on a schema-declared listened ref attribute whose
 value addresses the agent. Its opening behavior is a schema property,
-not a hand-maintained list. A system turn containing the wakes' results
-answers them under the transaction-order rule. No per-wake acknowledgement
-or turn-to-wake copy is needed.
+not a hand-maintained list. An accepted ordinary reply answers wakes under
+the transaction-order rule; opening a turn or rendering a system turn alone
+does not. `seon.turn/latest-answering-turn-t` owns that derivation. A turn's
+handled claim is separate from wake answering. No copied wake queue is needed.
 
 Compaction retracts the agent's evaluations; the next system turn
 regenerates the opening. It does not change installed program identities.
