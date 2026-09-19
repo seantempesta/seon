@@ -291,38 +291,9 @@
 ;;; Flat diagnostics — one evidence-complete construction
 ;;; ---------------------------------------------------------------------------
 
-(defn- known-or-unknown
-  {:malli/schema [:=> [:cat :seon.error/source]
-                  [:or :seon.error/source
-     :seon.error/base
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error
-     :seon.turn.loop/error]]}
-  [value]
-  (if (nil? value) ::unknown value))
-
 (defn diagnostic
   "Construct the declared base observation and its diagnostic evidence.
-  Domain owners add and declare their own complete facets."
+  Delegate to the leaf constructor, preserving supplied domain members."
   {:malli/schema
    [:=> [:cat [:map
                 [:seon.error/at :seon.error/at]
@@ -338,21 +309,8 @@
                 [:seon.error/diagnostic-evidence :seon.schema/value]
                 [:seon.error/data {:optional true} :map]]]
     :seon.error/base]}
-  [{:seon.error/keys [at layer operation message data diagnostic-layer
-                      diagnostic-operation diagnostic-member diagnostic-expected
-                      diagnostic-offending diagnostic-cause diagnostic-evidence]}]
-  {:seon.error/at at :seon.error/layer layer :seon.error/operation operation
-   :seon.error/message message
-   :seon.error/data
-   (merge data
-          {::diagnostic-layer (known-or-unknown diagnostic-layer)
-           ::diagnostic-operation (known-or-unknown diagnostic-operation)
-           ::diagnostic-member (known-or-unknown diagnostic-member)
-           ::diagnostic-expected (known-or-unknown diagnostic-expected)
-           ::diagnostic-offending (known-or-unknown diagnostic-offending)
-           ::diagnostic-cause (known-or-unknown diagnostic-cause)
-           ::diagnostic-evidence-availability (if (some? diagnostic-evidence) ::known ::unknown)
-           ::diagnostic-evidence (known-or-unknown diagnostic-evidence)})})
+  [observation]
+  (error.refusal/diagnostic observation))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The normalizer

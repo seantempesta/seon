@@ -786,8 +786,8 @@
                         permission (nth permissions index)
                         declared (::declared permission)
                         actual ((mi/-f->original error/facets) projection value)]
-                    (when (or (and (empty? actual) (not (::base? permission)))
-                              (seq (set/difference actual declared)))
+                    (when (and (not (::base? permission))
+                               (empty? (set/intersection actual declared)))
                       (reject!
                        (cond->
                         {:seon.error/message

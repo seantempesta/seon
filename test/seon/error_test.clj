@@ -192,6 +192,28 @@
            :seon.config.error/max-evidence-bytes evidence-bytes}
           extra)))
 
+(deftest diagnostic-construction-preserves-domain-members
+  (test-support/with-database
+   (fn [_]
+     (let [observation
+           (error/diagnostic
+            {:seon.error/at #inst "2026-09-19T00:00:00Z"
+             :seon.error/layer :seon.agent/acquisition
+             :seon.error/operation 'seon.error-test/check
+             :seon.error/message "The agent is unavailable."
+             :seon.error/diagnostic-layer :seon.agent/acquisition
+             :seon.error/diagnostic-operation 'seon.error-test/check
+             :seon.error/diagnostic-member :seon.agent/id
+             :seon.error/diagnostic-expected :seon.agent/id
+             :seon.error/diagnostic-offending "absent"
+             :seon.error/diagnostic-cause :seon.agent/unavailable
+             :seon.error/diagnostic-evidence {:seon.agent/id "absent"}
+             :seon.agent/error-agent-id "absent"
+             :seon.error-test/context {:seon.error-test/retained true}})]
+       (is ((schema/projection-validator (schema/handed-projection) :seon.agent/error)
+            observation))
+       (is (= {:seon.error-test/retained true} (:seon.error-test/context observation)))))))
+
 (deftest diagnostic-construction-is-evidence-complete
   (let [complete
         (error/diagnostic

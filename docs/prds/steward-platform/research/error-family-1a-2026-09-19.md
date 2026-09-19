@@ -1725,3 +1725,212 @@ The completed slices introduce no kind or general error predicate. The
 three-suite task remains **not green**, with the exact remaining producer,
 admission and kernel boundaries above. Cold and live proof remain with the
 orchestrator.
+
+
+## Composition continuation — 2026-09-20, blocked at the foreign overlay boundary
+
+Read the composition review Part 1 and Part 2 ranks 7–8, and the amended
+error-conversion PRD sections 1.1–1.2 end to end. The newly granted raw
+admission/schema/kernel scope is accepted; the earlier request for that
+scope is settled. The raw producer/recorder drafts above remain pending.
+
+### Complete open observations at the constructor and wrapper
+
+Moved the sole pure constructor and its evidence helper to
+`src/seon/error/refusal.clj`. `seon.error/diagnostic` keeps its public input
+and output declaration and delegates directly to that leaf. No dynamic
+resolution or second constructor was added. The leaf retains all supplied
+domain members while moving its seven diagnostic request members into their
+existing evidence map; unavailable evidence retains the same qualified
+unknown values. The canonical fixture regression supplies an agent facet and
+an additional domain map, then validates that facet and retained map.
+
+The wrapper now refuses an error result when it satisfies no declared facet
+(and the boundary does not explicitly declare the base). Additional satisfied
+facets do not invalidate an otherwise complete declared facet. Malli still
+validates the authored output, including conjunction constraints. The existing
+broad-success-arm regression now also verifies that the composed value
+satisfies exactly the agent and unknown-test facets and passes a boundary
+which declares the agent facet. Existing undeclared-only and incomplete-error
+regressions remain. These changes must land together: preserving facets at a
+base-declared constructor would trip the previous all-facets wrapper rule.
+
+### Exact verification
+
+The HEAD-plus-tests baseline, HEAD `9ad085939834143948043dda2cc6917b4f7ebb85`,
+finished at `2026-09-19T23:33:31Z`: **120 tests / 4,161 assertions /
+27 failures / 4 errors**, exit 1. The new constructor regression produced
+exactly two failures: the constructed value failed `:seon.agent/error`, and
+`:seon.error-test/context` was nil rather than the supplied map. The existing
+sovereign SCI source assertion accounts for one failure; the other 24 failures
+and four errors reproduce the schema and kernel boundaries already recorded.
+The initial extra-facet test input used the wrong member; after reading the
+actual declaration it was corrected to `:seon.test/unknown` and an explicit
+facet-set assertion was added. The baseline therefore proves the constructor
+regression, not the corrected extra-facet regression.
+
+The required five-namespace load exited 0 and printed `:loads` after the
+constructor/wrapper edits. `git diff --check` passed. The post-change fast
+snapshot at HEAD `4b3c4b5f39efa622fda67b1d0a9ad2b11d091905` refused before a
+test JVM launched, exit **64**, with these exact bytes:
+
+```text
+bin/test: Incomplete --paths overlay; add changed caller files: src/seon/render.clj src/seon/render/transcript.clj src/seon/render/walk.clj src/seon/render/web.clj src/seon/sci/kernel.clj test/seon/render/faults_test.clj test/seon/render/history_test.clj test/seon/render/retained_test.clj test/seon/render/root_pull_test.clj test/seon/render/transcript_run_test.clj test/seon/render/transcript_test.clj test/seon/render/walk_test.clj test/seon/render/web_debug_test.clj test/seon/render/web_test.clj
+```
+
+The kernel path was this lane's own uncommitted draft. The other 13 paths
+belong to the held render slice. They were neither edited nor included in the
+snapshot. AGENTS.md lane rule 12 requires stopping at an overlay refusal naming
+a foreign dirty caller; this assignment also explicitly forbids a worktree.
+No workaround, foreign session operation, lifecycle action, or cold gate ran.
+**The suites are not green and there is no post-change fast tally.**
+
+The kernel draft below is preserved for continuation and removed from the
+working source so the pending cause remains separate from this composition
+slice. Its existing two failing regressions were re-observed in the baseline;
+its implementation has not been verified under armed tests. Its deadline
+regression must assert `:seon.sci.kernel/error` and `:time` at
+`[:seon.error/data :seon.sci.admit/record :seon.eval/outcome]`, replacing the
+retired `:seon.sci.eval/time-limit` assertion.
+
+<details>
+<summary>Pending authorized kernel draft</summary>
+
+```diff
+diff --git a/src/seon/sci/kernel.clj b/src/seon/sci/kernel.clj
+index 18bcd441f..0d6c11d13 100644
+--- a/src/seon/sci/kernel.clj
++++ b/src/seon/sci/kernel.clj
+@@ -517,28 +517,12 @@
+             (.remove thread-arm)))))))
+
+ (defn failure-value
+-  "The ONE flat `:seon.error` value for a failure at the guarded boundary.
+-
+-  Both entrances classify here so they cannot drift apart. A throwable that
+-  already carries a refusal — an instrument contract violation, a refused
+-  schema declaration, an unresolved invocation — keeps its own
+-  `:seon.error/kind` and gains this boundary's evidence; everything else
+-  becomes `::time-limit-kind` when the diagnostic record's outcome is `:time`
+-  and `::failure-kind` otherwise. `:seon.fn/sym` is the invoked function
+-  symbol when one exists: it prefixes the message and rides in the data. A
+-  form evaluation supplies no symbol, which is the ONLY difference between
+-  the two entrances — the classification itself is identical.
+-
+-  THE OUTPUT UNION ENUMERATES EVERY ERROR FACET (program-facts PRD §1q).
+-  This boundary classifies failures it did not raise, so the facet a value
+-  carries is whatever the original refusal declared. A generic pass-through
+-  lists the whole facet population rather than claiming a narrower one; the
+-  armed wrapper derives its permissions from that union and refuses an
+-  unlisted facet. The 63 members are `seon.error/facet-keys` over the
+-  packaged declarations, sorted, on 2026-09-18."
++  "Preserve an existing structural refusal and accrete guard evidence.
++  Otherwise return the kernel facet with the observed evaluation duration;
++  the complete diagnostic record retains whether the deadline fired."
+   {:malli/schema
+    [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record]
+-    [:or :seon.error/value :seon.error/base
++    [:or :seon.error/base
+          :my.background/error :my.edit/error :my.fs/error :my.message/error :my.plan/error
+          :my.shell/error :my.turn/error :seon.agent/error :seon.agent.graph/error
+          :seon.ai/request-error :seon.artifact/error :seon.boot/error :seon.bootstrap/error
+@@ -558,9 +542,7 @@
+          :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+          :seon.search/error :seon.test/error :seon.test.accretion/error :seon.test.run/error
+          :seon.test.runner/error :seon.turn/error :seon.turn.loop/error]]}
+-  [{subject :seon.fn/sym
+-    time-limit-kind ::time-limit-kind
+-    failure-kind ::failure-kind}
++  [{subject :seon.fn/sym}
+    throwable
+    diagnostic-record]
+   (let [timed-out? (= :time (:seon.eval/outcome diagnostic-record))
+@@ -569,7 +551,9 @@
+                           :seon.sci.admit/record diagnostic-record}
+                    subject (assoc :seon.fn/sym subject))
+         existing (error.refusal/refusal throwable)]
+-    (if (:seon.error/kind existing)
++    (if (and (:seon.error/at existing)
++             (:seon.error/layer existing)
++             (:seon.error/operation existing))
+       ;; The refusal is already the boundary value. Wrapping it copied its
+       ;; data, its ex-data (the whole refusal), and its throw-site message into
+       ;; a `:nested-refusal` envelope, so the terminal renderer fitted six
+@@ -581,11 +565,12 @@
+         (assoc :seon.error/message
+                (or (ex-message throwable) "The operation was refused.")))
+       (error/diagnostic
+-       (let [kind (if timed-out? time-limit-kind failure-kind)]
+-         {kind (or subject (if timed-out?
+-                             (:seon.eval/fn-entries diagnostic-record)
+-                             true))
+-        :seon.error/kind kind
++       {:seon.error/at (java.util.Date.)
++        :seon.error/layer :seon.sci.kernel/evaluation
++        :seon.error/operation 'seon.sci.kernel/failure-value
++        :seon.sci.kernel/guard-observation
++        {:seon.error.evidence/attribute :seon.eval/duration-ms
++         :seon.error.evidence/value (:seon.eval/duration-ms diagnostic-record)}
+       :seon.error/message
+       (or (:seon.error/message existing)
+           (cond->> (if timed-out?
+@@ -595,7 +580,7 @@
+                          (.getName (class throwable))))
+             subject (str "Invocation of " subject " failed: ")))
+       :seon.error/diagnostic-layer :sci
+-      :seon.error/diagnostic-operation (or subject :evaluation)
++      :seon.error/diagnostic-operation 'seon.sci.kernel/failure-value
+       :seon.error/diagnostic-member :throwable
+       :seon.error/diagnostic-expected :successful-evaluation
+       :seon.error/diagnostic-offending
+@@ -612,7 +597,7 @@
+         (assoc :seon.sci.eval/symbol (:sci.impl/symbol throwable-data))
+
+         (ex-message throwable)
+-        (assoc :seon.error/throw-site-message (ex-message throwable)))})))))
++        (assoc :seon.error/throw-site-message (ex-message throwable)))}))))
+
+ (defn unarmed-record
+   "The diagnostic record for a failure that never reached an arm."
+
+```
+
+</details>
+
+### Touched files, reset, and proof owed
+
+The composition slice touches `src/seon/error.clj`,
+`src/seon/error/refusal.clj`, `src/seon/instrument.clj`,
+`test/seon/error_test.clj`, `test/seon/instrument_test.clj`, and this note.
+The temporary kernel implementation is preserved only as the draft above.
+`test/seon/schema_test.clj` was clean at this continuation's first status;
+its previously foreign regression was already landed and was not altered.
+All unrelated uncommitted files were preserved.
+
+**RESET NEEDED:** no additional attributes from this slice; the prior batch's
+exact attribute obligations remain unchanged. No raw attribute or stored type
+change lands in this continuation.
+
+The next continuation still owes the authorized raw write/schema admission,
+the three schema producers and their recorder conversion, and the kernel
+repair, followed by the three-suite green fast tally. The orchestrator owes
+this cold gate with the complete prior resource/reset batch appended:
+
+```sh
+bin/test --paths \
+  src/seon/error.clj src/seon/error/refusal.clj src/seon/instrument.clj \
+  src/seon/schema.clj src/seon/schema/internal.cljc src/seon/db.clj \
+  src/seon/cluster/status.clj src/seon/sci/admit.clj src/seon/sci/eval.clj \
+  src/seon/sci/kernel.clj resources/seon/schemas/seon.schema.edn \
+  resources/seon/schemas/seon.db.edn resources/seon/schemas/seon.db.write.edn \
+  resources/seon/schemas/seon.db.write.attempt.edn resources/seon/schemas/seon.error.edn \
+  test/seon/error_test.clj test/seon/instrument_test.clj test/seon/schema_test.clj \
+  -- seon.error-test seon.instrument-test seon.schema-test \
+     seon.db-test seon.cluster-test seon.sci.eval-test
+```
+
+| Evidence | Bytes | SHA-256 |
+|---|---:|---|
+| Combined pre-change fast run | 128,632 | `9abc596e0a1a60ed32b94362469ae1788fa252e8082807c07bc5c4d73c6444ac` |
+| Post-change overlay refusal | 975 | `17753b1f9c8b8e9a7ab207d65d310cc0a2e9482963b2888d18088ffa4b6004a8` |
+| Required namespace load | 205 | `579c3de9fb226ffa47e63f1160596a1fe89089af30718e0a8855f4a369c28a18` |

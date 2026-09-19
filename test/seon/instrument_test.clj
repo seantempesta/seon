@@ -1377,8 +1377,12 @@
               :seon.error/layer :seon.instrument-test/body
               :seon.error/operation 'seon.instrument-test/precise-error-output}
         complete (assoc base :seon.agent/error-agent-id "observed")
+        composed (assoc complete :seon.test/unknown "seon.instrument-test/absent")
         refusal (test-support/refusal-data #(wrapped base))]
     (is (= complete (wrapped complete)))
+    (is (= #{:seon.agent/error :seon.test/unknown-error} (error/facets projection composed)))
+    (is (= composed (wrapped composed))
+        "A complete declared facet permits additional facets on the same open map.")
     (is ((schema/projection-validator projection :seon.instrument/undeclared-error)
          refusal)
         "An ordinary map success arm cannot satisfy the promised error facet.")))
