@@ -106,6 +106,18 @@
                                                   (inc (db/basis-t (db/db connection))))))))
        (complete-selection! connection request)
        (is (= #{} (symbols (select!))) "A green bare rerun selects zero, including platform.")
+       (doseq [policy [:named :all :platform]]
+         (let [selection (select-request
+                          (cond-> (assoc request :seon.db/db (db/db connection)
+                                                 :seon.test.run/policy policy)
+                            (= :named policy) (assoc :seon.test/identities #{(fixture-symbol "direct")})))
+               reused (:seon.test.selection/unchanged selection)]
+           (is (empty? (:seon.test.run/members selection)) (pr-str selection))
+           (is (seq reused) (pr-str selection))
+           (is (every? #(and (:seon.test/unchanged %)
+                            (integer? (:seon.test.run/basis-t %))
+                            (string? (:seon.test.run/program-digest %))
+                            (string? (:seon.test.run/input-digest %))) reused))))
        (let [database (db/db connection)
              definitions (sort (db/q '[:find [?symbol ...]
                                        :where [_ :seon.fn/sym ?symbol]] database))]
@@ -121,6 +133,11 @@
              (println "A1 selection measurement"
                       {:seeds n :elapsed-ms (/ (double (- (System/nanoTime) started)) 1e6)
                        :members (count (:seon.test.run/members selected))}))))
+       (let [full (assoc request :seon.test.run/policy :full)]
+         (complete-selection! connection full)
+         (let [selection (select-request (assoc full :seon.db/db (db/db connection)))]
+           (is (empty? (:seon.test.run/members selection)) (pr-str selection))
+           (is (seq (:seon.test.selection/unchanged selection)))))
        (complete-selection! connection (assoc request :seon.test/identities #{(fixture-symbol "unrelated")}))
        (install-selection-program! connection (str/replace source "leaf [] 1" "leaf [] 3"))
        (let [changed (select!)]
@@ -186,7 +203,10 @@
        (support/transacted! connection [[:db/retractEntity [:seon.fn.file/relative-path "src/selection-removed.clj"]]])
        (let [removed (select!)]
          (is (= [:removed-file] (:seon.test.selection/widenings removed)))
-         (is (= (symbols first-selection) (symbols removed))))
+         (is (empty? (symbols removed))
+             "A create-then-delete leaves the same program; widening eligibility reuses its green evidence.")
+         (is (= (symbols first-selection)
+                (set (map :seon.test/sym (:seon.test.selection/unchanged removed))))))
        (let [database (db/db connection)
              source-eid (:db/id (db/pull database [:db/id] [:seon.source/digest seal]))
              missing-inputs (:db-after (d/with database [[:db/retract source-eid :seon.source/test-input-digest]]))
@@ -220,13 +240,17 @@
               right-basis (db/basis-t (db/db right))
               target (fixture-symbol "branch-leaf")
               content #(get (#'sut/definition-digests (db/db %) [target]) target)]
-          (doseq [connection [left right]]
-            (install-selection-program! connection "(defn branch-leaf [] 1)"))
+          (install-selection-program! left "(defn branch-leaf [] 1)")
+          (install-selection-program! right "\n(defn branch-leaf [] 1)\n")
           (is (not= (get-in (db/db left) [:config :branch])
                     (get-in (db/db right) [:config :branch])))
           (is (not= (:db/id (db/pull (db/db left) [:db/id] [:seon.fn/sym target]))
                     (:db/id (db/pull (db/db right) [:db/id] [:seon.fn/sym target]))))
           (is (string? (content left)))
+          (is (not= (:seon.program/analyzed-source-digest
+                     (db/pull (db/db left) [:seon.program/analyzed-source-digest] [:seon.fn/sym target]))
+                    (:seon.program/analyzed-source-digest
+                     (db/pull (db/db right) [:seon.program/analyzed-source-digest] [:seon.fn/sym target]))))
           (is (= (content left) (content right)))
           (is (= #{target} (#'sut/changed-definition-symbols (db/db left) left-basis)
                           (#'sut/changed-definition-symbols (db/db right) right-basis)))

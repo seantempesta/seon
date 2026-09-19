@@ -574,7 +574,9 @@
                     database entities attributes))))
 
 (defn- definition-digests
-  "Identify selected definition content, independently of branch-local entities."
+  "Identify definition content independently of branch-local entities.
+  analyzed-source-digest identifies the analyzed input file or batch, so it
+  proves analysis but cannot identify an individual definition's change."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
                   [:map-of :qualified-symbol :seon.source/digest]]}
   [database symbols]
@@ -585,8 +587,7 @@
                                  [?entity :seon.test/sym ?symbol])
                              [?entity ?attribute ?value]]
                     database symbols
-                    [:seon.program/analyzed-source-digest
-                     :seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references
+                    [:seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references
                      :seon.test/source :seon.test/subject :seon.test/platform
                      :seon.test/fixture :seon.test/fixture-observation :seon.test/long
                      :seon.schema.admission/source]))]
@@ -639,12 +640,53 @@
                                    history namespaces)) [])]
     (into (set direct) namespace-symbols)))
 
+(defn- selection-seeds
+  "Resolve supplied definition and namespace identities in this database."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/changed]
+                  [:or [:set :qualified-symbol] :seon.error/value
+                   :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
+  [database changed]
+  (reduce
+   (fn [seeds change]
+     (let [[attribute value] (if (vector? change) change [:seon.fn/sym change])]
+       (if (= attribute :seon.ns/name)
+         (let [members (db/q '[:find [?symbol ...] :in $ ?name
+                               :where [?n :seon.ns/name ?name]
+                               (or-join [?e ?n] [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])
+                               (or [?e :seon.fn/sym ?symbol] [?e :seon.test/sym ?symbol])]
+                             database value)]
+           (cond (and (map? members)
+                      (contains? members :seon.error/at)
+                      (contains? members :seon.error/layer)
+                      (contains? members :seon.error/operation)) (reduced members)
+                 (empty? members) (reduced (unknown change "Namespace has no analyzed definitions."))
+                 :else (into seeds members)))
+         (if (qualified-symbol? value)
+           (let [known (db/q '[:find ?e . :in $ ?symbol
+                               :where (or [?e :seon.fn/sym ?symbol]
+                                          [?e :seon.test/sym ?symbol]
+                                          [?e :seon.fn/calls ?symbol]
+                                          [?e :seon.fn/references ?symbol]
+                                          [?e :seon.test/subject ?symbol])]
+                             (db/history database) value)]
+             (cond (and (map? known)
+                        (contains? known :seon.error/at)
+                        (contains? known :seon.error/layer)
+                        (contains? known :seon.error/operation)) (reduced known)
+                   known (conj seeds value)
+                   :else (reduced (selection-refusal database :seon.test/identity-unresolved
+                                   "Changed identity has no definition, history or incoming edge."
+                                   [:seon.fn/sym value]))))
+           (reduced (selection-refusal database :seon.test/coverage-unknown
+                                       "This changed declaration has no bounded graph selection." change))))))
+   #{} changed))
+
 (defn select
   "Select complete test memberships for one explicit cluster and immutable database.
   Baselines and outstanding work derive from admitted run/member facts, ordered
   by selection transaction. Calls, references and declared subjects use one
-  union gate walk. Unknown coverage refuses; unchanged green incremental work
-  has zero members, including zero platform tests. No filesystem reads occur."
+  union gate walk. Unknown coverage refuses; matching recorded green work under every policy
+  has zero executable members, including zero platform tests. No filesystem reads occur."
   {:malli/schema [:=> [:cat :seon.test.selection/request]
                   [:or :seon.test.selection/result :seon.error/value
                    :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
@@ -687,7 +729,8 @@
                               database run-ids [:seon.test.run/members :seon.test.run/covered-by]))
             facts (selection-facts database (concat run-ids source-ids member-ids)
                     [:seon.source/digest :seon.source/test-input-digest
-                     :seon.test.run/id :seon.test.run/cluster :seon.test.run/policy
+                     :seon.test.run/id :seon.test.run/at :seon.test.run/program-digest
+                     :seon.test.run/cluster :seon.test.run/policy
                      :seon.test.run/branch :seon.test.run/tested-branch
                      :seon.test.run/include-long? :seon.test.run/input-digest
                      :seon.test.run/basis-t :seon.test.run/selection-tx
@@ -714,11 +757,11 @@
                                     (= branch (one % :seon.test.run/branch))
                                     (or (nil? (one % :seon.test.run/tested-branch))
                                         (= branch (one % :seon.test.run/tested-branch)))
-                                    (= :incremental (one % :seon.test.run/policy))
+                                    (or (= :platform policy) (not= :platform (one % :seon.test.run/policy)))
                                     (= include-long? (one % :seon.test.run/include-long?))
                                     (= input-digest (one % :seon.test.run/input-digest))
-                                    (empty? (get-in facts [% :seon.test.run/namespaces]))
-                                    (empty? (get-in facts [% :seon.test.run/identities]))
+                                    (= namespaces (get-in facts [% :seon.test.run/namespaces] #{}))
+                                    (= identities (get-in facts [% :seon.test.run/identities] #{}))
                                     (one % :seon.test.run/selection-tx)))
                       (sort-by #(one % :seon.test.run/selection-tx)))
             members (fn [run] (into (get-in facts [run :seon.test.run/members] #{})
@@ -769,7 +812,9 @@
                                       result (members run)))
                             {} (if last-green (drop-while #(<= (one % :seon.test.run/selection-tx)
                                                                 (one last-green :seon.test.run/selection-tx)) runs) runs))
-            changed (if (and comparison (= :incremental policy)) (changed-definition-symbols database comparison) #{})
+            observed-changed (if comparison (changed-definition-symbols database comparison) #{})
+            changed (into observed-changed
+                          (selection-read! (selection-seeds database (vec (:seon.test/changed request)))))
             schema-changes (when (and comparison (= :incremental policy) (not first-run?))
                              (selection-read!
                               (db/q '[:find [?e ...] :in $ [?attribute ...] :where [?e ?attribute]]
@@ -777,9 +822,9 @@
                                     [:seon.schema/key :seon.schema/edn])))
             _ (when (seq schema-changes)
                 (refuse! :seon.test/coverage-unknown "Schema changes require proven bounded dependencies." (vec schema-changes)))
-            reached (if (and (seq changed) (not first-run?))
+            reached (if (seq changed)
                       (selection-read! (functions/gate-sets {:seon.db/db database :seon.fn/seeds changed})) [])
-            work? (or first-run? (seq changed) (seq pending) (not= :incremental policy))
+            work? (or first-run? (seq changed) (seq pending))
             reached (set reached)
             candidates
             (if (or first-run? (#{:all :full} policy))
@@ -792,7 +837,7 @@
                                 :where [?ns :seon.ns/name ?name]
                                        [?test :seon.test/ns ?ns] [?test :seon.test/sym ?symbol]]
                               database namespaces)))
-                     (when work?
+                     (when (or work? (= :platform policy))
                        (selection-read!
                         (db/q '[:find [?symbol ...]
                                 :where [?test :seon.test/platform] [?test :seon.test/sym ?symbol]] database))))))
@@ -830,13 +875,20 @@
                                       (or (= :agent (one entity :seon.schema.admission/source))
                                           (= "test" (one (one entity :seon.fn/file) :seon.fn.file/relative-root))
                                           (named? entry))
-                                      (or include-long? (named? entry)
+                                      (or include-long? (identities (first entry))
                                           (not (one entity :seon.test/long)))))) tests)
             _ (doseq [symbol identities :when (not (get eligible symbol))]
                 (refuse! :seon.test/identity-unresolved "The requested test is not eligible." symbol))
             _ (doseq [ns-symbol namespaces
-                      :when (not-any? #(= ns-symbol (one (one % :seon.test/ns) :seon.ns/name)) (vals eligible))]
+                      :when (not-any? #(= ns-symbol (one (one % :seon.test/ns) :seon.ns/name)) (vals tests))]
                 (refuse! :seon.test/namespace-unresolved "The requested namespace has no eligible tests." ns-symbol))
+            long-excluded
+            (into [] (keep (fn [[test-symbol entity]]
+                             (when (and (not include-long?) (not (identities test-symbol))
+                                        (not (excluded? [test-symbol entity])) (one entity :seon.test/long))
+                               {:seon.test/sym test-symbol :seon.test/long (one entity :seon.test/long)
+                                :seon.test/command ["bin/test-check" (:seon.cluster/name cluster-row)
+                                                    "--test" (str test-symbol)]}))) tests)
             reasons (reduce-kv
                      (fn [result symbol entity]
                        (let [entry [symbol entity]
@@ -844,9 +896,38 @@
                                        (and first-run? (not= :platform policy)) (conj :first-run)
                                        (and (not= :platform policy) (reached symbol)) (conj :reaches-changed)
                                        (or (named? entry) (#{:all :full} policy)) (conj :named)
-                                       (and work? (one entity :seon.test/platform)) (conj :platform))]
+                                       (and (or work? (#{:platform :all :full} policy)) (one entity :seon.test/platform)) (conj :platform))]
                          (if (seq reasons) (assoc result symbol reasons) result)))
-                     (sorted-map) eligible)]
+                     (sorted-map) eligible)
+            digest (selection-read! (runner/program-digest database))
+            latest (reduce
+                    (fn [result run-eid]
+                      (reduce (fn [result member]
+                                (assoc result (one member :seon.test.member/symbol) [run-eid member]))
+                              result (get-in facts [run-eid :seon.test.run/members])))
+                    {} (sort-by #(one % :seon.test.run/selection-tx)
+                                (filter #(and (= branch (one % :seon.test.run/branch))
+                                              (not (one % :seon.test.run/tested-branch))
+                                              (= digest (one % :seon.test.run/program-digest))
+                                              (= input-digest (one % :seon.test.run/input-digest))
+                                              (one % :seon.test.run/selection-tx)) run-ids)))
+            reused (into (sorted-map)
+                         (keep (fn [[test-symbol _]]
+                                 (when-let [[run-eid member] (get latest test-symbol)]
+                                   (when (and (green? member)
+                                              (or (nil? supplied-basis) (= supplied-basis (one run-eid :seon.test.run/basis-t)))
+                                              (not (reached test-symbol)))
+                                     [test-symbol
+                                      {:seon.test/sym test-symbol :seon.test/unchanged true
+                                       :seon.test/run-basis-t (one run-eid :seon.test.run/basis-t)
+                                       :seon.test.run/basis-t (one run-eid :seon.test.run/basis-t)
+                                       :seon.test.run/program-digest digest :seon.test.run/input-digest input-digest
+                                       :seon.test/run-at (one run-eid :seon.test.run/at)
+                                       :seon.test/run [:seon.test.run/id (one run-eid :seon.test.run/id)]
+                                       :seon.test/recorded-basis-t (one member :seon.test.member/completed-tx)
+                                       :seon.test/pass-count (one member :seon.test.member/pass-count)
+                                       :seon.test/fail-count 0 :seon.test/error-count 0}])))) reasons)
+            reasons (apply dissoc reasons (keys reused))]
         (cond-> {:seon.test.run/basis-t basis-t
                  :seon.test.run/cluster cluster-id
                  :seon.test.run/policy policy
@@ -854,6 +935,8 @@
                  :seon.test.run/input-digest input-digest
                  :seon.test.run/members (mapv (fn [[symbol reasons]]
                                                {:seon.test/sym symbol :seon.test.member/reasons reasons}) reasons)}
+          (seq reused) (assoc :seon.test.selection/unchanged (vec (vals reused)))
+          (seq long-excluded) (assoc :seon.test/long-excluded long-excluded)
           first-run? (assoc :seon.test.selection/widenings
                             [(cond (seq removed-files) :removed-file
                                    (some #(and (= cluster-id (one % :seon.test.run/cluster))
@@ -871,47 +954,6 @@
                (contains? (ex-data failure) :seon.error/at)
                (contains? (ex-data failure) :seon.error/layer)
                (contains? (ex-data failure) :seon.error/operation)) (ex-data failure) (throw failure)))))
-
-(defn- selection-seeds
-  "Resolve supplied definition and namespace identities in this database."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/changed]
-                  [:or [:set :qualified-symbol] :seon.error/value
-                   :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
-  [database changed]
-  (reduce
-   (fn [seeds change]
-     (let [[attribute value] (if (vector? change) change [:seon.fn/sym change])]
-       (if (= attribute :seon.ns/name)
-         (let [members (db/q '[:find [?symbol ...] :in $ ?name
-                               :where [?n :seon.ns/name ?name]
-                               (or-join [?e ?n] [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])
-                               (or [?e :seon.fn/sym ?symbol] [?e :seon.test/sym ?symbol])]
-                             database value)]
-           (cond (and (map? members)
-                      (contains? members :seon.error/at)
-                      (contains? members :seon.error/layer)
-                      (contains? members :seon.error/operation)) (reduced members)
-                 (empty? members) (reduced (unknown change "Namespace has no analyzed definitions."))
-                 :else (into seeds members)))
-         (if (qualified-symbol? value)
-           (let [known (db/q '[:find ?e . :in $ ?symbol
-                               :where (or [?e :seon.fn/sym ?symbol]
-                                          [?e :seon.test/sym ?symbol]
-                                          [?e :seon.fn/calls ?symbol]
-                                          [?e :seon.fn/references ?symbol]
-                                          [?e :seon.test/subject ?symbol])]
-                             (db/history database) value)]
-             (cond (and (map? known)
-                        (contains? known :seon.error/at)
-                        (contains? known :seon.error/layer)
-                        (contains? known :seon.error/operation)) (reduced known)
-                   known (conj seeds value)
-                   :else (reduced (selection-refusal database :seon.test/identity-unresolved
-                                   "Changed identity has no definition, history or incoming edge."
-                                   [:seon.fn/sym value]))))
-           (reduced (selection-refusal database :seon.test/coverage-unknown
-                                       "This changed declaration has no bounded graph selection." change))))))
-   #{} changed))
 
 (defn reaching
   "Return tests reaching explicit changed definitions through the same union graph owner."
@@ -1050,6 +1092,7 @@
                                    [:seon.test.run/cluster :seon.test.run/input-digest
                                     :seon.test.run/policy :seon.test.run/include-long?
                                     :seon.test.run/deadline
+                                    :seon.test.run/exclusions
                                     :seon.test.run/change-basis-t :seon.test.run/namespaces
                                     :seon.test.run/identities])
                        (select-keys run
@@ -1059,9 +1102,11 @@
                 (assoc :seon.test.run/cluster cluster-id))
         selector (into [:db/id :seon.test.run/selection-tx
                         [:seon.test.run/namespaces :limit nil]
+                        [:seon.test.run/exclusions :limit nil]
                         [:seon.test.run/identities :limit nil]]
                        (keys (dissoc row :seon.test.run/members
-                                     :seon.test.run/namespaces :seon.test.run/identities)))
+                                     :seon.test.run/namespaces :seon.test.run/identities
+                                     :seon.test.run/exclusions)))
         previous (db/pull database selector [:seon.test.run/id run-id])]
     (doseq [read-result [cluster-row previous]]
       (when (and (map? read-result)
@@ -1108,6 +1153,8 @@
                       (assoc :seon.test.run/cluster
                              (get-in previous [:seon.test.run/cluster :db/id])))
             normalize #(-> %
+                           (update :seon.test.run/exclusions
+                                   (fn [rows] (set (map (fn [row] (dissoc row :db/id)) rows))))
                            (dissoc :seon.test.run/namespaces :seon.test.run/identities)
                            (merge (select-keys (admission-scope %)
                                               [:seon.test.run/namespaces
@@ -1309,28 +1356,19 @@
                                       (or [?entity :seon.fn/sym ?symbol]
                                           [?entity :seon.test/sym ?symbol])]
                              database (mapv relative-path paths)))
-        tests (when (and (not (and (map? file-symbols)
-                                   (contains? file-symbols :seon.error/at)
-                                   (contains? file-symbols :seon.error/layer)
-                                   (contains? file-symbols :seon.error/operation)))
-                         (or (seq changed) (seq file-symbols)))
-                (reaching {:seon.db/db database
-                           :seon.test/changed (vec (concat changed file-symbols))}))]
-    (cond
-      (and (map? file-symbols)
-           (contains? file-symbols :seon.error/at)
-           (contains? file-symbols :seon.error/layer)
-           (contains? file-symbols :seon.error/operation)) file-symbols
-      (and (map? tests)
-           (contains? tests :seon.error/at)
-           (contains? tests :seon.error/layer)
-           (contains? tests :seon.error/operation)) tests
-      :else
+        seeds (when-not (and (map? file-symbols)
+                             (contains? file-symbols :seon.error/at)
+                             (contains? file-symbols :seon.error/layer)
+                             (contains? file-symbols :seon.error/operation))
+                (vec (concat changed file-symbols)))]
+    (if (and (map? file-symbols)
+             (contains? file-symbols :seon.error/at)
+             (contains? file-symbols :seon.error/layer)
+             (contains? file-symbols :seon.error/operation)) file-symbols
       (check-request-admission (cond-> {:seon.db/db database
                        :seon.test/namespaces (set (:seon.test/namespaces request))
-                       :seon.test/identities (set tests)
+                       :seon.test/changed seeds
                        :seon.test/include-long? (true? (:seon.test/include-long? request))}
-                (or (seq changed) (seq file-symbols)) (assoc :seon.test.run/policy :named)
                 cluster (assoc :seon.test.run/cluster [:seon.cluster/name cluster])
                 (:seon.test.run/cluster request) (assoc :seon.test.run/cluster (:seon.test.run/cluster request))
                 (:seon.test.run/change-basis-t request)
@@ -1371,7 +1409,7 @@
                                     :seon.test/command ["bin/test-check" (or cluster "default")
                                                         "--test" test-symbol]})))
                          selected))
-        long-excluded []
+        long-excluded (:seon.test/long-excluded selection)
         ;; A test reaching a declared destructive owner never runs in the
         ;; development JVM: the same rule seon.test/run enforces per Var, applied
         ;; to the whole selection so the exclusion is reported, never silent.
@@ -1424,7 +1462,19 @@
                                       (contains? effective :seon.error/at)
                                       (contains? effective :seon.error/layer)
                                       (contains? effective :seon.error/operation))))
-                   (db/transact! connection [[:db.fn/call admit-run selection]]))]
+                   (db/transact! connection [[:db.fn/call admit-run
+                       (cond-> (assoc selection :seon.test.run/members
+                                      (filterv #((set runnable) (:seon.test.member/symbol %))
+                                               (:seon.test.run/members selection)))
+                         (or (seq long-excluded) (seq excluded) (seq deferred) (and widened defer?))
+                         (assoc :seon.test.run/exclusions
+                                (vec (concat
+                                      (map (fn [entry] {:seon.test.member/symbol (:seon.test/sym entry)
+                                                        :seon.test.selection/disposition :long}) long-excluded)
+                                      (for [test-symbol selected :when (not ((set runnable) test-symbol))]
+                                        {:seon.test.member/symbol test-symbol
+                                         :seon.test.selection/disposition
+                                         (if (excluded test-symbol) :destructive :deferred)})))))]]))]
     (cond
       (and (map? effective)
            (contains? effective :seon.error/at)
@@ -1452,10 +1502,11 @@
                                                 (map #(symbol (namespace (symbol %))) selected)))))
             deadline (+ started (* 1000000 (:seon.test/check-time-limit-ms effective)))
             initial (cond-> {:seon.test/tests [] :seon.test/passed [] :seon.test/failed []
-                             :seon.test/results []
+                             :seon.test/results (vec (:seon.test.selection/unchanged selection))
                              :seon.test.run/basis-t (db/basis-t database)
                              :seon.test/next-tier (commands paths namespaces)}
-                      (nil? changed) (assoc :seon.test/skipped-count 0
+                      (nil? changed) (assoc :seon.test/skipped-count
+                                           (count (:seon.test.selection/unchanged selection))
                                            :seon.test/skip-reason "recorded result covers unchanged program facts")
                       (seq deferred) (assoc :seon.test/deferred deferred)
                       (seq destructive) (assoc :seon.test/destructive-excluded destructive)
@@ -1589,7 +1640,9 @@
   and the typed expiry naming what was pending in :seon.test/expired.
   Red results return :seon.test/next-tier :none. Every failure names its test
   and the changed identities it reaches. Selection is admitted before execution,
-  including a zero-member request; deferred members remain outstanding.
+  including a zero-member request. Declared exclusions and deferred requests
+  are recorded separately from executable memberships. A bound or red platform
+  member leaves the admitted, unexecuted remainder outstanding.
   Selection, loading, and execution
   share the total :seon.test/check-time-limit-ms fact; each test receives
   the remaining allowance. Timeout reports expiry without interrupting resource acquisition."

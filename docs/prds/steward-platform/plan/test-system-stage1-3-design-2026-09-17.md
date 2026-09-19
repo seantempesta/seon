@@ -151,8 +151,10 @@ Scope matters: a named-only or platform-only run must not advance the bare
 incremental baseline. Record requested namespace/identity sets and the request
 policy (`:incremental`, `:named`, `:platform`, `:all`, `:full`) on the run as
 input evidence. Bare means incremental. Names mean named scope; names select
-all their eligible tests regardless of freshness. Explicit all/full/platform
-requests retain their meaning and do not become silent incremental aliases.
+their eligible tests. Every policy is an eligibility scope: named/all/full/
+platform requests reuse matching recorded green members. Each reused member
+is reported `:seon.test/unchanged` with its tested basis, program digest and
+input digest; only members without matching evidence execute (D7, 2026-09-19).
 Run defaults and eligibility are decided here, never in bash.
 
 A previous red run is usable change history but **not discharge of its red or
@@ -193,15 +195,12 @@ fixture material, `/population-unknown` for missing indexing evidence, and
 here retain the `seon.test` namespace. First-run is a successful outcome,
 not a refusal. Unknown evidence never becomes an empty success.
 
-**Platform/no-op policy, explicitly:** include platform members first when
-there is changed work, an outstanding obligation, a first run, or an explicit
-named/all/full/platform request. For an unchanged, previously green bare
-request, return zero members, including zero platform members. This is the
-small policy refinement needed to meet the owner's unchanged-run requirement;
-always adding platform tests cannot meet it. Amend the PRD/AGENTS wording in
-the implementation commit. After an ordinary edit, N means the exact union of
-changed-reach tests and that declared platform tier, not a promise that every
-platform test transitively calls the edited function. Output names both sets.
+**Platform/no-op policy:** declared platform members enter eligibility for
+changed work, an outstanding obligation, a first run, or platform/all/full
+scope. Matching recorded green members are reused under every policy, including
+platform. Execute only unresolved members, with platform execution first.
+Selection preserves the reasons for execution and reports the confidence
+values for reuse; an unchanged request can execute zero tests under any scope.
 
 ### Post-reset change algorithm
 
@@ -323,9 +322,9 @@ identity attribute** is needed. This replaces stage 0's proposed member/id
 and member/test ref before they ship, satisfying G5 and deletion law. Run
 identity still uses `seon.id/id`; do not add another identity generator.
 
-Extend `runner/record-tx :2227` with phase-specific admission through
-`runner/admit-run` (transaction function), called by `commit-results! :2444`'s
-existing writer route. Store run provenance, request, selection-tx and all
+Admission belongs to `seon.test/admit-run`, invoked as a transaction
+function before execution. `runner/commit-results!` owns result recording;
+recording a result is not admission. Store run provenance, request, selection-tx and all
 members in **one transaction before any body starts**. Validate the handed
 selection's source commit/program digest, input digest and change basis at
 the writer. A concurrent program update refuses `:seon.test/program-mismatch`;
@@ -441,7 +440,7 @@ edge values. Its full post-reset regression is still required.
 
 ## Stage 3 — admission and claims at the writer
 
-`runner/admit-run` becomes the reservation boundary. At its transaction db,
+`seon.test/admit-run` becomes the reservation boundary. At its transaction db,
 find admitted unfinished members for the **same cluster, tested program/input
 digests, lineage and change basis**. Reserve the complement and write
 covered-by refs in the same transaction. Reserve on admission, **not first

@@ -278,8 +278,8 @@
                           (mapv #(hash-map :seon.test.member/symbol %
                                            :seon.test.member/reasons #{:named}) symbols)}
                _ (test-support/transacted!
-                  connection [[:db.fn/call runner/admit-run admission]
-                              [:db.fn/call runner/admit-run
+                  connection [[:db.fn/call seon-test/admit-run admission]
+                              [:db.fn/call seon-test/admit-run
                                (assoc admission :seon.test.run/provenance other-run)]])
                claim-request (fn [provenance process]
                                (merge (select-keys process [:seon.db.process/pid :seon.db.process/start-instant])
@@ -377,10 +377,10 @@
                           :seon.test.run/deadline deadline
                           :seon.test.run/members [{:seon.test.member/symbol platform :seon.test.member/reasons #{:platform}}
                                                   {:seon.test.member/symbol bulk :seon.test.member/reasons #{:named}}]}
-               _ (test-support/transacted! connection [[:db.fn/call runner/admit-run admission]])
+               _ (test-support/transacted! connection [[:db.fn/call seon-test/admit-run admission]])
                other-run (runner/provenance (db/db connection))
                _ (test-support/transacted!
-                  connection [[:db.fn/call runner/admit-run
+                  connection [[:db.fn/call seon-test/admit-run
                                (assoc admission :seon.test.run/provenance other-run)]])
                request (fn [provenance process]
                          (merge (select-keys process [:seon.db.process/pid :seon.db.process/start-instant])

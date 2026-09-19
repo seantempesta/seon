@@ -1,6 +1,7 @@
 {:seon.test.selection/request
  [:map
   [:seon.db/db :seon.db/database-value]
+  [:seon.test/changed {:optional true} :seon.test/changed]
   [:seon.test.run/cluster {:optional true} :seon.test.run/cluster]
   [:seon.test/namespaces {:optional true} [:set :symbol]]
   [:seon.test/identities {:optional true} [:set :qualified-symbol]]
@@ -8,8 +9,25 @@
   [:seon.test.run/policy {:optional true} :seon.test.run/policy]
   [:seon.test/include-long? {:optional true} :boolean]]
  :seon.test.selection/widening [:enum :missing-basis :removed-file :outside-program-graph]
+ :seon.test.selection/reused
+ [:and :seon.test/result
+  [:map
+   [:seon.test/unchanged [:= true]]
+   [:seon.test.run/basis-t :seon.test.run/basis-t]
+   [:seon.test.run/program-digest :seon.test.run/program-digest]
+   [:seon.test.run/input-digest :seon.test.run/input-digest]]]
+ :seon.test.selection/unchanged [:vector :seon.test.selection/reused]
+ :seon.test.selection/disposition
+ [:enum {:description "Finite execution decisions recorded for excluded members; these describe the request decision, not an entity kind."}
+  :long :destructive :deferred]
+ :seon.test.selection/exclusion
+ [:map {:seon.db/attributes true}
+  [:seon.test.member/symbol :seon.test.member/symbol]
+  [:seon.test.selection/disposition :seon.test.selection/disposition]]
  :seon.test.selection/result
  [:map
+  [:seon.test.selection/unchanged {:optional true} :seon.test.selection/unchanged]
+  [:seon.test/long-excluded {:optional true} :seon.test/long-excluded]
   [:seon.test.selection/widenings {:optional true} [:vector :seon.test.selection/widening]]
   [:seon.test.selection/removed {:optional true} [:vector :string]]
   [:seon.test.run/basis-t :seon.test.run/basis-t]

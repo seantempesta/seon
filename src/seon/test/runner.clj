@@ -2301,13 +2301,6 @@
   [request]
   ((requiring-resolve 'seon.test/selection-admission) request))
 
-(defn admit-run
-  "Admit the selector's immutable members through the one transaction owner."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/admission]
-                  :seon.store/transaction-data]}
-  [database request]
-  ((requiring-resolve 'seon.test/admit-run) database request))
-
 (defn- execution-refusal! [operation run-id kind expected observed]
   (let [failure (error/diagnostic
                  {:seon.error/kind kind

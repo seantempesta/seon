@@ -9,8 +9,9 @@
                 :change-basis-t [:and {:description "Earlier tested basis used to select changes in the same lineage; absent for first-run."} :seon.db/basis-t],
                 :members [:set {:seon.db/component true :seon.db/component-schema :seon.test.member/member :description "Selected memberships admitted atomically before execution; deleting the run cascades to these components."} :seon.db/ref],
                 :covered-by [:set {:description "Existing run members accepted instead of duplicate execution at admission. Optional refs sweep with their targets; a reader must report missing coverage as unknown."} :seon.db/ref],
+                :exclusions [:set {:seon.db/component true :seon.db/component-schema :seon.test.selection/exclusion :description "Request decisions excluded from executable membership; deletion of the owning run cascades to these observations."} :seon.db/ref],
                 :selection-tx [:and {:description "Transaction admitting the complete selection, including zero members. Required at admission; the optional stored ref sweeps if that transaction is removed, leaving selection unavailable."} :seon.db/ref],
-                :policy [:enum {:description "Requested gate policy; an execution scope, never an entity discriminator."} :incremental :named :platform :all :full],
+                :policy [:enum {:description "Requested eligibility scope. Matching recorded green evidence is reused under every policy."} :incremental :named :platform :all :full],
                 :namespaces [:set {:description "Namespaces explicitly requested at admission; absence means none requested."} :symbol],
                 :identities [:set {:description "Test identities explicitly requested at admission."} :qualified-symbol],
                 :include-long? [:boolean {:description "Explicit long-test inclusion decision for this request."}],
@@ -26,6 +27,7 @@
                  [:seon.test.run/change-basis-t {:optional true} :seon.test.run/change-basis-t]
                  [:seon.test.run/namespaces {:optional true} :seon.test.run/namespaces]
                  [:seon.test.run/identities {:optional true} :seon.test.run/identities]
+                 [:seon.test.run/exclusions {:optional true} [:vector :seon.test.selection/exclusion]]
                  [:seon.test.run/members [:vector :seon.test.member/member]]],
                 :deadline [:and {:description "Original request deadline; contention and reclaim never restart it."} :seon.test.run/at],
                 :dead-workers [:vector {:description "Confirmed exited process generations from the process census or observed child exit; timeout or unknown observations do not qualify."}
@@ -94,6 +96,7 @@
                  [:seon.test.run/identities {:optional true} :seon.test.run/identities]
                  [:seon.test.run/members {:optional true} :seon.test.run/members]
                  [:seon.test.run/covered-by {:optional true} :seon.test.run/covered-by]
+                 [:seon.test.run/exclusions {:optional true} :seon.test.run/exclusions]
                  [:seon.test.run/selection-tx {:optional true} :seon.test.run/selection-tx]
                  [:seon.test.run/deadline {:optional true} :seon.test.run/deadline]
                  [:seon.test.run/branch {:optional true} :seon.test.run/branch]]

@@ -924,7 +924,8 @@ adds tests reaching code changed since the recorded green basis (derived
 from `:seon.fn/calls` edges, never mtimes) — deliberately widening to every
 eligible test when the basis is missing, a file was removed, or a changed
 gate input sits outside the program graph; `--all` adds every
-non-long test; explicit namespaces run complete. A lane with concurrent
+non-long test; explicit namespaces select their complete eligibility scope.
+A lane with concurrent
 neighbours uses `bin/test-fast --paths <its own files…> -- <namespaces…>`,
 which snapshots HEAD and overlays only those paths. A LANE NEVER RUNS
 `bin/test` gates, `--all`, OR `--full`; the orchestrator owns cold gates and
@@ -936,17 +937,17 @@ never silent. By default, every canonical gate records the tests it ran on `:cur
 through `seon.test.runner/commit-results!` (`src/seon/test/runner.clj:1435`);
 recording failure fails the gate. Fast iterations do not persist that evidence.
 
-**Shared request policy (Stage 1–3 target):** platform members run first for
-changed work, an outstanding obligation, a first run, or an explicit
-named/all/full/platform request. An unchanged, previously green bare request
-returns recorded evidence and executes zero tests, including zero platform
-tests. `seon.test/run-owned` implements single-test reuse through
-`seon.test.runner/reusable-result`: program digest, exact recorded selection
-and requested basis must match. Bare requests use their last green program
-basis; `:seon.test/run-basis-t` can explicitly request the current database
-basis to rerun. `:seon.test/unchanged` and `:seon.test/recorded-basis-t` name
-reuse and its recording transaction. The shell/selection integration remains
-the post-reset Stage 1 work; this paragraph does not claim it has migrated.
+**Shared request policy:** every policy is an eligibility scope, never an
+execution promise. Named/all/full/platform requests reuse each member whose
+recorded green matches the program digest, input digest and requested basis.
+Selection reports each such member as `:seon.test/unchanged` with all three
+confidence values; only members lacking that evidence execute. Executable
+platform members run first. An unchanged green request can execute zero tests
+under any policy. `seon.test/select` owns set selection and reuse;
+`seon.test.runner/reusable-result` owns the single-test request used by
+`seon.test/run-owned`. `:seon.test/recorded-basis-t` distinguishes the result
+recording transaction from the tested basis. Shell integration remains the
+post-reset Stage 1 work; this paragraph does not claim it has migrated.
 
 Tests find design issues; structure dissolves them: when a failure class
 appears, move the invariant to one choke point and keep ONE regression per

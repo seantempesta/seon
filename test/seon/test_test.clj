@@ -11,6 +11,61 @@
             [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
 
+(deftest check-records-only-execution-members-and-reuses-the-green-set
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "check-reuse" {:seon.test/check-time-limit-ms 120000})
+     (test-support/transacted! connection
+       [{:seon.ns/name 'selection.check}
+        {:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
+         :seon.source/test-input-digest (id/digest 64 [:check :inputs])}])
+     (let [ctx (test-support/fork-cluster-ctx connection)]
+       (doseq [source ["(defn leaf {:malli/schema [:=> [:cat] :int]} [] 1)"
+                       "(clojure.test/deftest ordinary (clojure.test/is (= 1 (leaf))))"
+                       "(clojure.test/deftest ^{:seon.test/long \"Declared long fixture\"} slow (clojure.test/is (= 1 (leaf))))"]]
+         (let [evaluation (sci.eval/evaluate
+                            {:seon.sci.eval/ctx ctx :seon.cluster.eval/source source
+                             :seon.cluster.eval/ns [:seon.ns/name 'selection.check]
+                             :seon.sci.admit/caps (config/result-caps (config/defaults))
+                             :seon.sci.eval/time-limit-ms 120000 :seon.config/on-core-error :panic})
+               row (program/declaration-row (:seon.program/row evaluation) :all :agent)]
+           (is (map? row) (pr-str evaluation))
+           (test-support/transacted! connection [row])
+           (sci.eval/install-evaluated-rows!
+             {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+              :seon.sci.eval/installations [{:seon.program/row row :seon.sci.eval/evaluation evaluation}]})))
+       (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)})
+       (is (= (runner/program-digest (db/db connection))
+              (runner/program-digest (:seon.db/db (sci.eval/acquired-program ctx)))))
+       (let [request {:seon.db/connection connection :seon.boot/cluster-name "check-reuse"
+                      :seon.test/namespaces ['selection.check]
+                      :my.program/context {:my.program/base-ctx ctx :seon.sci.eval/ctx ctx
+                                           :seon.db/connection connection}}
+             first-check (sut/check request)
+             second-check (sut/check request)]
+         (is (= ['selection.check/ordinary] (:seon.test/tests first-check)) (pr-str first-check))
+         (is (empty? (:seon.test/failed first-check)) (pr-str first-check))
+         (is (= ['selection.check/ordinary] (:seon.test/passed first-check)) (pr-str first-check))
+         (is (= [] (:seon.test/tests second-check)) (pr-str second-check))
+         (is (= [true] (mapv :seon.test/unchanged (:seon.test/results second-check))) (pr-str second-check))
+         (let [reused (first (:seon.test/results second-check))]
+           (is (integer? (:seon.test.run/basis-t reused)))
+           (is (= (runner/program-digest (db/db connection)) (:seon.test.run/program-digest reused)))
+           (is (= (id/digest 64 [:check :inputs]) (:seon.test.run/input-digest reused))))
+         (is (= #{'selection.check/ordinary}
+                (set (db/q '[:find [?symbol ...] :where [_ :seon.test.member/symbol ?symbol]
+                            [?run :seon.test.run/members ?member] [?member :seon.test.member/symbol ?symbol]]
+                           (db/db connection)))))
+         (is (= #{['selection.check/slow :long]}
+                (db/q '[:find ?symbol ?decision :where [?run :seon.test.run/exclusions ?excluded]
+                        [?excluded :seon.test.member/symbol ?symbol]
+                        [?excluded :seon.test.selection/disposition ?decision]] (db/db connection))))
+         (let [selected (sut/check-admission (db/db connection)
+                           (assoc request :seon.test/changed ['selection.check/leaf]))]
+           (is (some #(and (= 'selection.check/ordinary (:seon.test.member/symbol %))
+                           ((:seon.test.member/reasons %) :reaches-changed))
+                     (:seon.test.run/members selected)) (pr-str selected))))))))
+
 (deftest recorded-reuse-requires-the-original-selection
   (test-support/with-database
    (fn [connection]
@@ -256,8 +311,8 @@
                               (assoc :seon.test.run/members (mapv member (drop 1 symbols))))
            report (test-support/transacted!
                    connection
-                   [[:db.fn/call runner/admit-run request]
-                    [:db.fn/call runner/admit-run second-request]])
+                   [[:db.fn/call sut/admit-run request]
+                    [:db.fn/call sut/admit-run second-request]])
            after (:db-after report)
            memberships (fn [run-id attribute]
                          (set (db/q '[:find [?symbol ...]
@@ -274,14 +329,14 @@
        (is (= 3 (db/q '[:find (count ?member) .
                         :where [?member :seon.test.member/symbol]] after)))
        (let [replay (test-support/transacted!
-                     connection [[:db.fn/call runner/admit-run second-request]])]
+                     connection [[:db.fn/call sut/admit-run second-request]])]
          (is (empty? (filter #(or (= "seon.test.run" (namespace (:a %)))
                                  (= "seon.test.member" (namespace (:a %))))
                             (:tx-data replay)))
              "An identical admission replay writes no evidence datoms."))
        (let [before (db/basis-t (db/db connection))
              refused (db/transact! connection
-                       [[:db.fn/call runner/admit-run
+                       [[:db.fn/call sut/admit-run
                          (assoc second-request :seon.test.run/members [])]])]
          (is (= :seon.test.run/immutable (:seon.error/kind refused)) (pr-str refused))
          (is (= before (db/basis-t (db/db connection)))))))))
@@ -303,20 +358,20 @@
                     :seon.test.run/members []}
            before (db/basis-t database)
            refused (db/transact! connection
-                     [[:db.fn/call runner/admit-run
+                     [[:db.fn/call sut/admit-run
                        (assoc-in request [:seon.test.run/provenance :seon.test.run/program-digest]
                                  (id/digest 64 [:different :program]))]])]
        (is (= :seon.test/program-mismatch (:seon.error/kind refused)) (pr-str refused))
        (is (= before (db/basis-t (db/db connection))))
        (let [wrong-input (db/transact! connection
-                           [[:db.fn/call runner/admit-run
+                           [[:db.fn/call sut/admit-run
                              (assoc request :seon.test.run/input-digest
                                     (id/digest 64 [:different :inputs]))]])]
          (is (= :seon.test/program-mismatch (:seon.error/kind wrong-input))
              (pr-str wrong-input))
          (is (= before (db/basis-t (db/db connection)))))
        (let [report (test-support/transacted!
-                     connection [[:db.fn/call runner/admit-run request]])
+                     connection [[:db.fn/call sut/admit-run request]])
              row (db/pull (:db-after report)
                          [:seon.test.run/selection-tx :seon.test.run/members]
                          [:seon.test.run/id (get-in request [:seon.test.run/provenance :seon.test.run/id])])]
