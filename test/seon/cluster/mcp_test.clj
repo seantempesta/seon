@@ -193,7 +193,7 @@
   (let [cluster-name "mcp-jvm-exception-face-test"
         effective (config/defaults)
         inline-ceiling (:seon.config.eval.result/blob-threshold effective)
-        throw-site-frame
+        dependency-frame
         ['malli.core$_map_schema$reify__1 'invoke "core.cljc" 1289]
         serving-frame
         ['seon.cluster$mcp_io_prepl 'invokeStatic "cluster.clj" 336]
@@ -205,8 +205,8 @@
                 :at serving-frame}
                {:type 'java.lang.IllegalArgumentException
                 :message small-message
-                :at throw-site-frame}]
-         :trace (into [throw-site-frame serving-frame]
+                :at dependency-frame}]
+         :trace (into [dependency-frame serving-frame]
                       (repeat 500 serving-frame))
          :cause small-message
          :phase :execution}]
@@ -228,8 +228,11 @@
             (cluster/mcp-get-value
              cluster-name (:seon.blob/digest oversized-result)
              [:seon.error/message] 0)]
-        (is (= throw-site-frame (:seon.dev.mcp/frame face))
-            "the root exception location survives instead of the serving frame")
+        (is (= serving-frame (:seon.error/frame face))
+            "the first first-party frame survives instead of the dependency frame")
+        (is (= 'java.lang.IllegalArgumentException
+               (:seon.error/exception-class face)))
+        (is (= small-message (:seon.error/message face)))
         (is (= {:seon.error/diagnostic-layer :development-mcp
                 :seon.error/diagnostic-operation :evaluate-jvm
                 :seon.error/diagnostic-member :exception
@@ -241,7 +244,7 @@
                 :seon.error/diagnostic-evidence-availability
                 :seon.error/known
                 :seon.error/diagnostic-evidence
-                {:seon.dev.mcp/frame throw-site-frame}}
+                {:seon.error/frame serving-frame}}
                (select-keys
                 (:seon.error/data face)
                 [:seon.error/diagnostic-layer
@@ -293,10 +296,36 @@
           "Cannot invoke java.util.concurrent.Future.get() because fut is null"
           :phase :execution} false true)
         face (:seon.dev.mcp/value result)]
-    (is (= :seon.dev.mcp/nil-deref (:seon.error/kind face)))
-    (is (= deref-frame (:seon.dev.mcp/frame face)))
+    (is (= 'java.lang.NullPointerException
+           (:seon.error/exception-class face)))
+    (is (= serving-frame (:seon.error/frame face)))
+    (is (= "The evaluated form dereferenced nil."
+           (:seon.error/message face)))
     (is (not (str/includes? (pr-str result) "Future.get"))
         "the misleading host overload sentence must not leak")))
+
+(deftest jvm-ex-info-projects-its-message-class-and-first-party-frame
+  (let [cluster-name "mcp-jvm-ex-info-test"
+        dependency-frame
+        ['malli.core$_map_schema$reify__1 'invoke "core.cljc" 1289]
+        first-party-frame
+        ['seon.cluster$mcp_io_prepl 'invokeStatic "cluster.clj" 336]
+        message "The JVM evaluation refused the supplied member."
+        face
+        (:seon.dev.mcp/value
+         (projected
+          cluster-name (config/defaults)
+          {:via [{:type 'clojure.lang.ExceptionInfo
+                  :message message
+                  :at dependency-frame}]
+           :trace [dependency-frame first-party-frame]
+           :cause message
+           :phase :execution}
+          false true))]
+    (is (= message (:seon.error/message face)))
+    (is (= 'clojure.lang.ExceptionInfo
+           (:seon.error/exception-class face)))
+    (is (= first-party-frame (:seon.error/frame face)))))
 
 (deftest runtime-observation-counts-problems-without-embedding-facts
   (let [cluster-name "mcp-runtime-problem-count-test"

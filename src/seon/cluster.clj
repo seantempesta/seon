@@ -26,6 +26,7 @@
             [seon.cluster.process :as cluster.process]
             [seon.cluster.wake :as wake]
             [seon.error :as error]
+            [seon.error.refusal :as refusal]
             [seon.turn :as turn]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -315,25 +316,34 @@
       bootstrap-effective)))
 
 (defn- nil-deref?
+  {:malli/schema [:=> [:cat :map] :boolean]}
   [cause]
   (= 'clojure.core$deref_future (first (:at cause))))
 
+(defn- first-seon-frame
+  {:malli/schema [:=> [:cat [:sequential :seon.error/frame]]
+                  [:maybe :seon.error/frame]]}
+  [trace]
+  (some (fn [frame]
+          (when (str/starts-with? (str (first frame)) "seon.")
+            frame))
+        trace))
+
 (defn- exception-summary
+  {:malli/schema [:=> [:cat :map] :seon.dev.mcp/jvm-exception-error]}
   [value]
   (let [cause-entry (last (:via value))
         nil-deref? (nil-deref? cause-entry)
-        frame (or (:at cause-entry) (first (:trace value)))
-        kind (or (get-in cause-entry [:data :seon.error/kind])
-                 (if nil-deref?
-                   :seon.dev.mcp/nil-deref
-                   :seon.dev.mcp/jvm-exception))
+        frame (or (first-seon-frame (:trace value))
+                  (:at cause-entry)
+                  (first (:trace value)))
         message (if nil-deref?
                   "The evaluated form dereferenced nil."
                   (str (or (:cause value) (:message cause-entry))))]
-    (cond->
-     (error/diagnostic
-      {kind true
-       :seon.error/kind kind
+    (refusal/diagnostic
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.dev.mcp/evaluation
+       :seon.error/operation `exception-summary
        :seon.error/message message
        :seon.error/diagnostic-layer :development-mcp
        :seon.error/diagnostic-operation :evaluate-jvm
@@ -342,21 +352,45 @@
        :seon.error/diagnostic-offending (str (:type cause-entry))
        :seon.error/diagnostic-cause message
        :seon.error/diagnostic-evidence
-       (when frame {:seon.dev.mcp/frame frame})
+       {:seon.error/frame frame}
        :seon.error/data
-       (cond-> {:seon.dev.mcp/exception-class (str (:type cause-entry))}
-         frame (assoc :seon.dev.mcp/frame frame))})
-      true (assoc :seon.dev.mcp/exception-class (str (:type cause-entry)))
-      frame (assoc :seon.dev.mcp/frame frame))))
+       {:seon.error/exception-class (:type cause-entry)
+        :seon.error/frame frame}
+       :seon.error/exception-class (:type cause-entry)
+       :seon.error/frame frame})))
 
 (defn- mcp-projection-error
-  [value]
-  {:seon.dev.mcp/value
-   {:seon.error/kind :seon.dev.mcp/projection-failed
-    :seon.error/message "The MCP value projection failed."
-    :seon.error/data
-    {:seon.error/diagnostic-offending (if (nil? value) "nil" (.getName (class value)))}}
-   :seon.dev.mcp/windowed? false})
+  {:malli/schema
+   [:function
+    [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                      :seon.schema.admission/reason "The projection fallback describes an arbitrary value that failed projection."
+                      :gen/elements [nil false 0 "" :k [] {}]}]]
+     :seon.dev.mcp/projection-failed-result]
+    [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                      :seon.schema.admission/reason "The projection fallback describes an arbitrary value that failed projection."
+                      :gen/elements [nil false 0 "" :k [] {}]}]
+               :seon.error/throwable]
+     :seon.dev.mcp/projection-failed-result]]}
+  ([value]
+   (mcp-projection-error value nil))
+  ([value failure]
+   {:seon.dev.mcp/value
+    (refusal/diagnostic
+     {:seon.error/at (java.util.Date.)
+      :seon.error/layer :seon.dev.mcp/projection
+      :seon.error/operation `mcp-projection-error
+      :seon.error/message
+      "MCP projection refused the value: expected an admissible projected value; projection raised an exception. Fix: inspect the offending value class and its projection contract."
+      :seon.error/diagnostic-layer :development-mcp
+      :seon.error/diagnostic-operation :project-value
+      :seon.error/diagnostic-member :seon.dev.mcp/value
+      :seon.error/diagnostic-expected :admissible-projected-value
+      :seon.error/diagnostic-offending (if (nil? value) "nil" (.getName (class value)))
+      :seon.error/diagnostic-cause (some-> failure ex-message)
+      :seon.error/diagnostic-evidence nil
+      :seon.dev.mcp/projection-offending-class
+      (if (nil? value) "nil" (.getName (class value)))})
+    :seon.dev.mcp/windowed? false}))
 
 (defn- mcp-project
   ([cluster-name bootstrap-effective value]
@@ -394,8 +428,11 @@
                        :seon.schema/projection)
                admitted
                  (admit/admit-value
-                  (cond-> {:seon.sci.admit/value (or exception-summary-value
-                                                     value)
+                  (cond-> {:seon.sci.admit/value
+                           (if exception-summary-value
+                             (select-keys exception-summary-value
+                                          [:seon.error/message])
+                             value)
                            :seon.sci.admit/interrupt-fn (fn [])
                            :seon.sci.admit/caps caps
                            :seon.config/on-core-error
@@ -456,7 +493,10 @@
                            :seon.dev.mcp.artifact/transaction-result result})))
                       content-digest))))]
            (cond-> {:seon.dev.mcp/value
-                    (admit/semantic-value projected-node)
+                    (cond-> (admit/semantic-value projected-node)
+                      exception-summary-value
+                      (->> (merge (dissoc exception-summary-value
+                                         :seon.error/message))))
                     :seon.dev.mcp/windowed? artifact-backed?}
              artifact-backed?
              (assoc :seon.blob/digest content-digest
@@ -466,7 +506,7 @@
              (and artifact-backed? (nil? stored-digest))
              (assoc :seon.dev.mcp/remainder
                     "The cluster has no database connection; the remainder is not retrievable.")))))
-    (catch Throwable _ (mcp-projection-error value)))))
+    (catch Throwable failure (mcp-projection-error value failure)))))
 
 (defn mcp-valf
   "Project marked MCP returns with caller-supplied exception recognition."
