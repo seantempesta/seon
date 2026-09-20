@@ -40,3 +40,16 @@ DIFFERENT family. Drift fails the checker with the offending map named. The
 three sightings become its regression cases. Selection itself may also rank
 a map by how many of its required keys are family-specific, but the checker
 is the class kill; ranking is a heuristic.
+
+
+## Publication lane boot observation after 4028a8996
+
+On shared-tree HEAD `f46f5d82a`, complete scratch publication succeeded but
+`bin/seon --root tmp/publication-dissolution-root start publication-dissolution`
+refused at configuration: turn entity `12a2b18544e6` was required to carry
+`:seon.error/at` (`[45902 :seon.error/at]`). This is a write-side selection
+sighting, not yet a proven attribution to one schema or bridge hunk.
+The write-validation and compiled-schema owners were concurrently held;
+the lane stopped without editing them. Full timing, digest, raw log paths,
+cleanup and remaining proofs are recorded in
+[the publication landing note](../../prds/steward-platform/research/publication-dissolution-2026-09-20.md#resume-after-955482c22-and-4028a8996--held-boot-boundary).

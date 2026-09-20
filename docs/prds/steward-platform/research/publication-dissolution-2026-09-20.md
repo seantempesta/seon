@@ -1590,3 +1590,95 @@ Three sequencing choices at this boundary:
 3. Hold these commits until the next integrated checkpoint. Cost: no
    immediate extra JVM work; adoption/export acceptance and measurements
    remain explicitly unproven.
+
+
+## Resume after 955482c22 and 4028a8996 — held boot boundary
+
+Read the exact commands owed section end to end, the fresh-host issue and
+updated adoption regression end to end; checked `git status --short -- src
+test resources` before proceeding. No production or test bytes changed.
+HEAD at measurement: `f46f5d82a6626fa31cb01ba1bdf0243553a672da`;
+the publication used the shared tree including the parked foreign changes.
+In particular, `src/seon/cluster.clj` has foreign staged changes preserved
+untouched. Held `src/seon/db.clj`, `src/seon/schema/*`, and error-family
+files were neither edited nor committed by this lane.
+
+Commands executed serially:
+
+```
+bin/seon --root tmp/publication-dissolution-root init
+bin/seon --root tmp/publication-dissolution-root start publication-dissolution
+bin/seon --root tmp/publication-dissolution-root down
+```
+
+Complete publication succeeded: 381 inputs, 634 findings. Source digest
+`bb958e15c6961648ffc011e49137bb0a0495d9ed56b1ba71dddb8f1623418ef8`;
+toolchain digest
+`8ef26ab25523640854c550bfc989b5bb939273b5075f9860440dbbdb7cc8ddcb`;
+published commit `6ab00236-2f3d-5d48-80d6-2f9ba8369021`.
+
+| Measured complete-publication phase | Wall-clock ms |
+| --- | ---: |
+| Publication preparation | 5,452 |
+| Analysis | 10,956 |
+| Reconciliation, branch publication start through branch head | 72,897 |
+| Of reconciliation: schema population | 1,601 |
+| Of reconciliation: population transaction | 26,944 |
+| Of reconciliation: contract row batches | 20,378 |
+| Init operation including process lifetime | 143,125 |
+| Entire lifecycle | 143,290 |
+| Adoption | unavailable: host boot refused |
+
+Reconciliation is the sum of completed-phase events beginning with
+`branch publication started: 381 inputs` and ending with
+`publication branch head`; subdivisions above are included, not additional.
+The phase extractor and historical before measurements remain above. This
+is not a controlled before/after comparison: the shared tree changed.
+One-file publication remains unmeasured on this resume.
+
+Raw evidence: `tmp/publication-dissolution/resume-init.log`,
+`resume-complete-phases.tsv`, `resume-current-src.edn`, `resume-start.log`,
+and the copied `resume-operations/` directory. The extractor is the existing
+committed `publication-phase-measurements-2026-09-20.clj` alongside this note.
+The producer PID 5595 lingered after completion: the thread sample
+`resume-init-threads.txt` shows `DestroyJavaVM` and non-daemon
+`clojure-agent-send-off-pool-2`/`-3` waiting on `SynchronousQueue`, with no
+main thread. This repeats the exit-delay evidence in
+[the prior idle-agent-thread issue](../../../seon/issues/archive/test-base-publication-waits-for-idle-agent-threads.md)
+on the fresh operator publication path; no shutdown change was made across
+this held boot boundary.
+
+Scratch boot PID 8711 reached namespaces, REPL, store, branch, recovery and
+config, then refused after 18,663 ms (18,767 ms lifecycle):
+
+```
+seon.db/transact! refused transaction data at [45902 :seon.error/at]:
+expected the required key :seon.error/at with a value satisfying should
+be an inst, got a map missing :seon.error/at :seon.error/unknown.
+Entity: #:seon.turn{:id "12a2b18544e6"}.
+```
+
+The required error member on a turn row is the observed boundary, not a
+claim that a particular foreign hunk caused it. Write-schema selection is
+in held `src/seon/db.clj:3350`; compiled entity interpretation is in held
+`src/seon/schema/*`; error declarations are held too. The exact cause
+requires those owners' evidence. MCP runtime status reported the failed
+scratch advertisement stale and health unknown. Juniper was not seeded:
+there was no running cluster on which to seed it. Same-tree adoption,
+export, and fresh-host adoption therefore remain unproven on this tree.
+No redundant suite or cold gate was launched. The explicitly requested
+fast adoption regression is still owed after the held boot boundary clears:
+
+```
+bin/test-fast --paths test/seon/cluster/publication_adoption_test.clj -- seon.cluster.publication-adoption-test
+```
+
+The focused host/export fast command and all exact cold commands in the
+preceding section remain owed unchanged, including named long adoption,
+runner integration, bare `bin/test` twice, and `bin/test --platform`.
+Resume scratch boot, seed Juniper, measure same-tree adoption/export and a
+one-file body commit before claiming LANDED. RESET NEEDED: no new reset
+request; default remained deliberately stopped and was never operated.
+`down` confirmed PID 8711 dead, removed its stale advertisement and reported
+the store flock free. Evidence was copied out and the scratch root deleted.
+**STOPPED at the explicitly held write-validation/schema boundary.**
