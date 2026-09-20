@@ -163,19 +163,13 @@
             :id [:string {:min 1, :seon.db/identity true :seon.wake/context-inert true}],
             :refused-error
             [:and
-             {:seon.error/class true,
-              :seon.error/refusal true,
-              :seon.error/refusal-shape :seon.error/refusal-value,
-              :seon.render/ai seon.error/refusal-prose,
+             {:seon.db/attributes true,
+              :seon.render/ai seon.error/render-ai,
               :seon.render/html seon.error/render-html,
-              :gen/schema
-              [:map
-               [:seon.turn/refused :seon.turn/refused]
-               [:seon.error/message :seon.error/message]],
-              :error/message
-              "must identify the run rule that refused its transition" :seon.wake/context-inert true}
-             :seon.error/refusal-value
-             [:map [:seon.turn/refused :seon.turn/refused]]],
+              :description "A transition refused its actual request under the named rule. Occurrences own this observation; no agent identity is inferred for a request that may name no existing agent."}
+             :seon.error/base
+             [:map {:seon.db/attributes true}
+              [:seon.turn/rule :seon.turn/rule]]],
             :status
             [:enum
              {:description

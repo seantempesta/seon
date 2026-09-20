@@ -179,6 +179,28 @@
             :seon.error/operation (if (symbol? operation) operation
                                      (symbol (namespace operation) (name operation)))))))
 
+(defn- schema-refusal
+  "Return the actual unavailable value and the declared shape it cannot satisfy."
+  {:malli/schema
+   [:=> [:cat :qualified-symbol :seon.schema/key :seon.schema/value :string :map]
+    :seon.schema/validation-refusal]}
+  [operation expected value message evidence]
+  (error.refusal/diagnostic
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.db/acquisition
+    :seon.error/operation operation
+    :seon.error/message message
+    :seon.schema/expected-value expected
+    :seon.schema/refused-value value
+    :seon.error/diagnostic-layer :database-read
+    :seon.error/diagnostic-operation operation
+    :seon.error/diagnostic-member expected
+    :seon.error/diagnostic-expected expected
+    :seon.error/diagnostic-offending value
+    :seon.error/diagnostic-cause ::unavailable-value
+    :seon.error/diagnostic-evidence evidence
+    :seon.error/data evidence}))
+
 (defn- dependency-error
   [operation error]
   (if (:seon.schema/expected-value (ex-data error))
@@ -284,9 +306,10 @@
       (dependency-error ::db cause))))
 
 (defn- missing-connection-error
+  {:malli/schema [:=> [:cat :string] :seon.schema/validation-refusal]}
   [needed]
-  (error-value
-   ::missing-connection-binding
+  (schema-refusal
+   'seon.db/missing-connection-error :seon.db/connection nil
    (str "This read needs " needed
         ", and no cluster connection is bound on this thread. Custody is "
         "elided only inside an agent evaluation; elsewhere — a raw or "
@@ -406,8 +429,9 @@
         {:db-name (:branch configuration)
          :t (dbi/-max-tx database)
          :datahike/commit-id commit-id}
-        (error-value
-         ::uncommitted-database-value
+        (schema-refusal
+         'seon.db/database-value-identity :seon.db/database-value-identity
+         {:db-name (:branch configuration) :t (dbi/-max-tx database)}
          (str "This database value has no commit id, so it has no committed "
               "identity. Read its basis transaction with seon.db/basis-t.")
          {:db-name (:branch configuration)
@@ -434,6 +458,8 @@
   [connection]
   (:branch (:config @connection)))
 
+(declare write-observation)
+
 (defn- foreign-connection-error
   "Refuse a write naming a branch outside the writing custody, naming both.
 
@@ -441,26 +467,34 @@
   identities are read from the two connections this call actually holds,
   immediately before `transact-call` hands one to Datahike, so nothing can
   change between the decision and the write it governs."
-  [connection]
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.db/connection :seon.store/transaction]
+    [:or :nil :seon.db.write/validation-refusal]]}
+  [database connection transaction]
   (when (some? *conn*)
     (let [ambient-connection-id (connection-id *conn*)
           explicit-connection-id (connection-id connection)]
       (when-not (= ambient-connection-id explicit-connection-id)
         (let [ambient-branch (connection-branch *conn*)
               explicit-branch (connection-branch connection)]
-          (error-value
-           ::foreign-connection
-           (str "This write names branch " (pr-str explicit-branch)
+          (write-observation
+           database transaction
+           {:seon.error/at (java.util.Date.)
+            :seon.error/layer :seon.db/database-write
+            :seon.error/operation 'seon.db/transact!
+            :seon.error/message
+            (str "This write names branch " (pr-str explicit-branch)
                 ", which is not the writing cluster's branch "
                 (pr-str ambient-branch)
                 ". A cluster writes only its own branch: send the work to "
                 "the cluster that owns "
                 (pr-str explicit-branch)
                 " instead of transacting into its connection.")
+            :seon.error/data
            {::ambient-connection-id ambient-connection-id
             ::explicit-connection-id explicit-connection-id
             ::ambient-branch ambient-branch
-            ::explicit-branch explicit-branch}))))))
+            ::explicit-branch explicit-branch}}))))))
 
 (defn- append-read-evidence!
   [evidence]
@@ -1778,9 +1812,10 @@
 ;;; and the hook hands it to the supplier.
 
 (defn- unsupplied-custody-error
+  {:malli/schema [:=> [:cat :string] :seon.schema/validation-refusal]}
   [needed]
-  (error-value
-   ::unsupplied-custody
+  (schema-refusal
+   'seon.db/unsupplied-custody-error :seon.db/connection nil
    (str "This call's environment carries no cluster connection, so " needed
         " cannot be supplied. Pass the database value or connection "
         "explicitly, as in (db/pull db selector eid).")
@@ -2646,10 +2681,22 @@
     (not (dbi/-temporal-index? database))
     (do
       (append-database-evidence! database :all)
-      (error-value
-       ::non-temporal-database
-       "The database does not retain temporal indices."
-       {::operation ::temporal-read}))
+      (error.refusal/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.db/database-read
+        :seon.error/operation 'seon.db/database-view
+        :seon.error/message "The database does not retain temporal indices."
+        :seon.config/error-key :seon.config.db/keep-history?
+        :seon.error/expected-shape (id/digest 64 [:= true])
+        :seon.error/diagnostic-layer :database-read
+        :seon.error/diagnostic-operation 'seon.db/database-view
+        :seon.error/diagnostic-member :seon.config.db/keep-history?
+        :seon.error/diagnostic-expected [:= true]
+        :seon.error/diagnostic-offending false
+        :seon.error/diagnostic-cause ::non-temporal-database
+        :seon.error/diagnostic-evidence {:seon.config.db/keep-history? false}
+        :seon.error/data {::operation ::temporal-read
+                          :seon.config.db/keep-history? false}}))
 
     :else
     (try
@@ -3269,13 +3316,20 @@
         (or (ex-message failure) "Transaction rejected.")))))
 
 (defn- rejected-value
-  [connection throwable data]
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.store/transaction :seon.error/throwable :map]
+    :seon.db.write/validation-refusal]}
+  [database transaction throwable data]
   (let [conflict
         (try
-          (unique-conflict (d/db connection) data)
+          (unique-conflict database data)
           (catch Throwable _
             nil))]
-    {:seon.error/kind ::rejected
+    (write-observation
+     database transaction
+     {:seon.error/at (java.util.Date.)
+      :seon.error/layer :seon.db/database-write
+      :seon.error/operation 'seon.db/transact!
      :seon.error/message (rejection-message conflict throwable)
      :seon.error/data
      (cond-> (merge data conflict)
@@ -3285,12 +3339,11 @@
               [{:seon.error/argument "transaction data"
                 :seon.error/path [(::conflict-attribute conflict)]
                 :seon.error/expected
-                (get (dbi/-schema (d/db connection)) (::conflict-attribute conflict))
+                (get (dbi/-schema database) (::conflict-attribute conflict))
                 :seon.error/expected-description "a value satisfying the attribute's uniqueness constraint"
                 :seon.error/offending conflict
                 :seon.error/actual-description "a value already assigned to an entity"
-                :seon.error/fix "Update the existing owner, or choose an unused value."}]))
-     ::transaction-refused true}))
+                :seon.error/fix "Update the existing owner, or choose an unused value."}]))})))
 
 (defn- stamp-receipt
   [transaction]
@@ -4209,17 +4262,16 @@
 
 (defn- transact-call
   {:malli/schema
-   [:=> [:cat [:or :seon.db/connection :seon.error/value]
+   [:=> [:cat :seon.db/database-value [:or :seon.db/connection :seon.error/value]
          :seon.store/transaction]
     [:or :seon.db/transaction-report :seon.db/error-result]]}
-  [connection transaction]
+  [database connection transaction]
   (if (and (map? connection) (inst? (:seon.error/at connection))
              (qualified-keyword? (:seon.error/layer connection))
              (qualified-symbol? (:seon.error/operation connection)))
     connection
     (try
-      (let [database (d/db connection)
-            carried-state (connection-projection-state connection)
+      (let [carried-state (connection-projection-state connection)
             projection
             (or (some-> carried-state deref :seon.schema/projection)
                 (carried-projection database)
@@ -4338,7 +4390,7 @@
 
             ;; A Datahike abort keeps the dependency's classification.
             (some? (:error data))
-            (rejected-value connection throwable data)
+            (rejected-value database transaction throwable data)
 
             :else
             (let [failure
@@ -4455,14 +4507,14 @@
 (defn render-rejection-ai
   "Render a rejected database transaction as readable steering text."
   {:malli/schema
-   [:=> [:cat :seon.db/transaction-refused-error] [:string {:min 1}]]}
+   [:=> [:cat :seon.db.write/validation-refusal] [:string {:min 1}]]}
   [unit]
   (@error-render-ai unit))
 
 (defn render-rejection-html
   "Render a rejected database transaction as readable Hiccup."
   {:malli/schema
-   [:=> [:cat :seon.db/transaction-refused-error] :seon.render/hiccup]}
+   [:=> [:cat :seon.db.write/validation-refusal] :seon.render/hiccup]}
   [unit]
   (@error-render-html unit))
 
@@ -4545,10 +4597,15 @@
              (ex-info "The explicit transaction connection is not live."
                       {::connection connection}))
 
+            (and (map? database) (inst? (:seon.error/at database))
+                 (qualified-keyword? (:seon.error/layer database))
+                 (qualified-symbol? (:seon.error/operation database))) database
+
             :else
-            (or (foreign-connection-error connection)
-                (transact-call connection transaction))))]
+            (or (foreign-connection-error database connection transaction)
+                (transact-call database connection transaction))))]
      (if (and (database-value? database) (map? result) (inst? (:seon.error/at result))
+              (not (:seon.db.write.attempt/request-id result))
               (qualified-keyword? (:seon.error/layer result))
               (qualified-symbol? (:seon.error/operation result)))
        (write-observation database transaction result)

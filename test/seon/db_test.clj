@@ -333,7 +333,9 @@
 (deftest transaction-wrappers-cannot-hide-a-classified-refusal
   (test-support/with-database
    (fn [connection]
-     (let [refusal {:seon.error/kind :seon.turn/refused
+     (let [refusal {:seon.error/at #inst "2026-09-20T00:00:00Z"
+                    :seon.error/layer :seon.turn/transition
+                    :seon.error/operation 'seon.turn/open-call
                     :seon.turn/rule
                     :seon.turn/no-such-agent}
            wrapped (ex-info "classified transition refusal"
@@ -345,9 +347,14 @@
                        (let [result (datahike.tools/throwable-promise)]
                          (result wrapped)
                          result))]
-         (is (= (assoc refusal :seon.error/message "classified transition refusal")
-                (db/transact! connection []))
-             "the classified exception supplies its message; a deeper wrapper cannot replace it")))
+         (let [result (db/transact! connection [])]
+           (is (= (assoc refusal :seon.error/message "classified transition refusal")
+                  (select-keys result (conj (vec (keys refusal)) :seon.error/message)))
+               "the classified exception supplies its message; a deeper wrapper cannot replace it")
+           (is (schema/valid-candidate-value? (schema/handed-projection)
+                                             :seon.turn/refused-error result))
+           (is (schema/valid-candidate-value? (schema/handed-projection)
+                                             :seon.db.write/validation-refusal result)))))
      (test-support/transacted! connection
                                [{:seon.agent/id "busy-agent"}])
      (is (map? (db/transact!
@@ -359,7 +366,8 @@
             connection
             (turn/open-tx
              {:seon.turn/id "contending-run" :seon.turn/agent [:seon.agent/id "missing-agent"] :seon.turn/opened-tx "datomic.tx"}))]
-       (is (= :seon.turn/refused (:seon.error/kind result)))
+       (is (schema/valid-candidate-value? (schema/handed-projection)
+                                         :seon.turn/refused-error result))
        (is (= :seon.turn/no-such-agent
               (:seon.turn/rule result))
            "a real invalid opening preserves its writer rule")
@@ -593,8 +601,10 @@
 (deftest unbound-current-database-is-a-flat-error
   (let [result (binding [db/*conn* nil]
                  (db/q exam-query))]
-    (is (= :seon.db/missing-connection-binding
-           (:seon.error/kind result)))
+    (is (schema/valid-candidate-value? (schema/handed-projection)
+                                      :seon.schema/validation-refusal result))
+    (is (= :seon.db/connection (:seon.schema/expected-value result)))
+    (is (nil? (:seon.schema/refused-value result)))
     (is (str/includes? (:seon.error/message result)
                        "(seon.operator/connection \"default\")"))
     (is (= 'seon.db/*conn*
@@ -902,8 +912,10 @@
            (testing "database-value-identity answers, never throws"
              (let [answer (db/database-value-identity database)]
                (is (or ((schema/projection-validator (schema/handed-projection) :seon.db/database-value-identity) answer)
-                       (= :seon.db/uncommitted-database-value
-                          (:seon.error/kind answer)))
+                       (and (schema/valid-candidate-value? (schema/handed-projection)
+                                                           :seon.schema/validation-refusal answer)
+                            (= :seon.db/database-value-identity
+                               (:seon.schema/expected-value answer))))
                    "a committed identity or a flat error value")))
            (testing "read-evidence produces a well-formed dependency revision"
              (let [captured (atom [])]
@@ -1113,8 +1125,9 @@
          (is (= before (db/basis-t @connection)))
          (is (= contender (:db/id (db/pull @connection [:db/id]
                                           [:seon.cluster.eval/id contender-id]))))
-         (is (= :seon.db/rejected (:seon.error/kind rejected)))
-         (is (true? (:seon.db/transaction-refused rejected)))
+         (is (schema/valid-candidate-value? (schema/handed-projection)
+                                           :seon.db.write/validation-refusal rejected))
+         (is (string? (:seon.db.write.attempt/request-id rejected)))
          (is (= {:error :transact/unique
                  :attribute :seon.cluster.eval/id}
                 (select-keys conflict [:error :attribute])))
@@ -1137,7 +1150,7 @@
                             owner-id))
          (is (= 'seon.db/render-rejection-ai
                 (->> (schema/matching-shapes rejected)
-                     (some #(when (= :seon.db/transaction-refused-error
+                     (some #(when (= :seon.db.write/validation-refusal
                                      (:seon.schema/key %))
                               (:seon.render/ai %)))))))))))
 
@@ -1156,7 +1169,8 @@
               "not-the-current-id"
               "db-cas-replacement"]])
            data (:seon.error/data rejected)]
-       (is (= :seon.db/rejected (:seon.error/kind rejected)))
+       (is (schema/valid-candidate-value? (schema/handed-projection)
+                                         :seon.db.write/validation-refusal rejected))
        (is (= {:error :transact/cas
                :expected "not-the-current-id"
                :new "db-cas-replacement"}
@@ -1503,15 +1517,17 @@
                      (db/as-of database time-point)
                      (db/since database time-point)]]
         (doseq [result results]
-          (is (= :seon.db/non-temporal-database
-                 (:seon.error/kind result)))
+          (is (schema/valid-candidate-value? (schema/handed-projection)
+                                            :seon.config/error result))
+          (is (= :seon.config.db/keep-history? (:seon.config/error-key result)))
+          (is (false? (get-in result [:seon.error/data :seon.config.db/keep-history?])))
           (is (= :seon.db/temporal-read
                  (get-in result [:seon.error/data :seon.db/operation])))
           (is (not (contains? (:seon.error/data result)
                               :seon.db/dependency-data))))
         (binding [db/*conn* connection]
-          (is (= :seon.db/non-temporal-database
-                 (:seon.error/kind (db/history))))))
+          (is (schema/valid-candidate-value? (schema/handed-projection)
+                                            :seon.config/error (db/history)))))
       (finally
         (d/release connection)
         (d/delete-database configuration)))))
@@ -1769,9 +1785,11 @@
                 "the writing cluster's own connection still commits")
             (is (nil? (:seon.error/kind elided))
                 "the elided arity still commits through the writing custody")
-            (is (= :seon.db/foreign-connection (:seon.error/kind refused)))
-            (is (true? (:seon.db/foreign-connection refused))
-                "the refusal carries its class marker")
+            (is (schema/valid-candidate-value? (schema/handed-projection)
+                                              :seon.db.write/validation-refusal refused))
+            (is (= [{:seon.agent/id "foreign"}]
+                   (get-in refused [:seon.error/data :seon.db.write.attempt/transaction]))
+                "the refusal carries the actual submitted write")
             (is (= (branch writing-connection)
                    (:seon.db/ambient-branch data))
                 "the refusal names the writing cluster's branch")

@@ -4,6 +4,8 @@
  :seon.db.write/validation-refusal
  [:and
   {:seon.db/attributes false
+   :seon.render/ai seon.db/render-rejection-ai
+   :seon.render/html seon.db/render-rejection-html
    :description "Raw refused request and its observed basis. Recorder admission projects the transaction data into the stored write attempt; this transient value is not a stored entity."}
   :seon.error/base
   [:map

@@ -2538,3 +2538,63 @@ three local callers are removed together; the existing error output
 contracts remain the authority. This correction and the typed-unknown
 assertion await the next changed-input run. The render-owner skill and UI
 architecture were read end to end before this edit.
+
+### Complete database and interpreter refusals — next candidate
+
+`d6867a306` landed database propagation; its required namespace load returned
+`:loads` (`tmp/error-family-db-propagation-load.log`). The next candidate
+uses the existing raw write facet for native uniqueness/CAS aborts and a
+foreign-connection refusal. Both carry the actual submitted transaction
+and the database value observed before submission through `write-observation`.
+An already complete raw refusal is not wrapped a second time. Native
+exception data, unique-conflict evidence, and atomicity assertions remain.
+The old marker-only `:seon.db/transaction-refused-error` descriptor is
+removed; its renderer declarations now belong to the raw write facet.
+
+Unavailable custody and uncommitted database identity use the existing raw
+schema refusal: actual unavailable/partial value and its expected schema,
+without inventing a committed basis. Non-temporal reads report the existing
+config facet naming `:seon.config.db/keep-history?` and its actual false value.
+The real turn producer reached by the database wrapper regression now
+throws the complete transition refusal with its actual operation and rule.
+That existing facet composes the base and `:seon.turn/rule`; it does not
+invent an agent identity for a request naming no existing agent. The error
+pass-through contracts explicitly name this facet and the reader-count facet.
+
+Two SCI fixture expectations are stale under the current declarations.
+The override fixture previously retracted file provenance from unrelated
+core functions. It now retracts only the target after admitting it as an
+agent function, and verifies that absence plus the existing admission and
+historical behavior. The injected-binding fixture previously demanded
+first-party rows for every copied `clojure.test` public Var. The binding
+resource explicitly declares that host namespace integration; the test now
+derives those dependency bindings from the declaration, verifies their SCI
+resolution without manufactured program rows, and separately verifies the
+first-party bindings' rows. Neither observation establishes a foreign
+`seon.fn` defect.
+
+The public-walk regression retains its allocation bound and plan-reuse
+assertion. A scoped observation of the real plan owner records only selector
+counts, plan identities and projection fingerprints, so its next failure
+can distinguish different inputs from failed reuse without printing a
+complete projection. These later fixture edits are not in the already
+frozen six-suite snapshot `tmp/error-family-producers.log`.
+
+Read-only dependency boundary: `reference-code/datahike/src/datahike/writer.cljc`
+`expected-refusal-face` still selects its short log through
+`:seon.error/kind` or native `:error`. A complete kind-free turn refusal has
+neither, so it falls through to the writer's full exception log. No kind
+was restored and no dependency fork was edited. This logging observation
+is distinct from the Seon wrapper's preserved refusal value.
+
+The six-suite candidate completed **276 tests / 6,183 assertions / 3 failures /
+1 error** (`tmp/error-family-producers.log`, request `66810a37bfb6`). Error,
+instrumentation, schema, database and cluster suites had no failure/error
+events. SCI's remaining events were the pre-correction binding-row
+expectation (1F), pre-correction core-file retraction fixture (1E), and
+public-walk reuse/allocation (2F; observed 4,362,304,936 bytes against 1 GiB).
+All measured producer, custody, renderer, reader and guard corrections pass.
+Completion again refused at `seon.blob/with-publication!`: zero declared
+facets versus raw write and test-execution facets. Its nested projection
+measured 16,451 against 16,384 bytes. No cap or assertion was weakened;
+this tally is execution evidence, not a durable green result.

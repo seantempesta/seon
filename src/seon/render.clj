@@ -1316,15 +1316,6 @@
                :seon.error/data {:seon.render/output rendered}}]
           (merge observation (error/diagnostic observation)))))))
 
-(defn- present-output
-  "A producer's output, as produced. The value renderer's AI projection is
-  the one place presentation elides (owner, 2026-09-08); this seam passes
-  the data through."
-  {:malli/schema [:=> [:cat :map :seon.render/output :seon.render/rendered] [:or :seon.render/rendered :seon.render/error-result]]}
-
-  [_request _output raw]
-  raw)
-
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."
   {:malli/schema [:=> [:cat :seon.render/call-request]
@@ -1340,8 +1331,7 @@
                          (producer request :seon.render/ai :seon.render/ai))]
         (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
           selected
-          (present-output request :seon.render/ai
-                          (raw-output request :seon.render/ai selected)))))))
+          (raw-output request :seon.render/ai selected))))))
 
 (defn render-html
   "Render one value as Hiccup through the unique selected live SCI Var."
@@ -1359,8 +1349,7 @@
                                    :seon.render/html))]
         (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
           selected
-          (present-output request :seon.render/html
-                          (raw-output request :seon.render/html selected)))))))
+          (raw-output request :seon.render/html selected))))))
 
 (defn- entity-lookup
   [database entity]
@@ -1603,7 +1592,7 @@
                                  raw)
                                (if reusable?
                                (:seon.render.call/output previous)
-                               (present-output request output raw)))
+                               raw))
                     entry (assoc
                            (merge
                             (when reusable?

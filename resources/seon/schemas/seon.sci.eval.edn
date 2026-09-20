@@ -233,15 +233,12 @@
                   :seon.boot/cluster-name]],
                 :schema-refused :seon.schema/key,
                 :reader-event-count-error
-                [:map
-                 {:seon.error/class true,
-                  :seon.render/ai seon.error/render-ai,
-                  :seon.render/html seon.error/render-html,
-                  :error/message
-                  "must identify the impossible reader-event count"}
+                [:and {:seon.db/attributes true
+                       :description "An evaluation requires exactly one reader event. This observation records the actual count; it does not claim a parsed form or a projected source."}
+                 :seon.error/base
+                 [:map {:seon.db/attributes true}
                  [:seon.sci.eval/reader-event-count
-                  :seon.sci.eval/reader-event-count]
-                 [:seon.error/message :seon.error/message]],
+                  :seon.sci.eval/reader-event-count]]],
                 :documentation-unavailable :symbol,
                 :bindings
                 [:map-of :qualified-symbol :seon.sci.eval/binding],

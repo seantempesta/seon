@@ -74,6 +74,20 @@ pair.
 
 surface: database (the fork's transaction/writer logging seam)
 
+## Error-facet retirement observation — 2026-09-20
+
+The writer's short face still depends on retired `:seon.error/kind` or
+Datahike's native `:error` at `writer.cljc:105`. A transaction function that
+throws a complete Seon base plus its specific facet has neither. The
+`:db.fn/call` seam directly applies the transaction function
+(`db/transaction.cljc:1153`), so no native discriminator is added before the
+writer selects its log. Such a refusal falls through to the full throwable
+and invocation log. This is source evidence, not a captured log assertion.
+The error-family lane converted `seon.turn/refuse!` to its declared rule
+facet and preserved its value through `seon.db`; it did not restore a kind
+for the logger or edit the dependency. The fork's eventual logging
+regression must also cover a kind-free transaction-function refusal.
+
 Fix sketch: the unique-constraint and nil-value sites are EXPECTED outcomes
 of a caller's transaction, not fork faults — replace `log/raise` with a
 plain `throw` of the same `ex-info` at those sites and let the writer's

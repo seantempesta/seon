@@ -65,10 +65,10 @@
       :seon.render/error :seon.render.data/error :seon.render.value/error
       :seon.render.walk/error :seon.render.web/error :seon.schedule/error
       :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
-      :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error
+      :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
       :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
       :seon.search/error :seon.test/error :seon.test.accretion/error
-      :seon.test.run/error :seon.test.runner/error :seon.turn/error
+      :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
       :seon.turn.loop/error]]
     [:=> [:catn [::entity :map]
                  [::database :seon.db/db]]
@@ -91,10 +91,10 @@
       :seon.render/error :seon.render.data/error :seon.render.value/error
       :seon.render.walk/error :seon.render.web/error :seon.schedule/error
       :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
-      :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error
+      :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
       :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
       :seon.search/error :seon.test/error :seon.test.accretion/error
-      :seon.test.run/error :seon.test.runner/error :seon.turn/error
+      :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
       :seon.turn.loop/error]]]}
   ([entity]
    (into {}

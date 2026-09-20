@@ -292,7 +292,7 @@
 ;;; Shared contract, every `*-call`:
 ;;; - reads the current run/agent state from `db` (datahike.api/pull or
 ;;;   entity over the db value it is handed);
-;;; - THROWS ex-info {:seon.error/kind :seon.turn/refused, ...}
+;;; - Throws ex-info carrying the refused transition and its violated rule.
 ;;;   naming the violated rule when the transition is ineligible — the
 ;;;   writer aborts the whole transaction atomically;
 ;;; - otherwise returns plain tx-data (the serial writer makes the read
@@ -303,12 +303,17 @@
 
 (defn- refuse!
   "Abort the whole transaction, naming the rule the request violated."
+  {:malli/schema [:=> [:cat :qualified-symbol :qualified-keyword :map]
+                  :seon.turn/refused-error]}
   [transition rule request]
-  (throw (ex-info (str "run transition refused: " (name rule))
-                  {:seon.error/kind ::refused
-                   ::transition transition
-                   ::rule rule
-                   ::request request :seon.turn/refused rule})))
+  (let [message (str "run transition refused: " (name rule))]
+    (throw (ex-info message
+                    {:seon.error/at (java.util.Date.)
+                     :seon.error/layer ::transition
+                     :seon.error/operation transition
+                     :seon.error/message message
+                     ::rule rule
+                     :seon.error/data {::request request}}))))
 
 (defn- current-run
   "The run's current facts on `db`, or nil when no such run exists.

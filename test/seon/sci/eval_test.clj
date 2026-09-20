@@ -37,6 +37,7 @@
             [seon.render.web :as render.web]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
@@ -45,7 +46,7 @@
 (def ^:private caps
   (config/result-caps (config/defaults)))
 
-(deftest overrides-follow-current-admission-and-survive-lost-file-coordinates
+(deftest overrides-follow-current-admission-and-survive-lost-own-file-coordinates
   (test-support/with-database
    (fn [connection]
      (let [before (db/db connection)
@@ -53,6 +54,7 @@
            test-definition (test-support/program-fn-row
                             'seon.sci.eval-test/compiled-runtime-victim)
            target-name (:seon.fn/sym target)
+           target-id (:db/id (db/pull before [:db/id] [:seon.fn/sym target-name]))
            indexed-members
            (db/q '[:find ?function ?file
                    :in $ ?name
@@ -62,14 +64,18 @@
                  before 'seon.id)]
        (is (seq indexed-members) "the canonical population supplies indexed src declarations")
        (is (not (some #{target-name} (program/overrides before))))
+       ;; Core declarations require file provenance; only the admitted agent
+       ;; override may lose its own coordinates in this transaction.
        (test-support/transacted!
         connection
         (into [(assoc target :seon.schema.admission/source :agent)
                (assoc test-definition :seon.schema.admission/source :agent)]
               (map (fn [[function file]] [:db/retract function :seon.fn/file file]))
-              indexed-members))
+              (filter (fn [[function _]] (= target-id function)) indexed-members)))
        (let [overridden (db/db connection)
              projection (schema/projection-from-database overridden)]
+         (is (nil? (:seon.fn/file (db/pull overridden [:seon.fn/file]
+                                           [:seon.fn/sym target-name]))))
          (is (= :agent (get-in projection
                               [:seon.schema.projection/function-admissions
                                'seon.id/symbol-in :seon.schema.admission/source])))
@@ -78,7 +84,7 @@
                               'seon.id/valid? :seon.schema.admission/source]))
              "an unrelated core declaration cannot inherit another identity's agent provenance")
          (is (some #{target-name} (program/overrides overridden))
-             "the last lost file coordinate does not hide an accepted override")
+             "losing the override's own file coordinate does not hide its current admission")
          (is (not (some #{(:seon.fn/sym test-definition)}
                         (program/overrides overridden)))
              "an agent-admitted definition under the test root is not a src override")
@@ -728,7 +734,7 @@
             "this database genuinely carries no config singleton, which is
              the case that produced the nil")
         (is (= :record mode))
-        (is (= :seon.config/missing-result-cap (:seon.error/kind caps))
+        (is (schema/valid-candidate-value? (schema/handed-projection) :seon.config/error caps)
             "the caps are the refusal NAMING the key, not an absence")
         (is (= :seon.config.eval.result/max-bytes
                (:seon.config/key (:seon.error/data caps)))
@@ -742,8 +748,11 @@
                             :seon.fn/spec "[:=> [:cat :int] :int]"}
                            (schema/projection-from-database database)
                            database))]
-            (is (= :seon.instrument/missing-recorder (:seon.error/kind refusal)))
-            (is (= :seon.flow/commit-fault! (:seon.error/expected-key refusal)))))))))
+            (is (schema/valid-candidate-value? (schema/handed-projection)
+                                             :seon.instrument/registration-error refusal))
+            (is (= :seon.flow/commit-fault!
+                   (get-in refusal [:seon.instrument/registration-observation
+                                    :seon.error.evidence/value])))))))))
 
 (deftest require-context-rows-carry-namespace-symbols
   (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
@@ -754,14 +763,25 @@
                    [:seon.program/row :seon.ns/requires]))
         "namespace dependencies observe their symbol values")))
 
-(deftest base-context-injections-have-program-rows
+(deftest base-context-bindings-resolve-without-dependency-stubs
   (let [injected (set (program/base-context-injected-symbols))
+        public-namespaces
+        (into #{}
+              (keep #(some-> % schema.form/attr-form-properties
+                             :seon.sci.binding/public-namespace))
+              (vals (:seon.schema.projection/forms (schema/handed-projection))))
+        dependency-bindings
+        (into #{} (filter #(public-namespaces (symbol (namespace %)))) injected)
+        program-bindings (set/difference injected dependency-bindings)
         rows (#'seon.fn/desired-rows
               {:seon.fn/roots ["src" "test"]} nil)
         published (set (keep :seon.fn/sym rows))
         ctx (eval/build-base-ctx (seon.schema/handed-projection))]
-    (is (empty? (set/difference injected published))
-        "the context declaration is the population's binding authority")
+    (is (seq program-bindings))
+    (is (empty? (set/difference program-bindings published))
+        "first-party bindings resolve to program declarations")
+    (is (empty? (set/intersection dependency-bindings published))
+        "copied dependency bindings do not manufacture first-party program rows")
     (is (every? #(sci/resolve ctx %) (program/base-context-injected-symbols))
         "every declared injection resolves in the constructed context")))
 
@@ -1791,10 +1811,11 @@
                              "[{:seon.sci.eval-test/undeclared true}])"))
                 unbound-after (binding [db/*conn* connection-b]
                                 (evaluate uncustodied-ctx cluster-names-source))]
-            (is
-              (=
-                :seon.db/missing-connection-binding
-                (get-in unbound [:seon.sci.admit/value :seon.error/kind])))
+            (is (schema/valid-candidate-value? (schema/handed-projection)
+                                              :seon.schema/validation-refusal
+                                              (:seon.sci.admit/value unbound)))
+            (is (= :seon.db/connection
+                   (get-in unbound [:seon.sci.admit/value :seon.schema/expected-value])))
             (is
               (= ["ambient-a"] (:seon.sci.admit/value read-a))
               "the ctx overrides a foreign binding already on the thread")
@@ -1817,9 +1838,9 @@
                   rejected
                   [:seon.sci.admit/value :seon.error/data :seon.error/diagnostic-cause])))
             (is
-              (=
-                :seon.db/missing-connection-binding
-                (get-in unbound-after [:seon.sci.admit/value :seon.error/kind]))
+              (schema/valid-candidate-value? (schema/handed-projection)
+                                             :seon.schema/validation-refusal
+                                             (:seon.sci.admit/value unbound-after))
               "an uncustodied ctx never inherits the caller's binding")))))))
 
 (deftest
@@ -1846,10 +1867,23 @@
                      :seon.render/output :seon.render/ai}
             root-selector render.walk/root-selector
             root-selectors (atom [])
+            root-pull-plan render.walk/root-pull-plan
+            plan-acquisitions (atom [])
             compile-plan pull-api/compile-pull-plan
             compilation-count (atom 0)]
         (with-redefs
-          [render.walk/root-selector
+          [render.walk/root-pull-plan
+           (fn [request]
+             (let [acquired (root-pull-plan request)]
+               (swap! plan-acquisitions conj
+                      {:seon.sci.eval-test/plan-id
+                       (System/identityHashCode (:datahike.pull/plan acquired))
+                       :seon.sci.eval-test/selector-id
+                       (System/identityHashCode (:seon.render.walk/selector acquired))
+                       :seon.sci.eval-test/fingerprint
+                       (:seon.schema.projection/fingerprint acquired)})
+               acquired))
+           render.walk/root-selector
            (fn [database distance supplied-caps]
              (let [selector (root-selector database distance supplied-caps)]
                (swap! root-selectors conj selector)
@@ -1889,7 +1923,11 @@
             (is (= 2 (count web)))
             (is
               (and (seq @root-selectors) (<= @compilation-count 1))
-              "direct, web, and through-SCI reuse a plan, including an already warm plan")
+              (str "direct, web, and through-SCI reuse a plan, including an already warm plan: "
+                   {:seon.sci.eval-test/selector-count (count @root-selectors)
+                    :seon.sci.eval-test/distinct-selectors (count (distinct @root-selectors))
+                    :seon.sci.eval-test/compilations @compilation-count
+                    :seon.sci.eval-test/acquisitions @plan-acquisitions}))
             (is
               (every? #(and (int? %) (< % (* 1024 1024 1024))) allocations)
               (str "through-SCI allocations must stay below 1 GiB: " (pr-str allocations)))
@@ -2201,9 +2239,11 @@
         (is (not= :seon.sci.eval-test/hung deadline-result))
         (is
           (and
-            (= :seon.render/unknown (:seon.error/kind deadline-result))
+            (schema/valid-candidate-value? (schema/handed-projection)
+                                           :seon.render/unknown deadline-result)
             (= :time-limit (:seon.render.unknown/reason deadline-result))
-            (= :seon.sci.kernel/time-limit (:seon.render.unknown/refusal deadline-result)))
+            (= 'seon.sci.kernel/failure-value
+               (:seon.render.unknown/refused-operation deadline-result)))
           "nested render work keeps the outer 50ms time limit")))))
 
 (deftest a-foreign-armed-context-is-refused-as-a-value
@@ -2212,9 +2252,12 @@
         {stop! :seon.sci.kernel/stop!} (kernel/arm armed-ctx 30000)]
     (try
       (let [evaluation (run-in other-ctx "(+ 1 2)" 1000)]
-        (is (= :seon.sci.kernel/already-armed
-               (:seon.error/kind (:seon.sci.admit/value evaluation)))
+        (is (schema/valid-candidate-value? (schema/handed-projection)
+                                           :seon.sci.kernel/error
+                                           (:seon.sci.admit/value evaluation))
             "a refusal at an agent-facing operation is a value, never a throw")
+        (is (= 'seon.sci.kernel/acquire-arm
+               (:seon.error/operation (:seon.sci.admit/value evaluation))))
         (is (some? (:seon.cluster.eval/error evaluation))
             "presence is the state, so a preserved refusal still carries the
              message the loop reads — it must never store a nil there"))
@@ -2224,8 +2267,13 @@
       ;; one arm on one thread cannot both be honoured, so the fork is refused
       ;; loudly rather than silently borrowing the parent's deadline.
       (let [forked (run-in (sci/fork armed-ctx) "(+ 1 2)" 1000)]
-        (is (= :seon.sci.kernel/already-armed
-               (:seon.error/kind (:seon.sci.admit/value forked)))))
+        (is (schema/valid-candidate-value? (schema/handed-projection)
+                                           :seon.sci.kernel/error
+                                           (:seon.sci.admit/value forked)))
+        (is (= :seon.sci.kernel/arm-id
+               (get-in forked [:seon.sci.admit/value
+                               :seon.sci.kernel/guard-observation
+                               :seon.error.evidence/attribute]))))
       (finally (stop!)))))
 
 (deftest both-entrances-classify-one-failure-identically
@@ -2320,7 +2368,7 @@
     (is (= 'unresolved-diagnostic-member
            (:seon.error/diagnostic-offending (:seon.error/data failure))))))
 
-(deftest a-refusal-keeps-its-own-kind-at-both-entrances
+(deftest a-refusal-keeps-its-declared-facet-at-both-entrances
   ;; A refusal our own guarded machinery raised already says what went
   ;; wrong. One classifier means neither entrance can flatten it into a
   ;; generic failure while the other preserves it.
@@ -2336,11 +2384,16 @@
                       :seon.sci.eval/time-limit-ms 1000
                       :seon.sci.admit/caps caps
                       :seon.config/on-core-error :record}))]
-       (is (= :seon.sci.eval/reader-event-count (:seon.error/kind evaluated))
+       (is (schema/valid-candidate-value? (schema/handed-projection)
+                                         :seon.sci.eval/reader-event-count-error evaluated)
            "the reader's refusal is not flattened into evaluation-failed")
-       (is (= :seon.sci.kernel/missing-function-installer
-              (:seon.error/kind invoked))
+       (is (= 2 (:seon.sci.eval/reader-event-count evaluated)))
+       (is (schema/valid-candidate-value? (schema/handed-projection)
+                                         :seon.sci.kernel/error invoked)
            "nor is the kernel's own refusal flattened into invocation-failed")
+       (is (= 'user/never-defined
+              (get-in invoked [:seon.sci.kernel/guard-observation
+                               :seon.error.evidence/value])))
        (is (some? (:seon.sci.admit/record (:seon.error/data invoked)))
            "a preserved refusal still gains the boundary's own evidence")))))
 
@@ -2376,17 +2429,16 @@
 (deftest a-storable-declarations-committed-row-is-recognised-by-its-value
   ;; THE WRITER CANONICALIZES BEFORE IT COMMITS. `seon.turn/row-tx` runs every
   ;; reader row through `seon.program/declaration-row`, which rebuilds a schema
-  ;; row and RE-PRINTS its `:seon.schema/form`; a namespaced property map —
-  ;; carried by exactly the STORABLE declarations — prints there as
-  ;; `#:seon.db{:identity true}` and in the reader's row as
-  ;; `{:seon.db/identity true}`. Comparing those BYTES answered "not ours" for
+  ;; row and reprints its `:seon.schema/form`. Supply a namespaced property
+  ;; map spelling that differs from the writer's canonical spelling.
+  ;; Comparing those bytes answered "not ours" for
   ;; the cluster's own committed declaration, so `install-evaluated-rows!`
   ;; skipped it and the live projection lost every storable declaration while
   ;; its facts were intact (2026-09-17). A declaration is a VALUE.
   (test-support/with-database
     (fn [connection]
       (let [reader-row {:seon.schema/key :example.storable/order
-                        :seon.schema/form "[:string {:seon.db/identity true}]"
+                        :seon.schema/form "[:string #:seon.db{:identity true}]"
                         :seon.schema.admission/source :agent}
             canonical (program/declaration-row reader-row :all :agent)]
         (test-support/transacted! connection [canonical])

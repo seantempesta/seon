@@ -23,10 +23,10 @@
            :seon.render/error :seon.render.data/error :seon.render.value/error
            :seon.render.walk/error :seon.render.web/error :seon.schedule/error
            :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-           :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error
+           :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
            :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
            :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-           :seon.test.run/error :seon.test.runner/error :seon.turn/error
+           :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
            :seon.turn.loop/error],
           :append-only-after [:qualified-keyword {:description "Schema property naming the assignment attribute whose history activates nonempty membership retention at database admission."}],
           :retraction-authority [:qualified-keyword {:description "Schema property naming the creator ref whose first historical assertion authorizes membership retraction."}],
@@ -319,7 +319,6 @@
           :conflict-value :seon.schema/value,
           :conflict-owner :seon.db/entity-id,
           :transaction-refused [:= true]
-          :transaction-refused-error [:map {:seon.error/class true :seon.render/ai seon.db/render-rejection-ai :seon.render/html seon.db/render-rejection-html :error/message "must mark a database transaction that was refused"} [:seon.db/transaction-refused :seon.db/transaction-refused] [:seon.error/message :seon.error/message]]
           :transaction-outcome-unknown [:= true]
           :transaction-outcome-unknown-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a database transaction whose outcome is unknown"} [:seon.db/transaction-outcome-unknown :seon.db/transaction-outcome-unknown] [:seon.error/message :seon.error/message]]
  :seon.db/invalid-read [:= true]

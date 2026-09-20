@@ -506,15 +506,17 @@
 
       (empty? events)
       (throw (ex-info "Your reply had no form; only comments/prose. Send a form."
-                      {:seon.error/kind :seon.cluster.reply/no-forms
-                       :seon.cluster.reply/no-forms true
-                       :seon.sci.reader/event-count 0}))
+                      {:seon.error/at (java.util.Date.)
+                       :seon.error/layer :seon.sci.eval/reader
+                       :seon.error/operation 'seon.sci.eval/one-event
+                       ::reader-event-count 0}))
 
       :else
       (throw (ex-info "Evaluation requires exactly one reader event."
-                      {:seon.error/kind ::reader-event-count
-                       ::reader-event-count (count events)
-                       :seon.sci.reader/event-count (count events)})))))
+                      {:seon.error/at (java.util.Date.)
+                       :seon.error/layer :seon.sci.eval/reader
+                       :seon.error/operation 'seon.sci.eval/one-event
+                       ::reader-event-count (count events)})))))
 
 (defn bind-result!
   "Bind one evaluation's value in the fork under its own handle.
@@ -642,6 +644,8 @@
   shape alongside `:seon.config/missing-effective-error`; handing them the
   `nil` this used to produce violated their contracts at every SCI contract
   install."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or :seon.config/effective :seon.config/error]]}
   [db]
   (let [cluster-name
         (db/q '[:find ?cluster .
@@ -651,8 +655,11 @@
              db)]
     (if cluster-name
       (config/effective db cluster-name)
-      {:seon.error/kind :seon.config/required-absent
-       :seon.config/required-absent :seon.boot/cluster-name
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.config/read
+       :seon.error/operation 'seon.sci.eval/database-effective-config
+       :seon.config/error-key :seon.boot/cluster-name
+       :seon.error/expected-key :seon.boot/cluster-name
        :seon.error/message
        "seon.sci.eval/database-effective-config requires configuration naming its cluster; this database has none."})))
 
@@ -2756,7 +2763,51 @@
                           ;; later failure in the JVM.
                           :seon.sci.eval/projection-state projection-state
                           :seon.effect/counter (atom -1)})}
-      (kernel/with-arm
+      (let [failure-result
+             (fn [throwable]
+               (let [record (record (if (kernel/interrupted? throwable)
+                                 :time :error))
+                definitions
+                (when-let [{failed-ctx :seon.sci.eval/ctx
+                            before :seon.sci.eval/before-intern-values
+                            failed-form :seon.sci.eval/form}
+                           @session-observation]
+                  ;; A failed evaluation has no durable program row. Any def
+                  ;; it installed before the later throw/cut therefore belongs
+                  ;; to the agent's defs, including a contracted def whose declaration
+                  ;; never reached the terminal transaction.
+                  (bindings
+                   failed-ctx namespace-name before source failed-form
+                   (built-in-calls)))
+                arity-message (interpreted-arity-message throwable)
+                value (cond->
+                          (kernel/failure-value
+                           {::kernel/time-limit-kind ::time-limit
+                            ::kernel/failure-kind ::evaluation-failed}
+                           throwable record)
+                        arity-message
+                        (assoc :seon.error/message arity-message))
+                admitted (shown-result value request record)]
+          (failed-evaluation
+           (cond-> {:seon.sci.eval/admitted admitted
+                    :seon.sci.admit/caps caps
+                    :seon.sci.eval/printed printed
+                    :seon.sci.eval/namespace-name namespace-name
+                    :seon.print/options @print-options
+                    :seon.sci.eval/bindings definitions
+                    :seon.sci.admit/record record
+                    :seon.sci.admit/value value
+                    :seon.cluster.eval/triage-edn
+                    (pr-str
+                     (main/ex-triage (Throwable->map throwable)))}
+             ;; the instant the interrupt was OBSERVED — the one
+             ;; genuinely new fact a cut evaluation leaves. Its
+             ;; presence IS the interrupted state; there is no label.
+             (= :time (:seon.eval/outcome record))
+             (assoc :seon.cluster.eval/interrupted-at
+                    (java.util.Date.))))))]
+       (try
+        (kernel/with-arm
        evaluation-ctx time-limit-ms
        (fn [armed]
         (vreset! arm-state armed)
@@ -2928,48 +2979,12 @@
             :seon.sci.eval/bindings definitions
             :seon.program/row row}))
         (catch Throwable throwable
-          (let [record (record (if (kernel/interrupted? throwable)
-                                 :time :error))
-                definitions
-                (when-let [{failed-ctx :seon.sci.eval/ctx
-                            before :seon.sci.eval/before-intern-values
-                            failed-form :seon.sci.eval/form}
-                           @session-observation]
-                  ;; A failed evaluation has no durable program row. Any def
-                  ;; it installed before the later throw/cut therefore belongs
-                  ;; to the agent's defs, including a contracted def whose declaration
-                  ;; never reached the terminal transaction.
-                  (bindings
-                   failed-ctx namespace-name before source failed-form
-                   (built-in-calls)))
-                arity-message (interpreted-arity-message throwable)
-                value (cond->
-                          (kernel/failure-value
-                           {::kernel/time-limit-kind ::time-limit
-                            ::kernel/failure-kind ::evaluation-failed}
-                           throwable record)
-                        arity-message
-                        (assoc :seon.error/message arity-message))
-                admitted (shown-result value request record)]
-          (failed-evaluation
-           (cond-> {:seon.sci.eval/admitted admitted
-                    :seon.sci.admit/caps caps
-                    :seon.sci.eval/printed printed
-                    :seon.sci.eval/namespace-name namespace-name
-                    :seon.print/options @print-options
-                    :seon.sci.eval/bindings definitions
-                    :seon.sci.admit/record record
-                    :seon.sci.admit/value value
-                    :seon.cluster.eval/triage-edn
-                    (pr-str
-                     (main/ex-triage (Throwable->map throwable)))}
-             ;; the instant the interrupt was OBSERVED — the one
-             ;; genuinely new fact a cut evaluation leaves. Its
-             ;; presence IS the interrupted state; there is no label.
-             (= :time (:seon.eval/outcome record))
-             (assoc :seon.cluster.eval/interrupted-at
-                    (java.util.Date.))))))
-          ))))))))
+          (failure-result throwable))
+          )))
+        (catch Throwable throwable
+          (if @arm-state
+            (throw throwable)
+            (failure-result throwable))))))))))
 
 (defn fork-candidate-ctx
   "Fork one candidate through the generation-aware turn path.

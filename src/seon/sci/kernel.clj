@@ -171,8 +171,13 @@
       (install! ctx database function-symbol)
       (throw
        (ex-info "SCI context has no database-program installer."
-                {:seon.error/kind ::missing-function-installer
-                 :seon.fn/sym function-symbol :seon.sci.kernel/missing-function-installer function-symbol}))))
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer ::installation
+                 :seon.error/operation 'seon.sci.kernel/ensure-function!
+                 ::guard-observation
+                 {:seon.error.evidence/attribute :seon.fn/sym
+                  :seon.error.evidence/value function-symbol}
+                 :seon.fn/sym function-symbol}))))
   function-symbol)
 
 (defn context-projection
@@ -296,8 +301,12 @@
     (when-not guard
       (throw
        (ex-info "SCI context has no stable interrupt guard."
-                {:seon.error/kind ::missing-interrupt-guard
-                 ::missing-interrupt-guard true})))
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer ::arming
+                 :seon.error/operation 'seon.sci.kernel/acquire-arm
+                 ::guard-observation
+                 {:seon.error.evidence/attribute ::guard
+                  :seon.error.evidence/value :seon.error/unknown}})))
     (if-let [armed (current-thread-arm guard)]
       (do
         (when-not (same-interpreter? armed ctx)
@@ -310,8 +319,12 @@
                    " for interpreter " (::interpreter-id existing)
                    " was armed at " (pr-str (::armed-at existing))
                    "; requested interpreter " (::interpreter-id requested) ".")
-              {:seon.error/kind ::already-armed
-               ::already-armed true
+              {:seon.error/at (java.util.Date.)
+               :seon.error/layer ::arming
+               :seon.error/operation 'seon.sci.kernel/acquire-arm
+               ::guard-observation
+               {:seon.error.evidence/attribute ::arm-id
+                :seon.error.evidence/value (::arm-id existing)}
                ::existing-arm existing
                ::requested-context requested}))))
         {:interrupt-fn (::interrupt-fn guard)
@@ -550,14 +563,14 @@
          :seon.reconcile/error :seon.render/error :seon.render.data/error
          :seon.render.value/error :seon.render.walk/error :seon.render.web/error
          :seon.schedule/error :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error
-         :seon.schema.shape/error :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error
+         :seon.schema.shape/error :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
          :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
          :seon.test/admission-error :seon.test/execution-error :seon.test/expired
          :seon.test/not-runnable-error :seon.test/resolution-error
          :seon.test/selection-error :seon.test/unknown-error
          :seon.test.run/immutable-error :seon.test.run/unavailable-error
          :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error :seon.test.run/error
-         :seon.test.runner/error :seon.turn/error :seon.turn.loop/error]]}
+         :seon.test.runner/error :seon.turn/error :seon.turn/refused-error :seon.turn.loop/error]]}
   [{subject :seon.fn/sym}
    throwable
    diagnostic-record]
