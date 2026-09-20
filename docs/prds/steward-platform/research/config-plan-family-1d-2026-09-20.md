@@ -7,6 +7,42 @@ tags: [schema, config, plan, data-model]
 
 # Wave 1d — config and plan family
 
+## Current landing status (supersedes the historical gate below)
+
+- C7: `5a0a805e4`; R3: `c50625da4`; R2: `2d1323fcd`.
+- Plan needs: converted from optional refs to indexed identity values.
+  The chosen value dial preserves the prerequisite token through deletion;
+  a missing prerequisite blocks, and explicit dependency retraction clears it.
+  Consumers converted: the two plan pull selectors, frontier derivation,
+  add-step writer, whole-tree compiler/comparison, and dependency retractions
+  in `src/seon/plan.clj`; dependency inputs in `test/my/plan_test.clj`.
+  Deleted the now-unneeded document-reference decoder. The title renderer
+  still uses lookup refs to resolve identity strings, as required by pull.
+- The new canonical `seon.plan-test` regression creates the agent through
+  `creation-tx`, adds two steps through the plan owner, retracts the prerequisite
+  through the admitted writer, pulls the surviving dependency value, verifies
+  blocked/ready reads, then explicitly retracts the dependency and verifies ready.
+  It passed. Fast tally: **23 tests, 131 assertions, 0 failures, 7 errors**.
+  Log: `tmp/config-plan-1d-needs-fast.log`. The errors concern existing refusal
+  contracts and `seon.fn.schema-shape/normalized-form` on refusal observations.
+  The existing open issue `test-refusal-observations-overflow-in-projection-acquisition`
+  owns that class; this tally is not a green namespace claim.
+- **RESET NEEDED: `:my.plan.item/needs`**, ref → string, cardinality many.
+  The same resource documents the optional sweep behavior of agent, subject,
+  and completion refs and moves the `about` codec rationale into its docstring.
+- Cold plan gate owed:
+  `bin/test --paths resources/seon/schemas/my.plan.item.edn src/seon/plan.clj test/seon/plan_test.clj test/my/plan_test.clj -- seon.plan-test my.plan-test`.
+  The orchestrator also owes the platform proof. No reset or lifecycle command
+  was run, and no worktree was created.
+- Unowned plan fixtures still use ref-shaped needs in
+  `test/my/plan_api_test.clj`, `test/seon/transaction_result_test.clj`,
+  `test/seon/transact_feedback_test.clj`, `test/seon/render/value_test.clj`,
+  `test/seon/context_blocks_fixture.clj`, `test/seon/sci/shown_text_test.clj`,
+  `test/seon/html_views_test.clj`, and `test/seon/loop_proof_test.clj`.
+  Their owners must convert dependency values to step identity strings.
+  The held `src/seon/render/value.clj:333–336` old ref-map specialization is
+  now unnecessary; string values already follow its ordinary value path.
+
 ## Resumed ruling and C7 result
 
 The orchestrator approved option 1 plus the bounded R2 extension in

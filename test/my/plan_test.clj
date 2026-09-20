@@ -178,7 +178,7 @@
            {:my.plan/parent-step [:my.plan.item/id "root"]})
       (add connection "verify" "Verify"
            {:my.plan/parent-step [:my.plan.item/id "root"]
-            :my.plan.item/needs #{[:my.plan.item/id "prepare"]}})
+            :my.plan.item/needs #{"prepare"}})
       (is (= ["prepare"] (ids (:my.plan/ready (plan-of connection)))))
       (is (= ["verify"] (ids (:my.plan/blocked (plan-of connection)))))
       (plan/complete! "prepare" connection "alice")
@@ -194,7 +194,7 @@
       (is (str/includes? (plan/render-plan-ai (plan-of connection)) "(seon.plan/plan {})"))
       (let [prepare (add connection "prepare" "Prepare")
             verify (add connection "verify" "Verify"
-                        {:my.plan.item/needs #{[:my.plan.item/id "prepare"]}})]
+                        {:my.plan.item/needs #{"prepare"}})]
         (is (= [prepare] (plan/ready @connection "alice")))
         (is (= [verify] (plan/blocked @connection "alice")))
         (is (= ["prepare"] (:my.plan/needs verify)))
@@ -302,7 +302,7 @@
     (fn [connection]
       (add connection "prepare" "Prepare")
       (add connection "verify" "Verify"
-           {:my.plan.item/needs #{[:my.plan.item/id "prepare"]}})
+           {:my.plan.item/needs #{"prepare"}})
       (let [current (plan-of connection)
             step (first (filter #(= "verify" (:my.plan.item/id %))
                                 (:my.plan/steps current)))
@@ -333,7 +333,7 @@
                       :my.plan.item/title "Prepare"}
                      {:my.plan.item/id "verify"
                       :my.plan.item/title "Verify"
-                      :my.plan.item/needs #{[:my.plan.item/id "prepare"]}}]}]
+                      :my.plan.item/needs #{"prepare"}}]}]
                   :my.plan/current-step {:my.plan.item/id "prepare"}}]
         (is (= {:my.plan/added 3 :my.plan/changed 0 :my.plan/retracted 0}
                (:my.plan/diff (plan/plan! tree @connection connection "alice"))))
@@ -378,9 +378,9 @@
                   (plan/plan!
                    {:my.plan/steps
                     [{:my.plan.item/id "prepare" :my.plan.item/title "Prepare"
-                      :my.plan.item/needs #{[:my.plan.item/id "verify"]}}
+                      :my.plan.item/needs #{"verify"}}
                      {:my.plan.item/id "verify" :my.plan.item/title "Verify"
-                      :my.plan.item/needs #{[:my.plan.item/id "prepare"]}}]}
+                      :my.plan.item/needs #{"prepare"}}]}
                    @connection connection "alice")))))))))
 
 (deftest whole-tree-reconciliation-retracts-omitted-steps
@@ -535,12 +535,12 @@
         :my.plan.item/id "juniper/compare-changed-results"
         :my.plan.item/position 2
         :my.plan.item/title "Compare refreshed results"
-        :my.plan.item/needs #{"step-render-plan"}}
+        :my.plan.item/needs #{"juniper/render-plan"}}
        {:db/id "step-live-turn"
         :my.plan.item/id "juniper/try-live-turn"
         :my.plan.item/position 3
         :my.plan.item/title "Try the assembled context in a live agent turn"
-        :my.plan.item/needs #{"step-compare"}}})
+        :my.plan.item/needs #{"juniper/compare-changed-results"}}})
 
 (deftest the-example-fixture-shape-installs-and-renders
   (support/with-database

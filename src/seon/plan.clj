@@ -79,7 +79,7 @@
     {:my.plan.item/subject [:db/id]}
     {:my.plan.item/completed-tx [:db/txInstant]}
     :my.plan.item/about
-    {:my.plan.item/needs [:my.plan.item/id]}
+    (limit :my.plan.item/needs nil)
     {:my.plan.item/steps 8}])
 
 (defn- refuse!
@@ -230,8 +230,8 @@
 (defn- foreign-open-work
   "Open work by identity for dependencies outside this agent's pulled tree.
 
-  `:my.plan.item/needs` is an ordinary ref, so a dependency may live in
-  another agent's plan; its subtree is pulled with the same selector."
+  Dependencies name step identities, including steps in another agent's plan.
+  A missing prerequisite remains open work until its dependency is removed."
   [database item-ids]
   (reduce (fn [result item-id]
             (let [entity (step-eid database item-id)]
@@ -240,7 +240,7 @@
                      (contains? entity :seon.error/at)
                      (contains? entity :seon.error/layer)
                      (contains? entity :seon.error/operation)) (reduced entity)
-                (nil? entity) (assoc result item-id false)
+                (nil? entity) (assoc result item-id true)
                 :else (let [row (db/pull database step-selector entity)]
                         (if (and (map? row)
                                  (contains? row :seon.error/at)
@@ -261,7 +261,6 @@
   (let [open-by-id (into {} (map (juxt :my.plan.item/id open-work?)) nodes)
         foreign-ids (into #{}
                           (comp (mapcat :my.plan.item/needs)
-                                (map :my.plan.item/id)
                                 (remove #(contains? open-by-id %)))
                           nodes)
         foreign (if (seq foreign-ids)
@@ -275,11 +274,11 @@
       (let [open? (fn [item-id]
                     (if (contains? open-by-id item-id)
                       (get open-by-id item-id)
-                      (get foreign item-id false)))
+                      (get foreign item-id true)))
             incomplete (into [] (remove :my.plan.item/completed-tx) nodes)
             blocked-ids (into #{}
                               (comp (filter (fn [node]
-                                              (some (comp open? :my.plan.item/id)
+                                              (some open?
                                                     (:my.plan.item/needs node))))
                                     (map :my.plan.item/id))
                               incomplete)
@@ -317,10 +316,7 @@
             (into []
                   (mapcat
                    (fn [node]
-                     (let [needs (into []
-                                       (map :my.plan.item/id)
-                                       (sort-by :my.plan.item/id
-                                                (:my.plan.item/needs node)))
+                     (let [needs (vec (sort (:my.plan.item/needs node)))
                            step
                            (cond-> (dissoc node
                                            :my.plan.item/steps
@@ -638,8 +634,9 @@
                                     :my.plan/parent-step))
           needs (into #{}
                       (map (fn [reference]
-                             (or (read-result! (ref-eid database reference))
-                                 (refuse! :my.plan/dependency-not-found
+                             (if (read-result! (step-eid database reference))
+                               reference
+                               (refuse! :my.plan/dependency-not-found
                                           (str "Plan dependency "
                                                (pr-str reference)
                                                " does not exist.")
@@ -1073,8 +1070,18 @@
 
 (defn- scalar-retractions
   [database entry]
-  (let [id (:my.plan.item/id entry)]
-    (into []
+  (let [id (:my.plan.item/id entry)
+        retained (set (:my.plan.item/needs entry))
+        previous (read-result!
+                  (db/q '[:find [?dependency ...]
+                          :in $ ?id
+                          :where [?step :my.plan.item/id ?id]
+                                 [?step :my.plan.item/needs ?dependency]]
+                        database id))]
+    (into (mapv (fn [dependency]
+                  [:db/retract [:my.plan.item/id id]
+                   :my.plan.item/needs dependency])
+                (remove retained previous))
           (keep (fn [attribute]
                   (when (and (not (contains? entry attribute))
                              (db/q '[:find ?value .
@@ -1090,13 +1097,6 @@
            :my.plan.item/completed-tx
            :my.plan.item/about])))
 
-(defn- document-reference-id
-  "The stable identity a `[:my.plan.item/id \"x\"]` reference names, or nil."
-  [reference]
-  (when (and (vector? reference)
-             (= :my.plan.item/id (first reference)))
-    (second reference)))
-
 (def ^:private comparable-selector
   '[:my.plan.item/id
     :my.plan.item/position
@@ -1107,7 +1107,7 @@
     {:my.plan.item/subject [:db/id]}
     :my.plan.item/completed-tx
     :my.plan.item/about
-    {:my.plan.item/needs [:my.plan.item/id]}
+    (limit :my.plan.item/needs nil)
     {:my.plan.item/steps [:my.plan.item/id]}])
 
 (defn- comparable
@@ -1149,8 +1149,7 @@
                               (:my.plan.item/completed-tx row)
                               (:my.plan.item/about row)
                               (get parents (:my.plan.item/id row))
-                              (into #{} (map :my.plan.item/id)
-                                    (:my.plan.item/needs row))
+                              (set (:my.plan.item/needs row))
                               (:my.plan.item/done-query row)
                               (get-in row [:my.plan.item/subject :db/id]))]))
           rows)))
@@ -1197,8 +1196,8 @@
         (doseq [token (:my.plan.item/about entry)]
           (resolve-subject! database token))
         (doseq [reference (:my.plan.item/needs entry)]
-          (when-not (or (contains? wanted-ids (document-reference-id reference))
-                        (read-result! (ref-eid database reference)))
+          (when-not (or (contains? wanted-ids reference)
+                        (read-result! (step-eid database reference)))
             (refuse! :my.plan/dependency-not-found
                      (str "Plan dependency " (pr-str reference)
                           " does not exist.")
@@ -1207,23 +1206,7 @@
             (into {}
                   (map (fn [entry]
                          [(:my.plan.item/id entry)
-                          (into []
-                                (keep (fn [reference]
-                                        (let [id (document-reference-id
-                                                  reference)]
-                                          (if (contains? wanted-ids id)
-                                            id
-                                            (read-result!
-                                             (db/q '[:find ?id .
-                                                     :in $ ?step
-                                                     :where
-                                                     [?step :my.plan.item/id
-                                                      ?id]]
-                                                   database
-                                                   (read-result!
-                                                    (ref-eid database
-                                                             reference))))))))
-                                (:my.plan.item/needs entry))]))
+                          (vec (sort (:my.plan.item/needs entry)))]))
                   entries)
             _ (refuse-dependency-cycle! needs-by-id)
             current (get-in input [:my.plan/current-step :my.plan.item/id])
@@ -1258,7 +1241,7 @@
                              (assoc :my.plan.item/steps (set nested))
                              (seq needs)
                              (assoc :my.plan.item/needs
-                                    (into #{} (map step-ref) needs))))))
+                                    (set needs))))))
                   entries)
             retracted-ids (sort (remove wanted-ids existing))
             retractions (mapv (fn [id]

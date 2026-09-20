@@ -15,27 +15,25 @@
                :agent
                [:and
                 {:description
-                 "A retained agent ref from the pre-component plan model. Ownership now derives from the component edges :my.plan/steps and :my.plan.item/steps; my.plan never writes this attribute."}
+                 "A retained agent ref from the pre-component plan model. Ownership now derives from the component edges :my.plan/steps and :my.plan.item/steps; my.plan never writes this attribute. Optional peer ref: deleting its target sweeps this backlink."}
                 :seon.db/ref],
                :needs
                [:set
                 {:description
-                 "Plan-step refs whose open work currently blocks this step. Dependency is not ownership, so this stays an ordinary ref, never a component."}
-                :seon.db/ref],
+                 "Value edges naming prerequisite step identities. They survive prerequisite retraction: a missing prerequisite remains blocked until the author removes the dependency or restores and completes that step. Dependency is not ownership."
+                 :seon.db/index true}
+                :my.plan.item/id],
                :about-token [:or :symbol :qualified-keyword],
-               ;; The subset branch keeps the outer `:or` structurally present
-               ;; so the Datahike bridge uses its scalar EDN codec and preserves
-               ;; authored vector order.
                :about
                [:or
                 {:description
-                 "Ordered function, namespace, and schema tokens this step's work concerns."}
+                 "Ordered function, namespace, and schema tokens this step's work concerns. The outer union selects the scalar EDN codec so authored vector order survives storage."}
                 [:vector :my.plan.item/about-token]
                 [:= []]],
                :completed-tx
                [:and
                 {:description
-                 "The transaction completing this step; its db/txInstant is the completion time. Absence means open."}
+                 "The transaction completing this step; its db/txInstant is the completion time. Absence means open. Optional ref: retracting the transaction sweeps this completion fact."}
                 :seon.db/ref],
                :done-when
                [:string
@@ -46,7 +44,7 @@
                [:and {:description "Completion query: a nonempty result or truthy scalar is evidence of completion; false, nil, or an empty result is not. Inputs are $ and, when subject is present, ?subject. Errors never complete the step."}
                 :seon.db/query],
                :subject
-               [:and {:description "Optional entity bound as the completion query's second input after $."}
+               [:and {:description "Optional entity bound as the completion query's second input after $. Sweep: target deletion removes the binding."}
                 :seon.db/ref],
                :position
                [:int
