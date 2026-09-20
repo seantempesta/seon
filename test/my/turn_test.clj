@@ -59,7 +59,9 @@
                value (support/agent-value ctx source)]
            (is (map? value) source)
            (is (string? (:seon.error/message value)) source)
-           (is (keyword? (:seon.error/kind value)) source)
+           (is (= :seon.instrument/invocation
+                  (:seon.error/layer value)) source)
+           (is (= :input (:seon.instrument/check value)) source)
            (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :my.turn/value) value))
                "and the loop cannot mistake it for a disposition")))))))
 

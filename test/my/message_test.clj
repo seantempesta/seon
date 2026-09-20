@@ -129,7 +129,9 @@
                                         :my.message/content "No recipient."
                                         :seon.db/connection connection
                                         :seon.agent/id "bob"})]
-          (is (= :seon.message/unknown-recipient (:seon.error/kind missing)))
+          (is (true? (:seon.message/unknown-recipient missing)))
+          (is (= 'seon.cluster.message/send!
+                 (:seon.error/operation missing)))
           (is (= 3 (db/q '[:find (count ?m) . :where [?m :seon.message/id _]] @connection))))))))
 
 (deftest a-bad-argument-is-an-error-value-never-a-throw
@@ -191,15 +193,16 @@
                              bad ")")]]
           (let [value (support/agent-value ctx source)]
             (is (map? value) source)
-            (is (keyword? (:seon.error/kind value)) source)
+            (is (= :seon.instrument/invocation
+                   (:seon.error/layer value)) source)
+            (is (= :input (:seon.instrument/check value)) source)
             (is (string? (:seon.error/message value)) source)
             (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :my.message/value) value))
                 "and the loop cannot mistake it for a delivery")))))))
 
 (deftest the-error-value-is-the-registered-one
-  ;; `:seon.error/value` REQUIRES a kind. A function whose declared
-  ;; output is `[:or … :seon.error/value]` and which returns a bare
-  ;; `{:seon.error/message …}` is outside its own contract. This
+  ;; Every returned refusal satisfies its declared facet and base. A function
+  ;; that returns a bare message map is outside its own contract. This
   ;; assertion is what stops that hole opening here — and `my.turn`'s
   ;; own error values now satisfy the same schema (the canary that
   ;; deliberately asserted its defect fired when 932ff55fb fixed it,

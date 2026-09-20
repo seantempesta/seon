@@ -24,7 +24,7 @@
                                database 'seon.turn/open?))
            plans (get-in report [:seon.program/plan :seon.program/issues])
            valid? (schema/projection-validator (schema/handed-projection) :seon.program/breakage)]
-       (is (not (:seon.error/kind report)) (pr-str report))
+       (is (not (:seon.error/at report)) (pr-str report))
        (is (= expected (:seon.program/callers report)))
        (is (= expected (:seon.program/callers caller-report)))
        (is (= expected (set (map :seon.fn/sym (:seon.program/call-sites report)))))
@@ -45,7 +45,7 @@
        (is (valid? report))
        (is (= (db/basis-t database) (db/basis-t (db/db connection))))
        (let [missing (program/breaks (assoc request :seon.program/subject 'absent.program/function))]
-         (is (= :seon.program/not-found (:seon.error/kind missing)))
+         (is (= 'absent.program/function (:seon.program/not-found missing)))
          (is (= 'absent.program/function (:seon.program/not-found missing))))))))
 
 (deftest schema-and-namespace-reads-keep-different-connections-distinct
@@ -56,7 +56,7 @@
            namespace-report (program/breaks {:seon.db/db database :seon.program/subject 'seon.turn})
            render-report (program/breaks {:seon.db/db database
                                           :seon.program/subject 'seon.render.value/render-ai})]
-       (is (not (:seon.error/kind key-report)) (pr-str key-report))
+       (is (not (:seon.error/at key-report)) (pr-str key-report))
        (is (contains? (:seon.program/contract-refs key-report) 'seon.db/transact!))
        (is (seq (:seon.program/schema-references key-report)))
        (is (seq (:seon.program/mentions key-report)))
@@ -91,11 +91,11 @@
              metadata-snapshot (program/history {:seon.db/db (db/db connection)
                                                  :seon.program/subject (symbol target)
                                                  :seon.db/tx metadata-t})]
-         (is (not (:seon.error/kind snapshot)) (pr-str snapshot))
+         (is (not (:seon.error/at snapshot)) (pr-str snapshot))
          (is (= [source] (mapv :seon.program/source (:seon.program/history snapshot))))
          (is (not (contains? (:seon.program/definition (first (:seon.program/history snapshot)))
                             :seon.fn/doc)))
-         (is (not (:seon.error/kind metadata-snapshot)) (pr-str metadata-snapshot))
+         (is (not (:seon.error/at metadata-snapshot)) (pr-str metadata-snapshot))
          (is (= metadata-t (:seon.db/tx metadata-snapshot)))
          (is (= ["Later metadata"]
                 (mapv #(get-in % [:seon.program/definition :seon.fn/doc])
@@ -104,7 +104,7 @@
        (let [result (program/history {:seon.db/db (db/db connection)
                                       :seon.program/subject (symbol target)})
              events (:seon.program/history result)]
-         (is (not (:seon.error/kind result)) (pr-str result))
+         (is (not (:seon.error/at result)) (pr-str result))
          (is (= #{source changed-source} (set (map :seon.program/source events))))
          (is (= [true false true false] (mapv :seon.db/added? events)))
          (is (= (mapv :seon.program/source events)

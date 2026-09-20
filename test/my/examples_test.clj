@@ -50,7 +50,7 @@
         (let [root @root-resource
               example-url (str "http://127.0.0.1:" (.getPort (.getAddress ^HttpServer @server-resource)) "/")]
           (support/seed-cluster! connection "examples")
-          (is (not (:seon.error/kind
+          (is (not (:seon.error/at
                     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "examples"
                                     :seon.config/manifest
                                     {:seon.config.fs/working-root (.getAbsolutePath root)
@@ -133,15 +133,15 @@
               (let [failed (run "(my.note/add! {:my.note/id \"bad-note\" :my.note/content 42})")
                     value (:seon.sci.admit/value failed)
                     documented (:seon.sci.admit/value (run "(doc my.note/add!)"))]
-                (is (= :seon.instrument/contract-violated (:seon.error/kind value)) (pr-str failed))
+                (is (= :input (:seon.instrument/check value)) (pr-str failed))
                 (is (= documented (:seon.error/doc value)))
                 (is (str/includes? (:seon.error/message value "") "my.note/add!"))
                 (is (str/includes? (:seon.error/message value "") ":my.note/content"))
                 (is (some? (get-in value [:seon.error/data :seon.error/diagnostic-expected])))
                 (is (empty? (db/q '[:find ?note :where [?note :my.note/id "bad-note"]] @connection))))
               (let [failed (run "(my.test/run {:seon.agent/id 17})")]
-                (is (= :seon.instrument/contract-violated
-                       (get-in failed [:seon.sci.admit/value :seon.error/kind]))
+                (is (= :input
+                       (get-in failed [:seon.sci.admit/value :seon.instrument/check]))
                     "A refused test lookup stays one flat error, never a vector of fake test results."))
               (doseq [{function-symbol :sym} rows
                       :let [metadata (some-> function-symbol requiring-resolve meta)]
@@ -167,7 +167,7 @@
                                                                 :seon.test/fail-count
                                                                 :seon.test/error-count])
                                                (:seon.sci.admit/value result)))))
-                                (is (nil? (get-in result [:seon.sci.admit/value :seon.error/kind]))
+                                (is (nil? (get-in result [:seon.sci.admit/value :seon.error/at]))
                                     (pr-str result)))
                               (recur)))))))))
               (let [effect-ids (db/q '[:find [?id ...] :where

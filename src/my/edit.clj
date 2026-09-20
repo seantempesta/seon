@@ -50,7 +50,7 @@
                     :my.edit/source \"(def example 2)\"}))"
   {:malli/schema
    [:=> [:cat :my.edit/form-request]
-    [:or :my.edit/result :seon.error/value]]
+    [:or :my.edit/result :my.edit/error]]
    :seon.workload :io
    :seon.effect/capability 'seon.edit.jvm/edit}
   [request]
@@ -73,7 +73,7 @@
                      :my.edit/new-string \"(def example 2)\"}))"
   {:malli/schema
    [:=> [:cat :my.edit/exact-request]
-    [:or :my.edit/result :seon.error/value]]
+    [:or :my.edit/result :my.edit/error]]
    :seon.workload :io
    :seon.effect/capability 'seon.edit.jvm/edit}
   [request]
@@ -97,7 +97,7 @@
                      :my.edit/new-window \"(def example 2)\"}))"
   {:malli/schema
    [:=> [:cat :my.edit/lines-request]
-    [:or :my.edit/result :seon.error/value]]
+    [:or :my.edit/result :my.edit/error]]
    :seon.workload :io
    :seon.effect/capability 'seon.edit.jvm/edit}
   [request]

@@ -71,9 +71,9 @@
                               @connection)
                         (assoc :seon.error/data {:seon.agent/id "alice"}))]
         (is (and (map? failure)
-                 (contains? failure :seon.error/at)
-                 (contains? failure :seon.error/layer)
-                 (contains? failure :seon.error/operation)) (pr-str failure))
+                 (inst? (:seon.error/at failure))
+                 (qualified-keyword? (:seon.error/layer failure))
+                 (qualified-symbol? (:seon.error/operation failure))) (pr-str failure))
         (doseq [[subject line] [["Plan step" (plan/format-item-ai failure)]
                                 ["Ready work" (plan/format-ready-items-ai failure)]
                                 ["Plan" (plan/format-plan-ai failure)]]]
@@ -91,7 +91,7 @@
                                 :seon.agent/id "nobody"})
             source (plan/render-plan-ai {:seon.db/db @connection
                                          :seon.agent/id "nobody"})]
-        (is (= :my.plan/agent-not-found (:seon.error/kind refusal))
+        (is (true? (:my.plan/agent-not-found refusal))
             "the derivation refuses as a flat value, never by throwing")
         (is (str/includes? source "(seon.plan/format-plan-ai (seon.plan/plan {}))")
             "the refusal renders through this plan's own AI pair")
@@ -105,7 +105,7 @@
         (is (= [] (:my.plan/steps empty-plan)))
         (is (= [] (:my.plan/ready empty-plan)))
         (is (= [] (:my.plan/blocked empty-plan)))
-        (is (not (contains? empty-plan :seon.error/kind))))
+        (is (nil? (:seon.error/at empty-plan))))
       (add connection "root" "Improve the plan")
       (add connection "child" "The only child"
            {:my.plan/parent-step [:my.plan.item/id "root"]})
@@ -199,8 +199,8 @@
         (is (= [verify] (plan/blocked @connection "alice")))
         (is (= ["prepare"] (:my.plan/needs verify)))
         (is (= [prepare verify] (plan/steps @connection "alice")))
-        (is (= :my.plan/not-owned
-               (:seon.error/kind (plan/start! "prepare" connection "bob"))))
+        (is (true? (:my.plan/not-owned
+                    (plan/start! "prepare" connection "bob"))))
         (is (= (assoc prepare :my.plan/state :current) (plan/start! "prepare" connection "alice")))
         (is (= (assoc prepare :my.plan/state :current) (plan/current @connection "alice")))
         (let [completed (plan/complete! "prepare" connection "alice")]
@@ -208,8 +208,8 @@
                  (dissoc completed :my.plan.item/completed-tx)))
           (is (inst? (get-in completed [:my.plan.item/completed-tx :db/txInstant]))))
         (is (= {} (plan/current @connection "alice")))
-        (is (= :my.plan/unusable-current-step
-               (:seon.error/kind (plan/start! "prepare" connection "alice"))))
+        (is (true? (:my.plan/unusable-current-step
+                    (plan/start! "prepare" connection "alice"))))
         (is (= [(assoc verify :my.plan/state :ready)] (plan/ready @connection "alice")))
         (is (= [] (plan/blocked @connection "alice")))))))
 
@@ -339,8 +339,8 @@
           (is (= ["root" "prepare" "verify"] (ids (:my.plan/steps current))))
           (is (= {:my.plan.item/id "prepare"} (:my.plan/current-step current))))
         (testing "two siblings may not claim one position"
-          (is (= :my.plan/duplicate-position
-                 (:seon.error/kind
+          (is (= true
+                 (:my.plan/duplicate-position
                   (plan/plan!
                    {:my.plan/steps
                     [{:my.plan.item/id "a" :my.plan.item/title "A"
@@ -349,8 +349,8 @@
                       :my.plan.item/position 0}]}
                    @connection connection "alice")))))
         (testing "one step may not be owned by two parents"
-          (is (= :my.plan/duplicate-identity
-                 (:seon.error/kind
+          (is (= true
+                 (:my.plan/duplicate-identity
                   (plan/plan!
                    {:my.plan/steps
                     [{:my.plan.item/id "one" :my.plan.item/title "One"
@@ -363,16 +363,16 @@
                         :my.plan.item/title "Shared"}]}]}
                    @connection connection "alice")))))
         (testing "the current step must be an open step of this plan"
-          (is (= :my.plan/unusable-current-step
-                 (:seon.error/kind
+          (is (= true
+                 (:my.plan/unusable-current-step
                   (plan/plan!
                    {:my.plan/steps [{:my.plan.item/id "root"
                                      :my.plan.item/title "Improve the plan"}]
                     :my.plan/current-step {:my.plan.item/id "absent"}}
                    @connection connection "alice")))))
         (testing "dependencies may not form a cycle"
-          (is (= :my.plan/dependency-cycle
-                 (:seon.error/kind
+          (is (= true
+                 (:my.plan/dependency-cycle
                   (plan/plan!
                    {:my.plan/steps
                     [{:my.plan.item/id "prepare" :my.plan.item/title "Prepare"
@@ -439,9 +439,9 @@
                         database)
             query db/q]
         (is (and (map? refusal)
-                 (contains? refusal :seon.error/at)
-                 (contains? refusal :seon.error/layer)
-                 (contains? refusal :seon.error/operation)) (pr-str refusal))
+                 (inst? (:seon.error/at refusal))
+                 (qualified-keyword? (:seon.error/layer refusal))
+                 (qualified-symbol? (:seon.error/operation refusal))) (pr-str refusal))
         (with-redefs [db/q (fn [& arguments]
                             (let [form (first arguments)]
                               (if (#{'[:find ?step .

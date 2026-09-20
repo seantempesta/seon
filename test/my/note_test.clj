@@ -65,7 +65,8 @@
                      [?note :my.note/content ?content]]
                    (db/history @connection))))
       (let [missing (note/forget! "temporary" connection "alice")]
-        (is (= :my.note/not-found (:seon.error/kind missing)))
+        (is (true? (:my.note/not-found missing)))
+        (is (= "temporary" (:seon.error/diagnostic-offending missing)))
         (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/value) missing))))))
 
 (deftest notes-is-agent-scoped-current-and-whole

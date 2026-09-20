@@ -13,20 +13,22 @@
             [seon.issue :as issue]))
 
 (defn- checked [value]
-  (if (:seon.error/kind value)
+  (if (and (map? value) (:seon.error/at value))
     (throw (ex-info (:seon.error/message value) value))
     value))
 
 (defn- read-result [request operation read-value]
   (try (read-value)
        (catch Exception failure
-         (if (:seon.error/kind (ex-data failure))
+         (if (:seon.error/at (ex-data failure))
            (ex-data failure)
            (error/diagnostic
-            {:seon.error/kind :seon.program/read-refused
+            {:seon.error/at (java.util.Date.)
+             :seon.error/layer :seon.program/read
+             :seon.error/operation operation
              :seon.error/message (str "Cannot read program facts: " (ex-message failure))
              :seon.program/read-refused true
-             :seon.error/diagnostic-layer :program-read
+             :seon.error/diagnostic-layer :seon.program/read
              :seon.error/diagnostic-operation operation
              :seon.error/diagnostic-member (:seon.program/subject request)
              :seon.error/diagnostic-expected :seon.program/breakage
@@ -55,10 +57,12 @@
             (subject-identities subject))
       (checked
        (error/diagnostic
-        {:seon.error/kind :seon.program/not-found
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.program/read
+         :seon.error/operation 'my.program/breaks
          :seon.error/message (str "No program declaration names " subject ".")
          :seon.program/not-found subject
-         :seon.error/diagnostic-layer :program-read
+         :seon.error/diagnostic-layer :seon.program/read
          :seon.error/diagnostic-operation 'my.program/breaks
          :seon.error/diagnostic-member subject
          :seon.error/diagnostic-expected (subject-identities subject)
@@ -356,10 +360,12 @@
     (if (and ctx base connection)
       {:seon.sci.eval/ctx ctx :my.program/base-ctx base :seon.db/connection connection}
       (error/diagnostic
-       {:seon.error/kind :seon.program/declaration-refused
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.program/write
+        :seon.error/operation 'my.program/supplied-context
         :seon.program/declaration-refused true
         :seon.error/message "Program mutation requires the executing SCI context, its cluster base and connection."
-        :seon.error/diagnostic-layer :program-write
+        :seon.error/diagnostic-layer :seon.program/write
         :seon.error/diagnostic-operation 'my.program/supplied-context
         :seon.error/diagnostic-member :my.program/context
         :seon.error/diagnostic-expected :my.program/context
@@ -384,11 +390,13 @@
 (defn- refusal [operation report affected]
   (merge
    (error/diagnostic
-    {:seon.error/kind :seon.program/declaration-refused
+    {:seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.program/write
+     :seon.error/operation operation
      :seon.program/declaration-refused true
      :seon.error/message (str "Cannot perform " operation " on " (:seon.program/subject report)
                               "; repair the named referrers first.")
-     :seon.error/diagnostic-layer :program-write
+     :seon.error/diagnostic-layer :seon.program/write
      :seon.error/diagnostic-operation operation
      :seon.error/diagnostic-member (:seon.program/subject report)
      :seon.error/diagnostic-expected :seon.program/change
@@ -571,13 +579,15 @@
                 report (when subject
                          (breaks {:seon.db/db (db/db connection) :seon.program/subject subject}))]
             (when (or (#{'clojure.core/remove-ns 'clojure.core/ns-unalias} native)
-                      (and report (not (:seon.error/kind report))))
+                      (and report (not (:seon.error/at report))))
               (reduced
                (error/diagnostic
-                {:seon.error/kind :seon.program/declaration-refused
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :seon.program/write
+                 :seon.error/operation operation
                  :seon.program/declaration-refused true
                  :seon.error/message (str "Use " operation " so program facts decide before SCI changes.")
-                 :seon.error/diagnostic-layer :program-write
+                 :seon.error/diagnostic-layer :seon.program/write
                  :seon.error/diagnostic-operation operation
                  :seon.error/diagnostic-member native
                  :seon.error/diagnostic-expected operation

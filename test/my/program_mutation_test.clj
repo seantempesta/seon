@@ -18,7 +18,7 @@
            before @(:env fork)
            base-before @(:env ctx)
            refused (program/ns-unmap! context 'seon.turn/open?)]
-       (is (= :seon.program/declaration-refused (:seon.error/kind refused)))
+       (is (true? (:seon.program/declaration-refused refused)))
        (is (seq (get-in refused [:seon.error/data :seon.program/callers])))
        (is (= (count (get-in refused [:seon.error/data :seon.program/callers]))
               (count (get-in refused [:seon.program/plan :seon.program/issues]))))
@@ -33,15 +33,14 @@
                       :seon.sci.admit/caps (config/result-caps decisions)
                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)
                       :seon.config/on-core-error :panic})]
-         (is (= :seon.program/declaration-refused
-                (get-in result [:seon.sci.admit/value :seon.error/kind]))
+         (is (true? (get-in result [:seon.sci.admit/value :seon.program/declaration-refused]))
              (pr-str (select-keys result [:seon.cluster.eval/error :seon.eval/shown]))))
        (support/transacted! connection [(assoc (support/program-fn-row (db/db connection) (symbol "my.program" "disposable") "(defn disposable [] 42)")
                                               :seon.fn/source "(defn disposable [] 42)")])
        (doseq [target [ctx fork]]
          (sci/eval-string* target "(do (in-ns 'my.program) (defn disposable [] 42))"))
        (let [removed (program/ns-unmap! context (symbol "my.program" "disposable"))]
-         (is (not (:seon.error/kind removed)) (pr-str removed))
+         (is (not (:seon.error/at removed)) (pr-str removed))
          (is (= #{(symbol "my.program" "disposable")} (:seon.program/affected removed)))
          (is (nil? (db/pull (db/db connection) [:db/id] [:seon.fn/sym (symbol "my.program" "disposable")])))
          (is (nil? (sci/resolve fork (symbol "my.program" "disposable"))))
@@ -69,7 +68,7 @@
                         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)
                         :seon.config/on-core-error :panic})
                value (:seon.sci.admit/value result)]
-           (is (= :seon.program/declaration-refused (:seon.error/kind value)) (pr-str result))
+           (is (true? (:seon.program/declaration-refused value)) (pr-str result))
            (is (= expected (get-in value [:seon.error/data :seon.error/diagnostic-expected])))
            (is (= basis (db/basis-t (db/db connection))))
            (is (true? (= (get-in before [:namespaces 'seon.turn])
@@ -97,7 +96,7 @@
                                      (defn target [] 42)
                                      (defn caller [] (target)))"))
        (let [result (program/ns-unalias! context 'my.disposable.program 'text)]
-         (is (not (:seon.error/kind result)) (pr-str result))
+         (is (not (:seon.error/at result)) (pr-str result))
          (is (empty? (db/q (db/db connection)
                           '[:find [?alias ...] :where
                             [?ns :seon.ns/name my.disposable.program]
@@ -105,7 +104,7 @@
          (doseq [ctx [base fork]]
            (is (nil? (get-in @(:env ctx) [:namespaces 'my.disposable.program :aliases 'text])))))
        (let [result (program/remove-ns! context 'my.disposable.program)]
-         (is (not (:seon.error/kind result)) (pr-str result))
+         (is (not (:seon.error/at result)) (pr-str result))
          (is (= #{'my.disposable.program (symbol "my.disposable.program" "target") (symbol "my.disposable.program" "caller")}
                 (:seon.program/affected result)))
          (doseq [ctx [base fork]]

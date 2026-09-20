@@ -10,7 +10,7 @@
 
   Example:
   (my.turn/complete {:my.turn/result \"The requested verification passed.\"})"
-  {:malli/schema [:=> [:cat [:map [:my.turn/result :my.turn/result]]] [:or :my.turn/completed :seon.error/value]]}
+  {:malli/schema [:=> [:cat [:map [:my.turn/result :my.turn/result]]] [:or :my.turn/completed :my.turn/blank-result-error]]}
   [request]
   (run/complete (:my.turn/result request)))
 
@@ -22,7 +22,7 @@
 
   Example:
   (my.turn/wait {:my.turn/note \"Waiting for the missing source data.\"})"
-  {:malli/schema [:=> [:cat [:map [:my.turn/note :my.turn/note]]] [:or :my.turn/wait :seon.error/value]]}
+  {:malli/schema [:=> [:cat [:map [:my.turn/note :my.turn/note]]] [:or :my.turn/wait :my.turn/blank-note-error]]}
   [request]
   (run/wait (:my.turn/note request)))
 

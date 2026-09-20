@@ -48,7 +48,7 @@
   (my.fs/read {:my.fs/path \"AGENTS.md\" :my.fs/max-bytes 1024})"
   {:malli/schema
    [:=> [:cat :my.fs/read-request]
-    [:or :my.fs/read-result :seon.error/value]]
+    [:or :my.fs/read-result :my.fs/error]]
    :seon.workload :io
    :seon.effect/capability 'seon.fs.jvm/read}
   [request]
@@ -68,7 +68,7 @@
                  :my.fs/precondition {:my.fs/expected-absence? true}})"
   {:malli/schema
    [:=> [:cat :my.fs/write-request]
-    [:or :my.fs/write-result :seon.error/value]]
+    [:or :my.fs/write-result :my.fs/error]]
    :seon.workload :io
    :seon.effect/capability 'seon.fs.jvm/write}
   [request]
@@ -85,7 +85,7 @@
                :my.fs/max-depth 1 :my.fs/max-results 10})"
   {:malli/schema
    [:=> [:cat :my.fs/glob-request]
-    [:or :my.fs/glob-result :seon.error/value]]
+    [:or :my.fs/glob-result :my.fs/error]]
    :seon.workload :io
    :seon.effect/capability 'seon.fs.jvm/glob}
   [request]
@@ -102,7 +102,7 @@
   (my.fs/stat {:my.fs/path \"AGENTS.md\"})"
   {:malli/schema
    [:=> [:cat :my.fs/stat-request]
-    [:or :my.fs/stat-result :seon.error/value]]
+    [:or :my.fs/stat-result :my.fs/error]]
    :seon.workload :io
    :seon.effect/capability 'seon.fs.jvm/stat}
   [request]

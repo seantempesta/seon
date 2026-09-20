@@ -2,21 +2,27 @@
   "Start and inspect capability requests that may finish later."
   (:refer-clojure :exclude [await])
   (:require [seon.background :as background]
+            [seon.error.refusal :as refusal]
             [seon.schema.edn :as schema.edn]))
 
 (schema.edn/load! {})
 
 (defn- invalid-call
   [forms]
-  {:seon.error/kind ::invalid-call
-   :seon.error/message
-   "my.background/background needs one direct capability call with one request map, optionally preceded by an options map. Inspect (doc my.background/background)."
-   :seon.error/data
-   {:seon.error/diagnostic-operation 'my.background/background
+  (refusal/diagnostic
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :my.background/call
+    :seon.error/operation 'my.background/background
+    :seon.error/message
+    "background refused its call at [:forms]: expected one direct capability call with one request map, optionally preceded by an options map, but observed another form shape. Fix: inspect (doc my.background/background) and supply the documented direct call."
+    :seon.error/diagnostic-layer :my.background/call
+    :seon.error/diagnostic-operation 'my.background/background
     :seon.error/diagnostic-member :forms
     :seon.error/diagnostic-expected '(my.background/background (capability request-map))
-    :seon.error/diagnostic-offending (pr-str forms)}
-   :my.background/invalid-call true})
+    :seon.error/diagnostic-offending forms
+    :seon.error/diagnostic-cause :my.background/invalid-call
+    :seon.error/diagnostic-evidence {:my.background/authored-form forms}
+    :my.background/invalid-call true}))
 
 (defmacro background
   "Start one capability request without waiting for its result.
@@ -57,7 +63,7 @@
                (my.shell/run! {:my.shell/argv [\"printf\" \"%s\" \"Verified.\"]
                                :my.shell/cwd \".\"}))]
     (my.background/poll {:my.background/result work}))"
-  {:malli/schema [:=> [:cat [:map [:my.background/result :my.background/result]]] [:or :my.background/receipt :seon.error/value]]}
+  {:malli/schema [:=> [:cat [:map [:my.background/result :my.background/result]]] [:or :my.background/receipt :my.background/invalid-result-error :my.background/missing-result-error]]}
   [request]
   (background/poll (:my.background/result request)))
 
@@ -75,6 +81,6 @@
                                :my.shell/cwd \".\"}))]
     (my.background/await {:my.background/result work
                           :my.turn/note \"Waiting for the process result.\"}))"
-  {:malli/schema [:=> [:cat [:map [:my.background/result :my.background/result] [:my.turn/note :my.turn/note]]] [:or :my.background/receipt :my.turn/wait :seon.error/value]]}
+  {:malli/schema [:=> [:cat [:map [:my.background/result :my.background/result] [:my.turn/note :my.turn/note]]] [:or :my.background/receipt :my.turn/wait :my.background/invalid-result-error :my.background/missing-result-error]]}
   [request]
   (background/await (:my.background/result request) (:my.turn/note request)))

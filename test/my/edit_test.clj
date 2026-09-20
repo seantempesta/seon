@@ -40,6 +40,6 @@
           (let [handler (:seon.effect/capability entry)
                 declaration (when handler
                               (db/pull @connection [:seon.fn/private? :seon.fn/spec]
-                                       [:seon.fn/sym (str handler)]))]
+                                       [:seon.fn/sym handler]))]
             (is (true? (:seon.fn/private? declaration)) (pr-str entry))
             (is (string? (:seon.fn/spec declaration)) (pr-str entry))))))))

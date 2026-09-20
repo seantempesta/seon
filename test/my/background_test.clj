@@ -33,9 +33,9 @@
          (macroexpand-1
           '(my.background/background
             (my.example/call {:my.example/id 1})))))
-  (is (= :my.background/invalid-call
-         (:seon.error/kind
-          (macroexpand-1 '(my.background/background (+ 1 2 3))))))
+  (let [refusal (macroexpand-1 '(my.background/background (+ 1 2 3)))]
+    (is (true? (:my.background/invalid-call refusal)))
+    (is (= 'my.background/background (:seon.error/operation refusal))))
   ;; The agent's own limit is ordinary execution data on the same call: the
   ;; config fact is the default, this wins over it in either direction.
   (is (= '(seon.effect/request!

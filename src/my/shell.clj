@@ -35,7 +35,7 @@
   (my.shell/run! {:my.shell/argv [\"printf\" \"%s\" \"Verified.\"] :my.shell/cwd \".\"})"
   {:malli/schema
    [:=> [:cat :my.shell/run-request]
-    [:or :my.shell/run-result :seon.error/value]]
+    [:or :my.shell/run-result :my.shell/error]]
    :seon.workload :io
    :seon.effect/capability 'seon.shell.jvm/run}
   [request]
