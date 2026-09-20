@@ -5283,3 +5283,17 @@ orchestrator-only integration namespace on the platform tier. Resumed on
 items 2–4; cluster.clj conversion and duplicate-publisher deletions land
 when step 1 releases the file. (A "usage limit" grep hit in its log was my
 monitor's own command text in a `ps` listing, not a stop.)
+
+## 2026-09-21 ~04:50 UTC — step 1: ownership expanded (option 2, bounded) to land
+
+`bridge-step1-registry` after the recorder fix: combined 337 tests / 7,345
+assertions / 15 F / 36 E; config follow-up 23 / 179 / 0 / 3 E; registry
+4,678 providers at most once, zero warm compiler calls, zero copies (the
+core proof); reds attributed to the facet census in `error.clj` /
+`sci/admit.clj` and the SCI walk allocation. Ruled option 2, bounded: step
+1 owns error.clj, sci/admit.clj, sci/kernel.clj and their tests for exactly
+those reds (native-path stale expectations flip to `:in`/key assertions;
+1a's row-acquisition design is classified, not done); walk allocation is a
+recorded measurement, not a landing condition; land as ONE commit when the
+six namespaces are green, or with the remaining reds classified by owner —
+the tree has been held four hours with three lanes waiting on these files.
