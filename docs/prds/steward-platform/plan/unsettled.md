@@ -5153,3 +5153,21 @@ fact on the base; a toolchain change forces one complete publication. Its
 closure prototype passes 2 tests / 24 assertions. Resumed; six rulings now
 sit in the spec (lineage, caller closure, type findings, namespace
 interface, general closure, toolchain identity).
+
+## 2026-09-21 ~01:45 UTC — host reuse and reader migration landed; results-reuse in its closing pass
+
+`results-reuse-everywhere` landed `b0b5eedfe`: `seon.test/run`,
+`run-owned`, the operator single-test request, `my.test/run` and
+`seon.plan/run-issue-tests!` all admit and record through the one
+authority; a matching green contributes `covered-by` without executing;
+readers migrated (`runner/latest-results`, `test/recorded-result`,
+`stale-in`, `verified?`, `changed-since-green`, `issue/status`, `done?`,
+`issue.opening`, `problems/failed-tests`, `render.test`). Host/reader
+regression 24–25 assertions green and recorded; an SCI reuse and an expiry
+proof pass. Boundaries: `fn.clj:1376/:1379/:1553` legacy readers → handed
+to the publication lane (owns fn.clj); `bootstrap.clj:245/:412/:460` →
+results-reuse once step 1 releases bootstrap_test.clj; admission suite
+4 F / 2 E to classify. A 286 MB fast log from a self-terminated invalid JVM
+is being deleted by the lane. Closing pass resumed; then the lane stops as
+landed and the orchestrator owes bare×2 + platform after the publication
+lane lands.
