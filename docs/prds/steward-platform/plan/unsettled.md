@@ -5310,3 +5310,16 @@ rule for the lane: further validation/selection choices are its own under
 two invariants (no nested gate or second JVM; coverage never silently
 dropped — moved to a named orchestrator namespace or listed as owed).
 Resumed on items 2–4.
+
+## 2026-09-21 ~05:25 UTC — step-2 launch spec written; step-3 spec lane launched
+
+`bridge-step2-design` landed `62a378a65`:
+[bridge-step2-walker-spec-2026-09-21.md](bridge-step2-walker-spec-2026-09-21.md)
+(verbatim launch text, canonical parity oracle, raw-walker census and
+disposition, dated caller inventory, measured deletion budget; 3–5
+lane-days). Launches on astra low the moment step 1 lands. Third slot →
+`bridge-step3-design` (astra high, read-only): step 3's launch text from
+its research note (stamp attribute declaration, RESET batch, acquisition
+function and typed refusal, relation to the publication's source digest,
+proofs, deletion budget). Editing lanes: step 1 (landing), publication
+(items 2–4); one read-only design lane.
