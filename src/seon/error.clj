@@ -91,7 +91,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -100,7 +100,7 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
      :seon.test/admission-error :seon.test/execution-error :seon.test/expired
@@ -226,7 +226,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -235,7 +235,7 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
      :seon.test/admission-error :seon.test/execution-error :seon.test/expired
@@ -251,6 +251,7 @@
          projection ::observation-attributes
          (fn []
            (let [forms (:seon.schema.projection/forms projection)
+                 stored-attributes (set (schema.form/database-attributes forms))
                  attributes
                  (loop [pending (vec (conj (facet-keys projection) :seon.error/base))
                         seen #{} result #{}]
@@ -264,8 +265,9 @@
                                 (into result members))))
                      result))]
              (into {}
-                   (map (fn [attribute]
-                          [attribute (schema.datahike/malli->datahike-attr-in projection attribute)]))
+                   (comp (filter stored-attributes)
+                         (map (fn [attribute]
+                                [attribute (schema.datahike/malli->datahike-attr-in projection attribute)])))
                    attributes))))]
     (letfn [(restore [value]
               (if-not (map? value)
@@ -327,7 +329,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -336,7 +338,7 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
      :seon.search/error :seon.test/error :seon.test.accretion/error
@@ -648,6 +650,26 @@
                             :seon.error/layer :seon.error/normalization
                             :seon.error/operation (or function 'seon.error/normalize)}
                            (when (map? error-value) error-value))
+        observation
+        (if ((schema/projection-validator projection :seon.db.write/validation-refusal) observation)
+          (-> observation
+              (assoc :seon.db.write/attempt
+                     {:seon.db.write.attempt/request-id (:seon.db.write.attempt/request-id observation)
+                      :seon.db.write.attempt/observed-at (:seon.error/at observation)
+                      :seon.db.write.attempt/operations
+                      (project-observation caps (get-in observation [:seon.error/data :seon.db.write.attempt/transaction]))})
+              (dissoc :seon.db.write.attempt/request-id)
+              (update :seon.error/data dissoc :seon.db.write.attempt/transaction))
+          observation)
+        observation
+        (if ((schema/projection-validator projection :seon.schema/validation-refusal) observation)
+          (-> observation
+              (assoc :seon.schema/error-declaration
+                     (project-observation caps (:seon.schema/refused-value observation))
+                     :seon.schema/declaration-expectation
+                     (project-observation caps (:seon.schema/expected-value observation)))
+              (dissoc :seon.schema/refused-value :seon.schema/expected-value))
+          observation)
         signature (signature projection observation
                              (or (some-> class-name symbol)
                                  (:seon.error/exception-class observation))
@@ -721,6 +743,7 @@
                                  (not= full-edn
                                        (:seon.error/data-edn fact)))))]
     {:seon.error/fact fact
+     :seon.error/source observation
      :seon.error/data-content full-edn}))
 
 (defn normalize
@@ -782,7 +805,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -791,7 +814,7 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
      :seon.search/error :seon.test/error :seon.test.accretion/error
@@ -818,7 +841,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -827,7 +850,7 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
      :seon.search/error :seon.test/error :seon.test.accretion/error
@@ -1594,7 +1617,9 @@
          request (cond-> request (map? source)
                    (assoc :seon.error/source
                           (stored-observation (:seon.schema/projection request) source)))
-         fact (or (:seon.error/fact request) (normalize request))
+         prepared (prepare request)
+         request (assoc request :seon.error/source (:seon.error/source prepared))
+         fact (or (:seon.error/fact request) (:seon.error/fact prepared))
          signature (:seon.error/signature fact)
          agent-id (second (:seon.error/agent fact))
          turn-id (second (:seon.error/run fact))
@@ -1644,10 +1669,12 @@
    projection ::observation-selector
    (fn []
      (let [forms (:seon.schema.projection/forms projection)
+           stored-attributes (set (schema.form/database-attributes forms))
            observation-keys (conj (facet-keys projection)
                                   :seon.error/base :seon.error.occurrence/occurrence)]
        (letfn [(members [schemas]
-                 (sort (into #{} (mapcat #(map first (schema.form/map-entries forms (get forms %)))) schemas)))
+                 (sort (into #{} (comp (mapcat #(map first (schema.form/map-entries forms (get forms %))))
+                                       (filter stored-attributes)) schemas)))
                (selector [schemas active]
                  (into [:db/id]
                        (map (fn [attribute]
@@ -1675,7 +1702,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -1684,7 +1711,7 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
      :seon.test/admission-error :seon.test/execution-error :seon.test/expired
@@ -1730,7 +1757,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -1739,7 +1766,7 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
      :seon.search/error :seon.test/error :seon.test.accretion/error
@@ -1905,7 +1932,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -1914,7 +1941,7 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
      :seon.search/error :seon.test/error :seon.test.accretion/error

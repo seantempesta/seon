@@ -19,6 +19,7 @@
    live in `seon.schema.internal`, outside agent context."
   (:require [malli.core :as m]
             [seon.id :as id]
+            [seon.error.refusal :as error.refusal]
             [malli.registry :as mr]
             [clojure.core.reducers :as reducers]
             [clojure.set :as set]
@@ -38,8 +39,6 @@
 ;;; instead of a `requiring-resolve` on every call (AGENTS §2.1).
 (defonce ^:private schema-edn-packaged-forms
   (delay (requiring-resolve 'seon.schema.edn/packaged-forms)))
-(defonce ^:private error-diagnostic
-  (delay (requiring-resolve 'seon.error/diagnostic)))
 (defonce ^:private schema-datahike-storable-attribute-in?
   (delay (requiring-resolve 'seon.schema.datahike/storable-attribute-in?)))
 (defonce ^:private schema-datahike-storable-properties-in
@@ -368,7 +367,7 @@
    The answer is retained by the projection's own runtime holder. A projection
    assembled without that holder remains correct and simply derives afresh."
   {:malli/schema
-   [:=> [:catn [:seon.schema/projection :map] [:seon.schema/cache-key [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A projection cache key is ordinary heterogeneous data chosen by its caller; cached values are the supplied thunk's arbitrary result.", :gen/elements [nil false 0 "" :k [] {}]}]] [:seon.schema/derive-fn [:fn clojure.core/ifn?]]] :seon.schema/value]}
+   [:=> [:catn [:seon.schema/projection :map] [:seon.schema/cache-key [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A projection cache key is ordinary heterogeneous data chosen by its caller; cached values are the supplied thunk's arbitrary result.", :gen/elements [nil false 0 "" :k [] {}]}]] [:seon.schema/derive-fn [:fn clojure.core/ifn?]]] [:or :seon.schema/value :seon.schema/validation-refusal]]}
   [projection cache-key derive-fn]
   (if-let [cache (projection-cache projection)]
     (let [candidate (delay (derive-fn))
@@ -1060,7 +1059,7 @@
 
 (defn call-with-projection
   "Call `f` with one immutable database-derived projection for this operation."
-  {:malli/schema [:=> [:cat :map [:fn clojure.core/ifn?]] [:or :seon.error/base :seon.instrument/registration-error [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The callback preserves declaration data or returns the writer's base diagnostic or instrumentation registration refusal unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
+  {:malli/schema [:=> [:cat :map [:fn clojure.core/ifn?]] [:or :seon.error/base :seon.schema/validation-refusal :seon.db.write/validation-refusal :seon.instrument/registration-error [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The callback preserves declaration data or returns the writer's base diagnostic or instrumentation registration refusal unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [projection f]
   (binding [*projection* projection
             *projection-state* nil]
@@ -1068,7 +1067,7 @@
 
 (defn call-with-projection-state
   "Call `f` with one cluster-owned, advanceable schema projection state."
-  {:malli/schema [:=> [:cat [:fn clojure.core/deref] [:fn clojure.core/ifn?]] [:or :seon.instrument/registration-error [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The body returns its polymorphic result unchanged; instrumentation acquisition can return its declared registration refusal.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
+  {:malli/schema [:=> [:cat [:fn clojure.core/deref] [:fn clojure.core/ifn?]] [:or :seon.schema/validation-refusal :seon.db.write/validation-refusal :seon.instrument/registration-error [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The body returns its polymorphic result unchanged; instrumentation acquisition can return its declared registration refusal.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [projection-state f]
   (binding [*projection-state* projection-state
             *projection* nil
@@ -1722,20 +1721,32 @@
      :seon.schema/render-function-has-no-declared-contract}))
 
 (defn- render-contract-refusal!
+  {:malli/schema
+   [:=> [:cat [:map [:seon.schema/key :seon.schema/key]
+                    [:seon.render/property :qualified-keyword]
+                    [:seon.render/function :qualified-symbol]]
+         [:map [:seon.schema/render-contract :seon.schema/value]
+               [:seon.schema/render-input :seon.schema/value]
+               [:seon.schema/render-contract-cause :qualified-keyword]]]
+    :nil]}
   [{schema-key :seon.schema/key
     property :seon.render/property
     renderer :seon.render/function}
    {:seon.schema/keys [render-contract render-input render-contract-cause]}]
   (let [diagnostic
-        (@error-diagnostic
-         {:seon.error/kind :seon.schema/render-contract-incoherent
+        (error.refusal/diagnostic
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer :seon.schema/admission
+          :seon.error/operation 'seon.schema/render-contract-refusal!
+          :seon.schema/refused-value renderer
+          :seon.schema/expected-value schema-key
           :seon.error/message
           (str "Schema publication refused " schema-key ": " property
                " names " renderer " whose declared input "
                (pr-str render-input) " does not accept the declaring shape.")
           :seon.error/diagnostic-layer :schema-admission
           :seon.error/diagnostic-operation
-          'seon.schema/render-contract-coherence
+          'seon.schema/render-contract-refusal!
           :seon.error/diagnostic-member schema-key
           :seon.error/diagnostic-expected schema-key
           :seon.error/diagnostic-offending renderer
@@ -1745,7 +1756,7 @@
            :seon.render/property property
            :seon.render/function renderer
            :seon.fn/spec render-contract
-           :seon.fn/input render-input} :seon.schema/render-contract-incoherent true})]
+           :seon.fn/input render-input}})]
     (throw (ex-info (:seon.error/message diagnostic) diagnostic))))
 
 (defn- assert-render-contracts!
@@ -2610,14 +2621,18 @@
                      :seon.schema.admission/reason
                      "The refused value is whatever a caller handed in place of a database value."
                      :gen/elements [nil false {} :k]}]]
-    :seon.error/value]}
+    :seon.schema/validation-refusal]}
   [db]
-  (@error-diagnostic
-   {:seon.error/kind :seon.schema/invalid-projection-source
+  (error.refusal/diagnostic
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.schema/derivation
+    :seon.error/operation 'seon.schema/refuse-projection-source
+    :seon.schema/refused-value db
+    :seon.schema/expected-value :seon.db/database-value
     :seon.error/message
     "The program projection requires a Datahike database value; a projection with no forms is never derived from one that is not."
     :seon.error/diagnostic-layer :schema-derivation
-    :seon.error/diagnostic-operation 'seon.schema/projection-from-database
+    :seon.error/diagnostic-operation 'seon.schema/refuse-projection-source
     :seon.error/diagnostic-member :seon.schema/database-value
     :seon.error/diagnostic-expected :seon.db/database-value
     :seon.error/diagnostic-offending db
@@ -2791,13 +2806,17 @@
   {:malli/schema
    [:=> [:cat ::registry-key :seon.schema/pull-selector-element
          :keyword :string]
-    :seon.error/value]}
+    :seon.schema/validation-refusal]}
   [schema-key selector-element cause message]
-  (@error-diagnostic
-   {:seon.error/kind :seon.schema/unsupported-pull-selector
+  (error.refusal/diagnostic
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.schema/derivation
+    :seon.error/operation 'seon.schema/pulled-selector-refusal
+    :seon.schema/refused-value selector-element
+    :seon.schema/expected-value :seon.schema/pull-selector-element
     :seon.error/message message
     :seon.error/diagnostic-layer :schema-derivation
-    :seon.error/diagnostic-operation 'seon.schema/pulled-form-in
+    :seon.error/diagnostic-operation 'seon.schema/pulled-selector-refusal
     :seon.error/diagnostic-member schema-key
     :seon.error/diagnostic-expected :seon.schema/pull-selector-element
     :seon.error/diagnostic-offending selector-element
@@ -3046,7 +3065,7 @@
   (let [derived-key (pulled-schema-key schema-key selector)
         projected (projection-with-pulled-form-in
                    projection schema-key selector)]
-    (if (and (map? projected) (:seon.error/kind projected))
+    (if (and (map? projected) (:seon.schema/expected-value projected))
       projected
       (get (:seon.schema.projection/forms projected) derived-key))))
 

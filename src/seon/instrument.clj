@@ -542,7 +542,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -551,7 +551,7 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
      :seon.search/error :seon.test/error :seon.test.accretion/error
@@ -580,7 +580,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -589,7 +589,7 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
      :seon.search/error :seon.test/error :seon.test.accretion/error

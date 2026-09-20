@@ -12,7 +12,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -21,9 +21,13 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+     :seon.test/admission-error :seon.test/execution-error :seon.test/expired
+     :seon.test/not-runnable-error :seon.test/resolution-error
+     :seon.test/selection-error :seon.test/unknown-error
+     :seon.test.run/immutable-error :seon.test.run/unavailable-error
      :seon.search/error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
@@ -68,7 +72,7 @@
            :seon.error/diagnostic-evidence (known-or-unknown diagnostic-evidence)})))
 
 (defn refusal
-  "Deepest classified `ex-data`, retaining its exception message when absent;
+  "Deepest structural error in `ex-data`, retaining its exception message;
   else deepest non-empty data, or nil.
 
   This is a genuine pass-through: the data it returns is the data some other
@@ -90,7 +94,7 @@
      :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
      :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
      :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
      :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
      :seon.flow/error :seon.fn/error :seon.fn.binding/error
      :seon.instrument/arity-error :seon.instrument/contract-error
@@ -99,9 +103,13 @@
      :seon.problems/error :seon.program/error :seon.reconcile/error
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema.datahike/error :seon.schema.shape/error
+     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+     :seon.test/admission-error :seon.test/execution-error :seon.test/expired
+     :seon.test/not-runnable-error :seon.test/resolution-error
+     :seon.test/selection-error :seon.test/unknown-error
+     :seon.test.run/immutable-error :seon.test.run/unavailable-error
      :seon.search/error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
@@ -114,9 +122,11 @@
       (let [data (ex-data candidate)]
         (recur (ex-cause candidate)
                (if (seq data) data deepest)
-               (if (some? (:seon.error/kind data))
+               (if (and (:seon.error/at data)
+                        (:seon.error/layer data)
+                        (:seon.error/operation data))
                  (assoc data :seon.error/message
                         (or (:seon.error/message data)
                             (not-empty (ex-message candidate))
-                            (str (:seon.error/kind data))))
+                            (str (:seon.error/operation data))))
                  classified))))))

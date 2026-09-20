@@ -35,11 +35,11 @@
                 [:map [:optional [:= true]]]
                 :seon.schema/definition]],
               :pulled-entry-result
-              [:or :seon.schema/pulled-entry :seon.error/value],
+              [:or :seon.schema/pulled-entry :seon.schema/validation-refusal],
               :pulled-form-result
-              [:or :seon.schema/malli-form :seon.error/value],
+              [:or :seon.schema/malli-form :seon.schema/validation-refusal],
               :pulled-projection-result
-              [:or :seon.schema/projection :seon.error/value],
+              [:or :seon.schema/projection :seon.schema/validation-refusal],
               :definition :seon.schema/malli-form,
               :value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                             :seon.schema.admission/reason "The shared value schema represents arbitrary in-memory Clojure values, including nil and host objects; callers declaring concrete data must use their own shape."
@@ -160,6 +160,23 @@
  :seon.schema/render-contract-incoherent [:= true]
  :seon.schema/render-contract-incoherent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema/render-contract-incoherent class marker"} [:seon.schema/render-contract-incoherent :seon.schema/render-contract-incoherent] [:seon.error/message :seon.error/message]]
  ; Additive error declaration manifest, 2026-09-18.
+
+
+ :seon.schema/refused-value
+ [:schema {:description "The actual value refused by schema validation, carried transiently to recorder admission; it may be a declaration, selector, or unavailable database value."}
+  :seon.schema/value]
+
+ :seon.schema/expected-value
+ [:schema {:description "The required schema key observed at the refusing boundary, carried transiently to recorder admission."}
+  :seon.schema/key]
+
+ :seon.schema/validation-refusal
+ [:and {:seon.db/attributes false
+        :description "Raw schema validation evidence. Recorder admission projects the refused and expected values into the existing stored schema error components."}
+  :seon.error/base
+  [:map
+   [:seon.schema/refused-value :seon.schema/refused-value]
+   [:seon.schema/expected-value :seon.schema/expected-value]]]
 
  :seon.schema/declaration-expectation
  [:and

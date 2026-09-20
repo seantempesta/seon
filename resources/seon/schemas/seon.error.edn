@@ -207,6 +207,7 @@
              :prepared
              [:map
               [:seon.error/fact :seon.error/fact]
+              [:seon.error/source :seon.error/source]
               [:seon.error/data-content :seon.error/data-content]],
              :steward :seon.db/ref,
              :of-steward

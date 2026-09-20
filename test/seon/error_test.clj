@@ -1092,7 +1092,6 @@
      {::test-support/extra-schema
       (schema.datahike/malli->datahike-schema-in projection [::manifest-id ::manifest-location ::manifest-observation ::manifest-explanations])}
      (fn [connection]
-       (test-support/apply-config! connection "error-manifest" {})
        (db/carry-connection-projection-state!
         connection (sci.eval/projection-state @connection projection))
        (test-support/transacted! connection [{::manifest-id "root-path"
@@ -1157,11 +1156,64 @@
              segment (:v (first (db/datoms database :eavt location :seon.error.location/segments)))
              before (db/basis-t database)
              result (db/transact! connection [[:db/add segment :seon.error.location.segment/ordinal 3]])]
-         (is (schema/valid-candidate-value? :seon.db.write/error result) (pr-str result))
+         (is (schema/valid-candidate-value? :seon.db.write/validation-refusal result) (pr-str result))
+         (is (= [[:db/add segment :seon.error.location.segment/ordinal 3]]
+                (get-in result [:seon.error/data :seon.db.write.attempt/transaction])))
          (is (= before (get-in result [:seon.error/basis :seon.error.basis/t])))
          (is (= before (db/basis-t (db/db connection))))
-         (is (= 2 (count (db/datoms database :eavt location :seon.error.location/segments)))))))))
+         (is (= 2 (count (db/datoms database :eavt location :seon.error.location/segments))))
+         (let [recording (error/recording database (commit-request result {}))
+               report (test-support/transacted! connection (:seon.db/tx-data recording))
+               occurrence (first (:seon.error/occurrences
+                                  (db/pull (:db-after report) (error/observation-selector projection)
+                                           (:seon.error/ref recording))))
+               attempt (:seon.db.write/attempt occurrence)]
+           (is (= (:seon.db.write.attempt/request-id result)
+                  (:seon.db.write.attempt/request-id attempt)))
+           (is (= before (get-in occurrence [:seon.error/basis :seon.error.basis/t])))
+           (is (= (mapv :v (db/datoms database :eavt segment :seon.error.location.segment/ordinal))
+                  (mapv :v (db/datoms (:db-after report) :eavt segment :seon.error.location.segment/ordinal)))
+               "The recorder stores the submitted transaction as evidence; it never executes it.")
+           (is (= (get-in result [:seon.error/data :seon.db.write.attempt/transaction])
+                  (admit/semantic-value
+                   (edn/read-string (get-in attempt [:seon.db.write.attempt/operations :seon.instrument/actual])))))
+           (is (false? (get-in attempt [:seon.db.write.attempt/operations :seon.error/capped?])))
+           (is (not (contains? occurrence :seon.db.write.attempt/request-id)))))))))
 
+
+(deftest schema-refusals-are-admitted-at-the-recorder
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/handed-projection)
+           unavailable {:seon.error-test/unavailable true}
+           raw (try (schema/projection-from-database unavailable)
+                    (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
+           recording (error/recording (db/db connection) (commit-request raw {}))
+           report (test-support/transacted! connection (:seon.db/tx-data recording))
+           root (db/pull (:db-after report) (error/observation-selector projection)
+                         (:seon.error/ref recording))
+           occurrence (first (:seon.error/occurrences root))]
+       (is ((schema/projection-validator projection :seon.schema/validation-refusal) raw) (pr-str raw))
+       (is ((schema/projection-validator projection :seon.schema/error) (error/latest-fact root)))
+       (is (= unavailable
+              (admit/semantic-value
+               (edn/read-string (get-in occurrence [:seon.schema/error-declaration :seon.instrument/actual])))))
+       (is (= :seon.db/database-value
+              (admit/semantic-value
+               (edn/read-string (get-in occurrence [:seon.schema/declaration-expectation :seon.instrument/actual])))))
+       (is (not (contains? occurrence :seon.schema/refused-value)))
+       (is (= (second (:seon.error/ref recording))
+              (:seon.error/signature (error/normalize (request (error/latest-fact root))))))))))
+
+(deftest cause-chain-reading-preserves-the-deepest-complete-observation
+  (let [observation {:seon.error/at #inst "2026-09-20T00:00:00Z"
+                     :seon.error/layer :seon.error-test/cause-chain
+                     :seon.error/operation 'seon.error-test/check
+                     :seon.error/message "A complete refusal"
+                     :seon.agent/error-agent-id "observed"}
+        underlying (ex-info "Underlying evidence" {:seon.error-test/evidence "retained"})
+        refusal (ex-info "Refused" observation underlying)]
+    (is (= observation (error/refusal (ex-info "Wrapper" {:seon.error-test/wrapper true} refusal))))))
 
 (deftest error-facets-persist-through-the-real-occurrence-owner
   (test-support/with-database

@@ -883,7 +883,7 @@
         mismatch-data (ex-data mismatch)]
     (testing "a mismatch refuses with both declared sides and the reason"
       (is (instance? clojure.lang.ExceptionInfo mismatch))
-      (is (= 'seon.schema/render-contract-coherence
+      (is (= 'seon.schema/render-contract-refusal!
              (:seon.error/operation mismatch-data)))
       (is (= shape
              (get-in mismatch-data
@@ -891,7 +891,7 @@
       (is (= shape
              (get-in mismatch-data
                      [:seon.error/data :seon.error/diagnostic-member])))
-      (is (= 'seon.schema/render-contract-coherence
+      (is (= 'seon.schema/render-contract-refusal!
              (get-in mismatch-data
                      [:seon.error/data :seon.error/diagnostic-operation])))
       (is (= renderer
@@ -1309,12 +1309,24 @@
                 [:and :seon.error/base [:map [:seon.error/at :string]]]
                 [:and :seon.error/base [:map]]
                 [:and :seon.error/base [:map [::domain-marker ::domain-marker]]]
-                [:and :seon.error/base [:map [::raw-payload ::raw-payload]]]]]
+                [:and {:seon.db/attributes true} :seon.error/base
+                 [:map {:seon.db/attributes true} [::raw-payload ::raw-payload]]]]]
          (let [outcome (try (schema/build-projection
                             (assoc forms ::domain-marker :boolean ::raw-payload :map
                                    ::invalid-facet definition))
                            nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-           (is (map? outcome) (str "Declaration must refuse: " definition))))))))
+           (is (map? outcome) (str "Declaration must refuse: " definition))))
+       (let [raw (schema/build-projection
+                  (assoc forms ::raw-payload :map
+                         ::raw-facet [:and {:seon.db/attributes false} :seon.error/base
+                                      [:map [::raw-payload ::raw-payload]]]))
+             observation {:seon.error/at (java.util.Date.)
+                          :seon.error/layer ::admission
+                          :seon.error/operation 'seon.schema-test/error-declarations-expand-all-inherited-members
+                          ::raw-payload {::observed (Object.)}}]
+         (is ((schema/projection-validator raw ::raw-facet) observation))
+         (is (not (some #{::raw-payload}
+                        (schema.form/database-attributes (:seon.schema.projection/forms raw))))))))))
 
 (deftest error-facets-and-their-owned-members-are-storable
   (test-support/with-database
@@ -1324,6 +1336,7 @@
            facets (into #{:seon.error/base}
                         (keep (fn [[k definition]]
                                 (when (and (vector? definition)
+                                           (:seon.db/attributes (schema.form/schema-properties forms definition))
                                            (schema.form/extends-schema? forms definition :seon.error/base)) k)))
                         forms)
            declarations

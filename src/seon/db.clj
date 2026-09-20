@@ -48,14 +48,6 @@
 ;;; require `seon.db`, so this namespace cannot require them back. One
 ;;; resolution per var, realized at first use, instead of a
 ;;; `requiring-resolve` on every call (AGENTS §2.1).
-(defonce ^:private error-diagnostic
-  (delay (requiring-resolve 'seon.error/diagnostic)))
-(defonce ^:private error-project-observation
-  (delay (requiring-resolve 'seon.error/project-observation)))
-(defonce ^:private config-effective
-  (delay (requiring-resolve 'seon.config/effective)))
-(defonce ^:private config-result-caps
-  (delay (requiring-resolve 'seon.config/result-caps)))
 (defonce ^:private error-explain-problem
   (delay (requiring-resolve 'seon.error/explain-problem)))
 (defonce ^:private error-problem-sentence
@@ -180,7 +172,7 @@
   {:malli/schema [:=> [:cat :map] :seon.error/base]}
   [request]
   (let [operation (:seon.error/diagnostic-operation request)]
-    (@error-diagnostic
+    (error.refusal/diagnostic
      (assoc request
             :seon.error/at (java.util.Date.)
             :seon.error/layer (keyword "seon.db" (name (:seon.error/diagnostic-layer request)))
@@ -4102,37 +4094,19 @@
            (seq (d/datoms database :eavt eid :seon.agent/id))))))))
 
 (defn- write-observation
-  "Complete a refused write with the request and its immutable pre-write basis.
-  Before a branch has one selected configuration, retain the base refusal and
-  state why its bounded request projection could not be acquired."
+  "Carry the actual refused request and immutable pre-write basis as data.
+  Recorder admission owns its bounded stored projection."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction :seon.error/base]
-                  :seon.db/error-result]}
+                  [:and :seon.db.write/validation-refusal :seon.db/error-result]]}
   [database transaction observation]
-  (let [cluster-names (d/q '[:find [?name ...]
-                            :where [?cluster :seon.cluster/config ?configuration]
-                                   [?configuration :seon.config/cluster ?name]] database)
-        config-names (if (seq cluster-names) cluster-names
-                        (d/q '[:find [?name ...] :where [_ :seon.config/cluster ?name]] database))]
-    (if-not (= 1 (count config-names))
-      (assoc-in observation [:seon.error/data ::observation-unavailable]
-                "The write basis does not select exactly one configuration for bounded evidence.")
-      (let [configuration (@config-effective database (first config-names))
-            caps (@config-result-caps configuration)
-            at (:seon.error/at observation)]
-        (if-not (and (pos-int? (:seon.config.eval.result/max-bytes caps))
-                     (pos-int? (:seon.config.eval.result/max-source caps)))
-          (assoc-in observation [:seon.error/data ::observation-unavailable] caps)
-          (assoc observation
-                 :seon.db.write/attempt
-                 {:seon.db.write.attempt/request-id (id/id)
-                  :seon.db.write.attempt/observed-at at
-                  :seon.db.write.attempt/operations
-                  (@error-project-observation caps transaction)}
-                 :seon.error/basis
-                 {:seon.error.basis/store (datahike.store/store-identity (:store (dbi/-config database)))
-                  :seon.error.basis/branch (:branch (dbi/-config database))
-                  :seon.error.basis/commit (d/commit-id database)
-                  :seon.error.basis/t (dbi/-max-tx database)}))))))
+  (-> observation
+      (assoc :seon.db.write.attempt/request-id (id/id)
+             :seon.error/basis
+             {:seon.error.basis/store (datahike.store/store-identity (:store (dbi/-config database)))
+              :seon.error.basis/branch (:branch (dbi/-config database))
+              :seon.error.basis/commit (d/commit-id database)
+              :seon.error.basis/t (dbi/-max-tx database)})
+      (assoc-in [:seon.error/data :seon.db.write.attempt/transaction] transaction)))
 
 (defn- transact-call
   {:malli/schema

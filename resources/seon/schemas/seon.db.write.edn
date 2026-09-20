@@ -1,6 +1,17 @@
 {
  ; Additive error declaration manifest, 2026-09-18.
 
+ :seon.db.write/validation-refusal
+ [:and
+  {:seon.db/attributes false
+   :description "Raw refused request and its observed basis. Recorder admission projects the transaction data into the stored write attempt; this transient value is not a stored entity."}
+  :seon.error/base
+  [:map
+   [:seon.db.write.attempt/request-id :seon.db.write.attempt/request-id]
+   [:seon.error/basis :seon.error/basis]
+   [:seon.error/data
+    [:map [:seon.db.write.attempt/transaction :seon.db.write.attempt/transaction]]]]]
+
  :seon.db.write/attempt
  [:and
  {:seon.db/component true,

@@ -172,7 +172,8 @@
           (contract-error! identity definition [] :seon.schema/invalid-schema
                            "A boolean marker alone cannot define an error facet."
                            {:seon.schema/member (first additions)}))
-        (owned-storage! definition #{identity}))
+        (when (:seon.db/attributes (form/schema-properties forms definition))
+          (owned-storage! definition #{identity})))
       (doseq [property [:seon.render/ai :seon.render/html]
               :let [entry (find properties property)]
               :when (and entry (not (qualified-symbol? (val entry))))]

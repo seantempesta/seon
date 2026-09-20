@@ -1726,7 +1726,6 @@ three-suite task remains **not green**, with the exact remaining producer,
 admission and kernel boundaries above. Cold and live proof remain with the
 orchestrator.
 
-
 ## Composition continuation — 2026-09-20, blocked at the foreign overlay boundary
 
 Read the composition review Part 1 and Part 2 ranks 7–8, and the amended
@@ -1934,3 +1933,55 @@ bin/test --paths \
 | Combined pre-change fast run | 128,632 | `9abc596e0a1a60ed32b94362469ae1788fa252e8082807c07bc5c4d73c6444ac` |
 | Post-change overlay refusal | 975 | `17753b1f9c8b8e9a7ab207d65d310cc0a2e9482963b2888d18088ffa4b6004a8` |
 | Required namespace load | 205 | `579c3de9fb226ffa47e63f1160596a1fe89089af30718e0a8855f4a369c28a18` |
+
+## Raw producer and recorder continuation (2026-09-20)
+
+The orchestrator explicitly authorized plain working-tree fast iteration after
+the overlay refused the paused render lane's dirty callers. No worktree,
+lifecycle operation, or cold gate was used. The first five-suite run completed
+with **198 tests / 5,194 assertions / 32 failures / 29 errors**. The raw writer
+regression and both kernel regressions passed; this is an intermediate tally.
+
+Database validation refusals now carry request identity, the observed basis
+entity, and the actual submitted transaction as transient data. The writer no
+longer acquires rendering configuration or projects the transaction. `prepare`
+projects that evidence into the unchanged stored write attempt before deriving
+the signature; recording stores the prepared observation. The regression reads
+the occurrence through the real owner, decodes the projected transaction, checks
+the original basis/request identity, and verifies recording did not execute it.
+
+Schema's three diagnostic producers now construct complete raw
+`:seon.schema/validation-refusal` values through the leaf constructor. Recorder
+admission projects the refused declaration and expected key into the existing
+stored schema facet. Transient facets retain declaration validation but do not
+promise Datahike attributes; storage readers select only declared datom
+attributes. Pull-result and projection-cache outputs declare the raw refusal,
+and the pull consumer branches on its required expected-value member.
+
+The first run verified the remaining pull failures named the projection cache's
+undeclared raw facet. The new schema-recorder fixture initially supplied a
+keyword to a map-input producer, so it observed instrumentation instead of that
+producer; the fixture now supplies a map. Neither contract was weakened.
+
+The cause-chain reader preserves the deepest observation with all three base
+members even when a deeper exception carries ordinary data. Its pass-through
+contracts include the nine test facets. The kernel separately preserves that
+value, or constructs its declared guard-observation facet with actual duration
+and the complete diagnostic record. The deadline regression tests that facet
+and the recorded `:time` outcome.
+
+The working-tree facet manifest had 89 facets versus 74 declared at three
+pass-through boundaries. Fifteen additional facets were in foreign render
+drafts; this is a measured integration boundary, not permission to add references
+to schemas absent from HEAD. Final verification below will name the remaining
+tests and exact missing keys. The open-map wrapper regression now asserts that
+both intended facets are present rather than asserting an exclusive taxonomy:
+the same value also satisfies the newly landed `:seon.test/expired` shape.
+
+### RESET NEEDED for this continuation
+
+No stored attribute type changes. The new keys
+`:seon.db.write.attempt/transaction`, `:seon.schema/refused-value`, and
+`:seon.schema/expected-value` are transient. Existing stored write-attempt and
+schema-error shapes are unchanged. Earlier reset-batch obligations in this note
+remain owed.

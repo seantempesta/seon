@@ -1,6 +1,10 @@
 {
  ; Additive error declaration manifest, 2026-09-18.
 
+ :seon.db.write.attempt/transaction
+ [:schema {:description "Actual submitted transaction, carried as data to recorder admission. Never a database attribute or an executable recorder request."}
+  :seon.store/transaction]
+
  :seon.db.write.attempt/bound-ms
  [:int {:min 1}]
 
