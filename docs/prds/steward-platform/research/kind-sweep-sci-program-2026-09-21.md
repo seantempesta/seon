@@ -632,3 +632,36 @@ is clean. No default lifecycle or foreign file was changed. Cold proof is
 still orchestrator-owned. The next fast iteration includes call-preparation
 and `seon.db-test`, with the protocol namespaces because their supplier
 acquisition input changes.
+
+
+## Morning continuation — call preparation
+
+The previously unassigned hook family now declares six complete facets:
+incoherent supplier (key, supplier, schema and expected coherence), unavailable
+value (target, key, supplier and argument index), unresolved supplier (symbol),
+thrown supplier (symbol and exception class), invalid supplied value (target,
+key, supplier and expected schema), ambiguous call (target, count and candidate
+positions). Raw invalid output is retained at `:seon.error/offending`.
+
+`error-value` and `error-value?` are removed together with every caller.
+Call preparation's own consumers inspect their required facet members;
+the genuinely polymorphic supplier-result boundary uses the error owner's
+complete facet validation under the acquired projection (D12). The error
+owner requires call preparation, so its two inspection Vars resolve once
+through delays, following its existing SCI load-cycle idiom. No copied facet
+registry or per-call resolution is introduced.
+
+Supplier coherence accepts the row's success shape and declared facet shapes.
+One explicit transitional allowance remains for `seon.db/supplied-database-value`
+and `supplied-connection`, whose held owner still declares `:seon.error/value`.
+Database query/history results also retain named inline debts; pass-through
+contracts use that owner's `:seon.db/error-result` union. `plan-for`/`plan`
+only produce a plan or nil and no longer claim an error they never return.
+
+The first combined snapshot waited for both occupied repository JVM slots;
+it was stopped before starting a test JVM so the completed canonical fixture
+repairs could be included. The completed slice loads and has clean lint.
+The post-commit fast pass is pending below. The protocol's `overrides` reader
+also normalizes a returned database failure, rather than promising an
+undeclared pass-through. The large diagnostic is recorded in
+[the reporting issue](../../../seon/issues/call-preparation-refusal-dumps-the-acquired-projection.md).

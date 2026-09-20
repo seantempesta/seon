@@ -58,7 +58,7 @@
  :validators
  [:map-of :seon.call-preparation/key :seon.schema/compiled-validator],
 
- :refusals [:vector :seon.error/value],
+ :refusals [:vector [:or :seon.call-preparation/incoherent-supplier-error :seon.db/error-result]],
 
  ;; THE HOT-PATH GATE. Every identity in this cluster whose contract could be
  ;; prepared at all, derived by the same query set the plan is compiled from.
@@ -217,4 +217,30 @@
   {:error/message
    "must be a call-preparation state atom built by seon.call-preparation/state"
    :gen/gen seon.call-preparation/state-generator}
-  seon.call-preparation/state?]}
+  seon.call-preparation/state?]
+ :target-symbol :qualified-symbol
+ :incoherent-key :qualified-keyword
+ :coherence-expectation :string
+ :unavailable-key :qualified-keyword
+ :unresolved-symbol :qualified-symbol
+ :thrown-supplier :qualified-symbol
+ :invalid-key :qualified-keyword
+ :incoherent-supplier-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.call-preparation/incoherent-key :seon.call-preparation/incoherent-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.call-preparation/schema-key :seon.call-preparation/schema-key] [:seon.call-preparation/coherence-expectation :seon.call-preparation/coherence-expectation]]]
+ :unavailable-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/unavailable-key :seon.call-preparation/unavailable-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.fn.argument/index :seon.fn.argument/index]]]
+ :unresolved-supplier-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.call-preparation/unresolved-symbol :seon.call-preparation/unresolved-symbol]]]
+ :supplier-threw-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.call-preparation/thrown-supplier :seon.call-preparation/thrown-supplier] [:seon.error/exception-class :seon.error/exception-class]]]
+ :invalid-supplied-value-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/invalid-key :seon.call-preparation/invalid-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.call-preparation/schema-key :seon.call-preparation/schema-key]]]
+ :ambiguous-call-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/supplied-count :seon.call-preparation/supplied-count] [:seon.call-preparation/candidates :seon.call-preparation/candidates]]]
+}

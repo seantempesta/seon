@@ -8,6 +8,7 @@
             [seon.call-preparation :as cp]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.error :as error]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
@@ -130,10 +131,10 @@
   [{:seon.call-preparation/key :seon.db/db
     :seon.call-preparation/schema [:seon.schema/key :seon.db/database-value]
     :seon.call-preparation/supplier
-    [:seon.fn/sym "seon.db/supplied-database-value"]}
+    [:seon.fn/sym 'seon.db/supplied-database-value]}
    {:seon.call-preparation/key :seon.db/connection
     :seon.call-preparation/schema [:seon.schema/key :seon.db/connection]
-    :seon.call-preparation/supplier [:seon.fn/sym "seon.db/supplied-connection"]}])
+    :seon.call-preparation/supplier [:seon.fn/sym 'seon.db/supplied-connection]}])
 
 (defn- projection
   "The acquired projection a probe hands to call preparation.
@@ -151,10 +152,10 @@
   `return-key` is the supplier's declared success arm: passing the row's own
   value schema makes the row coherent, and passing anything else makes it the
   incoherence falsifier."
-  [return-key]
+  [database return-key]
   (let [forms (assoc (schema/declaration-population) :sample/marker :int)
         supplier-spec [:=> [:cat :seon.env/environment]
-                       [:or return-key :seon.error/value]]
+                       [:or return-key :seon.call-preparation/unresolved-supplier-error]]
         target-spec [:=> [:cat :string :sample/marker] :string]
         contracts {'sample/supply-marker supplier-spec
                    'sample/target target-spec}
@@ -174,7 +175,8 @@
             :seon.program/schema-forms forms}))
         function-row
         (fn [function-symbol spec source arglists]
-          (merge {:seon.fn/sym function-symbol
+          (merge (test-support/program-fn-row database function-symbol source)
+                 {:seon.fn/sym function-symbol
                   ;; Every program row declares where its definition was
                   ;; admitted from; the fn schema requires it.
                   :seon.schema.admission/source :core
@@ -193,13 +195,13 @@
        :seon.program/predicate-functions predicate-functions
        :seon.program/schema-keys #{:sample/marker}
        :seon.program/schema-forms forms})
-     (function-row "sample/supply-marker" supplier-spec
+     (function-row 'sample/supply-marker supplier-spec
                    "(defn supply-marker [environment] 1)" '([environment]))
-     (function-row "sample/target" target-spec
+     (function-row 'sample/target target-spec
                    "(defn target [label marker] label)" '([label marker]))
      {:seon.call-preparation/key :sample/marker
       :seon.call-preparation/schema [:seon.schema/key :sample/marker]
-      :seon.call-preparation/supplier [:seon.fn/sym "sample/supply-marker"]}]))
+      :seon.call-preparation/supplier [:seon.fn/sym 'sample/supply-marker]}]))
 
 (defn- slot-keys
   [plan supplied-count]
@@ -216,7 +218,7 @@
             plan with no change to any dispatch code"
     (test-support/with-database
      (fn [connection]
-       (test-support/transacted! connection (synthetic-population :sample/marker))
+       (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
        (let [database @connection
              current (cp/snapshot database (projection))
              call-state (cp/state)]
@@ -224,7 +226,7 @@
              "the synthetic supplier's declared return agrees with its row")
          (is (contains? (:seon.call-preparation/supplied-defaults current)
                         :sample/marker))
-         (let [plan (cp/plan call-state database current "sample/target")]
+         (let [plan (cp/plan call-state database current 'sample/target)]
            (is (false? (:seon.call-preparation/empty? plan)))
            (is (= [{:seon.fn.argument/index 1
                     :seon.call-preparation/key :sample/marker
@@ -237,16 +239,16 @@
                                    :seon.call-preparation/inserts]))
                "the exact two-argument call invokes unchanged")
            (is (identical? plan (cp/plan call-state database current
-                                         "sample/target"))
+                                         'sample/target))
                "the compiled plan is cached, not recompiled per call")))))))
 
 (deftest an-undeclared-function-gets-an-empty-plan
   (test-support/with-database
    (fn [connection]
-     (test-support/transacted! connection (synthetic-population :sample/marker))
+     (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
      (let [database @connection
            current (cp/snapshot database (projection))
-           plan (cp/plan (cp/state) database current "sample/supply-marker")]
+           plan (cp/plan (cp/state) database current 'sample/supply-marker)]
        (is (true? (:seon.call-preparation/empty? plan))
            "the supplier itself declares no supplied default")))))
 
@@ -259,7 +261,7 @@
             arm never becomes an installed supplied default"
     (test-support/with-database
      (fn [connection]
-       (test-support/transacted! connection (synthetic-population :string))
+       (test-support/transacted! connection (synthetic-population (db/db connection) :string))
        (let [database @connection
              current (cp/snapshot database (projection))
              refusal (first (filter #(= :sample/marker
@@ -267,13 +269,12 @@
                                          (:seon.error/data %)))
                                     (:seon.call-preparation/refusals current)))]
          (is (some? refusal) "the incoherent row is refused")
-         (is (= :seon.call-preparation/incoherent-supplier
-                (:seon.error/kind refusal)))
+         (is (contains? refusal :seon.call-preparation/incoherent-key))
          (is (not (contains? (:seon.call-preparation/supplied-defaults current)
                              :sample/marker))
              "and it is not installed, so it can never supply a value")
          (is (true? (:seon.call-preparation/empty?
-                     (cp/plan (cp/state) database current "sample/target")))
+                     (cp/plan (cp/state) database current 'sample/target)))
              "the target therefore has nothing to inject"))))))
 
 (deftest a-row-naming-an-absent-supplier-is-refused
@@ -281,23 +282,19 @@
    (fn [connection]
      (test-support/transacted! connection
                                [{:seon.ns/name 'sample :seon.ns/source "(ns sample)"}
-                                {:seon.fn/sym "sample/nowhere"
-                                 :seon.schema.admission/source :core
-                                 :seon.fn/ns [:seon.ns/name 'sample]
-                                 :seon.fn/source "(defn nowhere [] nil)"
-                                 :seon.fn/private? false}
+                                (test-support/program-fn-row
+                                 (db/db connection) 'sample/nowhere "(defn nowhere [] nil)")
                                 {:seon.call-preparation/key :sample/absent
                                  :seon.call-preparation/schema
                                  [:seon.schema/key :seon.db/database-value]
                                  :seon.call-preparation/supplier
-                                 [:seon.fn/sym "sample/nowhere"]}])
+                                 [:seon.fn/sym 'sample/nowhere]}])
      (let [current (cp/snapshot @connection (projection))
            refusal (first (filter #(= :sample/absent
                                       (:seon.call-preparation/key
                                        (:seon.error/data %)))
                                   (:seon.call-preparation/refusals current)))]
-       (is (= :seon.call-preparation/incoherent-supplier
-              (:seon.error/kind refusal)))
+       (is (contains? refusal :seon.call-preparation/incoherent-key))
        (is (not (contains? (:seon.call-preparation/supplied-defaults current)
                            :sample/absent)))
        (testing "and the cluster's own shipped rows are unaffected"
@@ -316,9 +313,9 @@
        (let [call-state (cp/state)
              cold @connection
              before (cp/current-snapshot call-state cold (projection))
-             warm (cp/plan call-state cold before "sample/target")]
+             warm (cp/plan call-state cold before 'sample/target)]
          (is (nil? warm) "sample/target is not in the program graph yet")
-         (test-support/transacted! connection (synthetic-population :sample/marker))
+         (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
          ;; No sleep and no listener: read the connection, compare the basis.
          (let [after-database @connection
                after (cp/current-snapshot call-state after-database
@@ -330,20 +327,20 @@
                           :sample/marker))
            (is (= [:sample/marker]
                   (slot-keys (cp/plan call-state after-database after
-                                      "sample/target")
+                                      'sample/target)
                              1))
                "and the plan compiled against the new row")))))))
 
 (deftest an-unrelated-transaction-refreshes-without-changing-the-row-basis
   (test-support/with-database
    (fn [connection]
-     (test-support/transacted! connection (synthetic-population :sample/marker))
+     (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
      (let [call-state (cp/state)
            first-database @connection
            first-snapshot (cp/current-snapshot call-state first-database
                                                (projection))
            first-plan (cp/plan call-state first-database first-snapshot
-                               "sample/target")]
+                               'sample/target)]
        (test-support/transacted! connection [{:seon.ns/name 'unrelated
                                               :seon.ns/source "(ns unrelated)"}])
        (let [next-database @connection
@@ -358,7 +355,7 @@
              "but the row basis did not move")
          (is (= first-plan
                 (cp/plan call-state next-database next-snapshot
-                         "sample/target"))
+                         'sample/target))
              "so the compiled plan survives unchanged"))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -370,11 +367,11 @@
             reuse it; B is a sovereign branch with its own state"
     (test-support/with-database
      (fn [connection-a]
-       (test-support/transacted! connection-a (synthetic-population :sample/marker))
+       (test-support/transacted! connection-a (synthetic-population (db/db connection-a) :sample/marker))
        (let [state-a (cp/state)
              database-a @connection-a
              snapshot-a (cp/current-snapshot state-a database-a (projection))
-             plan-a (cp/plan state-a database-a snapshot-a "sample/target")]
+             plan-a (cp/plan state-a database-a snapshot-a 'sample/target)]
          (is (= [:sample/marker] (slot-keys plan-a 1)))
          (test-support/with-database
           (fn [connection-b]
@@ -383,13 +380,13 @@
             (test-support/transacted! connection-b
                                       (filterv #(not (contains?
                                                       % :seon.call-preparation/key))
-                                               (synthetic-population :sample/marker)))
+                                               (synthetic-population (db/db connection-b) :sample/marker)))
             (let [state-b (cp/state)
                   database-b @connection-b
                   snapshot-b (cp/current-snapshot state-b database-b
                                                   (projection))
                   plan-b (cp/plan state-b database-b snapshot-b
-                                  "sample/target")]
+                                  'sample/target)]
               (is (not (contains? (:seon.call-preparation/supplied-defaults
                                    snapshot-b)
                                   :sample/marker))
@@ -421,7 +418,7 @@
                  names no dynamic var"
          (let [bare (env/environment {:seon.boot/cluster-name "bare"})
                refusal (db/supplied-database-value bare)]
-           (is (= :seon.db/unsupplied-custody (:seon.error/kind refusal)))
+           (is (= 'seon.db/unsupplied-custody-error (:seon.error/operation refusal)))
            (is (nil? (:seon.db/binding (:seon.error/data refusal))))))))))
 
 (defn- probe-ctx
@@ -475,7 +472,7 @@
                                           :sample/label "required"})))
            (let [current (cp/snapshot @connection (projection))
                  invocation (cp/plan-for @connection current
-                                         "seon.call-preparation-test/probe-map-needs-label")]
+                                         'seon.call-preparation-test/probe-map-needs-label)]
              (is (some? invocation))
              (is (= [] (cp/prepare current (environment-for connection)
                                    invocation [])))))
@@ -489,8 +486,7 @@
            (let [refusal (test-support/refusal-data
                           #(probe ctx
                                   "probe-received-connection? {:seon.db/connection 1}"))]
-             (is (= :seon.instrument/contract-violated
-                    (:seon.error/kind refusal)))
+             (is (= :input (:seon.instrument/check refusal)))
              (is (= 'seon.call-preparation-test/probe-received-connection?
                     (:seon.error/diagnostic-operation
                      (:seon.error/data refusal))))
@@ -501,8 +497,7 @@
          (testing "explicit caller wins, at an exact full arity"
            (let [refusal (test-support/refusal-data
                           #(probe ctx "probe-received-database? \"a\" 1"))]
-             (is (= :seon.instrument/contract-violated
-                    (:seon.error/kind refusal)))
+             (is (= :input (:seon.instrument/check refusal)))
              (is (= ["a" 1]
                     (:seon.error/diagnostic-offending
                      (:seon.error/data refusal)))
@@ -528,7 +523,7 @@
        (let [ctx (probe-ctx connection)
              current (cp/snapshot @connection (projection))
              plan (cp/plan (cp/state) @connection current
-                           "seon.call-preparation-test/probe-received-both")]
+                           'seon.call-preparation-test/probe-received-both)]
          (is (= #{1 3} (set (keys (:seon.call-preparation/by-supplied-count
                                    plan))))
              "partial placements are decided from values, never enumerated")
@@ -549,8 +544,7 @@
                 ctx
                 (str "(seon.call-preparation-test/probe-repeated-database "
                      "(seon.call-preparation-test/probe-current-database))"))]
-           (is (= :seon.call-preparation/ambiguous-call
-                  (:seon.error/kind refusal)))
+           (is (= 1 (:seon.call-preparation/supplied-count refusal)))
            (is (= #{[0] [1]}
                   (set (:seon.call-preparation/candidates
                         (:seon.error/data refusal)))))
@@ -594,9 +588,9 @@
                    :seon.call-preparation/key :seon.db/db
                    :seon.call-preparation/supplier-symbol
                    'sample/nowhere-at-all}
-             refusal (cp/supply current environment slot "sample/target")]
-         (is (= :seon.call-preparation/unavailable (:seon.error/kind refusal)))
-         (is (= "sample/target" (:seon.fn/sym (:seon.error/data refusal))))
+             refusal (cp/supply current environment slot 'sample/target)]
+         (is (= :seon.db/db (:seon.call-preparation/unavailable-key refusal)))
+         (is (= 'sample/target (:seon.fn/sym (:seon.error/data refusal))))
          (is (= :seon.db/db
                 (:seon.call-preparation/key (:seon.error/data refusal))))
          (is (= 1 (:seon.fn.argument/index (:seon.error/data refusal)))
@@ -612,7 +606,7 @@
            ;; cannot produce — is substituted into a real plan.
            (let [compiled (cp/plan-for
                            @connection current
-                           "seon.call-preparation-test/probe-received-database?")
+                           'seon.call-preparation-test/probe-received-database?)
                  _ (is (some? compiled))
                  result
                  (cp/prepare
@@ -624,8 +618,7 @@
                              :seon.call-preparation/inserts [slot]
                              :seon.call-preparation/entries []}})
                   [])]
-             (is (= :seon.call-preparation/unavailable
-                    (:seon.error/kind result)))
+             (is (= :seon.db/db (:seon.call-preparation/unavailable-key result)))
              (is (zero? @entered) "the target body was never entered"))))))))
 
 (deftest two-clusters-supply-their-own-custody
@@ -696,8 +689,8 @@
        (test-support/transacted! connection database-rows)
        ;; This ordinary call is also the program-graph edge that makes the
        ;; source-string callee part of a reduced focused-test projection.
-       (is (= :my.plan/agent-not-found
-              (:seon.error/kind
+       (is (= "missing"
+              (:my.plan/missing-agent-id
                (plan/plan {:seon.db/db @connection
                            :seon.agent/id "missing"}))))
        (let [ctx (sci.eval/cluster-ctx @connection connection)
@@ -716,7 +709,7 @@
                                (cp/hook runtime callee arguments))))
              current (cp/snapshot @connection acquired-projection)
              invocation-plan
-             (cp/plan (get ctx cp/carrier) @connection current "my.plan/plan")
+             (cp/plan (get ctx cp/carrier) @connection current 'my.plan/plan)
              omitted (try
                        (sci/eval-string* live "(my.plan/plan)")
                        (catch Throwable cause cause))
@@ -734,12 +727,12 @@
            (is (db/database-value? (:seon.db/db (first prepared))))
            (is (= "missing"
                   (:seon.agent/id (first prepared)))))
-         (is (= "my.plan/plan" @observed)
+         (is (= 'my.plan/plan @observed)
              "SCI hands the hook the indexed callee identity")
          (is (not (instance? Throwable omitted))
              (some-> ^Throwable omitted ex-message))
-         (is (= :my.plan/agent-not-found (:seon.error/kind omitted)))
-         (is (= omitted explicit)
+         (is (= "missing" (:my.plan/missing-agent-id omitted)))
+         (is (= (dissoc omitted :seon.error/at) (dissoc explicit :seon.error/at))
              "an explicit database wins and reaches the same function body"))))))
 
 (deftest call-preparation-cache-coherence-does-not-widen-evaluation-evidence
@@ -748,7 +741,7 @@
      (test-support/transacted! connection database-rows)
      (let [captured (atom [])
            call-state (cp/state)
-           sym "seon.call-preparation-test/probe-current-database"
+           sym 'seon.call-preparation-test/probe-current-database
            invocation-plan
            (binding [db/*read-evidence-sink* captured]
              (let [current (cp/current-snapshot call-state @connection
@@ -802,3 +795,39 @@
                       (get-in row [:seon.call-preparation/supplier :db/id])}])
        (is (false? (db/read-evidence-current? @connection evidence))
            "a real supplied-default declaration change still invalidates")))))
+
+
+(defn malformed-base-supplier
+  "Return ordinary map data which satisfies no declared error facet."
+  {:malli/schema [:=> [:cat :seon.env/environment] :map]}
+  [_environment]
+  {:seon.error/at (java.util.Date.)
+   :seon.error/layer :seon.call-preparation/test
+   :seon.error/operation 'seon.call-preparation-test/malformed-base-supplier})
+
+(deftest supplier-failures-have-facets-and-malformed-claims-remain-data
+  (test-support/with-database
+   (fn [connection]
+     (let [current (cp/snapshot (db/db connection) (projection))
+           slot {:seon.fn.argument/index 0
+                 :seon.call-preparation/key :seon.db/db
+                 :seon.call-preparation/supplier-symbol
+                 'seon.call-preparation-test/malformed-base-supplier}
+           value (cp/supply current (environment-for connection) slot 'sample/target)
+           missing (cp/supply current (environment-for connection)
+                              (assoc slot :seon.call-preparation/supplier-symbol
+                                     'sample/absent-supplier) 'sample/target)
+           cause (get-in missing [:seon.error/data :seon.call-preparation/cause])]
+       (is (contains? (error/facets (projection) value)
+                      :seon.call-preparation/invalid-supplied-value-error))
+       (is (= :seon.db/db (:seon.call-preparation/invalid-key value)))
+       (is (= :seon.db/database-value (:seon.call-preparation/schema-key value)))
+       (is (empty? (error/facets (projection) (:seon.error/offending value))))
+       (is (= 'seon.call-preparation-test/malformed-base-supplier
+              (:seon.error/operation (:seon.error/offending value))))
+       (is (contains? (error/facets (projection) missing)
+                      :seon.call-preparation/unavailable-error))
+       (is (= 'sample/target (:seon.call-preparation/target-symbol missing)))
+       (is (contains? (error/facets (projection) cause)
+                      :seon.call-preparation/unresolved-supplier-error))
+       (is (= 'sample/absent-supplier (:seon.call-preparation/unresolved-symbol cause)))))))

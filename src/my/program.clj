@@ -439,12 +439,18 @@
   database value. This does not assert JVM write-back or SCI loadability.
   Example: (my.program/overrides)"
   {:malli/schema [:=> [:cat :my.program/read-request]
-                  [:or [:vector :seon.fn/sym] :seon.program/read-refused-error :seon.program/not-found-error]]}
+                  [:or [:vector :seon.fn/sym] :seon.program/read-refused-error]]}
   [{database :seon.db/db :as request}]
   (read-result request 'my.program/overrides
-               #((requiring-resolve 'seon.program/overrides) database)))
+               #(let [result ((requiring-resolve 'seon.program/overrides) database)]
+                  (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.program/overrides passes seon.db's generic :seon.error/value.
+                    (throw (ex-info (:seon.error/message result) result))
+                    result))))
 
-(defn- refusal [operation report affected]
+(defn- refusal
+  {:malli/schema [:=> [:cat :qualified-symbol :seon.program/breakage :seon.program/affected]
+                  :seon.program/mutation-refused-error]}
+  [operation report affected]
   (merge
    (error/diagnostic
     {:seon.error/at (java.util.Date.)
