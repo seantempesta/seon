@@ -5780,3 +5780,25 @@ explicitly downstream; the explicit handler-protocol argument stays the
 effect owner's Phase-3 item. Resumed to land step 2 (walker deletion in
 one commit). Its note must name the recorder check that still refuses
 fast recording and in which JVM — the publication lane's follow-up.
+
+## 2026-09-21 ~18:30 UTC — CODEX USAGE LIMIT: two lanes stopped; owner paged; waiting for the go-ahead
+
+"You've hit your usage limit … try again at Sep 26th, 2026 12:45 PM"
+stopped `kind-sweep-ops-effects-2` (after landing `005ce2e86`, bootstrap
+kinds retired — its remaining owed items: effect settlement per option 2,
+context capture's two projections, the fn.clj gate-set facets) and
+`bridge-step2-walker` (mid-landing: ~19 files uncommitted in the tree —
+schema.clj, schema/datahike.clj, schema/internal.cljc, fn.clj, cluster.clj,
+turn.clj, render*, db.clj, error.clj, config.clj, issue.clj, agent.clj,
+print.cljc, reconcile.cljc, test/runner.clj, cluster/source.clj —
+PRESERVED, never reverted; `src/seon/schema/form.cljc` still present).
+`gate-restructure` still running until its next API call. Sessions
+retained; per the standing rule nothing is relaunched; the owner was paged
+by push notification. Orchestrator-only work while waiting: none of the
+owed cold proofs can run — a bare gate snapshots the working tree, which
+carries step 2's half-landed schema cut; `--paths` gates of landed families
+(1a, 1d, render, my-protocol, test-system, sci-program) are runnable on
+HEAD and will be, one at a time, if the wait is long. Resume order on
+go-ahead: step 2 (land), ops-effects-2 (finish), sci-program (my.program),
+publication (final measurements), gate-restructure (if it stopped), then
+the turn/cluster and bin/script sweeps, then bare×2 + platform.
