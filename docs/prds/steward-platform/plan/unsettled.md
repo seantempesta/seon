@@ -5114,3 +5114,18 @@ excludes seven inference-dependent finding classes; 16 findings; 8 tests /
 41 assertions green) and stopped at namespace-interface invalidation;
 ruled option 1 — requiring files invalidate through `:seon.ns/requires`
 facts; recorded in the spec; resumed.
+
+## 2026-09-21 ~00:35 UTC — sweep paused after its blocker slice; step 1 resumed on the freed callers; MCP fix adopting
+
+`kind-sweep-turn-cluster` landed `510a9236d` (MCP projection facets, two
+armed regressions), `61c5c5eb8` (process-identity facet), `6adc28242`
+(note) and stopped with the broader sweep incomplete (30 refs in
+cluster.clj, 68 in turn.clj); paths clean; session retained — it resumes
+AFTER step 1 and the publication lane release cluster.clj/turn.clj.
+`bridge-step1-registry` resumed (astra low) to convert the 13 released
+callers and remove the old arities in one commit. `results-reuse` resumed
+under option 1 (host reuse slice: 1 test / 8 assertions, second request
+unchanged; legacy issue-completion/failure readers migrate to recorded
+results). Adopting `510a9236d` into default in place
+(`tmp/orchestrator/adopt-mcp-fix-2026-09-21.log`). Editing lanes: step 1,
+publication, results-reuse.
