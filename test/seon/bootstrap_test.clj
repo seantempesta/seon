@@ -392,7 +392,7 @@
         :seon.cluster/name "missing-intent-budget"
         :seon.ns/name namespace-name})
       (let [result (bootstrap/pull-result (generator-request connection))]
-        (is (= :seon.config/required-absent (:seon.error/kind result)))
+        (is (= :seon.config.bootstrap/beyond-closure-token-budget (:seon.config/error-key result)))
         (is (= :seon.config.bootstrap/beyond-closure-token-budget
                (:seon.config/required-absent result)))))))
 
@@ -402,7 +402,11 @@
       (seed-cluster! connection "generated-membership-failure")
       (let [request (generator-request connection)
             failed-pull
-            {:seon.error/kind :seon.db/invalid-read
+            {:seon.error/at (java.util.Date.)
+             :seon.error/layer :seon.db/read
+             :seon.error/operation 'seon.db/pull
+             :seon.db/read-operation :pull
+             :seon.db.read/target [:seon.agent/id agent-id]
              :seon.error/message "injected failed membership pull"
              :seon.error/data {:seon.db/operation "datahike.pull/result"}}
             cases
@@ -410,21 +414,21 @@
               {:seon.render.walk/root nil
                :seon.render.walk/members {}
                :seon.render.walk/order []}
-              :seon.bootstrap/root-acquisition-empty]
+              :seon.bootstrap/acquired-member-count]
              ["failed pull"
               {:seon.render.walk/root failed-pull
                :seon.render.walk/members {}
                :seon.render.walk/order []}
-              :seon.db/invalid-read]]]
-        (doseq [[label acquisition expected-kind] cases]
+              :seon.db/read-operation]]]
+        (doseq [[label acquisition expected-member] cases]
           (let [result
                 (with-redefs [walk/root-acquisition
                               (constantly acquisition)]
                   (bootstrap/next-entry request "bootstrap:missing"))]
             (is (map? result) label)
-            (is (= expected-kind (:seon.error/kind result)) label)
-            (when (= :seon.bootstrap/root-acquisition-empty expected-kind)
-              (is (true? (:seon.bootstrap/root-acquisition-empty result)) label))
+            (is (contains? result expected-member) label)
+            (when (= :seon.bootstrap/acquired-member-count expected-member)
+              (is (zero? (:seon.bootstrap/acquired-member-count result)) label))
             (is (not (nil? result))
                 (str label " must not look like a completed frontier"))))))))
 

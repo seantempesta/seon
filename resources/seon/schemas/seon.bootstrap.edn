@@ -1,25 +1,11 @@
-#:seon.bootstrap{:root-acquisition-empty [:= true]
-                 :root-acquisition-empty-error
-                 [:map
-                  {:seon.error/class true
-                   :seon.render/ai seon.error/render-ai
-                   :seon.render/html seon.error/render-html
-                   :error/message
-                   "must mark a generated opening whose root acquisition is empty"}
-                  [:seon.bootstrap/root-acquisition-empty
-                   :seon.bootstrap/root-acquisition-empty]
-                  [:seon.error/message :seon.error/message]]
-                 :prefix-drift [:= true]
-                 :prefix-drift-error
-                 [:map
-                  {:seon.error/class true
-                   :seon.render/ai seon.error/render-ai
-                   :seon.render/html seon.error/render-html
-                   :error/message
-                   "must mark a generated opening whose settled prefix drifted"}
-                  [:seon.bootstrap/prefix-drift
-                   :seon.bootstrap/prefix-drift]
-                  [:seon.error/message :seon.error/message]]
+#:seon.bootstrap{
+ :acquired-member-count [:int {:min 0}]
+ :root-acquisition-empty-error [:and :seon.error/base [:map [:seon.bootstrap/acquired-member-count :seon.bootstrap/acquired-member-count]]]
+ :unmatched-source :string
+ :unmatched-source-error [:and :seon.error/base [:map [:seon.bootstrap/unmatched-source :seon.bootstrap/unmatched-source] [:seon.turn/id :seon.turn/id]]]
+ :expected-prefix-count [:int {:min 0}]
+ :actual-prefix-count [:int {:min 0}]
+ :prefix-drift-error [:and :seon.error/base [:map [:seon.bootstrap/expected-prefix-count :seon.bootstrap/expected-prefix-count] [:seon.bootstrap/actual-prefix-count :seon.bootstrap/actual-prefix-count] [:seon.turn/id :seon.turn/id]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.bootstrap/error

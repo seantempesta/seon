@@ -782,3 +782,14 @@ and three fresh-operator-reset-test lifecycle assertions now consume actual
 bound/expiration/generation evidence. Held launcher's own kind checks remain
 its owner's work. Add state source, operator/claim resources, new state/lock/
 subprocess resources, and fresh-operator-reset-test to the accumulated commands.
+
+Bootstrap: source kind sites 12 → 0, bootstrap tests 4 → 0. Missing agent
+reuses `my.plan/agent-not-found-error`; missing budget supplies the complete
+config rule facet and its expected key. Empty acquisition names the observed
+member count; prefix failures name unmatched source or both prefix counts,
+with actual ordered source data in diagnostic evidence. Returned contracts
+name these facets. Inline base checks are exclusively the remaining
+`seon.db/error-result` debt via db/q, walk/entity-lookup, walk/root-acquisition,
+and plan/ready-subjects. Load and source/test lint pass. Add bootstrap source,
+resource and bootstrap-test to the accumulated commands; fast tally remains
+reserved for the end pass.

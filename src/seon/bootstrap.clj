@@ -7,6 +7,7 @@
             [seon.ai.tokens :as tokens]
             [seon.turn :as turn]
             [seon.db :as db]
+            [seon.error.refusal :as error]
             [seon.id :as id]
             [seon.render :as render]
             [seon.render.walk :as walk]
@@ -58,7 +59,7 @@
      "Your plan is your instructions. Read its current step and completion criterion before acting; a done-query completes it automatically when the facts match, and you mark a step without one complete only after seeing the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it."
      "Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to \"root\" :my.message/content \"...\"}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact."
      "Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.message/_to; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied."
-     "Define a function with its invoke contract: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1)). The input :cat describes the arguments; the last schema describes the result. A function that can fail returns [:or <success> :seon.error/value]; a bare :maybe is refused. [:vector X] needs a vector; use vec to convert a lazy seq. Admitted definitions are durable. Auto-check calls your function with generated inputs including each collection's empty value. A deftest becomes a durable test. deftest and is are referred; use clojure.test/testing with its namespace. (my.test/run) runs yours."
+     "Define a function with its invoke contract: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1)). The input :cat describes the arguments; the last schema describes the result. A function that can fail returns [:or <success> <declared-refusal-facet>]; a bare :maybe is refused. [:vector X] needs a vector; use vec to convert a lazy seq. Admitted definitions are durable. Auto-check calls your function with generated inputs including each collection's empty value. A deftest becomes a durable test. deftest and is are referred; use clojure.test/testing with its namespace. (my.test/run) runs yours."
      (str "A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value \"datomic.tx\" names this write, for example (seon.db/transact! [{:my.note/id \"observation\" :my.note/agent [:seon.agent/id "
           (pr-str agent-id)
           "] :my.note/content \"Verified\" :my.note/about \"datomic.tx\"}]); pull :db/txInstant through that ref.")
@@ -103,21 +104,31 @@
   "Derive one agent's live opening seeds from current database facts."
   {:malli/schema
    [:=> [:cat :seon.db/db :seon.agent/id]
-    [:or :seon.agent/situation :seon.error/value]]}
+    [:or :seon.agent/situation :my.plan/agent-not-found-error]]}
   [database agent-id]
-  (let [agent
+  (let [agent-row
         (db/pull database
                  '[:seon.agent/id
                    {:seon.agent/namespace
                     [:db/id :seon.ns/name
                      :seon.ns/requires]}]
                  [:seon.agent/id agent-id])]
-    (if-not (:seon.agent/id agent)
-      {:seon.agent/no-such-agent agent-id
-       :seon.error/kind :seon.agent/no-such-agent
-       :seon.error/message (str "No agent has id " (pr-str agent-id) ".")
-       :seon.error/data {:seon.agent/id agent-id}}
-      (let [namespace (:seon.agent/namespace agent)
+    (if-not (:seon.agent/id agent-row)
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.bootstrap/opening
+        :seon.error/operation 'seon.bootstrap/situation
+        :seon.error/message "Create the requested agent before deriving its opening."
+        :seon.error/offending agent-id
+        :seon.error/diagnostic-layer :seon.bootstrap/opening
+        :seon.error/diagnostic-operation 'seon.bootstrap/situation
+        :seon.error/diagnostic-member :seon.agent/id
+        :seon.error/diagnostic-expected :seon.agent/entity
+        :seon.error/diagnostic-offending agent-id
+        :seon.error/diagnostic-cause :seon.agent/id
+        :seon.error/diagnostic-evidence agent-id
+        :my.plan/missing-agent-id agent-id})
+      (let [namespace-row (:seon.agent/namespace agent-row)
             run (when-let [id (turn/open-for-agent database [:seon.agent/id agent-id])]
                   (db/pull database
                            '[:seon.turn/id
@@ -143,12 +154,12 @@
         (cond->
          {:seon.agent/id agent-id
           :seon.agent/namespace-ref
-          [:seon.ns/name (:seon.ns/name namespace)]
+          [:seon.ns/name (:seon.ns/name namespace-row)]
           :seon.agent/unread-message-count (long unread)
           :seon.turn/turns-remaining
           (long (max 0 (- (or turn-limit 0) turns-used)))
           :seon.agent/protocol-namespaces
-          (->> (:seon.ns/requires namespace)
+          (->> (:seon.ns/requires namespace-row)
                sort
                vec)}
           run
@@ -210,8 +221,8 @@
 
 (defn- entry-cost-source
   "Everything one entry costs the agent to read: its comment and its form."
-  [{comment :seon.repl/comment :as entry}]
-  (str (when comment (str comment "\n")) (entry-form-source entry)))
+  [{entry-comment :seon.repl/comment :as entry}]
+  (str (when entry-comment (str entry-comment "\n")) (entry-form-source entry)))
 
 (defn- entries
   [rendered]
@@ -363,7 +374,11 @@
                 :seon.render.walk/root-acquisition acquisition
                 :seon.render/output :seon.render/form))))
 
+;; Debt: db/q and db/pull retain :seon.error/value through :seon.db/error-result;
+;; walk/entity-lookup, root-acquisition and plan/ready-subjects pass it through.
 (defn- beyond-closure-budget
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+                  [:or :int :seon.config/rule-error :seon.db/error-result]]}
   [database agent-id]
   (let [attribute :seon.config.bootstrap/beyond-closure-token-budget
         budget
@@ -376,14 +391,26 @@
                  ?budget]]
               database agent-id)]
     (cond
-      (:seon.error/kind budget) budget
+      (or (:seon.config/error-key budget) (and (:seon.error/at budget) (:seon.error/layer budget) (:seon.error/operation budget))) budget
       (int? budget) budget
       :else
-      {:seon.config/required-absent attribute
-       :seon.error/kind :seon.config/required-absent
-       :seon.error/message
-       (str "Generated opening intent membership requires config key "
-            attribute ".")})))
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.bootstrap/opening
+        :seon.error/operation 'seon.bootstrap/beyond-closure-budget
+        :seon.error/message "Declare the opening intent token budget in the cluster configuration."
+        :seon.error/offending budget
+        :seon.error/diagnostic-layer :seon.bootstrap/opening
+        :seon.error/diagnostic-operation 'seon.bootstrap/beyond-closure-budget
+        :seon.error/diagnostic-member attribute
+        :seon.error/diagnostic-expected "a configured integer token budget"
+        :seon.error/diagnostic-offending budget
+        :seon.error/diagnostic-cause attribute
+        :seon.error/diagnostic-evidence budget
+        :seon.error/expected-key attribute
+        :seon.config/error-key attribute
+        :seon.config/rule :seon.config/required-absent
+        :seon.config/required-absent attribute}))))
 
 (defn- demonstrated-namespace-names
   [database agent-id]
@@ -422,7 +449,7 @@
 (defn- intent-acquisition
   [request subject]
   (let [lookup (walk/entity-lookup (:seon.db/db request) subject)]
-    (if (:seon.error/kind lookup)
+    (if (and (:seon.error/at lookup) (:seon.error/layer lookup) (:seon.error/operation lookup))
       {:seon.render.walk/root lookup
        :seon.render.walk/members {}
        :seon.render.walk/order []}
@@ -568,34 +595,39 @@
 
 (defn pull-result
   "Pull and render the bounded candidate neighborhood for one opening."
-  {:malli/schema [:=> [:cat :seon.render.walk/request] :map]}
+  {:malli/schema [:=> [:cat :seon.render.walk/request] [:or :map :seon.bootstrap/root-acquisition-empty-error :seon.config/rule-error :my.plan/agent-not-found-error :my.plan/subject-not-found-error :seon.db/error-result]]}
   [request]
   (let [acquisition (walk/root-acquisition request)
         root (:seon.render.walk/root acquisition)
         order (:seon.render.walk/order acquisition)]
     (cond
-      (:seon.error/kind root)
+      (and (:seon.error/at root) (:seon.error/layer root) (:seon.error/operation root))
       root
 
       (or (nil? root) (empty? order))
-      {::root-acquisition-empty true
-       :seon.error/kind ::root-acquisition-empty
-       :seon.error/message
-       "The generated opening root pull returned no membership data."
-       :seon.error/data
-       {:seon.render.walk/lookup (:seon.render.walk/lookup request)
-        :seon.render.walk/root-present? (some? root)
-        :seon.render.walk/member-count
-        (count (:seon.render.walk/members acquisition))}}
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.bootstrap/opening
+        :seon.error/operation 'seon.bootstrap/pull-result
+        :seon.error/message "Acquire the opening root and membership before generating entries."
+        :seon.error/offending acquisition
+        :seon.error/diagnostic-layer :seon.bootstrap/opening
+        :seon.error/diagnostic-operation 'seon.bootstrap/pull-result
+        :seon.error/diagnostic-member :seon.render.walk/lookup
+        :seon.error/diagnostic-expected "a root with acquired membership"
+        :seon.error/diagnostic-offending acquisition
+        :seon.error/diagnostic-cause :seon.render.walk/lookup
+        :seon.error/diagnostic-evidence acquisition
+        :seon.bootstrap/acquired-member-count (count (:seon.render.walk/members acquisition))})
 
       :else
       (let [agent-id (second (:seon.render.walk/lookup request))
             budget (beyond-closure-budget (:seon.db/db request) agent-id)
-            subjects (when-not (:seon.error/kind budget)
+            subjects (when-not (or (:seon.config/error-key budget) (and (:seon.error/at budget) (:seon.error/layer budget) (:seon.error/operation budget)))
                        (plan/ready-subjects (:seon.db/db request) agent-id))]
         (cond
-          (:seon.error/kind budget) budget
-          (:seon.error/kind subjects) subjects
+          (or (:seon.config/error-key budget) (and (:seon.error/at budget) (:seon.error/layer budget) (:seon.error/operation budget))) budget
+          (or (:my.plan/missing-agent-id subjects) (:my.plan/missing-subject-attribute subjects) (and (:seon.error/at subjects) (:seon.error/layer subjects) (:seon.error/operation subjects))) subjects
           :else
           (let [base-candidates
                 (into (direct-candidates request acquisition)
@@ -635,23 +667,25 @@
      :seon.repl/entry (first (entries rendered))}))
 
 (defn- next-entry-in
-  [request run-id]
+  {:malli/schema [:=> [:cat :seon.render.walk/request :seon.turn/id]
+                  [:or :nil :seon.repl/entry :seon.bootstrap/root-acquisition-empty-error :seon.config/rule-error :my.plan/agent-not-found-error :my.plan/subject-not-found-error :seon.db/error-result]]}
+  [request turn-id]
   (let [rows
         (db/q {:query
                '[:find ?ordinal ?source ?result
-                 :in $ ?run-id
+                 :in $ ?turn-id
                  :where
-                 [?run :seon.turn/id ?run-id]
+                 [?run :seon.turn/id ?turn-id]
                  [?form :seon.cluster.eval/run ?run]
                  [?form :seon.cluster.eval/ordinal ?ordinal]
                  [?form :seon.cluster.eval/source ?source]
                  [?receipt :seon.cluster.eval/run ?run]
                  [?receipt :seon.cluster.eval/ordinal ?ordinal]
                  [?receipt :seon.eval/shown ?result]]
-               :args [(:seon.db/db request) run-id]
+               :args [(:seon.db/db request) turn-id]
                :order-by '[?ordinal :asc]})
         pull (pull-result request)]
-    (if (:seon.error/kind pull)
+    (if (or (:seon.bootstrap/acquired-member-count pull) (:seon.config/error-key pull) (:my.plan/missing-agent-id pull) (:my.plan/missing-subject-attribute pull) (and (:seon.error/at pull) (:seon.error/layer pull) (:seon.error/operation pull)))
       pull
       (let [candidates
             (let [root (root-candidate request (:seon.repl/root-key pull))]
@@ -678,11 +712,21 @@
                               "A stored generated form is outside the pull."]
                           (throw
                            (ex-info message
-                                    {::prefix-drift true
-                                     :seon.error/kind ::prefix-drift
-                                     :seon.error/message message
-                                     :seon.turn/id run-id
-                                     :seon.cluster.eval/source source}))))
+                                    (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.bootstrap/opening
+        :seon.error/operation 'seon.bootstrap/next-entry-in
+        :seon.error/message "Rebuild the opening from its stored evaluation sources."
+        :seon.error/offending source
+        :seon.error/diagnostic-layer :seon.bootstrap/opening
+        :seon.error/diagnostic-operation 'seon.bootstrap/next-entry-in
+        :seon.error/diagnostic-member :seon.cluster.eval/source
+        :seon.error/diagnostic-expected "a source in the acquired opening"
+        :seon.error/diagnostic-offending source
+        :seon.error/diagnostic-cause :seon.cluster.eval/source
+        :seon.error/diagnostic-evidence source
+        :seon.bootstrap/unmatched-source source
+        :seon.turn/id turn-id})))))
                       {:seon.repl/key (:seon.repl/key candidate)
                        :seon.sci.admit/print-node (edn/read-string result)}))
                   rows)
@@ -695,33 +739,38 @@
             expected-sources (mapv entry-form-source (take index episode))]
         (when-not (= prior-sources expected-sources)
           (let [message
-                (str "The generated opening prefix differs from its receipts: expected "
-                     (pr-str expected-sources) " actual " (pr-str prior-sources))]
+                "Rebuild the opening after its stored prefix changed."]
             (throw
              (ex-info message
-                      {::prefix-drift true
-                       :seon.error/kind ::prefix-drift
-                       :seon.error/message message
-                       :seon.turn/id run-id
-                       :seon.bootstrap/expected expected-sources
-                       :seon.bootstrap/actual prior-sources}))))
+                      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.bootstrap/opening
+        :seon.error/operation 'seon.bootstrap/next-entry-in
+        :seon.error/message "Rebuild the opening after its stored prefix changed."
+        :seon.error/offending prior-sources
+        :seon.error/diagnostic-layer :seon.bootstrap/opening
+        :seon.error/diagnostic-operation 'seon.bootstrap/next-entry-in
+        :seon.error/diagnostic-member :seon.bootstrap/expected-prefix-count
+        :seon.error/diagnostic-expected expected-sources
+        :seon.error/diagnostic-offending prior-sources
+        :seon.error/diagnostic-cause :seon.bootstrap/expected-prefix-count
+        :seon.error/diagnostic-evidence prior-sources
+        :seon.turn/id turn-id
+        :seon.bootstrap/expected-prefix-count (count expected-sources)
+        :seon.bootstrap/actual-prefix-count (count prior-sources)})))))
         (nth episode index nil)))))
 
 (defn next-entry
   "Derive the next generated entry from receipts already stored on the run."
   {:malli/schema [:=> [:cat :seon.render.walk/request :seon.turn/id]
-                  [:or :nil :seon.repl/entry :seon.error/value]]}
-  [request run-id]
+                  [:or :nil :seon.repl/entry :seon.bootstrap/root-acquisition-empty-error :seon.config/rule-error :my.plan/agent-not-found-error :my.plan/subject-not-found-error :seon.db/error-result]]}
+  [request turn-id]
   (let [projection
         (or (schema/handed-projection)
             (sci.kernel/context-projection (:seon.sci.eval/ctx request)))]
     (schema/call-with-projection
      projection
-     #(next-entry-in request run-id))))
-
-(defn- digest-value
-  [value]
-  (id/digest 64 value))
+     #(next-entry-in request turn-id))))
 
 (defn supervision-run-id
   "The deterministic identity of root's first-agent supervision run."
@@ -788,9 +837,9 @@
                        :seon.agent/id]
                   :seon.store/transaction-data]}
   [database process agent-id]
-  (let [run-id (supervision-run-id)
+  (let [turn-id (supervision-run-id)
         already-open? (some? (db/pull database [:db/id]
-                                      [:seon.turn/id run-id]))
+                                      [:seon.turn/id turn-id]))
         read? (not (root-read-agent-history? database))
         send? (not (root-messaged-agent? database))
         read-expression
@@ -833,7 +882,7 @@
       []
       (turn/system-run-tx
        database
-       {:seon.agent/id "root" :seon.turn/id run-id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.root] :seon.turn/reply-size (count (pr-str sources)) :seon.turn/sources sources}))))
+       {:seon.agent/id "root" :seon.turn/id turn-id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.root] :seon.turn/reply-size (count (pr-str sources)) :seon.turn/sources sources}))))
 
 (defn seed-tx
   "Transaction data opening, claiming, and freezing one bootstrap run."
@@ -852,7 +901,7 @@
    {agent-id :seon.agent/id
     namespace-name :seon.ns/name
     process :seon.db.process/id
-    opened-at :seon.turn/opened-tx}]
+    _opened-at :seon.turn/opened-tx}]
   (let [id (run-id agent-id)
         message-id (id/id (random-uuid) 8)
         namespace-row
