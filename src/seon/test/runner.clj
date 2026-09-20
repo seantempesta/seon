@@ -3204,10 +3204,15 @@
            :seon.error/message
            "The live process has no held operator store."}))
       (catch Throwable failure#
-        {:seon.error/kind
-         (or (:seon.error/kind (ex-data failure#))
-             :seon.test.runner/persistent-results-recording-failed)
-         :seon.error/message (ex-message failure#)}))))
+        ;; Preserve the producer's complete refusal, including its schema and
+        ;; member. Older throwers lack base observations; this boundary adds
+        ;; those defaults without replacing observations already supplied.
+        (merge {:seon.error/at (java.util.Date.)
+                :seon.error/layer :seon.test/recording
+                :seon.error/operation 'seon.test.runner/record-persistent-results!
+                :seon.error/message (or (ex-message failure#)
+                                        "Recording the test request failed.")}
+               (dissoc (ex-data failure#) :seon.error/kind))))))
 
 (defn- record-persistent-results!
   "Commit one bare-gate completion through the authoritative store holder."
