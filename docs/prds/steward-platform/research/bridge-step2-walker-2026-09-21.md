@@ -120,6 +120,41 @@ publication implementation changed to accommodate their cost. Source require
 of `seon.db` brackets the commit. All five assigned classes now have green
 fast evidence; the orchestrator's cold platform gate remains owed.
 
+### Fixture-observation declarations and final boundary
+
+`verify-fixture-observations!` (`src/seon/test/runner.clj:1202`) follows the
+program graph to expensive fixture owners and requires a nonblank declared
+observation. Both named tests now carry that declaration. The MCP flow-health
+test references the fresh-store owner only to assert zero acquisitions. The
+schema adoption test needs an isolated root and child JVM because it reloads
+record definitions. Its existing subprocess now uses the test's declared
+300,000-ms long bound and reason rather than the unrelated operator lifecycle
+lock bound. No fixture-admission rule changed.
+
+Both namespaces loaded with `clojure -M:test`; the runner's own `marker-reason`
+accepted both declarations, and the adoption bound assertion passed
+(`tmp/bridge-platform-observation-load.log`). This is declaration/load evidence,
+not an execution claim for those two tests. Their runtime proof remains with
+the orchestrator's cold request. The same load and marker check follows their
+commit. The five class commits are `f08558cb5`, `6c3eca33e`, `e06fce47b`,
+`c5016e014`, and `83776c8c7`; each was followed by a successful require.
+
+Untouched foreign ownership boundaries: `src/seon/cluster.clj`,
+`src/seon/cluster/source.clj`, `src/seon/fn.clj`,
+`script/seon/fresh_operator.clj`, `bin/seon`, and `bin/seon-hook`.
+No default lifecycle action, worktree, cold gate or foreign session action
+was performed. Markdown lint also reports existing stale Datahike gitlinks
+in `docs/prds/steward-platform/plan/wave-3a-task-family-spec-2026-09-21.md`
+and `docs/prds/steward-platform/plan/wave-3bc-render-pairs-and-template-proofs-spec-2026-09-21.md`;
+those foreign documents remain untouched.
+
+Cold commands owed to the orchestrator (not run by this lane):
+
+```sh
+bin/test --platform
+bin/test --paths src/seon/cluster/registry.clj src/seon/db.clj test/seon/cluster/registry_test.clj test/seon/cluster/store_test.clj test/seon/db/declaration_population_test.clj test/seon/test_support_test.clj test/seon/cluster/mcp_test.clj test/seon/schema_redeclare_test.clj -- seon.cluster.registry-test seon.cluster.store-test seon.db.declaration-population-test seon.test-support-test seon.cluster.mcp-test seon.schema-redeclare-test
+```
+
 ## Final ruled slice and verification
 
 This section supersedes the historical checkpoints below. The orchestrator

@@ -67,7 +67,11 @@
         (finally (cluster/stop! instance))))
     (finally (support/delete-recursively! root))))
 
-(deftest seeded-schema-families-survive-development-adoption
+(deftest ^{:seon.test/fixture-observation
+           "Real development adoption reloads record definitions; an isolated published root and child JVM keep those classes out of the shared worker."
+           :seon.test/long "Publish, boot, seed, adopt and seed again in an isolated JVM to observe schema survival across record reload."
+           :seon.test/long-ms 300000}
+  seeded-schema-families-survive-development-adoption
   (let [root (.getCanonicalPath (io/file "tmp" (str "schema-redeclare-test-" (random-uuid))))
         base (System/getProperty "seon.test.published-base")
         argv (cond-> [(str (io/file (System/getProperty "java.home") "bin" "java"))]
@@ -79,7 +83,9 @@
                              (pr-str `(do (require 'seon.schema-redeclare-test)
                                           (adoption-probe! ~root)
                                           (shutdown-agents)))])
-                 :seon.operator.subprocess/deadline-ms operator.state/lifecycle-lock-timeout-ms
+                 :seon.operator.subprocess/deadline-ms
+                 (:seon.test/long-ms
+                  (meta #'seeded-schema-families-survive-development-adoption))
                  :seon.operator.subprocess/merge-error? true})]
     (is (= 0 (:seon.operator.subprocess/exit result))
         (:seon.operator.subprocess/output result))

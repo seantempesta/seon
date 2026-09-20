@@ -354,7 +354,9 @@
       (finally
         (swap! running-instances dissoc cluster-name)))))
 
-(deftest live-runtime-observation-hands-its-projection-to-flow-health
+(deftest ^{:seon.test/fixture-observation
+           "Observes that flow health uses an ordinary canonical branch; the fresh-store owner is referenced only to assert zero acquisitions."}
+  live-runtime-observation-hands-its-projection-to-flow-health
   (let [cluster-name "mcp-runtime-projection-test"
         fresh-stores (atom 0)
         acquire @#'support/with-fresh-database]
