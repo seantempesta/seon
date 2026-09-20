@@ -5751,3 +5751,18 @@ context capture (raw errors without occurrence custody; issue
 now, option 1 owed to the turn/cluster sweep (the turn seam supplies
 occurrence recording). Resumed through blob, edit, operator,
 operator/state, bootstrap, then effect per option 2.
+
+## 2026-09-21 ~17:00 UTC — sci-program family kind-free (my.program extension queued); gate-restructure lane LAUNCHED
+
+`kind-sweep-sci-program` landed five slices through `e10797ad5` (blob
+storage kind stamps → complete diagnostics `e4519e5bd`; core program
+kinds retired); assigned sci/program files kind-free, paths clean. Stop:
+`my.program` read/context failures match zero facets — option 1 (extend
+to src/my/program.clj + tests) ruled but QUEUED behind the gate fix per
+the owner's priority on repetitive-work speed-ups; session retained. All
+five of its fast passes executed 0 tests on recording-admission refusal
+(evidence at its next resume, post-`22a1a0567`). `gate-restructure`
+LAUNCHED (astra low) from the spec's verbatim assignment: the two
+string/symbol sites first (868/868 tasks misrouted to serial), then unused
+worker lifetimes and repeated per-test preparation. Editing lanes: step 2,
+ops-effects-2, gate-restructure.
