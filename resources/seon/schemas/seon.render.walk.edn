@@ -13,7 +13,7 @@
                      :seon.render.walk/lookup]
                     [:seon.error/value
                      {:optional true}
-                     :seon.error/value]],
+                     [:or :seon.render.walk/elided-error :seon.render.walk/no-such-entity-error :seon.render/error-result :seon.db/error-result]]],
                    :found-depth [:int {:min 0}],
                    :lookup
                    [:or :seon.render.walk/entity-lookup
@@ -85,17 +85,19 @@
                      :seon.render/rendered]
                     [:seon.error/value
                      {:optional true}
-                     :seon.error/value]
+                     [:or :seon.render.walk/elided-error :seon.render.walk/no-such-entity-error :seon.render/error-result :seon.db/error-result]]
                     [:seon.db/tx-data
                      {:optional true}
                      :seon.db/tx-data]],
                    :units [:vector :seon.render.walk/unit],
-                   :elided [:= true]
-                   :elided-error [:map {:seon.error/class true :seon.render/ai seon.error/elision-prose :seon.render/html seon.error/elision-html :error/message "must mark a bounded render walk that elided additional content"} [:seon.render.walk/elided :seon.render.walk/elided] [:seon.error/message :seon.error/message]]
-                   :no-such-entity [:= true]
-                   :no-such-entity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a render walk whose requested entity does not exist"} [:seon.render.walk/no-such-entity :seon.render.walk/no-such-entity] [:seon.error/message :seon.error/message]]
-                   :connections-failed [:= true]
-                   :connections-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a render walk whose connection discovery failed"} [:seon.render.walk/connections-failed :seon.render.walk/connections-failed] [:seon.error/message :seon.error/message]]
+
+                   :elided-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/elision-prose :seon.render/html seon.error/elision-html}
+ [:seon.print/bound-by :qualified-keyword]
+ [:seon.render.walk/limit :seon.render.walk/limit]
+ [:seon.render.walk/continuation-subject :seon.render.walk/continuation-subject]]]
+
+                   :no-such-entity-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.walk/missing-lookup :seon.render.walk/missing-lookup]]]
+
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.render.walk/error
@@ -119,4 +121,10 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.evidence/entity}
  :seon.db/ref]
+
+ :missing-lookup :seon.render.walk/lookup
+
+ :limit [:int {:min 0}]
+
+ :continuation-subject :seon.render.walk/lookup
 }

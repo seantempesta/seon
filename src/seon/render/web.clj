@@ -486,13 +486,13 @@
                    :seon.render.walk/path [::fleet-oversight]
                    :seon.render.walk/found-depth 0
                    :seon.render/distance 0}
-            (:seon.error/kind fleet-output)
+            (and (:seon.error/at fleet-output) (:seon.error/layer fleet-output) (:seon.error/operation fleet-output)) ;; debt: seon.render/render-call via seon.db/error-result declares :seon.error/value, directly or through its result union.
             (assoc :seon.error/value fleet-output
                    :seon.render/output
                    [:div {:class "seon-render-unavailable"}
                     "renderer unavailable"])
 
-            (not (:seon.error/kind fleet-output))
+            (not (and (:seon.error/at fleet-output) (:seon.error/layer fleet-output) (:seon.error/operation fleet-output))) ;; debt: seon.render/render-call via seon.db/error-result declares :seon.error/value, directly or through its result union.
             (assoc :seon.render/output fleet-output)))
         units (cond-> walked-units fleet-unit (conj fleet-unit))
         ranks (into {}
@@ -618,12 +618,26 @@
                                (cond-> shown
                                  (pos? elided)
                                  (conj
-                                  {:seon.error/kind :seon.render.walk/elided
-                                   :seon.error/message
-                                   (str "elided " elided " reverse " attribute
-                                        " connection"
-                                        (when-not (= 1 elided) "s")
-                                        " at the configured collection cap") :seon.render.walk/elided true}))]))))))]
+                                  (let [observation
+                                        {:seon.error/at (java.util.Date.)
+                                         :seon.error/layer :seon.render.web/render
+                                         :seon.error/operation 'seon.render.web/generic-entity
+                                         :seon.error/message (str "elided " elided " reverse " attribute
+                                                                                             " connection"
+                                                                                             (when-not (= 1 elided) "s")
+                                                                                             " at the configured collection cap")
+                                         :seon.error/diagnostic-layer :seon.render.web/render
+                                         :seon.error/diagnostic-operation 'seon.render.web/generic-entity
+                                         :seon.error/diagnostic-member :seon.render.walk/lookup
+                                         :seon.error/diagnostic-expected "connections within the requested collection bound"
+                                         :seon.error/diagnostic-offending sources
+                                         :seon.error/diagnostic-cause :seon.render.walk/lookup
+                                         :seon.error/diagnostic-evidence {:seon.render.walk/shown (count shown) :seon.render.walk/omitted elided}
+                                         :seon.error/fix "Supply the expected member and repeat the requested operation."
+                                         :seon.print/bound-by :seon.config.eval.result/max-collection
+                                         :seon.render.walk/limit width
+                                         :seon.render.walk/continuation-subject [eid attribute]}]
+                                    (merge observation (error/diagnostic observation)))))]))))))]
     (cond-> direct
       (and reverse? (seq reverse-groups))
       (assoc :seon.render.debug/reverse-refs reverse-groups))))
@@ -692,29 +706,50 @@
           :description))
 
 (defn- debug-diagnostic
-  [kind message operation member expected offending cause evidence]
-  (error/diagnostic
-   {kind true
-    :seon.error/kind kind
-    :seon.error/message message
-    :seon.error/diagnostic-layer :debug-page
-    :seon.error/diagnostic-operation operation
-    :seon.error/diagnostic-member member
-    :seon.error/diagnostic-expected expected
-    :seon.error/diagnostic-offending offending
-    :seon.error/diagnostic-cause cause
-    :seon.error/diagnostic-evidence evidence}))
+  {:malli/schema [:=> [:cat :string :qualified-symbol :qualified-keyword
+                       :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value]
+                  :seon.render.web/request-error]}
+  [message operation member expected offending cause evidence]
+  (let [observation
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.render.web/debug
+         :seon.error/operation operation
+         :seon.render.web/refused-member member
+         :seon.error/message message
+         :seon.error/diagnostic-layer :seon.render.web/debug
+         :seon.error/diagnostic-operation operation
+         :seon.error/diagnostic-member member
+         :seon.error/diagnostic-expected expected
+         :seon.error/diagnostic-offending offending
+         :seon.error/diagnostic-cause cause
+         :seon.error/diagnostic-evidence evidence
+         :seon.error/fix "Repair the unavailable page input and repeat the observation."}]
+    (merge observation (error/diagnostic observation))))
 
 (defn- turn-function-result
   "Call the ruled turn API, retaining an unavailable function as data."
+  {:malli/schema [:=> [:cat :qualified-symbol [:sequential :seon.schema/value]] [:or :seon.schema/value :seon.render.web/function-unavailable-error :seon.turn/error :seon.db/error-result]]}
+
   [function arguments]
   (let [resolved (try (requiring-resolve function)
                       (catch java.io.FileNotFoundException _ nil))]
     (if resolved
       (apply resolved arguments)
-      {:seon.render.web/function-unavailable function
-       :seon.error/kind ::function-unavailable
-       :seon.error/message (str "Not yet available: " function)})))
+      (let [observation
+            {:seon.error/at (java.util.Date.)
+             :seon.error/layer :seon.render.web/render
+             :seon.error/operation 'seon.render.web/turn-function-result
+             :seon.error/message (str "Not yet available: " function)
+             :seon.error/diagnostic-layer :seon.render.web/render
+             :seon.error/diagnostic-operation 'seon.render.web/turn-function-result
+             :seon.error/diagnostic-member :seon.fn/sym
+             :seon.error/diagnostic-expected "a resolvable turn function"
+             :seon.error/diagnostic-offending function
+             :seon.error/diagnostic-cause :seon.fn/sym
+             :seon.error/diagnostic-evidence {:seon.render.web/arguments arguments}
+             :seon.error/fix "Supply the expected member and repeat the requested operation."
+             :seon.render.web/function-unavailable function}]
+        (merge observation (error/diagnostic observation))))))
 
 (defn- debug-turn-request
   [database connection agent-id caps render-context]
@@ -749,10 +784,9 @@
            (message-bar-html {:seon.agent/id agent-id ::message-autofocus? false}))))
 
 (defn- debug-value-html
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
   [value]
-  (if (:seon.error/kind value)
-    [:pre {:class "seon-debug-error"} (pr-str value)]
-    [:pre (pr-str value)]))
+  [:pre (pr-str value)])
 
 (defn- debug-page-url
   [debug-request changes]
@@ -885,7 +919,7 @@
 
 (defn- graph-model
   [debug-request ref-attributes observation]
-  (when-not (:seon.error/kind observation)
+  (when-not (and (:seon.error/at observation) (:seon.error/layer observation) (:seon.error/operation observation)) ;; debt: seon.render.data/entity-observation via seon.db/pull declares :seon.error/value, directly or through its result union.
     (let [snapshot (:seon.render.data/snapshot observation)
           branch (:db-name snapshot)
           selected-eid (:seon.render.data/eid observation)
@@ -994,7 +1028,7 @@
   [output rendered]
   [:div {:class "seon-debug-candidate-preview"}
    (cond
-     (:seon.error/kind rendered) (debug-value-html rendered)
+     (and (:seon.error/at rendered) (:seon.error/layer rendered) (:seon.error/operation rendered)) (error/render-html rendered) ;; debt: seon.render/render-call via seon.db/error-result declares :seon.error/value, directly or through its result union.
      (= output :seon.render/html) rendered
      :else [:pre (str rendered)])])
 
@@ -1074,8 +1108,8 @@
                    (:seon.render.selection.stage/value selected-stage)
                    (get previews selected))]
     (cond
-      (:seon.error/kind selection) (debug-value-html selection)
-      (:seon.error/kind selected) (debug-value-html selected)
+      (or (:seon.render/refused-member selection) (:seon.render/candidates selection)) (error/render-html selection)
+      (or (:seon.render/refused-member selected) (:seon.render/candidates selected)) (error/render-html selected)
       (nil? rendered)
       [:p {:class "seon-debug-empty"}
        "No render function produced a value for this projection."]
@@ -1086,7 +1120,7 @@
   (let [selection (:seon.render/selection experiment)
         selected (:seon.render.selection/selected selection)
         entry (get (:seon.render/entries experiment) selected)]
-    (when (and (not (:seon.error/kind selection))
+    (when (and (not (or (:seon.render/refused-member selection) (:seon.render/candidates selection)))
                (qualified-symbol? selected))
       [:section {:class "seon-debug-selected-renderer"}
        [:h4 (if (= output :seon.render/ai) "AI" "HTML")]
@@ -1348,8 +1382,8 @@
                                     (get components %))))]
   [:section {:id "debug-units" :class "seon-debug-found-values"}
    [:h1 {:class "seon-debug-caption"} "Entity attributes and connections"]
-   (if (:seon.error/kind acquisition)
-     (debug-value-html acquisition)
+   (if (and (:seon.error/at acquisition) (:seon.error/layer acquisition) (:seon.error/operation acquisition)) ;; debt: seon.render.walk/acquire-entity via seon.db/pull declares :seon.error/value, directly or through its result union.
+     (error/render-html acquisition)
      (into (cond-> [:div]
              agent?
              (conj (debug-found-value
@@ -1396,6 +1430,8 @@
   decide that itself either: `render/render-call` consulted the invocation
   cache with `same-invocation-evidence?` and the retained read evidence before
   returning, and an entry carrying an output is that cache's hit."
+  {:malli/schema [:=> [:cat :map] [:or :seon.render/rendered :seon.render.web/request-error :seon.render/error-result :seon.turn/error :seon.db/error-result]]}
+
   [request]
   (let [captured-invocations (:seon.render/captured-invocations request)
         request (cond-> request
@@ -1419,7 +1455,6 @@
             preview
             (if-not (and agent-id namespace-name)
               (debug-diagnostic
-               ::owner-not-ensured
                "Evaluating this preview requires an agent assigned to the viewing namespace."
                'seon.render.web/render-source-call
                :seon.agent/id :seon.agent/id
@@ -1436,10 +1471,10 @@
                         :seon.cluster.reply/text source
                         :seon.sci.admit/caps (:seon.sci.admit/caps request)})]
                   (cond-> evaluated
-                    (not (:seon.error/kind evaluated))
+                    (not (and (:seon.error/at evaluated) (:seon.error/layer evaluated) (:seon.error/operation evaluated))) ;; debt: seon.turn/preview-sources declares :seon.error/value, directly or through its result union.
                     (assoc :seon.render.call/source-run-id (str (random-uuid)))))))
             output
-            (if (:seon.error/kind preview)
+            (if (and (:seon.error/at preview) (:seon.error/layer preview) (:seon.error/operation preview)) ;; debt: seon.turn/preview-sources declares :seon.error/value, directly or through its result union.
               preview
               (binding [db/*read-evidence-sink* observed]
                 (transcript/render-ai
@@ -1458,12 +1493,12 @@
             enrich-invocation
             (fn [entry]
               (cond-> (assoc entry :seon.render.call/output output)
-                (not (:seon.error/kind preview)) (merge preview)
+                (not (and (:seon.error/at preview) (:seon.error/layer preview) (:seon.error/operation preview))) (merge preview) ;; debt: seon.turn/preview-sources declares :seon.error/value, directly or through its result union.
                 (seq evidence) (update :seon.render.call/read-evidence into evidence)))
             enrich-call
             (fn [entry]
               (cond-> (assoc entry :seon.render.call/output output)
-                (not (:seon.error/kind preview))
+                (not (and (:seon.error/at preview) (:seon.error/layer preview) (:seon.error/operation preview))) ;; debt: seon.turn/preview-sources declares :seon.error/value, directly or through its result union.
                 (assoc :seon.render.call/source-run-id
                        (:seon.render.call/source-run-id preview))
                 (seq evidence) (update :seon.render.call/read-evidence into evidence)))]
@@ -1615,8 +1650,8 @@
                            (:seon.render.data/incoming-cursor debug-request)))
                   first-observation (data/entity-observation
                                      observation-request)
-                  restarted? (= :seon.render.data/stale-continuation
-                                (:seon.error/kind first-observation))
+                  restarted? (= :seon.render.data/continuation
+                                (:seon.render.data/refused-member first-observation))
                   effective-request (if restarted?
                                       (dissoc debug-request
                                               :seon.render.data/outgoing-cursor
@@ -1654,7 +1689,7 @@
                   ;; unit's own typed value instead of poisoning the others
                   ;; or painting a wall of bare entity ids.
                   reverse-values
-                  (if (:seon.error/kind acquisition)
+                  (if (and (:seon.error/at acquisition) (:seon.error/layer acquisition) (:seon.error/operation acquisition)) ;; debt: seon.render.walk/acquire-entity via seon.db/pull declares :seon.error/value, directly or through its result union.
                     {}
                     (into {}
                           (map (fn [unit]
@@ -1666,7 +1701,7 @@
                                                effective-request)
                                          :max-work
                                          (::pull-max-work effective-request)})]
-                                   [unit (if (:seon.error/kind pulled)
+                                   [unit (if (and (:seon.error/at pulled) (:seon.error/layer pulled) (:seon.error/operation pulled)) ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
                                            pulled
                                            (get pulled unit))])))
                           reverse-units))
@@ -1704,7 +1739,7 @@
                  (context/selection database agent-id))
                ::observation observation
                ::related-entities
-               (if (:seon.error/kind related-values)
+               (if (and (:seon.error/at related-values) (:seon.error/layer related-values) (:seon.error/operation related-values)) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
                  related-values
                  (zipmap related-eids related-values))
                ::restarted? restarted?
@@ -1778,10 +1813,23 @@
           [:section {:id "debug-units" :class "seon-debug-found-values"}
            [:h1 {:class "seon-debug-caption"}
             "Attributes of the selected entity"]
-           (debug-value-html
+           (error/render-html
             (or acquisition
-                {:seon.error/kind ::render-value-missing
-                 :seon.error/message "The selected entity does not exist."}))])
+                (let [observation
+                      {:seon.error/at (java.util.Date.)
+                       :seon.error/layer :seon.render.web/render
+                       :seon.error/operation 'seon.render.web/debug-page-result
+                       :seon.error/message "The selected entity does not exist."
+                       :seon.error/diagnostic-layer :seon.render.web/render
+                       :seon.error/diagnostic-operation 'seon.render.web/debug-page-result
+                       :seon.error/diagnostic-member :seon.render/value
+                       :seon.error/diagnostic-expected "an existing selected entity"
+                       :seon.error/diagnostic-offending debug-request
+                       :seon.error/diagnostic-cause :seon.render/value
+                       :seon.error/diagnostic-evidence {}
+                       :seon.error/fix "Supply the expected member and repeat the requested operation."
+                       :seon.render.web/refused-member :seon.render/value}]
+                  (merge observation (error/diagnostic observation)))))])
         program-identity
         (debug-program-identity db (:seon.sci.eval/ctx handle))
         page
@@ -2220,7 +2268,6 @@
          signature [registration-key message]
          diagnostic
          (debug-diagnostic
-          ::page-derivation-failed
           message
           'seon.render.web/render-pass
           :seon.render.web/page :seon.render.web/page
@@ -2240,7 +2287,7 @@
        (hiccup/->string
         [:section {:class "seon-debug-body"}
          [:h2 {:class "seon-debug-caption"} "This page could not be derived"]
-         (debug-value-html diagnostic)])}
+         (error/render-html diagnostic)])}
       :seon.render.web/fragments {}
       :seon.render/captured-calls {}
       :seon.render/captured-invocations {}
@@ -2396,6 +2443,8 @@
 
 (defn- change-context
   "Run the requested ordinary turn operation on the calling thread."
+  {:malli/schema [:=> [:cat :map] [:or [:map [:seon.db/db :seon.db/database-value]] :seon.render.web/context-error]]}
+
   [request]
   (let [cluster (:seon.turn.loop/cluster request request)
         connection (:seon.db/connection cluster)
@@ -2414,13 +2463,13 @@
         result (turn-function-result
                 function [(cond-> prepared
                             (= action :system-turn) (assoc :seon.turn/write? true))])]
-    (if (:seon.error/kind result) result {:seon.db/db (db/db connection)})))
+    (if (and (:seon.error/at result) (:seon.error/layer result) (:seon.error/operation result)) result {:seon.db/db (db/db connection)}))) ;; debt: seon.db/transact! / seon.turn/system-turn declares :seon.error/value, directly or through its result union.
 
 (defn derive-context!
   "Render the requesting agent's saved evaluations from its database value."
   {:malli/schema [:=> [:cat :seon.render/context-request]
                   [:or :seon.render/acquired-context
-                   :seon.render/context-change-result :seon.error/value]]}
+                   :seon.render/context-change-result :seon.render.web/context-error]]}
   [request]
   (schema/call-with-projection
    (sci.kernel/context-projection (:seon.sci.eval/ctx request))
@@ -2466,7 +2515,7 @@
              (swap! cache assoc-in [::ai-calls key root-call]
                     (assoc (merge previous evidence) :seon.render.call/output result))
              result)
-           (:seon.error/kind entries)
+           (and (:seon.error/at entries) (:seon.error/layer entries) (:seon.error/operation entries)) ;; debt: seon.render.walk/history via seon.eval/of-agent declares :seon.error/value, directly or through its result union.
            entries
            :else
            (let [segments (history-segments entries)
@@ -2545,9 +2594,22 @@
                                            (when-not channel port))
                                          ports)))]
        (throw (ex-info "the render proc is missing an in/out port"
-                       {:seon.error/kind ::missing-port
-                        ::missing-port (first missing)
-                        ::missing (vec missing)}))))
+                       (let [observation
+                             {:seon.error/at (java.util.Date.)
+                              :seon.error/layer :seon.render.web/render
+                              :seon.error/operation 'seon.render.web/render-step
+                              :seon.error/message "The requested render observation is unavailable."
+                              :seon.error/diagnostic-layer :seon.render.web/render
+                              :seon.error/diagnostic-operation 'seon.render.web/render-step
+                              :seon.error/diagnostic-member :seon.render.web/render-channel
+                              :seon.error/diagnostic-expected "all declared render ports"
+                              :seon.error/diagnostic-offending (vec missing)
+                              :seon.error/diagnostic-cause :seon.render.web/render-channel
+                              :seon.error/diagnostic-evidence {:seon.render.web/missing (vec missing)}
+                              :seon.error/fix "Supply the expected member and repeat the requested operation."
+                              :seon.render.web/missing-port (first missing)
+                              ::missing (vec missing)}]
+                         (merge observation (error/diagnostic observation)))))))
    (assoc args
           ::flow/in-ports
           {::interest (:seon.render.web/render-channel args)
@@ -2651,7 +2713,11 @@
   complete package. Queue drain is permission for another write, never
   remote-delivery acknowledgement."
   {:seon.fn/external-sink :html-response
-   :seon.fn/projection-boundary :seon.render/html}
+   :seon.fn/projection-boundary :seon.render/html
+   :malli/schema
+   [:=> [:cat :seon.schema/value :seon.schema/value :seon.blob/octet-array
+         :seon.config.eval/time-limit-ms :seon.schema/value]
+    [:or :boolean :seon.render.web/request-error]]}
   [channel generator frame backstop-ms member]
   (if (http/send! channel frame false)
     (let [{pending-bytes :http-kit.write/pending-bytes
@@ -2665,18 +2731,24 @@
                  :seon.config.eval/time-limit-ms
                  :seon.await/config-value backstop-ms}
                 :seon.await/diagnostic
-                {:seon.error/diagnostic-layer :web-delivery
-                 :seon.error/diagnostic-operation ::socket-queue-drain
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :seon.render.web/delivery
+                 :seon.error/operation 'seon.render.web/write-package!
+                 :seon.error/diagnostic-layer :seon.render.web/delivery
+                 :seon.error/diagnostic-operation 'seon.render.web/write-package!
                  :seon.error/diagnostic-member member
                  :seon.error/diagnostic-expected ::drained-or-closed
                  :seon.error/diagnostic-offending ::pending
                  :seon.error/diagnostic-evidence
                  {:http-kit.write/pending-bytes pending-bytes}}
                 :seon.await/future drained})]
-          (if (:seon.error/kind result)
+          (if (and (:seon.error/at result) (:seon.error/layer result) (:seon.error/operation result)) ;; debt: seon.await/await! declares :seon.error/value, directly or through its result union.
             (do
               (datastar/close-sse! generator)
-              result)
+              (assoc result
+                     :seon.error/at (java.util.Date.)
+                     :seon.render.web/refused-member :seon.await/future
+                     :seon.error/fix "Observe the socket drain or closure before writing another package."))
             true))
         true))
     (do
@@ -2685,20 +2757,34 @@
 
 (defn- await-feed-package!
   "Wait for this page's next package under the carried delivery backstop."
+  {:malli/schema
+   [:=> [:cat :seon.flow/channel :seon.schema/value :seon.config.eval/time-limit-ms]
+    [:or :map :seon.render.web/request-error]]}
   [tap registration-key backstop-ms]
-  (await/await!
-   {:seon.await/bound
-    {:seon.await/config-attribute :seon.config.eval/time-limit-ms
-     :seon.await/config-value backstop-ms}
-    :seon.await/diagnostic
-    {:seon.error/diagnostic-layer :web-delivery
-     :seon.error/diagnostic-operation ::feed-delta
-     :seon.error/diagnostic-member registration-key
-     :seon.error/diagnostic-expected ::registered-package
-     :seon.error/diagnostic-offending ::pending
-     :seon.error/diagnostic-evidence {}}
-    :seon.await/port-operations [tap]
-    :seon.await/accept? #(get % registration-key)}))
+  (let [result
+        (await/await!
+         {:seon.await/bound
+          {:seon.await/config-attribute :seon.config.eval/time-limit-ms
+           :seon.await/config-value backstop-ms}
+          :seon.await/diagnostic
+          {:seon.error/at (java.util.Date.)
+           :seon.error/layer :seon.render.web/delivery
+           :seon.error/operation 'seon.render.web/await-feed-package!
+           :seon.error/diagnostic-layer :seon.render.web/delivery
+           :seon.error/diagnostic-operation 'seon.render.web/await-feed-package!
+           :seon.error/diagnostic-member registration-key
+           :seon.error/diagnostic-expected ::registered-package
+           :seon.error/diagnostic-offending ::pending
+           :seon.error/diagnostic-evidence {}}
+          :seon.await/port-operations [tap]
+          :seon.await/accept? #(get % registration-key)})]
+
+    (if (and (:seon.error/at result) (:seon.error/layer result) (:seon.error/operation result)) ;; debt: seon.await/await! declares :seon.error/value; this owner adds its requested completion facet.
+      (assoc result
+             :seon.error/at (java.util.Date.)
+             :seon.render.web/refused-member :seon.await/port-operations
+             :seon.error/fix "Observe a complete package for this registered page before delivery.")
+      result)))
 
 (defn feed
   "Paint current facts on the connection's virtual thread, then consume deltas.
@@ -2748,20 +2834,21 @@
                             channel generator (frame-bytes page) backstop-ms
                             {:seon.render.web/tab-id tab-id
                              :seon.render.web/page registration-key})]
-               (when (:seon.error/kind written)
+               (when (:seon.render.web/refused-member written)
                  (throw (ex-info (:seon.error/message written) written)))
                (when written
                  (async/offer! render-channel {::join true})
                  (loop [delivered-revision -1]
                    (when @painting
                      (let [packages (await-feed-package! tap registration-key backstop-ms)]
-                       (when (:seon.error/kind packages)
+                       (when (:seon.render.web/refused-member packages)
                          (when @painting
                            (datastar/patch-signals!
                             generator
                             (json/write-str
                              {"seonFeedError"
-                              {"seon.error/kind" (str (:seon.error/kind packages))
+                              {"seon.error/operation" (str (:seon.error/operation packages))
+                               "seon.error/layer" (str (:seon.error/layer packages))
                                "seon.error/message" (:seon.error/message packages)}}
                              :escape-slash false)))
                          (throw (ex-info (:seon.error/message packages) packages)))
@@ -2778,7 +2865,7 @@
                                   {:seon.render.web/tab-id tab-id
                                    :seon.render.web/page registration-key
                                    :seon.render.package/revision revision})]
-                             (when (:seon.error/kind written)
+                             (when (:seon.render.web/refused-member written)
                                (throw (ex-info (:seon.error/message written) written)))
                              (when written (recur revision))))))))))
              (catch Throwable failure
@@ -2904,10 +2991,10 @@
              {:tx-data [[:db.fn/call #'message/inbound-tx request]]
               :tx-meta (inbound-tx-meta (db/db connection) process id)})]
         (cond
-          (not (:seon.error/kind result))
+          (not (and (:seon.error/at result) (:seon.error/layer result) (:seon.error/operation result))) ;; debt: seon.db/transact! / seon.turn/system-turn declares :seon.error/value, directly or through its result union.
           {:status 204 :headers {} :body nil}
 
-          (= :seon.db/unknown-failure (:seon.error/kind result))
+          (get-in result [:seon.db.write/attempt :seon.db.write.attempt/completion-unavailable])
           {:status 500
            :headers {"content-type" "text/plain; charset=utf-8"}
            :body (:seon.error/message result)}
@@ -2958,6 +3045,7 @@
         db namespace-name)))
 
 (defn- agent-namespace
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :seon.render/namespace :seon.db/error-result]]}
   [db agent-id]
   (db/q '[:find ?namespace-name .
          :in $ ?agent-id
@@ -2968,12 +3056,15 @@
        db agent-id))
 
 (defn- current-cluster-name
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :seon.cluster/name :seon.db/error-result]]}
   [db]
   (db/q '[:find ?cluster-name .
          :where [?cluster :seon.cluster/name ?cluster-name]]
        db))
 
 (defn- ensure-namespace-owner!
+
+  {:malli/schema [:=> [:cat [:map [:seon.store/connection-object :seon.db/connection] [:seon.db.process/id :seon.db.process/id]] :seon.render/namespace] [:or :map :seon.render.web/request-error :seon.agent/error :seon.db/error-result]]}
   [{connection :seon.store/connection-object
     process :seon.db.process/id}
    namespace-name]
@@ -2986,13 +3077,25 @@
                     {:seon.agent/id (str namespace-name)
                      :seon.cluster/name (current-cluster-name (db/db connection))
                      :seon.ns/name namespace-name})]
-        (if (:seon.error/kind result)
+        (if (and (:seon.error/at result) (:seon.error/layer result) (:seon.error/operation result)) ;; debt: seon.cluster/ensure-entity! declares :seon.error/value, directly or through its result union.
           result
           (or (first (cluster.agent/assigned-to (db/db connection) namespace-name))
-              {:seon.error/kind ::owner-not-ensured
-               :seon.error/message
-               (str "The namespace owner for " namespace-name
-                    " was not created.") :seon.render.web/owner-not-ensured true})))))
+              (let [observation
+                    {:seon.error/at (java.util.Date.)
+                     :seon.error/layer :seon.render.web/render
+                     :seon.error/operation 'seon.render.web/ensure-namespace-owner!
+                     :seon.error/message (str "The namespace owner for " namespace-name
+                                                     " was not created.")
+                     :seon.error/diagnostic-layer :seon.render.web/render
+                     :seon.error/diagnostic-operation 'seon.render.web/ensure-namespace-owner!
+                     :seon.error/diagnostic-member :seon.ns/name
+                     :seon.error/diagnostic-expected "a namespace with an assigned agent"
+                     :seon.error/diagnostic-offending namespace-name
+                     :seon.error/diagnostic-cause :seon.ns/name
+                     :seon.error/diagnostic-evidence {}
+                     :seon.error/fix "Supply the expected member and repeat the requested operation."
+                     :seon.render.web/refused-member :seon.ns/name}]
+                (merge observation (error/diagnostic observation))))))))
 
 (def ^:private namespace-walk-options
   {:depth 2})
@@ -3263,10 +3366,22 @@
                    :seon.agent/id (get-in request [:path-params :id])
                    :seon.sci.eval/time-limit-ms
                    (:seon.config.eval/time-limit-ms service)}))
-                 {:seon.render.web/invalid-context-action true
-                  :seon.error/kind ::invalid-context-action
-                  :seon.error/message "Choose Run system turn, Virtual turn, or Compact."})]
-    (if (:seon.error/kind result)
+                 (let [observation
+                       {:seon.error/at (java.util.Date.)
+                        :seon.error/layer :seon.render.web/render
+                        :seon.error/operation 'seon.render.web/context-response
+                        :seon.error/message "Choose Run system turn, Virtual turn, or Compact."
+                        :seon.error/diagnostic-layer :seon.render.web/render
+                        :seon.error/diagnostic-operation 'seon.render.web/context-response
+                        :seon.error/diagnostic-member :seon.render/context-action
+                        :seon.error/diagnostic-expected "system-turn, virtual-turn, or compact"
+                        :seon.error/diagnostic-offending params
+                        :seon.error/diagnostic-cause :seon.render/context-action
+                        :seon.error/diagnostic-evidence {}
+                        :seon.error/fix "Supply the expected member and repeat the requested operation."
+                        :seon.render.web/refused-member :seon.render/context-action}]
+                   (merge observation (error/diagnostic observation))))]
+    (if (and (:seon.error/at result) (:seon.error/layer result) (:seon.error/operation result)) ;; debt: seon.db/transact! / seon.turn/system-turn declares :seon.error/value, directly or through its result union.
       {:status 422 :headers {"content-type" "text/plain; charset=utf-8"}
        :body (pr-str result)}
       {:status 204 :headers {} :body nil})))
@@ -3297,14 +3412,39 @@
           (try
             (if-let [content (blob/get connection value-digest)]
               (value/artifact-value (value/read-artifact content))
-              {:seon.error/kind :seon.render.web/value-not-found
-               :seon.error/message "No stored value has this digest."
-               :seon.blob/digest value-digest :seon.render.web/value-not-found value-digest})
+              (let [observation
+                    {:seon.error/at (java.util.Date.)
+                     :seon.error/layer :seon.render.web/render
+                     :seon.error/operation 'seon.render.web/data-response
+                     :seon.error/message "No stored value has this digest."
+                     :seon.error/diagnostic-layer :seon.render.web/render
+                     :seon.error/diagnostic-operation 'seon.render.web/data-response
+                     :seon.error/diagnostic-member :seon.blob/digest
+                     :seon.error/diagnostic-expected "a stored value at the requested digest"
+                     :seon.error/diagnostic-offending value-digest
+                     :seon.error/diagnostic-cause :seon.blob/digest
+                     :seon.error/diagnostic-evidence {}
+                     :seon.error/fix "Supply the expected member and repeat the requested operation."
+                     :seon.render.web/value-not-found value-digest
+                     :seon.blob/digest value-digest}]
+                (merge observation (error/diagnostic observation))))
             (catch Throwable failure
-              {:seon.error/kind :seon.render.web/value-unreadable
-               :seon.render.web/value-unreadable value-digest
-               :seon.error/message (or (ex-message failure)
-                                       "The stored value is unreadable.")}))
+              (let [observation
+                    {:seon.error/at (java.util.Date.)
+                     :seon.error/layer :seon.render.web/render
+                     :seon.error/operation 'seon.render.web/data-response
+                     :seon.error/message (or (ex-message failure)
+                                                                        "The stored value is unreadable.")
+                     :seon.error/diagnostic-layer :seon.render.web/render
+                     :seon.error/diagnostic-operation 'seon.render.web/data-response
+                     :seon.error/diagnostic-member :seon.blob/digest
+                     :seon.error/diagnostic-expected "a readable stored value"
+                     :seon.error/diagnostic-offending value-digest
+                     :seon.error/diagnostic-cause :seon.blob/digest
+                     :seon.error/diagnostic-evidence {:seon.error/throwable-class (.getName (class failure))}
+                     :seon.error/fix "Supply the expected member and repeat the requested operation."
+                     :seon.render.web/value-unreadable value-digest}]
+                (merge observation (error/diagnostic observation)))))
 
           entity?
           (when-let [eid (some-> (when entity
@@ -3497,7 +3637,7 @@
                 (db/db connection) process)
             (let [result
                   (db/transact! connection [{:seon.db.process/id process}])]
-              (when (:seon.error/kind result)
+              (when (and (:seon.error/at result) (:seon.error/layer result) (:seon.error/operation result)) ;; debt: seon.db/transact! / seon.turn/system-turn declares :seon.error/value, directly or through its result union.
                 (throw
                  (ex-info "The web service process transaction was refused."
                           result)))))

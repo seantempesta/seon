@@ -255,7 +255,11 @@
                              [repeated
                               {:seon.cluster.eval/source "#:seon.repl{:value 124}"
                                :seon.cluster.eval/error "Only the REPL writes responses."
-                               :seon.error/kind :seon.sci.reader/fabricated-response}
+                               :seon.cluster.eval/triage-edn
+                               (pr-str {:seon.error/data {:seon.sci.reader/phase "reply"
+                                                        :seon.sci.reader/line 2
+                                                        :seon.sci.reader/column 1}})
+                               :seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-debug-test/fixture :seon.error/operation 'seon.render.web-debug-test/turn-details-use-the-loop-opening-and-exact-segments :seon.render/refused-member :seon.render/output}
                               (assoc (select-keys directory [:seon.cluster.eval/source :seon.eval/renderer
                                                             :seon.cluster.eval/read-evidence
                                                             :seon.cluster.eval/read-basis-transaction])
@@ -273,7 +277,7 @@
                  ;; the ref to point at. The fault lands first so the message
                  ;; can name an entity that already exists.
                  (let [recorded (error/recording @connection
-                                  {:seon.error/source {:seon.error/kind :seon.debug/panel-fixture
+                                  {:seon.error/source {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-debug-test/fixture :seon.error/operation 'seon.render.web-debug-test/turn-details-use-the-loop-opening-and-exact-segments :seon.render/refused-member :seon.render/output
                                                        :seon.error/message "Known fixture fault."}
                                    :seon.error/id "panel-fault" :seon.error/at (java.util.Date.)
                                    :seon.error/process cluster/boot-process-identity
@@ -394,7 +398,7 @@
                           :seon.context.capture/prompt (:seon.cluster.prompt/text acquired)}])
              request (assoc request :seon.db/db @connection :seon.turn/id "history-probe-turn")]
          (is (:db-after captured) (pr-str captured))
-         (is (nil? (:seon.error/kind (render/acquire-context! request)))
+         (is (string? (:seon.cluster.prompt/text (render/acquire-context! request)))
              "Acquisition publishes units; it does not judge a capture it cannot
               recompose. The capture is compose(select(units)) plus the frame,
               so only seon.cluster.prompt holds the bytes to compare — see
@@ -402,7 +406,7 @@
        (let [changed (db/transact! connection
                                   [[:db/add component-eid :my.plan/objective
                                     "The current component changed"]])]
-         (is (nil? (:seon.error/kind changed)))
+         (is (:db-after changed))
          (is (= history (walk/history (assoc request :seon.db/db @connection)))
              "History reuses the observation without executing or reprinting the component."))))))
 
@@ -450,7 +454,7 @@
            blocks (filter vector? (tree-seq vector? seq html))
            classed (fn [css-class]
                      (filter #(= css-class (:class (second %))) blocks))]
-       (is (nil? (:seon.error/kind html)) (pr-str html))
+       (is (vector? html) (pr-str html))
        (is (= 1 (count (classed "seon-eval-thinking"))) (pr-str html))
        (is (= ";; I should read the plan first."
               (last (first (classed "seon-eval-thinking")))))
@@ -584,7 +588,7 @@
            caps (config/result-caps effective)
            ctx (support/fork-cluster-ctx connection)
            fault (error/normalize
-                  {:seon.error/source {:seon.error/kind ::fixture
+                  {:seon.error/source {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-debug-test/fixture :seon.error/operation 'seon.render.web-debug-test/reverse-declarations-receive-the-actual-relationship-value :seon.render/refused-member :seon.render/output
                                        :seon.error/message "A declared fault card."}
                    :seon.error/id "reverse-render-fixture"
                    :seon.error/at (java.util.Date.)
@@ -660,7 +664,7 @@
        (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-html"))))))
 
 (deftest a-refused-selection-is-not-reported-as-an-empty-render
-  (let [refusal {:seon.error/kind :seon.config/missing-effective
+  (let [refusal {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-debug-test/fixture :seon.error/operation 'seon.render.web-debug-test/a-refused-selection-is-not-reported-as-an-empty-render :seon.render/refused-member :seon.render/output
                  :seon.error/message "The render profile is unavailable."}
         html (#'web/experiment-preview-html
               :seon.render/html
@@ -953,7 +957,7 @@
            turns (outline-nodes rendered :data-turn-kind)
            units (outline-nodes rendered :data-evaluation-id)
            raw (outline-nodes rendered #(= "seon-session-raw" (:class %)))]
-       (is (nil? (:seon.error/kind rendered)) (pr-str rendered))
+       (is (vector? rendered) (pr-str rendered))
        (is (not (str/includes? (element-text rendered) "No turns recorded."))
            (pr-str rendered))
 
@@ -1023,7 +1027,7 @@
            composed (prompt/prompt (:seon.db/db request) request)
            rendered (transcript/render-outline request)
            raw (first (outline-nodes rendered #(= "seon-session-raw" (:class %))))]
-       (is (nil? (:seon.error/kind composed)) (pr-str composed))
+       (is (string? (:seon.cluster.prompt/text composed)) (pr-str composed))
        (is (some? raw) (pr-str rendered))
        (is (= (:seon.cluster.prompt/text composed) (element-text raw))
            "show everything is the prompt the provider boundary receives")
@@ -1051,7 +1055,7 @@
                               :seon.issue/problem "Keep the observed origin."
                               :seon.issue/severity :cleanup})
             issue-id (:seon.issue/id added)]
-        (is (nil? (:seon.error/kind added)) (pr-str added))
+        (is (seq (:seon.issue/id added)) (pr-str added))
         (is (string? issue-id))
         (support/transacted! connection
           [[:db/add [:seon.cluster.eval/id "outline-e0"] :seon.eval/origin issue-id]])

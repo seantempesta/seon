@@ -93,8 +93,8 @@
          (is (str/includes? (pr-str generic-html) "2")))
        (let [missing (transcript/render-run-ai
                       (dissoc unit :seon.turn/id))]
-         (is (= ::transcript/selected-run-unavailable
-                (:seon.error/kind missing)))
+         (is (= :seon.turn/turn
+                (:seon.render.transcript/refused-member missing)))
          (is (= :seon.turn/turn
                 (get-in missing [:seon.error/data
                                  :seon.error/diagnostic-member]))))))))

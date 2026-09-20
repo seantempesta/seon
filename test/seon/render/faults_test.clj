@@ -24,9 +24,9 @@
                                                :seon.turn/opened-tx "datomic.tx"}])
            recording (error/recording
                       (db/db connection)
-                      {:seon.error/source {:seon.error/kind :seon.instrument/contract-violated
+                      {:seon.error/source {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.faults-test/fixture :seon.error/operation 'seon.render.faults-test/pulled-fault-concern-uses-the-entity-pair :seon.render/refused-member :seon.render/output
                                            :seon.error/message "No credential configured."
-                                           :seon.error/data {:seon.instrument/fn "seon.ai/complete"}}
+                                           :seon.error/data {:seon.instrument/fn 'seon.ai/complete}}
                        :seon.error/id "fault-render-probe" :seon.error/at (java.util.Date. 0)
                        :seon.error/process "fault-render-probe" :seon.sci.admit/caps caps
                        :seon.config.error/max-evidence-bytes 16384
@@ -57,10 +57,10 @@
   (support/with-database
    (fn [connection]
      (let [cluster-name "fault-opening"
-           _ (config/apply! {:seon.db/connection connection :seon.boot/cluster-name cluster-name})
+           _ (support/seed-cluster! connection cluster-name)
            agents ["root" "repair" "happened"]
            setup (db/transact! connection
-                              (into [[:db/add "cluster" :seon.cluster/name cluster-name]]
+                              (into []
                                     (mapcat #(agent/creation-tx
                                               {:seon.agent/id % :seon.ns/name (symbol (str "my.agents." %))
                                                :seon.cluster/name cluster-name}) agents)))
@@ -73,7 +73,8 @@
          (doseq [id agents]
            (let [result (turn/system-turn {:seon.turn.loop/cluster handle
                                           :seon.agent/id id :seon.turn/write? true})]
-             (is (not (:seon.error/kind result)) (pr-str result))
+             (is (vector? (:seon.turn/forms result)) (pr-str result))
+             (is (vector? (:seon.render.walk/units result)))
              (let [entry (first (filter #(str/includes? (or (:seon.cluster.eval/source %) "") ":seon.error/fn")
                                         (evaluation/of-agent (db/db connection) id)))]
                (is (some? entry) id)

@@ -57,8 +57,8 @@
         (is (seq ai-before))
         (is (= ai-before (transcript/render-runtime-ai unit))
             "Rendering HTML does not change the AI source.")
-        (is (= :seon.db/not-found
-               (:seon.error/kind (transcript/render-runtime-html
+        (is (= :seon.agent/runtime
+               (:seon.render.transcript/refused-member (transcript/render-runtime-html
                                  (assoc unit :seon.agent/id "absent-runtime-owner")))))
         (is (= "65 s" (#'transcript/runtime-duration (java.util.Date. 0) (java.util.Date. 65000))))
         (is (= "4 d 2 h" (#'transcript/runtime-duration (java.util.Date. 0) (java.util.Date. (* 98 3600000)))))

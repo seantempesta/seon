@@ -38,20 +38,29 @@
     {:seon.message/id "render-walk-message"
      :seon.message/to [:seon.agent/id agent-id]
      :seon.message/content "42"}])]
-    (is (not (:seon.error/kind result)) (pr-str result))))
+    (is (:db-after result) (pr-str result))))
+
+(defn- seed-listeners!
+  [connection]
+  (support/transacted!
+   connection
+   [{:seon.agent/id agent-id
+     :seon.agent/runtime
+     {:seon.runtime/agent [:seon.agent/id agent-id]
+      :seon.runtime/listens
+      (mapv (fn [attribute] {:seon.listen/attribute attribute})
+            [:seon.message/content :seon.message/about :seon.message/inbound-content])}}]))
 
 (deftest every-identifiable-neighbour-uses-its-declared-lookup-ref
   (support/with-database
    (fn [connection]
      (seed-agent-and-inbox! connection)
-     (support/transacted!
-             connection
-             [{:seon.message/content "identityless message"}])
+     (seed-listeners! connection)
      (let [database @connection
            identity-attributes (db/populated-identity-attributes database)
            units (vals (:seon.render.walk/members
                         (walk/root-acquisition
-                         (request database (support/fork-cluster-ctx connection) 1))))
+                         (request database (support/fork-cluster-ctx connection) 2))))
            numeric-lookups (->> units
                                 (keep :seon.render.walk/lookup)
                                 (filter number?)
@@ -64,8 +73,8 @@
                        (when (contains? entity attribute)
                          [attribute (get entity attribute)]))
                      identity-attributes)))]
-       (testing "the declared reverse concern is addressed by its message identity"
-         (is (some #(= [:seon.message/id "render-walk-message"]
+       (testing "the namespace neighbour is addressed by its declared identity"
+         (is (some #(= [:seon.ns/name agent-namespace]
                        (:seon.render.walk/lookup %))
                    units)))
        (testing "a raw eid survives only when the entity has no identity"
@@ -101,14 +110,14 @@
                          :seon.db/connection connection)))))]
        (let [error-valued-units (filterv :seon.error/value units)]
          (is (seq units) "the supplied projection traverses an existing entity")
-         (is (every? #(= :seon.render.walk/elided
-                         (:seon.error/kind (:seon.error/value %)))
+         (is (every? #(= :seon.render/distance
+                         (:seon.print/bound-by (:seon.error/value %)))
                      error-valued-units)
              "every error-valued survivor is a distance-cap marker, not a renderer failure")
-         (is (every? #(true? (:seon.render.walk/elided
+         (is (every? #(some? (:seon.render.walk/continuation-subject
                               (:seon.error/value %)))
                      error-valued-units)
-             "every distance-cap error carries its declared class marker"))
+             "every distance-cap error carries its continuation subject"))
        (is (some #(str/includes? (str (:seon.render/output %)) agent-id) units)
            "the seeded subject reaches database reads and HTML emission")
        (is (zero? @database-projection-resolutions)
@@ -124,7 +133,7 @@
   (->> (vals (:seon.render.walk/members acquisition))
        (mapcat :seon.render.walk/connections)
        (keep :seon.error/value)
-       (filter #(= ::walk/elided (:seon.error/kind %)))
+       (filter #(some? (:seon.print/bound-by %)))
        vec))
 
 (deftest a-truncated-connection-is-reported-whichever-bound-cut-it
@@ -137,13 +146,7 @@
   (support/with-database
    (fn [connection]
      (seed-agent-and-inbox! connection)
-     (support/transacted!
-             connection
-             (mapv (fn [ordinal]
-                     {:seon.message/id (str "render-walk-message-" ordinal)
-                      :seon.message/to [:seon.agent/id agent-id]
-                      :seon.message/content "42"})
-                   [1 2]))
+     (seed-listeners! connection)
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            narrow (assoc caps :seon.config.eval.result/max-collection 2)]
@@ -183,8 +186,6 @@
                            2
                            :seon.render/html))]
        (is (pos? (count units)) "the census must inspect a real neighborhood")
-       (is (empty? (filter #(= ::walk/elided
-                               (get-in % [:seon.error/value
-                                          :seon.error/kind]))
+       (is (empty? (filter #(get-in % [:seon.error/value :seon.print/bound-by])
                            units))
            "HTML emits only units with renderable content")))))

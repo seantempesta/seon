@@ -75,7 +75,9 @@
              runtime-html (pr-str (transcript/render-runtime-html runtime-unit))]
          (is (:db-after linked))
          (is (str/includes? (transcript/render-runtime-ai runtime-unit) "[:seon.agent/id \"page\"]"))
-         (is (:seon.error/kind (transcript/render-runtime-ai {:seon.db/db @connection})))
+         (let [refusal (transcript/render-runtime-ai {:seon.db/db @connection})]
+           (is (= :seon.agent/runtime (:seon.render.transcript/refused-member refusal)))
+           (is (= 'seon.render.transcript/runtime-owner (:seon.error/operation refusal))))
          (is (str/includes? runtime-html "Turn open"))
          (is (str/includes? runtime-html "Turns (3)"))
          (is (str/includes? runtime-html "Message from page"))
@@ -106,4 +108,6 @@
        (is (= (mapv #(select-keys % keys) full) narrow))
        (is (= (evaluation/of-agent @connection "absent")
               (evaluation/of-agent @connection "absent" [:seon.eval/shown]))))
-     (is (:seon.error/kind (evaluation/of-agent @connection "absent"))))))
+     (let [refusal (evaluation/of-agent @connection "absent")]
+       (is (= :seon.agent/id (get-in refusal [:seon.error/data :seon.error/diagnostic-member])))
+       (is (= "absent" (get-in refusal [:seon.error/data :seon.error/diagnostic-offending])))))))

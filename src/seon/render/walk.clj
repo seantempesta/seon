@@ -36,6 +36,7 @@
             [seon.db :as db]
             [seon.cluster.wake :as wake]
             [seon.eval :as evaluation]
+            [seon.error :as error]
             [seon.print :as print]
             [seon.render :as render]
             [seon.schema :as schema]
@@ -160,10 +161,10 @@
   "Resolve one entity id to its stable declared lookup identity."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.db/ref]
-    [:or :seon.render.walk/lookup :seon.error/value]]}
+    [:or :seon.render.walk/lookup :seon.db/error-result]]}
   [database entity]
   (let [pulled (db/pull database '[*] entity)]
-    (if (:seon.error/kind pulled)
+    (if (and (:seon.error/at pulled) (:seon.error/layer pulled) (:seon.error/operation pulled)) ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
       pulled
       (stable-lookup (db/populated-identity-attributes database) pulled))))
 
@@ -216,22 +217,38 @@
   absence of signal: with no profile the observation could never fire even
   though the pull had already stopped at 8,193 (measured 2026-09-07,
   research/verify-storage-bound-2026-09-07.md B5)."
+  {:malli/schema
+   [:=> [:cat :qualified-keyword :boolean :int :int :int]
+    [:map [:seon.render.walk/attribute :qualified-keyword]
+     [:seon.error/value :seon.render.walk/elided-error]]]}
   [attribute reverse? shown query-limit presentation-limit]
   (let [bound-by (if (<= (long query-limit) (long presentation-limit))
                    :seon.config.eval.result/max-collection
                    :seon.render.profile/max-children)]
     {:seon.render.walk/attribute attribute
      :seon.error/value
-     {::elided true
-      :seon.error/kind ::elided
-      :seon.error/message
-      (str "elided additional " (when reverse? "reverse ") attribute
-           " connections past " shown
-           ", bounded by " bound-by)
-      :seon.error/data
-      {:seon.render.walk/attribute attribute
-       :seon.print/bound-by bound-by
-       :seon.render.walk/shown (long shown)}}}))
+     (let [observation
+           {:seon.error/diagnostic-layer :seon.render.walk/connections
+            :seon.error/diagnostic-operation 'seon.render.walk/connection-observation
+            :seon.error/diagnostic-member :seon.render.walk/lookup
+            :seon.error/diagnostic-expected "a traversal within the requested query-work bound"
+            :seon.error/diagnostic-offending {:seon.render.walk/attribute attribute :seon.render.walk/shown shown}
+            :seon.error/diagnostic-cause :seon.render.walk/lookup
+            :seon.error/diagnostic-evidence {}
+            :seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
+            :seon.error/at (java.util.Date.)
+            :seon.error/layer :seon.render.walk/connections
+            :seon.error/operation 'seon.render.walk/connection-observation
+            :seon.print/bound-by bound-by
+            :seon.render.walk/limit shown
+            :seon.render.walk/continuation-subject [attribute reverse?]
+            :seon.error/message (str "elided additional " (when reverse? "reverse ") attribute
+                                   " connections past " shown
+                                   ", bounded by " bound-by)
+            :seon.error/data {:seon.render.walk/attribute attribute
+                               :seon.print/bound-by bound-by
+                               :seon.render.walk/shown (long shown)}}]
+       (merge observation (error/diagnostic observation)))}))
 
 (defn- acquisition-members
   [projection database root distance width query-width]
@@ -391,13 +408,15 @@
 
 (defn- namespace-connections
   "Resolve observed namespace names for this walk without changing stored facts."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :int]
+                  [:or :map :seon.db/error-result]]}
   [database entity width]
   (if-let [namespace-name (:seon.ns/name entity)]
     (let [names (:seon.ns/requires entity)
           requirers (db/q '[:find [?entity ...] :in $ ?name
                              :where [?entity :seon.ns/requires ?name]]
                            database namespace-name)]
-      (if (:seon.error/kind requirers)
+      (if (and (:seon.error/at requirers) (:seon.error/layer requirers) (:seon.error/operation requirers)) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
         requirers
         (assoc entity
                :seon.ns/requires
@@ -415,7 +434,8 @@
         previous (get @cache cache-key)]
     (if (and previous
              (identical? (:datahike.pull/plan plan) (:datahike.pull/plan previous))
-             (not (:seon.error/kind (:seon.render.call/output previous)))
+             (not (let [output (:seon.render.call/output previous)]
+               (and (:seon.error/at output) (:seon.error/layer output) (:seon.error/operation output)))) ;; debt: seon.db/pull declares :seon.error/value through seon.db/error-result.
              (db/read-evidence-current? database (:seon.render.call/read-evidence previous)))
       (let [refreshed (render/refresh-read-evidence database previous)]
         (swap! cache
@@ -443,7 +463,7 @@
                   (namespace-connections database entity (pull-width (:seon.sci.admit/caps plan)))
                   (if (seq reverse-selector)
                   (let [reverse-values (db/pull database reverse-selector lookup)]
-                    (if (:seon.error/kind reverse-values)
+                    (if (and (:seon.error/at reverse-values) (:seon.error/layer reverse-values) (:seon.error/operation reverse-values)) ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
                       reverse-values
                       (merge entity reverse-values)))
                   entity))))
@@ -645,6 +665,11 @@
       (when (map? namespace-ref) (:db/id namespace-ref)))))
 
 (defn- distance-cap-unit
+  {:malli/schema
+   [:=> [:cat :map :int]
+    [:or :nil
+     [:map [:seon.render.walk/lookup :seon.render.walk/lookup]
+      [:seon.error/value :seon.render.walk/elided-error]]]]}
   [member remaining]
   (when (and (zero? remaining)
              (seq (:seon.render.walk/connections member)))
@@ -656,10 +681,23 @@
      :seon.render.walk/found-depth
      (inc (:seon.render.walk/found-depth member))
      :seon.error/value
-     {::elided true
-      :seon.error/kind ::elided
-      :seon.error/message
-      "elided connections at the requested distance cap"}}))
+     (let [observation
+           {:seon.error/diagnostic-layer :seon.render.walk/distance
+            :seon.error/diagnostic-operation 'seon.render.walk/distance-cap-unit
+            :seon.error/diagnostic-member :seon.render.walk/lookup
+            :seon.error/diagnostic-expected "a traversal within the requested query-work bound"
+            :seon.error/diagnostic-offending member
+            :seon.error/diagnostic-cause :seon.render.walk/lookup
+            :seon.error/diagnostic-evidence {}
+            :seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
+            :seon.error/at (java.util.Date.)
+            :seon.error/layer :seon.render.walk/distance
+            :seon.error/operation 'seon.render.walk/distance-cap-unit
+            :seon.print/bound-by :seon.render/distance
+            :seon.render.walk/limit remaining
+            :seon.render.walk/continuation-subject (:seon.render.walk/lookup member)
+            :seon.error/message "elided connections at the requested distance cap"}]
+       (merge observation (error/diagnostic observation)))}))
 
 (defn- declared-acquisition
   "Order declared concerns; an owned component has a block even before it exists."
@@ -746,10 +784,21 @@
              :seon.render.walk/path []
              :seon.render.walk/found-depth 0
              :seon.error/value
-             {::no-such-entity true
-              :seon.error/kind ::no-such-entity
-              :seon.error/message
-              (str "Nothing in the database answers to " (pr-str lookup) ".")}}]
+             (let [observation
+                   {:seon.error/at (java.util.Date.)
+                    :seon.error/layer :seon.render.walk/render
+                    :seon.error/operation 'seon.render.walk/neighborhood
+                    :seon.error/message "The requested lookup has no entity in this database."
+                    :seon.error/diagnostic-layer :seon.render.walk/render
+                    :seon.error/diagnostic-operation 'seon.render.walk/neighborhood
+                    :seon.error/diagnostic-member :seon.render.walk/lookup
+                    :seon.error/diagnostic-expected "an existing entity"
+                    :seon.error/diagnostic-offending lookup
+                    :seon.error/diagnostic-cause :seon.render.walk/lookup
+                    :seon.error/diagnostic-evidence {}
+                    :seon.error/fix "Supply the expected member and repeat the requested operation."
+                    :seon.render.walk/missing-lookup lookup}]
+               (merge observation (error/diagnostic observation)))}]
            (into []
                  (comp
                   (take node-limit)
@@ -775,7 +824,7 @@
                                     (scoped-attribute member))
                              owner (assoc :seon.render/namespace owner))
                            rendered (render/render-call render-request)
-                           failure (when (:seon.error/kind rendered) rendered)
+                           failure (when (or (:seon.render/refused-member rendered) (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered)) rendered)
                            failure-outcome
                            (when (and failure owner)
                              (render/renderer-failure
@@ -810,7 +859,7 @@
                  order)))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Assembly — the ai kind
+;;; Assembly — the AI projection
 ;;; ---------------------------------------------------------------------------
 
 ;;; ---------------------------------------------------------------------------
@@ -933,7 +982,7 @@
   admitted with its opening transaction. Generated system evaluations remain
   visible. Without a turn id, every stored evaluation participates."
   {:malli/schema [:=> [:cat :seon.render.walk/history-request]
-                  [:or [:vector :map] :seon.error/value]]}
+                  [:or [:vector :map] :seon.db/error-result :seon.render/error-result]]}
   [{database :seon.db/db lookup :seon.render.walk/lookup :as request}]
   (let [agent-id (:seon.agent/id
                   (db/pull database [:seon.agent/id] lookup))
@@ -943,7 +992,7 @@
         selected (when-let [id (:seon.turn/id request)]
                    (db/pull database [:db/id :seon.turn.work/situation]
                             [:seon.turn/id id]))]
-    (if (:seon.error/kind evaluations)
+    (if (and (:seon.error/at evaluations) (:seon.error/layer evaluations) (:seon.error/operation evaluations)) ;; debt: seon.eval/of-agent declares :seon.error/value, directly or through its result union.
       evaluations
       (reduce
        (fn [entries saved]
@@ -952,7 +1001,7 @@
                          (assoc request :seon.render/value saved
                                         :seon.render/output :seon.render/ai
                                         :seon.render.call/id [lookup]))]
-           (if (:seon.error/kind rendered)
+           (if (or (:seon.render/refused-member rendered) (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered))
              (reduced rendered)
              (conj entries
                    {:seon.render.history/call-id [lookup]

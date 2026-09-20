@@ -70,9 +70,10 @@
               :seon.sci.admit/caps caps}]
     (doseq [render [transcript/render-run-ai transcript/render-run-html]]
       (let [refusal (render unit)]
-        (is (= :seon.render.transcript/selected-run-unavailable
-               (:seon.error/kind refusal)))
-        (is (str/includes? (:seon.error/message refusal) "selected run"))))))
+        (is (= :seon.turn/turn
+               (:seon.render.transcript/refused-member refusal)))
+        (is (= 'seon.render.transcript/missing-selected-run (:seon.error/operation refusal)))
+        (is (= "selected-run" (get-in refusal [:seon.error/diagnostic-offending :seon.turn/id])))))))
 
 (deftest durable-history-entries-never-invent-executions
   (let [history (ns-resolve 'seon.render.transcript 'history)
@@ -385,7 +386,7 @@
          ;; failed evaluation stores no shown text beside its error.
          :seon.cluster.eval/error "No such namespace: missing.function"
          :seon.cluster.eval/triage-edn (arithmetic-triage-edn)
-         :seon.error/kind :seon.sci.eval/refused
+         :seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.transcript-test/fixture :seon.error/operation 'seon.render.transcript-test/stored-evaluations-are-terminal-transcript-values :seon.render/refused-member :seon.render/output
          :seon.problems/id "problem-eval-error"
          :seon.cluster.eval/interrupted-at (between decline self)
          :seon.cluster.eval/source "(missing.function/call)"}]))))
@@ -930,9 +931,9 @@
          (assoc :seon.eval/shown "{")
          (= :receipt-mixed event-kind)
          (assoc :seon.eval/shown
-                (pr-str {:seon.error/kind :generated/refusal})
+                (pr-str {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.transcript-test/fixture :seon.error/operation 'seon.render.transcript-test/the-history-query-bounds-what-the-transcript-pulls :seon.render/refused-member :seon.render/output})
                 :seon.cluster.eval/error content
-                :seon.error/kind :generated/refusal
+                :seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.transcript-test/fixture :seon.error/operation 'seon.render.transcript-test/the-history-query-bounds-what-the-transcript-pulls :seon.render/refused-member :seon.render/output
                 :seon.problems/id (str "problem-" id)
                 :seon.cluster.eval/interrupted-at event-at
                 :seon.cluster.eval/output content))])))
@@ -1308,8 +1309,8 @@
                                      (map :seon.render.history/bytes
                                           prompt-entries))
                responses (keep :seon.render.history/printed-value stored-entries)]
-           (is (nil? (:seon.error/kind committed))
-               (pr-str (select-keys committed [:seon.error/kind
+           (is (:db-after committed)
+               (pr-str (select-keys committed [:seon.error/operation
                                                :seon.error/message])))
            (is (= 6 (count outcomes)) "six forms, six evaluations")
            (is (= 6 @evaluations)

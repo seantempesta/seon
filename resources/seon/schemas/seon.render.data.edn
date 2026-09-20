@@ -27,8 +27,17 @@
                     [:seon.render.data/previous-offset
                      {:optional true}
                      :seon.render.data/offset]],
-                   :no-such-path [:= true]
-                   :no-such-path-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a requested nested value path that does not exist"} [:seon.render.data/no-such-path :seon.render.data/no-such-path] [:seon.error/message :seon.error/message]]
+                   :no-such-path-error
+                   [:and :seon.error/base
+ [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  [:seon.render.data/root-description :seon.render.data/root-description]
+  [:seon.render.data/requested-path-length :seon.render.data/requested-path-length]]]
+ :refused-member :qualified-keyword
+ :observation-error
+ [:and :seon.error/base
+  [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+   [:seon.render.data/refused-member :seon.render.data/refused-member]]]
+
  :subject :seon.db/entity-id
  :eid :int
  :snapshot :seon.db/database-value-identity
@@ -55,8 +64,8 @@
   [:seon.render.data/complete? :seon.render.data/complete?]
   [:seon.render.data/continuation {:optional true} :seon.render.data/continuation]
   [:seon.render.data/ref-attributes-probed {:optional true} :seon.render.data/ref-attributes-probed]]
- :outgoing [:or :seon.render.data/page :seon.error/value]
- :incoming [:or :seon.render.data/page :seon.error/value]
+ :outgoing [:or :seon.render.data/page :seon.db/error-result]
+ :incoming [:or :seon.render.data/page :seon.render.data/observation-error :seon.db/error-result]
  :identities :seon.db/datoms
  :outgoing-cursor :seon.render.data/continuation
  :incoming-cursor :seon.render.data/continuation
@@ -103,4 +112,8 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.location/entity}
  :seon.db/ref]
+
+ :root-description :string
+
+ :requested-path-length [:int {:min 0}]
 }

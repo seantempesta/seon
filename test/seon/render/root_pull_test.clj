@@ -144,7 +144,7 @@
                      :seon.render.walk/root-acquisition acquisition)))]
        (is (not= ::backstop result)
            "history-db rendering terminates within the declared event bound")
-       (is (or (vector? result) (:seon.error/kind result))
+       (is (or (vector? result) (:seon.db/read-operation result))
            "a temporal walk returns units or a loud typed refusal")))))
 
 (deftest root-acquisition-contract-is-projection-neutral
@@ -470,12 +470,12 @@
                connection
                [{:seon.ns/name 'root-walk.required}
                 {:seon.ns/name 'root-walk.subject
-                 :seon.ns/requires [[:seon.ns/name 'root-walk.required]]}
+                 :seon.ns/requires #{'root-walk.required}}
                 {:seon.ns/name 'root-walk.dependent
-                 :seon.ns/requires [[:seon.ns/name 'root-walk.subject]]}
-                {:seon.fn/sym "root-walk.subject/unrelated"
-                 :seon.fn/ns [:seon.ns/name 'root-walk.subject]
-                 :seon.schema.admission/source :core}])
+                 :seon.ns/requires #{'root-walk.subject}}
+                (support/program-fn-row
+                 (db/db connection) 'root-walk.subject/unrelated
+                 "(defn unrelated {:malli/schema [:=> [:cat] :nil]} [] nil)")])
            acquisition
            (walk/root-acquisition
             {:seon.db/db @connection
@@ -483,7 +483,7 @@
              :seon.render.walk/lookup [:seon.ns/name 'root-walk.subject]
              :seon.render/distance 1
              :seon.sci.admit/caps caps})]
-       (is (not (:seon.error/kind tx)) (pr-str tx))
+       (is (:db-after tx) (pr-str tx))
        (is (= #{[:seon.ns/name 'root-walk.subject]
                 [:seon.ns/name 'root-walk.required]
                 [:seon.ns/name 'root-walk.dependent]}

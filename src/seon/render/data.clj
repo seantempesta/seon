@@ -10,6 +10,7 @@
   Crash walk: pure. A kill loses only a cursor carried by the URL."
   (:require [clojure.edn :as edn]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -45,7 +46,7 @@
   A path that leaves the value is a legible refusal rather than nil,
   because nil is also a legitimate value to have navigated to and the
   two must not look the same."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.render.data/cursor] [:or [:map [:seon.render.data/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]]] :seon.error/value]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.render.data/cursor] [:or [:map [:seon.render.data/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]]] :seon.render.data/no-such-path-error]]}
   [value {:keys [:seon.render.data/path]}]
   (reduce (fn [found step]
             (let [inner (:seon.render.data/value found)
@@ -65,10 +66,27 @@
 
                 :else
                 (reduced
-                 {:seon.error/kind ::no-such-path
-                  :seon.error/message (str "There is nothing at " (pr-str step)
-                                           " in this value.")
-                  :seon.error/data {:seon.render.data/step (pr-str step)} :seon.render.data/no-such-path true}))))
+                 (assoc
+                  (error/diagnostic
+                   {:seon.error/at (java.util.Date.)
+                    :seon.error/layer :seon.render.data/cursor
+                    :seon.error/operation 'seon.render.data/at
+                    :seon.error/message "The requested path has no value at this step."
+                    :seon.error/diagnostic-layer :seon.render.data/cursor
+                    :seon.error/diagnostic-operation 'seon.render.data/at
+                    :seon.error/diagnostic-member :seon.render.data/path
+                    :seon.error/diagnostic-expected "a present map key, set member, or sequence index"
+                    :seon.error/diagnostic-offending value
+                    :seon.error/diagnostic-cause :seon.render.data/absent-path
+                    :seon.error/diagnostic-evidence
+                    {:seon.render.data/step step
+                     :seon.render.data/path path
+                     :seon.render.data/root-description (if (nil? value) "nil" (.getName (class value)))}})
+                  :seon.render.data/path path
+                  :seon.render.data/root-description (if (nil? value) "nil" (.getName (class value)))
+                  :seon.render.data/requested-path-length (count path)
+                  :seon.error/diagnostic-offending value
+                  :seon.error/fix "Select a present member from the parent value.")))))
           {:seon.render.data/value value}
           path))
 
@@ -80,18 +98,37 @@
   {:malli/schema
    [:=> [:cat :seon.db/pull-selector :seon.db/entity-id
          :seon.render.data/cursor]
-    [:or :seon.render/value :seon.error/value]]}
+    [:or :seon.render/value :seon.render.data/no-such-path-error :seon.db/error-result]]}
   [selector entity-id cursor]
   (let [pulled (db/pull selector entity-id)]
-    (if (:seon.error/kind pulled)
+
+    (if (and (:seon.error/at pulled) (:seon.error/layer pulled) (:seon.error/operation pulled)) ;; debt: seon.db/pull declares :seon.error/value (directly or through :seon.db/error-result).
       pulled
       (let [selected (at pulled cursor)]
-        (if (:seon.error/kind selected)
+        (if (:seon.render.data/root-description selected)
           selected
           (:seon.render.data/value selected))))))
 
-(defn- observation-error [kind message]
-  {:seon.error/kind kind :seon.error/message message})
+(defn- observation-error
+  {:malli/schema [:=> [:cat :qualified-symbol :qualified-keyword :string :seon.schema/value]
+                  :seon.render.data/observation-error]}
+  [operation member message offending]
+  (assoc
+   (error/diagnostic
+    {:seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.render.data/observation
+     :seon.error/operation operation
+     :seon.error/message message
+     :seon.error/diagnostic-layer :seon.render.data/observation
+     :seon.error/diagnostic-operation operation
+     :seon.error/diagnostic-member member
+     :seon.error/diagnostic-expected "an existing subject and a continuation from the same snapshot, entity, and direction"
+     :seon.error/diagnostic-offending offending
+     :seon.error/diagnostic-cause :seon.render.data/observation-unavailable
+     :seon.error/diagnostic-evidence {member offending}})
+   :seon.render.data/refused-member member
+   :seon.error/diagnostic-offending offending
+   :seon.error/fix "Acquire the subject again and use the continuation returned by that observation."))
 
 (defn- continuation [snapshot eid direction offset cursor]
   (cond-> {::snapshot snapshot ::eid eid ::direction direction
@@ -104,13 +141,16 @@
            (= eid (::eid cursor))
            (= direction (::direction cursor)))))
 
-(defn- outgoing-page [database snapshot eid limit weight cursor]
+(defn- outgoing-page
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.render.data/snapshot :int [:int {:min 1}] [:int {:min 1}] [:maybe :seon.render.data/continuation]] [:or :seon.render.data/page :seon.db/error-result]]}
+  [database snapshot eid limit weight cursor]
   (let [page (db/index-page
               database
               (cond-> {:index :eavt :components [eid] :direction :forward
                        :limit limit :max-result-weight weight}
                 cursor (assoc :cursor (::index-cursor cursor))))]
-    (if (:seon.error/kind page)
+
+    (if (and (:seon.error/at page) (:seon.error/layer page) (:seon.error/operation page)) ;; debt: seon.db/index-page declares :seon.error/value (directly or through :seon.db/error-result).
       page
       (cond-> {::datoms (:datahike.index-page/datoms page)
                ::complete? (:datahike.index-page/complete? page)}
@@ -120,12 +160,14 @@
                              (:datahike.index-page/cursor page)))))))
 
 (defn- incoming-page
+
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.render.data/snapshot :int [:vector :qualified-keyword] [:int {:min 1}] [:int {:min 1}] [:int {:min 1}] [:maybe :seon.render.data/continuation]] [:or :seon.render.data/page :seon.render.data/observation-error :seon.db/error-result]]}
   [database snapshot eid attributes limit weight probe-limit cursor]
   (let [start (or (::attribute-offset cursor) 0)
         stop (min (count attributes) (+ start probe-limit))]
     (if (> start (count attributes))
-      (observation-error ::invalid-continuation
-                         "Incoming continuation exceeds the reference attributes.")
+      (observation-error 'seon.render.data/incoming-page ::attribute-offset
+                         "Incoming continuation exceeds the reference attributes." cursor)
       (reduce
        (fn [result offset]
          (let [remaining (- limit (count (::datoms result)))
@@ -136,7 +178,8 @@
                               :max-result-weight weight}
                        (and (= offset start) (::index-cursor cursor))
                        (assoc :cursor (::index-cursor cursor))))]
-           (if (:seon.error/kind page)
+
+           (if (and (:seon.error/at page) (:seon.error/layer page) (:seon.error/operation page)) ;; debt: seon.db/index-page declares :seon.error/value (directly or through :seon.db/error-result).
              (reduced page)
              (let [rows (into (::datoms result) (:datahike.index-page/datoms page))
                    more? (not (:datahike.index-page/complete? page))
@@ -161,20 +204,23 @@
 (defn entity-observation
   "Bounded assertions and references for one entity at one database value."
   {:malli/schema [:=> [:catn [::request ::observation-request]]
-                  [:or ::observation :seon.error/value]]}
+                  [:or ::observation ::observation-error :seon.db/error-result]]}
   [{database :seon.db/db ::keys [subject limit max-result-weight
                                 max-ref-attributes outgoing-cursor incoming-cursor]}]
   (let [snapshot (db/database-value-identity database)
         found (db/pull database [:db/id] subject)
         eid (:db/id found)]
     (cond
-      (:seon.error/kind snapshot) snapshot
-      (:seon.error/kind found) found
-      (nil? eid) (observation-error ::missing-subject "The selected entity does not exist.")
+
+      (and (:seon.error/at snapshot) (:seon.error/layer snapshot) (:seon.error/operation snapshot)) snapshot ;; debt: seon.db/database-value-identity declares :seon.error/value (directly or through :seon.db/error-result).
+
+      (and (:seon.error/at found) (:seon.error/layer found) (:seon.error/operation found)) found ;; debt: seon.db/pull declares :seon.error/value (directly or through :seon.db/error-result).
+      (nil? eid) (observation-error 'seon.render.data/entity-observation ::subject "The selected entity does not exist." subject)
       (not (and (matching-continuation? outgoing-cursor snapshot eid :outgoing)
                 (matching-continuation? incoming-cursor snapshot eid :incoming)))
-      (observation-error ::stale-continuation
-                         "The continuation belongs to a different database value, entity, or direction.")
+      (observation-error 'seon.render.data/entity-observation ::continuation
+                         "The continuation belongs to a different database value, entity, or direction."
+                         {::outgoing-cursor outgoing-cursor ::incoming-cursor incoming-cursor ::snapshot snapshot ::subject subject})
       :else
       (let [attributes (into [] (comp (filter (fn [[_ definition]]
                                                (= :db.type/ref (:db/valueType definition))))

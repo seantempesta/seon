@@ -185,7 +185,7 @@
        (is (not (valid? projection :seon.render/form
                         {:seon.repl/comment "; no act"})))
        (is (valid? projection :seon.render/form
-                   {:seon.error/kind :seon.render/failure
+                   {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.history-test/fixture :seon.error/operation 'seon.render.history-test/form-output-validation-is-the-declared-open-shape :seon.render/refused-member :seon.render/output
                     :seon.error/message "failed"}))))))
 
 (defn- settled-node

@@ -81,7 +81,7 @@
                [:seon.render/value :seon.render/value]
                [:seon.render/output-schema
                 :seon.render/output-schema]],
-              :candidates [:vector :seon.fn/sym],
+              :candidates [:vector {:min 2} :qualified-symbol],
               :selection-request
               [:and
                :seon.render/call-request
@@ -118,14 +118,14 @@
                 [:vector :seon.render/selection-candidate]]
                [:seon.render.selection.stage/error
                 {:optional true}
-                :seon.error/value]],
+                :seon.render/ambiguous-error]],
               :selection
               [:map
                [:seon.render.selection/stages
                 [:vector {:min 5 :max 5} :seon.render/selection-stage]]
                [:seon.render.selection/selected
                 [:or :qualified-symbol :seon.render/rendered
-                 :seon.error/value]]],
+                 :seon.render/ambiguous-error :seon.render/request-error :seon.config/error]]],
               :distance [:int {:min 0}],
               :unknown-reason [:enum :time-limit :refused :unselected],
               :unknown-request
@@ -140,26 +140,14 @@
                 :seon.render.call/id]
                [:seon.error/value {:optional true} :seon.error/value]],
               :unknown
-              [:map
-               {:seon.error/class true,
-                :seon.render/ai seon.render/unknown-ai,
-                :seon.render/html seon.render/unknown-html,
-                :error/message
-                "must name why a render producer refused, and which one"}
-               [:seon.render.unknown/reason :seon.render/unknown-reason]
-               [:seon.error/message :seon.error/message]
-               [:seon.render.unknown/producer
-                {:optional true}
-                :qualified-symbol]
-               [:seon.render.unknown/output
-                {:optional true}
-                :seon.render/output]
-               [:seon.render.unknown/throwable
-                {:optional true}
-                :seon.error/throwable-class]
-               [:seon.render.unknown/call
-                {:optional true}
-                [:vector :seon.schema/value]]],
+              [:and :seon.error/base
+ [:map {:seon.db/attributes true :seon.render/ai seon.render/unknown-ai :seon.render/html seon.render/unknown-html}
+  [:seon.render.unknown/reason :seon.render/unknown-reason]
+  [:seon.render.unknown/producer {:optional true} :qualified-symbol]
+  [:seon.render.unknown/output {:optional true} :seon.render/output]
+  [:seon.render.unknown/refused-operation {:optional true} :qualified-symbol]
+  [:seon.render.unknown/throwable {:optional true} :string]
+]],
               :failure
               [:map
                [:seon.render/ai :string]
@@ -232,12 +220,12 @@
                 :gen/elements [nil true 0 "" :k [] {} #{}]}],
               :rendering [:set :qualified-symbol],
               :would-fall-to-floor? :boolean,
-              :ambiguous [:= true]
-              :ambiguous-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a value matching more than one declared render producer"} [:seon.render/ambiguous :seon.render/ambiguous] [:seon.error/message :seon.error/message]]
+
+              :ambiguous-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render/candidates :seon.render/candidates]]]
               :invalid-output :keyword
-              :invalid-output-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the render projection whose producer returned invalid output"} [:seon.render/invalid-output :seon.render/invalid-output] [:seon.error/message :seon.error/message]]
- :seon.render/walk-failed [:= true]
- :seon.render/walk-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.render/walk-failed class marker"} [:seon.render/walk-failed :seon.render/walk-failed] [:seon.error/message :seon.error/message]]
+              :invalid-output-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render/invalid-output :seon.render/invalid-output] [:seon.error/message :seon.error/message]]]
+
+ :seon.render/walk-failed-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render/walk-operation :seon.render/walk-operation]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.render/error
@@ -257,4 +245,12 @@
 
  :seon.render/requested-output
  [:enum :seon.render/ai :seon.render/html]
+
+ :refused-member :qualified-keyword
+
+ :request-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render/refused-member :seon.render/refused-member]]]
+
+ :walk-operation :qualified-symbol
+
+ :error-result [:or :seon.render/request-error :seon.render/ambiguous-error :seon.render/invalid-output-error :seon.render/unknown :seon.render.transcript/request-error :seon.config/error :seon.db/error-result]
 }

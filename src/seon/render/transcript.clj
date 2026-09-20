@@ -60,7 +60,7 @@
    :seon.eval/duration-ms
    :seon.sci.eval/ending-ns
    :seon.problems/id
-   :seon.error/kind
+   :seon.error/at :seon.error/layer :seon.error/operation :seon.error/data-edn
    {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
    {:seon.cluster.eval/run
     [:db/id :seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]}
@@ -87,6 +87,7 @@
      [(= ?run-id ?bootstrap-run-id) ?pinned?]]])
 
 (defn- recent-message-rows
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :int] [:or [:sequential [:tuple :int :inst :string :int]] :seon.db/error-result]]}
   [db agent-id limit]
   (db/q {:query
         '[:find ?message ?at ?ordinal ?tx
@@ -104,6 +105,7 @@
         :limit limit}))
 
 (defn- recent-receipt-rows
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :int] [:or [:sequential [:tuple :int :inst :string]] :seon.db/error-result]]}
   [db agent-id limit]
   (db/q {:query
         '[:find ?receipt ?at ?id
@@ -121,6 +123,7 @@
 
 
 (defn- pinned-receipt-ids
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:sequential :int] :seon.db/error-result]]}
   [db agent-id]
   (db/q '[:find [?receipt ...]
          :in $ % ?agent-id ?bootstrap-run-id
@@ -131,6 +134,7 @@
        db active-runs-rules agent-id (bootstrap/run-id agent-id)))
 
 (defn- bootstrap-task-message-eid
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :int :seon.db/error-result]]}
   [db agent-id]
   (db/q '[:find ?message .
           :in $ ?turn-id
@@ -195,6 +199,7 @@
                   :limit bounded-limit}))}))
 
 (defn- pulled-many
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/pull-selector [:maybe [:sequential :seon.db/entity-id]]] [:or [:sequential [:maybe :seon.db/pulled-entity]] :seon.db/error-result]]}
   [db selector entity-ids]
   (if (seq entity-ids)
     (db/pull-many db selector entity-ids)
@@ -278,7 +283,6 @@
                     (:seon.eval/renderer receipt))
      ::error (:seon.cluster.eval/error receipt)
      ::triage-edn (:seon.cluster.eval/triage-edn receipt)
-     ::error-kind (:seon.error/kind receipt)
      ::problem-id (:seon.problems/id receipt)
      ::interrupted-at (:seon.cluster.eval/interrupted-at receipt)
      ::comment (:seon.cluster.eval/comment receipt)
@@ -690,29 +694,33 @@
                         db agent-ref))]
     {::selected-run-id (:seon.turn/id unit)
      ::selected-agent-id
-     (or supplied-agent-id (when-not (:seon.error/kind queried) queried))
-     ::selected-run-error (when (:seon.error/kind queried) queried)}))
+     (or supplied-agent-id (when-not (and (:seon.error/at queried) (:seon.error/layer queried) (:seon.error/operation queried)) queried)) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
+     ::selected-run-error (when (and (:seon.error/at queried) (:seon.error/layer queried) (:seon.error/operation queried)) queried)})) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
 
 (defn- missing-selected-run
+
+  {:malli/schema [:=> [:cat :seon.render/unit :map] :seon.render.transcript/request-error]}
   [unit identities]
-  (error/diagnostic
-   {:seon.error/kind ::selected-run-unavailable
-    :seon.error/message
-    "The selected run is unavailable because its run, agent, or database identity is missing."
-    :seon.error/diagnostic-layer :render
-    :seon.error/diagnostic-operation 'seon.render.transcript/render-run
-    :seon.error/diagnostic-member :seon.turn/turn
-    :seon.error/diagnostic-expected
-    [:seon.db/db :seon.turn/id :seon.agent/id]
-    :seon.error/diagnostic-offending
-    (select-keys unit [:seon.turn/id :seon.turn/agent])
-    :seon.error/diagnostic-cause ::selected-run-unavailable
-    :seon.error/diagnostic-evidence identities}))
+  (let [observation
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.render.transcript/render
+         :seon.error/operation 'seon.render.transcript/missing-selected-run
+         :seon.error/message "The selected run is unavailable because its run, agent, or database identity is missing."
+         :seon.error/diagnostic-layer :seon.render.transcript/render
+         :seon.error/diagnostic-operation 'seon.render.transcript/missing-selected-run
+         :seon.error/diagnostic-member :seon.turn/turn
+         :seon.error/diagnostic-expected [:seon.db/db :seon.turn/id :seon.agent/id]
+         :seon.error/diagnostic-offending unit
+         :seon.error/diagnostic-cause ::selected-run-unavailable
+         :seon.error/diagnostic-evidence identities
+         :seon.error/fix "Supply the expected member and repeat the requested operation."
+         :seon.render.transcript/refused-member :seon.turn/turn}]
+    (merge observation (error/diagnostic observation))))
 
 (defn render-run-ai
   "Render only the selected turn's state and evaluations."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :string :seon.error/value]]}
+                  [:or :string :seon.render.transcript/error-result]]}
   [unit]
   (let [{run-id ::selected-run-id agent-id ::selected-agent-id
          identity-error ::selected-run-error :as identities}
@@ -811,14 +819,14 @@
                             :where [?turn :seon.turn/id ?id]
                                    [?evaluation :seon.cluster.eval/run ?turn]]
                           database turn-id)]
-    (if (:seon.error/kind row)
+    (if (and (:seon.error/at row) (:seon.error/layer row) (:seon.error/operation row)) ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
       [:p (:seon.error/message row)]
       [:article {:class "seon-turn-header"}
        [:h3 (str "Turn " turn-id)]
        [:dl
         [:dt "Opened"] [:dd (pr-str (get-in row [:seon.turn/opened-tx :db/txInstant]))]
         [:dt "Trigger"] [:dd (or (get-in row [:seon.turn/trigger :seon.message/id]) "None")]
-        [:dt "Evaluations"] [:dd (if (:seon.error/kind evaluations)
+        [:dt "Evaluations"] [:dd (if (and (:seon.error/at evaluations) (:seon.error/layer evaluations) (:seon.error/operation evaluations)) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
                                    (:seon.error/message evaluations)
                                    (str (or evaluations 0)))]
         [:dt "Reply"] [:dd (if (find row :seon.turn/reply-size) "Recorded" "None")]]])))
@@ -826,7 +834,7 @@
 (defn render-run-html
   "Show the selected turn's header, state and evaluations."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :seon.render/hiccup :seon.error/value]]}
+                  [:or :seon.render/hiccup :seon.render.transcript/error-result]]}
   [unit]
   (let [{run-id ::selected-run-id agent-id ::selected-agent-id
          identity-error ::selected-run-error
@@ -880,9 +888,9 @@
         (db/q '[:find ?cluster-name .
                 :where [_ :seon.cluster/name ?cluster-name]] database)
         effective (when (and cluster-name
-                             (not (:seon.error/kind cluster-name)))
+                             (not (and (:seon.error/at cluster-name) (:seon.error/layer cluster-name) (:seon.error/operation cluster-name)))) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
                     (config/effective database cluster-name))]
-    (if (and (map? effective) (nil? (:seon.error/kind effective)))
+    (if (and (map? effective) (nil? (and (:seon.error/at effective) (:seon.error/layer effective) (:seon.error/operation effective)))) ;; debt: seon.config/effective declares :seon.error/value, directly or through its result union.
       effective
       (config/defaults))))
 
@@ -898,7 +906,7 @@
   beyond it are an ordinary elision value carrying their count and a requery
   identity, so nothing is silently dropped."
   {:malli/schema [:=> [:cat :seon.render.transcript/history-request]
-                  [:or :seon.render.transcript/history :seon.error/value]]}
+                  [:or :seon.render.transcript/history :seon.db/error-result]]}
   [{database :seon.db/db agent-id :seon.agent/id}]
   (let [effective (agent-config database)
         limit (long (:seon.config.render.agent/max-children effective))
@@ -912,7 +920,7 @@
                              [?run :seon.turn/opened-tx ?opened]]
                     :args [database agent-id]
                     :order-by '[?opened :desc ?run :desc]})]
-    (if (:seon.error/kind rows)
+    (if (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
       rows
       (let [total (count rows)
             newest (into [] (take limit) rows)
@@ -921,7 +929,7 @@
                   (keep
                    (fn [[eid _opened]]
                      (let [row (db/pull database history-run-selector eid)]
-                       (when-not (:seon.error/kind row)
+                       (when-not (and (:seon.error/at row) (:seon.error/layer row) (:seon.error/operation row)) ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
                          (assoc row
                                 :seon.render.transcript/entries
                                 (history-entries
@@ -963,9 +971,9 @@
   the loop printed it rather than in a second error shape invented here."
   {:malli/schema [:=> [:cat [:or :seon.render.transcript/history
                              :seon.error/value]]
-                  [:or :string :seon.error/value]]}
+                  [:or :string :seon.db/error-result]]}
   [derived]
-  (if (:seon.error/kind derived)
+  (if (and (:seon.error/at derived) (:seon.error/layer derived) (:seon.error/operation derived)) ;; debt: seon.render.transcript/agent-history via seon.db/q declares :seon.error/value, directly or through its result union.
     derived
     (let [runs (:seon.render.transcript/runs derived)
           older (:seon.render.transcript/older-runs derived)]
@@ -986,7 +994,7 @@
 
 (defn render-history-ai
   "The prompt is this concern's AI projection, so emit no duplicate text."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.db/database-value] [:or :string :seon.error/value]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.db/database-value] [:or :string :seon.db/error-result]]}
   [_turns _database]
   "")
 
@@ -1002,6 +1010,8 @@
           (map #(turn-header database (:seon.turn/id %)) ordered))))
 
 (defn- runtime-owner
+
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.agent/id :seon.render.transcript/request-error]]}
   [unit]
   (let [runtime (or (:seon.render/value unit) unit)
         owner (:seon.runtime/agent runtime)
@@ -1011,23 +1021,28 @@
                                  (if (map? owner) (:db/id owner) owner))))
                      (:seon.agent/id unit))]
     (or agent-id
-        (error/diagnostic
-         {:seon.error/kind :seon.db/not-found
-          :seon.error/message "The runtime component's owner could not be resolved."
-          :seon.error/diagnostic-layer :seon.render
-          :seon.error/diagnostic-operation 'seon.render.transcript/render-runtime-ai
-          :seon.error/diagnostic-member :seon.runtime/agent
-          :seon.error/diagnostic-expected :seon.agent/id
-          :seon.error/diagnostic-offending (or owner :seon.error/unknown)
-          :seon.error/diagnostic-cause :seon.db/not-found
-          :seon.error/diagnostic-evidence [:seon.runtime/agent]}))))
+        (let [observation
+              {:seon.error/at (java.util.Date.)
+               :seon.error/layer :seon.render.transcript/render
+               :seon.error/operation 'seon.render.transcript/runtime-owner
+               :seon.error/message "The runtime component's owner could not be resolved."
+               :seon.error/diagnostic-layer :seon.render
+               :seon.error/diagnostic-operation 'seon.render.transcript/runtime-owner
+               :seon.error/diagnostic-member :seon.runtime/agent
+               :seon.error/diagnostic-expected :seon.agent/id
+               :seon.error/diagnostic-offending unit
+               :seon.error/diagnostic-cause :seon.db/not-found
+               :seon.error/diagnostic-evidence [:seon.runtime/agent]
+               :seon.error/fix "Supply the expected member and repeat the requested operation."
+               :seon.render.transcript/refused-member :seon.agent/runtime}]
+          (merge observation (error/diagnostic observation))))))
 
 (defn render-runtime-ai
   "Read my runtime trigger and listens without observing turn-history churn."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.error/value]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.render.transcript/error-result]]}
   [unit]
   (let [agent-id (runtime-owner unit)]
-    (if (:seon.error/kind agent-id) agent-id
+    (if (:seon.render.transcript/refused-member agent-id) agent-id
       (str ";; My trigger and listens; (seon.db/pull '[{:seon.agent/runtime [:seon.runtime/turns]}] [:seon.agent/id "
            (pr-str agent-id) "]) reads my turns on demand.\n"
        (repl/source-text
@@ -1124,16 +1139,18 @@
                          :seon.ai.usage/completion-tokens
                          :seon.ai.usage/total-tokens
                          :seon.ai.usage/cached-tokens
-                         {:seon.ai.attempt/error [:seon.error/kind]}]}])
+                         {:seon.ai.attempt/error [:seon.error/at :seon.error/layer :seon.error/operation :seon.error/data-edn]}]}])
 
-(defn- turn-rows [database agent-id]
+(defn- turn-rows
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:vector :map] :seon.db/error-result]]}
+  [database agent-id]
   (let [rows (db/q '[:find ?opened (pull ?t pattern) :in $ ?agent-id pattern
                      :where [?a :seon.agent/id ?agent-id]
                             [?a :seon.agent/runtime ?runtime]
                             [?runtime :seon.runtime/turns ?t]
                             [?t :seon.turn/id _ ?opened]]
                    database agent-id debug-turn-selector)]
-    (if (:seon.error/kind rows) rows
+    (if (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) rows ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
         (mapv (fn [ordinal [_ row]] (assoc row ::ordinal ordinal))
               (range) (sort-by (juxt first #(get-in % [1 :seon.turn/id])) rows)))))
 
@@ -1231,7 +1248,7 @@
             at (get-in latest [:seon.turn/closed-tx :db/txInstant])]
         (when (seq pending)
           {::turn latest
-           ::detail (str "stalled: " (or (:seon.error/kind failure) "unknown provider refusal")
+           ::detail (str "stalled: " (or (:seon.error/operation failure) "unknown provider refusal")
                          " at " (if (inst? at)
                                   (.format (java.text.SimpleDateFormat. "HH:mm") at)
                                   "unknown time")
@@ -1342,7 +1359,7 @@
      (session-header request (if (vector? rows) rows []))
      [:h2 "Session"]
      (cond
-       (:seon.error/kind rows) [:p {:class "seon-emission-error"} (:seon.error/message rows)]
+       (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) [:p {:class "seon-emission-error"} (:seon.error/message rows)] ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
        url
        [:p {:role "status" :data-init (str "@get('" url "')")}
         (if (::outline? request)
@@ -1366,7 +1383,9 @@
                    (render/acquire-context! (assoc request :seon.turn/id selected-id))
                    (catch clojure.lang.ExceptionInfo failure
                      (let [refusal (ex-data failure)]
-                       (if (= :seon.instrument/contract-violated (:seon.error/kind refusal))
+                       (if (and (:seon.instrument/fn refusal)
+                                (:seon.instrument/check refusal)
+                                (:seon.instrument/explanations refusal))
                          refusal
                          (throw failure)))))
         entries (:seon.render.history/entries acquired)
@@ -1410,7 +1429,7 @@
        [:p {:class "seon-session-meta"}
         (str (format "%,d" (utf8-size prompt)) " bytes · ≈" (format "%,d" (tokens/estimate prompt))
              " tokens · " (count entries) " emissions · oldest → newest")])]
-     (if (:seon.error/kind acquired)
+     (if (and (:seon.error/at acquired) (:seon.error/layer acquired) (:seon.error/operation acquired)) ;; debt: seon.render/acquire-context! via seon.turn/system-turn declares :seon.error/value, directly or through its result union.
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value acquired))
         (value/render-html (assoc request :seon.render/value acquired))]
@@ -1525,7 +1544,7 @@
         fitted (when model
                  ((requiring-resolve 'seon.cluster.prompt/agent-calibration)
                   database agent-id model))]
-    (if (or (nil? fitted) (:seon.error/kind fitted))
+    (if (or (nil? fitted) (and (:seon.error/at fitted) (:seon.error/layer fitted) (:seon.error/operation fitted))) ;; debt: seon.cluster.prompt/agent-calibration declares :seon.error/value, directly or through its result union.
       tokens/shipped-calibration
       fitted)))
 
@@ -1571,7 +1590,7 @@
        [:span {:data-show (str "!$" signal)} "As the model saw it"]
        [:span {:data-show (str "$" signal)} "Rendered"]]
       [:div {:class "seon-outline-html" :data-show (str "!$" signal)}
-       (if (:seon.error/kind html)
+       (if (and (:seon.error/at html) (:seon.error/layer html) (:seon.error/operation html)) ;; debt: seon.render/render-call via seon.db/error-result declares :seon.error/value, directly or through its result union.
          [:div {:class "seon-emission-error"}
           (error/render-html (assoc request :seon.render/value html))]
          html)]
@@ -1591,16 +1610,16 @@
                     (:seon.db/db request) request)
                    (catch clojure.lang.ExceptionInfo failure
                      (let [refusal (ex-data failure)]
-                       (if (:seon.error/kind refusal) refusal (throw failure)))))]
+                       (if (or (:seon.instrument/check refusal) (:seon.render/refused-member refusal) (:seon.render.web/refused-member refusal)) refusal (throw failure)))))]
     [:details {:class "seon-outline-everything" :data-preserve-attr "open"}
      [:summary
-      (if (:seon.error/kind composed)
+      (if (and (:seon.error/at composed) (:seon.error/layer composed) (:seon.error/operation composed)) ;; debt: seon.cluster.prompt/prompt declares :seon.error/value, directly or through its result union.
         "Show everything · the composed prompt was refused"
         (let [text (:seon.cluster.prompt/text composed)]
           (str "Show everything · the composed prompt · "
                (format "%,d" (utf8-size text)) " bytes · ≈"
                (format "%,d" (tokens/estimate text)) " tokens")))]
-     (if (:seon.error/kind composed)
+     (if (and (:seon.error/at composed) (:seon.error/layer composed) (:seon.error/operation composed)) ;; debt: seon.cluster.prompt/prompt declares :seon.error/value, directly or through its result union.
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value composed))]
        [:pre {:class "seon-session-raw"
@@ -1627,7 +1646,7 @@
                    (render/acquire-context! (dissoc request :seon.turn/id))
                    (catch clojure.lang.ExceptionInfo failure
                      (let [refusal (ex-data failure)]
-                       (if (:seon.error/kind refusal) refusal (throw failure)))))
+                       (if (or (:seon.instrument/check refusal) (:seon.render/refused-member refusal) (:seon.render.web/refused-member refusal)) refusal (throw failure)))))
         entries (:seon.render.history/entries acquired)
         saved (mapv :seon.render/value entries)
         by-eid (into {} (map (juxt :db/id identity)) (if (vector? rows) rows []))
@@ -1646,11 +1665,11 @@
      (session-header request (if (vector? rows) rows []))
      [:h2 "Session"]
      (cond
-       (:seon.error/kind rows)
+       (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value rows))]
 
-       (:seon.error/kind acquired)
+       (and (:seon.error/at acquired) (:seon.error/layer acquired) (:seon.error/operation acquired)) ;; debt: seon.render/acquire-context! via seon.turn/system-turn declares :seon.error/value, directly or through its result union.
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value acquired))]
 
@@ -1682,11 +1701,12 @@
              [:p {:class "seon-outline-empty"} "This turn stored no evaluations."])])
         (outline-everything request)])]))
 
-(defn- ledger-acquisition [request]
+(defn- ledger-acquisition {:malli/schema [:=> [:cat :seon.render/context-request] [:or :seon.render/acquired-context :seon.render/context-change-result :seon.render.web/context-error]]}
+  [request]
   (let [selector '[:seon.cluster.eval/source :seon.cluster.eval/comment
                  :seon.eval/shown :seon.eval/renderer
                  {:seon.eval/renderer-fn [:db/id :seon.fn/sym]} :seon.cluster.eval/error
-                 :seon.cluster.eval/output :seon.error/kind
+                 :seon.cluster.eval/output :seon.error/at :seon.error/layer :seon.error/operation :seon.error/data-edn
                  :seon.cluster.eval/read-basis-transaction
                  :seon.cluster.eval/interrupted-at :seon.cluster.eval/triage-edn
                  :seon.eval/duration-ms :seon.sci.eval/ending-ns
@@ -1697,9 +1717,10 @@
      (assoc (dissoc request :seon.turn/id)
             ::ledger? true :seon.db/pull-selector selector))))
 
-(defn- ledger-evaluations [request]
+(defn- ledger-evaluations {:malli/schema [:=> [:cat :seon.render/context-request] [:or :nil [:map-of :int [:vector :map]] :seon.render.web/context-error]]}
+  [request]
   (let [acquired (ledger-acquisition request)]
-    (if (:seon.error/kind acquired) acquired
+    (if (and (:seon.error/at acquired) (:seon.error/layer acquired) (:seon.error/operation acquired)) acquired ;; debt: seon.render/acquire-context! via seon.turn/system-turn declares :seon.error/value, directly or through its result union.
         (get-in acquired [::ledger-data ::evaluations]))))
 
 (defn- ledger-url [agent-id turn-id query]
@@ -1739,6 +1760,7 @@
 
 (defn- ledger-effects
   "Acquire effect facts for all closed turns in one batch per fact family."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:sequential :map]] [:or [:map [:seon.render.transcript/steps :map] [:seon.render.transcript/messages :map] [:seon.render.transcript/definitions :map]] :seon.db/error-result]]}
   [database agent-id rows]
   (let [intervals (db/q '[:find ?id ?opened ?closed :in $ [?id ...]
                           :where [?turn :seon.turn/id ?id ?opened]
@@ -1756,7 +1778,7 @@
         definitions (db/q '[:find ?symbol ?tx
                              :where (or [?f :seon.fn/sym ?symbol ?tx]
                                         [?f :seon.test/sym ?symbol ?tx])] database)]
-    (if-let [failure (some #(when (:seon.error/kind %) %) [intervals steps messages definitions])]
+    (if-let [failure (some #(when (and (:seon.error/at %) (:seon.error/layer %) (:seon.error/operation %)) %) [intervals steps messages definitions])] ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
       failure
       {::steps (group-by first steps) ::messages (group-by first messages)
        ;; Acquire each definition once, then relate it to the saved intervals.
@@ -1776,7 +1798,7 @@
                         (map #(str "message sent to " (second %)) messages)
                         (map #(str "definition installed during this turn: " (second %)) definitions))]
     (cond
-      (:seon.error/kind effects) {::details (:seon.error/message effects)}
+      (and (:seon.error/at effects) (:seon.error/layer effects) (:seon.error/operation effects)) {::details (:seon.error/message effects)} ;; debt: seon.render.transcript/ledger-effects via seon.db/q declares :seon.error/value, directly or through its result union.
       (not (:seon.turn/closed-tx row)) {::details "Turn is still open."}
       :else {::details (if (seq details) (str/join " · " details) "—")
              ::summary (str/join " · " (cond-> []
@@ -1787,8 +1809,11 @@
 (defn- emission-byte-count [emissions]
   (reduce + 0 (map ::contributed-bytes emissions)))
 
-(defn- ledger-rows [database rows evaluations]
-  (if (:seon.error/kind rows) rows
+(defn- ledger-rows
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or [:sequential :map] :seon.db/error-result] [:maybe :map]]
+                  [:or [:vector :map] :seon.db/error-result]]}
+  [database rows evaluations]
+  (if (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) rows ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
     (mapv (fn [row]
             (let [attempts (mapv #(assoc % ::usage (attempt-usage %))
                                  (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row)))
@@ -1886,7 +1911,7 @@
           (str (if provider? "Full context as sent" "Full context before reply")
                (when capture
                  (str ": " (format "%,d" (utf8-size capture)) " bytes · "
-                      (if (:seon.error/kind calibration)
+                      (if (and (:seon.error/at calibration) (:seon.error/layer calibration) (:seon.error/operation calibration)) ;; debt: seon.cluster.prompt/agent-calibration declares :seon.error/value, directly or through its result union.
                         "estimate unavailable"
                         (str "rebuilt ≈" (format "%,d" (tokens/estimate capture calibration)) " tokens"))))
                (when-let [billed (::prompt usage)] (str " · billed " (format "%,d" billed))))]
@@ -1927,7 +1952,7 @@
   [request]
   (let [acquired (ledger-acquisition request)
         {::keys [rows evaluations calibrations]} (::ledger-data acquired)]
-    (if (:seon.error/kind acquired)
+    (if (and (:seon.error/at acquired) (:seon.error/layer acquired) (:seon.error/operation acquired)) ;; debt: seon.render/acquire-context! via seon.turn/system-turn declares :seon.error/value, directly or through its result union.
       [:div {:id (ledger-body-id (:seon.turn/id request))} [:p (:seon.error/message acquired)]]
       (let [row (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)]
         (ledger-turn-body (assoc request ::calibrations calibrations) rows evaluations row)))))
@@ -1949,7 +1974,7 @@
 (defn- evaluation-match [by-eid saved]
   {::turn (get by-eid (get-in saved [:seon.cluster.eval/run :db/id]))
    ::detail (let [form (::value (readable-shown (:seon.cluster.eval/source saved)))]
-              (cond (= :seon.sci.reader/fabricated-response (some-> (:seon.error/kind saved) keyword))
+              (cond (= "reply" (get-in (::value (readable-shown (:seon.cluster.eval/triage-edn saved))) [:seon.error/data :seon.sci.reader/phase]))
                     "Agent-written REPL response"
                     (and (seq? form) (symbol? (first form))) (str (first form))
                     :else "Unreadable reply form"))})
@@ -1965,7 +1990,7 @@
   [by-eid evaluations]
   (finding :fabricated "Fabricated responses"
            (map #(evaluation-match by-eid %)
-                (filter #(= :seon.sci.reader/fabricated-response (some-> (:seon.error/kind %) keyword)) evaluations))))
+                (filter #(= "reply" (get-in (::value (readable-shown (:seon.cluster.eval/triage-edn %))) [:seon.error/data :seon.sci.reader/phase])) evaluations))))
 
 (defn- empty-reply-problem
   "Detect settled replies that produced no evaluation evidence."
@@ -2020,7 +2045,7 @@
                                 [?m :seon.message/id ?mid]
                                 [?f :seon.error/occurrences ?occurrence]
                                 [?occurrence :seon.error.occurrence/count ?count]] database agent-id)]
-    (if (:seon.error/kind messages)
+    (if (and (:seon.error/at messages) (:seon.error/layer messages) (:seon.error/operation messages)) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
       [(assoc (finding :faults "Fault delivery" []) ::unknown 1)
        (assoc (finding :fault-turns "Turns opened by faults" []) ::unknown 1)]
       (let [fault-message-ids (set (map first messages))
@@ -2034,13 +2059,13 @@
 
 (defn render-captured-prefix
   "The captured history bytes, excluding the turn owner's changing frame."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :string :seon.error/value]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :string :seon.db/error-result]]}
   [{database :seon.db/db turn-id :seon.turn/id agent-id :seon.agent/id}]
   (let [text (db/q '[:find ?text . :in $ ?id
                      :where [?t :seon.turn/id ?id] [?c :seon.context.capture/run ?t]
                             [?c :seon.context.capture/prompt ?text]] database turn-id)
         opening (when (string? text) (turn/opening-db database turn-id))
-        frame (when (and opening (not (:seon.error/kind opening)))
+        frame (when (and opening (not (and (:seon.error/at opening) (:seon.error/layer opening) (:seon.error/operation opening)))) ;; debt: seon.turn/opening-db declares :seon.error/value, directly or through its result union.
                 (repl/frame opening agent-id))
         suffix (str "\n\n" frame)]
     (when frame
@@ -2104,7 +2129,7 @@
         per-step (frequencies
                   (for [row rows :when (seq (:seon.turn/attempts row))]
                     (let [basis (turn/opening-db database (:seon.turn/id row))]
-                      (when-not (:seon.error/kind basis)
+                      (when-not (and (:seon.error/at basis) (:seon.error/layer basis) (:seon.error/operation basis)) ;; debt: seon.turn/opening-db declares :seon.error/value, directly or through its result union.
                         (get-in (db/pull basis
                                          '[{:seon.agent/plan [{:my.plan/current-step [:my.plan.item/id]}]}]
                                          [:seon.agent/id agent-id])
@@ -2112,7 +2137,7 @@
     {::used (turn/episode-runs database agent-id)
      ::bound (#'turn/max-episode-runs database agent-id)
      ::completed (count (filter :my.plan.item/completed-tx steps))
-     ::steps (count steps) ::plan-unavailable (boolean (:seon.error/kind plan))
+     ::steps (count steps) ::plan-unavailable (boolean (and (:seon.error/at plan) (:seon.error/layer plan) (:seon.error/operation plan))) ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
      ::per-step per-step ::totals totals ::attempts (count attempts)
      ::missing-usage (count (remove #(every? number? (map (::usage %) [::prompt ::hit ::miss ::out])) attempts))
      ::cost (when (every? number? costs) (reduce + 0 costs))
@@ -2148,9 +2173,9 @@
                     (assoc (finding :stale-but-unchanged "stale-but-unchanged reads"
                                     (map #(evaluation-match by-eid %)
                                          (concat empty-emissions
-                                                 (when-not (:seon.error/kind refreshes)
+                                                 (when-not (and (:seon.error/at refreshes) (:seon.error/layer refreshes) (:seon.error/operation refreshes)) ;; debt: seon.turn/changed-reads declares :seon.error/value, directly or through its result union.
                                                    (map #(get saved-by-eid (first %)) refreshes)))))
-                           ::unknown (if (:seon.error/kind refreshes) 1 0))
+                           ::unknown (if (and (:seon.error/at refreshes) (:seon.error/layer refreshes) (:seon.error/operation refreshes)) 1 0)) ;; debt: seon.turn/changed-reads declares :seon.error/value, directly or through its result union.
                     (repeated-problem by-eid saved)
                     (empty-reply-problem rows saved)
                     (directory-problem database by-eid saved)
@@ -2310,20 +2335,20 @@
   [request]
   (let [acquired (ledger-acquisition request)
         {::keys [rows evaluations calibrations]} (::ledger-data acquired)
-        evaluations (if (:seon.error/kind acquired) acquired evaluations)
+        evaluations (if (and (:seon.error/at acquired) (:seon.error/layer acquired) (:seon.error/operation acquired)) acquired evaluations) ;; debt: seon.render/acquire-context! via seon.turn/system-turn declares :seon.error/value, directly or through its result union.
         request (assoc request ::calibrations calibrations)
         selected (or (:seon.turn/id request) (:seon.turn/id (last rows)))
         expanded (conj (set (map :seon.turn/id (take-last 3 rows))) selected)
-        problems (when-not (or (:seon.error/kind rows) (:seon.error/kind evaluations))
+        problems (when-not (or (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) (and (:seon.error/at evaluations) (:seon.error/layer evaluations) (:seon.error/operation evaluations))) ;; debt: seon.db/q / seon.db/pull-many; seon.eval/of-agent declares :seon.error/value, directly or through its result union.
                    (session-problems request rows evaluations))]
     [:section {:id (session-id (:seon.agent/id request)) :class "seon-session seon-ledger" :data-author "seon"}
      [:div {:class "seon-session-sticky"} (session-header request rows)
       [:h2 "Turn ledger"]
       (when problems (problem-summary request problems))
-      (when-not (:seon.error/kind evaluations) (ledger-strip request rows evaluations selected problems))]
+      (when-not (and (:seon.error/at evaluations) (:seon.error/layer evaluations) (:seon.error/operation evaluations)) (ledger-strip request rows evaluations selected problems))] ;; debt: seon.eval/of-agent declares :seon.error/value, directly or through its result union.
      (when problems (problems-html request problems))
      (cond
-       (:seon.error/kind evaluations) [:p (:seon.error/message evaluations)]
+       (and (:seon.error/at evaluations) (:seon.error/layer evaluations) (:seon.error/operation evaluations)) [:p (:seon.error/message evaluations)] ;; debt: seon.eval/of-agent declares :seon.error/value, directly or through its result union.
        (seq rows)
        (for [row rows
              :let [turn-id (:seon.turn/id row)
@@ -2356,11 +2381,11 @@
 (defn render-runtime-html
   "Show transaction times, message triggers, listens, and newest-first turns."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :seon.render/hiccup :seon.error/value]]}
+                  [:or :seon.render/hiccup :seon.render.transcript/error-result]]}
   [unit]
   (let [agent-id (runtime-owner unit)
         database (:seon.db/db unit)
-        row (if (:seon.error/kind agent-id) agent-id
+        row (if (:seon.render.transcript/refused-member agent-id) agent-id
                 (db/pull database
                      [{:seon.agent/runtime
                        [{:seon.runtime/turns runtime-turn-selector}
@@ -2368,18 +2393,23 @@
                         {:seon.runtime/listens [:seon.listen/attribute]}]}]
                      [:seon.agent/id agent-id]))]
     (cond
-      (:seon.error/kind row) row
+      (and (:seon.error/at row) (:seon.error/layer row) (:seon.error/operation row)) row ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
       (nil? (:seon.agent/runtime row))
-      (error/diagnostic
-       {:seon.error/kind :seon.db/not-found
-        :seon.error/message "The agent's runtime component is unavailable."
-        :seon.error/diagnostic-layer :seon.render
-        :seon.error/diagnostic-operation 'seon.render.transcript/render-runtime-html
-        :seon.error/diagnostic-member :seon.agent/runtime
-        :seon.error/diagnostic-expected :seon.runtime/entity
-        :seon.error/diagnostic-offending agent-id
-        :seon.error/diagnostic-cause :seon.db/not-found
-        :seon.error/diagnostic-evidence [:seon.agent/runtime]})
+      (let [observation
+            {:seon.error/at (java.util.Date.)
+             :seon.error/layer :seon.render.transcript/render
+             :seon.error/operation 'seon.render.transcript/render-runtime-html
+             :seon.error/message "The agent's runtime component is unavailable."
+             :seon.error/diagnostic-layer :seon.render
+             :seon.error/diagnostic-operation 'seon.render.transcript/render-runtime-html
+             :seon.error/diagnostic-member :seon.agent/runtime
+             :seon.error/diagnostic-expected :seon.runtime/entity
+             :seon.error/diagnostic-offending agent-id
+             :seon.error/diagnostic-cause :seon.db/not-found
+             :seon.error/diagnostic-evidence [:seon.agent/runtime]
+             :seon.error/fix "Supply the expected member and repeat the requested operation."
+             :seon.render.transcript/refused-member :seon.agent/runtime}]
+        (merge observation (error/diagnostic observation)))
       :else
         (let [runtime (:seon.agent/runtime row)
               turns (sort-by (juxt #(some-> (get-in % [:seon.turn/opened-tx :db/txInstant])

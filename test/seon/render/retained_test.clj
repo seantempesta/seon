@@ -20,13 +20,13 @@
                    :seon.cluster.eval/run [:seon.turn/id "retained-turn"]
                    :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
                    :seon.eval/shown shown}])]
-    (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message])))))
+    (is (:db-after report) (pr-str (select-keys report [:seon.error/operation :seon.error/message])))))
 
 (defn- replace-renderer! [connection ctx form]
   (let [report (db/transact! connection
-                 [[:db/add [:seon.fn/sym "seon.render-simplification.fixture-a/namespace-ai"]
+                 [[:db/add [:seon.fn/sym 'seon.render-simplification.fixture-a/namespace-ai]
                    :seon.fn/source (pr-str form)]])]
-    (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message]))))
+    (is (:db-after report) (pr-str (select-keys report [:seon.error/operation :seon.error/message]))))
   (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                      :seon.schema/projection (kernel/context-projection ctx)})
   ;; The indexed fixture is compiled core; install the same authored form in
@@ -85,7 +85,7 @@
          (is (zero? @checks) "equal committed wrappers must not replay reads")
          (let [report (db/transact! connection [[:db/add [:seon.cluster.eval/id "retained-shown"]
                                                 :seon.eval/shown "two"]])]
-           (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message]))))
+           (is (:db-after report) (pr-str (select-keys report [:seon.error/operation :seon.error/message]))))
          (is (= "two" (render/render-call (request))))
          (is (pos? @checks) "a changed database still validates dependencies")
          (let [invoke kernel/invoke
@@ -101,8 +101,10 @@
              "redefining the selected renderer invalidates its program identity")
          (sci/binding [sci/ns (sci/create-ns namespace-name)]
            (replace-renderer! connection ctx '(defn namespace-ai [_] nil)))
-         (is (= :seon.render/invalid-ai-output (:seon.error/kind (render/render-call (request))))
-             "a renderer returning nil reports its invalid output")
+         (let [refusal (render/render-call (request))]
+           (is (= :ai (:seon.render/invalid-output refusal)))
+           (is (= 'seon.render/raw-output (:seon.error/operation refusal)))
+           (is (nil? (:seon.error/diagnostic-offending refusal))))
          (sci/binding [sci/ns (sci/create-ns namespace-name)]
            (replace-renderer! connection ctx '(defn namespace-ai [value]
                                 (seon.db/q '[:find ?shown .
@@ -148,7 +150,7 @@
            calls (atom 0)]
        (with-redefs [kernel/invoke
                      (fn [input]
-                       (when (= "seon.repl/render-ai" (:seon.fn/sym input))
+                       (when (= 'seon.repl/render-ai (:seon.fn/sym input))
                          (swap! calls inc))
                        (invoke input))]
          (let [before (render/acquire-context! (request))
@@ -180,10 +182,10 @@
              (is (not= (:seon.cluster.prompt/text before) (:seon.cluster.prompt/text after)))
              (is (= 1 @calls) "only the evaluation with changed shown text re-renders"))
            (let [renderer (db/pull (db/db connection) [:seon.fn/source]
-                                   [:seon.fn/sym "seon.repl/render-ai"])]
+                                   [:seon.fn/sym 'seon.repl/render-ai])]
              (is (string? (:seon.fn/source renderer)))
              (is (:db-after
-                  (db/transact! connection [[:db/add [:seon.fn/sym "seon.repl/render-ai"]
+                  (db/transact! connection [[:db/add [:seon.fn/sym 'seon.repl/render-ai]
                                              :seon.fn/source (str (:seon.fn/source renderer) "\n")]])))
              (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                                 :seon.schema/projection (kernel/context-projection ctx)})

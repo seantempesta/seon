@@ -1,7 +1,5 @@
-#:seon.render.web{:prospective-context-unavailable [:= true]
-                  :prospective-context-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a prospective context that cannot be observed"} [:seon.render.web/prospective-context-unavailable :seon.render.web/prospective-context-unavailable] [:seon.error/message :seon.error/message]]
-                  :live-processes-unavailable [:= true]
-                  :live-processes-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark live process state that cannot be observed"} [:seon.render.web/live-processes-unavailable :seon.render.web/live-processes-unavailable] [:seon.error/message :seon.error/message]]
+#:seon.render.web{
+
                   :feed-request
                   [:map
                    [:seon.agent/id :seon.agent/id]
@@ -142,36 +140,16 @@
                     :seon.render.web/pages-mult]],
                   :wanted-port :seon.render.web/port,
                   :missing-port :keyword
-                  :missing-port-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the absent web-server port"} [:seon.render.web/missing-port :seon.render.web/missing-port] [:seon.error/message :seon.error/message]]
-                  :owner-not-ensured [:= true]
-                  :owner-not-ensured-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a namespace page whose owner was not ensured"} [:seon.render.web/owner-not-ensured :seon.render.web/owner-not-ensured] [:seon.error/message :seon.error/message]]
-                  :preview-unavailable [:= true]
-                  :preview-unavailable-error
-                  [:map {:seon.error/class true :seon.render/ai seon.error/render-ai
-                         :error/message "must identify an unavailable preview"
-                         :seon.render/html seon.error/render-html}
-                   [:seon.render.web/preview-unavailable :seon.render.web/preview-unavailable]
-                   [:seon.error/message :seon.error/message]]
+                  :missing-port-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/missing-port :seon.render.web/missing-port]]]
+
                   :value-not-found :seon.blob/digest
-                  :value-not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the requested rendered value that was not found"} [:seon.render.web/value-not-found :seon.render.web/value-not-found] [:seon.error/message :seon.error/message]]
+                  :value-not-found-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/value-not-found :seon.render.web/value-not-found]]]
                   :value-unreadable :seon.blob/digest
-                  :value-unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the rendered value whose blob is unreadable"} [:seon.render.web/value-unreadable :seon.render.web/value-unreadable] [:seon.error/message :seon.error/message]]
+                  :value-unreadable-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/value-unreadable :seon.render.web/value-unreadable]]]
                   :function-unavailable :qualified-symbol
                   :function-unavailable-error
-                  [:map {:seon.error/class true
-                         :error/message "must identify the unavailable function"
-                         :seon.render/ai seon.error/render-ai
-                         :seon.render/html seon.error/render-html}
-                   [:seon.render.web/function-unavailable :seon.render.web/function-unavailable]
-                   [:seon.error/message :seon.error/message]]
-                  :invalid-context-action [:= true]
-                  :invalid-context-action-error
-                  [:map {:seon.error/class true
-                         :error/message "must identify the invalid context action"
-                         :seon.render/ai seon.error/render-ai
-                         :seon.render/html seon.error/render-html}
-                   [:seon.render.web/invalid-context-action :seon.render.web/invalid-context-action]
-                   [:seon.error/message :seon.error/message]]
+                  [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/function-unavailable :seon.render.web/function-unavailable]]]
+
 
  ; Additive error declaration manifest, 2026-09-18.
 
@@ -196,4 +174,11 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.evidence/entity}
  :seon.db/ref]
+
+ :refused-member :qualified-keyword
+
+ :request-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/refused-member :seon.render.web/refused-member]]]
+
+
+ :context-error [:or :seon.render.web/request-error :seon.render.web/function-unavailable-error :seon.render/error-result :seon.turn/error :seon.db/error-result]
 }

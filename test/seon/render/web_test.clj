@@ -34,6 +34,7 @@
             [clojure.test :refer [deftest is testing]]
             [org.httpkit.server :as http]
             [seon.blob :as blob]
+            [seon.agent :as agent]
             [seon.cluster :as cluster]
             [seon.ai.tokens :as tokens]
             [seon.cluster.agent :as cluster.agent]
@@ -42,6 +43,7 @@
             [seon.context :as seon.context]
             [seon.db :as db]
             [seon.eval :as evaluation]
+            [seon.plan :as plan]
             [seon.error :as error]
             [seon.flow :as flow]
             [seon.problems :as problems]
@@ -101,7 +103,9 @@
                       datastar/close-sse! (fn [_] (reset! closed? true))]
           ((web-private 'write-package!)
            ::channel ::generator (byte-array [1]) 20 ::socket-drain))]
-    (is (= :seon.await/backstop-fired (:seon.error/kind result)))
+    (is (= :seon.await/future (:seon.render.web/refused-member result)))
+    (is (= 20 (get-in result [:seon.error/data :seon.error/diagnostic-evidence
+                             :seon.await/config-value])))
     (is (= ::socket-drain
            (get-in result [:seon.error/data
                            :seon.error/diagnostic-member])))
@@ -597,10 +601,13 @@ handle))}}
   (support/with-database
    (fn [connection]
      (support/transacted! connection
-                          [{:seon.agent/id "unit-owner"
-                            :seon.agent/plan {:my.plan/objective "Inspect the page"}
-                            :seon.agent/settings
-                            {:seon.config.eval/time-limit-ms 1234}}])
+                          [{:seon.agent/id "unit-owner"}])
+     (is (map? (:my.plan/diff
+                (plan/plan! {:my.plan/objective "Inspect the page"}
+                            @connection connection "unit-owner"))))
+     (is (= 1234 (:seon.config.eval/time-limit-ms
+                  (agent/settings! {:seon.config.eval/time-limit-ms 1234}
+                                   connection "unit-owner"))))
      (let [database @connection
            projection (schema/projection-from-database database)
            declared (web-private 'declared-entity-units)
@@ -1057,7 +1064,8 @@ handle))}}
                  ;; an-unrelated-fixture-transaction-mints-a-half-agent).
                 (support/transacted!
                         connection
-                        [{:db/doc "An unrelated fact on an entity nothing derives interest in."}])
+                        [{:seon.ns/name 'render.web.unrelated
+                          :db/doc "An unrelated fact on an entity nothing derives interest in."}])
                 (is (< pass-before (settle-render! context)))
                 (is (= before @counts)
                     "the database wake reuses observation, discovery, and invocation")
@@ -1979,11 +1987,12 @@ handle))}}
             inbound {:seon.agent/id agent-id
                      :seon.message/inbound-content "accepted"}]
         (doseq [[result expected-status]
-                [[{:seon.error/kind :seon.db/rejected
+                [[{:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-test/fixture :seon.error/operation 'seon.render.web-test/transaction-refusals-map-to-http-without-success :seon.render/refused-member :seon.render/output
                    :seon.error/message "dependency refusal"}
                   422]
-                 [{:seon.error/kind :seon.db/unknown-failure
-                   :seon.error/message "core failure"}
+                 [{:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-test/fixture :seon.error/operation 'seon.render.web-test/transaction-refusals-map-to-http-without-success :seon.render/refused-member :seon.render/output
+                   :seon.error/message "core failure"
+                   :seon.db.write/attempt {:seon.db.write.attempt/completion-unavailable "No completion was observed."}}
                   500]]]
           (let [response (with-redefs [db/transact! (fn [& _] result)]
                            (web/inbound service inbound))]
@@ -1997,11 +2006,11 @@ handle))}}
             (with-redefs [db/q (fn [& _] nil)
                           db/transact!
                           (fn [& _]
-                            {:seon.error/kind :seon.db/rejected
+                            {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-test/fixture :seon.error/operation 'seon.render.web-test/start-refuses-a-flat-process-write-before-binding :seon.render/refused-member :seon.render/output
                              :seon.error/message "injected process refusal"})]
               (support/refusal-data
                #(web/start! (service-request connection {}))))]
-        (is (= :seon.db/rejected (:seon.error/kind result)))
+        (is (= :seon.render/output (:seon.render/refused-member result)))
         (is (= "injected process refusal" (:seon.error/message result)))))))
 
 (deftest a-cross-origin-inbound-is-refused-test
@@ -2199,16 +2208,11 @@ handle))}}
   (with-server
     (fn [connection server _context]
       (let [id (turn/next-id @connection "web-test" "root")
-            refusal (error/diagnostic
-                     {:seon.error/kind :seon.instrument/contract-violated
-                      :seon.error/message "fixture prompt acquisition refused"
-                      :seon.error/diagnostic-layer :instrument
-                      :seon.error/diagnostic-operation 'seon.eval/of-agent
-                      :seon.error/diagnostic-member :seon.eval/origin
-                      :seon.error/diagnostic-expected :int
-                      :seon.error/diagnostic-offending {:db/id 12345}
-                      :seon.error/diagnostic-cause :malli.core/invalid-output
-                      :seon.error/diagnostic-evidence {:seon.turn/id id}})]
+            refusal (assoc (support/refusal-data #(error/value "fixture prompt acquisition refused"))
+                           :seon.error/message "fixture prompt acquisition refused")]
+        (is (seon.schema/valid-candidate-value? :seon.instrument/contract-error refusal))
+        (is (= 'seon.error/value (:seon.instrument/fn refusal)))
+
         (support/transacted!
          connection
          (turn/open-tx {:seon.turn/id id
@@ -2221,12 +2225,11 @@ handle))}}
                 body (.body response)]
             (is (= 200 (.statusCode response)))
             (is (str/includes? body "id=\"surface-debug-session_2f_root\""))
-            (doseq [evidence ["fixture prompt acquisition refused" "seon.eval/of-agent"
-                              "seon.eval/origin" "int" "12345"]]
+            (doseq [evidence ["fixture prompt acquisition refused" "seon.error/value"]]
               (is (str/includes? body evidence) evidence))
             (is (not (str/includes? body "Loading the selected turn")))))
         (doseq [failure [(IllegalStateException. "unrelated runtime failure")
-                         (ex-info "unrelated typed failure" {:seon.error/kind ::unrelated})]]
+                         (ex-info "unrelated typed failure" {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-test/fixture :seon.error/operation 'seon.render.web-test/session-acquisition-failure-replaces-the-loading-panel :seon.render/refused-member :seon.render/output})]]
           (with-redefs [render/acquire-context! (fn [_] (throw failure))]
             (is (= 500 (.statusCode
                         (fetch server (str "/agent/root/debug?turn=" id "&prompt=true")

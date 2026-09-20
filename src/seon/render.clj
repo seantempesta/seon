@@ -65,13 +65,13 @@
                 :seon.error/value]]
     [:or :seon.render.profile/profile
      :seon.config/missing-effective-error
-     :seon.error/value]]}
+     :seon.config/error]]}
   [effective]
   ;; Either refusal shape is returned unchanged. A profile built from a
   ;; refusal would carry nil budgets and every downstream render would then
   ;; read that absence as a policy (AGENTS.md section 2.4).
   (if (or (:seon.config/missing-effective effective)
-          (:seon.error/kind effective))
+          (and (:seon.error/at effective) (:seon.error/layer effective) (:seon.error/operation effective))) ;; debt: seon.config/effective declares :seon.error/value, directly or through its result union.
     effective
     {:seon.render.profile/id :seon.render.profile/agent
      :seon.render.profile/token-budget
@@ -106,7 +106,7 @@
   {:malli/schema [:=> [:cat :map] [:maybe :seon.schema/projection]]}
   [request]
   (or (let [database (:seon.db/db request)]
-        (when (and database (not (:seon.error/kind database)))
+        (when (and database (not (and (:seon.error/at database) (:seon.error/layer database) (:seon.error/operation database)))) ;; debt: seon.db/db declares :seon.error/value, directly or through its result union.
           (db/carried-projection database)))
       (:seon.schema/projection request)
       (some-> (:seon.sci.eval/ctx request) sci.kernel/context-projection)))
@@ -114,7 +114,7 @@
 (defn request-profile
   "Return the profile carried by one request, deriving it once when absent."
   {:malli/schema [:=> [:cat :map]
-                  [:or :seon.render.profile/profile :seon.error/value]]}
+                  [:or :seon.render.profile/profile :seon.render/request-error :seon.config/error :seon.db/error-result]]}
   [request]
   (or (:seon.render/profile request)
       (if-let [projection (or (:seon.schema/projection request)
@@ -130,24 +130,29 @@
               effective (when cluster-name
                           (schema/call-with-projection
                            projection #(config/effective database cluster-name)))]
-          (if (:seon.error/kind effective)
+          (if (and (:seon.error/at effective) (:seon.error/layer effective) (:seon.error/operation effective)) ;; debt: seon.config/effective declares :seon.error/value, directly or through its result union.
             effective
             (or (when effective (agent-render-profile effective))
                 default-agent-profile)))
-        (error/diagnostic
-         {:seon.error/kind ::missing-projection
-          :seon.error/message
-          "Rendering requires a carried profile or handed projection."
-          :seon.error/diagnostic-layer :render
-          :seon.error/diagnostic-operation 'seon.render/request-profile
-          :seon.error/diagnostic-member :seon.schema/projection
-          :seon.error/diagnostic-expected
-          [:or :seon.render/profile :seon.schema/handed-projection]
-          :seon.error/diagnostic-offending :seon.error/unknown
-          :seon.error/diagnostic-cause ::missing-projection
-          :seon.error/diagnostic-evidence nil}))))
+        (let [observation
+              {:seon.error/at (java.util.Date.)
+               :seon.error/layer :seon.render/render
+               :seon.error/operation 'seon.render/request-profile
+               :seon.error/message "Rendering requires a carried profile or handed projection."
+               :seon.error/diagnostic-layer :seon.render/render
+               :seon.error/diagnostic-operation 'seon.render/request-profile
+               :seon.error/diagnostic-member :seon.schema/projection
+               :seon.error/diagnostic-expected [:or :seon.render/profile :seon.schema/handed-projection]
+               :seon.error/diagnostic-offending request
+               :seon.error/diagnostic-cause ::missing-projection
+               :seon.error/diagnostic-evidence {}
+               :seon.error/fix "Supply the expected member and repeat the requested operation."
+               :seon.render/refused-member :seon.schema/projection}]
+          (merge observation (error/diagnostic observation))))))
 
 (defn- target-profile
+
+  {:malli/schema [:=> [:cat :map] [:or :seon.render.profile/profile :seon.render/request-error :seon.config/error :seon.db/error-result]]}
   [request]
   (let [value (render-value request)
         database (:seon.db/db request)
@@ -304,15 +309,28 @@
             (sort-by str symbols)))))
 
 (defn- ambiguity
+
+  {:malli/schema [:=> [:cat [:maybe :seon.render/namespace] :seon.render/output [:sequential :qualified-symbol]] :seon.render/ambiguous-error]}
   [namespace-name output candidate-symbols]
-  {:seon.error/kind ::ambiguous
-   :seon.error/message
-   (str "More than one function in " namespace-name
-        " accepts this value and returns " output ".")
-   :seon.error/data
-   {:seon.render/namespace namespace-name
-    :seon.render/output output
-    :seon.render/candidates (vec candidate-symbols)} :seon.render/ambiguous true})
+  (let [observation
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.render/render
+         :seon.error/operation 'seon.render/ambiguity
+         :seon.error/message (str "More than one function in " namespace-name
+                             " accepts this value and returns " output ".")
+         :seon.error/diagnostic-layer :seon.render/render
+         :seon.error/diagnostic-operation 'seon.render/ambiguity
+         :seon.error/diagnostic-member :seon.render/output
+         :seon.error/diagnostic-expected "one applicable renderer"
+         :seon.error/diagnostic-offending candidate-symbols
+         :seon.error/diagnostic-cause :seon.render/output
+         :seon.error/diagnostic-evidence {:seon.render/namespace namespace-name :seon.render/output output}
+         :seon.error/fix "Supply the expected member and repeat the requested operation."
+         :seon.render/candidates (vec candidate-symbols)
+         :seon.error/data {:seon.render/namespace namespace-name
+                         :seon.render/output output
+                         :seon.render/candidates (vec candidate-symbols)}}]
+    (merge observation (error/diagnostic observation))))
 
 (defn transacted
   "Restore a pulled entity to the transaction shape used for selection."
@@ -370,6 +388,8 @@
          producers)))))
 
 (defn- schema-producer
+
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.schema/value :seon.render/output] [:or :nil :qualified-symbol :seon.render/ambiguous-error]]}
   [projection request value output]
   (let [producers (schema-producers projection request value output)]
     (cond
@@ -431,6 +451,8 @@
         (producer-argument request)))))
 
 (defn- declared-producer
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.schema/value :seon.render/output]
+                  [:or :nil :qualified-symbol :seon.render/ambiguous-error]]}
   [projection request value output]
   (if (attribute-scoped? request)
     (attribute-producer projection request output)
@@ -516,7 +538,7 @@
               evidence)
         selection-error (when (> (count compatible) 1)
                           (ambiguity (:seon.render/namespace request) output
-                                     (mapv str compatible)))
+                                     compatible))
         status (cond selection-error :ambiguous
                      (seq compatible) :selected
                      :else :no-match)
@@ -571,7 +593,7 @@
   [{output :seon.render/output
     :as request}]
   (let [profile (request-profile request)]
-    (if (:seon.error/kind profile)
+    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
       (finish-selection [] profile selection-stage-order)
       (let [request (assoc request :seon.render/profile profile)
             value (render-value request)
@@ -600,7 +622,7 @@
     :as request}]
   (let [decision (selection request)
         profile (request-profile request)]
-    (if (:seon.error/kind profile)
+    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
       decision
       (let [request (assoc request :seon.render/profile profile)
             value (render-value request)
@@ -626,6 +648,8 @@
                      stages actual-stages))))))
 
 (defn- producer
+
+  {:malli/schema [:=> [:cat :map :seon.render/output :qualified-keyword] [:or :qualified-symbol :seon.render/rendered :seon.render/error-result]]}
   [request output _output-schema]
   (:seon.render.selection/selected
    (selection (assoc request :seon.render/output output))))
@@ -668,7 +692,7 @@
 (defn source-generation
   "The adopted program commit carried by this database; empty before adoption."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:vector :seon.source/commit-id]]}
+                  [:or [:vector :seon.source/commit-id] :seon.db/error-result]]}
   [database]
   (db/q '[:find [?commit ...]
           :where [?cluster :seon.cluster/name _]
@@ -695,7 +719,7 @@
                               '[:seon.fn/sym (limit :seon.fn/calls nil)]
                               (mapv #(vector :seon.fn/sym %) pending))
             visited (into visited pending)]
-        (if (:seon.error/kind rows)
+        (if (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
           nil
           (recur (into #{} (comp (mapcat :seon.fn/calls)
                                 (remove visited)) rows)
@@ -871,7 +895,7 @@
 ;;; exactly why "same database value, same adopted commit, same profile ⇒
 ;;; same bytes" was unreachable (Opus review B5, PRD §5). The value below is
 ;;; what the refusal contributes instead, and it is STABLE BY CONSTRUCTION:
-;;; only the producer, the call, the reason, the refusal's own kind and the
+;;; only the producer, the call, the reason, the refusal's observed operation and the
 ;;; throwable's class. The kernel's diagnostic record — duration, entrances,
 ;;; allocation — is deliberately NOT carried: it is the one part of a refusal
 ;;; that differs run to run, and it would otherwise both move prompt bytes and
@@ -892,8 +916,8 @@
     (cond-> (sorted-map :seon.render.unknown/reason reason)
       producer-symbol (assoc :seon.render.unknown/producer producer-symbol)
       output (assoc :seon.render.unknown/output output)
-      (qualified-keyword? (:seon.error/kind failure))
-      (assoc :seon.render.unknown/refusal (:seon.error/kind failure))
+      (qualified-symbol? (:seon.error/operation failure))
+      (assoc :seon.render.unknown/refused-operation (:seon.error/operation failure))
       (string? (:seon.sci.eval/throwable data))
       (assoc :seon.render.unknown/throwable (:seon.sci.eval/throwable data))
       (vector? call-id) (assoc :seon.render.unknown/call call-id))))
@@ -901,34 +925,32 @@
 (defn unknown
   "The ONE stable typed unknown a refused render producer contributes.
 
-  `:seon.render.unknown/reason` is the class marker: `:time-limit` when the
+  `:seon.render.unknown/reason` records the invocation outcome: `:time-limit` when the
   producer ran past the request's `:seon.sci.eval/time-limit-ms`, `:refused`
   when the guarded invocation ended in a throwable or a declared-contract
-  refusal, and `:unselected` when no producer ran at all. The refusal's own
-  `:seon.error/kind` and the throwable's class ride along when the boundary
+  refusal, and `:unselected` when no producer ran at all. The refusal's observed operation and the throwable's class ride along when the boundary
   observed them, because they are what a repair starts from and both are
   stable spellings."
   {:malli/schema [:=> [:cat :seon.render/unknown-request] :seon.render/unknown]}
   [{producer-symbol :seon.render.unknown/producer
     reason :seon.render.unknown/reason
     :as request}]
-  (let [stable (unknown-stable-evidence request)]
-    (error/diagnostic
-     (assoc stable
-            :seon.error/kind ::unknown
-            :seon.error/message
-            (str "The renderer "
-                 (if producer-symbol (str producer-symbol " ") "")
-                 "did not return: " (name reason) ".")
-            :seon.error/diagnostic-layer :render
-            :seon.error/diagnostic-operation
-            (or producer-symbol 'seon.render/unknown)
-            :seon.error/diagnostic-member :seon.render/output
-            :seon.error/diagnostic-expected :seon.render/rendered
-            :seon.error/diagnostic-offending
-            (or (:seon.render.unknown/call stable) producer-symbol reason)
-            :seon.error/diagnostic-cause reason
-            :seon.error/diagnostic-evidence stable))))
+  (let [stable (unknown-stable-evidence request)
+        observation
+        (merge stable
+               {:seon.error/at (Date.)
+                :seon.error/layer :seon.render/invocation
+                :seon.error/operation 'seon.render/unknown
+                :seon.error/message "The selected renderer did not return an observation."
+                :seon.error/diagnostic-layer :seon.render/invocation
+                :seon.error/diagnostic-operation 'seon.render/unknown
+                :seon.error/diagnostic-member :seon.render/output
+                :seon.error/diagnostic-expected :seon.render/rendered
+                :seon.error/diagnostic-offending (:seon.error/value request)
+                :seon.error/diagnostic-cause reason
+                :seon.error/diagnostic-evidence stable
+                :seon.error/fix "Inspect the renderer's refusal and repair its declared output."})]
+    (merge observation (error/diagnostic observation))))
 
 (defn- unknown-evidence-of
   [unit]
@@ -939,16 +961,15 @@
           value)))
 
 (defn unknown-ai
-  "`:seon.render/ai` — one refused render as ONE line of data.
+  "Render the declared unknown facet and its stable observation fields.
 
-  Data, never comment-shaped (ruling 45) and never prose, so the page, the
-  history unit and the prompt say the same thing about the same absence — the
-  same rule `seon.repl/missing-text` follows for a value that was never
-  stored. A sorted map and canonical printing make the line's bytes a
-  function of the refusal alone."
+  The facet line follows the error message grammar. Sorted observation data
+  keeps timing and other transient invocation measurements out of the shown
+  text while the complete refusal remains available as diagnostic evidence."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
-  (admit/canonical-edn (unknown-evidence-of unit)))
+  (str "Facets: [:seon.render/unknown]\n"
+       (admit/canonical-edn (unknown-evidence-of unit))))
 
 (defn unknown-html
   "`:seon.render/html` — one refused render as one labeled block.
@@ -969,7 +990,7 @@
 
   TOTAL: a refusal that never reached a producer — an ambiguous selection, a
   missing projection — is still an unavailable observation, so it becomes the
-  same typed unknown with no producer to name and its own kind as the refusal."
+  same typed unknown with no producer to name and its observed refusal operation."
   {:malli/schema [:=> [:cat :seon.error/value] :seon.render/unknown]}
   [failure]
   (if (:seon.render.unknown/reason failure)
@@ -1029,6 +1050,8 @@
 
 (defn- invocation-unknown
   "The typed unknown for a producer that did not return, else nil."
+  {:malli/schema [:=> [:cat :map :seon.render/output :qualified-symbol :map] [:or :nil :seon.render/unknown]]}
+
   [request output selected result]
   (when-let [reason (get unknown-reason-by-outcome
                          (get-in result [:seon.sci.admit/record
@@ -1045,6 +1068,9 @@
 
 (defn- invoked
   "One producer's returned value, or the typed unknown that replaces it."
+  {:malli/schema [:=> [:cat :map :seon.render/output :qualified-symbol]
+                  [:or :seon.render/rendered :seon.render/error-result]]}
+
   [request output selected]
   (let [result (invoke-selected request selected)]
     (or (invocation-unknown request output selected result)
@@ -1052,7 +1078,7 @@
 
 (defn- valid-projection?
   [projection output value]
-  (or (:seon.error/kind value)
+  (or (and (:seon.error/at value) (:seon.error/layer value) (:seon.error/operation value)) ;; debt: seon.sci.kernel/invoke declares :seon.error/value through its admitted result.
       (schema/valid-candidate-value?
        (:seon.schema.projection/forms projection) output value)))
 
@@ -1138,19 +1164,19 @@
         selected (when-not (or (contains? rendering selected)
                                (and (= output :seon.render/ai)
                                     selected
-                                    (or (not (:seon.error/kind selected))
-                                        (= ::ambiguous (:seon.error/kind selected)))
+                                    (or (not (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected)))
+                                        (seq (get-in selected [:seon.error/data :seon.render/candidates])))
                                     (some
                                      #(source-producer?
                                        projection %
                                        [(producer-argument
                                          (assoc request :seon.render/value value))])
-                                     (if (= ::ambiguous (:seon.error/kind selected))
+                                     (if (seq (get-in selected [:seon.error/data :seon.render/candidates]))
                                        (get-in selected [:seon.error/data :seon.render/candidates])
                                        [selected]))))
                    selected)]
     (cond
-      (:seon.error/kind selected) (bounded-error-node request selected)
+      (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected)) (bounded-error-node request selected)
 
       selected
       ;; A NESTED PRODUCER THAT DID NOT RETURN SAYS SO. Falling back to the
@@ -1164,7 +1190,7 @@
                                                  result)]
           (bounded-error-node request unavailable)
           (if (valid-projection? projection output rendered)
-            (if (:seon.error/kind rendered)
+            (if (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/refused-member rendered))
               node
               {:seon.print/face :seon.print/projected
                :seon.render.call/selected-producer selected
@@ -1205,14 +1231,18 @@
   (project-node* request output [] node value))
 
 (defn- invoke-producer
+
+  {:malli/schema [:=> [:cat :map :seon.render/output :qualified-keyword] [:or :seon.render/rendered :seon.render/error-result]]}
   [request output output-schema]
   (let [selected (or (:seon.render.call/selected-producer request)
                      (producer request output output-schema))]
-    (if (:seon.error/kind selected)
+    (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
       selected
       (invoked request output selected))))
 
 (defn- raw-output
+  {:malli/schema [:=> [:cat :seon.render/call-request :seon.render/output :qualified-symbol]
+                  [:or :seon.render/rendered :seon.render/error-result]]}
   [request output selected]
   (let [projection (request-projection request)
         rendered (invoked request output selected)
@@ -1226,52 +1256,90 @@
                     [(render-invocation-argument projection request selected)])))]
     (case output
       :seon.render/ai
-      (if (or declared-absence? (string? rendered) (:seon.error/kind rendered)
+      (if (or declared-absence? (string? rendered) (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/refused-member rendered))
               (valid-projection? projection :seon.render/source-blocks rendered))
         rendered
-        {:seon.error/kind ::invalid-ai-output
-         :seon.render/invalid-output :ai
-         :seon.error/message "The selected AI renderer did not return text."
-         :seon.error/data {:seon.render/output rendered}})
+        (let [observation
+              {:seon.error/diagnostic-layer :seon.render/output
+               :seon.error/diagnostic-operation 'seon.render/raw-output
+               :seon.error/diagnostic-member :seon.render/output
+               :seon.error/diagnostic-expected "a value satisfying the requested render output"
+               :seon.error/diagnostic-offending rendered
+               :seon.error/diagnostic-cause :seon.render/output
+               :seon.error/diagnostic-evidence {:seon.render/output rendered}
+               :seon.error/fix "Return a value satisfying the renderer's declared output contract."
+               :seon.error/at (Date.)
+               :seon.error/layer :seon.render/output
+               :seon.error/operation 'seon.render/raw-output
+               :seon.render/invalid-output :ai
+               :seon.error/message "The selected AI renderer did not return text."
+               :seon.error/data {:seon.render/output rendered}}]
+          (merge observation (error/diagnostic observation))))
 
       :seon.render/html
-      (if (or declared-absence? (:seon.error/kind rendered)
+      (if (or declared-absence? (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/refused-member rendered))
               (hiccup/hiccup? rendered))
         rendered
-        {:seon.error/kind ::invalid-html-output
-         :seon.render/invalid-output :html
-         :seon.error/message "The selected HTML renderer did not return Hiccup."
-         :seon.error/data {:seon.render/output rendered}})
+        (let [observation
+              {:seon.error/diagnostic-layer :seon.render/output
+               :seon.error/diagnostic-operation 'seon.render/raw-output
+               :seon.error/diagnostic-member :seon.render/output
+               :seon.error/diagnostic-expected "a value satisfying the requested render output"
+               :seon.error/diagnostic-offending rendered
+               :seon.error/diagnostic-cause :seon.render/output
+               :seon.error/diagnostic-evidence {:seon.render/output rendered}
+               :seon.error/fix "Return a value satisfying the renderer's declared output contract."
+               :seon.error/at (Date.)
+               :seon.error/layer :seon.render/output
+               :seon.error/operation 'seon.render/raw-output
+               :seon.render/invalid-output :html
+               :seon.error/message "The selected HTML renderer did not return Hiccup."
+               :seon.error/data {:seon.render/output rendered}}]
+          (merge observation (error/diagnostic observation))))
 
       :seon.render/form
       (if (valid-projection? projection :seon.render/form rendered)
         rendered
-        {:seon.error/kind ::invalid-form-output
-         :seon.render/invalid-output :form
-         :seon.error/message "The selected form renderer did not return a form."
-         :seon.error/data {:seon.render/output rendered}}))))
+        (let [observation
+              {:seon.error/diagnostic-layer :seon.render/output
+               :seon.error/diagnostic-operation 'seon.render/raw-output
+               :seon.error/diagnostic-member :seon.render/output
+               :seon.error/diagnostic-expected "a value satisfying the requested render output"
+               :seon.error/diagnostic-offending rendered
+               :seon.error/diagnostic-cause :seon.render/output
+               :seon.error/diagnostic-evidence {:seon.render/output rendered}
+               :seon.error/fix "Return a value satisfying the renderer's declared output contract."
+               :seon.error/at (Date.)
+               :seon.error/layer :seon.render/output
+               :seon.error/operation 'seon.render/raw-output
+               :seon.render/invalid-output :form
+               :seon.error/message "The selected form renderer did not return a form."
+               :seon.error/data {:seon.render/output rendered}}]
+          (merge observation (error/diagnostic observation)))))))
 
 (defn- present-output
   "A producer's output, as produced. The value renderer's AI projection is
   the one place presentation elides (owner, 2026-09-08); this seam passes
   the data through."
+  {:malli/schema [:=> [:cat :map :seon.render/output :seon.render/rendered] [:or :seon.render/rendered :seon.render/error-result]]}
+
   [_request _output raw]
   raw)
 
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."
   {:malli/schema [:=> [:cat :seon.render/call-request]
-                  [:or :nil :string :seon.error/value]]
+                  [:or :nil :string :seon.render/error-result]]
    :seon.fn/external-sink :ai-visible-text
   :seon.fn/projection-boundary :seon.render/ai}
   [request]
   (let [profile (request-profile request)]
-    (if (:seon.error/kind profile)
+    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
       profile
       (let [request (assoc request :seon.render/profile profile)
             selected (or (:seon.render.call/selected-producer request)
                          (producer request :seon.render/ai :seon.render/ai))]
-        (if (:seon.error/kind selected)
+        (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
           selected
           (present-output request :seon.render/ai
                           (raw-output request :seon.render/ai selected)))))))
@@ -1279,18 +1347,18 @@
 (defn render-html
   "Render one value as Hiccup through the unique selected live SCI Var."
   {:malli/schema [:=> [:cat :seon.render/call-request]
-                  [:or :nil :seon.render/hiccup :seon.error/value]]
+                  [:or :nil :seon.render/hiccup :seon.render/error-result]]
    :seon.fn/external-sink :html-response
   :seon.fn/projection-boundary :seon.render/html}
   [request]
   (let [profile (request-profile request)]
-    (if (:seon.error/kind profile)
+    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
       profile
       (let [request (assoc request :seon.render/profile profile)
             selected (or (:seon.render.call/selected-producer request)
                          (producer request :seon.render/html
                                    :seon.render/html))]
-        (if (:seon.error/kind selected)
+        (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
           selected
           (present-output request :seon.render/html
                           (raw-output request :seon.render/html selected)))))))
@@ -1306,24 +1374,29 @@
       (:db/id entity))))
 
 (defn- source-provenance-error
+
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/request-error]}
   [unit]
-  {:seon.error/kind ::missing-source-provenance
-   :seon.error/message
-   "Default AI source requires an entity identity or stored evaluation result reference."
-   :seon.error/diagnostic-layer :render
-   :seon.error/diagnostic-operation 'seon.render/render-form
-   :seon.error/diagnostic-member :seon.render.value/root
-   :seon.error/diagnostic-expected
-   :seon.render.walk/lookup
-   :seon.error/diagnostic-offending
-   (select-keys unit [:seon.render.value/root])
-   :seon.error/diagnostic-cause ::missing-source-provenance
-   :seon.error/diagnostic-evidence nil})
+  (let [observation
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.render/render
+         :seon.error/operation 'seon.render/source-provenance-error
+         :seon.error/message "Default AI source requires an entity identity or stored evaluation result reference."
+         :seon.error/diagnostic-layer :seon.render/render
+         :seon.error/diagnostic-operation 'seon.render/source-provenance-error
+         :seon.error/diagnostic-member :seon.render.value/root
+         :seon.error/diagnostic-expected :seon.render.walk/lookup
+         :seon.error/diagnostic-offending unit
+         :seon.error/diagnostic-cause ::missing-source-provenance
+         :seon.error/diagnostic-evidence {}
+         :seon.error/fix "Supply the expected member and repeat the requested operation."
+         :seon.render/refused-member :seon.render.value/root}]
+    (merge observation (error/diagnostic observation))))
 
 (defn render-form
   "Spell the structural read that reproduces one reached database value."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :seon.render/form :seon.error/value]]}
+                  [:or :seon.render/form :seon.render/request-error :seon.db/error-result]]}
   [unit]
   (let [value (:seon.render/value unit)
         root (or (:seon.render.value/root unit)
@@ -1340,20 +1413,20 @@
 (defn render-default-ai-source
   "Return authored source that reproduces a value for terminal rendering."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :seon.render/source :seon.error/value]]}
+                  [:or :seon.render/source :seon.render/request-error :seon.db/error-result]]}
   [unit]
   (let [form (render-form unit)]
-    (if (:seon.error/kind form)
+    (if (:seon.render/refused-member form)
       form
       (pr-str form))))
 
 (defn render-form-value
   "Render one value as the Clojure form that reads it."
   {:malli/schema [:=> [:cat :seon.render/call-request]
-                  [:or :seon.render/form :seon.error/value]]}
+                  [:or :seon.render/form :seon.render/error-result]]}
   [request]
   (let [profile (request-profile request)]
-    (if (:seon.error/kind profile)
+    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
       profile
       (let [request (assoc request :seon.render/profile profile)
             projection (request-projection request)
@@ -1361,17 +1434,28 @@
                                       :seon.render/form)]
         (if (valid-projection? projection :seon.render/form rendered)
           rendered
-          {:seon.error/kind ::invalid-form-output
-           :seon.render/invalid-output :form
-           :seon.error/message
-           "The selected form renderer did not return a form."
-           :seon.error/data {:seon.render/output rendered}})))))
+          (let [observation
+                {:seon.error/diagnostic-layer :seon.render/output
+                 :seon.error/diagnostic-operation 'seon.render/render-form-value
+                 :seon.error/diagnostic-member :seon.render/output
+                 :seon.error/diagnostic-expected "a value satisfying the requested render output"
+                 :seon.error/diagnostic-offending rendered
+                 :seon.error/diagnostic-cause :seon.render/output
+                 :seon.error/diagnostic-evidence {:seon.render/output rendered}
+                 :seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
+                 :seon.error/at (Date.)
+                 :seon.error/layer :seon.render/output
+                 :seon.error/operation 'seon.render/render-form-value
+                 :seon.render/invalid-output :form
+                 :seon.error/message "The selected form renderer did not return a form."
+                 :seon.error/data {:seon.render/output rendered}}]
+            (merge observation (error/diagnostic observation))))))))
 
 (defn render-call
   "Reuse one retained projection while its input, code, and reads are current."
   {:malli/schema [:=> [:cat :seon.render/call-request]
                   [:or :nil :string :seon.render/hiccup
-                   :seon.render/form :seon.error/value]]}
+                   :seon.render/form :seon.render/error-result]]}
   [{database :seon.db/db
     output :seon.render/output
     call-id :seon.render.call/id
@@ -1380,7 +1464,7 @@
     candidate-call-ids :seon.render/candidate-call-ids
     :as request}]
   (let [profile (request-profile request)]
-    (if (:seon.error/kind profile)
+    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
       profile
       (let [request (assoc request :seon.render/profile profile)
             previous (when (and call-id retained-calls)
@@ -1421,20 +1505,23 @@
                   (if (compatible-selection-candidate? decision
                                                        requested-candidate)
                     requested-candidate
-                    (error/diagnostic
-                     {:seon.error/kind ::candidate-not-applicable
-                      :seon.error/message
-                      "The requested renderer is not an applicable candidate."
-                      :seon.error/diagnostic-layer :render
-                      :seon.error/diagnostic-operation 'seon.render/render-call
-                      :seon.error/diagnostic-member
-                      :seon.render.call/selected-producer
-                      :seon.error/diagnostic-expected :compatible
-                      :seon.error/diagnostic-offending requested-candidate
-                      :seon.error/diagnostic-cause ::candidate-not-applicable
-                      :seon.error/diagnostic-evidence decision}))
+                    (let [observation
+                          {:seon.error/at (java.util.Date.)
+                           :seon.error/layer :seon.render/render
+                           :seon.error/operation 'seon.render/render-call
+                           :seon.error/message "The requested renderer is not an applicable candidate."
+                           :seon.error/diagnostic-layer :seon.render/render
+                           :seon.error/diagnostic-operation 'seon.render/render-call
+                           :seon.error/diagnostic-member :seon.render.call/selected-producer
+                           :seon.error/diagnostic-expected :compatible
+                           :seon.error/diagnostic-offending requested-candidate
+                           :seon.error/diagnostic-cause ::candidate-not-applicable
+                           :seon.error/diagnostic-evidence decision
+                           :seon.error/fix "Supply the expected member and repeat the requested operation."
+                           :seon.render/refused-member :seon.render.call/selected-producer}]
+                      (merge observation (error/diagnostic observation))))
                   (:seon.render.selection/selected decision))]
-            (if (:seon.error/kind selected)
+            (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
               selected
               (let [static-evidence (call-static-evidence request decision
                                                           selected)
@@ -1572,7 +1659,7 @@
   enter an earlier prompt merely because the caller supplies today's db."
   {:malli/schema [:=> [:cat :seon.render/context-request]
                   [:or :seon.render/acquired-context
-                   :seon.render/context-change-result :seon.error/value]]}
+                   :seon.render/context-change-result :seon.render.web/context-error]]}
   [request]
   (if (:seon.render/context-action request)
     (@render-web-derive-context! request)
@@ -1581,13 +1668,15 @@
           basis (if turn-id
                   (@turn-opening-db database turn-id)
                   database)]
-      (if (:seon.error/kind basis) basis
+      (if (and (:seon.error/at basis) (:seon.error/layer basis) (:seon.error/operation basis)) basis ;; debt: seon.turn/opening-db declares :seon.error/value, directly or through its result union.
         (let [acquired (@render-web-derive-context!
                         (assoc request :seon.db/db basis))]
           acquired)))))
 
 
 (defn- namespace-owner
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.render/namespace]
+                  [:or :nil :seon.agent/id :seon.db/error-result]]}
   [database namespace-name]
   (db/q '[:find ?agent-id .
           :in $ ?namespace-name
@@ -1601,7 +1690,7 @@
   "Prepare one refused render's OUTPUT values and its owner message.
 
   Both audiences read the SAME typed unknown, so the page and the prompt say
-  the same thing about the same absence: `unknown-ai` is one line of data for
+  the same thing about the same absence: `unknown-ai` names the facet and stable observation for
   the agent, `unknown-html` the labeled block for a person. The anonymous
   sentence `Renderer unavailable.` that used to stand here named neither the
   producer nor why it stopped, so it taught the reader nothing and hid which
@@ -1653,17 +1742,36 @@
     (body)))
 
 (defn- walk-error
+
+  {:malli/schema [:=> [:cat :string] :string]}
   [message]
   (pr-str
-   {:seon.error/kind ::walk-failed
-    :seon.error/message message :seon.render/walk-failed true}))
+   (let [observation
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer :seon.render/render
+          :seon.error/operation 'seon.render/walk-error
+          :seon.error/message message
+          :seon.error/diagnostic-layer :seon.render/render
+          :seon.error/diagnostic-operation 'seon.render/walk-error
+          :seon.error/diagnostic-member :seon.render.walk/context
+          :seon.error/diagnostic-expected "available walk custody"
+          :seon.error/diagnostic-offending message
+          :seon.error/diagnostic-cause :seon.render.walk/context
+          :seon.error/diagnostic-evidence {}
+          :seon.error/fix "Supply the expected member and repeat the requested operation."
+          :seon.render/walk-operation 'seon.render/walk-error}]
+     (merge observation (error/diagnostic observation)))))
 
 (defn- ambient-database-value
+
+  {:malli/schema [:=> [:cat] [:or :seon.db/database-value :seon.db/error-result]]}
   []
   (or (:seon.db/db *walk-context*)
       (db/db)))
 
 (defn- custody-cluster-name
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or :nil :seon.cluster/name :seon.db/error-result]]}
   [database]
   (db/q '[:find ?cluster-name .
           :where [_ :seon.cluster/name ?cluster-name]] database))

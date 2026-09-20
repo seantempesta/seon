@@ -42,4 +42,10 @@
                            :seon.render.transcript/runs]
                           [:seon.render.transcript/older-runs
                            {:optional true}
-                           :seon.print/elision]]}
+                           :seon.print/elision]]
+ :refused-member :qualified-keyword
+
+ :request-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.transcript/refused-member :seon.render.transcript/refused-member]]]
+
+ :error-result [:or :seon.render.transcript/request-error :seon.db/error-result]
+}

@@ -21,4 +21,11 @@
 
  :seon.render.unknown/throwable
  :string
+
+ ; The call is in-memory diagnostic data; its arbitrary value is admitted
+ ; by the error recorder, not installed as a persistent scalar attribute.
+ :seon.render.unknown/call :seon.render.call/id
+
+ :seon.render.unknown/refused-operation :qualified-symbol
+
 }
