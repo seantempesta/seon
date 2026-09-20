@@ -5255,3 +5255,17 @@ step 1's 52-file hold, so the third slot is a read-only design lane:
 for 4a/4b/4c from the isolation research, the landed test system and
 Datahike's versioning source — the owner's branch-and-merge requirement,
 verbatim, is its acceptance.
+
+## 2026-09-21 ~04:10 UTC — wave-4 specs written; step-2 spec lane launched
+
+`wave4-isolation-merge-design` landed `92313e84b`:
+[wave-4-isolation-merge-spec-2026-09-21.md](wave-4-isolation-merge-spec-2026-09-21.md)
+— launchable specs for 4a (1–2 lane-days), 4b (3–5), 4c (2–3), a shared
+acceptance contract (the merge gate IS the landed test system; durable
+acceptance and conflict evidence), what 4a assumes from bridge step 3, and
+"what wave 4 must NOT build". Launch authority for wave 4 after step 3's
+reset. Third slot → `bridge-step2-design` (astra high, read-only): the
+verbatim step-2 launch text (compiled walker; delete `seon.schema.form`;
+attribute derivation by `m/walk` with whole-population equality as the
+regression) so step 2 starts the minute step 1 lands. Default RSS 15.8 GB
+idle (was 4.7 GB at reset) — watched, not restarted.
