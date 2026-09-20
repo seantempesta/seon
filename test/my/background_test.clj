@@ -5,18 +5,23 @@
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
 
-(deftest background-error-renderers-cover-every-declared-class
-  (doseq [[schema-key marker message]
+(deftest background-error-renderers-cover-every-declared-facet
+  (doseq [[schema-key observation message]
           [[:my.background/invalid-call-error
-            :my.background/invalid-call
+            [:my.background/call-source "((+ 1 2 3))"]
             "The background call is invalid."]
            [:my.background/invalid-result-error
-            :my.background/invalid-result
+            [:my.background/result-observation "[:wrong 1]"]
             "The background result ref is invalid."]
            [:my.background/missing-result-error
-            :my.background/missing-result
+            [:my.background/missing-result-ref [:seon.effect/id "missing"]]
             "The background result is missing."]]]
-    (let [error {marker true :seon.error/message message}
+    (let [[member value] observation
+          error {:seon.error/at #inst "2026-09-21T00:00:00.000-00:00"
+                 :seon.error/layer :my.background/test
+                 :seon.error/operation 'my.background-test/facet
+                 :seon.error/message message
+                 member value}
           ai (background/render-ai error)
           html (background/render-html error)]
       (is ((schema/projection-validator (schema/handed-projection) schema-key) error))
@@ -34,7 +39,7 @@
           '(my.background/background
             (my.example/call {:my.example/id 1})))))
   (let [refusal (macroexpand-1 '(my.background/background (+ 1 2 3)))]
-    (is (true? (:my.background/invalid-call refusal)))
+    (is (= "((+ 1 2 3))" (:my.background/call-source refusal)))
     (is (= 'my.background/background (:seon.error/operation refusal))))
   ;; The agent's own limit is ordinary execution data on the same call: the
   ;; config fact is the default, this wins over it in either direction.
@@ -59,7 +64,7 @@
                        :seon.turn/opened-tx "datomic.tx"}
                       {:seon.effect/id "background-result"
                        :seon.effect/run [:seon.turn/id "background-run"]
-                       :seon.effect/owner [:seon.fn/sym "my.shell/run!"]
+                       :seon.effect/owner [:seon.fn/sym 'my.shell/run!]
                        :seon.effect/form-ordinal 0
                        :seon.effect/ordinal 0
                        :seon.effect/request-edn "{}"

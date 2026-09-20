@@ -3,6 +3,7 @@
   (:refer-clojure :exclude [await])
   (:require [seon.run :as run]
             [seon.db :as db]
+            [seon.error.refusal :as refusal]
             [seon.schema.edn :as schema.edn]))
 
 (schema.edn/load! {})
@@ -37,16 +38,31 @@
   `background`."
   {:malli/schema
    [:=> [:cat :my.background/result]
-    [:or :my.background/receipt :seon.error/value]]}
+    [:or :my.background/receipt
+     :my.background/invalid-result-error
+     :my.background/missing-result-error
+     :seon.db/invalid-read-error
+     :seon.schema/missing-projection-error]]}
   [result-ref]
   (if-not (and (vector? result-ref)
                (= 2 (count result-ref))
                (= :seon.effect/id (first result-ref))
                (string? (second result-ref)))
-    {:seon.error/kind :my.background/invalid-result
-     :seon.error/message "poll needs a :seon.effect/id lookup ref."
-     :seon.error/data {:my.background/result result-ref}
-     :my.background/invalid-result true}
+    (refusal/diagnostic
+     {:seon.error/at (java.util.Date.)
+      :seon.error/layer :my.background/poll
+      :seon.error/operation 'seon.background/poll
+      :seon.error/message "poll needs a :seon.effect/id lookup ref."
+      :seon.error/diagnostic-layer :my.background/poll
+      :seon.error/diagnostic-operation 'seon.background/poll
+      :seon.error/diagnostic-member :my.background/result
+      :seon.error/diagnostic-expected "a :seon.effect/id lookup ref"
+      :seon.error/diagnostic-offending result-ref
+      :seon.error/diagnostic-cause :my.background/invalid-result
+      :seon.error/diagnostic-evidence {}
+      :seon.error/fix "Supply [:seon.effect/id <id>]."
+      :seon.error/data {:my.background/result result-ref}
+      :my.background/result-observation (pr-str result-ref)})
     (if-let [receipt
              (db/pull (db/db db/*conn*)
                       [:seon.effect/id
@@ -69,10 +85,21 @@
         (:seon.effect/interrupted-at receipt)
         (assoc :seon.effect/interrupted-at
                (:seon.effect/interrupted-at receipt)))
-      {:seon.error/kind :my.background/missing-result
-       :seon.error/message "The background effect receipt does not exist."
-       :seon.error/data {:my.background/result result-ref}
-       :my.background/missing-result true})))
+      (refusal/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.background/poll
+        :seon.error/operation 'seon.background/poll
+        :seon.error/message "The background effect receipt does not exist."
+        :seon.error/diagnostic-layer :my.background/poll
+        :seon.error/diagnostic-operation 'seon.background/poll
+        :seon.error/diagnostic-member :my.background/result
+        :seon.error/diagnostic-expected "an existing background effect receipt"
+        :seon.error/diagnostic-offending result-ref
+        :seon.error/diagnostic-cause :my.background/missing-result
+        :seon.error/diagnostic-evidence {}
+        :seon.error/fix "Use the lookup ref returned by background."
+        :seon.error/data {:my.background/result result-ref}
+        :my.background/missing-result-ref result-ref}))))
 
 (defn await
   "Wait for a background request or return its finished result.
@@ -82,14 +109,22 @@
   Use it when the next run should resume after the request settles."
   {:malli/schema
    [:=> [:cat :my.background/result :my.turn/note]
-    [:or :my.background/receipt :my.turn/wait :seon.error/value]]}
+    [:or :my.background/receipt :my.turn/wait
+     :my.background/invalid-result-error
+     :my.background/missing-result-error
+     :seon.db/invalid-read-error
+     :seon.schema/missing-projection-error
+     :my.turn/blank-note-error]]}
   [result-ref note]
   (let [descriptor (poll result-ref)]
-    (if (or (:seon.error/kind descriptor)
+    (if (or (contains? descriptor :my.background/result-observation)
+            (contains? descriptor :my.background/missing-result-ref)
+            (contains? descriptor :seon.db/read-operation)
+            (contains? descriptor :seon.schema/missing-projection)
             (:seon.effect/result-edn descriptor)
             (:seon.effect/interrupted-at descriptor))
       descriptor
       (let [wait-value (run/wait note)]
-        (if (:seon.error/kind wait-value)
+        (if (contains? wait-value :my.turn/blank-note)
           wait-value
           (assoc wait-value :my.background/result result-ref))))))

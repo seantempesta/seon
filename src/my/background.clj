@@ -22,7 +22,7 @@
     :seon.error/diagnostic-offending forms
     :seon.error/diagnostic-cause :my.background/invalid-call
     :seon.error/diagnostic-evidence {:my.background/authored-form forms}
-    :my.background/invalid-call true}))
+    :my.background/call-source (pr-str forms)}))
 
 (defmacro background
   "Start one capability request without waiting for its result.
