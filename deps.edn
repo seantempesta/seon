@@ -145,9 +145,15 @@
                 ;; v0.1.5@376d6ec + 1 commit. fbff842 publishes the bound port.
                 io.github.clojure/core.async.flow-monitor
                 {:local/root "reference-code/core.async.flow-monitor"}}
+   ;; Test JVMs are many at once (a gate = coordinator + pool workers + a
+   ;; serial worker; two gates may run; lanes' fast loops beside them). At
+   ;; 12.5 % of a 128 GB machine each could take 16 GB and the machine
+   ;; swapped (2026-09-20: 8 of 9 GB swap used). 8 % (~10 GB) covers the
+   ;; measured worker peaks (7–8 GB; the population base preparation 13 GB
+   ;; once) — a base preparation that needs more will say so in its log.
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
-              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=12.5"
+              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=8"
               "-XX:G1PeriodicGCInterval=30000"]}
 
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
