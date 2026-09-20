@@ -1069,6 +1069,7 @@ coordinator_jvm_arguments=(
   "-J-Dseon.test.changed-paths-file=$changed_paths_file"
   "-J-Dseon.test.worker-parent=$worker_parent"
   "-J-Dseon.test.worker-count=$worker_count"
+  "-J-Dseon.test.worker-checkout-seconds=$worker_checkouts_phase_seconds"
   "-J-Dseon.test.published-base=$shared_published_base"
 )
 if [ -n "$persistent_results_root" ]; then

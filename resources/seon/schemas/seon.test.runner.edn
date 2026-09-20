@@ -1,4 +1,9 @@
 #:seon.test.runner{:error-count [:int {:min 0}],
+                   :report-options
+                   [:map
+                    [:seon.print/length :seon.print/length]
+                    [:seon.print/level :seon.print/level]
+                    [:seon.render/profile :seon.render/profile]],
                    :fail-count [:int {:min 0}],
                    :namespaces [:vector :symbol],
                    :pass-count [:int {:min 0}],

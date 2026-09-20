@@ -881,8 +881,6 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (config/apply! {:seon.db/connection connection
-                      :seon.boot/cluster-name "error-test"})
       (test-support/seed-cluster! connection "error-test")
       (test-support/transacted! connection [{:seon.agent/id "root"}
                                           {:seon.agent/id "agent-3"}])
@@ -921,7 +919,13 @@
                 db)))]))
 
 (deftest recurrence-counting-does-not-require-a-notification-threshold
-  (with-db
+  (let [applications (atom 0)
+        apply-config config/apply!]
+   (with-redefs [config/apply! (fn [request]
+                                (when (= "error-test" (:seon.boot/cluster-name request))
+                                  (swap! applications inc))
+                                (apply-config request))]
+    (with-db
     (fn [connection]
       (let [request (dissoc (commit-request (transform-error (ex-info "boom" {})) {})
                             :seon.config.error/recurrence-limit)]
@@ -931,6 +935,7 @@
                         (db/db connection))))
         (is (= 1 (count (db/q '[:find ?m :where [?m :seon.message/about]]
                               (db/db connection)))))))))
+   (is (= 1 @applications) "The canonical cluster seed is the sole config writer.")))
 
 (deftest only-a-throwable-tells-the-attributed-agent
   (with-db

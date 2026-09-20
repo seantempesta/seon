@@ -121,12 +121,16 @@
       (pr-str value))))
 
 (defn- report-options
-  []
-  (let [configuration (config/defaults)]
+  ([]
+   (let [configuration (config/defaults)]
     (assoc (select-keys configuration
                         [:seon.print/length :seon.print/level])
            :seon.render/profile
            (render/agent-render-profile configuration))))
+  ([supplied]
+   (merge (or (::report-options supplied) (report-options))
+          (select-keys supplied
+                       [:seon.print/length :seon.print/level :seon.render/profile]))))
 
 (defn- throwable-signature
   [^Throwable failure]
@@ -635,7 +639,7 @@
       :seon.error/diagnostic-evidence {:seon.test/var (str unrunnable)}
       :seon.test/not-runnable (str unrunnable)})
     (let [selected-namespaces (set (map (comp symbol namespace symbol var-symbol) test-vars))
-          options (report-options)
+          options (report-options custody)
           capture (atom {::order [] ::results {}})
           reported-signatures (atom #{})
           default-report (.getRawRoot #'test/report)
@@ -1330,7 +1334,7 @@
   [resolution task test-vars]
   (let [host-vars (filterv #(instance? clojure.lang.Var %) test-vars)
         custody (or (:seon.db/custody-request resolution) {})
-        request (merge (select-keys resolution [:seon.sci.eval/ctx])
+        request (merge (select-keys resolution [:seon.sci.eval/ctx ::report-options])
                        custody
                        {:seon.test/vars test-vars
                         :seon.sci.eval/time-limit-ms
@@ -1617,7 +1621,8 @@
 (defn- run-task!
   "Run one worker task with all output captured as attributed data."
   [task resolution]
-  (let [options (report-options)
+  (let [options (report-options resolution)
+        resolution (assoc resolution ::report-options options)
         output (StringWriter.)
         started-at (Instant/now)
         started-nanos (System/nanoTime)]
@@ -2051,7 +2056,8 @@
          worker-id reader writer
          {::projection projection
           ::task-executor task-executor
-          ::resolution {:seon.db/db database :seon.db/connection connection
+          ::resolution {::report-options (report-options)
+                        :seon.db/db database :seon.db/connection connection
                         :seon.sci.eval/ctx (:seon.sci.eval/ctx base)
                         :seon.schema/projection (schema/projection-from-database database)
                         :seon.test/class-loader (clojure.lang.RT/baseLoader)}})
@@ -3758,7 +3764,10 @@
 (defn- start-worker!
   [worker-id checkout-root operator-root]
   (cache/worker-checkout! (System/getProperty "seon.test.root")
-                          (.getPath checkout-root))
+                          (.getPath checkout-root)
+                          (Long/parseLong
+                           (or (System/getProperty "seon.test.worker-checkout-seconds")
+                               (str (silence-seconds)))))
   (.mkdirs (io/file operator-root "logs"))
   (let [error-log (io/file operator-root "logs" "worker-stderr.log")
         published-base (System/getProperty "seon.test.published-base")
@@ -4688,17 +4697,11 @@
                       " namespaces=" (count namespaces)
                       " workers=" pool-size
                       " silence-backstop=" configured-silence-seconds "s"))
-      (do
         (doseq [[index test-namespace] (map-indexed vector namespaces)]
           (announce! progress
                      (str "LOAD " (inc index) "/" (count namespaces)
                           " " test-namespace))
-          ;; The worker-launch virtual threads lazily load through
-          ;; `requiring-resolve`, which serializes on REQUIRE_LOCK — a
-          ;; bare `require` here raced them, interleaving `*loaded-libs*`
-          ;; so whichever source-compiled dependency lost the race failed
-          ;; with 'namespace not found' (observed live: sci, then
-          ;; clj-kondo's inlined tools.reader). One lock, both entries.
+          ;; Use the same loader lock as requiring-resolve.
           (locking clojure.lang.RT/REQUIRE_LOCK
             (require test-namespace))
           (announce! progress
@@ -4808,7 +4811,7 @@
             ::git-sha git-sha
             ::bulk bulk
             ::record-results! record-results!
-            ::recording-label recording-label})))
+            ::recording-label recording-label}))
       (finally
         (doseq [worker @workers*]
           (stop-worker! worker))

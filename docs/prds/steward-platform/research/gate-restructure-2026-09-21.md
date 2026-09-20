@@ -95,6 +95,90 @@ it is not evidence of full JVM fixture isolation. Full cold gate/platform
 proof and the new child-process regression remain unexecuted in this lane.
 No before/after child RSS or creation/exit measurement is claimed yet.
 
+## Resumed preparation slice
+
+Lifetime checkpoint: `cdf517203`. The restored preparation changes carry one
+immutable report-options value through worker/task/Var reporting, preserving
+explicit profiles, and remove the duplicate config application before the
+canonical cluster seed. Checkout preparation retains its shell-declared bound
+across lock acquisition and copy commands at the existing checkout owner.
+Regressions cover the reserved first task, retirement leftovers, the reporter
+profile, branch/schema isolation, exceptional cleanup, and the single config
+writer. The process-exit regression now prints PID/start/exit evidence when
+the orchestrator runs it; it has not run here.
+
+`morning-fast.log` armed 1,499 contracts but refused admission at
+`:seon.call-preparation/ambiguous-call-error`, member
+`:seon.call-preparation/candidates`: “A stored error member must have a
+storable registered attribute.” `adoption-fast.log` reached the same refusal.
+Both executed zero tests; neither supplied a durable unchanged tally. This is
+not the store-lock failure and was not retried as one. The held call-preparation
+declaration and bridge were not edited. The first overlay inadvertently
+included the already-staged `test/seon/test_support.clj` caller conversion;
+that foreign two-line diff is excluded from this lane's commits.
+
+The independent real-fixture probe ran on the shared checkout, including its
+foreign edits, with 1,490 contracts armed. It is not a clean HEAD-plus-owned-paths
+proof. `morning-measure.edn` records run `e2dd79a9c4f7`, program digest
+`412b35d58cdb691b7a8072b4f678108f23d660cd35d99f61a556a591c5c94520` and
+input digest `726f7c1efd52a466eb4b3cab43a347f2a6c2a331a1c0ab8918e969e68cd04c45`.
+Base readiness was 96,064.399 ms, with one population, one complete source
+analysis and one canonical SCI base construction. All ten warmed ordinary
+fixtures asserted zero of each and exactly one branch/delete lifecycle.
+
+| Warm ordinary fixture phase | First (n=1), ms | Subsequent n | Median, ms | p90, ms | Max, ms |
+|---|---:|---:|---:|---:|---:|
+| Total | 27.087708 | 9 | 2.639125 | 3.322791 | 3.322791 |
+| Setup | 14.593041 | 9 | 2.205459 | 3.040041 | 3.040041 |
+| Body | 0.606584 | 9 | 0.037917 | 0.105750 | 0.105750 |
+| Cleanup | 11.888083 | 9 | 0.273791 | 0.849875 | 0.849875 |
+
+For the one first sample, median, p90 and max all equal the shown duration.
+The recurrence member was normally admitted and durably recorded: **one
+executed, zero unchanged, zero failures, one error**. Resolution took
+425.912 ms; config application occurred once (682.978 ms). Its failing body
+took 776.130 ms, its inclusive fixture 1,651.184 ms, and total task 2,396.651 ms.
+These failing spans remain marked incomplete in the raw events and are not
+included in successful-duration distributions. The script now retains task
+output/results for diagnosis as well as the recorder's tally.
+
+Durations are monotonic wall time. Exclusive observations subtract nested
+observations on the same thread; asynchronous base construction is separately
+observed and MUST NOT be added to base-readiness elapsed time. Recursive
+seed-cluster arities yield two inclusive seed observations but only one config
+application. This does not mean two cluster preparations.
+
+`/usr/bin/time -l` measured maximum resident set size **8,786,558,976 bytes**
+and peak memory footprint **8,424,725,728 bytes** for this probe. Neither is
+heap usage; no heap measurement or worker RSS improvement is claimed.
+The historical complete log still has 868 serial timings (median 914 ms,
+p90 4,461 ms, max 242,733 ms) and zero pool timings. It contains no isolated
+fixture timing. A comparable successful before/after recurrence body and
+post-change cold worker census remain unavailable; these numbers do not
+establish a whole-gate speedup.
+
+Reproduction scripts alongside this note: `gate-restructure-census-2026-09-21.py`
+and `gate-restructure-measure-2026-09-21.clj`. Probe command, after acquiring
+the existing test slot, is `clojure -J-Dseon.test.source-root="$PWD"
+-J-Dseon.test.git-sha="$(git rev-parse HEAD)" -M:test
+docs/prds/steward-platform/research/gate-restructure-measure-2026-09-21.clj
+tmp/gate-restructure/measure.edn`. The probe never forces reuse into execution.
+The serial owned namespace load passed in `morning-load-and-failure.log`,
+including the publication-adoption namespace, and printed the fully expanded
+docstring contract with no schema Vars. Cold gate/platform and process proof
+remain owed to the orchestrator.
+
+The normally admitted red retry `3d58e4a63df7` retained the complete task output
+in `tmp/gate-restructure/recurrence-diagnosis.edn`. Its one error is
+`:malli.core/invalid-schema` at `seon.error/stored-observation`,
+`src/seon/error.clj:287`, calling `malli.core/properties`. That path has foreign
+staged edits and was not changed. This retry again recorded one executed and
+zero unchanged. Its ten ordinary probes again met the structural budget;
+first total was 25.666709 ms, subsequent n=9 median 2.861042 ms, p90/max
+3.357791 ms. This is a second diagnosis run on a changed shared program digest,
+not a matched before/after comparison. The final owned namespace load passed
+after all source and regression edits (`final-owned-load.log`).
+
 The final lifetime namespace load passed (exit 0), including both runner test
 namespaces and the integration namespace. `bash -n bin/test` and the owned
 diff whitespace check passed. Fast execution is still behind the unchanged

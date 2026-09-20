@@ -365,6 +365,50 @@
           "reading the leaked-attribute candidate is a typed refusal naming
            attribute-not-installed — stronger leak evidence than absence"))))
 
+(deftest warmed-fixtures-only-acquire-isolated-branches
+  (test-support/with-database (fn [_] nil))
+  (let [base @(deref #'test-support/database-base)
+        base-connection (::test-support/connection base)
+        projection (:seon.schema/projection (:seon.sci.eval/ctx base))
+        branches (d/branches base-connection)
+        holders (::test-support/holders @(deref #'test-support/base-state))
+        counts (atom {})
+        observations {#'test-support/populate-database! ::population
+                      #'seon.fn/build-manifest ::analysis
+                      (requiring-resolve 'seon.sci.eval/build-base-ctx) ::sci-base
+                      #'d/branch! ::branch
+                      #'d/delete-branch! ::delete-branch}
+        wrappers (into {}
+                       (map (fn [[v phase]]
+                              (let [original @v]
+                                [v (fn [& arguments]
+                                     (swap! counts update phase (fnil inc 0))
+                                     (apply original arguments))])))
+                       observations)
+        run (fn [options body]
+              (test-support/await-event!
+               (future (test-support/with-database options body))
+               ::ordinary-fixture-completion))]
+    (with-redefs-fn wrappers
+      (fn []
+        (run {::test-support/extra-schema (test-support/file-store-probe-schema ::warm-marker)}
+             (fn [connection]
+               (test-support/transacted! connection [{::warm-marker "first"}])
+               (is (= #{"first"} (test-support/file-store-markers connection ::warm-marker)))))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"intentional fixture body failure"
+                             (run {} (fn [connection]
+                                       (is (identical? projection (db/carried-projection (db/db connection))))
+                                       (throw (ex-info "intentional fixture body failure" {}))))))
+        (run {} (fn [connection]
+                  (is (identical? projection (db/carried-projection (db/db connection))))
+                  (is (not (contains? (:schema @connection) ::warm-marker)))))))
+    (is (= {::branch 3 ::delete-branch 3} @counts)
+        "Three branches, including the throwing body, replay no population, analysis or SCI base construction.")
+    (is (= branches (d/branches base-connection)))
+    (is (integer? holders) "The observed base must carry its actual hold count.")
+    (is (= holders (::test-support/holders @(deref #'test-support/base-state))))
+    (is (identical? base @(deref #'test-support/database-base)))))
+
 (deftest ^{:seon.test/platform
            "Moving part: the one test bracket every other test forks through."}
   shared-support-observes-events-refusals-and-cleanup

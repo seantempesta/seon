@@ -106,6 +106,56 @@
     (is (every? #(= 1 (get-in % [::runner/task-summary ::runner/error-count])) results))
     (is (every? symbol? (mapcat #(map :seon.test/sym (::runner/task-results %)) results)))))
 
+(deftest each-launched-worker-owns-its-first-task-before-startup
+  (let [fast-drained (CountDownLatch. 1)
+        release-slow (CountDownLatch. 1)
+        worker (fn [name] {::runner/worker-id name ::runner/worker-retired? (atom false)})
+        slow (delay (test-support/await-event! release-slow ::slow-startup-release) (worker "slow"))
+        tasks (mapv (fn [n] {::runner/task-id n
+                             ::runner/task-symbols [(symbol "seon.reserved-fixture" (str "test-" n))]})
+                    (range 3))
+        executed (atom {})]
+    (with-redefs-fn
+      {#'runner/stop-worker! (fn [w] (when (= "fast" (::runner/worker-id w)) (.countDown fast-drained)))
+       #'runner/execute-worker-task!
+       (fn [_ w task]
+         (swap! executed assoc (::runner/task-id task) (::runner/worker-id w))
+         task)}
+      (fn []
+        (let [completion (future (#'runner/run-task-pool!
+                                   nil [(delay (worker "fast")) slow]
+                                   (delay (throw (ex-info "Unexpected serial demand" {}))) tasks []))]
+          (try
+            (test-support/await-event! fast-drained ::fast-worker-drained)
+            (is (= {0 "fast" 2 "fast"} @executed))
+            (finally (.countDown release-slow)))
+          (is (= (set (map ::runner/task-id tasks))
+                 (set (map ::runner/task-id (test-support/await-event! completion ::reserved-stage-complete)))))
+          (is (= "slow" (get @executed 1))))))))
+
+(deftest retired-workers-leave-one-bounded-leftover-wave
+  (let [worker (fn [worker-id] {::runner/worker-id worker-id ::runner/worker-retired? (atom false)})
+        tasks (mapv (fn [n] {::runner/task-id n
+                             ::runner/task-symbols [(symbol "seon.retirement-fixture" (str "test-" n))]})
+                    (range 3))
+        executed (atom [])
+        stopped (atom [])]
+    (with-redefs-fn
+      {#'runner/stop-worker! #(swap! stopped conj (::runner/worker-id %))
+       #'runner/execute-worker-task!
+       (fn [_ w task]
+         (swap! executed conj (::runner/task-id task))
+         (reset! (::runner/worker-retired? w) true)
+         (#'runner/failed-worker-task task "Observed worker retirement."))}
+      (fn []
+        (let [results (#'runner/run-task-pool! nil [(delay (worker "pool"))]
+                                              (delay (worker "serial")) tasks [])]
+          (is (= [0 1] @executed))
+          (is (= {0 1 1 1 2 1} (frequencies (map ::runner/task-id results))))
+          (is (= ["pool" "serial"] @stopped))
+          (is (true? (::runner/worker-pool-exhausted (last results))))
+          (is (every? #(= 1 (get-in % [::runner/task-summary ::runner/error-count])) results)))))))
+
 (deftest ^{:seon.test/platform "Dependency cache identity excludes checkout locations."}
   dependency-source-digest-does-not-name-the-checkout
   (let [root (doto (io/file project-root "tmp" (str "digest-" (random-uuid))) .mkdirs)

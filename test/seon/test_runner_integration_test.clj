@@ -61,6 +61,10 @@
                                       ::runner/exchange-id (str worker-id "/stop")})
                              "', flush=True)\n"))]
                    (swap! children conj worker)
+                   (let [process ^Process (::runner/worker-process worker)]
+                     (prn {::runner/worker-id worker-id
+                           ::created-pid (.pid process)
+                           ::created-at (str (.orElse (.startInstant (.info (.toHandle process))) nil))}))
                    worker))
         pool (delay (launch "pool-1"))
         serial (delay (launch "serial"))
@@ -86,6 +90,9 @@
               (test-support/await-event! serial-entered ::serial-entered)
               (let [process ^Process (::runner/worker-process (force pool))]
                 (test-support/await-event! (.onExit process) ::pool-process-exit)
+                (prn {::pool-exited-pid (.pid process)
+                      ::exit-code (.exitValue process)
+                      ::serial-release-pending? (pos? (.getCount release-serial))})
                 (is (not (.isAlive process)))
                 (is (not (.isDone completion)))
                 (is (.isAlive ^Process (::runner/worker-process (force serial)))))
@@ -287,7 +294,7 @@
           ":seon.test.runner/worker-id \\\"ordinary\\\" "
           ":seon.test.runner/exchange-id \\\"ordinary\\\" "
           ":seon.test.runner/task-id \\\"ordinary\\\" "
-          ":seon.test.runner/task-symbols [\\\"seon.exchange-test/ordinary\\\"] "
+          ":seon.test.runner/task-symbols [seon.exchange-test/ordinary] "
           ":seon.test.runner/task-summary {:seon.test.runner/test-count 1 "
           ":seon.test.runner/pass-count 1 :seon.test.runner/fail-count 0 "
           ":seon.test.runner/error-count 0} :seon.test.runner/task-results [] "

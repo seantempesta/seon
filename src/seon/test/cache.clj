@@ -10,7 +10,8 @@
            [java.lang Process ProcessHandle]
            [java.nio.file Files LinkOption]
            [java.time Instant]
-           [java.util.concurrent TimeUnit]))
+           [java.util.concurrent TimeUnit]
+           [java.util.concurrent.locks ReentrantLock]))
 
 (def graph-roots
   "Roots whose files are represented in the program-graph manifest."
@@ -271,8 +272,16 @@
         (some #(when (.startsWith ^String % "git=") (.substring ^String % 4))
               (enumeration-seq (java.util.StringTokenizer. (or (.readLine reader) ""))))))))
 
-(defn- child! [directory arguments]
-  (let [seconds (bounds/silence-seconds (into {} (System/getenv)))
+(defn- child!
+  ([directory arguments]
+   (child! directory arguments
+           (+ (System/nanoTime)
+              (.toNanos TimeUnit/SECONDS (bounds/silence-seconds (into {} (System/getenv)))))))
+  ([directory arguments deadline]
+  (let [remaining (- deadline (System/nanoTime))
+        _ (when-not (pos? remaining)
+            (throw (ex-info "Test input preparation exceeded its execution bound."
+                            {::command arguments ::phase :worker-checkout})))
         child (process/process arguments
                                {:dir (str directory) :in :inherit :out :inherit :err :inherit
                                 :shutdown (fn [child]
@@ -281,10 +290,10 @@
                                               (.destroyForcibly ^Process (:proc child))
                                               (.waitFor ^Process (:proc child) 10 TimeUnit/SECONDS)))})]
     (try
-      (let [result (deref child (* seconds 1000) ::expired)]
+      (let [result (deref child (max 1 (quot remaining 1000000)) ::expired)]
         (when (= ::expired result)
           (throw (ex-info "Test input preparation exceeded its execution bound."
-                          {::command arguments ::seconds seconds})))
+                          {::command arguments ::phase :worker-checkout})))
         (when-not (zero? (:exit result))
           (throw (ex-info "Test input preparation failed."
                           {::command arguments ::exit (:exit result)}))))
@@ -293,9 +302,9 @@
           (process/destroy-tree child)
           (when-not (.waitFor ^Process (:proc child) 10 TimeUnit/SECONDS)
             (.destroyForcibly ^Process (:proc child))
-            (.waitFor ^Process (:proc child) 10 TimeUnit/SECONDS)))))))
+            (.waitFor ^Process (:proc child) 10 TimeUnit/SECONDS))))))))
 
-(defn- copy-checkout! [snapshot checkout]
+(defn- copy-checkout! [snapshot checkout deadline]
   (let [snapshot (.getCanonicalFile (io/file snapshot))
         checkout (.getCanonicalFile (io/file checkout))]
   (.mkdirs checkout)
@@ -305,7 +314,8 @@
     (child! snapshot
             (if (= "Mac OS X" (System/getProperty "os.name"))
               ["/bin/cp" "-cRP" (str entry) (str checkout)]
-              ["cp" "-a" "--reflink=auto" (str entry) (str checkout)])))))
+              ["cp" "-a" "--reflink=auto" (str entry) (str checkout)])
+            deadline))))
 
 (defn- alive? [{::keys [pid started]}]
   (when (and pid started)
@@ -315,13 +325,24 @@
           (and (.isAlive handle)
                (= started (str (.orElse (.startInstant (.info handle)) nil)))))))))
 
+(defonce ^:private worker-checkout-lock (ReentrantLock.))
+
 (defn worker-checkout!
   "Materialize an admitted worker's checkout from the immutable gate snapshot."
-  {:malli/schema [:=> [:cat :string :string] :string]}
-  [snapshot checkout]
-  (locking #'worker-checkout!
+  {:malli/schema [:function
+                  [:=> [:cat :string :string] :string]
+                  [:=> [:cat :string :string [:int {:min 1}]] :string]]}
+  ([snapshot checkout]
+   (worker-checkout! snapshot checkout (bounds/silence-seconds (into {} (System/getenv)))))
+  ([snapshot checkout seconds]
+   (let [allowance (.toNanos TimeUnit/SECONDS seconds)
+         deadline (+ (System/nanoTime) allowance)]
+    (when-not (.tryLock ^ReentrantLock worker-checkout-lock allowance TimeUnit/NANOSECONDS)
+      (throw (ex-info "Worker checkout preparation did not acquire its lock within the declared bound."
+                      {::phase :worker-checkout ::seconds seconds ::checkout checkout})))
+    (try
     (when-not (.isDirectory (io/file checkout "src"))
-      (copy-checkout! snapshot checkout)
+      (copy-checkout! snapshot checkout deadline)
       (doseq [directory ["data" "logs" "tmp" "target"]]
         (.mkdirs (io/file checkout directory)))
       (doseq [entry (.listFiles (io/file snapshot "target"))
@@ -330,7 +351,8 @@
          (.toPath (io/file checkout "target" (.getName entry)))
          (Files/readSymbolicLink (.toPath entry))
          (make-array java.nio.file.attribute.FileAttribute 0))))
-    checkout))
+    checkout
+    (finally (.unlock ^ReentrantLock worker-checkout-lock))))))
 
 (defn- referenced? [directory]
   (boolean
