@@ -7,10 +7,16 @@ tags: [publication, test-system, wave/publication-velocity]
 
 # Publication dissolution — decision checkpoint
 
-Items 1–4 are **not complete**. The production tree contains the ruled publication-analysis exclusions.
-A tested declaration-closure prototype is preserved in the research patch linked
-below; publication/reconciliation and persistent caching remain unimplemented. No publication speedup is claimed. The sections
-below retain the earlier decision evidence. Item 5 remains outside this assignment.
+Items 1–4 are **not complete**. The runner integration split is committed
+(`fb4dfee98`); live operator publication and phase-driven heartbeat are
+committed (`4686e5c91`), with same-JVM scratch evidence below; persistent
+artifact memoization is committed (`08ce441a6`), with 6 tests / 50 assertions
+green. The finding-summary slice is validated (1 test / 4 assertions) and lands
+with this note. Item 1's population
+conversion, shared gate publication, lineage reuse and duplicate-publisher
+removal remain owed. The current stop is the executing-toolchain validation
+boundary at the end of this note. Earlier sections preserve dated decisions,
+not the present implementation status. Item 5 is outside this assignment.
 
 ## Decision: what constitutes an analysis input?
 
@@ -1089,3 +1095,122 @@ not publication work. Foreign dirty callers `src/seon/sci/eval.clj` and
 `test/seon/test_support.clj` used HEAD bytes, as announced by admission.
 The common population owner's adoption of this API is still owed; this
 commit does not claim the final one-file publication ceiling.
+
+## Decision — executing toolchain versus disk identity
+
+**Confirmed boundary, not a cache-selection policy variant.** The existing
+indexer replay was extended to leave its historical `call-target` loaded
+while replacing the producer's source bytes with the current implementation.
+Complete re-analysis still ran. Fast diagnostic `1815716751ac` reported:
+
+```clojure
+{:seon.source/toolchain-digests-equal? true
+ :seon.fn/stale-calls #{clojure.core/defn}
+ :seon.fn/current-calls #{pub.alpha/f}
+ :seon.fn/artifacts-equal? false}
+```
+
+The assertion requiring equal call facts failed. The original successful
+producer-change regression changes both source and executing implementation;
+this probe separates them, as a long-lived JVM does. The diagnostic patch is
+[publication-loaded-toolchain-probe-2026-09-20.patch](publication-loaded-toolchain-probe-2026-09-20.patch).
+It was reversed after the run; no known-failing diagnostic was left in the
+recurring suite. Reproduce by applying that patch and running:
+
+```sh
+bin/test-fast --paths test/seon/fn/publication_toolchain_test.clj -- seon.fn.publication-toolchain-test
+```
+
+The combined diagnostic run had 3 tests, 16 assertions, 5 failures, 0 errors:
+one is this producer mismatch; four belonged to a new finding test whose
+`pub.sample` namespace did not match `src/sample.clj`. That fixture is fixed
+to `src/pub/sample.clj` and only its changed namespace is rerun. The original
+finding test is not evidence against the publication reporter: its extra
+namespace/path finding was correctly retained and counted.
+
+Archaeology identifies the competing guarantee precisely. Commit `1b2bcc4f1`
+removed the pre-publication reload roster from `init-form`: a syntax/schema
+refusal must not first mutate the live system's definitions. Current
+`refresh-source!` publishes and only then calls development adoption's reload;
+bare publication does not reload. The producer requires closure includes the
+database and schema owners, so restoring a reload before admission crosses
+those owners' live validation guarantee. See the reopened
+[loaded-indexer issue](../../../seon/issues/priming-indexes-with-the-live-jvms-loaded-code.md)
+and [partial-hot-reload issue](../../../seon/issues/partial-hot-reload-produces-mixed-code-with-no-warning.md).
+
+Exactly three choices; costs are implementation estimates, not timings:
+
+1. **Recommended — admit publication only when the loaded producer generation
+   matches the requested toolchain; refuse a mismatch before work.** Record
+   producer readiness through its loading/admission seam, compare it with the
+   graph-derived requested digest, and leave the previous publication intact
+   on mismatch. Guarantee: honest facts/cache identity, no second JVM, no
+   pre-validation mutation. Cost: roughly 0.5–1 lane-day plus an orchestrator
+   controlled host-generation transition for producer changes. Give up:
+   automatic publication of producer/dependency changes on an older host;
+   ordinary application edits retain live N-file publication.
+2. **Admit a producer-generation transition before publishing, explicitly
+   extending the live adoption guarantee.** Validate the complete producer
+   closure, install it in dependency order and re-arm it, then publish with
+   that generation. Guarantee: exact producer identity and automatic live
+   publication, with an explicit failed-transition state rather than atomic
+   rollback. Cost: roughly 1–2 lane-days with the schema/database/instrumentation
+   owners. Give up: the current guarantee that a refused publication leaves
+   all live definitions untouched.
+3. **Permit an isolated fresh producer JVM only on toolchain mismatch.** Use
+   the old host for matching application edits; hand changed producer work to
+   an isolated compiler and admit its output through the store owner.
+   Guarantee: current producer semantics without reloading the old host.
+   Cost: roughly 1–2 lane-days plus the cold startup on producer changes.
+   Give up: the absolute no-fresh-JVM-while-live rule; this requires an explicit
+   owner exception and was not attempted.
+
+This is the spec's storage/validation stop and AGENTS.md §2.5's design gate:
+“when a decision would create hours of cross-owner work or its guarantees
+cannot be stated simply, STOP before production edits”. No producer-loader,
+population conversion, lineage rewrite, or duplicate-publisher deletion was
+made at this boundary. The cluster file was released; it is not a held-path
+excuse. The reporting-only edit in that file remains independently landable.
+
+### Cold proof still owed to the orchestrator
+
+No lane cold gate was run. Current landed slices and the finding-summary
+slice require the isolated proof below, plus the separate explicitly named
+long integration suite. That child-gate coverage remains outside `--platform`
+by the owner's ruling; the destructive-platform guard is unchanged.
+
+```sh
+bin/test --paths script/seon/fresh_operator.clj src/seon/operator/state.clj src/seon/fn.clj src/seon/cluster.clj src/seon/test/cache.clj test/seon/dev/publication_test.clj test/seon/fn/publication_cache_test.clj test/seon/cluster/publication_findings_test.clj test/seon/test_runner_test.clj test/seon/test_runner_integration_test.clj -- seon.dev.publication-test seon.fn.publication-cache-test seon.fn.publication-toolchain-test seon.fn.publication-test seon.cluster.publication-findings-test seon.test-cache-test seon.test-runner-test
+bin/test --paths test/seon/test_runner_test.clj test/seon/test_runner_integration_test.clj -- seon.test-runner-integration-test
+bin/test --platform
+```
+
+The source/history reuse regression and single-digit one-file publication
+measurement are **not supplied** by those commands yet: their common-publisher
+implementation remains unfinished. No duplicate publisher has been deleted.
+The old warning roster is the path removed by item 4. The `fn_test.clj`
+fixture failure recorded earlier remains outside this slice and was not
+edited or repeatedly rerun.
+
+
+### Finding-summary landing evidence
+
+Fast run `54d4e43df92e`: **1 executed, 4 assertions, 0 failures, 0 errors**.
+The changed snapshot included `src/seon/cluster.clj`,
+`src/seon/test/cache.clj`, and the corrected finding test. Stored row
+attribution, resolution delta, unchanged delta, and unavailable-baseline
+reporting passed. The cold cache-hit print branch compiles in this snapshot
+but is deliberately left to the orchestrator's cold proof; no child gate was
+launched to exercise a print statement. Cache hits now print the retained
+finding count and zero delta for the unchanged publication.
+
+`08ce441a6` loaded successfully from an exact HEAD archive; its temporary
+archive was removed after that JVM exited. The final reporting commit gets
+the same HEAD load. No scratch cluster remains (`tmp/publication-root` was
+downed and deleted); default was never operated. The diagnostic extension of
+`publication_toolchain_test.clj` is reversed byte-for-byte and survives only
+as the committed research patch. The intermediate queued findings-only
+invocation was canceled before launching a JVM, and its launcher removed
+its snapshot; its tests were combined with the diagnostic to save a startup.
+All test JVMs and HEAD-load JVMs were serial. The foreign dirty paths remained
+excluded by `--paths`; no foreign session was resumed, messaged or edited.

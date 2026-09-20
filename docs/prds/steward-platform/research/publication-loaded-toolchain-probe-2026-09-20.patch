@@ -1,0 +1,31 @@
+diff --git a/test/seon/fn/publication_toolchain_test.clj b/test/seon/fn/publication_toolchain_test.clj
+index 18fff03f4..e779d36b8 100644
+--- a/test/seon/fn/publication_toolchain_test.clj
++++ b/test/seon/fn/publication_toolchain_test.clj
+@@ -33,6 +33,8 @@
+       (let [before (with-redefs-fn {#'functions/call-target old-call-target}
+                      #(functions/build-manifest request))
+             _ (write! "src/compiler.clj" source)
++            stale (with-redefs-fn {#'functions/call-target old-call-target}
++                    #(functions/build-manifest (assoc request :seon.fn/previous-manifest before)))
+             observed (atom [])
+             analyze analyzer/analyze
+             incremental (with-redefs [analyzer/analyze
+@@ -45,6 +47,17 @@
+             calls (fn [manifest]
+                     (into #{} (mapcat :seon.fn/calls) (:seon.fn.file/rows (consumer manifest))))
+             selected (functions/publication-inputs before complete #{"src/compiler.clj"} [])]
++        (println "LOADED TOOLCHAIN BOUNDARY"
++                 (pr-str {:seon.source/toolchain-digests-equal?
++                          (= (:seon.source/toolchain-digest stale)
++                             (:seon.source/toolchain-digest complete))
++                          :seon.fn/stale-calls (calls stale)
++                          :seon.fn/current-calls (calls complete)
++                          :seon.fn/artifacts-equal?
++                          (= (:seon.fn.manifest/artifacts stale)
++                             (:seon.fn.manifest/artifacts complete))}))
++        (is (= (calls stale) (calls complete))
++            "A live producer must not stamp new toolchain bytes onto facts computed by its older loaded code.")
+         (is (= #{"src/compiler.clj"} selected))
+         (is (= 3 (count @observed)) "A producer body change reanalyzes every input exactly once.")
+         (is (not= (:seon.source/toolchain-digest before) (:seon.source/toolchain-digest incremental)))

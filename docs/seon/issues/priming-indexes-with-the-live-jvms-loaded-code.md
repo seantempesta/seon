@@ -1,13 +1,45 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: blocker
 tags: [issue, operator, program-graph]
 ---
 
-# Priming indexes with the live JVM's loaded code and records a digest that lies
+# Publication can record the disk toolchain digest while executing older producer code
 
-## Resolution
+## Reopened — publication dissolution, 2026-09-20
+
+The toolchain-digest ruling makes the historical defect directly observable.
+Fast diagnostic run `1815716751ac` kept the historical `call-target` producer
+loaded while changing its source input to the current implementation. The
+incremental request forced complete re-analysis, yet stale and current
+producers reported equal `:seon.source/toolchain-digest` values and unequal
+artifacts. The stale caller recorded `#{clojure.core/defn}`; the current
+producer recorded `#{pub.alpha/f}`. Equal disk identities did not establish
+equal executing producers.
+
+The reproducible diagnostic is preserved in
+[the research patch](../../prds/steward-platform/research/publication-loaded-toolchain-probe-2026-09-20.patch).
+This is a controlled historical producer replay under the armed fast harness,
+not a claim that the owner's default JVM was probed or modified.
+
+`script/seon/fresh_operator.clj` `init-form` calls loaded publication Vars;
+`src/seon/cluster.clj` `refresh-source!` publishes before
+`development-source-refresh!` reloads namespaces. Bare complete publication
+has no development reload. Commit `1b2bcc4f1` deliberately removed the earlier
+pre-publication reload roster because it changed live definitions before
+validation; the guarantee is documented in
+[partial hot reload](partial-hot-reload-produces-mixed-code-with-no-warning.md).
+The historical resolution below therefore no longer describes current code.
+
+The remaining common-publisher conversion stops at this validation boundary.
+Changing the live producer closure can change shared database/schema Vars in
+running clusters, while using the existing Vars can stamp incorrect toolchain
+identity onto durable facts and memoized artifacts. The priced choices are in
+[the publication landing note](../../prds/steward-platform/research/publication-dissolution-2026-09-20.md).
+No pre-validation reload or second JVM was introduced.
+
+## Historical resolution
 
 Resolved by the 2026-07-30 static `current-src` publication replacement.
 Repository indexing no longer evaluates or loads application source to inspect

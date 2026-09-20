@@ -448,6 +448,13 @@
             (spit ready (pr-str (cond-> {::digest digest ::prepared-at (str (Instant/now))}
                                  (snapshot-git-sha snapshot) (assoc ::git-sha (snapshot-git-sha snapshot))
                                  inputs (assoc ::inputs inputs))))))
+        (when hit?
+          (let [manifest (read-edn (io/file base "manifest.edn"))]
+            (if (seq (:seon.fn.manifest/artifacts manifest))
+              (println "bin/test: findings:"
+                       (count (:seon.fn.manifest/findings manifest))
+                       "; added=0; resolved=0 (unchanged publication)")
+              (println "bin/test: findings unavailable: cached manifest is absent or unreadable"))))
         (.mkdirs (.getParentFile reference))
         (spit reference (pr-str {::pid (Long/parseLong pid)
                                 ::started (str (.orElse (.startInstant (.info handle)) nil))}))

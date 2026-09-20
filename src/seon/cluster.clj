@@ -113,14 +113,22 @@
   nil)
 
 (defn- report-analysis-warnings!
-  [manifest]
-  (doseq [finding (:seon.fn.manifest/findings manifest)]
+  "Summarize durable findings; the manifest retains the complete queryable rows."
+  {:malli/schema [:=> [:cat [:maybe :seon.fn.manifest/manifest]
+                       :seon.fn.manifest/manifest] :nil]}
+  [previous manifest]
+  (let [finding-values (fn [value]
+                         (into #{} (comp (mapcat :seon.fn.file/rows)
+                                         (filter :seon.lint/id))
+                               (:seon.fn.manifest/artifacts value)))
+        current (finding-values manifest)
+        before (when previous (finding-values previous))]
     (report-source-progress!
-     (str "WARNING "
-          (name (:seon.fn.analyzer/type finding))
-          " " (:seon.fn.finding/relative-path finding)
-          (when-let [row (:seon.fn.analyzer/row finding)] (str ":" row))
-          " — " (:seon.fn.analyzer/message finding))))
+     (str "findings: " (count current)
+          (if previous
+            (str "; added=" (count (set/difference current before))
+                 "; resolved=" (count (set/difference before current)))
+            "; delta unavailable: no corresponding previous manifest"))))
   nil)
 
 (defn socket-server?
@@ -2193,7 +2201,6 @@
                     {:seon.fn/roots (:seon.fn/roots roots)
                      :seon.fn/root (:seon.fn/root roots)}))
         _ (report-source-progress! "analysis complete")
-        _ (report-analysis-warnings! manifest)
         snapshot-after (current-source-snapshot roots)]
     (when-not (= snapshot-before snapshot-after)
       (refused! "Source changed while current-src was being analyzed; retry."
@@ -2210,9 +2217,17 @@
 
 (defn- full-source-refresh!
   [root store roots]
-  (let [{source-digest :seon.source/digest
+  (let [prior-publication (current-publication store nil)
+        prior-artifact (read-source-artifact root)
+        previous (when (and prior-publication
+                            (valid-source-manifest? (:seon.fn/manifest prior-artifact))
+                            (= (:seon.source/digest prior-publication)
+                               (:seon.source/digest prior-artifact)))
+                   (:seon.fn/manifest prior-artifact))
+        {source-digest :seon.source/digest
          snapshot :seon.source/snapshot
          manifest :seon.fn/manifest} (stable-manifest roots)
+        _ (report-analysis-warnings! previous manifest)
         unchanged (current-publication store source-digest)
         published (or unchanged
                       (do (report-source-progress! "branch publication started")
@@ -2347,7 +2362,7 @@
                 (into [] (keep :seon.fn.change/artifact) changes)
                 next-manifest
                 (seon.fn/replace-manifest-artifacts manifest desired-artifacts)
-                _ (report-analysis-warnings! next-manifest)
+                _ (report-analysis-warnings! manifest next-manifest)
                 scalar? (and (empty? reasons) (not population?))
                 rows (if scalar? (into [] (mapcat :seon.fn.change/rows) changes) [])
                 _ (report-source-progress!
