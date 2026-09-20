@@ -6521,3 +6521,22 @@ now `:malli.core/invalid-schema` (was the raw-member refusal this morning)
 — a schema that does not compile at fault-recording time, evidence added to
 [the fault-erasure issue](../../../seon/issues/a-core-fault-whose-record-is-refused-loses-its-own-message.md).
 The bare cold gate at `0f5f849bd` is running (`tmp/orchestrator/gate-0f5f849bd-bare.log`).
+
+## 2026-09-22 ~18:05 local — the cold gate cannot prepare its base at HEAD: the new bridge rule refuses the OLD declarations in the main store → RESET (running)
+
+`bin/test --prepare-head-base` and the bare gate both failed at
+"published-base": the child threw at
+`seon.schema.datahike/assert-storable-schema!` naming
+`:seon.bootstrap/prefix-drift-error` / `:seon.turn/id` — while the
+snapshot's `seon.bootstrap.edn` already carries `:seon.error/run`. The
+compiled declaration therefore came from the main root's store (the
+previously published current-src, last night's declarations), which the
+base publication reconciles against; the fresh-store run on
+`tmp/head-root2` passed. This is the reset boundary step 2 recorded
+("RESET NEEDED: the five members"). `bin/seon reset --force` is running on
+the main root (default comes up at `0f5f849bd`; timed;
+`tmp/orchestrator/reset-0f5f849bd.log`); the base preparation and the
+bare gate follow. Sighting for the redesign: a stored declaration the
+current bridge would refuse is reported as an exception from a child
+process with no schema name in the operator's line — the refusal should
+name the stored schema and say "reset" (issue to file with the gate).
