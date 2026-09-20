@@ -7026,3 +7026,13 @@ test-system lane stopped correctly on a shared-file boundary (its
 `unresolved-callers` hunk); it proceeds with the bare gate in its own
 files and commits the edge fix once the foreign hunk lands. Its own
 parity test exceeds 10 s — sent back under the law.
+
+## 2026-09-23 ~09:00 local — BARE `bin/test` WORKS AGAIN (`cec1b6782`): selection from the published database + recorded green basis; a repeat run executes 0 ("Recorded 0 executed"); reference parity test 10.2 → 5.0 s; test-system lane released on the 5 s bound-as-failure and the two slow-test classes
+
+The bare gate's cold proof (twice, second executes 0) is the
+orchestrator's on the quiet tree after slice 4 lands. The lane's
+`declared-reference-edges` fix (3.56 s → 223 ms) waits in fn.clj for the
+redesign lane's hunk to land. Next for the test-system lane: the default
+5 s bound enforced as a test failure (producing the offender list as
+facts), then tests that publish the whole program get a small fixture
+program, then tests that pass by a bound firing await their event.
