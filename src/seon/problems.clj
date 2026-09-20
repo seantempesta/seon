@@ -118,6 +118,9 @@
        (mapv (fn [row]
                (let [fact (restore-error-fact (error/latest-fact row))]
                  {:seon.error/signature (:seon.error/signature row)
+                  :seon.error/at (:seon.error/at fact)
+                  :seon.error/layer (:seon.error/layer fact)
+                  :seon.error/operation (:seon.error/operation fact)
                   :seon.problems/occurrences (reduce + 0 (map :seon.error.occurrence/count
                                                             (:seon.error/occurrences row)))
                   :seon.error/fact fact})))
