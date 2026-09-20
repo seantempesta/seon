@@ -6755,3 +6755,26 @@ milliseconds, `reference-code/datahike/src/datahike/db/search.cljc:140–157`).
 cluster row (the first adoption becomes the no-op). The lane is deleting
 the layer now (dirty: fn.clj, analyzer.clj, cluster.clj, source.clj and
 four tests). Complete tier at 1,431/1,967 tests.
+
+## 2026-09-23 ~01:10 local — SLICE 2 LANDED (`c402d3c1d`): changed-file manifest 136.6 s → 1.14 s (clj-kondo 79 ms); complete tier at slice 1: 1,982 tests run, 515 red — the bulk tier's debt, now enumerated
+
+Slice 2 diff reviewed: `src/seon/fn.clj` −245/+69; deleted
+`publication-inputs`/`declaration-targets`, `producer-paths`,
+`toolchain-digest`, `resolution-digest`, `cached-analysis`,
+`cache-analysis!`, `artifact-cache-key`; callers found by one Datalog
+query over `:seon.fn/calls` → `:seon.fn/file` → relative path; one
+clj-kondo call over changed + caller files with its own cache; no-change
+= zero lint; cold = every file only without a previous manifest.
+RESET NEEDED: `:seon.source/toolchain-digest` removed. Live before/after
+on the lane's scratch cluster: manifest 136,580 ms → 1,141 ms. Two
+findings the lane recorded honestly: the canonical test fixture's initial
+population is O(program) (`compile-index-transaction` from
+`test-support/create-base`, ~150 s for the first test in a worker — a
+>10 s item that needs the owner's authorization or an algorithm; test
+system design), and unchanged publication seals still advance the branch
+(existing issue, slice 3). `bin/test --all` at `0c6be06f3` (5,226 s):
+1,982 tests executed, **515 red**, recorded tally unavailable
+(`tmp/orchestrator/gate-0c6be06f3-all.log`); 208 reds surface at
+`instrument.clj` (contract refusals at the wrapper) — classes triaged in
+the next block. Reset at `c402d3c1d` → platform tier → measurement
+running serially.
