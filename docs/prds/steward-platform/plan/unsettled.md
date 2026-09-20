@@ -6253,3 +6253,16 @@ mixed cross-dependent edits from two lanes into one stash; that is the
 cause, and the cure is step 2 landing. The lane is paused with its session;
 it resumes on the open-request accretion the moment step 2 lands. The
 fault-committer conversion follow-up is recorded in its note. Slot freed.
+
+## 2026-09-22 ~12:30 local — third slot deliberately HELD open for the critical path
+
+Two lanes run: step 2 (mid-landing: `schema/form.cljc` deleted, callers
+rewritten across src and test — the cut that unblocks the error lane and
+the turn/cluster sweep) and publication (the proof that lets default start
+and the owed gates run). The `bin/script` sweep (script/seon/fresh_operator.clj,
+28 kind sites; 7 files across script/, bin/, src/seon/test/) is the only
+free-file candidate, but the publication lane edits the operator's boot
+form in that same file during its proof — a third lane there buys a held-file
+stop, not progress. Decision (owner's focus rule this morning: fewer lanes,
+proven landings): the slot stays open until step 2 lands (error lane
+resumes there) and the bin/script sweep launches after publication lands.
