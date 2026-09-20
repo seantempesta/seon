@@ -145,4 +145,7 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.evidence/entity}
  :seon.db/ref]
+
+ :seon.operator/missing-bound :qualified-keyword
+ :seon.operator/working-directory :string
 }

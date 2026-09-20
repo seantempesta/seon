@@ -52,6 +52,7 @@
                         :seon.operator.claim/processes]]
                       :path :string
                       :read-error
-                      [:map
+                      [:and :seon.error/base [:map
                        [:seon.operator.claim/path :seon.operator.claim/path]
-                       [:seon.error/message :seon.error/message]]}
+                       [:seon.error/message :seon.error/message]]] :seon.operator.claim/requested-creator :seon.cluster.process/identity
+}

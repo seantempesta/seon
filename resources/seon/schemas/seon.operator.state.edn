@@ -1,0 +1,41 @@
+{
+ :seon.operator.state/deadline-undeclared-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator.subprocess/deadline-member :seon.operator.subprocess/deadline-member]]]
+ :seon.operator.state/progress-undeclared-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator.subprocess/progress-member :seon.operator.subprocess/progress-member]]]
+ :seon.operator.state/deadline-exceeded-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator.subprocess/argv :seon.operator.subprocess/argv] [:seon.operator.subprocess/deadline-ms :seon.operator.subprocess/deadline-ms] [:seon.operator.subprocess/phase :seon.operator.subprocess/phase]]]
+ :seon.operator.state/process-termination-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.boot/pid :seon.boot/pid]]]
+ :seon.operator.state/lock-bound-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator.lock/bound :seon.operator.lock/bound]]]
+ :seon.operator.state/lock-hold-timeout-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator.lock/expired-at :seon.operator.lock/expired-at]]]
+ :seon.operator.state/lock-holder-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator.lock/path :seon.operator.lock/path]]]
+ :seon.operator.state/lock-acquisition-timeout-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator.lock/path :seon.operator.lock/path] [:seon.operator.lock/waited-ms :seon.operator.lock/waited-ms]]]
+ :seon.operator.state/ephemeral-owner-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator/ephemeral-owner :seon.operator/ephemeral-owner]]]
+ :seon.operator.state/root-creator-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator.claim/creator :seon.operator.claim/creator] [:seon.operator.claim/requested-creator :seon.operator.claim/requested-creator]]]
+ :seon.operator.state/process-claim-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator.process-record/generation :seon.operator.process-record/generation]]]
+ :seon.operator.state/missing-bound-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator/missing-bound :seon.operator/missing-bound]]]
+ :seon.operator.state/managed-root-error
+ [:and {:seon.db/attributes false} :seon.error/base
+  [:map [:seon.operator/working-directory :seon.operator/working-directory]]]
+}

@@ -78,8 +78,7 @@
                 (operator.state/root-lifecycle-lock-path root)
                 :seon.operator.lock/command "missing lock declarations"}
                (fn [] (reset! invoked? true))))]
-        (is (= :seon.operator/lock-bound-undeclared
-               (:seon.error/kind (ex-data failure))))
+        (is (= :seon.operator.lock/acquisition-timeout-ms (:seon.operator.lock/bound (ex-data failure))))
         (is (= :seon.operator.lock/acquisition-timeout-ms
                (:seon.operator.lock/bound (ex-data failure))))
         (is (false? @invoked?)))
@@ -113,8 +112,7 @@
                     :seon.operator.lock/hold-timeout-ms 1000}
                    (fn [] :must-not-run)))
                 data (ex-data failure)]
-            (is (= :seon.operator/lock-acquisition-timeout
-                   (:seon.error/kind data)))
+            (is (nat-int? (:seon.operator.lock/waited-ms data)))
             (is (= "held transition"
                    (get-in data
                            [:seon.operator.lock/holder
@@ -152,8 +150,7 @@
         (let [failure (test-support/await-event! timed-holder
                                                  :hold-timeout-returned)
               data (ex-data failure)]
-          (is (= :seon.operator/lock-hold-timeout
-                 (:seon.error/kind data)))
+          (is (inst? (:seon.operator.lock/expired-at data)))
           (is (= "overdue transition"
                  (get-in data [:seon.operator.lock/holder
                                :seon.operator.lock/command])))
@@ -168,8 +165,7 @@
                   :seon.operator.lock/acquisition-timeout-ms 50
                   :seon.operator.lock/hold-timeout-ms 1000}
                  (constantly :must-not-run)))]
-          (is (= :seon.operator/lock-acquisition-timeout
-                 (:seon.error/kind (ex-data failure)))
+          (is (nat-int? (:seon.operator.lock/waited-ms (ex-data failure)))
               "an expired hold remains kernel-owned until terminal"))
         (.countDown release-holder)
         (is (= :acquired-after-terminal
@@ -524,8 +520,7 @@
                repository-root
                (assoc record :seon.boot/start-instant (java.util.Date. 0))
                [] 10))]
-        (is (= :seon.operator/process-claim-mismatch
-               (:seon.error/kind (ex-data failure))))
+        (is (= generation (:seon.operator.process-record/generation (ex-data failure))))
         (is (operator.state/process-identity-alive? process-identity)))
       (finally
         (test-support/delete-recursively! repository-root)))))
@@ -870,7 +865,10 @@
 
 (deftest process-census-refuses-unreadable-external-claims-as-data
   (let [claim-error
-        {:seon.operator.claim/path "claim.edn"
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/invalid-claim-error
+         :seon.operator.claim/path "claim.edn"
          :seon.error/message "Unreadable claim."
          :seon.error/data {:seon.operator.claim/path "claim.edn"}}
         observations

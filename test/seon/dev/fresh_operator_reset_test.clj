@@ -48,7 +48,7 @@
                                failure))))
            (finally (cleanup)))))
       (catch Throwable failure
-        (if (= :seon.operator/lock-hold-timeout (:seon.error/kind (ex-data failure)))
+        (if (:seon.operator.lock/expired-at (ex-data failure))
           (let [file (io/file root "data/clusters/default/logs/seon.log")]
             (throw (ex-info "Fixture bound expired awaiting READY or terminal boot failure; holder retains cleanup."
                             (assoc (ex-data failure)
@@ -108,7 +108,7 @@
                             (deliver completed :cleaned)))
                          (catch Throwable failure (ex-data failure))))
               expired (deref waiter immediate-refusal-bound-ms ::timeout)]
-          (is (= :seon.operator/lock-hold-timeout (:seon.error/kind expired)))
+          (is (inst? (:seon.operator.lock/expired-at expired)))
           (is (= "READY or terminal boot failure" (::awaited-event expired)))
           (is (= "await READY" (::phase expired)))
           (is (pos? (::elapsed-ms expired)))
@@ -178,7 +178,7 @@
                             (catch clojure.lang.ExceptionInfo failure (ex-data failure))))
                 lines (filter #(str/starts-with? % "! waiting")
                               (str/split-lines (str output)))]
-            (is (= :seon.operator/lock-acquisition-timeout (:seon.error/kind refusal)))
+            (is (nat-int? (:seon.operator.lock/waited-ms refusal)))
             (is (= 1 (count lines)) (str output))
             (is (str/includes? (str output) "publication regression"))
             (is (str/includes? (str output) "alive=true"))

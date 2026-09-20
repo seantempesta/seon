@@ -769,3 +769,16 @@ concrete fields; five state-owned assertions await the next slice. Load passed;
 source/test lint is clean. Fast tally is reserved for the accumulated end pass.
 Add operator source, both `seon.operator.edn` and `seon.operator.collect.edn`,
 `test/seon/operator_test.clj`, and `seon.operator-test` to the commands.
+
+Operator state: its source was clean before acquisition. Sixteen producer
+kind sites → zero; lifecycle bounds, lock paths and elapsed times, process
+identities, claim paths, creator observations and working directory supply
+substantive facets. Arbitrary refused requests stay on `:seon.error/offending`.
+The returned claim-read error now extends the base. JVM load passes and
+Babashka loaded the same namespace and observed the missing deadline member
+from `run-process! {}`. Lint reports zero errors/warnings (two preexisting
+redundant-coercion informational findings). Five operator-test state assertions
+and three fresh-operator-reset-test lifecycle assertions now consume actual
+bound/expiration/generation evidence. Held launcher's own kind checks remain
+its owner's work. Add state source, operator/claim resources, new state/lock/
+subprocess resources, and fresh-operator-reset-test to the accumulated commands.

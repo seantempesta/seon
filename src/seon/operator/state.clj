@@ -10,12 +10,12 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [seon.fs :as owned-fs]
+            [seon.error.refusal :as error]
             [clojure.string :as str])
   (:import [java.io PushbackReader RandomAccessFile]
            [java.net InetSocketAddress Socket]
            [java.nio.channels FileChannel]
            [java.nio.file Files LinkOption OpenOption StandardOpenOption]
-           [java.time Instant]
            [java.util Date UUID]
            [java.util.concurrent ExecutionException TimeUnit TimeoutException]))
 
@@ -90,13 +90,37 @@
   (when-not (and (vector? argv) (seq argv) (every? string? argv)
                  (integer? deadline-ms) (pos? deadline-ms))
     (throw
-     (ex-info "A foreign process requires argv and a positive deadline."
-              {:seon.error/kind
-               :seon.operator.subprocess/deadline-undeclared
-               :seon.operator.subprocess/request request})))
+     (ex-info "Supply nonempty argv and a positive process deadline."
+              (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/run-process!
+         :seon.error/message "Supply nonempty argv and a positive process deadline."
+         :seon.error/offending request
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/run-process!
+         :seon.error/diagnostic-member :seon.operator.subprocess/deadline-ms
+         :seon.error/diagnostic-expected "a positive deadline and nonempty argv"
+         :seon.error/diagnostic-offending request
+         :seon.error/diagnostic-cause :seon.operator.subprocess/deadline-undeclared
+         :seon.error/diagnostic-evidence request
+         :seon.operator.subprocess/deadline-member :seon.operator.subprocess/deadline-ms}))))
   (when (and silence-ms (not (and (pos-int? silence-ms) progress observe-output!)))
-    (throw (ex-info "A subprocess silence bound requires its phase observation."
-                    {:seon.error/kind :seon.operator.subprocess/progress-undeclared})))
+    (throw (ex-info "Supply a progress atom and output observer for the silence bound."
+                    (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/run-process!
+         :seon.error/message "Supply a progress atom and output observer for the silence bound."
+         :seon.error/offending request
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/run-process!
+         :seon.error/diagnostic-member :seon.operator.subprocess/progress
+         :seon.error/diagnostic-expected "a phase observation for the silence bound"
+         :seon.error/diagnostic-offending request
+         :seon.error/diagnostic-cause :seon.operator.subprocess/progress-undeclared
+         :seon.error/diagnostic-evidence request
+         :seon.operator.subprocess/progress-member :seon.operator.subprocess/progress}))))
   (let [deadline-ns (+ (System/nanoTime) (* 1000000 (long deadline-ms)))
         last-progress (atom (System/nanoTime))
         watch-key (Object.)
@@ -155,15 +179,28 @@
       (let [reaped? (terminate-subprocess! process-record identities)]
         (throw
          (ex-info
-          "A foreign process exceeded its declared deadline."
-          {:seon.error/kind :seon.operator.subprocess/deadline-exceeded
+          "The process and its output must finish within the declared bound."
+          (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/run-process!
+         :seon.error/message "The process and its output must finish within the declared bound."
+         :seon.error/offending argv
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/run-process!
+         :seon.error/diagnostic-member :seon.operator.subprocess/deadline-ms
+         :seon.error/diagnostic-expected deadline-ms
+         :seon.error/diagnostic-offending argv
+         :seon.error/diagnostic-cause :seon.operator.subprocess/deadline-exceeded
+         :seon.error/diagnostic-evidence argv
+         
            :seon.operator.subprocess/argv argv
            :seon.operator.subprocess/deadline-ms deadline-ms
            :seon.operator.subprocess/phase phase
            :seon.operator.subprocess/pid (.pid child)
            :seon.operator.subprocess/start-instant
            (:seon.boot/start-instant (first identities))
-           :seon.operator.subprocess/reaped? reaped?})))
+           :seon.operator.subprocess/reaped? reaped?}))))
       {:seon.operator.subprocess/argv argv
        :seon.operator.subprocess/exit (.exitValue child)
        :seon.operator.subprocess/output output
@@ -239,11 +276,24 @@
             (catch ExecutionException error (throw (.getCause error))))
           (when (matching-process-handle record)
             (throw
-             (ex-info "The exact recorded process survived SIGKILL."
-                      {:seon.error/kind :seon.operator/process-survived-sigkill
+             (ex-info "The exact process must exit before its claim can be retired."
+                      (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/terminate-recorded-process!
+         :seon.error/message "The exact process must exit before its claim can be retired."
+         :seon.error/offending record
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/terminate-recorded-process!
+         :seon.error/diagnostic-member :seon.boot/pid
+         :seon.error/diagnostic-expected "exit of the exact process identity"
+         :seon.error/diagnostic-offending record
+         :seon.error/diagnostic-cause :seon.operator/process-survived-sigkill
+         :seon.error/diagnostic-evidence record
+         
                        :seon.operator.process-record/generation
                        (:seon.operator.process-record/generation record)
-                       :seon.boot/pid (:seon.boot/pid record)})))
+                       :seon.boot/pid (:seon.boot/pid record)}))))
           :sigkill)
         :sigterm))
     (recorded-process-absence record)))
@@ -470,12 +520,22 @@
     (when-not (and (integer? value) (pos? value))
       (throw
        (ex-info
-        (str "The operator lifecycle lock requires a positive declared `"
-             bound-key "` before acquisition.")
-        {:seon.error/kind :seon.operator/lock-bound-undeclared
-         :seon.operator.lock/bound bound-key
-         :seon.operator.lock/value value
-         :seon.operator.lock/request request :seon.operator/lock-bound-undeclared true})))
+        "Declare a positive lock bound before acquisition."
+        (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/declared-lock-timeout
+         :seon.error/message "Declare a positive lock bound before acquisition."
+         :seon.error/offending value
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/declared-lock-timeout
+         :seon.error/diagnostic-member bound-key
+         :seon.error/diagnostic-expected "a positive integer lock bound"
+         :seon.error/diagnostic-offending value
+         :seon.error/diagnostic-cause :seon.operator/lock-bound-undeclared
+         :seon.error/diagnostic-evidence value
+         
+         :seon.operator.lock/bound bound-key}))))
     value))
 
 (defn- close-lifecycle-lock!
@@ -563,15 +623,25 @@
                     (write-edn! (lock-holder-path path) expired)
                     (throw
                      (ex-info
-                      (str "Operator lifecycle holder was silent for " silence-ms
-                           " ms in phase " (pr-str (:seon.operator.lock/phase expired))
-                           " holding " lock-key " for `"
-                           (:seon.operator.lock/command holder) "`.")
-                      {:seon.error/kind :seon.operator/lock-hold-timeout
-                       :seon.operator/lock-hold-timeout true
+                      "The lifecycle holder must announce progress within its declared bound."
+                      (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/await-lock-held-transition!
+         :seon.error/message "The lifecycle holder must announce progress within its declared bound."
+         :seon.error/offending expired
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/await-lock-held-transition!
+         :seon.error/diagnostic-member :seon.operator.lock/hold-timeout-ms
+         :seon.error/diagnostic-expected silence-ms
+         :seon.error/diagnostic-offending expired
+         :seon.error/diagnostic-cause :seon.operator/lock-hold-timeout
+         :seon.error/diagnostic-evidence expired
+         
+                       
                        :seon.operator.lock/holder expired
                        :seon.operator.lock/waiter waiter
-                       :seon.operator.lock/expired-at expired-at})))))]
+                       :seon.operator.lock/expired-at expired-at}))))))]
           (if (= :progress outcome) (recur) outcome))))))
 
 (defn with-lifecycle-lock!
@@ -655,22 +725,45 @@
                        (+ (.getTime ^Date holder-start) holder-bound) deadline))]
             (when (and holder (not (:seon.operator.lock/holder-alive? holder)))
               (throw (ex-info
-                      (str "Lifecycle holder is dead but the kernel lock remains held: "
-                           (holder-sentence path) ". Refusing to replace the locked inode.")
-                      {:seon.error/kind :seon.operator/lock-holder-inconsistent
+                      "Inspect the inconsistent holder before replacing any locked inode."
+                      (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/with-lifecycle-lock!
+         :seon.error/message "Inspect the inconsistent holder before replacing any locked inode."
+         :seon.error/offending holder
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/with-lifecycle-lock!
+         :seon.error/diagnostic-member :seon.operator.lock/path
+         :seon.error/diagnostic-expected "a live holder for the kernel lock"
+         :seon.error/diagnostic-offending holder
+         :seon.error/diagnostic-cause :seon.operator/lock-holder-inconsistent
+         :seon.error/diagnostic-evidence holder
+         
                        :seon.operator.lock/holder holder
-                       :seon.operator.lock/path lock-key})))
+                       :seon.operator.lock/path lock-key}))))
             (when (<= effective-deadline now)
               (throw
                (ex-info
-                (str "Timed out after " waited
-                     " ms waiting for the operator lifecycle lock "
-                     lock-key " held by " (holder-sentence path) ".")
-                {:seon.error/kind :seon.operator/lock-acquisition-timeout
+                "The lifecycle lock must become available within the acquisition bound."
+                (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/with-lifecycle-lock!
+         :seon.error/message "The lifecycle lock must become available within the acquisition bound."
+         :seon.error/offending waiter
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/with-lifecycle-lock!
+         :seon.error/diagnostic-member :seon.operator.lock/acquisition-timeout-ms
+         :seon.error/diagnostic-expected effective-deadline
+         :seon.error/diagnostic-offending waiter
+         :seon.error/diagnostic-cause :seon.operator/lock-acquisition-timeout
+         :seon.error/diagnostic-evidence waiter
+         
                  :seon.operator.lock/path lock-key
                  :seon.operator.lock/waited-ms waited
                  :seon.operator.lock/holder (lock-holder path)
-                 :seon.operator.lock/waiter waiter :seon.operator/lock-acquisition-timeout true})))
+                 :seon.operator.lock/waiter waiter }))))
             (let [announce? (nil? announced-at)]
               (when announce?
                 (println
@@ -733,10 +826,22 @@
         _ (when (and ephemeral-owner
                      (not (process-identity-alive? ephemeral-owner)))
             (throw
-             (ex-info "The declared ephemeral root owner is not alive."
-                      {:seon.error/kind
-                       :seon.operator/ephemeral-owner-not-alive
-                       :seon.operator/ephemeral-owner ephemeral-owner})))
+             (ex-info "Declare a live ephemeral owner before claiming its root."
+                      (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/claim-root-under-lock!
+         :seon.error/message "Declare a live ephemeral owner before claiming its root."
+         :seon.error/offending ephemeral-owner
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/claim-root-under-lock!
+         :seon.error/diagnostic-member :seon.operator/ephemeral-owner
+         :seon.error/diagnostic-expected "a live exact process identity"
+         :seon.error/diagnostic-offending ephemeral-owner
+         :seon.error/diagnostic-cause :seon.operator/ephemeral-owner-not-alive
+         :seon.error/diagnostic-evidence ephemeral-owner
+         
+                       :seon.operator/ephemeral-owner ephemeral-owner}))))
         previous-creator (:seon.operator.claim/creator previous)
         creator (or ephemeral-owner (current-process-identity))
         creator-changed? (and previous-creator
@@ -746,11 +851,23 @@
              (process-identity-alive? previous-creator))
         _ (when (and (not new-lifecycle?) previous-creator-alive?)
             (throw
-             (ex-info "The managed root already has a different creator."
-                      {:seon.error/kind
-                       :seon.operator/root-creator-mismatch
+             (ex-info "Use the existing live creator to operate this managed root."
+                      (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/claim-root-under-lock!
+         :seon.error/message "Use the existing live creator to operate this managed root."
+         :seon.error/offending creator
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/claim-root-under-lock!
+         :seon.error/diagnostic-member :seon.operator.claim/creator
+         :seon.error/diagnostic-expected previous-creator
+         :seon.error/diagnostic-offending creator
+         :seon.error/diagnostic-cause :seon.operator/root-creator-mismatch
+         :seon.error/diagnostic-evidence creator
+         
                        :seon.operator.claim/creator previous-creator
-                       :seon.operator.claim/requested-creator creator})))
+                       :seon.operator.claim/requested-creator creator}))))
         superseding? (and (not new-lifecycle?)
                           creator-changed?
                           (not previous-creator-alive?))
@@ -859,11 +976,25 @@
       (root-claim? claim) claim
       :else
       (throw
-       (ex-info "The exact external root claim is invalid."
-                {:seon.error/kind :seon.operator/unreadable-claim
-                 :seon.operator.claim/path (str path)})))))
+       (ex-info "Repair the malformed exact external root claim."
+                (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/root-claim
+         :seon.error/message "Repair the malformed exact external root claim."
+         :seon.error/offending claim
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/root-claim
+         :seon.error/diagnostic-member :seon.operator.claim/path
+         :seon.error/diagnostic-expected :seon.operator.claim/record
+         :seon.error/diagnostic-offending claim
+         :seon.error/diagnostic-cause :seon.operator/unreadable-claim
+         :seon.error/diagnostic-evidence claim
+         
+                 :seon.operator.claim/path (str path)}))))))
 
 (defn- invalid-claim-error
+  {:malli/schema [:=> [:cat :seon.schema/value :string :seon.schema/value] :seon.operator.claim/read-error]}
   [path message record]
   (let [root (when (map? record)
                (or (:seon.operator.claim/root record)
@@ -876,12 +1007,25 @@
                         :seon.operator.claim/malformed-record)}
                (string? root) (assoc :seon.operator.claim/root root))]
     (cond->
-     {:seon.error/kind :seon.operator/unreadable-claim
-      :seon.error/message message
+     (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/invalid-claim-error
+         :seon.error/message message
+         :seon.error/offending record
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/invalid-claim-error
+         :seon.error/diagnostic-member :seon.operator.claim/path
+         :seon.error/diagnostic-expected :seon.operator.claim/record
+         :seon.error/diagnostic-offending record
+         :seon.error/diagnostic-cause :seon.operator/unreadable-claim
+         :seon.error/diagnostic-evidence record
+         
+      
       :seon.error/data data
       :seon.operator.claim/path (str path)
       :seon.operator.claim/invalid-cause
-      (:seon.operator.claim/invalid-cause data)}
+      (:seon.operator.claim/invalid-cause data)})
       (string? root) (assoc :seon.operator.claim/root root))))
 
 (defn- read-claim-records
@@ -920,9 +1064,22 @@
     (when-not (= (select-keys record identity-keys)
                  (select-keys current identity-keys))
       (throw
-       (ex-info "The external process claim changed before exact stop."
-                {:seon.error/kind :seon.operator/process-claim-mismatch
-                 :seon.operator.process-record/generation generation})))
+       (ex-info "Re-read the changed process claim before stopping its process."
+                (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/stop-recorded-process-under-lock!
+         :seon.error/message "Re-read the changed process claim before stopping its process."
+         :seon.error/offending current
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/stop-recorded-process-under-lock!
+         :seon.error/diagnostic-member :seon.operator.process-record/generation
+         :seon.error/diagnostic-expected record
+         :seon.error/diagnostic-offending current
+         :seon.error/diagnostic-cause :seon.operator/process-claim-mismatch
+         :seon.error/diagnostic-evidence current
+         
+                 :seon.operator.process-record/generation generation}))))
     (let [advertisement
           (some
            (fn [observation]
@@ -942,10 +1099,23 @@
                       signal-path)]
       (when (process-identity-alive? record)
         (throw
-         (ex-info "The exact recorded process remained alive after stop."
-                  {:seon.error/kind :seon.operator/process-remained-alive
+         (ex-info "The exact process must exit before its claim can be retired."
+                  (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/stop-recorded-process-under-lock!
+         :seon.error/message "The exact process must exit before its claim can be retired."
+         :seon.error/offending record
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/stop-recorded-process-under-lock!
+         :seon.error/diagnostic-member :seon.boot/pid
+         :seon.error/diagnostic-expected "exit of the exact process identity"
+         :seon.error/diagnostic-offending record
+         :seon.error/diagnostic-cause :seon.operator/process-remained-alive
+         :seon.error/diagnostic-evidence record
+         
                    :seon.operator.process-record/generation generation
-                   :seon.boot/pid (:seon.boot/pid record)})))
+                   :seon.boot/pid (:seon.boot/pid record)}))))
       (delete-process-claim! repository-root generation)
       {:seon.operator.process-record/generation generation
        :seon.boot/pid (:seon.boot/pid record)
@@ -1073,9 +1243,21 @@
   (or (:seon.config.operator/event-silence-backstop-ms request)
       (get (read-edn (fs/path repository-root "config" "default.edn"))
            :seon.config.operator/event-silence-backstop-ms)
-      (throw (ex-info "The operator event-silence backstop is undeclared."
-                      {:seon.error/kind
-                       :seon.operator/missing-event-silence-backstop}))))
+      (throw (ex-info "Declare the operator event-silence backstop in configuration."
+                      (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/event-silence-backstop-ms
+         :seon.error/message "Declare the operator event-silence backstop in configuration."
+         :seon.error/offending request
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/event-silence-backstop-ms
+         :seon.error/diagnostic-member :seon.config.operator/event-silence-backstop-ms
+         :seon.error/diagnostic-expected "a declared event-silence bound"
+         :seon.error/diagnostic-offending request
+         :seon.error/diagnostic-cause :seon.operator/missing-event-silence-backstop
+         :seon.error/diagnostic-evidence request
+         :seon.operator/missing-bound :seon.config.operator/event-silence-backstop-ms})))))
 
 (defn- responsive-advertisement?
   [advertisement silence-ms]
@@ -1156,12 +1338,12 @@
         claim-observations
         (mapv
          (fn [claim]
-           (let [identity (select-keys claim
+           (let [process-identity (select-keys claim
                                        [:seon.boot/pid
                                         :seon.boot/start-instant])
                  exact-advertisements (get advertisements-by-key
-                                           (process-key identity) [])
-                 alive? (process-identity-alive? identity)]
+                                           (process-key process-identity) [])
+                 alive? (process-identity-alive? process-identity)]
              {:seon.operator.state/process-record claim
               :seon.operator.state/root
               (canonical-path (:seon.operator.process-record/root claim))
@@ -1301,7 +1483,7 @@
   [managed-root]
   (let [root-path (.normalize (.toAbsolutePath (fs/path managed-root)))
         no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])
-        bytes
+        file-bytes
         (if-not (Files/exists root-path no-follow)
           0
           (letfn [(size-of [path]
@@ -1313,7 +1495,7 @@
                       :else (Files/size path)))]
             (size-of root-path)))]
     (assoc (filesystem-space managed-root)
-           :seon.operator.footprint/file-bytes bytes)))
+           :seon.operator.footprint/file-bytes file-bytes)))
 
 (defn record-footprint-under-lock!
   "Record one observation while the caller holds the lifecycle lock."
@@ -1370,14 +1552,24 @@
     (when (or (str/blank? spelling)
               (not (.isAbsolute (io/file spelling))))
       (throw (ex-info
-              (str "The managed root " (pr-str managed-root)
-                   " is not a declared absolute root; its disposable data "
-                   "paths would resolve against the working directory "
-                   (pr-str (System/getProperty "user.dir")) ".")
-              {:seon.error/kind :seon.operator/undeclared-managed-root
-               :seon.operator/managed-root managed-root
+              "Supply an absolute managed root before deleting disposable data."
+              (error/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.operator/lifecycle
+         :seon.error/operation 'seon.operator.state/declared-managed-root
+         :seon.error/message "Supply an absolute managed root before deleting disposable data."
+         :seon.error/offending managed-root
+         :seon.error/diagnostic-layer :seon.operator/lifecycle
+         :seon.error/diagnostic-operation 'seon.operator.state/declared-managed-root
+         :seon.error/diagnostic-member :seon.operator/managed-root
+         :seon.error/diagnostic-expected "an explicitly declared absolute root"
+         :seon.error/diagnostic-offending managed-root
+         :seon.error/diagnostic-cause :seon.operator/undeclared-managed-root
+         :seon.error/diagnostic-evidence managed-root
+         
+               
                :seon.operator/working-directory
-               (System/getProperty "user.dir")})))
+               (System/getProperty "user.dir")}))))
     (.getCanonicalPath (io/file spelling))))
 
 (defn- managed-data-paths

@@ -1,0 +1,7 @@
+{
+ :seon.operator.subprocess/deadline-member :qualified-keyword
+ :seon.operator.subprocess/progress-member :qualified-keyword
+ :seon.operator.subprocess/argv [:vector :string]
+ :seon.operator.subprocess/deadline-ms [:int {:min 1}]
+ :seon.operator.subprocess/phase :keyword
+}
