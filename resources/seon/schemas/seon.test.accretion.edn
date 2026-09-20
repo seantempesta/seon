@@ -97,17 +97,14 @@
                           :seon.test.accretion/auto-check]],
                         :install-refused [:= true],
                         :install-refused-error
-                        [:map
-                         {:seon.error/class true
-                          :seon.render/ai seon.test.accretion/render-ai
+                        [:and
+                         {:seon.render/ai seon.test.accretion/render-ai
                           :seon.render/html seon.test.accretion/render-html
                           :error/message "must identify a refused green-to-install decision"}
+                         :seon.error/base
+                         [:map
                          [:seon.test.accretion/install-refused
                           :seon.test.accretion/install-refused]
-                         [:seon.error/at :seon.error/at]
-                         [:seon.error/layer :seon.error/layer]
-                         [:seon.error/operation :seon.error/operation]
-                         [:seon.error/message :seon.error/message]
                          [:seon.test.accretion/arguments {:optional true}
                           :seon.schema/arguments]
                          [:seon.test.accretion/expected {:optional true}
@@ -130,7 +127,7 @@
                          [:seon.test.accretion/auto-check
                           :seon.test.accretion/auto-check]
                          [:seon.test.accretion/install?
-                          :seon.test.accretion/install?]],
+                          :seon.test.accretion/install?]]],
                         :failure
                         [:map
                          [:seon.test.accretion/arguments

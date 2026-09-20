@@ -10,6 +10,7 @@
             [malli.generator :as mg]
             [malli.registry :as mr]
             [seon.effect :as effect]
+            [seon.error.refusal :as refusal]
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]))
 
@@ -69,8 +70,19 @@
                        "use a registered predicate schema or a quoted symbol "
                        "naming an admitted predicate.")]
       (throw (ex-info message
-                      {:seon.error/kind ::non-data-contract
-                       :seon.error/message message}))))
+                      (assoc (refusal/diagnostic
+                              {:seon.error/at (java.util.Date.)
+                               :seon.error/layer :seon.test.accretion/contract
+                               :seon.error/operation `data-contract!
+                               :seon.error/message message
+                               :seon.error/diagnostic-layer :seon.test.accretion/contract
+                               :seon.error/diagnostic-operation `data-contract!
+                               :seon.error/diagnostic-member :seon.fn/spec
+                               :seon.error/diagnostic-expected "a data-only function contract"
+                               :seon.error/diagnostic-offending contract
+                               :seon.error/diagnostic-cause :non-data-contract
+                               :seon.error/diagnostic-evidence {}})
+                             :seon.error/offending contract)))))
   contract)
 
 (defn candidate-capabilities
@@ -102,7 +114,10 @@
           :seon.sci.admit/caps (:seon.sci.admit/caps request)
           :seon.config/on-core-error
           (:seon.config/on-core-error request)})
-        _ (when (:seon.error/kind invocation)
+        ;; debt: seon.sci.kernel/invoke still declares a broad invocation-result.
+        _ (when (and (:seon.error/at invocation)
+                     (:seon.error/layer invocation)
+                     (:seon.error/operation invocation))
             (throw (ex-info (:seon.error/message invocation) invocation)))
         returned (:seon.sci.admit/value invocation)
         actual (or (:seon.error/diagnostic-offending returned) returned)
@@ -259,16 +274,16 @@
     (conj (str "Auto-check skipped: "
                (:seon.test.accretion/skip-reason check)))
 
-    (keyword? (get-in check
+    (qualified-symbol? (get-in check
                       [:seon.test.accretion/failure
                        :seon.test.accretion/actual
-                       :seon.error/kind]))
+                       :seon.error/operation]))
     (conj
-     (str "Observed undeclared error class "
+     (str "Observed error from "
           (get-in check
                   [:seon.test.accretion/failure
                    :seon.test.accretion/actual
-                   :seon.error/kind])
+                   :seon.error/operation])
           "; declare the error branch in the output schema when intentional."))))
 
 (defn gate-report
@@ -318,16 +333,26 @@
    [:=> [:cat :seon.test.accretion/gate-report]
     :seon.test.accretion/install-refused-error]}
   [report]
-  (merge report
-         (select-keys (get-in report [:seon.test.accretion/auto-check
-                                     :seon.test.accretion/failure])
-                      [:seon.test.accretion/arguments
-                       :seon.test.accretion/expected
-                       :seon.test.accretion/actual])
-         {:seon.test.accretion/install-refused true
-         :seon.error/kind :seon.test.accretion/install-refused
-         :seon.error/message
-         "Fix the contract or the function and re-evaluate the defn."}))
+  (let [message "Fix the contract or the function and re-evaluate the defn."]
+    (merge (refusal/diagnostic
+            {:seon.error/at (java.util.Date.)
+             :seon.error/layer :seon.test.accretion/install
+             :seon.error/operation `install-refusal
+             :seon.error/message message
+             :seon.error/diagnostic-layer :seon.test.accretion/install
+             :seon.error/diagnostic-operation `install-refusal
+             :seon.error/diagnostic-member :seon.test.accretion/install?
+             :seon.error/diagnostic-expected true
+             :seon.error/diagnostic-offending false
+             :seon.error/diagnostic-cause :install-refused
+             :seon.error/diagnostic-evidence {:seon.fn/sym (:seon.fn/sym report)}})
+           report
+           (select-keys (get-in report [:seon.test.accretion/auto-check
+                                       :seon.test.accretion/failure])
+                        [:seon.test.accretion/arguments
+                         :seon.test.accretion/expected
+                         :seon.test.accretion/actual])
+           {:seon.test.accretion/install-refused true})))
 
 (defn- render-failure
   [failure]
@@ -341,8 +366,8 @@
          "\narguments: " (pr-str (:seon.test.accretion/arguments failure))
          "\nexpected: " (:seon.test.accretion/expected failure)
          "\nactual: " (let [actual (:seon.test.accretion/actual failure)]
-                          (if (:seon.error/kind actual)
-                            (str (:seon.error/kind actual) " — " (:seon.error/message actual))
+                          (if (:seon.error/operation actual)
+                            (str (:seon.error/operation actual) " — " (:seon.error/message actual))
                             (pr-str actual)))
          (when-let [explanation (:seon.test.accretion/explanation failure)]
            (str "\nwhy: " explanation)))))
@@ -357,7 +382,7 @@
     (str/join
      "\n\n"
      (concat
-      [(str (:seon.error/kind unit) "\n" (:seon.error/message unit))
+      [(str (:seon.error/operation unit) "\n" (:seon.error/message unit))
        (:seon.test.accretion/orientation unit)]
       (mapcat
        (fn [group]
