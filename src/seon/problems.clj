@@ -118,7 +118,6 @@
        (mapv (fn [row]
                (let [fact (restore-error-fact (error/latest-fact row))]
                  {:seon.error/signature (:seon.error/signature row)
-                  :seon.error/kind (:seon.error/kind row)
                   :seon.problems/occurrences (reduce + 0 (map :seon.error.occurrence/count
                                                             (:seon.error/occurrences row)))
                   :seon.error/fact fact})))
@@ -144,14 +143,13 @@
 
 (defn- errored-receipts
   [db]
-  (->> (db/q '[:find ?id ?run-id ?ordinal ?source ?kind ?error
+  (->> (db/q '[:find ?id ?run-id ?ordinal ?source ?error
               :where
               ;; PRESENCE IS THE STATE: an errored receipt is one that
               ;; carries an error — there is no status label to filter
               ;; on, and the clause below already binds it
               [?receipt :seon.cluster.eval/id ?id]
               [?receipt :seon.cluster.eval/ordinal ?ordinal]
-              [?receipt :seon.error/kind ?kind]
               [?receipt :seon.cluster.eval/error ?error]
               [?receipt :seon.cluster.eval/run ?run]
               [?run :seon.turn/id ?run-id]
@@ -160,12 +158,11 @@
               [?form :seon.cluster.eval/source ?source]]
             db)
        (sort)
-       (mapv (fn [[id run-id ordinal source kind error]]
+       (mapv (fn [[id run-id ordinal source error]]
                {:seon.cluster.eval/id id
                 :seon.turn/id run-id
                 :seon.cluster.eval/ordinal ordinal
                 :seon.cluster.eval/source source
-                :seon.error/kind kind
                 :seon.cluster.eval/error error}))))
 
 (defn form-problem
@@ -203,9 +200,6 @@
                    [?run :seon.turn/agent ?author]
                    [?author :seon.agent/id ?author-id]]
                  db (:db/id form))
-            kind (or (:seon.error/kind admitted)
-                     (when unbound? ::unbound-var)
-                     ::evaluation-failed)
             error (or ordinary-error
                       (when unbound?
                         "The admitted result contains an unbound var.")
@@ -218,7 +212,6 @@
          (:seon.cluster.eval/source form)
          :seon.agent/id owner-id
          :seon.problems/author author-id
-         :seon.error/kind kind
          :seon.cluster.eval/error error}))))
 
 (defn assignment-value
@@ -382,7 +375,10 @@
   same value."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.problems/request]
-                  [:or :seon.problems/problems :seon.error/value]]}
+                  [:or :seon.problems/problems
+                   :seon.test/execution-error
+                   :seon.db/invalid-read-error
+                   :seon.schema/missing-projection-error]]}
   [db _request]
   (if-not (or (db/carried-projection db) (schema/handed-projection))
     (db/projection-fallback 'seon.problems/problems)
@@ -494,8 +490,7 @@
    (family-section
     "errors"
     (for [entry (:seon.problems/error-signatures found)]
-      (row "kind" (:seon.error/kind entry)
-           "seen" (:seon.problems/occurrences entry)
+      (row "seen" (:seon.problems/occurrences entry)
            "signature" (:seon.error/signature entry)
            "latest" (:seon.error/message (:seon.error/fact entry)))))
 
@@ -510,7 +505,6 @@
     (for [entry (:seon.problems/errored-receipts found)]
       (row "run" (:seon.turn/id entry)
            "form" (:seon.cluster.eval/ordinal entry)
-           "kind" (:seon.error/kind entry)
            "source" (:seon.cluster.eval/source entry)
            "error" (:seon.cluster.eval/error entry))))
    (family-section
@@ -600,7 +594,6 @@
                " run=" (:seon.turn/id entry)
                " ordinal=" (:seon.cluster.eval/ordinal entry)
                " source=" (pr-str (:seon.cluster.eval/source entry))
-               " kind=" (:seon.error/kind entry)
                (when-let [message (:seon.cluster.eval/error entry)]
                  (str " error=" (pr-str message)))))
         (for [entry (:seon.problems/deferred-agents found)]

@@ -10,9 +10,6 @@
                  [:seon.cluster.eval/ordinal
                   :seon.cluster.eval/ordinal]
                  [:seon.cluster.eval/source :seon.cluster.eval/source]
-                 [:seon.error/at :seon.error/at]
-                 [:seon.error/layer :seon.error/layer]
-                 [:seon.error/operation :seon.error/operation]
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
                 :id [:string {:min 1, :seon.db/identity true}],
                 :form-problem
@@ -25,33 +22,9 @@
                  [:seon.cluster.eval/source :seon.cluster.eval/source]
                  [:seon.agent/id :seon.agent/id]
                  [:seon.problems/author :seon.agent/id]
-                 [:seon.error/at :seon.error/at]
-                 [:seon.error/layer :seon.error/layer]
-                 [:seon.error/operation :seon.error/operation]
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
-                :evaluation-failed-error
-                [:map
-                 {:seon.error/class true,
-                  :seon.render/ai seon.error/render-ai,
-                  :seon.render/html seon.error/render-html,
-                  :error/message
-                  "must mark a routed form whose evaluation failed"}
-                 [:seon.problems/evaluation-failed
-                  :seon.problems/evaluation-failed]
-                 [:seon.error/message :seon.error/message]],
                 :unowned-namespace
                 [:map [:seon.ns/name :seon.ns/name]],
-                :unbound-var-error
-                [:map
-                 {:seon.error/class true,
-                  :seon.render/ai seon.error/render-ai,
-                  :seon.render/html seon.error/render-html,
-                  :error/message
-                  "must identify the unbound var referenced by a failed form"}
-                 [:seon.problems/unbound-var
-                  :seon.problems/unbound-var]
-                 [:seon.error/message :seon.error/message]],
-                :evaluation-failed [:= true],
                 :missing-model
                 [:map
                  #:seon.render{:ai seon.problems/missing-model-ai,
@@ -90,7 +63,6 @@
                  [:seon.sci.eval/evaluation
                   :seon.sci.eval/evaluation]],
                 :request [:map],
-                :unbound-var :seon.fn/sym,
                 :problems
                 [:map
                  #:seon.render{:ai seon.problems/ai-prose,
