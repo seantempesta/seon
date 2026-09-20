@@ -5025,3 +5025,19 @@ truncation fix + 1,001 regression and the two-run zero-execution proof on
 the current lineage without a full rebuild; the lineage reconciliation of
 the population owner (`cluster.clj:1741`, held by the turn/cluster sweep)
 is the publication-dissolution lane's.
+
+## 2026-09-20 ~23:10 UTC — load 69: 1a's cold gate stopped; audit
+
+Owner: "my system is barely responsive." Audit: the 1a three-suite cold gate
+(50 min in) was 1 coordinator (164 MB) + 3 pool workers IDLE at 3.6 GB each
++ 1 serial worker at 614 % CPU and 11 GB (error-tests at ~33 s each on the
+cold fixture); one lane fast JVM 5.4 GB; default 13.7 GB RSS idle;
+Subnautica (VR) 147 % + WindowServer 100 %; Backblaze 13 % / 5 GB; 36
+Spotlight mdworkers. Stopped the gate through its launcher (workers gone;
+load 69 → falling). Its green-suite recording is deferred to the cheap
+path (results-reuse's fast recording, then the incremental publication).
+Waste to fix in the gate design (A4/A6 restructure, already queued): pool
+workers that sit idle at full heap while the serial tier runs; a serial
+tier that pays the cold fixture per test. Owner-side: exclude `tmp/`,
+`target/`, `data/` from Spotlight and Backblaze (both index/back up every
+run root and published base).
