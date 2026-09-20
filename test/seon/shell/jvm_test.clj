@@ -63,7 +63,7 @@
                         :seon.boot/cluster-name "shell-test"
                         :seon.config/manifest
                         {:seon.config.eval.result/blob-threshold 4096}})]
-       (when (:seon.error/kind configured)
+       (when-not (contains? configured :seon.reconcile/operations)
          (throw (ex-info "Shell fixture configuration was refused." configured))))
      (f connection))))
 
@@ -150,7 +150,7 @@
          task
          {:seon.config.eval/time-limit-ms 20}
          ::stdout-capture)]
-    (is (= :seon.await/backstop-fired (:seon.error/kind result)))
+    (is (number? (:seon.await/elapsed-ms result)))
     (is (= ::stdout-capture
            (get-in result [:seon.error/data
                            :seon.error/diagnostic-member])))
@@ -270,7 +270,7 @@
                    (unsigned-octets
                     (descriptor-octets connection
                                        (:my.shell/stderr result)))))
-            (is (nil? (:seon.error/kind result)))))))))
+            (is (integer? (:my.shell/exit result)))))))))
 
 (deftest ^{:seon.test/fixture-observation "The refusal must precede process admission within a real file-backed shell effect fixture and leave its filesystem marker absent."} cwd-outside-roots-refuses-before-process-start
   (with-temp-tree
@@ -283,7 +283,7 @@
                 (run {:my.shell/argv ["/usr/bin/touch" (str marker)]
                       :my.shell/cwd (str (.getParent ^Path root))}
                      effective-map)]
-            (is (= :my.shell/cwd-refused (:seon.error/kind result)))
+            (is (= (str (.getParent ^Path root)) (:my.shell/refused-cwd result)))
             (is (not (Files/exists marker
                                    (make-array java.nio.file.LinkOption 0))))))))))
 
@@ -307,7 +307,7 @@
                 configured (config/apply! {:seon.db/connection connection
                                            :seon.boot/cluster-name "shell-test"
                                            :seon.config/manifest effective-map})
-                _ (is (not (:seon.error/kind configured)) (pr-str configured))
+                _ (is (contains? configured :seon.reconcile/operations) (pr-str configured))
                 context
                 {:seon.db/connection connection
                  :seon.env/environment (support/environment "shell-test" connection)
@@ -338,7 +338,7 @@
                  (slurp (.toFile (.resolve ^Path root "child.pid"))))
                 child-handle (ProcessHandle/of child-pid)]
             (testing "timeout is a flat capability error with output evidence"
-              (is (= :my.shell/time-limit (:seon.error/kind result)))
+              (is (integer? (:my.shell/terminated-pid result)))
               (is (map? (get-in result
                                 [:seon.error/data :my.shell/stdout])))
               (is (map? (get-in result
@@ -393,7 +393,7 @@
                  (slurp (.toFile (.resolve ^Path root "child.pid"))))
                 child-handle (ProcessHandle/of child-pid)]
             (testing "the child is cut by the evaluation deadline, not the shell's"
-              (is (= :my.shell/time-limit (:seon.error/kind result)))
+              (is (integer? (:my.shell/terminated-pid result)))
               (is (str/includes? (:seon.error/message result) "evaluation")
                   "the refusal names which limit ended the child")
               (is (< elapsed-ms 30000)

@@ -647,3 +647,22 @@ Env loads; source and test lint have zero errors/warnings. Fast tally remains
 owed at the runner admission boundary; append `src/seon/env.clj`,
 `resources/seon/schemas/seon.env.edn`, `test/seon/env_test.clj` and namespace
 `seon.env-test` to the accumulated commands.
+
+Shell JVM: source kind sites 17 → 0; tests 7 → 0. The handler return union
+names cwd refusal, stdin limit, stdin blob observation, terminated process,
+failed argv, and await timeout facets. Required observations are the refused
+cwd, actual/limit byte counts, requested digest and offset, terminated PID
+and limiting config key, or failed argv. Catch propagation preserves the two
+declared stdin refusal shapes; other throwables become complete run diagnostics
+retaining the cause. Capture completion consumers inspect the await elapsed
+member; successful capture values are staged writes and stdin completion is
+nil. No general predicate was added.
+
+PRD §1.3 debt: `seon.fs.jvm/stat` still declares `:seon.error/value`, so
+`cwd-path` has the explicitly commented transitional base-three check. Its
+producer belongs to another sweep. The diagnostic retains the returned stat
+as evidence instead of copying its kind. Shell source/test lint: zero errors
+and warnings; `require seon.shell.jvm` exited zero. Fast tally owed at the
+unchanged runner boundary. Append `src/seon/shell/jvm.clj`,
+`resources/seon/schemas/my.shell.edn`, `test/seon/shell/jvm_test.clj` and
+namespace `seon.shell.jvm-test` to the accumulated fast/cold commands.

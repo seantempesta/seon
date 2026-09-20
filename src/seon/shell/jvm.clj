@@ -5,6 +5,7 @@
             [seon.await :as await]
             [seon.blob :as blob]
             [seon.effect :as effect]
+            [seon.error.refusal :as error]
             [seon.fs.jvm]
             [seon.schema :as schema]
             [seon.schema.form :as schema.form]
@@ -14,7 +15,6 @@
            [java.nio ByteBuffer]
            [java.nio.charset CodingErrorAction StandardCharsets]
            [java.security MessageDigest]
-           [java.time Instant]
            [java.util HexFormat Optional]
            [java.util.concurrent TimeUnit TimeoutException]))
 
@@ -23,21 +23,6 @@
 (def ^:private io-buffer-bytes 65536)
 (def ^:private empty-digest
   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-
-(defn- flat-error
-  [kind message data]
-  {kind true
-   :seon.error/kind kind
-   :seon.error/message message
-   :seon.error/data data})
-
-(defn- error-value
-  [error kind message data]
-  (let [classified (ex-data error)]
-    (if (and (keyword? (:seon.error/kind classified))
-             (string? (:seon.error/message classified)))
-      classified
-      (flat-error kind message data))))
 
 (defn- strict-utf8
   [octets]
@@ -54,16 +39,39 @@
   [cwd effective]
   (let [stat (#'seon.fs.jvm/stat {:my.fs/path cwd} effective)]
     (cond
-      (:seon.error/kind stat)
-      (flat-error :my.shell/cwd-refused
-                  "The child working directory is outside filesystem policy."
-                  {:my.shell/cwd cwd
-                   :my.shell/filesystem-error (:seon.error/kind stat)})
+      ;; PRD 1.3 debt: seon.fs.jvm/stat still declares :seon.error/value.
+      (and (:seon.error/at stat) (:seon.error/layer stat)
+           (:seon.error/operation stat))
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.shell/execution
+        :seon.error/operation 'seon.shell.jvm/cwd-path
+        :seon.error/message "The child working directory is outside filesystem policy."
+        :seon.error/offending cwd
+        :seon.error/diagnostic-layer :my.shell/execution
+        :seon.error/diagnostic-operation 'seon.shell.jvm/cwd-path
+        :seon.error/diagnostic-member :my.shell/cwd
+        :seon.error/diagnostic-expected :my.fs/directory?
+        :seon.error/diagnostic-offending cwd
+        :seon.error/diagnostic-cause stat
+        :seon.error/diagnostic-evidence stat
+        :my.shell/refused-cwd cwd})
 
       (not (:my.fs/directory? stat))
-      (flat-error :my.shell/cwd-refused
-                  "The child working directory is not a no-follow directory."
-                  {:my.shell/cwd cwd})
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.shell/execution
+        :seon.error/operation 'seon.shell.jvm/cwd-path
+        :seon.error/message "The child working directory must be a no-follow directory."
+        :seon.error/offending cwd
+        :seon.error/diagnostic-layer :my.shell/execution
+        :seon.error/diagnostic-operation 'seon.shell.jvm/cwd-path
+        :seon.error/diagnostic-member :my.shell/cwd
+        :seon.error/diagnostic-expected :my.fs/directory?
+        :seon.error/diagnostic-offending cwd
+        :seon.error/diagnostic-cause :my.shell/not-directory
+        :seon.error/diagnostic-evidence stat
+        :my.shell/refused-cwd cwd})
 
       :else
       (let [working-root
@@ -93,12 +101,12 @@
           effective)))
 
 (defn- virtual-task
-  [name f]
+  [thread-name f]
   (let [result (promise)
         builder ^Thread$Builder$OfVirtual (Thread/ofVirtual)
         thread
         (.start
-         (.name builder ^String name (long 0))
+         (.name builder ^String thread-name (long 0))
          ^Runnable
          (fn []
            (deliver result
@@ -110,6 +118,8 @@
      :seon.shell.jvm/result result}))
 
 (defn- task-result
+  {:malli/schema [:=> [:cat :map :map :qualified-keyword]
+                  [:or :nil :seon.blob/staged-write :seon.await/timeout-error]]}
   [{thread :seon.shell.jvm/thread result :seon.shell.jvm/result}
    effective member]
   (let [terminal
@@ -128,7 +138,7 @@
            {:seon.shell.jvm/thread-name (.getName ^Thread thread)
             :seon.shell.jvm/thread-id (.threadId ^Thread thread)}}
           :seon.await/blocking-deref result})]
-    (if (:seon.error/kind terminal)
+    (if (:seon.await/elapsed-ms terminal)
       (do
         (.interrupt ^Thread thread)
         terminal)
@@ -137,9 +147,9 @@
         (:seon.shell.jvm/value terminal)))))
 
 (defn- capture-task
-  [connection name ^InputStream input]
+  [connection thread-name ^InputStream input]
   (virtual-task
-     name
+     thread-name
    (fn []
      (with-open [stream input]
        (blob/stage-binary! connection stream)))))
@@ -150,10 +160,21 @@
     (throw
      (ex-info
       "Child stdin exceeds the configured byte ceiling."
-      {:seon.error/kind :my.shell/stdin-limit
-       :seon.error/message
-       "Child stdin exceeds the configured byte ceiling."
-       :seon.error/data {:seon.config.shell/stdin-max-bytes limit} :my.shell/stdin-limit true})))
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.shell/execution
+        :seon.error/operation 'seon.shell.jvm/write-array!
+        :seon.error/message "Child stdin exceeds the configured byte ceiling; reduce the input or raise that bound."
+        :seon.error/offending (alength octets)
+        :seon.error/diagnostic-layer :my.shell/execution
+        :seon.error/diagnostic-operation 'seon.shell.jvm/write-array!
+        :seon.error/diagnostic-member :my.shell/stdin
+        :seon.error/diagnostic-expected :seon.config.shell/stdin-max-bytes
+        :seon.error/diagnostic-offending (alength octets)
+        :seon.error/diagnostic-cause :my.shell/stdin-limit
+        :seon.error/diagnostic-evidence (alength octets)
+        :my.shell/stdin-byte-limit limit
+        :my.shell/observed-stdin-bytes (alength octets)}))))
   (.write output octets))
 
 (defn- copy-blob-stdin!
@@ -164,10 +185,21 @@
         (throw
          (ex-info
           "Child stdin exceeds the configured byte ceiling."
-          {:seon.error/kind :my.shell/stdin-limit
-           :seon.error/message
-           "Child stdin exceeds the configured byte ceiling."
-           :seon.error/data {:seon.config.shell/stdin-max-bytes limit} :my.shell/stdin-limit true})))
+          (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.shell/execution
+        :seon.error/operation 'seon.shell.jvm/copy-blob-stdin!
+        :seon.error/message "Child stdin exceeds the configured byte ceiling; reduce the input or raise that bound."
+        :seon.error/offending offset
+        :seon.error/diagnostic-layer :my.shell/execution
+        :seon.error/diagnostic-operation 'seon.shell.jvm/copy-blob-stdin!
+        :seon.error/diagnostic-member :my.shell/stdin
+        :seon.error/diagnostic-expected :seon.config.shell/stdin-max-bytes
+        :seon.error/diagnostic-offending offset
+        :seon.error/diagnostic-cause :my.shell/stdin-limit
+        :seon.error/diagnostic-evidence offset
+        :my.shell/stdin-byte-limit limit
+        :my.shell/observed-stdin-bytes offset}))))
       (let [remaining (- limit offset)
             requested (int (min io-buffer-bytes (inc remaining)))
             octets (blob/read-chunk connection content-digest offset requested)]
@@ -178,27 +210,60 @@
               (throw
                (ex-info
                 "The stdin blob is unavailable."
-                {:seon.error/kind :my.shell/blob-unavailable
-                 :seon.error/message "The stdin blob is unavailable."
-                 :seon.error/data {:seon.blob/digest content-digest} :my.shell/blob-unavailable true})))
+                (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.shell/execution
+        :seon.error/operation 'seon.shell.jvm/copy-blob-stdin!
+        :seon.error/message "The stdin blob is unavailable."
+        :seon.error/offending content-digest
+        :seon.error/diagnostic-layer :my.shell/execution
+        :seon.error/diagnostic-operation 'seon.shell.jvm/copy-blob-stdin!
+        :seon.error/diagnostic-member :seon.blob/digest
+        :seon.error/diagnostic-expected :seon.blob/content
+        :seon.error/diagnostic-offending content-digest
+        :seon.error/diagnostic-cause :my.shell/missing-blob
+        :seon.error/diagnostic-evidence content-digest
+        :my.shell/stdin-blob-digest content-digest
+        :my.shell/stdin-blob-offset offset}))))
             (when-not (= content-digest actual)
               (throw
                (ex-info
                 "The stdin blob is unavailable or failed verification."
-                {:seon.error/kind :my.shell/blob-unavailable
-                 :seon.error/message
-                 "The stdin blob is unavailable or failed verification."
-                 :seon.error/data {:seon.blob/digest content-digest
-                                   :seon.blob/actual-digest actual} :my.shell/blob-unavailable true}))))
+                (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.shell/execution
+        :seon.error/operation 'seon.shell.jvm/copy-blob-stdin!
+        :seon.error/message "The stdin blob failed digest verification."
+        :seon.error/offending content-digest
+        :seon.error/diagnostic-layer :my.shell/execution
+        :seon.error/diagnostic-operation 'seon.shell.jvm/copy-blob-stdin!
+        :seon.error/diagnostic-member :seon.blob/digest
+        :seon.error/diagnostic-expected :seon.blob/content
+        :seon.error/diagnostic-offending content-digest
+        :seon.error/diagnostic-cause :my.shell/digest-mismatch
+        :seon.error/diagnostic-evidence content-digest
+        :my.shell/stdin-blob-digest content-digest
+        :my.shell/stdin-blob-offset offset})))))
           (let [read-count (alength ^bytes octets)]
             (when (zero? read-count)
               (throw
                (ex-info
                 "The stdin blob reader made no progress."
-                {:seon.error/kind :my.shell/blob-unavailable
-                 :seon.error/message
-                 "The stdin blob reader made no progress."
-                 :seon.error/data {:seon.blob/digest content-digest} :my.shell/blob-unavailable true})))
+                (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.shell/execution
+        :seon.error/operation 'seon.shell.jvm/copy-blob-stdin!
+        :seon.error/message "The stdin blob reader made no progress."
+        :seon.error/offending content-digest
+        :seon.error/diagnostic-layer :my.shell/execution
+        :seon.error/diagnostic-operation 'seon.shell.jvm/copy-blob-stdin!
+        :seon.error/diagnostic-member :seon.blob/digest
+        :seon.error/diagnostic-expected :seon.blob/content
+        :seon.error/diagnostic-offending content-digest
+        :seon.error/diagnostic-cause :my.shell/stalled-input
+        :seon.error/diagnostic-evidence content-digest
+        :my.shell/stdin-blob-digest content-digest
+        :my.shell/stdin-blob-offset offset}))))
             (.update digester ^bytes octets)
             (.write output ^bytes octets)
             (recur (+ offset read-count))))))))
@@ -252,9 +317,9 @@
 
 (defn- force-exact!
   [identities]
-  (doseq [identity (reverse (vec (distinct identities)))]
-    (when (same-process? identity)
-      (.destroyForcibly ^ProcessHandle (:seon.shell.jvm/handle identity)))))
+  (doseq [process-identity (reverse (vec (distinct identities)))]
+    (when (same-process? process-identity)
+      (.destroyForcibly ^ProcessHandle (:seon.shell.jvm/handle process-identity)))))
 
 (defn- terminate-tree!
   [process-record grace-ms]
@@ -296,7 +361,7 @@
           :shell-limit)))))
 
 (defn- output-descriptor
-  [connection captured effective]
+  [_connection captured effective]
   (let [size (:seon.blob/size captured)
         content-digest (:seon.blob/digest captured)
         inline-limit (:seon.config.shell/inline-output-bytes effective)
@@ -317,12 +382,17 @@
         (string? decoded) (assoc :my.shell.output/preview decoded)))))
 
 (defn- finish-evidence
+  {:malli/schema [:=> [:cat :seon.db/connection :map :map :map]
+                  [:or [:map [:my.shell/stdout :my.shell.output/value]
+                             [:my.shell/stderr :my.shell.output/value]
+                             [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]
+                   :seon.await/timeout-error]]}
   [connection stdout-task stderr-task effective]
   (let [stdout (task-result stdout-task effective ::stdout)]
-    (if (:seon.error/kind stdout)
+    (if (:seon.await/elapsed-ms stdout)
       stdout
       (let [stderr (task-result stderr-task effective ::stderr)]
-        (if (:seon.error/kind stderr)
+        (if (:seon.await/elapsed-ms stderr)
           stderr
           {:my.shell/stdout (output-descriptor connection stdout effective)
            :my.shell/stderr (output-descriptor connection stderr effective)
@@ -355,8 +425,8 @@
                                           effective)
                 input (task-result input-task effective ::stdin)]
             (cond
-              (:seon.error/kind evidence) evidence
-              (:seon.error/kind input) input
+              (:seon.await/elapsed-ms evidence) evidence
+              (:seon.await/elapsed-ms input) input
               :else
               (merge {:my.shell/argv argv
                       :my.shell/cwd (:my.shell/cwd request)
@@ -378,19 +448,30 @@
                     (task-result input-task effective ::stdin)
                     (catch Throwable _ nil))]
               (cond
-                (:seon.error/kind evidence) evidence
-                (:seon.error/kind input) input
+                (:seon.await/elapsed-ms evidence) evidence
+                (:seon.await/elapsed-ms input) input
                 :else
                 (assoc
-                 (flat-error
-                  :my.shell/time-limit
-                  (if (= :evaluation-limit disposition)
-                    (str "The foreign process was terminated when its "
-                         "evaluation reached its time limit.")
-                    "The foreign process exceeded its configured time limit.")
-                  (merge {:my.shell/argv argv
-                          :my.shell/cwd (:my.shell/cwd request)}
-                         evidence))
+                 (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.shell/execution
+        :seon.error/operation 'seon.shell.jvm/execute
+        :seon.error/message (if (= :evaluation-limit disposition)
+          "The process was terminated at the evaluation deadline."
+          "The process was terminated at the configured shell deadline.")
+        :seon.error/offending argv
+        :seon.error/diagnostic-layer :my.shell/execution
+        :seon.error/diagnostic-operation 'seon.shell.jvm/execute
+        :seon.error/diagnostic-member :my.shell/argv
+        :seon.error/diagnostic-expected "process exit before its deadline"
+        :seon.error/diagnostic-offending argv
+        :seon.error/diagnostic-cause :my.shell/time-limit
+        :seon.error/diagnostic-evidence evidence
+        :my.shell/terminated-pid (.pid child)
+        :my.shell/limiting-config-key
+        (if (= :evaluation-limit disposition)
+          :seon.config.eval/time-limit-ms :seon.config.shell/time-limit-ms)
+        :seon.error/data (merge {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)} evidence)})
                  :seon.effect/disposition :interrupted))))))
       (catch InterruptedException interrupted
         (terminate-tree! process-record
@@ -398,20 +479,37 @@
         (.interrupt (Thread/currentThread))
         (throw interrupted)))))
 
-(defn- run
+(defn- ^{:clj-kondo/ignore [:unused-private-var]} run
   {:malli/schema
    [:=> [:cat :my.shell/run-request :seon.config/effective]
-    [:or :my.shell/run-result :seon.error/value]]}
+    [:or :my.shell/run-result :my.shell/cwd-refused-error
+     :my.shell/stdin-limit-error :my.shell/blob-unavailable-error
+     :my.shell/time-limit-error :my.shell/start-failed-error
+     :seon.await/timeout-error]]}
   [request effective]
   (let [cwd (cwd-path (:my.shell/cwd request) effective)]
-    (if (:seon.error/kind cwd)
+    (if (:my.shell/refused-cwd cwd)
       cwd
       (try
         (execute request effective cwd)
         (catch InterruptedException interrupted
           (throw interrupted))
         (catch Throwable error
-          (error-value error :my.shell/start-failed
-                       "The foreground process could not be completed."
-                       {:my.shell/argv (:my.shell/argv request)
-                        :my.shell/cwd (:my.shell/cwd request)}))))))
+          (let [observed (ex-data error)]
+            (if (or (:my.shell/stdin-byte-limit observed)
+                    (:my.shell/stdin-blob-digest observed))
+              observed
+              (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.shell/execution
+        :seon.error/operation 'seon.shell.jvm/run
+        :seon.error/message "The foreground process could not be completed; inspect the captured cause."
+        :seon.error/offending request
+        :seon.error/diagnostic-layer :my.shell/execution
+        :seon.error/diagnostic-operation 'seon.shell.jvm/run
+        :seon.error/diagnostic-member :my.shell/argv
+        :seon.error/diagnostic-expected :my.shell/run-result
+        :seon.error/diagnostic-offending request
+        :seon.error/diagnostic-cause error
+        :seon.error/diagnostic-evidence (ex-data error)
+        :my.shell/failed-argv (:my.shell/argv request)}))))))))
