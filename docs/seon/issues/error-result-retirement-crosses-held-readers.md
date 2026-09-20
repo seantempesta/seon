@@ -121,3 +121,23 @@ The separately authorized deferred fault-committer conversion now lives at
 Its redesign owner must supply connection/profile on the request and use the
 shared result preparation instead of the size-gated staging. This existing
 issue remains the single follow-up for that conversion.
+
+## Accretion resumed — blob encoding decision, 2026-09-23
+
+The latest ruling explicitly permits keeping every legacy write unchanged,
+so the held producers no longer block accretion. Their atomic retirement and
+the cluster conversion remain the follow-up above.
+
+The recording seam still needs a declared representation for arbitrary
+objects in the blob. `seon.blob/put!` accepts UTF-8 text; `put-binary!` accepts
+an input stream. Neither encodes objects. The existing `store-faithful-edn`
+at `src/seon/blob.clj:43` returns text only when the EDN round trip preserves
+value, class and metadata. The pure probe in
+`docs/prds/steward-platform/research/error-result-blob-probe-2026-09-23.clj`
+returned `:map true`, `:atom false`, `:function false`, `:object false`.
+The same JVM loaded error, SCI evaluation and print successfully (exit 0).
+This is an encoding decision, not a held-file or test failure. SCI binding
+can preserve the live object; it does not define its durable bytes.
+
+The landing note prices exactly three choices. No new codec, lossy substitute
+or production change was introduced while that guarantee is undecided.

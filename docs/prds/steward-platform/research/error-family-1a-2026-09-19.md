@@ -3224,3 +3224,61 @@ The four requested canonical regressions and the implementation's exact
 cold command remain owed after the held producer is released. There is no
 new cold gate for this documentation-only stop; the accepted four-class
 work and its orchestrator-owned clean-boot proof are not reopened.
+
+## 2026-09-23 — accretion resumed; durable representation decision
+
+The new accretion ruling removes the held-file blocker: all legacy writes
+stay unchanged, and the one existing issue retains the atomic retirement
+follow-up. No held source was edited. The remaining decision is narrower
+than where recording happens: what bytes represent an arbitrary offending
+object in its blob? The existing evaluation mechanism retains arbitrary
+objects in SCI and saves shown text; it supplies no arbitrary-object codec.
+
+Dependency evidence: `src/seon/blob.clj:43` implements a faithful EDN
+round trip; `:342` takes text and `:352` takes an input stream.
+`src/seon/sci/eval.clj:534` binds the live object through SCI, while
+`:2557` prepares the shown result. The blob probe's exact output was:
+
+```text
+:map true
+:atom false
+:function false
+:object false
+```
+
+The executable probe is
+[error-result-blob-probe-2026-09-23.clj](error-result-blob-probe-2026-09-23.clj).
+It ran in one cold JVM with the requested namespaces loaded, exited 0,
+and touched no database. This is not an armed canonical regression or a
+writer timing measurement. Fast tally: **not run, zero tests executed**.
+
+AGENTS.md §2.5 requires an owner decision when the guarantee cannot be
+stated simply. Exactly three choices, simplest first; time estimates cover
+implementation and focused regression work, excluding JVM startup:
+
+1. **Blob the printer's shown text for every value (recommended).**
+   Guarantee: the exact live object is available through its SCI handle;
+   durable bytes record exactly what the printer showed, including elision.
+   Cost: approximately 2–3 hours for the requested integration and tests.
+   Given up: reconstructing the full object from the blob after restart;
+   this changes the requested meaning of the blob from value to observation.
+2. **Restrict durable value blobs to the existing faithful EDN encoder.**
+   Guarantee: every successful value blob round-trips value, class and
+   metadata; unsupported values produce an explicit typed storage refusal
+   while their live binding and shown text remain available.
+   Cost: approximately 3–4 hours, including the unsupported-value contract
+   and regression in addition to the four requested cases.
+   Given up: the unconditional blob promise for functions, atoms and other
+   unsupported objects; no opaque `#object` text is presented as a value.
+3. **Specify additional supported object encodings at the blob owner.**
+   Guarantee: round trips for an explicitly declared additional set of
+   types, with typed refusals outside that set; never universal JVM-object
+   reconstruction. Cost: a separate cross-owner codec design and at least
+   a day of implementation and tests, depending on the selected types.
+   Given up: the current bounded scope and reuse of only existing encoding.
+
+No production edits or attribute additions were made. RESET NEEDED remains
+the later four legacy attribute removals listed above; the two new attribute
+names are not yet declared. The canonical regressions, writer measurements
+and their cold command remain owed after this representation is selected.
+The previous request's retirement hold is not being reused as this gate.
