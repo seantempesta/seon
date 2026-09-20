@@ -5403,3 +5403,22 @@ slot → `wave1-families-design`: launch texts for 1b, 1c (with `:seon.ns/agents
 ownership settled against 3a), 1e deletion-dial sweep, and C4 option 1 —
 the families that declare once on the new bridge after steps 1–2. Step-1
 gate at 626 tasks executed.
+
+## 2026-09-21 ~08:20 UTC — step-1 cold gate: RED, two classes, neither step 1's registry
+
+`bin/test --paths <step 1's 52 paths> -- <its 40 namespaces>` at HEAD
+(`tmp/orchestrator/gate-step1-2026-09-21.log`; reds tabulated in
+`tmp/orchestrator/gate-step1-reds.txt`): base 88 s, tests 3,533 s, exit 1.
+Two classes carry almost every red: (1) STALE KIND EXPECTATIONS —
+`(keyword? (:seon.error/kind value))` in test/my/message_test.clj:194,
+turn_test.clj:62, fs/edit `public-entries-declare-resolvable-io-capabilities`
+— the my-protocol and turn/cluster sweeps' tests (D3: kinds deleted; flip to
+facet assertions); (2) WRAPPER OUTPUT REFUSALS at `instrument.clj:768` —
+functions returning a refusal VALUE their output contract does not declare
+(`seon.db/index-page refused return value at [:datahike.index-page/datoms]`
+and siblings): the error PRD's rule 1.2 (a contract names the exact errors
+it returns) not yet applied to the `seon.db` reads and their callers —
+1a's family. Neither class implicates step 1's registry (its 4,694-provider
+proof stands). No rerun: the classes go to their owners — 1a gets class 2
+at its next stop with the log; class 1 waits for the my-protocol sweep
+(sol low) and the turn/cluster sweep when slots free.
