@@ -4613,3 +4613,17 @@ delta measured and parity proven before removal; (3) bridge steps 1–2
 (registry value, walker deletion) FIRST, then the remaining wave-1 families
 on the new bridge; config/plan finishes as is. Wave-1b/1c launches are
 therefore deferred behind steps 1–2 (≈2 lane-days after the astra review).
+
+## 2026-09-20 ~10:30 UTC — bridge review landed; PRD source-review resumed
+
+`bridge-dissolution-review` (astra HIGH, read-only, ~45 min) landed
+`e1368902d`: recommends option 2 (one carried generation retaining compiled
+Malli schemas) — the PRD's direction; inventoried all 159 schema functions
+and every projection-selection seam; probe: 64 admission checks copied
+205,312 registry entries; historical final validation = 34.38 % of the
+population apply+commit time, entity-validator calls only 1.96 % (traversal
+to measure separately); first lane = eliminate discarded compiles and
+repeated registry allocation. Resumed to review the PRD line by line with
+Malli/Datahike file:line, correct in place, re-cost, and write the step-1
+lane spec verbatim. `error-family-1a` landed `ac3944048` (raw database and
+schema refusals projected at recorder admission).
