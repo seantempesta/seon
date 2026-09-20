@@ -200,9 +200,22 @@
                                          (ns-resolve host (symbol (name qualified))))
                                        (throw (ex-info
                                                (str "The loaded JVM has no interpreter binding " qualified ".")
-                                               {:seon.error/kind ::acquisition-refused
-                                                :seon.sci.eval/acquisition-refused true
-                                                :seon.sci.eval/load-state :unavailable})))
+                                               (error/diagnostic
+                                                {:seon.error/at (java.util.Date.)
+                                                 :seon.error/layer :seon.sci.eval/program
+                                                 :seon.error/operation 'seon.sci.eval/build-base-ctx
+                                                 :seon.error/message "Interpreter binding is unavailable; load its declared JVM namespace."
+                                                 :seon.error/offending qualified
+                                                 :seon.error/diagnostic-layer :seon.sci.eval/program
+                                                 :seon.error/diagnostic-operation 'seon.sci.eval/build-base-ctx
+                                                 :seon.error/diagnostic-member qualified
+                                                 :seon.error/diagnostic-expected :seon.sci.eval/loaded-binding
+                                                 :seon.error/diagnostic-offending qualified
+                                                 :seon.error/diagnostic-cause :seon.error/unknown
+                                                 :seon.error/diagnostic-evidence qualified
+                                                 ::row-member qualified
+                                                 ::acquisition-observation {:seon.error.evidence/attribute :seon.fn/sym
+                                                                            :seon.error.evidence/value qualified}}))))
                                    sci-namespace)]))
                           symbols)])))
               (group-by (comp symbol namespace)
@@ -707,9 +720,20 @@
     (when-not source
       (throw
        (ex-info "Selected function is missing from the acquired SCI program snapshot."
-                {:seon.error/kind ::missing-function-row
-                 ::missing-function-row function-symbol
-                 :seon.fn/sym function-symbol})))
+                (error/diagnostic
+                 {:seon.error/at (java.util.Date.)
+                  :seon.error/layer :seon.sci.eval/program
+                  :seon.error/operation 'seon.sci.eval/install-function-from-database!
+                  :seon.error/message "Selected function has no acquired row; acquire its declaration before installing it."
+                  :seon.error/offending function-symbol
+                  :seon.error/diagnostic-layer :seon.sci.eval/program
+                  :seon.error/diagnostic-operation 'seon.sci.eval/install-function-from-database!
+                  :seon.error/diagnostic-member :seon.fn/sym
+                  :seon.error/diagnostic-expected :seon.sci.eval/acquired-function
+                  :seon.error/diagnostic-offending function-symbol
+                  :seon.error/diagnostic-cause :seon.error/unknown
+                  :seon.error/diagnostic-evidence function-symbol
+                  ::missing-function-row function-symbol :seon.fn/sym function-symbol}))))
     (let [namespace-row (kernel/program-namespace ctx namespace-name)]
       (install-declared-classes! ctx [namespace-row])
       (sci/install-namespace-bindings!
@@ -848,8 +872,20 @@
                        (get row source-attribute)
                        (get committed source-attribute)))))
       (throw (ex-info "Committed declaration source does not match install request."
-                      {:seon.error/kind ::install-source-mismatch
-                       :seon.program/identity [identity-attribute value] :seon.sci.eval/install-mismatch true})))
+                      (error/diagnostic
+                       {:seon.error/at (java.util.Date.)
+                        :seon.error/layer :seon.sci.eval/program
+                        :seon.error/operation 'seon.sci.eval/install-row!
+                        :seon.error/message "Install source differs from the committed declaration; install the committed source."
+                        :seon.error/offending row
+                        :seon.error/diagnostic-layer :seon.sci.eval/program
+                        :seon.error/diagnostic-operation 'seon.sci.eval/install-row!
+                        :seon.error/diagnostic-member identity-attribute
+                        :seon.error/diagnostic-expected :seon.sci.eval/committed-source
+                        :seon.error/diagnostic-offending row
+                        :seon.error/diagnostic-cause :seon.error/unknown
+                        :seon.error/diagnostic-evidence row
+                        :seon.sci.eval/installation-member value}))))
     (let [installed
           (case identity-attribute
       :seon.ns/name
@@ -926,12 +962,20 @@
         (when-let [remaining
                    (some #(remaining-definition-facts db %) value)]
           (throw (ex-info "Deleted declaration definition facts remain after commit."
-                          {:seon.error/kind ::install-delete-mismatch
-                           :seon.program/identity
-                           (:seon.program/identity remaining)
-                           :seon.program/definition-attributes
-                           (:seon.program/definition-attributes remaining)
-                           :seon.sci.eval/install-mismatch true})))
+                          (error/diagnostic
+                           {:seon.error/at (java.util.Date.)
+                            :seon.error/layer :seon.sci.eval/program
+                            :seon.error/operation 'seon.sci.eval/install-row!
+                            :seon.error/message "Deleted declaration still has definition facts; commit its retraction before installation."
+                            :seon.error/offending remaining
+                            :seon.error/diagnostic-layer :seon.sci.eval/program
+                            :seon.error/diagnostic-operation 'seon.sci.eval/install-row!
+                            :seon.error/diagnostic-member :seon.program/definition-attributes
+                            :seon.error/diagnostic-expected :seon.sci.eval/retracted-declaration
+                            :seon.error/diagnostic-offending remaining
+                            :seon.error/diagnostic-cause :seon.error/unknown
+                            :seon.error/diagnostic-evidence remaining
+                            :seon.sci.eval/installation-member (second (:seon.program/identity remaining))}))))
         (when (and (not schema-deletion?)
                    (nil? (::namespace-state row)))
           (let [event (one-event (:seon.program/source row)
@@ -1017,7 +1061,7 @@
                                  (when (:db/isComponent properties) attribute)))
                          (:schema (db/schema-database after)))
         touched (db/q '[:find [?entity ...] :where [?entity]] changed-database)
-        parents (when-not (or (:seon.error/kind components) (:seon.error/kind touched))
+        parents (when-not (and (map? touched) (contains? touched :seon.error/at) (contains? touched :seon.error/layer) (contains? touched :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value through its output union.
                   (loop [frontier touched seen #{}]
                     (if (empty? frontier)
                       seen
@@ -1025,7 +1069,7 @@
                                              :in $ [?child ...] [?attribute ...]
                                              :where [?parent ?attribute ?child]]
                                            history frontier components)]
-                        (when-not (:seon.error/kind incoming)
+                        (when-not (and (map? incoming) (contains? incoming :seon.error/at) (contains? incoming :seon.error/layer) (contains? incoming :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value through its output union.
                           (recur (vec (remove seen incoming)) (into seen incoming)))))))
         entities (db/q '[:find [?entity ...]
                          :in $ [?attribute ...]
@@ -1037,11 +1081,11 @@
                         :where [$changed ?entity] [?entity ?attribute]]
                       after (db/since (db/history after) (db/basis-t before))
                       program/identity-attributes)]
-    (when (and parents (not (:seon.error/kind entities)) (not (:seon.error/kind changed)))
+    (when (and parents (not (and (map? entities) (contains? entities :seon.error/at) (contains? entities :seon.error/layer) (contains? entities :seon.error/operation))) (not (and (map? changed) (contains? changed :seon.error/at) (contains? changed :seon.error/layer) (contains? changed :seon.error/operation)))) ;; debt: seon.db/q declares :seon.error/value through its output union.
       (let [eids (vec (set (concat entities changed parents)))
             old (db/pull-many before '[*] eids)
             current (db/pull-many after '[*] eids)]
-        (and (not (:seon.error/kind old)) (not (:seon.error/kind current))
+        (and (not (and (map? old) (contains? old :seon.error/at) (contains? old :seon.error/layer) (contains? old :seon.error/operation))) (not (and (map? current) (contains? current :seon.error/at) (contains? current :seon.error/layer) (contains? current :seon.error/operation))) ;; debt: seon.db/pull-many declares :seon.error/value through its output union.
              (every?
               (fn [[eid old-row current-row]]
                 (let [identity (or (program/row-identity current-row)
@@ -1119,7 +1163,7 @@
       (when-let [snapshot (::base-bindings agent-ctx)]
         (reset! snapshot (base-bindings ctx)))
       (when-let [before (:seon.db/db (acquired-program ctx))]
-        (when (and (not-any? :seon.error/kind installed)
+        (when (and (every? :seon.sci.eval/installed installed)
                    (installation-covers-program-change?
                     before db installations (context-projection ctx)))
           (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
@@ -1247,8 +1291,22 @@
              (ex-info
               (str "First-party program namespace " namespace-name
                    " loaded without defining a namespace.")
-              {:seon.error/kind ::namespace-unloadable
-               :seon.ns/name namespace-name :seon.sci.eval/namespace-unloadable true}))))))
+              (error/diagnostic
+               {:seon.error/at (java.util.Date.)
+                :seon.error/layer :seon.sci.eval/program
+                :seon.error/operation 'seon.sci.eval/host-namespace!
+                :seon.error/message "Loaded source defined no namespace; correct its namespace declaration."
+                :seon.error/offending namespace-name
+                :seon.error/diagnostic-layer :seon.sci.eval/program
+                :seon.error/diagnostic-operation 'seon.sci.eval/host-namespace!
+                :seon.error/diagnostic-member :seon.ns/name
+                :seon.error/diagnostic-expected :seon.sci.eval/loaded-namespace
+                :seon.error/diagnostic-offending namespace-name
+                :seon.error/diagnostic-cause :seon.error/unknown
+                :seon.error/diagnostic-evidence namespace-name
+                ::row-member namespace-name
+                ::acquisition-observation {:seon.error.evidence/attribute :seon.ns/name
+                                           :seon.error.evidence/value namespace-name}})))))))
 
 (defn- load-core-namespaces!
   "The effectful cluster caller loads JVM namespaces before pure construction."
@@ -1348,6 +1406,8 @@
 
 (defn- program-documentation
   "Read one namespace's public functions at the evaluation's database basis."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol]
+                  [:or [:vector :map] :seon.db/error-result]]}
   [database namespace-name]
   (db/q '[:find [(pull ?function selector) ...]
           :in $ selector ?name
@@ -1358,10 +1418,22 @@
         database program-documentation-selector namespace-name))
 
 (defn- documentation-unavailable
+  {:malli/schema [:=> [:cat :symbol] :seon.sci.eval/documentation-unavailable-error]}
   [requested]
-  {:seon.sci.eval/documentation-unavailable requested
-   :seon.error/kind :seon.sci.eval/documentation-unavailable
-   :seon.error/message (str "No public program documentation is available for " requested ".")})
+  (error/diagnostic
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.sci.eval/program
+    :seon.error/operation 'seon.sci.eval/documentation-unavailable
+    :seon.error/message "No public documentation is available; request an installed public declaration."
+    :seon.error/offending requested
+    :seon.error/diagnostic-layer :seon.sci.eval/program
+    :seon.error/diagnostic-operation 'seon.sci.eval/documentation-unavailable
+    :seon.error/diagnostic-member :seon.fn/sym
+    :seon.error/diagnostic-expected :seon.sci.eval/public-documentation
+    :seon.error/diagnostic-offending requested
+    :seon.error/diagnostic-cause :seon.error/unknown
+    :seon.error/diagnostic-evidence requested
+    ::documentation-unavailable requested}))
 
 (defn- declaration-statement
   "The sentence `doc` and `dir` show in place of a declaration this row lacks."
@@ -1375,9 +1447,22 @@
    is the surface an agent reads before deciding how to call a function: a
    missing `:seon.fn/spec` rendered as `[]` says the function declares
    nothing, which is a claim the row does not support (AGENTS.md section 2.4)."
+  {:malli/schema [:=> [:cat :qualified-keyword] :seon.sci.eval/declaration-absent-error]}
   [attribute]
-  {:seon.error/kind :seon.sci.eval/declaration-absent
-   :seon.error/message (declaration-statement attribute)})
+  (error/diagnostic
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.sci.eval/program
+    :seon.error/operation 'seon.sci.eval/declaration-absent
+    :seon.error/message "The program row lacks a declaration; supply the declared member before relying on it."
+    :seon.error/offending attribute
+    :seon.error/diagnostic-layer :seon.sci.eval/program
+    :seon.error/diagnostic-operation 'seon.sci.eval/declaration-absent
+    :seon.error/diagnostic-member attribute
+    :seon.error/diagnostic-expected :seon.sci.eval/present-declaration
+    :seon.error/diagnostic-offending attribute
+    :seon.error/diagnostic-cause :seon.error/unknown
+    :seon.error/diagnostic-evidence attribute
+    ::missing-declaration attribute}))
 
 (defn docstring-parts
   "Split a declared docstring into its summary, body, and final Example section."
@@ -1399,7 +1484,7 @@
         definitions (db/q '[:find ?key ?form :in $ [?key ...]
                             :where [?schema :seon.schema/key ?key]
                                    [?schema :seon.schema/form ?form]] database keys)]
-    (when (:seon.error/kind definitions)
+    (when (and (map? definitions) (contains? definitions :seon.error/at) (contains? definitions :seon.error/layer) (contains? definitions :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value through its output union.
       (throw (ex-info "Documentation schema references unavailable." definitions)))
     (into (sorted-map) (map (fn [[key form]] [key (edn/read-string form)])) definitions)))
 
@@ -1424,6 +1509,8 @@
      :out (declaration-absent :seon.fn/spec)}))
 
 (defn- agent-documentation-contract
+  {:malli/schema [:=> [:cat :seon.db/database-value :map]
+                  [:or :map :seon.db/error-result]]}
   [database row]
   (let [entries (call-preparation/supplied-map-entries database (:seon.fn/sym row))
         contract (documentation-contract database row)
@@ -1431,7 +1518,7 @@
         spec (:seon.fn/spec row)
         arities (if (and spec (= :function (first (edn/read-string spec))))
                   (:in expanded) [(:in expanded)])]
-    (if (:seon.error/kind entries)
+    (if (and (map? entries) (contains? entries :seon.error/at) (contains? entries :seon.error/layer) (contains? entries :seon.error/operation)) ;; debt: seon.call-preparation/supplied-map-entries declares :seon.error/value through its output union.
       entries
       (let [inputs
             (mapv (fn [order input]
@@ -1453,10 +1540,13 @@
                  :supplied (vec (distinct (map #(nth % 2) entries)))))))))
 
 (defn- function-doc-map
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :map] [:or :map :seon.db/error-result]]
+                  [:=> [:cat :seon.db/database-value :map :boolean] [:or :map :seon.db/error-result]]]}
   ([database row]
    (let [overrides (when (= :agent (:seon.schema.admission/source row))
                      (program/overrides database))]
-     (if (:seon.error/kind overrides)
+     (if (and (map? overrides) (contains? overrides :seon.error/at) (contains? overrides :seon.error/layer) (contains? overrides :seon.error/operation)) ;; debt: seon.program/overrides declares :seon.error/value through its output union.
        overrides
        (function-doc-map database row
                          (boolean (some #{(:seon.fn/sym row)} overrides))))))
@@ -1474,7 +1564,7 @@
 
 (defn directory-value
   "Return current public function summaries and declared schemas for a namespace."
-  {:malli/schema [:=> [:cat :seon.db/db :symbol :boolean] :map]}
+  {:malli/schema [:=> [:cat :seon.db/db :symbol :boolean] [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [database namespace-name present?]
   (let [namespace-row (db/pull database
                              '[:seon.ns/name
@@ -1482,8 +1572,8 @@
                              [:seon.ns/name namespace-name])
         functions (program-documentation database namespace-name)]
     (cond
-      (:seon.error/kind namespace-row) namespace-row
-      (:seon.error/kind functions) functions
+      (and (map? namespace-row) (contains? namespace-row :seon.error/at) (contains? namespace-row :seon.error/layer) (contains? namespace-row :seon.error/operation)) namespace-row ;; debt: seon.db/pull declares :seon.error/value through its output union.
+      (and (map? functions) (contains? functions :seon.error/at) (contains? functions :seon.error/layer) (contains? functions :seon.error/operation)) functions ;; debt: seon.db/q declares :seon.error/value through its output union.
       (or (:seon.ns/name namespace-row) present? (seq functions))
       (let [functions (sort-by (juxt #(get % :seon.fn/doc-order Long/MAX_VALUE)
                                     :seon.fn/sym) functions)]
@@ -1506,7 +1596,7 @@
 
 (defn documentation-value
   "Read documentation for a public function, named override, or namespace."
-  {:malli/schema [:=> [:cat :seon.db/db :symbol :symbol] :map]}
+  {:malli/schema [:=> [:cat :seon.db/db :symbol :symbol] [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [database requested qualified]
   (if (namespace qualified)
     (let [row (db/pull database
@@ -1516,15 +1606,15 @@
                       (program/overrides database))
           overridden? (boolean (some #{qualified} overrides))]
       (cond
-        (:seon.error/kind row) row
-        (:seon.error/kind overrides) overrides
+        (and (map? row) (contains? row :seon.error/at) (contains? row :seon.error/layer) (contains? row :seon.error/operation)) row ;; debt: seon.db/pull declares :seon.error/value through its output union.
+        (and (map? overrides) (contains? overrides :seon.error/at) (contains? overrides :seon.error/layer) (contains? overrides :seon.error/operation)) overrides ;; debt: seon.program/overrides declares :seon.error/value through its output union.
         (and (:seon.fn/sym row)
              (or (false? (:seon.fn/private? row)) overridden?))
         (function-doc-map database row overridden?)
         :else (documentation-unavailable requested)))
     (let [row (db/pull database [:seon.ns/doc] [:seon.ns/name requested])]
       (cond
-        (:seon.error/kind row) row
+        (and (map? row) (contains? row :seon.error/at) (contains? row :seon.error/layer) (contains? row :seon.error/operation)) row ;; debt: seon.db/pull declares :seon.error/value through its output union.
         (:seon.ns/doc row) (merge (docstring-parts (:seon.ns/doc row)) {:in [] :out []})
         :else (documentation-unavailable requested)))))
 
@@ -1593,16 +1683,15 @@
     (error/diagnostic
      {:seon.error/at (java.util.Date.)
       :seon.error/layer ::acquisition
-      :seon.error/operation 'seon.sci.eval/install-row!
+      :seon.error/operation 'seon.sci.eval/acquisition-refusal
       :seon.sci.eval/row-member (second identity)
       :seon.sci.eval/acquisition-observation
       {:seon.error.evidence/attribute :seon.error/message
        :seon.error.evidence/value cause-message}
       :seon.error/message
-      (str "Program row " (pr-str identity)
-           " could not be installed during acquisition: " cause-message)
+      "Program row could not be installed; correct the reported acquisition evidence."
       :seon.error/diagnostic-layer ::acquisition
-      :seon.error/diagnostic-operation 'seon.sci.eval/install-row!
+      :seon.error/diagnostic-operation 'seon.sci.eval/acquisition-refusal
       :seon.error/diagnostic-member identity
       :seon.error/diagnostic-expected ::installed
       :seon.error/diagnostic-offending identity
@@ -1624,8 +1713,8 @@
   (id/digest 64
              [::acquisition-refused
               (get-in refusal [:seon.error/data ::acquisition-row])
-              (:seon.error/kind refusal)
-              (get-in refusal [:seon.error/data ::acquisition-cause-kind])
+              (:seon.sci.eval/row-member refusal)
+              (:seon.error/operation refusal)
               (get-in refusal [:seon.error/data ::acquisition-cause-message])]))
 
 (defn- record-acquisition-refusals!
@@ -1645,7 +1734,7 @@
               ;; answers the typed unknown rather than an absence, so an
               ;; `or` here would carry the refusal into `result-caps` and
               ;; `commit-tx` instead of the shipped decisions it means.
-              effective (if (:seon.error/kind read-effective)
+              effective (if (contains? read-effective :seon.config/error-key)
                           (config/defaults)
                           read-effective)
               caps (config/result-caps effective)
@@ -1674,7 +1763,7 @@
                refusals))
               outcome (db/transact! connection tx-data)]
           (cond-> (assoc state ::acquisition-refusals-recorded? true)
-            (:seon.error/kind outcome)
+            (and (map? outcome) (contains? outcome :seon.error/at) (contains? outcome :seon.error/layer) (contains? outcome :seon.error/operation)) ;; debt: seon.db/transact! declares :seon.error/value through its output union.
             (assoc ::acquisition-refusals-recorded? false
                    ::acquisition-recording-error outcome)))
         (assoc state ::acquisition-refusals-recorded? false))))))
@@ -1842,8 +1931,20 @@
                 (throw
                  (ex-info
                   "Program acquisition found a namespace binding cycle."
-                  {:seon.error/kind ::namespace-binding-cycle
-                   :seon.sci.eval/dependencies remaining :seon.sci.eval/namespace-binding-cycle true})))
+                  (error/diagnostic
+                   {:seon.error/at (java.util.Date.)
+                    :seon.error/layer :seon.sci.eval/program
+                    :seon.error/operation 'seon.sci.eval/acquire-program!
+                    :seon.error/message "Namespace bindings form a cycle; remove the cyclic dependency before acquisition."
+                    :seon.error/offending remaining
+                    :seon.error/diagnostic-layer :seon.sci.eval/program
+                    :seon.error/diagnostic-operation 'seon.sci.eval/acquire-program!
+                    :seon.error/diagnostic-member :seon.ns/requires
+                    :seon.error/diagnostic-expected :seon.sci.eval/acyclic-bindings
+                    :seon.error/diagnostic-offending remaining
+                    :seon.error/diagnostic-cause :seon.error/unknown
+                    :seon.error/diagnostic-evidence remaining
+                    ::pending-namespaces (set (keys remaining))}))))
               (let [released (set ready)]
                 (recur
                  (into {}
@@ -1863,7 +1964,7 @@
                     :seon.db/db db
                     ::prepared-projection (:seon.schema/projection state)
                     :seon.program/row row})]
-              (if (:seon.error/kind installed)
+              (if (contains? installed :seon.instrument/check)
                 (update state ::acquisition-refusals (fnil conj [])
                         (acquisition-refusal row installed))
                 (cond-> (assoc state
@@ -2294,9 +2395,20 @@
                 (throw
                  (ex-info
                   "Schema deletion did not unregister its reader identity."
-                  {:seon.error/kind ::schema-refused
-                   :seon.schema/key unregister-key
-                   :seon.sci.eval/value schema-value :seon.sci.eval/schema-refused unregister-key})))
+                  (error/diagnostic
+                   {:seon.error/at (java.util.Date.)
+                    :seon.error/layer :seon.sci.eval/program
+                    :seon.error/operation 'seon.sci.eval/declared-row
+                    :seon.error/message "Evaluated schema identity differs from its declaration; return the declared identity."
+                    :seon.error/offending schema-value
+                    :seon.error/diagnostic-layer :seon.sci.eval/program
+                    :seon.error/diagnostic-operation 'seon.sci.eval/declared-row
+                    :seon.error/diagnostic-member unregister-key
+                    :seon.error/diagnostic-expected :seon.sci.eval/registered-reader-identity
+                    :seon.error/diagnostic-offending schema-value
+                    :seon.error/diagnostic-cause :seon.error/unknown
+                    :seon.error/diagnostic-evidence schema-value
+                    ::schema-refused unregister-key}))))
               ;; Dependency validation is pure here. Current database data
               ;; is fenced by the terminal transaction against db-before.
               (schema/projection-without-schema projection unregister-key)
@@ -2308,9 +2420,20 @@
                 (throw
                  (ex-info
                   "Schema declaration did not register its reader identity."
-                  {:seon.error/kind ::schema-refused
-                   :seon.schema/key schema-key
-                   :seon.sci.eval/value schema-value :seon.sci.eval/schema-refused schema-key})))
+                  (error/diagnostic
+                   {:seon.error/at (java.util.Date.)
+                    :seon.error/layer :seon.sci.eval/program
+                    :seon.error/operation 'seon.sci.eval/declared-row
+                    :seon.error/message "Evaluated schema identity differs from its declaration; return the declared identity."
+                    :seon.error/offending schema-value
+                    :seon.error/diagnostic-layer :seon.sci.eval/program
+                    :seon.error/diagnostic-operation 'seon.sci.eval/declared-row
+                    :seon.error/diagnostic-member schema-key
+                    :seon.error/diagnostic-expected :seon.sci.eval/registered-reader-identity
+                    :seon.error/diagnostic-offending schema-value
+                    :seon.error/diagnostic-cause :seon.error/unknown
+                    :seon.error/diagnostic-evidence schema-value
+                    ::schema-refused schema-key}))))
               ;; Validate the actual evaluated value while the overlay is
               ;; isolated. The terminal transaction repeats this pure
               ;; candidate validation against its mid-transaction db value.
@@ -2410,7 +2533,7 @@
   `:seon.cluster.eval/error` is declared `:string`
   (`resources/seon/schemas/seon.cluster.eval.edn:3`), and the value it
   projects is ARBITRARY: any form an agent evaluates may RETURN a map
-  carrying `:seon.error/kind` whose `:seon.error/message` is not a string.
+  whose `:seon.error/message` is not a string on a failed execution path.
   Reading that key verbatim handed `evaluate`'s own output contract a
   lookup-ref vector, so the evaluation stopped naming its own failure and
   the diagnostic became a contract violation against `seon.sci.eval/evaluate`
@@ -2425,16 +2548,15 @@
     (cond
       (string? message) message
       (some? message) (pr-str message)
-      (some? (:seon.error/kind value)) (str (:seon.error/kind value))
-      ;; A value that names neither a message nor a kind still reached a
+      ;; A value that names no message still reached a
       ;; failing arm. The declared string says exactly that rather than
       ;; printing `nil` as though it were the failure.
       :else "The evaluation failed and named no failure.")))
 
 (defn- shown-result
   [value request record]
-  (let [function-name (when (= :seon.instrument/contract-violated (:seon.error/kind value))
-                        (:seon.instrument/contract-violated value))
+  (let [function-name (when (and (map? value) (contains? value :seon.instrument/check))
+                        (:seon.instrument/fn value))
         database (when function-name
                    (or (:seon.db/db request)
                        (some-> (get-in request [:seon.sci.eval/ctx ::custody :seon.db/connection]) db/db)))
@@ -2451,13 +2573,14 @@
                       :seon.render.call/id
                       [:seon.cluster.eval/source
                        (:seon.cluster.eval/source request)]))
-        shown (if (:seon.error/kind projection) projection
+        shown (if (contains? projection :seon.render.value/root-description) projection
                   (render.value/render-ai-data projection))]
     (cond-> {:seon.sci.admit/value value
              :seon.eval/shown (if (string? shown) shown (pr-str shown))}
       (:seon.render.call/selected-producer projection)
       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
-      (:seon.error/kind value)
+      (when-let [declared (render/request-projection request)]
+        (seq (error/facets declared value)))
       (assoc :seon.cluster.eval/error (failure-text value))
       record (assoc :seon.sci.admit/record record))))
 
@@ -3109,7 +3232,7 @@
     [:or :seon.test.runner/captured-result :seon.test/not-runnable-error]]}
   [request]
   (let [results (run-tests (assoc request :seon.test/vars [(:seon.test/var request)]))]
-    (if (:seon.error/kind results) results (first results))))
+    (if (contains? results :seon.test/not-runnable) results (first results))))
 
 (defn- run-candidate-test!
   [ctx database request test-symbol]

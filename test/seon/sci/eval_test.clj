@@ -107,7 +107,8 @@
             (#'eval/install-function-from-database! ctx nil function-symbol)
             nil
             (catch clojure.lang.ExceptionInfo error (ex-data error))))]
-    (is (= :seon.sci.eval/missing-function-row (:seon.error/kind failure)))
+    (is (= function-symbol (:seon.sci.eval/missing-function-row failure)))
+    (is (= 'seon.sci.eval/install-function-from-database! (:seon.error/operation failure)))
     (is (= function-symbol (:seon.fn/sym failure)))))
 
 (defn- compiled-runtime-victim
@@ -349,9 +350,7 @@
               (is (nil? (:seon.program/row evaluation)))
               (is (ok? evaluation) (pr-str evaluation))
               (is
-                (not=
-                  :seon.instrument/contract-violated
-                  (get-in evaluation [:seon.sci.admit/value :seon.error/kind]))))))))))
+                (= :opening-probe (:seon.sci.admit/value evaluation))))))))))
 
 (deftest the-diagnostics-are-recorded-and-are-not-limits
   (let [evaluation (run "(reduce + (map inc (range 500)))")
@@ -430,7 +429,7 @@
             (let [report (instrument/apply!
                           {:seon.config/on-core-error :panic
                            :seon.schema/projection projection})]
-              (is (nil? (:seon.error/kind report)) (pr-str report)))))))))
+              (is (:db-after report) (pr-str report)))))))))
 
 (deftest isolated-one-off-evaluations-do-not-share-definitions
   (run "(def leaked 1)")
@@ -1141,7 +1140,12 @@
   (let [printed (doto (java.io.StringWriter.) (.write "before failure"))
         interrupted-at (java.util.Date. 1785000000000)
         record {:seon.eval/outcome :time}
-        value {:seon.error/kind :seon.sci.eval/time-limit
+        value {:seon.error/at interrupted-at
+               :seon.error/layer :seon.sci.kernel/evaluation
+               :seon.error/operation 'seon.sci.kernel/failure-value
+               :seon.sci.kernel/guard-observation
+               {:seon.error.evidence/attribute :seon.eval/duration-ms
+                :seon.error.evidence/value 1000}
                :seon.error/message "Ran out of time."}
         admitted {:seon.sci.admit/value value
                   :seon.eval/shown (pr-str value)}
@@ -1828,9 +1832,7 @@
               (= "ambient-message" (:seon.sci.admit/value read-written))
               "a declared write is visible to the next evaluation")
             (is
-              (=
-                :seon.db/invalid-write
-                (get-in rejected [:seon.sci.admit/value :seon.error/kind])))
+              (some? (get-in rejected [:seon.sci.admit/value :seon.db.write.attempt/request-id])))
             (is
               (=
                 :seon.db/attribute-not-installed
@@ -2451,26 +2453,31 @@
                      (assoc reader-row :seon.schema/form "[:int {:seon.db/identity true}]")))
             "a genuinely different declaration is still not the committed one")))))
 
-(deftest a-returned-values-non-string-error-message-is-still-the-declared-string
-  ;; `:seon.cluster.eval/error` is declared `:string`
-  ;; (`resources/seon/schemas/seon.cluster.eval.edn:3`), and the value it
-  ;; projects is ARBITRARY: any form may return a map carrying
-  ;; `:seon.error/kind` whose `:seon.error/message` is not a string. Reading
-  ;; that key verbatim handed `evaluate`'s own output contract a lookup-ref
-  ;; vector, so the diagnostic of the evaluation became a contract violation
-  ;; naming `seon.sci.eval/evaluate` instead of the evaluation naming its own
-  ;; failure (fault `7710efbc…`, default pid 66052, 2026-09-17 04:22:54Z).
-  ;; The projection is DERIVED here; the value's own shape is never the
-  ;; evaluation's declared text.
+(deftest returned-errors-require-a-complete-declared-facet
   (test-support/with-database
     (fn [connection]
       (let [ctx (test-support/fork-cluster-ctx connection)
-            evaluation
-            (run-in ctx
-                    (str "{:seon.error/kind :probe/refused"
-                         " :seon.error/message [:seon.ns/name (quote user)]}")
-                    5000)]
-        (is (string? (:seon.cluster.eval/error evaluation))
-            "a failed evaluation names its failure with the string it declares")
-        (is (nil? ((schema/projection-explainer (schema/handed-projection) :seon.sci.eval/evaluation) evaluation))
-            "and the whole evaluation satisfies the contract it declares")))))
+            projection (schema/handed-projection)
+            complete {:seon.error/at (java.util.Date.)
+                      :seon.error/layer :seon.sci.kernel/evaluation
+                      :seon.error/operation 'seon.sci.kernel/failure-value
+                      :seon.sci.kernel/guard-observation
+                      {:seon.error.evidence/attribute :seon.eval/duration-ms
+                       :seon.error.evidence/value 12}
+                      :seon.error/message "Evaluation was refused."}
+            malformed (assoc complete :seon.error/message [:seon.ns/name 'user])
+            failed (run-in ctx (str "'" (pr-str complete)) 5000)
+            ordinary (run-in ctx (str "'" (pr-str malformed)) 5000)]
+        (is (contains? (error/facets projection complete) :seon.sci.kernel/error))
+        (is (empty? (error/facets projection malformed)))
+        (is (string? (:seon.cluster.eval/error failed)))
+        (is (= complete (:seon.sci.admit/value failed)))
+        (is (= 12 (get-in failed [:seon.sci.admit/value
+                                  :seon.sci.kernel/guard-observation
+                                  :seon.error.evidence/value])))
+        (is (nil? (:seon.cluster.eval/error ordinary)))
+        (is (= malformed (:seon.sci.admit/value ordinary)))
+        (is (str/includes? (:seon.eval/shown ordinary) "seon.ns/name"))
+        (doseq [evaluation [failed ordinary]]
+          (is (nil? ((schema/projection-explainer projection :seon.sci.eval/evaluation)
+                     evaluation))))))))

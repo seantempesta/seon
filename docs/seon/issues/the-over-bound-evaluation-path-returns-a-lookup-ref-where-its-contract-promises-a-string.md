@@ -115,3 +115,10 @@ records three priced options. Acceptance after ruling: preserve the actual
 returned object, assert the selected evaluation-error behavior and concrete
 evidence, and keep the evaluation's string contract satisfied under the
 canonical real-SCI regression. The historical resolution above remains valid.
+
+The orchestrator settled recognition under D12: only complete declared facets
+mark returned values as errors. The sci-program implementation replaces this
+legacy regression with complete-facet and malformed-value cases, preserving
+the actual returned objects and the evaluation string contract. Canonical
+execution remains owed because the fast recording authority refuses snapshot
+admission; this note stays open until that regression executes.

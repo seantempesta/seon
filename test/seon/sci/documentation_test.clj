@@ -31,8 +31,8 @@
         connection
         [[:db/add [:seon.fn/sym function-symbol]
           :seon.schema.admission/source :core]])
-       (is (= :seon.sci.eval/documentation-unavailable
-              (:seon.error/kind
+       (is (= function-symbol
+              (:seon.sci.eval/documentation-unavailable
                (evaluation/documentation-value
                 (db/db connection) function-symbol function-symbol))))))))
 
@@ -45,7 +45,7 @@
                       (db/db connection)
                       {:seon.fn/spec
                        "[:function [:=> [:cat :int] :string [:fn {:error/message \"pair relation\"} clojure.core/vector?]] [:=> [:cat [:or :string :int] :boolean] :keyword]]"})]
-        (is (not (:seon.error/kind doc)))
+        (is (contains? doc :in))
         (is (not (str/includes? output ":gen/gen")) output)
         (is (= [[:cat :int] [:cat [:or :string :int] :boolean]] (:in contract)))
         (is (= [:string :keyword] (:out contract)))))))
@@ -91,10 +91,12 @@
          (is (seq (read-string (:example doc)))))
        (doseq [result [directory documentation missing missing-ns]]
          (is (empty? (:seon.cluster.eval/output result))))
-       (is (= :seon.sci.eval/documentation-unavailable
-              (get-in missing [:seon.sci.admit/value :seon.error/kind])))
-       (is (= :seon.sci.eval/documentation-unavailable
-              (get-in missing-ns [:seon.sci.admit/value :seon.error/kind])))
+       (is (symbol? (get-in missing [:seon.sci.admit/value :seon.sci.eval/documentation-unavailable])))
+       (is (= 'seon.sci.eval/documentation-unavailable
+              (get-in missing [:seon.sci.admit/value :seon.error/operation])))
+       (is (symbol? (get-in missing-ns [:seon.sci.admit/value :seon.sci.eval/documentation-unavailable])))
+       (is (= 'seon.sci.eval/documentation-unavailable
+              (get-in missing-ns [:seon.sci.admit/value :seon.error/operation])))
        (is (= {:schemas {} :functions []} (:seon.sci.admit/value empty-ns)))
        (is (nil? (:seon.cluster.eval/error empty-ns)))))))
 
@@ -260,8 +262,8 @@
          (is (= (resolve 'my.message/send)
                 (:seon.instrument/var (meta @(sci/resolve ctx 'my.message/send))))
              "SCI must acquire the canonical armed host callable, not a pre-arming copy")
-         (is (= :seon.instrument/contract-violated (:seon.error/kind value)) (pr-str failed))
-         (is (= 'my.message/send (:seon.instrument/contract-violated value)))
+         (is (= :input (:seon.instrument/check value)) (pr-str failed))
+         (is (= 'my.message/send (:seon.instrument/fn value)))
          (is (= documentation (:seon.error/doc value)) (pr-str failed))
          (doseq [term ["nonempty string subject identity token"
                        ":my.message/assignment" ":seon.message/from"]]
@@ -291,14 +293,14 @@
                                                'my.note/undeclared)
            row (some #(when (= 'my.note/undeclared (:sym %)) %)
                      (:functions (evaluation/directory-value database 'my.note false)))]
-       (is (not (:seon.error/kind doc)))
+       (is (contains? doc :in))
        (is (some? row) "the undeclared row is still listed by dir")
        (doseq [[label value attribute]
                [["doc :in" (:in doc) :seon.fn/spec]
                 ["doc :out" (:out doc) :seon.fn/spec]
 ]]
-         (is (= :seon.sci.eval/declaration-absent (:seon.error/kind value)) label)
-         (is (str/includes? (:seon.error/message value) (str attribute)) label))
+         (is (= attribute (:seon.sci.eval/missing-declaration value)) label)
+         (is (= 'seon.sci.eval/declaration-absent (:seon.error/operation value)) label))
        (is (not= [] (:in doc)) "an absent contract never reads as a declared empty one")
        (is (not= "" (:summary doc)))
        (is (str/includes? (:summary doc) (str :seon.fn/doc)))

@@ -3,17 +3,11 @@
             [clojure.test :refer [deftest is]]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
-            [seon.db :as db]
             [seon.render :as render]
             [seon.repl :as repl]
             [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
-(defn- checked-transact! [connection transaction]
-  (let [result (db/transact! connection transaction)]
-    (when (:seon.error/kind result)
-      (throw (ex-info (pr-str result) result)))
-    result))
 
 (deftest a-plan-item-result-shows-data-instead-of-its-block-render-source
   (support/with-database
@@ -21,11 +15,11 @@
      (config/apply! {:seon.db/connection connection
                      :seon.boot/cluster-name "shown-text"})
      (support/seed-cluster! connection "shown-text")
-     (checked-transact! connection
+     (support/transacted! connection
                         (agent/creation-tx {:seon.agent/id "juniper"
                                             :seon.ns/name 'my.agents.juniper
                                             :seon.cluster/name "shown-text"}))
-     (checked-transact!
+     (support/transacted!
       connection
       [{:my.plan/agent [:seon.agent/id "juniper"]
          :my.plan/objective "Keep generated source out of values"

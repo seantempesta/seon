@@ -47,39 +47,13 @@
                   :seon.sci.eval/bindings]
                  [:seon.print/options :seon.print/options]
                  [:seon.sci.admit/record :seon.sci.admit/record]],
-                :acquisition-refused [:= true],
-                :namespace-unloadable [:= true],
-                :time-limit-error
-                [:map
-                 {:seon.error/class true,
-                  :seon.render/ai seon.error/time-limit-prose,
-                  :seon.render/html seon.error/render-html,
-                  :error/message
-                  "must identify the evaluation time limit that was reached"}
-                 [:seon.sci.eval/time-limit :seon.sci.eval/time-limit]
-                 [:seon.error/message :seon.error/message]],
+                ,
+                ,
+                ,
                 :missing-function-row :qualified-symbol,
-                :evaluation-failed-error
-                [:map
-                 {:seon.error/class true,
-                  :seon.render/ai seon.error/render-ai,
-                  :seon.render/html seon.error/render-html,
-                  :error/message
-                  "must mark an evaluation that failed before producing a value"}
-                 [:seon.sci.eval/evaluation-failed
-                  :seon.sci.eval/evaluation-failed]
-                 [:seon.error/message :seon.error/message]],
+                ,
                 :referenced-vars [:set :symbol],
-                :namespace-unloadable-error
-                [:map
-                 {:seon.error/class true,
-                  :seon.render/ai seon.error/render-ai,
-                  :seon.render/html seon.error/render-html,
-                  :error/message
-                  "must carry the :seon.sci.eval/namespace-unloadable class marker"}
-                 [:seon.sci.eval/namespace-unloadable
-                  :seon.sci.eval/namespace-unloadable]
-                 [:seon.error/message :seon.error/message]],
+                ,
                 :binding
                 [:map
                  [:seon.sci.eval/metadata :map]
@@ -90,39 +64,16 @@
                     :seon.schema.admission/reason
                     "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation.",
                     :gen/elements [nil true 0 "" :k [] {} #{}]}]]],
-                :acquisition-refused-error
-                [:map
-                 {:seon.error/class true,
-                  :seon.render/ai seon.error/render-ai,
-                  :seon.render/html seon.error/render-html,
-                  :error/message
-                  "must carry the :seon.sci.eval/acquisition-refused class marker"}
-                 [:seon.sci.eval/acquisition-refused
-                  :seon.sci.eval/acquisition-refused]
-                 [:seon.error/message :seon.error/message]],
-                :missing-function-row-error
-                [:map
-                 {:seon.error/class true,
-                  :seon.render/ai seon.error/render-ai,
-                  :seon.render/html seon.error/render-html,
-                  :error/message
-                  "must identify the function with no admitted program row"}
-                 [:seon.sci.eval/missing-function-row
-                  :seon.sci.eval/missing-function-row]
-                 [:seon.error/message :seon.error/message]],
+                ,
+                :missing-function-row-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.eval/missing-function-row :seon.sci.eval/missing-function-row]]],
                 :time-limit-ms [:int {:min 1}],
                 :defs-fork-result
                 [:map [:seon.sci.eval/ctx :seon.sci.eval/ctx]],
-                :namespace-binding-cycle-error
-                [:map
-                 {:seon.error/class true,
-                  :seon.render/ai seon.error/render-ai,
-                  :seon.render/html seon.error/render-html,
-                  :error/message
-                  "must identify a namespace participating in a binding cycle"}
-                 [:seon.sci.eval/namespace-binding-cycle
-                  :seon.sci.eval/namespace-binding-cycle]
-                 [:seon.error/message :seon.error/message]],
+                :namespace-binding-cycle-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.eval/pending-namespaces :seon.sci.eval/pending-namespaces]]],
                 :defs-fork-request
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
@@ -135,7 +86,7 @@
                  [:seon.db/connection
                   {:optional true}
                   :seon.db/connection]],
-                :evaluation-failed [:= true],
+                ,
                 :unrun-request
                 [:map
                  [:seon.sci.admit/value :seon.error/value]
@@ -158,7 +109,7 @@
                     "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation.",
                     :gen/elements [nil true 0 "" :k [] {} #{}]}]]
                  [:seon.sci.admit/record :seon.sci.admit/record]],
-                :install-mismatch [:= true],
+                ,
                 :install-request
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
@@ -186,18 +137,11 @@
                    :seon.schema.admission/reason
                    "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation.",
                    :gen/elements [nil true 0 "" :k [] {} #{}]}]],
-                :schema-refused-error
-                [:map
-                 {:seon.error/class true,
-                  :seon.render/ai seon.error/render-ai,
-                  :seon.render/html seon.error/render-html,
-                  :error/message
-                  "must identify the schema declaration refused during evaluation"}
-                 [:seon.sci.eval/schema-refused
-                  :seon.sci.eval/schema-refused]
-                 [:seon.error/message :seon.error/message]],
+                :schema-refused-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.eval/schema-refused :seon.sci.eval/schema-refused]]],
                 :reader-event-count :int,
-                :namespace-binding-cycle [:= true],
+                ,
                 :time-limit :seon.eval/fn-entries,
                 :ctx
                 [:fn
@@ -242,31 +186,18 @@
                 :documentation-unavailable :symbol,
                 :bindings
                 [:map-of :qualified-symbol :seon.sci.eval/binding],
-                :install-mismatch-error
-                [:map
-                 {:seon.error/class true,
-                  :seon.render/ai seon.error/render-ai,
-                  :seon.render/html seon.error/render-html,
-                  :error/message
-                  "must identify the function whose installed source or deletion mismatched"}
-                 [:seon.sci.eval/install-mismatch
-                  :seon.sci.eval/install-mismatch]
-                 [:seon.error/message :seon.error/message]],
+                :install-mismatch-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.eval/installation-member :seon.sci.eval/installation-member]]],
                 :projection-state
                 [:fn
                  {:error/message
                   "must hold one immutable replacement environment",
                   :gen/gen seon.sci.eval/projection-state-generator}
                  seon.sci.eval/projection-state?],
-                :documentation-unavailable-error
-                [:map
-                 {:seon.error/class true,
-                  :error/message "must identify the function or namespace without documentation",
-                  :seon.render/ai seon.error/render-ai,
-                  :seon.render/html seon.error/render-html}
-                 [:seon.sci.eval/documentation-unavailable
-                  :seon.sci.eval/documentation-unavailable]
-                 [:seon.error/message :seon.error/message]],
+                :documentation-unavailable-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.eval/documentation-unavailable :seon.sci.eval/documentation-unavailable]]],
                 :acquire-request
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
@@ -333,4 +264,12 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.projection/entity}
  :seon.db/ref]
+
+:pending-namespaces [:set {:min 1} :symbol]
+:missing-declaration :qualified-keyword
+:declaration-absent-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.eval/missing-declaration :seon.sci.eval/missing-declaration]]]
+
+:installation-member [:or :symbol :qualified-keyword]
 }

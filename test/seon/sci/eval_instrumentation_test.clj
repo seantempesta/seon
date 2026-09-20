@@ -64,8 +64,8 @@
                       (is (empty?
                            (db/q '[:find ?error
                                   :where
-                                  [?error :seon.error/kind
-                                   :seon.instrument/contract-violated]]
+                                  [?error :seon.instrument/check _]
+                                  [?error :seon.instrument/fn _]]
                                 @connection))))))
                 (finally
                   (instrument/remove!)))))

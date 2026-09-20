@@ -386,3 +386,38 @@ bin/test --paths src/seon/await.clj resources/seon/schemas/seon.await.edn src/se
 ```
 
 No cold gate, default lifecycle command, foreign repair, or worktree was run.
+
+## D12 and eval conversion
+
+The orchestrator ruled option 1 (D12): only complete declared facets mark a
+returned value as an evaluation error. `shown-result` now validates against
+the request's carried projection. The real-SCI regression compares a complete
+kernel facet with the same map carrying a malformed message: the latter keeps
+its value and shown text without acquiring an evaluation error.
+
+Eval source retirement occurrences fell from 37 to zero, resource class
+declarations from nine to zero, and all four affected eval test files have
+zero retirement matches. Missing row, installation mismatch, cyclic namespace
+bindings, absent documentation/declaration and schema identity failures have
+substantive required members. Acquisition reuses the existing row facet.
+Raw offending values remain on the error observation. The two SCI pass-through
+contracts name these facets. Database and call-preparation propagation sites
+retain same-line named debt while those callees expose the generic union.
+
+The one eval fast snapshot (`tmp/sci-program-eval-fast.log`, run.An97RS)
+armed 1,459 contracts (1,456 program-armable), then refused admission with
+**zero tests executed**. Even after `6dae626e0`, the recording authority rejects
+the optional raw `:seon.error/offending` on the runner marker-reason facet as
+non-storable. This is an observed foreign recording boundary, not a reason
+to stop. The tally is **owed**. The four namespaces load; Clojure lint has
+zero errors, with existing shadow/unused warnings outside the conversion.
+Two generated diagnostic-operation fields were corrected to their actual
+observer after the snapshot; no unchanged suite was rerun.
+
+Cold eval scope owed: `bin/test --paths src/seon/sci/eval.clj
+resources/seon/schemas/seon.sci.eval.edn src/seon/sci/kernel.clj
+src/seon/sci/admit.clj test/seon/sci/eval_test.clj
+test/seon/sci/documentation_test.clj test/seon/sci/shown_text_test.clj
+test/seon/sci/eval_instrumentation_test.clj -- seon.sci.eval-test
+seon.sci.documentation-test seon.sci.shown-text-test
+seon.sci.eval-instrumentation-test`, plus the orchestrator's platform proof.
