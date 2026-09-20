@@ -862,3 +862,59 @@ same shared-tree cycle recorded above, at `seon/issue.clj:1:1`
 foreign edit is attributed, and no worktree or archive was created. The
 1,001-member publication regression, thin launchers,
 host integration and identical-two-run zero-execution proof remain owed.
+
+## Truncation slice after publication-lineage ruling
+
+Read `docs/prds/steward-platform/plan/publication-dissolution-spec-2026-09-20.md`
+end to end. Publication reconciliation belongs to its lane. The preservation
+file was clean before editing; the held `src/seon/cluster.clj` was not edited.
+
+`src/seon/cluster/source.clj:323` now reads evidence attributes with Datalog
+and expands owned components from their queried datoms. The run wildcard pull
+at former line 350 is removed. Every cardinality-many run/component attribute
+is complete, without increasing a pull limit. Peer references retain their
+existing identity for the publication-lineage owner to preserve.
+
+Added `test/seon/test/publication_test.clj`, one regression using the canonical
+source manifest, real `source/publish!`, and real `source/record-results!`.
+It admits 1,001 canonical test identities, publishes again, and independently
+queries the exact member-symbol set. This checks collection preservation;
+it does not claim that copying old transaction refs fixes their history.
+
+Attempted armed iteration:
+
+```sh
+bin/test-fast --paths src/seon/cluster/source.clj test/seon/test/publication_test.clj -- seon.test.publication-test
+```
+
+Snapshot HEAD `c12fbf1fe0c0e512b0302066fd3404ecfe4d724c`, published overlay base
+`98b0449d90652e72969190ce279ca6cac9bf67c23c6cc4a06c7eeb7ed228928a`.
+Waited 147 seconds for a slot. JVM 67551 loaded the namespace and armed
+1,375 contracts. Admission then crossed the operator's 30,000 ms prepl silence
+bound; exit 1 **before any test body**. No assertion tally or passing regression
+is claimed. `publication-members-fast.log`: **8,345 bytes**, SHA-256
+`56e40b53e20e0048970dbdc67b4338a816f00782aaf5d440613d7273a674c41a`.
+The thread sample is `publication-members-threads.json`.
+
+A read-only authority query (9,035 ms) independently found request
+`a1c2b3344636` admitted at **536870933** despite the lost response. Its evidence
+was not deleted, retried as a fresh event, or marked green. The launcher JVM
+exited. This leaves admitted work without terminal evidence; transport outcome
+must not be inferred from a client timeout. Subsequent independent namespace
+verification will use a distinct request, not claim completion of this one.
+
+Pre-commit owned source load:
+`clojure -M -e "(require 'seon.cluster.source) (println :loads) (shutdown-agents)"`
+returned **`:loads`, exit 0** (`publication-members-load.log`).
+
+Publication-dissolution must retain these references in the same history:
+`seon.test.run/selection-tx` read by `src/seon/test/runner.clj:2334`, compared
+through `db/as-of` at `:2348`; `seon.test.member/claim-tx`, `/completed-tx`,
+and `/terminated-tx` read at `:2359–2360`; and `/covered-by` member refs
+queried at `:2344`. Reconciliation must retain their entity identities and
+temporal datoms, not just copy their numeric values into a rebuilt history.
+
+Cold proof additionally owed:
+`bin/test --paths src/seon/cluster/source.clj test/seon/test/publication_test.clj -- seon.test.publication-test`.
+No bash lines changed in this truncation slice. Files: source owner, new
+regression, and this note. Earlier thin-launcher and host obligations remain.

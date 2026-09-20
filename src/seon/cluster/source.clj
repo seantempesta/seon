@@ -320,6 +320,28 @@
       (throw (ex-info "Program identity lookup failed during publication." rows)))
     (zipmap identities rows)))
 
+(defn- evidence-entity
+  "Read complete stored evidence through datoms, including owned children.
+  Peer refs retain their identity; lineage reconciliation owns their history."
+  {:malli/schema [:=> [:cat :seon.db/database-value :int] :map]}
+  [database entity-id]
+  (let [datoms (db/q '[:find ?attribute ?value :in $ ?entity
+                       :where [?entity ?attribute ?value]] database entity-id)]
+    (when (:seon.error/at datoms)
+      (throw (ex-info "Published test evidence could not be read." datoms)))
+    (reduce
+     (fn [row [attribute value]]
+       (let [declaration (get (:schema database) attribute)
+             value (if (= :db.type/ref (:db/valueType declaration))
+                     (if (:db/isComponent declaration)
+                       (evidence-entity database value)
+                       {:db/id value})
+                     value)]
+         (if (= :db.cardinality/many (:db/cardinality declaration))
+           (update row attribute (fnil conj []) value)
+           (assoc row attribute value))))
+     {:db/id entity-id} datoms)))
+
 (defn- result-preservation-tx
   "Carry latest evidence from the published head, never the rebuild's base.
   Keep the original run fingerprint even when a definition changed. Evidence
@@ -347,7 +369,7 @@
                             ['* {:seon.test.failure/file [:seon.fn.file/relative-path]}
                              {:seon.test.failure/first-run [:seon.test.run/id]}
                              {:seon.test.failure/last-run [:seon.test.run/id]}]}))
-          run-rows (db/pull-many previous '[*] runs)
+          run-rows (mapv #(evidence-entity previous %) runs)
           test-rows (db/pull-many previous selector results)]
       (doseq [rows [run-rows test-rows]]
         (when (:seon.error/kind rows)
