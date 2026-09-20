@@ -6939,3 +6939,20 @@ error lane's parked slice: the offending value as a normal `result/e<id>`
 at the recording seam with open request keys, legacy members retired,
 readers converted (test-system/redesign hunks named as held). RESET
 NEEDED will grow by its attributes.
+
+## 2026-09-23 ~05:50 local — RULED: the offending value's durable form is the value printer's rendering (blob = complete, entity text = capped, object only in SCI); default burned four cores re-arming every wrapper for each lane publication through it
+
+Error lane stopped at a representation question (`7ec67fab7`: the blob
+encoder keeps EDN but rejects atoms/functions/opaque objects). RULED
+option 1, precisely: the durable form of any result is what the value
+printer produces (transport law; renders never refuse) — blob = the
+printer's complete rendering, shown-text attribute = the capped rendering
+under the profile, the live object only as `result/e<id>`; opaque values
+render as the printer already renders them; no faithful-EDN attempt, no
+encoder extension, no supported-type list. Load finding: load 26 with
+three JVMs — the default JVM had averaged 400 % CPU since its reset
+because every lane fast run publishes its base through the live JVM and
+each publication re-arms all ~1,500 wrappers (`projection-executor` →
+`arm-var!`, thread sample `tmp/orchestrator/default-idle-burn/`); idle
+now at 0 %. This is slice 4's "re-arm only wrappers whose contract digest
+changed" — measured evidence for it.
