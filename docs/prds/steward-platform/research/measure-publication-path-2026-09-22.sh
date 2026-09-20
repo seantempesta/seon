@@ -1,0 +1,35 @@
+#!/bin/zsh
+# Measure the publication path from zero and through the hook's own command,
+# on a throwaway worktree at HEAD and an isolated operator root.
+# Usage: docs/prds/steward-platform/research/measure-publication-path-2026-09-22.sh [WORKTREE] [ROOT]
+# Evidence: the operator's per-phase lines (`elapsed-ms` is the COMPLETED phase's
+# wall-clock) and `init phase=lifecycle elapsed-ms=` per run. Recorded 2026-09-22
+# in docs/prds/steward-platform/plan/unsettled.md (14:00, 14:40, 15:10 blocks).
+set -eu
+REPO=$(git rev-parse --show-toplevel)
+WT=${1:-$REPO/tmp/head-wt}
+ROOT=${2:-$REPO/tmp/head-root}
+[ -d "$WT" ] || git -C "$REPO" worktree add -q "$WT" HEAD
+# The worktree's submodule directories are empty; the classpath needs the real vendored sources.
+if [ ! -L "$WT/reference-code" ]; then
+  find "$WT/reference-code" -mindepth 1 -maxdepth 1 -type d -empty -delete 2>/dev/null || true
+  rmdir "$WT/reference-code" 2>/dev/null || true
+  ln -s "$REPO/reference-code" "$WT/reference-code"
+fi
+rm -rf "$ROOT"; mkdir -p "$ROOT"
+cd "$WT"
+run() { local name=$1; shift; { time "$@"; } > "$ROOT/$name.log" 2>&1; echo "exit=$?" >> "$ROOT/$name.log"; grep -h "init phase=lifecycle elapsed-ms=\|start phase=lifecycle elapsed-ms=\|exit=" "$ROOT/$name.log" | sed "s/^/$name: /"; }
+run init-zero bin/seon --root "$ROOT" init --result-file "$ROOT/init-zero.edn"
+run fork      bin/seon --root "$ROOT" init head
+run start     bin/seon --root "$ROOT" start head
+# Case A: no change at all.
+run adopt-nochange bin/seon --root "$ROOT" init --dev head --changed src/my/note.clj
+# Case B: docstring-only edit in a non-core namespace.
+perl -0pi -e 's/^  "/  "(measured edit) /m' src/my/note.clj
+run adopt-noncore bin/seon --root "$ROOT" init --dev head --changed src/my/note.clj
+# Case C: docstring-only edit in a core namespace (inside the producer closure of seon.fn).
+perl -0pi -e 's/^  "/  "(measured edit) /m' src/seon/id.clj
+run adopt-core bin/seon --root "$ROOT" init --dev head --changed src/seon/id.clj
+bin/seon --root "$ROOT" down
+git -C "$WT" checkout -- src/my/note.clj src/seon/id.clj
+echo "phases:"; grep -h "elapsed-ms" "$ROOT"/adopt-*.log | sed -E 's/.*completed-phase "([^"]*)".*elapsed-ms ([0-9]+).*/\2\t\1/' | sort -rn | head -20
