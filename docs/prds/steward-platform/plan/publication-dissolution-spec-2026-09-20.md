@@ -71,6 +71,14 @@ publishes CHANGED files as same-identity upserts (`src/seon/cluster.clj`
    public declaration names, never bodies. Seven inference-dependent kondo
    finding classes are excluded (16 findings in the census).
 
+   **General closure rule (2026-09-21 ~01:00 UTC, after `54f2c65c1`):** the
+   invalidation closure is over EVERY declaration the graph records (public or
+   private; function, schema, test, namespace), keyed by the declaration's own
+   digest, through every stored edge (calls, references, requires/alias/refer,
+   test subject/reach). A finding class that depends on something no stored
+   edge covers is excluded and listed; the lane stops only at cross-owner or
+   storage/validation decisions.
+
 2. **Publish through the live JVM, never a fresh one.** When `default` (or
    any live cluster JVM of the root) is alive, the publication runs over its
    prepl (the same seam `init --dev` adoption uses), removing the 40–60 s
