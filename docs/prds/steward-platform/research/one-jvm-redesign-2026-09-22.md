@@ -1031,7 +1031,6 @@ namespace instead. This is the existing
 verification boundary, not a green source-suite claim. No test-system file or
 foreign session was changed.
 
-
 Item 1 after measurement: 48,982 ms end to end, versus 139,859 ms before.
 The published result carried the report identities for the three `my.note`
 functions and its file row. The only reload was `my.note`; the only changed
@@ -1082,3 +1081,67 @@ Item 1 exact UTF-8 source bytes (diff payload, including line endings):
 | `src/seon/issue.clj` | 1411 | 2372 | +961 |
 
 Seams: `fn/report-identities` reads the report’s touched entities in before/after; `published-index-rows` selects those lookup refs; `program/exact-replacement-tx` remains the row writer; `source/changed-identities` uses native history for missed publications; `issue/adopt-tx` receives an identity scope; Clojure `require :reload`, `reload-order`, existing `instrument/apply!`, and SCI `acquire!` remain the execution owners. No schema attribute was added or removed. The explicit require of cluster/source/fn/issue exited zero. The orchestrator still owes the cold gate and its measurement-script row.
+
+### Item 1 landing and item 2 decision
+
+Item 1 landed as `245f693f6`. Retained evidence:
+[before](one-jvm-slice4-before-2026-09-22.edn),
+[after](one-jvm-slice4-item1-after-2026-09-22.edn),
+[no change](one-jvm-slice4-item1-nochange-2026-09-22.edn).
+The final fast snapshot at `926acd2e0` used a published graph 29 commits behind
+HEAD. Run `b4ab7f05f54c` recorded three executed tests, five assertions,
+zero failures and two errors: namespace/dependent selection passed;
+wrapper preservation could not compile a loaded function contract; the report
+test was refused by the fixture's one-argument `published-index-rows` contract.
+The wrapper compilation error's offending function was not printed, so its
+cause is not attributed. Its earlier pass and live wrapper evidence do not
+turn this latest run green. [Full fast output](one-jvm-slice4-item1-fast-2026-09-22.txt).
+
+The assignment permits stopping at this coherent seam for an item 2 design
+decision. The decision is whether activation's stored membership remains a boot
+contract or is deleted as duplicated program state. `activation-requirements`
+(`src/seon/cluster.clj:1258`) enumerates every function, schema and config dial;
+`activation-seal-tx` (`src/seon/cluster/source.clj:272`) stores those memberships
+again for each changed digest. `require-activation!` (`src/seon/cluster.clj:1649`)
+then requires that stored closure before boot. Deleting it is consequently a
+boot/schema contract change, not just removing a slow publication call. No item 2
+production edit has been made. Three options, priced by implementation scope:
+
+1. **Keep the boot contract and transact only its membership difference
+   (recommended, smallest scope).** Use publication report identities to update
+   the existing closure; a changed schema/config input derives the affected
+   requirements again. Cost: one owned implementation commit plus cold/changed/
+   deleted-member regressions and measurement; no schema reset. Guarantee:
+   preserve the current declared missing-member refusal. Tradeoff: retain the
+   stored membership and its maintenance rather than dissolve that duplication.
+2. **Remove the complete executable roster, retain declared boot prerequisites.**
+   Boot checks its required entry points, schema/config and lookup facts directly;
+   the database writer continues enforcing deletion integrity. Cost: coordinated
+   activation schema, publisher and boot edits, replacement boot regressions and
+   a reset. Guarantee: required boot inputs and surviving referrers remain checked.
+   Tradeoff: no separate historical roster detects deletion of an unreferenced,
+   non-boot function. This is a deliberate narrowing of the current boot promise.
+3. **Remove the entire stored activation closure.** Derive boot requirements from
+   the published database and packaged declarations at cold acquisition. Cost:
+   the widest schema/boot/caller cut, reset, and cold admission proof. Guarantee:
+   boot checks its current declared requirements without another stored roster.
+   Tradeoff: remove the historical publication-membership check entirely and pay
+   the complete derivation at cold boot; this does not itself optimize the writer.
+
+All options still need the straightforward item 2 fixes: remove the publisher's
+duplicate `db/deletion-error` scan (the writer already validates affected
+identities through reverse AVET seeks), restrict unresolved calls to indexed
+callee namespaces, and compare findings only for changed files. The protected
+database writer's whole-program arity query remains a separate O(program) cost;
+it must use affected declarations and reverse callers to meet the target. This
+lane has not changed `db.clj`, schema ownership, or any test-system implementation.
+The projection owner landed its changes during the final fast iteration; the
+49-second live measurement predates that landing and must not be presented as
+its performance. Item 3's core-fault message repair remains pending after item 2.
+
+Cleanup at the item 1 stop: the own-root operator reported zero process records,
+no JVMs and a free store lock. The completed fast and explicit-load sessions
+were reaped; the scratch root/source archive was removed without following its
+symlinks. Final explicit namespace load exited zero. The documentation hook
+reported two pre-existing Datahike gitlink citation mismatches in the wave-3a
+and wave-3bc plan documents; those foreign plans were not edited.

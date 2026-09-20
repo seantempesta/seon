@@ -1,0 +1,105 @@
+bin/test: snapshot differences from HEAD 926acd2e0aee1e72fb4a17065099ff32053bdee1:
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=9
+bin/test: overlay graph ca359707d66214bfbb12353e877fa8411584461717f643007e26dcbb42876e19 age= 29 commits behind HEAD
+bin/test: PHASE test-slot elapsed-seconds=0
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/test-runs/run.5wEXAg
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-20T22:43:48.037544Z pid= 7806 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-20T22:43:53.345267Z worker= test-fast mode= :panic namespaces= 1 program-namespaces= 109 registered= 1477 instrumented= 1477 program-armable= 1474
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-20T22:44:09.263457Z TIER named 3 tests
+bin/test: 2026-09-20T22:44:09.265975Z BEGIN namespace seon.cluster.publication-delta-test
+
+Testing seon.cluster.publication-delta-test
+bin/test: 2026-09-20T22:44:09.411587Z BEGIN test seon.cluster.publication-delta-test/changed-declarations-reload-their-namespace-and-dependents
+bin/test: 2026-09-20T22:44:15.681521Z END test seon.cluster.publication-delta-test/changed-declarations-reload-their-namespace-and-dependents
+bin/test: 2026-09-20T22:44:15.681932Z BEGIN test seon.cluster.publication-delta-test/reloading-one-file-preserves-unrelated-wrappers
+
+ERROR in (reloading-one-file-preserves-unrelated-wrappers) (instrument.clj:1019)
+Uncaught exception, not in assertion.
+expected: nil
+actual: clojure.lang.ExceptionInfo: The loaded function contract cannot compile.
+    at [seon.instrument$apply_BANG_$fn__107985 invoke instrument.clj 1019]
+    at [seon.instrument$apply_BANG_ invokeStatic instrument.clj 1001]
+    at [seon.instrument$apply_BANG_ invoke instrument.clj 929]
+    at [clojure.lang.AFn applyToHelper AFn.java 154]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$compiled_wrapper$fn__107899$fn__107910 doInvoke instrument.clj 778]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__67079$fn__67111 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$compiled_wrapper$fn__107899$fn__107922 doInvoke instrument.clj 813]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107944$fn__107947 doInvoke instrument.clj 891]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 411]
+    at [seon.cluster.publication_delta_test$fn__125721$fn__125722$fn__125723$arm__125724$fn__125725 invoke publication_delta_test.clj 83]
+    at [seon.schema$call_with_projection invokeStatic schema.clj 1139]
+    at [seon.schema$call_with_projection invoke schema.clj 1133]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$compiled_wrapper$fn__107899$fn__107910 doInvoke instrument.clj 778]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+bin/test: 2026-09-20T22:44:17.013396Z END test seon.cluster.publication-delta-test/reloading-one-file-preserves-unrelated-wrappers
+bin/test: 2026-09-20T22:44:17.013538Z BEGIN test seon.cluster.publication-delta-test/transaction-report-identities-select-only-changed-program-rows
+
+ERROR in (transaction-report-identities-select-only-changed-program-rows) (instrument.clj:768)
+Uncaught exception, not in assertion.
+expected: nil
+actual: clojure.lang.ExceptionInfo: seon.fn/published-index-rows refused argument count at []: expected the declared arglists, got an argument count of 2. Fix: Call one of the declared arglists. Called from seon.cluster.publication-delta-test (publication_delta_test.clj:25).
+    at [seon.instrument$compiled_wrapper$fn__107899$reject_BANG___107906 invoke instrument.clj 768]
+    at [seon.instrument$compiled_wrapper$fn__107899$fn__107908 invoke instrument.clj 775]
+    at [malli.core$__EQ__GT$reify$reify__67079$fn__67111 doInvoke core.cljc 2212]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$compiled_wrapper$fn__107899$fn__107922 doInvoke instrument.clj 813]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107944$fn__107947 doInvoke instrument.clj 891]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.lang.AFunction$1 doInvoke AFunction.java 33]
+    at [clojure.lang.RestFn invoke RestFn.java 424]
+    at [seon.cluster.publication_delta_test$fn__125665$fn__125666 invoke publication_delta_test.clj 25]
+    at [seon.test_support$run_database_body$fn__125624 invoke test_support.clj 914]
+    at [seon.schema$call_with_projection_state invokeStatic schema.clj 1148]
+    at [seon.schema$call_with_projection_state invoke schema.clj 1141]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$compiled_wrapper$fn__107899$fn__107910 doInvoke instrument.clj 778]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__67079$fn__67111 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$compiled_wrapper$fn__107899$fn__107922 doInvoke instrument.clj 813]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+bin/test: 2026-09-20T22:44:20.084458Z END test seon.cluster.publication-delta-test/transaction-report-identities-select-only-changed-program-rows
+bin/test: 2026-09-20T22:44:20.084648Z END namespace seon.cluster.publication-delta-test
+
+Ran 3 tests containing 5 assertions.
+0 failures, 2 errors.
+{:seon.test/sym seon.cluster.publication-delta-test/changed-declarations-reload-their-namespace-and-dependents, :seon.test.run/basis-t 536870921, :seon.test.run/program-digest "d640aefad13c9b088134c95345f1734df5cf474d998978760477ab2116f95712", :seon.test.run/input-digest "f2ab59cad2a31c2668eb639bb8e7bac4ed95868a50a9c692dc9e0efdeaf877ed"}
+{:seon.test/sym seon.cluster.publication-delta-test/reloading-one-file-preserves-unrelated-wrappers, :seon.test.run/basis-t 536870921, :seon.test.run/program-digest "d640aefad13c9b088134c95345f1734df5cf474d998978760477ab2116f95712", :seon.test.run/input-digest "f2ab59cad2a31c2668eb639bb8e7bac4ed95868a50a9c692dc9e0efdeaf877ed"}
+{:seon.test/sym seon.cluster.publication-delta-test/transaction-report-identities-select-only-changed-program-rows, :seon.test.run/basis-t 536870921, :seon.test.run/program-digest "d640aefad13c9b088134c95345f1734df5cf474d998978760477ab2116f95712", :seon.test.run/input-digest "f2ab59cad2a31c2668eb639bb8e7bac4ed95868a50a9c692dc9e0efdeaf877ed"}
+
+Recorded 3 executed, 0 unchanged; 5 assertions.
+0 failures, 2 errors.
+bin/test-fast: 3 executed, 0 unchanged; run b4ab7f05f54c

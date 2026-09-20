@@ -95,3 +95,17 @@ can reduce submitted datoms but cannot remove that whole-program query
 without changing the database writer owned by the concurrent error lane.
 Neither boundary is described as acceptable latency, and no timeout was
 raised to hide it.
+
+## Slice 4 item 1 — 2026-09-22 redesign assignment
+
+Transaction-report adoption landed at `245f693f6`; the own-root live docstring
+edit fell from 139,859 ms to 48,982 ms. Only the edited namespace reloaded and
+only its three fresh Clojure roots received new wrappers. The remaining
+activation/sealing and final deletion-comparison span was 8,264 ms. The publisher
+still derives and writes complete activation membership, while boot requires
+that stored closure. Keeping that contract with incremental membership versus
+removing the duplicate membership is the explicit decision at the assignment's
+permitted item 1 stop. The three scoped options and retained before/after
+evidence are in the
+[redesign landing note](../../prds/steward-platform/research/one-jvm-redesign-2026-09-22.md).
+No latency target or cold gate pass is claimed.
