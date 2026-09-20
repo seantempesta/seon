@@ -13,6 +13,12 @@ the existing SCI result binding, a blob reference and printer-produced shown
 text. The constructor's returned error map must also be its stored map.
 The four retired attributes must be removed with their readers in one slice.
 
+**Superseded construction requirement:** the later 11:35 and 12:05 rulings
+keep the constructor pure and its raw object in flight. Result preparation
+belongs to `seon.error/prepare`, driven by explicit request keys. The older
+constructor-input dependency below is resolved by that ruling; the held
+reader retirement remains pending.
+
 The error-family lane's read-only probe finds active consumers in paths
 explicitly held by bridge step 2 and gate restructure:
 
@@ -70,3 +76,24 @@ the actual producer's inputs. A dynamic binding, global connection lookup,
 or deferred writer-side enrichment would not satisfy the ruled constructor
 guarantee and the carried-input law. No such mechanism was added. The
 landing note records three scope choices for this remaining decision.
+
+## Recording callers and selected-overlay dependency — 2026-09-22
+
+One deferred caller conversion is authorized and required when publication
+releases `src/seon/cluster.clj`: its fault-committer block at approximately
+3216–3233 must supply `:seon.db/connection`, `:seon.render/profile` and the
+available projection to `seon.error/prepare`, then remove its size-gated
+`blob/stage!`. Preserve the blob owner's publication/transaction guarantee.
+Do not modify that held block in the error lane. The evaluation recorder is
+the currently authorized caller; the pure constructor remains unchanged.
+
+Before any new implementation, the selected fast baseline exits 1 while
+compiling `seon/error.clj:279:41`: `No such var:
+schema.datahike/database-attributes-core-in`. No tests execute. The restored
+error owner already calls that Var. `git show HEAD:src/seon/schema/datahike.clj`
+has no definition; the held working-tree diff adds it. Status is `MM` for
+that schema owner. This is a source-verified dependency on bridge step 2,
+not a test assertion failure or evidence against the recording design.
+The required overlay cannot include held changes or revert restored callers
+to the schema implementation being retired. Resume the selected baseline
+after that dependency lands; no new design choice is needed.

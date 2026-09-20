@@ -2868,3 +2868,58 @@ Load verification before this documentation commit: `clojure -M -e
 "(require 'seon.error 'seon.sci.eval 'seon.print) (println :loads)"`
 exited 0 and printed `:loads` against the current shared tree. This verifies
 loading only; it is not a test tally or an isolated HEAD proof.
+
+## 2026-09-22 open-request accretion — baseline reaches held schema dependency
+
+Read the 12:05 ruling end to end. It resolves the cluster-file stop: requests
+carrying explicit storage/render/context inputs take the new preparation
+path; other callers keep the existing behavior until the held committer is
+converted. The pure constructor stays unchanged.
+
+Queried the merged canonical population through
+`seon.schema.edn/packaged-forms` in one foreground JVM. Existing request keys
+are `:seon.db/connection`, `:seon.render/profile`, and `:seon.sci.eval/ctx`.
+The query for names `shown`, `result-id`, `ctx`, `profile` and the evaluation
+identity returned `:seon.eval/shown` (string), `:seon.cluster.eval/id`
+(nonempty string with entity identity), and no `result-id` key. An offending
+result identity must not reuse the evaluation entity's unique identity
+attribute. No new attributes were declared before the verification boundary.
+
+Baseline command, before new production edits:
+
+```sh
+bin/test-fast --paths src/seon/error.clj src/seon/sci/eval.clj src/seon/print.cljc resources/seon/schemas/seon.error.edn test/seon/error_test.clj -- seon.error-test
+```
+
+Exit **1**, before test execution; **no test tally available**. Exact refusal:
+
+```text
+Syntax error compiling at (seon/error.clj:279:41).
+No such var: schema.datahike/database-attributes-core-in
+```
+
+Verified the boundary: the restored `error.clj` calls that Var, HEAD's
+`src/seon/schema/datahike.clj` has no such definition, and the held working
+diff adds it. That file is `MM`; `src/seon/schema/internal.cljc` is also held
+and dirty. The overlay correctly excludes foreign changes. No working-tree
+test, worktree, held-file edit or rewrite of the restored caller was used to
+work around this dependency. No new production changes were made.
+
+The existing [issue](../../../seon/issues/error-result-retirement-crosses-held-readers.md)
+now records both this precise dependency and the requested single follow-up
+for the fault-committer block: supply the request keys and drop size-gated
+staging after its owner releases it. The constructor design gate is resolved;
+no further design ruling is requested. All four new canonical regressions
+remain owed. **RESET NEEDED:** no new attributes in this resume.
+
+Cold command owed after implementation and a successful fast run (not run by
+this lane; extend paths if the implementation adds a dedicated test file):
+
+```sh
+bin/test --paths src/seon/error.clj src/seon/sci/eval.clj src/seon/print.cljc resources/seon/schemas/seon.error.edn test/seon/error_test.clj -- seon.error-test seon.sci.eval-test
+```
+
+Before the documentation-only commit, the required shared-tree namespace
+load command exited 0 and printed `:loads`. It includes the held schema
+edits, so it does not supersede the selected-overlay refusal above. Files
+touched in this resume: this landing note and the linked existing issue.
