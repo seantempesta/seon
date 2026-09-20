@@ -5990,3 +5990,24 @@ zero. Third slot → `kind-sweep-sci-program` resumed (my.program option 1;
 `seon.call-preparation` assigned — the six db reds). Editing lanes:
 publication, step 2, sci-program; gate-restructure resumes at the next
 free slot; the ScheduleWakeup loop stopped (owner present).
+
+## 2026-09-22 ~09:40 local — owner: "facet" was never approved; explain in Clojure/library terms only
+
+Owner rulings/directions: (1) the word "facet" (my coinage in the
+error-conversion PRD) is not approved vocabulary — from now on: "error
+map" for the value and "error schema" for its Malli map schema
+`[:and :seon.error/base [:map …]]`; a retirement pass (sol low, after the
+current lanes land: 46 code/resource/test files with the word, mostly
+comments/docstrings/test-local keywords such as `:facet-member`,
+`:facet-validators`; 166 docs) restates every mention; no stored attribute
+or schema key contains the word (checked). (2) Every explanation from
+here uses Clojure, Malli, Datahike, SCI and core.async terms only.
+(3) The offending-value question: an arbitrary Clojure value has no
+`:db/valueType`; it is stored as `pr-str` EDN in `:seon.error/data-edn`
+(bounded; blob when large) — that stands. What smells is a map key the
+writer silently drops (`:seon.error/offending` optional in memory);
+recommendation put to the owner: the error-map constructor in
+`seon.error.refusal` serializes the value into `data-edn`/blob at
+construction so the in-memory map and the stored entity are the same map;
+retire the optional in-memory key and the writer's skip rule. Awaiting the
+owner's word before changing the constructor.
