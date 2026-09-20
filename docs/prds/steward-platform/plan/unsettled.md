@@ -5877,3 +5877,18 @@ same tree at boot; nothing bulky rides the `-e` form. Reset re-run
 (`tmp/orchestrator/default-reset-2026-09-21c.log`). Regression owed to the
 publication lane at resume: the launch form's byte size is bounded and
 asserted; the guard's digests are a comparison the child performs.
+
+## 2026-09-21 ~22:00 UTC — default UP; adopt refused by the loaded-producer guard's two-sided digest; fixed; reset re-run
+
+Third reset: republish 132 s, refork 10 s, start 15 s — default alive
+(pid 55995); adopt REFUSED "the live host's loaded producers do not match
+the requested toolchain" for a host that had just booted from the same
+tree. Cause (`3ac00fb8e`): `record-loaded-producers!` digested
+`(select-keys before (keys dependencies))` while `require-loaded-producers!`
+digested the full `toolchain-dependencies` map — different maps by
+construction. Fix (`d8921fbd4`): one private `loaded-producer-digest` used
+by both sides. Reset re-run (`tmp/orchestrator/default-reset-2026-09-21d.log`).
+Three orchestrator fixes tonight while lanes are down (write-schema rule
+`2d0e9b17e`, boot form `2d0e9b17e`→operator `…`, guard `d8921fbd4`) are
+the publication/error lanes' review items at resume; each is small and
+has its evidence here.
