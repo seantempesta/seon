@@ -1145,3 +1145,63 @@ were reaped; the scratch root/source archive was removed without following its
 symlinks. Final explicit namespace load exited zero. The documentation hook
 reported two pre-existing Datahike gitlink citation mismatches in the wave-3a
 and wave-3bc plan documents; those foreign plans were not edited.
+
+
+### Activation ruling: current-database derivation boundary
+
+The orchestrator selected option 3 at `ed6540c17`: remove the closure, with
+one-query boot derivation, and stop before production edits if the required
+facts cannot be derived that way. No production or test edits were made in
+this follow-up. The source inspection found the precise distinction:
+
+- Current callable functions and functions with no incoming calls/references
+  are queryable from current program facts. The old boot check does not ask
+  whether a function is unreferenced.
+- `closure-fact-missing` (`src/seon/cluster.clj:1583–1646`) instead subtracts
+  current identities from the stored expected identities. It also asks whether
+  every recorded initialization lookup resolves (`:1628–1636`).
+- Those expected lookups are obtained by `derive-activation` from
+  `config/default-population` (`src/seon/cluster.clj:1488–1495`). That function
+  reads and admits the shipped file (`src/seon/config.clj:446–463`), rather
+  than querying a durable declaration of initialization requirements.
+- Config application transacts actual desired entities
+  (`src/seon/config.clj:728–769`). Its digest covers effective config, not the
+  initialization rows (`:758–759`). After both an initialization referrer and
+  its target have been removed, their expected lookup has no current datom
+  outside the closure. The same applies to a removed unreferenced function.
+
+Thus two current databases with identical non-closure facts can have different
+answers from the old check solely because their closures remember different
+expectations. No query of those identical remaining facts can reproduce both
+answers. Native history could recover former names, but does not distinguish
+intentional removal from a missing requirement; it is not the requested query
+of the current published value. Reading stored Clojure/EDN text and rebuilding
+requirements is also not that query.
+
+Option 3's deletion remains the ruling. Its permitted deletion of the old check
+can remove this historical missing-name diagnostic, with the reason above;
+there is then no equivalent boot derivation to time. A query reporting current
+unresolved references or unreferenced functions is feasible, but has different
+semantics. The stop is to identify which of those current-fact questions the
+mandatory one-query boot derivation is meant to answer, not to preserve or
+incrementally maintain the banned roster. No replacement cache or declaration
+was proposed or added.
+
+The attempted own-root cold baseline failed after 115,988 ms, before any
+publication completed: `Keyword cannot be cast to Symbol` in
+`seon.schema/projection-registry:478`, via `fn/add-contract-facts:2473`.
+The trace enters Clojure `merge` and `PersistentTreeMap` comparison. This is
+separate from the derivation decision, not the reason for stopping. The
+[complete operator output](one-jvm-slice4-activation-before-2026-09-23.txt)
+retains the refusal and progress phases. Analysis of 390 files was 29,644 ms;
+schema population was 5,072 ms; preparation before contract projection was
+15,346 ms. No successful before/after or one-query timing is claimed.
+
+The own-root `down` reported zero records and a free store lock; its completed
+launcher was reaped and the root removed without following symlinks. Foreign
+edits in `src/seon/test.clj`, `src/seon/test/runner.clj`, and their tests were
+preserved. No default operation, fast test or cold gate ran in this follow-up.
+
+Explicit require of `seon.cluster`, `seon.cluster.source`, `seon.fn` and
+`seon.issue` exited zero after the failed cold publication. The failure is
+projection construction during population, not namespace loading.
