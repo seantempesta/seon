@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, dev, mcp, error, wave/dev-mcp, wave/error-class-contract, class/tools]
 ---
@@ -40,3 +40,17 @@ the MCP projection producers in `src/seon/cluster.clj` to declared facets via
 `seon.error.refusal`, and one regression: a thrown `ex-info` in jvm mode
 projects to a value carrying message, exception class and the first
 first-party frame. The kind-free fallback must still name the offending class.
+
+## Resolved — 2026-09-21 ~00:45 UTC
+
+Fixed by the turn/cluster sweep in `510a9236d` (facets + two armed
+regressions). In-place adoption of the change into default was refused
+twice (a lifecycle lock held by a lane's short "source build", then the
+30 s prepl silence bound in the eventless "source build" phase — the
+publication-dissolution lane's item 2 owns that bound); the namespace was
+hot-reloaded in default (`(require 'seon.cluster :reload)`), and a thrown
+`ex-info` now projects message, exception class, frame, layer, operation
+and `at`. Follow-up for the sweep: the reported frame is the projection
+site (`seon.cluster/mcp-io-prepl` :511), not the throw's first first-party
+frame; the legacy `:seon.error/diagnostic-*` member names remain until the
+sweep's family conversion.

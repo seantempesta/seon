@@ -5129,3 +5129,16 @@ unchanged; legacy issue-completion/failure readers migrate to recorded
 results). Adopting `510a9236d` into default in place
 (`tmp/orchestrator/adopt-mcp-fix-2026-09-21.log`). Editing lanes: step 1,
 publication, results-reuse.
+
+## 2026-09-21 ~00:45 UTC — MCP exceptions readable again (hot reload); adoption's 30 s silence bound hit twice
+
+`bin/seon init --dev default --changed src/seon/cluster.clj` was refused
+by a lifecycle lock (a lane's short "source build" holder, pid 83260), then
+by "the prepl response went silent for 30000 ms in phase source build" —
+the eventless-phase bound (tools item 2; the publication lane's item 2
+owns it). Applied the MCP fix by hot reload in default; a thrown
+evaluation now projects message/class/frame/layer/operation. Issue
+`mcp-exception-projection-is-opaque-after-the-kind-removal` resolved with
+the frame-site follow-up left to the sweep. Default's adopted source commit
+still predates `510a9236d` (loaded behaviour is current, program facts are
+not) until the publication lane's incremental path adopts it.
