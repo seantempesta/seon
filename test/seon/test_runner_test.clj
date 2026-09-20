@@ -868,7 +868,10 @@
 (def ^:private launcher-source-copy
   (str "cp \"$origin/src/seon/fs.clj\" src/seon/fs.clj\n"
        "mkdir -p src/seon/test\n"
-       "cp -R \"$origin/src/seon/test/.\" src/seon/test/\n"))
+       "cp -R \"$origin/src/seon/test/.\" src/seon/test/\n"
+       "mkdir -p src/seon/operator script\n"
+       "cp -R \"$origin/src/seon/operator/.\" src/seon/operator/\n"
+       "cp -R \"$origin/script/.\" script/\n"))
 
 (defn- publish-fixture-head! [checkout]
   (let [directory (io/file checkout "target/test-published-bases" fake-cache-digest)
@@ -894,13 +897,13 @@
                     "cd \"$checkout\"\n"
                     "cp -R \"$origin/bin/.\" bin/\n"
                     launcher-source-copy
-                    "printf '{:paths [\"src\"]}\\n' > bb.edn\n"
+                    "printf '{:paths [\"src\" \"script\"]}\\n' > bb.edn\n"
                     "printf 'tmp/\\ntarget/\\n' > .gitignore\n"
                     "touch docs/fixture test/fixture_test.clj .agents/skills/fixture .clj-kondo/fixture\n"
                     "ln -s .agents/skills seon-skills\n"
                     "ln -s ../.agents/skills .claude/skills\n"
                     "ln -s \"$origin/reference-code\" reference-code\n"
-                    "git init -q\ngit add -- docs bin src test bb.edn .gitignore .agents .claude .clj-kondo seon-skills reference-code\n"
+                    "git init -q\ngit add -- docs bin src script test bb.edn .gitignore .agents .claude .clj-kondo seon-skills reference-code\n"
                     "git -c user.name=\"$(git -C \"$origin\" config user.name)\" -c user.email=\"$(git -C \"$origin\" config user.email)\" commit -qm baseline\n")
         _ (.mkdirs fixture-root)
         child (.start (doto (ProcessBuilder. ^java.util.List

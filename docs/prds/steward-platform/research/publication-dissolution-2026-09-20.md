@@ -1397,3 +1397,34 @@ of optionality. Coordination was requested from the orchestrator; this lane
 has not edited that held file, weakened validation, or launched another known
 failing suite. The Babashka publication adapters load and `bash -n bin/test`
 passes. Work continues on the common-publisher slice while that owner lands.
+
+
+### Common publisher adapters completed
+
+The common-publisher slice now removes the retained-base compatibility helper
+and its obsolete seed-selection test as well as the duplicate build paths.
+The source publisher preserves the scalar caller's transaction process metadata
+and explicitly declares its optional expected commit. The cache's retained
+store is an export of the current publication, never another population.
+The operator's complete and changed-file requests call the same refresh owner.
+
+Compilation of the common owner, source owner, cache, runner and both runner
+test namespaces passed in one JVM after the final source edits; native lint
+reported zero errors, and the shell and Babashka load checks passed. These
+are load checks, **not a claim that the pending fast adapter tests passed**.
+The bridge's optional-member admission remains a required upstream change
+before the canonical population regression and final measurements can run.
+No worktree was created on this resumption.
+
+The reproducible phase extraction command is:
+
+```sh
+bb docs/prds/steward-platform/research/publication-dissolution-phases-2026-09-20.clj tmp/publication-dissolution/scratch-live-init.log tmp/publication-dissolution/scratch-one-file-init.log
+```
+
+It reports each measured phase and sums the former warning-event time without
+reprinting warning rosters. Final new logs will be passed through that same
+reader. The orchestrator's requested integration checkpoint, after the final
+publication proof, is exactly `bin/test`, `bin/test` again (reuse), then
+`bin/test --platform`. The separately named long integration namespace still
+needs `bin/test seon.test-runner-integration-test`; it is outside platform.

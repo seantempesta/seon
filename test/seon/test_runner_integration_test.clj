@@ -25,6 +25,24 @@
            [java.lang ProcessHandle]
            [java.util.concurrent CountDownLatch TimeUnit]))
 
+(defn- assert-one-terminal-error!
+  [case-name result expected-kind]
+  (is (= {::runner/test-count 1
+          ::runner/pass-count 0
+          ::runner/fail-count 0
+          ::runner/error-count 1}
+         (::runner/task-summary result))
+      (str case-name " contributes one terminal task to the total tally"))
+  (is (= 1 (count (::runner/task-results result))))
+  (is (= (symbol "seon.exchange-test" case-name)
+         (:seon.test/sym (first (::runner/task-results result)))))
+  (is (= expected-kind
+         (get-in result [::runner/worker-exchange-result
+                         :seon.error/kind])))
+  (is (= [(symbol "seon.exchange-test" case-name)]
+         (get-in result [::runner/worker-exchange-result
+                         ::runner/task-symbols]))))
+
 (deftest ^{:seon.test/long "Orchestrator integration: owns child processes; excluded from ordinary lane runner selection.", :seon.test/long-ms 1800000} dependency-configuration-excludes-first-party-source
   (let [root (doto (io/file (deref (var fixture/project-root)) "tmp" (str "dependency-inputs-" (random-uuid))) .mkdirs)
         log (io/file root "git.log")
@@ -142,7 +160,7 @@
                             (* 1000 test-support/event-backstop-seconds)
                             ::task-backstop)]
           (is (not= ::task-backstop result))
-          ((deref (var fixture/assert-one-terminal-error!)) "killed" result
+          (assert-one-terminal-error! "killed" result
                                       ::runner/worker-exited)))
       (finally
         (.close watcher)
@@ -158,7 +176,7 @@
               "os._exit(17)\n"))]
     (try
       (let [result ((deref (var fixture/execute-injected-task!)) worker ((deref (var fixture/exchange-task)) "re-arm-death"))]
-        ((deref (var fixture/assert-one-terminal-error!)) "re-arm-death" result ::runner/re-arm-failed)
+        (assert-one-terminal-error! "re-arm-death" result ::runner/re-arm-failed)
         (is (= 17 (get-in result [::runner/worker-exchange-result
                                   ::runner/worker-exit])))
         (is (= :worker-exchange
@@ -176,7 +194,7 @@
             test-support/event-backstop-seconds TimeUnit/SECONDS)
       (let [result ((deref (var fixture/execute-injected-task!)) worker
                                            ((deref (var fixture/exchange-task)) "write-failure"))]
-        ((deref (var fixture/assert-one-terminal-error!)) "write-failure" result
+        (assert-one-terminal-error! "write-failure" result
                                     ::runner/worker-write-failure))
       (finally
         ((deref (var fixture/stop-injected-worker!)) worker)))))
@@ -195,7 +213,7 @@
             (with-redefs-fn
               {#'runner/task-exchange-bound-seconds (constantly 1)}
               #((deref (var fixture/execute-injected-task!)) worker ((deref (var fixture/exchange-task)) "bounded")))]
-        ((deref (var fixture/assert-one-terminal-error!)) "bounded" result
+        (assert-one-terminal-error! "bounded" result
                                     ::runner/worker-exchange-bound)
         (is (false? (.isAlive ^Process (::runner/worker-process worker)))
             "the bounded worker is retired before another dispatch"))
@@ -1185,7 +1203,7 @@
              "cd \"$fixture\"\n"
              "cp -R \"$origin/bin/.\" bin/\n"
              (deref (var fixture/launcher-source-copy))
-             "printf '{:paths [\"src\"]}\\n' > bb.edn\n"
+             "printf '{:paths [\"src\" \"script\"]}\\n' > bb.edn\n"
              "printf 'tmp/\\ntarget/\\n' > .gitignore\n"
              "printf 'base\\n' > src/owned.txt\n"
              "printf 'base\\n' > src/deleted.txt\n"
@@ -1195,7 +1213,7 @@
              "ln -s ../.agents/skills .claude/skills\n"
              "ln -s \"$origin/reference-code\" reference-code\n"
              "git init -q\n"
-             "git add -- bin src test bb.edn .gitignore .agents .claude .clj-kondo seon-skills reference-code\n"
+             "git add -- bin src script test bb.edn .gitignore .agents .claude .clj-kondo seon-skills reference-code\n"
              "git -c user.name=\"$(git -C \"$origin\" config user.name)\" -c user.email=\"$(git -C \"$origin\" config user.email)\" commit -qm baseline\n")
                    "fixture-setup" (.getPath (deref (var fixture/project-root)))
                    (.getPath (io/file root "checkout"))])]

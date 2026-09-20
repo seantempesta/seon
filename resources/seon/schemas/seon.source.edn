@@ -91,6 +91,8 @@
               :publish-request
               [:map
                [:seon.fn/root {:optional true} :seon.fn/root]
+               [:seon.source/expected-commit-id {:optional true} :seon.source/expected-commit-id]
+               [:seon.db/process {:optional true} :seon.db/ref]
                [:seon.store/store :seon.store/store]
                [:seon.source/digest :seon.source/digest]
                [:seon.source/populate :seon.source/populate]

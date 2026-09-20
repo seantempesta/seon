@@ -54,14 +54,10 @@
   (delay (requiring-resolve 'seon.cluster/start!)))
 (defonce ^:private cluster-stop!
   (delay (requiring-resolve 'seon.cluster/stop!)))
-(defonce ^:private cluster-refresh-source!
-  (delay (requiring-resolve 'seon.cluster/refresh-source!)))
-(defonce ^:private cluster-source-artifact-file
-  (delay (requiring-resolve 'seon.cluster/source-artifact-file)))
+(defonce ^:private cluster-publication-base!
+  (delay (requiring-resolve 'seon.cluster/publication-base!)))
 (defonce ^:private cluster-source-progress
   (delay (requiring-resolve 'seon.cluster/*source-progress!*)))
-(defonce ^:private export-reidentify!
-  (delay (requiring-resolve 'seon.cluster.export/reidentify!)))
 
 (def var-generator
   "Finite representatives for the closed host/SCI Var representation sum."
@@ -4808,7 +4804,7 @@
                         namespace-names))))
 
 (defn -main
-  "Run the coordinator, publish its full or incremental base, or run a worker."
+  "Run the coordinator, export the common publication, or run a worker."
   {:malli/schema [:=> [:cat [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics.", :gen/elements [[]]} :string]] :nil]}
   [& arguments]
   (case (first arguments)
@@ -4816,48 +4812,13 @@
     (worker-main! (second arguments))
 
     "--prepare-base"
-    (let [root (.getCanonicalPath (io/file (second arguments)))]
-      (.mkdirs (io/file root))
-      (let [expected (.getCanonicalFile (io/file "src/seon/fn.clj"))
-            actual (.getCanonicalFile (io/file (.toURI (io/resource "seon/fn.clj"))))]
-        (when-not (= expected actual)
-          (throw (ex-info "Publication classpath does not name its snapshot."
-                          {::expected (str expected) ::actual (str actual)}))))
-      ;; A cloned compatible base arrives with the seed's store identity; the
-      ;; existing export owner reidentifies the COPY before it is opened.
-      ;; `refresh-source!` alone decides whether a named change is safe to
-      ;; upsert or requires its complete build.
-      (let [changed-paths (some-> (nth arguments 2 nil) edn/read-string)]
-        (when changed-paths
-          (@export-reidentify! (str (io/file root "data" "store"))))
-        (with-bindings {@cluster-source-progress #(println "bin/test: SOURCE" %)}
-          (if changed-paths
-            (@cluster-refresh-source! root changed-paths)
-            (@cluster-refresh-source! root))))
-      (let [held-store (store/open-store!
-                        {:seon.store/dir (str (io/file root "data" "store"))})]
-        (try
-          (let [database (source/database held-store
-                           (:seon.source/commit-id (source/current held-store)))
-                database (vary-meta database assoc :seon.schema/projection
-                                    (schema/projection-from-database database))
-                captured (provenance database)]
-            (when (contains? captured :seon.test.run/unavailable)
-              (throw (ex-info (:seon.error/message captured) captured)))
-            (spit (io/file root "provenance.edn")
-                  (pr-str (select-keys captured
-                                      [:seon.test.run/program-digest
-                                       :seon.test.run/basis-t
-                                       :seon.test.run/branch]))))
-          (finally (store/release-store! held-store))))
-      ;; The completed artifact is authoritative for full AND incremental
-      ;; publication; the in-memory analysis cache only covers full builds.
-      (let [artifact (edn/read-string (slurp (@cluster-source-artifact-file root)))
-            manifest (:seon.fn/manifest artifact)]
-        (when-not (seq (:seon.fn.manifest/artifacts manifest))
-          (throw (ex-info "Publication produced no program manifest." {::root root})))
-        (spit (io/file root "manifest.edn") (pr-str manifest)))
-      (println "bin/test: shared published test base ready at" root)
+    (let [[_ operator-root directory base] arguments]
+      (when-not (and operator-root directory base)
+        (throw (ex-info "Base export requires operator root, snapshot directory, and destination."
+                        {:seon.test.runner/arguments (vec arguments)})))
+      (with-bindings {@cluster-source-progress #(do (println "bin/test: SOURCE" %) (flush))}
+        (@cluster-publication-base! (str (io/file operator-root "data/clusters")) directory base))
+      (println "bin/test: shared published test base ready at" base)
       (shutdown-agents))
 
     (let [[cluster-name root git-sha selection-mode & namespace-names]

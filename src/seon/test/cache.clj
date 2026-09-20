@@ -353,56 +353,42 @@
                       (< (.lastModified (io/file directory "ready.edn")) cutoff))]
       ((requiring-resolve 'seon.fs/delete-recursively!) (str parent) (str directory)))))
 
-(defn- compatible-changes
-  "Program paths differing between complete, corresponding cache inputs.
-  Missing legacy evidence or any non-program change requires a full build."
-  [before after]
-  (when (and (vector? before) (= 3 (count before))
-             (vector? after) (= 3 (count after))
-             (map? (first before)) (map? (first after))
-             (every? string? (subvec before 1))
-             (every? string? (subvec after 1))
-             (= (subvec before 1) (subvec after 1)))
-    (let [changes (changed-inputs (first before) (first after))
-          paths (vec (sort (concat (::changed changes)
-                                   (::removed changes))))]
-      ;; The selector already declares which changed paths are outside the
-      ;; program graph; re-deriving that boundary here would be a second
-      ;; authority for the same question.
-      (let [roots (input-roots ".")]
-        (when-not (some #(input-path? roots %) paths)
-          paths)))))
-
-(defn- retained-base
-  [parent inputs]
-  (->> (.listFiles (io/file parent))
-       (keep (fn [directory]
-               (let [ready (read-edn (io/file directory "ready.edn"))
-                     changes (compatible-changes (::inputs ready) inputs)
-                     base (io/file directory "base")]
-                 (when (and changes
-                            (= (.getName directory) (::digest ready))
-                            (.isDirectory (io/file base "data" "store"))
-                            (.isFile (io/file base "build" "current-src.edn")))
-                   {::base base ::digest (::digest ready) ::changes changes}))))
-       (sort-by (juxt #(count (::changes %)) ::digest))
-       first))
-
-(defn- clone-base!
-  [seed base]
-  (doseq [path ["data/store" "build/current-src.edn"]]
-    (let [destination (io/file base path)]
-      (.mkdirs (.getParentFile destination))
-      (child! base
-              (if (= "Mac OS X" (System/getProperty "os.name"))
-                ["/bin/cp" "-cRP" (str (io/file seed path)) (str destination)]
-                ["cp" "-a" "--reflink=auto" (str (io/file seed path)) (str destination)])))))
+(defn prepare-base!
+  "Ask the root's live publisher for an export; boot only if no host exists."
+  {:malli/schema [:=> [:cat :string :string :string :map] :string]}
+  [source snapshot base basis]
+  (let [source (.getCanonicalPath (io/file source))
+        snapshot (.getCanonicalPath (io/file snapshot))
+        base (.getCanonicalPath (io/file base))
+        form (pr-str
+               `(do
+                  (require 'seon.cluster)
+                  (with-bindings
+                    {(ns-resolve 'seon.cluster (symbol "*source-progress!*"))
+                     (fn [phase#] (println "bin/test: SOURCE" phase#) (flush))}
+                    ((ns-resolve 'seon.cluster (symbol "publication-base!"))
+                     ~(str (io/file source "data/clusters")) ~snapshot ~base))))
+        ;; BB loads the operator after this cache namespace is complete. The
+        ;; same advertisement/send authority is used by result recording.
+        live ((requiring-resolve 'seon.fresh-operator/live-root-value!)
+              source form {:seon.fresh-operator/observe-output!
+                           (fn [text] (print text) (flush))})]
+    (if (:seon.fresh-operator/live-process? live)
+      (when-not (= base (:seon.fresh-operator/value live))
+        (throw (ex-info "The live publisher refused the requested base." live)))
+      (child! snapshot
+              (into ["clojure" "-Scp" (classpath basis snapshot)]
+                    (concat (map #(str "-J" %) (:seon.test/jvm-options basis))
+                            [(str "-J-Dseon.operator.root=" source)
+                             (str "-J-Dseon.test.root=" snapshot)
+                             (str "-J-Dseon.test.source-root=" source)
+                             "-M:test" "-m" "seon.test.runner" "--prepare-base" source snapshot base]))))
+    base))
 
 (defn- ensure-base! [source snapshot digest basis-file pid]
   (let [parent (.getCanonicalFile (io/file source "target" "test-published-bases"))
         directory (io/file parent digest)
         base (io/file directory "base")
-        checkout (io/file directory "checkout")
         ready (io/file directory "ready.edn")
         reference (io/file directory "references" (str pid ".edn"))
         handle (.orElseThrow (ProcessHandle/of (Long/parseLong pid)))
@@ -425,22 +411,10 @@
         (when-not hit?
           (when (.exists directory)
             ((requiring-resolve 'seon.fs/delete-recursively!) (str parent) (str directory)))
-          (let [seed (retained-base parent inputs)]
-            (copy-checkout! snapshot checkout)
-            (when seed (clone-base! (::base seed) base))
-            (println "bin/test: PUBLISH cached base" digest
-                     (if seed "from retained base" "full: no compatible retained base")
-                     (when seed (select-keys seed [::digest ::changes])))
+          (do
+            (println "bin/test: PUBLISH cached base" digest "through the common source authority")
             (flush)
-            (child! checkout
-                    (cond-> (into ["clojure" "-Scp" (classpath basis (str checkout))]
-                                  (concat (map #(str "-J" %) (:seon.test/jvm-options basis))
-                                          [
-                             (str "-J-Dseon.operator.root=" base)
-                             (str "-J-Dseon.test.root=" snapshot)
-                             (str "-J-Dseon.test.source-root=" source)
-                             "-M:test" "-m" "seon.test.runner" "--prepare-base" (str base)]))
-                      seed (conj (pr-str (::changes seed)))))
+            (prepare-base! source snapshot (str base) basis)
             (when-not (and (.isDirectory (io/file base "data" "store"))
                            (.isFile (io/file base "manifest.edn")))
               (throw (ex-info "Publication exited without its store and manifest."

@@ -1029,11 +1029,12 @@ if [ -n "$snapshot_digest" ]; then
   launch_runner bb --config "$run_root/bb.edn" -m seon.test.cache \
     "$source_root" "$run_root" "$snapshot_digest" "$test_basis_file" "$$"
 else
-  launch_runner clojure -Scp "$test_classpath" \
-    "-J-Dseon.operator.root=$shared_published_base" \
-    "-J-Dseon.test.root=$run_root" \
-    "-J-Dseon.test.source-root=$source_root" \
-    -M:test -m seon.test.runner --prepare-base "$shared_published_base"
+  launch_runner bb --config "$run_root/bb.edn" -e '
+(require (quote seon.test.cache) (quote clojure.edn))
+(apply seon.test.cache/prepare-base!
+       (conj (vec (take 3 *command-line-args*))
+             (clojure.edn/read-string (slurp (nth *command-line-args* 3)))))' \
+    "$source_root" "$run_root" "$shared_published_base" "$test_basis_file"
 fi
 if await_runner; then
   base_status=0

@@ -1619,7 +1619,8 @@
   typed diagnostic naming the advertisement and the cause. Only a root with no
   live advertised transport at all answers `:live-process? false`, which is the
   caller's signal to take the held-store path."
-  [root form]
+  ([root form] (live-root-value! root form {}))
+  ([root form request]
   (let [truth (cluster-truth
                root {:seon.fresh-operator/read-offline-roster? false
                      :seon.fresh-operator/probe-jvms? false})]
@@ -1631,8 +1632,14 @@
                   (:seon.fresh-operator/transport-advertisement row)))
               truth)]
       {:seon.fresh-operator/live-process? true
-       :seon.fresh-operator/value (prepl-value! advertisement form)}
-      {:seon.fresh-operator/live-process? false})))
+       :seon.fresh-operator/value
+       (if-let [observe! (:seon.fresh-operator/observe-output! request)]
+         (read-prepl-reply advertisement
+           (terminal-value
+             (prepl-eval! advertisement form (publication-bound-ms)
+                          (fn [event] (when (= :out (:tag event)) (observe! (:val event)))))))
+         (prepl-value! advertisement form))}
+      {:seon.fresh-operator/live-process? false}))))
 
 (defn- named-cluster-row
   [truth name]

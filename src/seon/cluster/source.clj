@@ -314,123 +314,6 @@
                               :seon.store/branch scratch})
     (catch Throwable _ nil)))
 
-(defn- identity-rows
-  [database-value identities]
-  (let [rows (db/pull-many database-value [:db/id] identities)]
-    (when (:seon.error/kind rows)
-      (throw (ex-info "Program identity lookup failed during publication." rows)))
-    (zipmap identities rows)))
-
-(defn- evidence-entity
-  "Read complete stored evidence through datoms, including owned children.
-  Peer refs retain their identity; lineage reconciliation owns their history."
-  {:malli/schema [:=> [:cat :seon.db/database-value :int] :map]}
-  [database entity-id]
-  (let [datoms (db/q '[:find ?attribute ?value :in $ ?entity
-                       :where [?entity ?attribute ?value]] database entity-id)]
-    (when (:seon.error/at datoms)
-      (throw (ex-info "Published test evidence could not be read." datoms)))
-    (reduce
-     (fn [row [attribute value]]
-       (let [declaration (get (:schema database) attribute)
-             value (if (= :db.type/ref (:db/valueType declaration))
-                     (if (:db/isComponent declaration)
-                       (evidence-entity database value)
-                       {:db/id value})
-                     value)]
-         (if (= :db.cardinality/many (:db/cardinality declaration))
-           (update row attribute (fnil conj []) value)
-           (assoc row attribute value))))
-     {:db/id entity-id} datoms)))
-
-(defn- result-preservation-tx
-  "Carry latest evidence from the published head, never the rebuild's base.
-  Keep the original run fingerprint even when a definition changed. Evidence
-  remains inspectable; it certifies only the program actually tested."
-  [previous]
-  (if-not (get (:schema previous) :seon.test/run)
-    []
-    (let [results (db/q '[:find [?test ...]
-                          :where [?test :seon.test/run]] previous)
-          runs (db/q '[:find [?run ...]
-                       :where [?run :seon.test.run/id]] previous)
-          selector (cond-> [:seon.test/sym :seon.test/pass-count
-                    :seon.test/fail-count :seon.test/error-count
-                    :seon.test/run-basis-t :seon.test/run-at
-                    :seon.test/failing-assertions :seon.test/failure-message
-                    {:seon.test/run [:seon.test.run/id]}]
-                     (get (:schema previous) :seon.test/reach-digest)
-                     (conj :seon.test/reach-digest)
-                     (get (:schema previous) :seon.test/reach)
-                     (conj '(limit :seon.test/reach nil))
-                     (get (:schema previous) :seon.test/reach-unknown)
-                     (conj :seon.test/reach-unknown)
-                     (get (:schema previous) :seon.test/failures)
-                     (conj {:seon.test/failures
-                            ['* {:seon.test.failure/file [:seon.fn.file/relative-path]}
-                             {:seon.test.failure/first-run [:seon.test.run/id]}
-                             {:seon.test.failure/last-run [:seon.test.run/id]}]}))
-          run-rows (mapv #(evidence-entity previous %) runs)
-          test-rows (db/pull-many previous selector results)]
-      (doseq [rows [run-rows test-rows]]
-        (when (:seon.error/kind rows)
-          (throw (ex-info "Published test evidence could not be read." rows))))
-      (into (mapv #(dissoc % :db/id) run-rows)
-            (map (fn [test]
-                   (let [row (dissoc test :db/id)]
-                     (cond-> (assoc row :seon.test/run
-                            [:seon.test.run/id
-                             (get-in row [:seon.test/run :seon.test.run/id])])
-                       (:seon.test/reach row)
-                       (update :seon.test/reach
-                               set)
-                       (:seon.test/failures row)
-                       (update :seon.test/failures
-                         (fn [failures]
-                           (mapv
-                             (fn [failure]
-                               (cond-> (assoc (dissoc failure :db/id)
-                                         :seon.test.failure/test [:seon.test/sym (:seon.test/sym row)]
-                                         :seon.test.failure/first-run [:seon.test.run/id (get-in failure [:seon.test.failure/first-run :seon.test.run/id])]
-                                         :seon.test.failure/last-run [:seon.test.run/id (get-in failure [:seon.test.failure/last-run :seon.test.run/id])])
-                                 (:seon.test.failure/file failure)
-                                 (assoc :seon.test.failure/file [:seon.fn.file/relative-path (get-in failure [:seon.test.failure/file :seon.fn.file/relative-path])])))
-                             failures)))))))
-            test-rows))))
-
-(defn- preserved-evidence-tx
-  "Carry values without manufacturing absent program definitions.
-   A retracted test has no current result; its old result remains in history.
-   A missing optional file keeps its exact path."
-  [database-value evidence]
-  (let [identities (vec (distinct
-                         (mapcat (fn [row]
-                                   (concat (when-let [identity (program/row-identity row)] [identity])
-                                           (keep :seon.test.failure/file (:seon.test/failures row))))
-                                 evidence)))
-        rows (identity-rows database-value identities)
-        present? #(some? (get rows %))
-        surviving (remove (fn [row]
-                            (when-let [test-name (:seon.test/sym row)]
-                              (not (present? [:seon.test/sym test-name])))) evidence)]
-    (mapv
-     (fn [row]
-       (cond-> row
-         (program/row-identity row)
-         (assoc :db/id (program/row-identity row))
-         (:seon.test/reach row) (update :seon.test/reach set)
-         (:seon.test/failures row)
-         (update :seon.test/failures
-                 (fn [failures]
-                   (mapv (fn [failure]
-                           (let [site (:seon.test.failure/file failure)]
-                             (if (and site (not (present? site)))
-                               (-> failure
-                                   (dissoc :seon.test.failure/file)
-                                   (assoc :seon.test.failure/reported-file (second site)))
-                               failure))) failures)))))
-     surviving)))
-
 (defn- record-results-at-head!
   {:malli/schema [:=> [:cat :seon.store/store :seon.source/test-recording-request]
                   :seon.source/test-recording-result]}
@@ -587,9 +470,10 @@
   "Reconcile and atomically publish on the current source database history."
   {:malli/schema [:=> [:cat :seon.source/publish-request]
                   :seon.source/published]}
-  [{:keys [:seon.store/store]
+  [{:keys [:seon.store/store :seon.db/process]
     directory :seon.fn/root
     source-digest :seon.source/digest
+    requested-commit :seon.source/expected-commit-id
     populate :seon.source/populate
     activation :seon.source/activation
     populate-request :seon.source/populate-request
@@ -598,7 +482,7 @@
   (let [input-digest (publication-input-digest! (or directory (fs/source-directory)))
           populate-fn (resolve-population populate source-digest)
           activation-fn (resolve-activation activation source-digest)
-          expected-commit (:seon.source/commit-id (current store))
+          expected-commit (or requested-commit (:seon.source/commit-id (current store)))
           scratch (scratch-branch)]
       (registry/branch! {:seon.store/store store
                          :seon.cluster.registry/from (or expected-commit :db)
@@ -613,14 +497,18 @@
                         (db/carry-derived-projection (d/db connection))))]
             ;; Reconcile on the published history. The scratch isolates refused
             ;; work; no test evidence is copied into a new history.
-            (require-committed!
-             (db/transact!
-              connection
-              {:tx-data (schema.datahike/malli->datahike-schema
-                         source-attributes)})
-             ::scratch-schema-refused
-             "the source scratch schema transaction was refused"
-             {:seon.source/digest source-digest})
+            (let [missing (filterv
+                            (fn [row]
+                              (let [definition (dissoc row :db/ident)]
+                                (not= definition
+                                      (select-keys (get (:schema @connection) (:db/ident row))
+                                                   (keys definition)))))
+                            (schema.datahike/malli->datahike-schema source-attributes))]
+              (when (seq missing)
+                (require-committed! (db/transact! connection {:tx-data missing})
+                                   ::scratch-schema-refused
+                                   "the source scratch schema transaction was refused"
+                                   {:seon.source/digest source-digest})))
             (populate-fn
              (cond-> (merge populate-request
                             {:seon.db/connection connection
@@ -637,14 +525,15 @@
             (require-committed!
              (db/transact!
               connection
-              {:tx-data
+              (cond-> {:tx-data
                (conj (activation-seal-tx
                       connection source-digest #{populate activation} activation-fn)
                      (cond-> {:seon.source/digest source-digest
                               :seon.source/test-input-digest input-digest}
                        (get-in populate-request [:seon.fn/manifest :seon.source/toolchain-digest])
                        (assoc :seon.source/toolchain-digest
-                              (get-in populate-request [:seon.fn/manifest :seon.source/toolchain-digest]))))})
+                              (get-in populate-request [:seon.fn/manifest :seon.source/toolchain-digest]))))}
+                process (assoc :tx-meta {:seon.db/process process})))
              ::source-seal-refused
              "the source seal transaction was refused"
              {:seon.source/digest source-digest})
@@ -712,104 +601,39 @@
                "incremental publication accepts scalar attributes only"
                {:seon.source/unsafe-attributes (vec (sort unsafe))}))))
 
+(defn populate-upserts!
+  "Admit scalar rows at the population seam of the common publisher."
+  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
+                                  [:seon.source/upsert-request :seon.source/upsert-request]]] :nil]}
+  [{connection :seon.db/connection previous :seon.source/previous-database
+    request :seon.source/upsert-request}]
+  (let [{rows :seon.source/upsert-rows manifest :seon.fn/manifest
+         populate :seon.source/populate process :seon.db/process
+         digest :seon.source/digest} request]
+    (assert-scalar-rows! @connection rows)
+    (when populate
+      ((resolve-population populate digest)
+       (assoc (:seon.source/populate-request request) :seon.db/connection connection
+              :seon.source/previous-database previous)))
+    (when (and manifest (nil? populate))
+      (fn/index! {:seon.db/connection connection :seon.fn/manifest manifest
+                  :seon.source/previous-database previous} (constantly nil)))
+    (when (seq rows)
+      (require-committed!
+        (db/transact! connection (cond-> {:tx-data rows}
+                                  process (assoc :tx-meta {:seon.db/process process})))
+        ::incremental-source-refused "the incremental source transaction was refused"
+        {:seon.source/digest digest})))
+  nil)
+
 (defn upsert!
-  "Publish canonical safe upserts against one exact source commit."
+  "Publish admitted scalar rows through the common lineage and activation owner."
   {:malli/schema [:=> [:cat [:and :seon.source/upsert-request
-                            [:map [:seon.fn/manifest {:optional true}
-                                   :seon.fn.manifest/manifest]]]]
+                            [:map [:seon.fn/manifest {:optional true} :seon.fn.manifest/manifest]]]]
                   :seon.source/published]}
-  [{:keys [:seon.store/store :seon.db/process]
-    directory :seon.fn/root
-    manifest :seon.fn/manifest
-    populate :seon.source/populate
-    populate-request :seon.source/populate-request
-    rows :seon.source/upsert-rows
-    expected-commit :seon.source/expected-commit-id
-    source-digest :seon.source/digest
-    activation :seon.source/activation}]
-  (let [input-digest (publication-input-digest! (or directory (fs/source-directory)))
-        activation-fn (resolve-activation activation source-digest)
-        scratch (scratch-branch)]
-    (registry/branch! {:seon.store/store store
-                       :seon.cluster.registry/from expected-commit
-                       :seon.store/branch scratch})
-    (try
-      (let [connection (store/open-branch! store scratch)]
-        (try
-          (assert-scalar-rows! @connection rows)
-          (let [basis-before (:max-tx @connection)]
-          (when populate
-            ((resolve-population populate source-digest)
-             (assoc populate-request :seon.db/connection connection)))
-          (when (and manifest (nil? populate))
-            (fn/index! {:seon.db/connection connection
-                        :seon.fn/manifest manifest
-                        :seon.source/previous-database @connection}
-                       (constantly nil)))
-          (let [digest-entities
-                (db/q '[:find [?entity ...]
-                       :where [?entity :seon.source/digest]]
-                     @connection)]
-            (when-not (= 1 (count digest-entities))
-              (refuse! ::invalid-source-seal
-                       "incremental publication requires one source digest entity"
-                       {:seon.source/expected-commit-id expected-commit
-                        ::digest-entity-count (count digest-entities)}))
-            (when (seq rows)
-              (require-committed!
-               (db/transact!
-                connection
-                (cond->
-                 {:tx-data rows}
-                  process (assoc :tx-meta {:seon.db/process process})))
-               ::incremental-source-refused
-               "the incremental source transaction was refused"
-               {:seon.source/digest source-digest
-                :seon.source/expected-commit-id expected-commit}))
-              (index-issues! connection source-digest (or directory (fs/source-directory)))
-              (let [identity-facts (cond-> {:seon.source/digest source-digest
-                                           :seon.source/test-input-digest input-digest}
-                                     (:seon.source/toolchain-digest manifest)
-                                     (assoc :seon.source/toolchain-digest
-                                            (:seon.source/toolchain-digest manifest)))
-                    prior (db/pull (db/db connection) (vec (keys identity-facts))
-                                   [:seon.source/digest source-digest])
-                    seal (cond-> (activation-seal-tx
-                                  connection source-digest #{activation} activation-fn)
-                           (not= identity-facts (select-keys prior (keys identity-facts)))
-                           (conj identity-facts))]
-                (when (seq seal)
-                 (require-committed!
-                  (db/transact!
-                   connection
-                   (cond->
-                    {:tx-data seal}
-                  process (assoc :tx-meta {:seon.db/process process})))
-               ::incremental-activation-refused
-               "the incremental source activation transaction was refused"
-               {:seon.source/digest source-digest
-                :seon.source/expected-commit-id expected-commit})))
-            (when (not= basis-before (:max-tx @connection))
-             (d/force-branch! @connection current-branch #{expected-commit}
-                             {:expected-current-commit expected-commit}))))
-            (finally
-              (d/release connection))))
-      (let [commit-id
-            (registry/branch-commit-id
-             {:seon.store/store store
-              :seon.store/branch current-branch})]
-        (when-not (uuid? commit-id)
-          (refuse! ::publish-readback-failed
-                   "the published source branch has no commit ID"
-                   {:seon.source/branch current-branch}))
-        (registry/retire-branch! {:seon.store/store store
-                                  :seon.store/branch scratch})
-        {:seon.source/branch current-branch
-         :seon.source/commit-id commit-id
-         :seon.source/digest source-digest
-         :seon.source/built? true
-           :seon.program/unresolved-report
-           (unresolved-report! (database store commit-id))})
-      (catch Throwable failure
-        (retire-scratch! store scratch)
-        (throw failure)))))
+  [request]
+  (publish! (assoc request :seon.source/populate `populate-upserts!
+                    :seon.source/populate-request
+                    (cond-> {:seon.source/upsert-request request}
+                      (:seon.fn/manifest request)
+                      (assoc :seon.fn/manifest (:seon.fn/manifest request))))))
