@@ -5802,3 +5802,25 @@ HEAD and will be, one at a time, if the wait is long. Resume order on
 go-ahead: step 2 (land), ops-effects-2 (finish), sci-program (my.program),
 publication (final measurements), gate-restructure (if it stopped), then
 the turn/cluster and bin/script sweeps, then bare×2 + platform.
+
+## 2026-09-21 ~19:00 UTC — all lanes stopped on the Codex limit; the gate could not publish through a stale default; lanes' edits SHELVED; default RESET from clean HEAD
+
+`gate-restructure` also stopped on the usage limit (after `9d40d32b4` and
+`cdf517203`; uncommitted edits in bin/test, cache.clj, runner.clj). Zero
+lanes running. The 1a cold gate on HEAD failed at `published-base`: the
+base now publishes through the live JVM (`4686e5c91`) and default's loaded
+code predated tonight's commits, so `(ns-resolve 'seon.cluster
+'*source-progress!*)` returned nil inside the prepl form → NPE
+(`tmp/orchestrator/gate-1a-six-2026-09-21.log:27-39`). Root cause: a
+default eight hours behind HEAD; the producer-mismatch guard
+(`3ac00fb8e`) exists only in code default never loaded. Fix: default must
+run HEAD. Every publisher reads the working tree, which carried three
+stopped lanes' half-landed edits (40 tracked files), so the orchestrator
+SHELVED them — `tmp/orchestrator/parked-2026-09-21/all-lanes.patch`
+(235 KB) + `git stash@{0}` "parked lanes 2026-09-21" — with the tracked
+list and untracked list beside it; re-applied with `git stash pop` (or
+`git apply` per lane) before any lane resumes. Tree at HEAD `5e6476302`;
+`bin/seon reset --force` running from it
+(`tmp/orchestrator/default-reset-2026-09-21.log`). Then the 1a gate
+reruns on HEAD, measuring the incremental base, the symbol fix and
+demand-started workers.
