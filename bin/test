@@ -721,6 +721,9 @@ populate_checkout_root() {
 
   # `git ls-files` never names this recorded file, and a worker checkout keys
   # the same dependency-class cache as the root it was copied from.
+  if [ -f "$source_root/test-input-paths.txt" ]; then
+    cp -p "$source_root/test-input-paths.txt" "$target_root/test-input-paths.txt"
+  fi
   if [ -f "$source_root/dependency-pins.txt" ]; then
     cp -p "$source_root/dependency-pins.txt" "$target_root/dependency-pins.txt"
   fi
@@ -754,8 +757,8 @@ fi
 if [ ${#snapshot_paths[@]} -gt 0 ]; then
   mkdir -p "$run_root/tmp"
   bb --config "$source_root/bb.edn" -e '
-    (require (quote [seon.test.selection :as selection]))
-    (prn (selection/source-inputs (selection/input-digests (first *command-line-args*))))' \
+    (require (quote [seon.test.cache :as cache]))
+    (prn (cache/source-inputs (cache/input-digests (first *command-line-args*))))' \
     "$run_root" >"$run_root/tmp/head-inputs.edn"
 fi
 overlay_paths=()
@@ -780,6 +783,12 @@ if [ ${#overlay_paths[@]} -gt 0 ]; then
       cp -Pp "$source_root/$entry" "$run_root/$entry"
     fi
   done
+fi
+# The publication inventory belongs to this immutable snapshot, not the live
+# index or files generated later by the gate. NUL delimiters preserve paths.
+git -C "$source_root" ls-tree -rz --name-only "$git_sha" -- . >"$run_root/test-input-paths.txt"
+if [ ${#overlay_paths[@]} -gt 0 ]; then
+  printf '%s\0' "${overlay_paths[@]}" >>"$run_root/test-input-paths.txt"
 fi
 if [ -e "$source_root/.env" ] && [ ! -e "$run_root/.env" ]; then
   ln -s "$source_root/.env" "$run_root/.env"
@@ -828,7 +837,7 @@ git -C "$source_root" --work-tree="$run_root" diff --name-status "$git_sha" -- \
     printf 'bin/test:   %s\n' "$entry"
   done
 git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standard -- \
-  . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt' ':!dependency-pins.txt' | while IFS= read -r entry; do
+  . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt' ':!dependency-pins.txt' ':!test-input-paths.txt' | while IFS= read -r entry; do
     printf 'bin/test:   A %s\n' "$entry"
   done
 while IFS= read -r entry; do
@@ -849,20 +858,17 @@ record_phase snapshot
 snapshot_changed=0
 if ! git -C "$source_root" --work-tree="$run_root" diff --quiet "$git_sha" -- . ':!reference-code' ||
    [ -n "$(git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standard -- \
-     . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt' ':!dependency-pins.txt')" ]; then
+     . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt' ':!dependency-pins.txt' ':!test-input-paths.txt')" ]; then
   snapshot_changed=1
 fi
-# Exact-HEAD fast snapshots need no graph for overlay closure, but if a
-# published base exists it is still the one the fast path will reuse. Preserve
-# that observable provenance: `newest-manifest` owns both selecting it and
-# reporting its commit age. No ready record remains an admitted exact-HEAD
-# snapshot, as ruled by 25a705b4b.
-if [ "$fast_iteration" -eq 1 ] && [ "$snapshot_changed" -eq 0 ] &&
-   compgen -G "$source_root/target/test-published-bases/*/ready.edn" >/dev/null; then
+# Resolve the fast snapshot's base once. Admission and recording carry this
+# descriptor even if another publication arrives while tests are running.
+if [ "$fast_iteration" -eq 1 ]; then
   bb --config "$source_root/bb.edn" -e '
     (require (quote [seon.test.cache :as cache]))
-    (cache/newest-manifest (first *command-line-args*)
-                           (second *command-line-args*))' "$source_root" "$git_sha"
+    (let [[source git-sha snapshot] *command-line-args*]
+      (spit (str snapshot "/tmp/published-base.edn")
+            (pr-str (cache/newest-base source git-sha))))' "$source_root" "$git_sha" "$run_root"
 fi
 if [ ${#snapshot_paths[@]} -gt 0 ] && [ "$snapshot_changed" -eq 1 ]; then
   # Cold gates own publication. Reuse the HEAD-only preparation command when
@@ -872,6 +878,7 @@ if [ ${#snapshot_paths[@]} -gt 0 ] && [ "$snapshot_changed" -eq 1 ]; then
     (require (quote [clojure.edn :as edn]))
     (let [[source inputs] *command-line-args*]
       (try (cache/head-manifest source (edn/read-string (slurp inputs)))
+           nil
            (catch Exception _ (System/exit 64))))' "$source_root" "$run_root/tmp/head-inputs.edn"; then
     begin_phase published-base
     launch_runner "$source_root/bin/test" --prepare-head-base
@@ -891,7 +898,9 @@ if [ ${#snapshot_paths[@]} -gt 0 ] && [ "$snapshot_changed" -eq 1 ]; then
           inputs (edn/read-string (slurp (str snapshot "/tmp/head-inputs.edn")))]
       (try
         (selection/assert-complete-overlay!
-         (if (= "1" fast) (cache/newest-manifest source git-sha)
+         (if (= "1" fast)
+           (cache/manifest (:seon.test.cache/base
+                            (edn/read-string (slurp (str snapshot "/tmp/published-base.edn")))))
              (cache/head-manifest source inputs)) source snapshot git-sha paths)
         (catch Exception failure
           (binding [*out* *err*] (println "bin/test:" (ex-message failure)))
@@ -912,7 +921,8 @@ record_phase test-slot
 if [ "$fast_iteration" -eq 1 ]; then
   echo "bin/test-fast: selected snapshot $run_root"
   cd "$run_root"
-  launch_runner clojure -M:test -m seon.test.fast ${namespaces[@]+"${namespaces[@]}"}
+  launch_runner clojure "-J-Dseon.test.source-root=$source_root" \
+    "-J-Dseon.test.git-sha=$git_sha" -M:test -m seon.test.fast ${namespaces[@]+"${namespaces[@]}"}
   if await_runner; then status=0; else status=$?; fi
   exit "$status"
 fi

@@ -6,7 +6,7 @@
 # Canonical database fixtures build their in-memory base once per JVM. Tests
 # explicitly exercising file-backed boot still own their fixture publication.
 # Limits: no per-worker isolation, retained run roots, or automatic platform
-# tier; no persisted result facts or green basis. The orchestrator gates a
+# tier. Results use the cold gate's recording authority. The orchestrator gates a
 # commit with bin/test --paths <files...> -- <namespaces...> and --platform.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -37,7 +37,8 @@ stop_fast_runner() {
   release_test_slot
 }
 trap stop_fast_runner EXIT HUP INT TERM
-nice -n 15 clojure -M:test -m seon.test.fast "$@" &
+nice -n 15 clojure "-J-Dseon.test.source-root=$PWD" \
+  "-J-Dseon.test.git-sha=$(git rev-parse HEAD)" -M:test -m seon.test.fast "$@" &
 suite_pid=$!
 if wait "$suite_pid"; then status=0; else status=$?; fi
 suite_pid=

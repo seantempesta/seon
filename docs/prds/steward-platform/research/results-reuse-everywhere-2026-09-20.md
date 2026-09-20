@@ -491,3 +491,91 @@ Pre-commit loading of `seon.test`, `seon.test.runner`, `seon.test.cache`,
 `:loads`, exit 0 (`step2-precommit-load.log`). Static lint of the changed
 Clojure owners reports no error-level findings. These checks do not replace
 the unavailable authority-backed fast proof.
+
+## Refreshed recording authority
+
+The orchestrator reports the reset and fresh overlay base
+`7d2fac621d415dddecf5ba753db17519d4b451df929367ab2c2a4067ec108908`.
+One read-only MCP JVM probe independently verified published source commit
+`6aaf302b-5fc8-5dd4-8003-a1591809d993`: all four declarations listed above
+are present, with an empty missing vector. The returned evaluation took
+13,640 ms. No runtime definitions or default-cluster state were changed.
+This closes the old missing-declarations gate; it does not yet prove recording.
+
+Read-only JVM probe (one form, no reload or transaction):
+
+```clojure
+(let [held (some :seon.store/store
+                 (vals @(var-get (ns-resolve 'seon.cluster 'running-instances))))
+      published (seon.cluster.source/current held)
+      database (seon.cluster.source/database held (:seon.source/commit-id published))
+      projection (seon.schema/projection-from-database database)
+      required [:seon.test.run/published-base-digest
+                :seon.test.run/overlay-input-digest
+                :seon.test.run/callers-at-head
+                :seon.source/test-selection-request]]
+  {:seon.source/commit-id (:seon.source/commit-id published)
+   :seon.test/present (filterv #(get-in projection [:seon.schema.projection/forms %]) required)
+   :seon.test/missing (filterv #(not (get-in projection [:seon.schema.projection/forms %])) required)})
+```
+
+The manifest-output fix returns nil after `cache/head-manifest`. A native
+Babashka probe against that fresh base exited 0 with **0 stdout bytes and
+0 stderr bytes** (`manifest-check-output.log`, `manifest-check-error.log`).
+It read the real ready record's source inputs and manifest, without a cold gate.
+
+Fast recording probe:
+
+```sh
+bin/test-fast --paths bin/test bin/test-fast src/seon/test/fast.clj -- seon.test.selection-test
+```
+
+Snapshot HEAD `3f31ec22093779b56197fbc6e342fb8e34ebc559`; slot wait
+793 seconds; one test JVM, PID 36548. Admission and completion succeeded
+against the refreshed source authority, recording run `eb10af2747d0`:
+**11 executed, 0 unchanged; 139 assertions, 4 failures, 1 error**, exit 1.
+`refreshed-authority-fast.log` is **22,249 bytes**, SHA-256
+`13e1241d1c6cdb2ce49bf628a722ba42b8221fbe67d272c9686337b19d01aeb1`.
+The snapshot-provenance regression passed, including fresh request IDs,
+zero execution across policies, and changed-overlay invalidation.
+
+Four failures were stale expectations that unchanged platform members rerun
+after spec/reference edits or deletion/recreation. The owned test now asserts
+only the members whose reachable content changed. Those corrected assertions
+were not in this completed snapshot and need the next fast run.
+The remaining error is the known foreign boundary, exactly:
+“A refused declared-reference read refuses selection.”
+`seon.fn/declared-reference-edges` returned a base error without a complete
+declared facet, with declared facets `#{}`. No foreign source was changed.
+
+The branch-content test spent 216 seconds constructing and using the
+canonical base. A thread sample of this lane's JVM is retained at
+`refreshed-authority-threads.json`: main awaited `retrying-base`, while
+`seon-test-database-base` was in schema projection/instrumentation.
+The long selection test completed in 608 seconds; its measured 1/10/100
+seed probes took 40,906.8 / 43,981.3 / 124,813.0 ms respectively.
+No watchdog or fixture bound was raised.
+
+Launcher slice: `bin/test`, `bin/test-fast`, `src/seon/test/fast.clj`,
+`test/seon/test/selection_test.clj`, AGENTS.md section 5, and this note.
+The fast entry resolves one published base, admits the exact snapshot,
+records completion through the cold recorder, and prints member confidence.
+Shell syntax, owned diff checks and fast-entry static lint pass.
+This slice deletes **17 bash lines** (15 from `bin/test`, 2 from
+`bin/test-fast`); these are replacements, not the still-owed launcher thinning.
+The file basis and shared tally migration remain pending. The second
+identical-run proof is still owed; the known red cannot be reported green.
+
+Cold proof owed to the orchestrator after convergence:
+
+```sh
+bin/test --paths bin/test bin/test-fast src/seon/test.clj src/seon/test/fast.clj src/seon/test/runner.clj src/seon/test/cache.clj src/seon/test/selection.clj src/seon/cluster/source.clj resources/seon/schemas/seon.source.edn resources/seon/schemas/seon.test.run.edn resources/seon/schemas/seon.test.selection.edn test/seon/test/selection_test.clj -- seon.test.selection-test seon.test-test seon.test.runner-test seon.test-cache-test
+```
+
+Then bare `bin/test` twice, with zero execution on the second green request,
+and the orchestrator's isolated platform proof. This lane ran no cold gate,
+worktree, publication, reset, or adoption.
+
+The required pre-commit load of `seon.test`, `seon.test.fast`,
+`seon.test.runner`, `seon.test.cache`, and `seon.cluster.source` returned
+`:loads`, exit 0 (`launcher-precommit-load.log`).

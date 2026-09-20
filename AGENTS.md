@@ -919,8 +919,9 @@ fixture base built once on demand. Plain namespaces use the working tree;
 `bin/test-fast --paths <your files…> -- <namespaces…>` reuses the gate's
 HEAD-plus-selected-files snapshot and removes it after the JVM exits,
 excluding foreign half-edits without preparing a published base. It provides no
-per-worker isolation, retained run roots, automatic platform tier, or
-recorded result facts; tests explicitly exercising file-backed boot still
+per-worker isolation, retained run roots, or automatic platform tier.
+Fast requests admit and record through the cold gate's source authority;
+matching green members report unchanged without execution. Tests explicitly exercising file-backed boot still
 create their own fixture roots. These are iteration results, not the
 isolated gate's proof.
 
@@ -975,7 +976,9 @@ bounded-execution law: a liveness watchdog dumps coordinator AND worker
 JVMs, and the tally is total — unlaunchable or unconfirmed work is typed,
 never silent. By default, every canonical gate records the tests it ran on `:current-src`
 through `seon.test.runner/commit-results!` (`src/seon/test/runner.clj:1435`);
-recording failure fails the gate. Fast iterations do not persist that evidence.
+recording failure fails the gate. Fast iterations use the same recorder,
+carrying the resolved published base, actual snapshot program and overlay
+input digests, and tested basis. Every request is a fresh run event.
 
 **Shared request policy:** every policy is an eligibility scope, never an
 execution promise. Named/all/full/platform requests reuse each member whose

@@ -138,9 +138,7 @@
            select! #(select-request (assoc request :seon.db/db (db/db connection)))
            symbols #(set (map :seon.test/sym (:seon.test.run/members %)))
            expected (set (map fixture-symbol ["direct" "indirect" "reference"]))
-           first-selection (select!)
-           platform (into #{} (keep #(when ((:seon.test.member/reasons %) :platform) (:seon.test/sym %)))
-                          (:seon.test.run/members first-selection))]
+           first-selection (select!)]
        (is (seq (:seon.test.run/members first-selection)) (pr-str first-selection))
        (is (every? (symbols first-selection) (conj expected (fixture-symbol "unrelated"))))
        (is (= :seon.test/cluster-required
@@ -224,11 +222,13 @@
        (testing "Spec and reference edits seed their owning definition"
          (support/transacted! connection [{:seon.fn/sym (fixture-symbol "leaf")
                                            :seon.fn/spec "[:=> [:cat] :int]"}])
-         (is (= (into expected platform) (symbols (select!))))
+         (is (= expected (symbols (select!)))
+             "Unchanged green platform members remain discharged after a spec edit.")
          (complete-selection! connection request)
          (support/transacted! connection [{:seon.fn/sym (fixture-symbol "stranger")
                                            :seon.fn/references #{(fixture-symbol "leaf")}}])
-         (is (= (conj platform (fixture-symbol "unrelated")) (symbols (select!))))
+         (is (= #{(fixture-symbol "unrelated")} (symbols (select!)))
+             "A reference edit executes only members whose reachable content changed.")
          (complete-selection! connection request))
        (testing "Historical symbols survive imported deletion and recreation"
          (let [database (db/db connection)
@@ -238,7 +238,7 @@
                recreated (:db-after (d/with removed [(support/program-fn-row removed leaf "(defn leaf [] 9)")]))]
            (is (not= original (:db/id (db/pull recreated [:db/id] [:seon.fn/sym leaf]))))
            (doseq [snapshot [removed recreated]]
-             (is (= (into (conj expected (fixture-symbol "unrelated")) platform)
+             (is (= (conj expected (fixture-symbol "unrelated"))
                     (symbols (select-request (assoc request :seon.db/db snapshot))))))))
        (testing "Explicit fixture material refuses"
          (is (= :seon.test/fixture-excluded
