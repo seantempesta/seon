@@ -9,6 +9,7 @@
             [seon.schema.edn :as schema.edn]
             [seon.schema :as schema]
             [seon.env :as env]
+            [seon.error.refusal :as refusal]
             [seon.sci.admit :as admit]))
 
 (schema.edn/load! {})
@@ -40,8 +41,8 @@
   back carrying its own base and facets. Per the program-facts PRD §1q the
   output therefore enumerates `:seon.error/base` and every canonical facet
   explicitly, exactly as `seon.error/latest-fact` does. Nothing here
-  constructs an error: the legacy `:seon.error/value` shape belongs to
-  `node-id`, `window` and `prepare`, which still build it themselves."
+  constructs an error; `node-id`, `window`, and `prepare` name their exact
+  render-value facets."
   {:malli/schema
    [:function
     [:=> [:catn [::entity :map]]
@@ -183,7 +184,7 @@
 (defn node-id
   "Stable element id for one root selector and `get-in` path."
   {:malli/schema [:=> [:cat :seon.render/unit :seon.render.data/path]
-                  [:or :string :seon.error/value]]}
+                  [:or :string :seon.render.value/missing-root-identity-error]]}
   [unit path]
   (let [root-address
         (or (:seon.render.call/id unit)
@@ -193,12 +194,25 @@
               [:seon.render.block/name block-name])
             (identity-address unit))]
     (if-not root-address
-      {:seon.error/kind ::missing-root-identity
-       :seon.error/message
-       "A rendered value root requires a caller-supplied block id."
-       :seon.error/data
-       {:seon.agent/id (:seon.agent/id unit)
-        :seon.render.data/path path} :seon.render.value/missing-root-identity true}
+      (refusal/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.render.value/identity
+        :seon.error/operation 'seon.render.value/node-id
+        :seon.error/message "A rendered value root requires a caller-supplied block id."
+        :seon.error/diagnostic-layer :seon.render.value/identity
+        :seon.error/diagnostic-operation 'seon.render.value/node-id
+        :seon.error/diagnostic-member :seon.render.value/root
+        :seon.error/diagnostic-expected "a caller-supplied block or entity identity"
+        :seon.error/diagnostic-offending unit
+        :seon.error/diagnostic-cause ::missing-root-identity
+        :seon.error/diagnostic-evidence {:seon.render.data/path path}
+        :seon.error/fix "Supply :seon.render.call/id, :seon.render.value/root, or an entity identity."
+        :seon.error/data {:seon.agent/id (:seon.agent/id unit)
+                          :seon.render.data/path path}
+        :seon.render.value/root-description
+        (pr-str (select-keys unit [:seon.agent/id :seon.render.call/id
+                                   :seon.render.value/root :db/id
+                                   :seon.render.block/name]))})
       (str "seon-value-"
            (id/digest 24 [(:seon.agent/id unit) root-address path])))))
 
@@ -284,9 +298,20 @@
        :seon.render.value/more? false})
     (catch Throwable failure
       {:seon.render.value/window
-       {:seon.error/kind :seon.render.value/window-failed
-        :seon.render.value/window-realization-failed true
-        :seon.error/message (or (ex-message failure) "realization failed")}
+       (refusal/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.render.value/window
+         :seon.error/operation 'seon.render.value/window
+         :seon.error/message (or (ex-message failure) "Window realization failed.")
+         :seon.error/diagnostic-layer :seon.render.value/window
+         :seon.error/diagnostic-operation 'seon.render.value/window
+         :seon.error/diagnostic-member :seon.render.value/window
+         :seon.error/diagnostic-expected "a realizable value window"
+         :seon.error/diagnostic-offending value
+         :seon.error/diagnostic-cause :seon.render.value/window-realization-failed
+         :seon.error/diagnostic-evidence {:seon.render.value/offset offset}
+         :seon.error/fix "Inspect the source value and request a realizable window."
+         :seon.render.value/window-offset offset})
        :seon.render.value/steps []
        :seon.render.value/offset offset
        :seon.render.value/shown 0
@@ -490,7 +515,7 @@
        :seon.render.data/path path
        :seon.print/entries
        [[{:seon.print/face :seon.print/keyword
-          :seon.print/value :seon.error/kind}
+          :seon.print/value :seon.error/layer}
          {:seon.print/face :seon.print/keyword
           :seon.print/value :seon.render.value/projection-failed}]
         [{:seon.print/face :seon.print/keyword
@@ -527,16 +552,16 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.render/unit]
-     [:or :nil :seon.render.value/projection :seon.error/value]]
+     [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error]]
     [:=> [:cat :seon.render/unit :seon.render/output]
-     [:or :nil :seon.render.value/projection :seon.error/value]]]}
+     [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error]]]}
   ([unit]
    (prepare unit :seon.render/ai))
   ([unit output]
    (let [path (vec (get-in unit [:seon.render.data/cursor
                                 :seon.render.data/path] []))
          id (node-id unit path)]
-     (if (:seon.error/kind id)
+     (if (:seon.render.value/root-description id)
        id
        (let [display (display-value unit)
              profile (render-profile unit)
@@ -634,7 +659,7 @@
 (defn- render-prepared
   [unit output]
   (let [projection (prepare unit output)]
-    (if (:seon.error/kind projection)
+    (if (:seon.render.value/root-description projection)
       projection
       (if (= output :seon.render/html)
         (render-html-data projection)
@@ -643,13 +668,13 @@
 (defn render-ai
   "Render any floor unit through the admitted text sink."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :string :seon.error/value]]}
+                  [:or :string :seon.render.value/missing-root-identity-error]]}
   [unit]
   (render-prepared unit :seon.render/ai))
 
 (defn render-html
   "Render any floor unit through the admitted hiccup sink."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :seon.render/hiccup :seon.error/value]]}
+                  [:or :seon.render/hiccup :seon.render.value/missing-root-identity-error]]}
   [unit]
   (render-prepared unit :seon.render/html))

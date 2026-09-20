@@ -89,7 +89,7 @@
 (defn- tag-of
   [node]
   (let [parsed (parsed-tag node)]
-    (if (:seon.error/kind parsed) "" (:seon.render.hiccup/tag parsed))))
+    (if (:seon.render.hiccup/unparseable-tag parsed) "" (:seon.render.hiccup/tag parsed))))
 
 (def ^:private void-tag?
   "Ask the ONE serializer whether a tag elides its children.
@@ -122,7 +122,7 @@
 (defn- node-classes
   [node]
   (let [parsed (parsed-tag node)
-        shorthand-classes (if (:seon.error/kind parsed)
+        shorthand-classes (if (:seon.render.hiccup/unparseable-tag parsed)
                             []
                             (:seon.render.hiccup/classes parsed))
         attribute (:class (attributes-of node))]
@@ -142,7 +142,7 @@
   (let [attributes (attributes-of node)
         parsed (parsed-tag node)]
     (or (:id attributes)
-        (when-not (:seon.error/kind parsed)
+        (when-not (:seon.render.hiccup/unparseable-tag parsed)
           (:seon.render.hiccup/id parsed)))))
 
 (defn- child-nodes
@@ -210,7 +210,7 @@
   one addressed element, and an absent address refuses loudly instead of
   returning an empty string that would compare equal to nothing."
   {:malli/schema [:=> [:cat :seon.render.lint/id-request]
-                  [:or :seon.render.lint/subject :seon.error/value]]}
+                  [:or :seon.render.lint/subject :seon.render.lint/absent-element-error]]}
   [{subject :seon.render.lint/hiccup id :seon.render.lint/id}]
   (let [root (if (hiccup/hiccup? subject) subject (seq subject))
         found (some (fn [[_path node]]
@@ -219,17 +219,21 @@
                     (walk root))]
     (or found
         (error/diagnostic
-         {:seon.error/kind ::absent-element
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer :seon.render.lint/lookup
+          :seon.error/operation 'seon.render.lint/element-with-id
           :seon.error/message
           (str "The rendered value carries no element with id " (pr-str id) ".")
-          :seon.error/diagnostic-layer :render
-          :seon.error/diagnostic-operation `element-with-id
+          :seon.error/diagnostic-layer :seon.render.lint/lookup
+          :seon.error/diagnostic-operation 'seon.render.lint/element-with-id
           :seon.error/diagnostic-member :seon.render.lint/id
           :seon.error/diagnostic-expected id
           :seon.error/diagnostic-offending :seon.render.lint/absent
           :seon.error/diagnostic-cause ::absent-element
           :seon.error/diagnostic-evidence
-          {:seon.render.lint/nodes (count (walk root))}}))))
+          {:seon.render.lint/nodes (count (walk root))}
+          :seon.error/fix "Render the required element with the requested id."
+          :seon.render.lint/absent-element id}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Delimiter balance — one scan, no regular expression
@@ -510,13 +514,18 @@
   value, ctx, admission caps, time limit, core-error dial, and the value — plus
   any `check` policy. Nothing is defaulted from a registry or a dynamic var:
   the request IS the world. A refusal from the render owner is returned as the
-  flat `:seon.error/value` it already is, never swallowed into an empty report."
+  exact `:seon.render/error-result` it already is, never swallowed into an empty report."
   {:malli/schema [:=> [:cat :seon.render.lint/render-request]
-                  [:or :seon.render.lint/report :seon.error/value]]}
+                  [:or :seon.render.lint/report :seon.render/error-result]]}
   [request]
   (let [rendered (render/render-call
                   (assoc request :seon.render/output :seon.render/html))]
-    (if (:seon.error/kind rendered)
+    (if (or (:seon.render/refused-member rendered)
+            (:seon.render/candidates rendered)
+            (:seon.render/invalid-output rendered)
+            (:seon.render.unknown/reason rendered)
+            (:seon.render/walk-operation rendered)
+            (:seon.render.transcript/refused-member rendered))
       rendered
       (check (assoc (select-keys request
                                  [:seon.render.lint/required-regions

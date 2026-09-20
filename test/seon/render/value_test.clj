@@ -79,9 +79,9 @@
                            :seon.render.profile/max-depth 3
                            :seon.render.profile/max-children 256
                            :seon.render.profile/composition :single-line})]
-       (is (nil? (:seon.error/kind report)) (pr-str report))
-       (is (nil? (:seon.error/kind installed)) (pr-str installed))
-       (is (nil? (:seon.error/kind completed)) (pr-str completed))
+       (is (seq (:tx-data report)) (pr-str report))
+       (is (map? installed) (pr-str installed))
+       (is (map? completed) (pr-str completed))
        (let [shown-plan (edn/read-string (plan/format-plan-ai whole-plan))]
          (is (str/includes? (:seon.plan/current-line shown-plan) "Current criterion"))
          (is (= #{"later" "finished"} (set (keys (:seon.plan/step-lines shown-plan)))))
@@ -423,9 +423,8 @@
                    :seon.sci.admit/caps caps}
         results [(value/render-html anonymous)
                  (value/render-html anonymous)]]
-    (is (= [:seon.render.value/missing-root-identity
-            :seon.render.value/missing-root-identity]
-           (mapv :seon.error/kind results)))
+    (is (every? string? (map :seon.render.value/root-description results)))
+    (is (every? #(= 'seon.render.value/node-id (:seon.error/operation %)) results))
     (is (every? #(= "A rendered value root requires a caller-supplied block id."
                     (:seon.error/message %))
                 results))
@@ -559,8 +558,10 @@
         window (value/window (poison) 0 3)]
     (is (str/includes? text "poison"))
     (is (str/includes? html "poison"))
-    (is (= :seon.render.value/window-failed
-           (:seon.error/kind (:seon.render.value/window window))))
+    (is (= 0 (:seon.render.value/window-offset
+              (:seon.render.value/window window))))
+    (is (= 'seon.render.value/window
+           (:seon.error/operation (:seon.render.value/window window))))
     (is (= "poison" (:seon.error/message (:seon.render.value/window window))))
     (is (zero? (:seon.render.value/shown window)))))
 

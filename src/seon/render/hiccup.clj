@@ -58,6 +58,7 @@
   render loses a string nobody had sent."
   (:require [clojure.string :as str]
             [clojure.test.check.generators :as gen]
+            [seon.error.refusal :as refusal]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -263,20 +264,31 @@
   stored nil; a tag with no classes yields an empty vector, because the
   caller concatenates it.
 
-  A head `hiccup?` would have refused returns a flat `:seon.error/value`
+  A head `hiccup?` would have refused returns a
+  `:seon.render.hiccup/unparseable-tag-error`
   naming what arrived — never nil (`[:maybe]` is banned, and a nil here
   would read downstream as an empty tag) and never a throw. The caller
   has already admitted its input, so a throw would be a second opinion
   about the same value: exactly the behaviour the quarry's `parse-tag`
   had and this rewrite drops."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A foreign tag candidate may have any shape; invalid tags return a diagnostic instead of throwing.", :gen/elements [nil false 0 "" :k [] {}]}]] [:or [:map [:seon.render.hiccup/tag :string] [:seon.render.hiccup/id {:optional true} :string] [:seon.render.hiccup/classes [:vector :string]]] :seon.error/value]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A foreign tag candidate may have any shape; invalid tags return a diagnostic instead of throwing.", :gen/elements [nil false 0 "" :k [] {}]}]] [:or [:map [:seon.render.hiccup/tag :string] [:seon.render.hiccup/id {:optional true} :string] [:seon.render.hiccup/classes [:vector :string]]] :seon.render.hiccup/unparseable-tag-error]]}
   [head]
   (if-not (or (keyword? head) (symbol? head) (string? head))
-    {:seon.error/kind ::unparseable-tag
-     :seon.render.hiccup/unparseable-tag (pr-str head)
-     :seon.error/message (str "A tag must be a keyword, symbol or string, not "
-                              (if (nil? head) "nil" (.getName (class head))) ".")
-     :seon.error/data {::head (pr-str head)}}
+    (refusal/diagnostic
+     {:seon.error/at (java.util.Date.)
+      :seon.error/layer :seon.render.hiccup/tag
+      :seon.error/operation 'seon.render.hiccup/shorthand
+      :seon.error/message "The Hiccup tag is not a keyword, symbol, or string."
+      :seon.error/diagnostic-layer :seon.render.hiccup/tag
+      :seon.error/diagnostic-operation 'seon.render.hiccup/shorthand
+      :seon.error/diagnostic-member :seon.render.hiccup/tag
+      :seon.error/diagnostic-expected "a keyword, symbol, or string"
+      :seon.error/diagnostic-offending head
+      :seon.error/diagnostic-cause ::unparseable-tag
+      :seon.error/diagnostic-evidence {}
+      :seon.error/fix "Supply a nonempty Hiccup tag name."
+      :seon.render.hiccup/unparseable-tag (pr-str head)
+      :seon.error/data {::head (pr-str head)}})
     ;; ONE left-to-right scan, and it accepts the shorthand in EITHER
     ;; order. The quarry's regex (`^([^.#]+)(?:#([^.#]+))?(?:\.(.+))?$`,
     ;; `src-old/seon/ui/html.cljc`) required `#id` before `.class`, so
@@ -295,10 +307,21 @@
           stop (boundary 0)
           tag (subs text 0 stop)]
       (if (zero? (count tag))
-        {:seon.error/kind ::unparseable-tag
+        (refusal/diagnostic
+         {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.render.hiccup/tag
+         :seon.error/operation 'seon.render.hiccup/shorthand
          :seon.render.hiccup/unparseable-tag (pr-str head)
          :seon.error/message "A tag shorthand carries no tag name."
-         :seon.error/data {::head (pr-str head)}}
+         :seon.error/diagnostic-layer :seon.render.hiccup/tag
+         :seon.error/diagnostic-operation 'seon.render.hiccup/shorthand
+         :seon.error/diagnostic-member :seon.render.hiccup/tag
+         :seon.error/diagnostic-expected "a nonempty tag name"
+         :seon.error/diagnostic-offending head
+         :seon.error/diagnostic-cause ::unparseable-tag
+         :seon.error/diagnostic-evidence {}
+         :seon.error/fix "Supply a nonempty Hiccup tag name."
+         :seon.error/data {::head (pr-str head)}})
         (loop [index stop
                id nil
                classes []]
@@ -311,11 +334,22 @@
                   stop (boundary (inc index))
                   token (subs text (inc index) stop)]
               (if (zero? (count token))
-                {:seon.error/kind ::unparseable-tag
+                (refusal/diagnostic
+                 {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :seon.render.hiccup/tag
+                 :seon.error/operation 'seon.render.hiccup/shorthand
                  :seon.render.hiccup/unparseable-tag (pr-str head)
                  :seon.error/message
                  (str "A tag shorthand carries an empty " marker " segment.")
-                 :seon.error/data {::head (pr-str head)}}
+                 :seon.error/diagnostic-layer :seon.render.hiccup/tag
+                 :seon.error/diagnostic-operation 'seon.render.hiccup/shorthand
+                 :seon.error/diagnostic-member :seon.render.hiccup/tag
+                 :seon.error/diagnostic-expected "a nonempty shorthand segment"
+                 :seon.error/diagnostic-offending token
+                 :seon.error/diagnostic-cause ::unparseable-tag
+                 :seon.error/diagnostic-evidence {:seon.render.hiccup/tag head}
+                 :seon.error/fix "Remove the empty shorthand segment or give it a name."
+                 :seon.error/data {::head (pr-str head)}})
                 (if (= \# marker)
                   ;; last id wins, matching the attribute map's precedence
                   ;; rule one level up: the more specific statement wins
@@ -422,10 +456,21 @@
                  (shorthand (nth element 0))
                  ;; `[]` has no head at all; `hiccup?` refuses it, and so
                  ;; must this, without indexing past the end
-                 {:seon.error/kind ::unparseable-tag
+                 (refusal/diagnostic
+                  {:seon.error/at (java.util.Date.)
+                  :seon.error/layer :seon.render.hiccup/tag
+                  :seon.error/operation 'seon.render.hiccup/shorthand
                   :seon.render.hiccup/unparseable-tag "[]"
-                  :seon.error/message "An empty vector has no Hiccup tag."})]
-    (if (:seon.error/kind parsed)
+                  :seon.error/message "An empty vector has no Hiccup tag."
+                  :seon.error/diagnostic-layer :seon.render.hiccup/tag
+                  :seon.error/diagnostic-operation 'seon.render.hiccup/shorthand
+                  :seon.error/diagnostic-member :seon.render.hiccup/tag
+                  :seon.error/diagnostic-expected "a nonempty Hiccup element"
+                  :seon.error/diagnostic-offending element
+                  :seon.error/diagnostic-cause ::unparseable-tag
+                  :seon.error/diagnostic-evidence {}
+                  :seon.error/fix "Supply a tag as the element's first member."}))]
+    (if (contains? parsed :seon.render.hiccup/unparseable-tag)
       false
       (let [body (subvec element 1)
             attributed? (attributes? (first body))

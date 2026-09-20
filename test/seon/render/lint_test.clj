@@ -55,7 +55,8 @@
   (let [refusal (lint/element-with-id
                  {:seon.render.lint/hiccup [:section [:pre "text"]]
                   :seon.render.lint/id "surface-capture-3"})]
-    (is (= :seon.render.lint/absent-element (:seon.error/kind refusal)))
+    (is (= "surface-capture-3" (:seon.render.lint/absent-element refusal)))
+    (is (= 'seon.render.lint/element-with-id (:seon.error/operation refusal)))
     (is (= "surface-capture-3"
            (get-in refusal [:seon.error/data
                             :seon.error/diagnostic-expected])))))

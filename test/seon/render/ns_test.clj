@@ -128,7 +128,8 @@
             html (sut/render-html unit)]
         (is (= ai html)
             "both projections return the same refusal from the owning read")
-        (is (= :seon.db/invalid-read (:seon.error/kind ai)))
+        (is (= :seon.db/read (:seon.error/layer ai)))
+        (is (contains? ai :seon.db/read-operation))
         (is (string? (:seon.error/message ai)))))))
 
 (deftest populated-namespace-renders-the-inverse-distance-gradient
@@ -349,11 +350,11 @@
             {:seon.schema/key :fixture.closure/not-found-error
              :seon.schema/form
              (pr-str
-              [:map {:seon.error/class true
-                     :seon.render/ai 'seon.error/render-ai
-                     :seon.render/html 'seon.error/render-html
-                     :error/message "must identify the absent fixture"}
-               [:seon.error/message :string]])}
+              [:and :seon.error/base
+               [:map {:seon.render/ai 'seon.error/render-ai
+                      :seon.render/html 'seon.error/render-html
+                      :error/message "must identify the absent fixture"}
+                [:seon.error/message :string]]])}
             closure-schema-rows
             [own-row error-row
              {:seon.schema/key :fixture.external/a

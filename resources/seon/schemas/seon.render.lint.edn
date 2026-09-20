@@ -71,6 +71,8 @@
                    [:map-of :seon.render.lint/defect [:int {:min 1}]],
                    :subject [:or :seon.render/hiccup :seon.render/page],
                    :id [:string {:min 1}],
+                   :absent-element :seon.render.lint/id,
+                   :absent-element-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:seon.render.lint/absent-element :seon.render.lint/absent-element]]],
                    :id-request
                    [:map
                     [:seon.render.lint/hiccup :seon.render.lint/subject]
