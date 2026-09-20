@@ -5911,3 +5911,31 @@ fresh-JVM path (the reset's republish proved it); restart with
 `bin/seon start` once the guard is fixed (`bin/seon init` not needed —
 the store holds the fresh complete publication). The 1a six-suite gate
 runs now on HEAD.
+
+## 2026-09-21 ~22:45 UTC — STATE FOR THE MORNING (lanes down on credits; two publication-lane defects block gates)
+
+What is TRUE at HEAD `5f0a733d9`+: the complete population publishes
+(`bin/seon reset --force`: republish ~132 s, refork ~10 s, start ~15 s);
+default boots and serves HEAD; the write-schema rule (`2d0e9b17e`), the
+boot-form size fix (operator) and the guard derivation (`d8921fbd4`) are
+landed with their evidence. What BLOCKS: (1) in-place adoption through the
+live host — issue `the-loaded-producer-guard-refuses-a-freshly-booted-host`;
+(2) the gate's base publication on the fresh-JVM path — issue
+`the-publication-export-does-not-identify-the-exported-program`. Both are
+the publication lane's unverified landing (its fast runs were dead all
+night on the write-schema defect); both go to it at resume as items 1 and
+2 before its measurements. Consequences: no cold gate ran green tonight;
+the bare×2 + platform proofs stay owed; default is STOPPED (restart with
+`bin/seon start` once the guard is fixed). Lanes: all stopped on the Codex
+limit; three sessions hold shelved edits in `git stash@{0}` +
+`tmp/orchestrator/parked-2026-09-21/all-lanes.patch` (step 2, ops-effects-2,
+gate-restructure) — `git stash pop` BEFORE resuming any of them. Resume
+order on go-ahead: publication (issues 1–2, then measurements) → step 2
+(land) → ops-effects-2 (finish) → gate-restructure → sci-program
+(my.program) → turn/cluster + bin/script sweeps → bare×2 + platform →
+1a/1d/render cold gates. Landed tonight, for the record: bridge step 1;
+results reuse (host); publication items 1–4 + common publisher; error
+family 1a; render, render-2, my-protocol, test-system (11 owed), sci
+core, background/problems/ai/plan/schedule/maintenance/config/issue/
+flow/env/shell/edit/operator/bootstrap kinds; MCP fix; gate symbol fix
++ demand-started workers; nine launch specs.
