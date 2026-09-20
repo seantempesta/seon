@@ -5861,3 +5861,19 @@ in db_test. The fixture base builds again (write probe). Follow-up for the
 sweeps: an identity attribute reused as a facet member is a modeling smell
 (the facet observes a VALUE — the ruling said reuse names, not identities);
 list for the test-system/bootstrap owners.
+
+## 2026-09-21 ~21:30 UTC — publication restored (`2d0e9b17e`); boot then died on "Method code too large!" — the boot form inlined every input digest
+
+With the write-schema rule, `bin/seon reset --force` republished the
+complete population in 133 s and reforked; the cluster JVM then exited in
+3 s: `Syntax error compiling fn* at (REPL:1:5). Method code too large!`
+(`data/clusters/default/logs/seon.log`). Cause: `launch-form`
+(`script/seon/fresh_operator.clj:2002`) inlined `loaded-inputs` — the
+content digest of every source input — as a literal for
+`record-loaded-producers!` (the loaded-producer guard, `3ac00fb8e`),
+pushing the compiled `fn*` past the JVM method-size limit. Fix
+(orchestrator): the child computes `seon.test.cache/input-digests` from the
+same tree at boot; nothing bulky rides the `-e` form. Reset re-run
+(`tmp/orchestrator/default-reset-2026-09-21c.log`). Regression owed to the
+publication lane at resume: the launch form's byte size is bounded and
+asserted; the guard's digests are a comparison the child performs.
