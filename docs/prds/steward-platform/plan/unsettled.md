@@ -7001,3 +7001,14 @@ keyword and symbol keys) — HEAD may not publish from zero; evidence being
 filed; schema.clj is the test-system lane's (its `30baf050a`), routed at
 its stop. Head base refreshed at HEAD (163 s); error lane running its
 result regressions.
+
+## 2026-09-23 ~07:40 local — cold publication fixed (`2d9984a50`: `(merge {} forms contracts)` — ordinary map, one line); error result regressions: functional assertions green, three TIMING failures (single error writes at 6–10 s) sent back as algorithmic
+
+The test-system lane fixed the projection-registry merge in one line and
+kept the parity regression; cold publication is possible again. The
+error lane's four result regressions pass their facts (`4e20bc458`) but
+one error entity written on the fixture takes 6.4–9.5 s; the lane called
+it "database transaction latency"; RULED: split the write (printer, blob,
+bind, prepare, write-schema selection, whole-entity validator, recording's
+reads, Datahike commit) and fix what is O(program) in its files; if the
+residue is the file-backed store's commit, report the number and stop.
