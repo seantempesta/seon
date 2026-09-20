@@ -36,9 +36,9 @@ reporting. These are §10 operational rules, not runner implementation claims.
 ## Canonical fixture
 
 `seon.test-support/with-database` ordinarily opens an isolated branch
-of the canonical in-memory base. It does not rebuild the whole source
-population per call. Each branch has its own connection, datoms, schema
-evolution, and history (`test/seon/test_support.clj:751`, `:784`).
+of the published database in a worker-private file store. It never indexes
+the source population. Each branch has its own connection, datoms, schema
+evolution, and history (`test/seon/test_support.clj`, `with-branched-database`).
 
 Shared base construction runs on its own daemon thread using the system
 classloader and the caller's explicitly carried projection. Failed attempts
@@ -50,10 +50,11 @@ in `test/seon/test_support_test.clj:22`. Reload preserves the successful base;
 never replace it merely to rerun a test.
 
 When the runner supplies a published base, `create-base` clones and
-reidentifies its file store before connecting the private tiered backend
-(`test/seon/test_support.clj:292`). Frontend-only writes do not make a
-shared backend immutable: Konserve's connect-time enumeration may migrate
-and delete old-format files. The simultaneous-acquisition regression in
+reidentifies its file store before connecting it directly
+(`test/seon/test_support.clj`, `create-base`). The former tiered backend
+copied every store key into memory on first connection (Datahike
+`store.cljc:91–104`). Konserve's connect-time enumeration may migrate
+and delete old-format files, so the private copy remains necessary. The simultaneous-acquisition regression in
 `test/seon/test_support_test.clj:146` verifies distinct stores, isolated
 writes, cleanup, and unchanged published bytes.
 

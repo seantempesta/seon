@@ -147,3 +147,15 @@ After fixture acquisition, existing error tests also exceeded five seconds:
 regression took 4.964 s. Those observations do not identify the slow
 transaction algorithm; they establish that the existing suite does not yet
 meet the new bound. No test metadata was widened to conceal these costs.
+
+## Published fixture iteration — 2026-09-23
+
+The test-system lane removed worker-side program indexing and connected the
+private exported file store directly, removing the tiered store's
+whole-backend `sync-on-connect`. Measured first `with-database` fell from
+188,907.588458 ms to 4,647.819208 ms; subsequent p50 is 37.0355 ms.
+The 2,000 ms first-use target still fails: database projection derivation
+alone takes 3,995.958667 ms. Cold worker resolution also still requires SCI
+acquisition before readiness. Therefore the liveness allowance has not been
+reduced or declared solved. Exact measurements and dependency seams:
+[test-system-fork-2026-09-23.md](../../prds/steward-platform/research/test-system-fork-2026-09-23.md).

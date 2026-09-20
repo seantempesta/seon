@@ -948,8 +948,10 @@ names a lane, before taking a slot or creating a run root, and prints the
 `bin/test-fast --paths <your files> -- <namespaces>` replacement. An
 orchestrator flag does not override lane identity. The fast loop uses the
 worker's same contract arming in one JVM, including private functions with
-declared contracts (`seon.test.arm/arm-contracts!`), with the canonical in-memory
-fixture base built once on demand. Plain namespaces use the working tree;
+declared contracts (`seon.test.arm/arm-contracts!`), with a worker-private copy
+of the exported publication and an isolated Datahike branch per fixture.
+The worker acquires its projection once; fixtures carry it without indexing
+source. Plain namespaces use the working tree;
 `bin/test-fast --paths <your files…> -- <namespaces…>` reuses the gate's
 HEAD-plus-selected-files snapshot and removes it after the JVM exits,
 excluding foreign half-edits without preparing a published base. It provides no

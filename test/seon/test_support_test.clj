@@ -68,7 +68,7 @@
             (when-let [base-connection (::test-support/connection constructed)]
               (is (pos? (db/q '[:find (count ?e) . :where [?e :seon.fn/sym]]
                               (db/db base-connection))))
-              (is (some? (:seon.sci.eval/ctx constructed))))
+              (is (delay? (::test-support/sci-context constructed))))
             (is (= 2 @attempts))
             (is (identical? constructed @base))
             (is (realized? base))
@@ -211,7 +211,7 @@
                        (let [result (db/transact! connection [{:seon.ns/name own}])]
                          (.countDown written)
                          (test-support/await-event! written ::both-private-writes)
-                         {::path (get-in configuration [:store :backend-config :path])
+                         {::path (get-in configuration [:store :path])
                           ::id (get-in configuration [:store :id])
                           ::private-root (::test-support/private-root base)
                           ::result-error (:seon.error/kind result)
@@ -261,7 +261,8 @@
                    (map :seon.schema/key)
                    (schema/canonical-schema-rows packaged-forms))
              (keep :seon.schema/key)
-             (seon.fn/rows {:seon.fn/roots seon.fn/source-roots}))
+             (mapcat :seon.fn.file/rows
+                     (:seon.fn.manifest/artifacts @test-support/source-manifest)))
             actual-schema-keys
             (db/q
              '[:find [?key ...]
@@ -369,11 +370,11 @@
   (test-support/with-database (fn [_] nil))
   (let [base @(deref #'test-support/database-base)
         base-connection (::test-support/connection base)
-        projection (:seon.schema/projection (:seon.sci.eval/ctx base))
+        projection (db/carried-projection (db/db base-connection))
         branches (d/branches base-connection)
         holders (::test-support/holders @(deref #'test-support/base-state))
         counts (atom {})
-        observations {#'test-support/populate-database! ::population
+        observations {#'cluster/populate-source! ::population
                       #'seon.fn/build-manifest ::analysis
                       (requiring-resolve 'seon.sci.eval/build-base-ctx) ::sci-base
                       #'d/branch! ::branch
@@ -532,13 +533,9 @@
 
 (deftest ^{:seon.test/platform
            "Moving part: the one test bracket every other test forks through."}
-  the-canonical-base-populates-from-an-empty-store
-  ;; THE COLD-GATE PROOF: a test JVM with no published base realizes this path
-  ;; at its first `with-database`. The population owner now hands its own
-  ;; declaration projection to every transaction it makes, so nothing here
-  ;; depends on an ambient binding the caller happened to hold; before that,
-  ;; the declarations transaction refused :seon.schema/missing-projection and
-  ;; every cold gate died at fixture setup (2026-09-16 blocker).
+  the-canonical-base-opens-the-published-store
+  ;; The base already contains indexed declarations. Opening a fixture must
+  ;; never invoke population, including when callers omit its path.
   (let [create-base (ns-resolve 'seon.test-support 'create-base)
         close-base! (ns-resolve 'seon.test-support 'close-base!)
         base (create-base nil)]
@@ -554,12 +551,11 @@
         (is (seq (db/q '[:find [?sym ...]
                          :where [_ :seon.fn/sym ?sym]]
                        database))
-            "and the program graph indexed")
+            "and the published program graph is present")
         (is (string?
              (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
                    database))
-            "and the population sealed, which is the write that needed the
-             projection the connection carries"))
+            "and the publication is sealed"))
       (finally (close-base! base)))))
 
 ;;; ---------------------------------------------------------------------------

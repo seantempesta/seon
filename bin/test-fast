@@ -3,7 +3,7 @@
 # --paths FILE... -- NS... reuses bin/test’s HEAD-plus-paths snapshot.
 # Plain NS... runs in the working tree; no operator root or published
 # base preparation. Uses the worker's exact program loading and contract arm.
-# Canonical database fixtures build their in-memory base once per JVM. Tests
+# Canonical database fixtures branch the exported publication. Tests
 # explicitly exercising file-backed boot still own their fixture publication.
 # Limits: no per-worker isolation, retained run roots, or automatic platform
 # tier. Results use the cold gate's recording authority. The orchestrator gates a
@@ -37,7 +37,9 @@ stop_fast_runner() {
   release_test_slot
 }
 trap stop_fast_runner EXIT HUP INT TERM
+published_base=$(bb -e '(require (quote [seon.test.cache :as cache])) (let [base (binding [*out* *err*] (cache/newest-base "." "HEAD"))] (println (:seon.test.cache/base base)))')
 nice -n 15 clojure "-J-Dseon.test.source-root=$PWD" \
+  "-J-Dseon.test.published-base=$published_base" \
   "-J-Dseon.test.git-sha=$(git rev-parse HEAD)" -M:test -m seon.test.fast "$@" &
 suite_pid=$!
 if wait "$suite_pid"; then status=0; else status=$?; fi

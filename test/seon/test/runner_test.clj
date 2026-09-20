@@ -117,7 +117,7 @@
            _selected-init (#'runner/initialize-contracts!
                            "arm-extent-regression"
                            ['seon.test.runner-test] projection)
-           base-ctx (:seon.sci.eval/ctx base)
+           base-ctx @(::test-support/sci-context base)
            independent-ctx #(sci.eval/build-base-ctx projection)
            observed (atom [])
            thread-ids (atom [])

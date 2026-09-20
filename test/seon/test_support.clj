@@ -338,31 +338,6 @@
           true (assoc :seon.db/tx-data tx-data)))))
     report))
 
-(defn- populate-database!
-  [connection]
-  (checked-fixture-result
-   (cluster/populate-source!
-    {:seon.db/connection connection
-     :seon.fn/manifest @source-manifest}))
-  nil)
-
-(defn- seal-population!
-  "Seal the completed population, through the connection's carried projection.
-
-  `populate-source!` is the contents step used by production
-  `source/publish!`; production seals that completed population in the
-  following transaction. Keep this canonical fixture on the same side of that
-  provenance boundary so indexed core contracts are not misclassified as
-  agent-authored rows. This write happens AFTER the base carries its
-  projection state, because the writer validates against the projection its
-  connection carries (law 2.1) rather than one bound around the call."
-  [connection]
-  (checked-fixture-result
-   (db/transact!
-    connection
-    {:tx-data [{:seon.source/digest (apply str (repeat 64 "0"))}]}))
-  nil)
-
 (defn- close-base!
   "Release one canonical base exactly once.
 
@@ -386,61 +361,45 @@
   nil)
 
 (defn- create-base
+  "Open a private copy of the published store; never analyze source here."
   [base]
-  (let [private-root (when base
-                       (let [parent (doto (io/file "tmp" "fixture-bases") .mkdirs)]
-                         (str (java.nio.file.Files/createTempDirectory
-                               (.toPath parent) "base-"
-                               (make-array java.nio.file.attribute.FileAttribute 0)))))]
+  (let [base (or base (System/getProperty "seon.test.published-base")
+                 (:seon.test.cache/base
+                  (cache/newest-base (System/getProperty "seon.test.source-root" ".")
+                                     (System/getProperty "seon.test.git-sha" "HEAD"))))
+        parent (doto (io/file "tmp" "fixture-bases") .mkdirs)
+        private-root (str (java.nio.file.Files/createTempDirectory
+                           (.toPath parent) "base-"
+                           (make-array java.nio.file.attribute.FileAttribute 0)))]
     (try
-      (let [configuration
-            (if base
-              (let [private-store (clone-directory! (io/file base "data" "store")
-                                                    (io/file private-root "store"))
-                    _ (cluster.export/reidentify! private-store)
-                    source (store/datahike-configuration private-store)
-                    backend (:store source)
-                    id (:id backend)]
-                ;; Connect-time migration can mutate even a frontend-only
-                ;; backend. Every JVM therefore owns the copy it connects.
-                (-> source
-                    (dissoc :fuse-index-roots? :index-config)
-                    (assoc :branch source/current-branch
-                           :store {:backend :tiered :id id
-                                   :frontend-config {:backend :memory :id id}
-                                   :backend-config backend
-                                   :write-policy :frontend-only
-                                   :read-policy :frontend-first})))
-              ;; Without commit records, the leased branch-name pool also
-              ;; bounds retained keys. Commit-graph tests own file stores.
-              {:store {:backend :memory :id (random-uuid)}
-               :commit-graph? false
-               :keep-history? true
-               :schema-flexibility :write})
-            _ (when-not base (d/create-database configuration))
+      (let [private-store (clone-directory! (io/file base "data" "store")
+                                             (io/file private-root "store"))
+            _ (cluster.export/reidentify! private-store)
+            source-configuration (store/datahike-configuration private-store)
+            ;; The worker owns this file-store copy. Datahike's tiered
+            ;; ready-store copies every backend key into memory on connect;
+            ;; ordinary file-store branches already share immutable roots.
+            configuration (-> source-configuration
+                              (dissoc :fuse-index-roots? :index-config)
+                              (assoc :branch source/current-branch))
             connection (d/connect configuration)]
         (try
-          (when-not base (populate-database! connection))
-          ;; The worker's bootstrap projection has schema forms, but no
-          ;; populated function contracts. Carry this base's actual program
-          ;; ONCE, before the sealing write and cold SCI acquisition: both the
-          ;; writer and the ctx then take the projection the connection carries.
           (let [database @connection
-                projection (schema/projection-from-database database)
+                projection (or (db/carried-projection database)
+                               (schema/projection-from-database database))
                 state (sci.eval/projection-state database projection)]
             (db/carry-connection-projection-state! connection state)
-            (when-not base (seal-population! connection))
-            (cond-> {:seon.test-support/configuration configuration
-                     :seon.test-support/connection connection
-                     ::closed (atom false)
-                     :seon.sci.eval/ctx
-                     (sci.eval/cluster-ctx (db/db connection) connection state)}
-              private-root (assoc ::private-root private-root)))
+            {::configuration configuration
+             ::connection connection
+             ::closed (atom false)
+             ::private-root private-root
+             ::sci-context
+             (delay (sci.eval/cluster-ctx (db/db connection) connection state))})
           (catch Throwable failure
             (close-base! {::configuration configuration ::connection connection})
             (throw failure))))
       (catch Throwable failure
-        (when private-root (delete-recursively! private-root))
+        (delete-recursively! private-root)
         (throw failure)))))
 
 (defprotocol Held
@@ -670,8 +629,8 @@
   ([connection]
    (fork-cluster-ctx connection (seeded-cluster-name (db/db connection))))
   ([connection cluster-name]
-   (let [base-ctx (:seon.sci.eval/ctx
-                   (checked-fixture-result (or *held-base* @database-base)))
+   (let [base-ctx @(::sci-context
+                    (checked-fixture-result (or *held-base* @database-base)))
          database (db/db connection)
          projection (db/carried-projection database)
          projection-state (:seon.sci.eval/projection-state (meta database))]
@@ -953,39 +912,27 @@
        (checked-fixture-result (db/transact! connection {:tx-data extra-schema})))
      (body connection))))
 
-(defn- reconnect-with-projection
-  ([configuration provisional-connection]
-   (reconnect-with-projection configuration provisional-connection
-                              (schema/projection-from-database
-                               @provisional-connection)))
-  ([configuration provisional-connection projection]
-  (let [projection-state
-        (sci.eval/projection-state @provisional-connection projection)]
-    (d/release provisional-connection)
-    {:seon.test-support/connection
-     (schema/call-with-projection-state
-      projection-state #(d/connect configuration))
-     :seon.sci.eval/projection-state projection-state})))
-
 (defn- with-fresh-database [database-id extra-schema options body]
   ((requiring-resolve 'seon.test.runner/fixture-observation!)
-    'seon.test-support/with-fresh-database
-    options)
-  (let [configuration {:store {:backend :memory, :id (or database-id (random-uuid))},
-                       :keep-history? true,
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        provisional-connection (d/connect configuration)]
+   'seon.test-support/with-fresh-database options)
+  ;; Store-global tests copy immutable published data into a distinct store.
+  ;; They never reconstruct that data by indexing the program again.
+  (let [base (create-base nil)]
     (try
-      (populate-database! provisional-connection)
-      (let [{connection :seon.test-support/connection,
-             projection-state :seon.sci.eval/projection-state} (reconnect-with-projection
-                                                                 configuration
-                                                                 provisional-connection)]
+      (let [configuration
+            (d/fork-database (::configuration base)
+                             {:store {:backend :memory
+                                      :id (or database-id (random-uuid))}})
+            connection (d/connect configuration)]
         (try
-          (run-database-body connection projection-state extra-schema body)
-          (finally (d/release connection))))
-      (finally (d/release provisional-connection) (d/delete-database configuration)))))
+          (let [projection (db/carried-projection (db/db (::connection base)))
+                state (sci.eval/projection-state @connection projection)]
+            (binding [*held-base* base]
+              (run-database-body connection state extra-schema body)))
+          (finally
+            (d/release connection)
+            (d/delete-database configuration))))
+      (finally (close-base! base)))))
 
 (defn- with-branched-database
   [extra-schema body]
@@ -996,33 +943,24 @@
   (let [held (acquire-base! database-base)
         base (:seon.test-support/value held)
         {configuration :seon.test-support/configuration
-         base-connection :seon.test-support/connection
-         base-ctx :seon.sci.eval/ctx} (try
+         base-connection :seon.test-support/connection} (try
                                         (checked-fixture-result base)
                                         (catch Throwable failure
                                           (release-base! database-base held)
                                           (throw failure)))
-        base-projection (:seon.schema/projection base-ctx)
+        base-projection (db/carried-projection (db/db base-connection))
         branch (acquire-branch!)]
     (try
-      ;; Fork the sealed base head. With a published base, branch heads and
-      ;; transactions live only in this JVM's Konserve memory frontend.
+      ;; Fork the sealed base head in the worker-owned file store.
       (d/branch! base-connection (get configuration :branch :db) branch)
       (let [branch-configuration (assoc configuration :branch branch)
-            provisional-connection (d/connect branch-configuration)]
+            connection (schema/call-with-projection
+                        base-projection #(d/connect branch-configuration))]
         (try
-          (let [{connection :seon.test-support/connection
-                 projection-state :seon.sci.eval/projection-state}
-            (reconnect-with-projection branch-configuration
-                                           provisional-connection
-                                           base-projection)]
-            (try
-              (binding [*held-base* base]
-                (run-database-body connection projection-state extra-schema body))
-              (finally
-                (d/release connection))))
-          (finally
-            (d/release provisional-connection))))
+          (let [state (sci.eval/projection-state @connection base-projection)]
+            (binding [*held-base* base]
+              (run-database-body connection state extra-schema body)))
+          (finally (d/release connection))))
       (finally
         ;; Datahike refuses deletion while a child connection remains active.
         ;; Return the name only after successful retirement; a teardown failure
@@ -1033,7 +971,7 @@
         (release-base! database-base held)))))
 
 (defn with-database
-  "Run `body` on a fresh branch of one canonical in-memory base.\n\n   The production source population is installed once per new test JVM.\n   Every invocation gets a distinct active branch, connection, datoms, schema\n   evolution, transaction history, and writer. Optional\n   `:seon.test-support/extra-schema` rows are synthetic declarations whose\n   installation is itself part of a test.\n\n   `:seon.test-support/database-id` preserves the legacy physical-store\n   identity contract through an isolated slower path. Store-global blob tests\n   request `:seon.test-support/fresh-store?` because blob keys are outside\n   Datahike branch facts."
+  "Run `body` on a fresh branch of the published test database.\n\n   The worker opens the published population without indexing source.\n   Every invocation gets a distinct active branch, connection, datoms, schema\n   evolution, transaction history, and writer. Optional\n   `:seon.test-support/extra-schema` rows are synthetic declarations whose\n   installation is itself part of a test.\n\n   `:seon.test-support/database-id` preserves the legacy physical-store\n   identity contract through an isolated slower path. Store-global blob tests\n   request `:seon.test-support/fresh-store?` because blob keys are outside\n   Datahike branch facts."
   ([body] (with-database {} body))
   ([{:seon.test-support/keys [database-id extra-schema fresh-store?], :as options} body]
     (if (or database-id fresh-store?)

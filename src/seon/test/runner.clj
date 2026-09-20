@@ -1376,7 +1376,8 @@
   [base]
   (when (and base (realized? base))
     (try
-      (when-let [env (some-> @base :seon.sci.eval/ctx :env)]
+      (when-let [env (let [context (:seon.test-support/sci-context @base)]
+                       (when (and context (realized? context)) (:env @context)))]
         (into {}
               (map (fn [[namespace-name bindings]]
                      [namespace-name (count bindings)]))
@@ -2038,31 +2039,35 @@
     (when (and (map? base) (contains? base :seon.error/at))
       (throw (ex-info "A test worker could not prepare its canonical fixture base."
                       base)))
-    (write-protocol! writer {::worker-event :ready
-                            ::worker-id worker-id
-                            ::fixture-preparation-ms
-                            (quot (- (System/nanoTime) started) 1000000)
-                            ::exchange-id (str worker-id "/readiness")})
-    (let [connection (:seon.test-support/connection base)
-          database (db/db connection)
-          task-executor
-          (Executors/newSingleThreadExecutor
-           (reify ThreadFactory
-             (newThread [_ runnable]
-               (doto (Thread. runnable (str "seon-test-worker-" worker-id))
-                 (.setDaemon true)))))]
-      (try
-        (serve-worker-commands!
-         worker-id reader writer
-         {::projection projection
-          ::task-executor task-executor
-          ::resolution {::report-options (report-options)
-                        :seon.db/db database :seon.db/connection connection
-                        :seon.sci.eval/ctx (:seon.sci.eval/ctx base)
-                        :seon.schema/projection (schema/projection-from-database database)
-                        :seon.test/class-loader (clojure.lang.RT/baseLoader)}})
-        (finally
-          (.shutdownNow task-executor))))))
+    ;; Resolution currently requires an acquired SCI program even for host
+    ;; tests. Preserve readiness's guarantee while plain database fixtures
+    ;; avoid acquiring an interpreter they never use.
+    (let [context @(:seon.test-support/sci-context base)]
+      (write-protocol! writer {::worker-event :ready
+                              ::worker-id worker-id
+                              ::fixture-preparation-ms
+                              (quot (- (System/nanoTime) started) 1000000)
+                              ::exchange-id (str worker-id "/readiness")})
+      (let [connection (:seon.test-support/connection base)
+            database (db/db connection)
+            task-executor
+            (Executors/newSingleThreadExecutor
+             (reify ThreadFactory
+               (newThread [_ runnable]
+                 (doto (Thread. runnable (str "seon-test-worker-" worker-id))
+                   (.setDaemon true)))))]
+        (try
+          (serve-worker-commands!
+           worker-id reader writer
+           {::projection projection
+            ::task-executor task-executor
+            ::resolution {::report-options (report-options)
+                          :seon.db/db database :seon.db/connection connection
+                          :seon.sci.eval/ctx context
+                          :seon.schema/projection (db/carried-projection database)
+                          :seon.test/class-loader (clojure.lang.RT/baseLoader)}})
+          (finally
+            (.shutdownNow task-executor)))))))
 
 (defn- worker-main!
   [worker-id]

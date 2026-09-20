@@ -244,7 +244,7 @@
                       connection
                       [[:db.fn/retractEntity [:seon.test/sym test-symbol]]
                        [:db.fn/call runner/record-tx completion]])]
-         (is (:seon.error/kind refused) (pr-str refused))
+         (is (inst? (:seon.error/at refused)) (pr-str refused))
          (is (= basis (db/basis-t (db/db connection))))
          (is (= :core (source-of))
              "result recording cannot recreate a deleted definition"))))))
