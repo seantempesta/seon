@@ -254,10 +254,10 @@ publication, browser observation or reset was performed for this plan.
 
 | Dependency mechanism | Pinned source and first-party seam | Consequence |
 |---|---|---|
-| Datahike incoming-ref sweep and component cascade | Gitlink `73afe78271a289861da236c5ac3457e64349653f`; `reference-code/datahike/src/datahike/db/transaction.cljc:998–1015`, `:831–836`; `seon.fn/reconcile-tx-in`, `seon.turn/row-tx` | Convert name edges and install Q1 before enabling entity deletion on the new population. |
+| Datahike incoming-ref sweep and component cascade | Gitlink `73afe7827` (measured 2026-09-17); `reference-code/datahike/src/datahike/db/transaction.cljc:998–1015`, `:831–836`; `seon.fn/reconcile-tx-in`, `seon.turn/row-tx` | Convert name edges and install Q1 before enabling entity deletion on the new population. |
 | Transaction functions and atomic report validation | Same dependency `transaction.cljc:1153–1154`, `:1206–1215`, `:1276`; `src/seon/db.clj:3009` write-report-error, `:3141` retain-transaction, `:3176` transact-call | One writer-time before/after decision, including expanded transaction functions; no client pre-read or duplicate transaction simulation. |
 | Empty many-values and pull component expansion | Same dependency `transaction.cljc:739–770`; `pull_api.cljc:345–357`; `seon.db/write-entity-value` | Positive evidence plus logical empty sets; schema-derived complete component traversal, including beyond pull's default 1,000 limit. |
-| Malli registry and derived map contracts | Gitlink `3517a3cd9271b2083780ac7be1725493905bca2e`; `reference-code/malli/src/malli/util.cljc`; `seon.schema` projection and `seon.schema.datahike` codec | Derive reader forms from entity plus selector, not a parallel hand-authored map. Reuse the existing union codec. |
+| Malli registry and derived map contracts | Gitlink `3517a3cd9` (measured 2026-09-17); `reference-code/malli/src/malli/util.cljc`; `seon.schema` projection and `seon.schema.datahike` codec | Derive reader forms from entity plus selector, not a parallel hand-authored map. Reuse the existing union codec. |
 
 ## Publication order and ownership
 

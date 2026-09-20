@@ -1,3 +1,10 @@
+---
+type: research
+status: complete
+created: 2026-09-17
+tags: [research, dependencies, pins]
+---
+
 # persistent-sorted-set pin move — verified, then declined
 
 Date: 2026-09-17. Lane: `pss-pin`. Branch `steward-platform`, superproject HEAD

@@ -835,7 +835,15 @@
            (when (and (not skill?) (run? :valid-type)) (rule-valid-type frontmatter vault-root))
            (when (run? :wikilink-target-exists) (rule-wikilink-target-exists links vault-root))
            (when (run? :no-bare-urls) (rule-no-bare-urls links))
-           (when (run? :dependency-pin-current)
+           ;; A dated research note or issue cites the pin it MEASURED against;
+           ;; that is point-in-time evidence, not a claim about the selected
+           ;; pin, so the currency rule applies only to living documents
+           ;; (skills, architecture, reference, plans, AGENTS.md). Before this
+           ;; guard every markdown edit reported 45 "stale" pins from one
+           ;; 2026-09-15 audit note into every agent's hook feedback.
+           (when (and (run? :dependency-pin-current)
+                      (not (contains? #{"research" "issue"}
+                                      (some-> frontmatter :type str/trim))))
              (rule-dependency-pin-current lines file-path gitlinks))])))
 
 ;;; ---------------------------------------------------------------------------
@@ -1129,11 +1137,15 @@
             (into []
                   (mapcat
                    (fn [path]
-                     (rule-dependency-pin-current
-                      (str/split-lines
-                       (slurp (io/file repository-root path)))
-                      path
-                      gitlinks)))
+                     (let [content (slurp (io/file repository-root path))
+                           [frontmatter _] (parse-frontmatter content)
+                           doc-type (some-> frontmatter :type str/trim)]
+                       ;; Same guard as run-rules: a dated research note or
+                       ;; issue cites the pin it measured against; only
+                       ;; living documents must cite the current gitlink.
+                       (when-not (contains? #{"research" "issue"} doc-type)
+                         (rule-dependency-pin-current
+                          (str/split-lines content) path gitlinks)))))
                   paths)]
         {::valid? (empty? violations)
          ::deleted-paths deleted

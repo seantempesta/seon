@@ -4627,3 +4627,22 @@ repeated registry allocation. Resumed to review the PRD line by line with
 Malli/Datahike file:line, correct in place, re-cost, and write the step-1
 lane spec verbatim. `error-family-1a` landed `ac3944048` (raw database and
 schema refusals projected at recorder admission).
+
+## 2026-09-20 ~11:00 UTC — tools: pin linter scoped; steps 3–4 research lanes launched
+
+Owner: research and test the PRD's steps 3–4 in the REPL now, in parallel;
+"fix the other issues and tools always." Tools: the markdown pin-currency
+rule now applies only to living documents (skills, architecture, reference,
+plans, AGENTS.md), not to dated `research`/`issue` notes, which cite the pin
+they measured against — every markdown edit had been dumping 45 stale-pin
+"errors" from one 2026-09-15 note into every agent's hook feedback;
+repository pin violations 58 → 0 (two historical pins in the reset-batch
+plan abbreviated as measured pins; one note gained its frontmatter). Queued
+for the results-reuse lane (holds bin/test): the overlay admission's
+`bb -e` prints the whole head manifest (19 MB line 10 in every --paths gate
+log) — return nil. Launched research lanes `step3-carried-projection` and
+`step4-validator-measurement` (astra MEDIUM, scratch JVMs only, one each):
+seam enumeration, Datahike metadata survival, the stamp prototype and
+restart proof; Datahike-vs-ours refusal tables, the validator's traversal
+cost split, a diet prototype with parity. Six lanes (three editing, three
+research); load watched.
