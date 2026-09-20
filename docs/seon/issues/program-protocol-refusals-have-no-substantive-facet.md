@@ -1,12 +1,29 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-21
 tags: [issue, program, error-model, sci, contracts]
 ---
 
 # Program protocol refusals have no substantive facet
+
+
+## Resolution — 2026-09-21
+
+Owner extended the lane to `my.program`; `d51a6d91e` declares the missing
+read, context, mutation and native-call observations and promotes not-found
+to a base extension. `fd93f709a` also makes call preparation admit their
+precise supplier return shapes.
+
+Fast run `a27611812ade` executed all 10 tests in `my.program-test`,
+`my.program-mutation-test`, and `my.program-query-test`, with zero failures
+or errors in those namespaces. This includes complete-facet validation on
+the canonical fixture and real SCI hook/mutation execution. The combined
+run was not green: call-preparation fixture repairs and one database
+contract-rearming error are tracked in the lane landing note.
+
+## Original evidence
 
 The sci-program sweep applied D12: only a complete declared facet makes a
 returned value an error. The existing `my.program/read-result` producer

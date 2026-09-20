@@ -225,6 +225,10 @@
   Refusing at acquisition is the point: an incoherent row is never
   installed, so a wrong-shaped value can never be handed to a target
   function and disguised as that function's own contract violation."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.call-preparation/supplied-default
+         [:or :nil :seon.call-preparation/shape] [:set :seon.call-preparation/shape]]
+    [:or :nil :seon.call-preparation/incoherent-supplier-error :seon.db/error-result]]}
   [database
    {schema-key :seon.call-preparation/schema-key
     fingerprint :seon.call-preparation/shape
@@ -994,6 +998,7 @@
  :seon.error/diagnostic-operation 'seon.call-preparation/unavailable
  :seon.error/diagnostic-member (:seon.call-preparation/key slot)
  :seon.error/diagnostic-expected "an available supplied default"
+ :seon.error/offending cause
  :seon.error/diagnostic-offending cause
  :seon.error/diagnostic-cause :seon.call-preparation/unavailable
  :seon.error/diagnostic-evidence (cond-> {:seon.fn/sym sym
@@ -1066,6 +1071,7 @@
  :seon.error/diagnostic-operation 'seon.call-preparation/supply
  :seon.error/diagnostic-member symbol-name
  :seon.error/diagnostic-expected "a returned supplied value"
+ :seon.error/offending cause
  :seon.error/diagnostic-offending cause
  :seon.error/diagnostic-cause :seon.call-preparation/supplier-threw
  :seon.error/diagnostic-evidence {:seon.call-preparation/supplier-symbol
@@ -1197,13 +1203,11 @@
 (defn prepare
   "Prepare one call's arguments against its plan, or refuse as a value.
 
-  Three failure faces and nothing else reaches the caller: an
-  `:seon.call-preparation/unavailable` value when a declared supplier
-  cannot produce (the target body is never entered), an
-  `:seon.call-preparation/ambiguous-call` value when two derived shapes
-  land on one supplied count, and — for an explicitly supplied wrong or
-  nil value — NO face at all, because caller presence wins and the
-  ordinary Malli contract violation owns that result.
+  An unavailable-error names a supplier that could not produce a value;
+  an invalid-supplied-value-error names a value outside its declared schema;
+  an ambiguous-call-error names multiple placements at one supplied count.
+  Each refusal prevents entry into the target. Explicit caller arguments
+  remain unchanged and the target's ordinary contract validates them.
 
   Caller presence is tested by argument occupancy and `contains?`, never
   truthiness: a supplied nil reaches ordinary Malli input validation."
@@ -1235,11 +1239,13 @@
               "declared arguments in full.")
  :seon.call-preparation/target-symbol sym
  :seon.call-preparation/supplied-count supplied
- :seon.call-preparation/candidates (:seon.call-preparation/candidates answer)
+ :seon.call-preparation/candidate-count (count (:seon.call-preparation/candidates answer))
  :seon.error/diagnostic-layer :seon.call-preparation/call
  :seon.error/diagnostic-operation 'seon.call-preparation/prepare
  :seon.error/diagnostic-member sym
  :seon.error/diagnostic-expected "one uniquely determined argument placement"
+ :seon.error/offending {:seon.call-preparation/candidates (:seon.call-preparation/candidates answer)
+                        :seon.schema/arguments arguments}
  :seon.error/diagnostic-offending arguments
  :seon.error/diagnostic-cause :seon.call-preparation/ambiguous-call
  :seon.error/diagnostic-evidence {:seon.fn/sym sym
@@ -1332,6 +1338,6 @@
                     prepared (prepare current environment
                                       (plan call-state database current sym)
                                       (vec arguments))]
-                (if (and (map? prepared) (or (:seon.call-preparation/unavailable-key prepared) (:seon.call-preparation/invalid-key prepared) (:seon.call-preparation/candidates prepared)))
+                (if (and (map? prepared) (or (:seon.call-preparation/unavailable-key prepared) (:seon.call-preparation/invalid-key prepared) (:seon.call-preparation/candidate-count prepared)))
                   (reduced prepared)
                   prepared)))))))))

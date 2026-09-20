@@ -1,13 +1,23 @@
 ---
 type: research
-status: blocked
+status: complete
 created: 2026-09-21
 tags: [error-model, kind-retirement, sci, program]
 ---
 
 # Kind sweep — sci-program
 
-## Result
+## Current result — morning continuation
+
+Both newly assigned items are landed: `d51a6d91e` converts `my.program`;
+`fd93f709a` converts call preparation, followed by the final evidence and
+fixture correction commit containing this note. Owned source/resources/tests
+are kind-free and load. This is implementation completion, not a green cold
+gate: one database contract-rearming error remains at the held test boundary.
+Final per-family iteration results and the cold command are at the end.
+All earlier section-6 stops below are historical and have owner rulings.
+
+## Historical first stop
 
 Stopped before production edits at the error-conversion PRD section-6
 required-member collision. The family is not converted. This is a schema
@@ -665,3 +675,73 @@ The post-commit fast pass is pending below. The protocol's `overrides` reader
 also normalizes a returned database failure, rather than promising an
 undeclared pass-through. The large diagnostic is recorded in
 [the reporting issue](../../../seon/issues/call-preparation-refusal-dumps-the-acquired-projection.md).
+
+
+## Final morning evidence
+
+| Family / namespace | Latest relevant run | Executed | Failures | Errors |
+|---|---|---:|---:|---:|
+| call preparation | `7f3aac1e66b7` | 17 | 0 | 0 |
+| program reads | `a27611812ade` | 5 | 0 | 0 |
+| program mutations | `a27611812ade` | 3 | 0 | 0 |
+| program query regressions | `a27611812ade` | 2 | 0 | 0 |
+| database regression handoff | `a27611812ade` | 64 | 0 | 1 |
+
+The final call-preparation pass recorded **96 assertions**, 17 executed,
+0 unchanged. The combined pass recorded 91 executed, 0 unchanged,
+705 assertions, 5 failures and 7 errors; its call-preparation results are
+superseded by the final pass. Its 10 program tests passed, including real
+SCI calls and the complete-facet regression. No unchanged database/program
+namespace was rerun for the subsequent test-only fixture repair.
+
+The fixture repair retains the canonical helper's `:agent` admission instead
+of overriding it to `:core` without the required indexed-file relation
+(`seon.fn.edn:151–154`). The malformed supplier value now has an invalid
+instant member, so it reaches call preparation as ordinary data; a complete
+base returned from a contract declaring no error facet is rejected earlier
+by instrumentation. The test proves that mere base-key presence does not
+make the supplied value an error.
+
+One admission iteration executed no tests: required ambiguity candidates
+were a non-storable nested vector. The final facet records target, supplied
+count and alternative count; the complete placements and arguments travel
+as error evidence, with raw values at `:seon.error/offending`. No per-facet
+EDN string was introduced. The final code also declares the private
+`read-result` and `coherent-supplier` return unions explicitly.
+
+The database diff/no-change, diff/refusal, replay, and arity/component cases
+named in the assignment passed. The remaining wildcard-pull test failed
+before its assertion, at `instrument/apply!`, with “The loaded function
+contract cannot compile.” Exact evidence and the intentionally unassigned
+cause are in [the rearming issue](../../../seon/issues/wildcard-pull-rearming-refuses-a-loaded-contract.md).
+The error was not treated as a reason to stop the owned conversion.
+
+R1–R8 census for this continuation: call-preparation source **2 → 0** kind
+references; its tests **10 → 0**; program resource **2 → 0** class markers.
+The four program protocol marker producers and general `checked` consumer
+are replaced by substantive facets and per-callee branches. The new files
+have zero `:seon.error/kind`, `seon.error/class`, or `error/error?` matches.
+Lint is clean. Four original SCI/program namespaces plus `my.program` and
+`seon.call-preparation` load before and after commits. No default lifecycle,
+foreign session, held file, worktree, or cold gate was operated.
+
+Handoffs remain: `fn.clj`'s generic gate/read return contracts; `schema/edn`
+and `schema/datahike` sites listed in the earlier sweep inventory; database
+suppliers' generic base return declarations; the wildcard rearming boundary;
+and the error/test reporting owner's oversized diagnostic issue. Error
+owners should include the new program/call-preparation facets in any enforced
+canonical pass-through inventory they own. Foreign dirty `error.clj`,
+`sci/eval.clj`, and `fn_test.clj` were explicitly excluded by overlay admission;
+this lane tested their HEAD bytes. No store-lock retry was needed.
+
+Cold proof owed to the orchestrator (not run by this lane):
+
+```sh
+bin/test --paths src/my/program.clj resources/seon/schemas/seon.program.edn test/my/program_test.clj test/my/program_mutation_test.clj test/my/program_query_test.clj src/seon/call_preparation.clj resources/seon/schemas/seon.call-preparation.edn test/seon/call_preparation_test.clj -- seon.call-preparation-test seon.db-test my.program-test my.program-mutation-test my.program-query-test
+bin/test --platform
+```
+
+The earlier SCI-family cold commands remain owed as recorded above. The
+latest raw logs are `tmp/sci-program-fast-facets.log` and
+`tmp/sci-program-fast-cp-fixtures.log`; the run identities and measured
+outcomes are retained here independently of those disposable files.

@@ -12,7 +12,14 @@
             [seon.fn :as function]
             [seon.issue :as issue]))
 
-(defn- read-result [request operation read-value]
+(defn- read-result
+  {:malli/schema
+   [:=> [:cat :map :qualified-symbol [:=> [:cat] :seon.schema/value]]
+    [:or :seon.program/breakage :seon.program/history-report
+     [:vector :seon.fn/sym] :seon.program/change
+     :seon.program/read-refused-error :seon.program/not-found-error
+     :seon.program/mutation-refused-error]]}
+  [request operation read-value]
   (try (read-value)
        (catch Exception failure
          (if (or (:seon.program/not-found (ex-data failure))
@@ -30,6 +37,7 @@
              :seon.error/diagnostic-operation 'my.program/read-result
              :seon.error/diagnostic-member (:seon.program/subject request)
              :seon.error/diagnostic-expected :seon.program/breakage
+             :seon.error/offending request
              :seon.error/diagnostic-offending request
              :seon.error/diagnostic-cause (ex-message failure)
              :seon.error/diagnostic-evidence (ex-data failure)})))))
@@ -671,6 +679,7 @@
                  :seon.error/diagnostic-operation 'my.program/native-call-refusal
                  :seon.error/diagnostic-member native
                  :seon.error/diagnostic-expected operation
+                 :seon.error/offending arguments
                  :seon.error/diagnostic-offending arguments
                  :seon.error/diagnostic-cause :native-program-mutation
                  :seon.error/diagnostic-evidence (or report {})

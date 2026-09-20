@@ -218,6 +218,7 @@
    "must be a call-preparation state atom built by seon.call-preparation/state"
    :gen/gen seon.call-preparation/state-generator}
   seon.call-preparation/state?]
+ :candidate-count [:int {:min 2}]
  :target-symbol :qualified-symbol
  :incoherent-key :qualified-keyword
  :coherence-expectation :string
@@ -242,5 +243,5 @@
   :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/invalid-key :seon.call-preparation/invalid-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.call-preparation/schema-key :seon.call-preparation/schema-key]]]
  :ambiguous-call-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/supplied-count :seon.call-preparation/supplied-count] [:seon.call-preparation/candidates :seon.call-preparation/candidates]]]
+  :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/supplied-count :seon.call-preparation/supplied-count] [:seon.call-preparation/candidate-count :seon.call-preparation/candidate-count]]]
 }

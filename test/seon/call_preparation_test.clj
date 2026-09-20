@@ -175,17 +175,9 @@
             :seon.program/schema-forms forms}))
         function-row
         (fn [function-symbol spec source arglists]
-          (merge (test-support/program-fn-row database function-symbol source)
-                 {:seon.fn/sym function-symbol
-                  ;; Every program row declares where its definition was
-                  ;; admitted from; the fn schema requires it.
-                  :seon.schema.admission/source :core
-                  :seon.fn/ns [:seon.ns/name 'sample]
-                  :seon.fn/source source
-                  :seon.fn/arglists (pr-str arglists)
-                  :seon.fn/private? false
-                  :seon.fn/spec (pr-str spec)}
-                 (contract-facts function-symbol spec source arglists)))]
+          (assoc (merge (test-support/program-fn-row database function-symbol source)
+                        (contract-facts function-symbol spec source arglists))
+                 :seon.fn/spec (pr-str spec)))]
     [{:seon.ns/name 'sample :seon.ns/source "(ns sample)"}
      (program/with-contract-facts
       {:seon.program/row {:seon.schema/key :sample/marker
@@ -545,6 +537,7 @@
                 (str "(seon.call-preparation-test/probe-repeated-database "
                      "(seon.call-preparation-test/probe-current-database))"))]
            (is (= 1 (:seon.call-preparation/supplied-count refusal)))
+           (is (= 2 (:seon.call-preparation/candidate-count refusal)))
            (is (= #{[0] [1]}
                   (set (:seon.call-preparation/candidates
                         (:seon.error/data refusal)))))
@@ -801,7 +794,7 @@
   "Return ordinary map data which satisfies no declared error facet."
   {:malli/schema [:=> [:cat :seon.env/environment] :map]}
   [_environment]
-  {:seon.error/at (java.util.Date.)
+  {:seon.error/at "not-an-instant"
    :seon.error/layer :seon.call-preparation/test
    :seon.error/operation 'seon.call-preparation-test/malformed-base-supplier})
 
