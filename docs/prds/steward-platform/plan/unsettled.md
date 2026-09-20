@@ -6924,3 +6924,18 @@ slice (2): the default 5 s bound enforced as FAILURE (surfacing the
 list), then those two classes fixed at their fixtures. The median 3.4 s
 is the tests' own work, not fixture reuse (subsequent fixture use was
 already ~3 ms before today and is 37 ms after the fork).
+
+## 2026-09-23 ~05:20 local — ERROR LANE: four classes landed (through `b7839a79c`; error/db 48 tests green); resumed on the parked result-mechanism slice; clean-boot proof owed in a quiet window
+
+Landed: complete write errors returned and absent component declarations
+preserved (`fb41a5244`), system-turn source reads keep their declared
+errors (`39406b8cf`), blob publication callbacks declare their database
+errors (`c5ce4ba3a`), contract refusals validated against declared error
+schemas (`b9d983b72`), and the `stored-observation` compiled-node fix
+(`b7839a79c`). The lane's own fresh boot hit the config-phase silence
+under load, so "the boot fault is gone" is unproven until the quiet-window
+boot. Per the owner's ruling no more red-class lanes; the slot goes to the
+error lane's parked slice: the offending value as a normal `result/e<id>`
+at the recording seam with open request keys, legacy members retired,
+readers converted (test-system/redesign hunks named as held). RESET
+NEEDED will grow by its attributes.
