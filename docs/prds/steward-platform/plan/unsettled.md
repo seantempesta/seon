@@ -5766,3 +5766,17 @@ LAUNCHED (astra low) from the spec's verbatim assignment: the two
 string/symbol sites first (868/868 tasks misrouted to serial), then unused
 worker lifetimes and repeated per-test preparation. Editing lanes: step 2,
 ops-effects-2, gate-restructure.
+
+## 2026-09-21 ~18:10 UTC — gate fix landed (symbols; workers from demand); step 2 handler custody ruled
+
+`gate-restructure` landed `9d40d32b4` (gate task and failure identities
+kept as symbols — the 868/868 misrouting) and `cdf517203` (gate workers
+start from stage demand and drained children are reaped — no more idle
+pool at full heap). `kind-sweep-ops-effects-2` landed `4510d4ef9` (edit),
+`bd817b01d`, `d2910dcaa` (operator, operator lifecycle). `bridge-step2-walker`
+(`24992acc3`) asked about shell handlers lacking a generation argument;
+ruled option 1 — use the handler's existing context, pass its generation
+explicitly downstream; the explicit handler-protocol argument stays the
+effect owner's Phase-3 item. Resumed to land step 2 (walker deletion in
+one commit). Its note must name the recorder check that still refuses
+fast recording and in which JVM — the publication lane's follow-up.
