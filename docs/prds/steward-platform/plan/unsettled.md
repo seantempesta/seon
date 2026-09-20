@@ -6717,3 +6717,21 @@ first cluster + start) as the once cost and measures `fork` against the
 running cluster (target < 1 s), then `adopt-first` (target ≈ no-change).
 Standing for the orchestrator: a number is never explained by which path
 it took; it is explained by what work the algorithm should do.
+
+## 2026-09-22 ~23:50 local — measurement at `0c6be06f3` (slice 1) complete; the inside-the-JVM costs are untouched, as expected
+
+| Case | `cd701afc2` (slice 0) | `0c6be06f3` (slice 1) |
+|---|---:|---:|
+| From zero | 206.3 s | 266.2 s (concurrent platform tier) |
+| Fork (before start — the row the script no longer measures) | 27.5 s | 21.5 s |
+| Boot to ready | 38.3 s | 64.3 s (load) |
+| First adoption after fork (was mislabeled "no change") | 128.4 s | 115.6 s |
+| Docstring, non-core | 350.4 s | 310.1 s (analysis 196.0 s) |
+| Docstring, core | 211.7 s | 236.7 s |
+
+Slice 1 removed the per-command JVM; every remaining second is inside the
+live JVM: the incremental analysis (196 s, slice 2), program
+reconciliation 29–38 s per adoption, changed-definition comparison
+21 s, reconciliation transaction 17 s (slice 4), contract projection
+22 s and contract rows 16 s per publication (slice 3). Rows measured
+under the platform tier's load; the quiet-window rerun follows slice 2.
