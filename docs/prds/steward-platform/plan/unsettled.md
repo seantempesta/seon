@@ -5422,3 +5422,17 @@ it returns) not yet applied to the `seon.db` reads and their callers —
 proof stands). No rerun: the classes go to their owners — 1a gets class 2
 at its next stop with the log; class 1 waits for the my-protocol sweep
 (sol low) and the turn/cluster sweep when slots free.
+
+## 2026-09-21 ~08:40 UTC — step 2 parked at the publication lane's held callers; my-protocol sweep launched
+
+`bridge-step2-walker` checkpoint (note committed; changes uncommitted, raw
+walker intact): construction parity 1,012 attributes / 0 mismatches;
+stopped at the held construction callers `src/seon/fn.clj` and
+`src/seon/cluster/source.clj` (publication-dissolution, finishing its
+population conversion and duplicate-publisher deletions). It resumes the
+moment the publication lane lands. The cold gate's class-1 reds under
+test/my/ go to `kind-sweep-my-protocol` (sol low, launched; src/my and
+test/my free); the turn/cluster sweep waits on turn.clj/cluster.clj
+(dirty from step 2 / publication); ops-effects next when a slot frees.
+Editing lanes with JVMs: publication, 1a, my-protocol; step 2 parked
+holding 39 files; `wave1-families-design` read-only.
