@@ -5824,3 +5824,20 @@ list and untracked list beside it; re-applied with `git stash pop` (or
 (`tmp/orchestrator/default-reset-2026-09-21.log`). Then the 1a gate
 reruns on HEAD, measuring the incremental base, the symbol fix and
 demand-started workers.
+
+## 2026-09-21 ~20:10 UTC — reset from clean HEAD REFUSED at program indexing; diagnosis in progress (no lanes)
+
+`bin/seon reset --force` from the clean tree: republish refused the
+program-indexing transaction at `[26651 :seon.error/at]` — entity
+`seon.dev.docstring-test/format-findings-test`, an ordinary test row
+(source, file, analyzed-source-digest, keywords, references, admission
+source, ns, call-arities, calls, sym) — "expected the required key
+:seon.error/at"; offending `:seon.error/unknown` is the validator's typed
+unknown for an absent value. A projection probe (`tmp/probe/shape-probe.clj`)
+shows no entity schema matches that row by required-subset and every
+`seon.test` facet correctly requires the error base, so the shape index is
+not the selector at fault; the write validator's own selection is. HEAD
+therefore cannot publish a complete population — every publisher is
+blocked, default is down, and no gate can run until this is found. Next:
+reproduce the single row write on the canonical fixture and read the
+writer's full refusal data (it names the validated schema).
