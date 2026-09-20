@@ -7,9 +7,9 @@ tags: [publication, test-system, wave/publication-velocity]
 
 # Publication dissolution — decision checkpoint
 
-Items 1–4 are **not complete**. The latest checkpoint implements the ruled
-publication-analysis exclusions; the publication/reconciliation and caching
-changes remain unimplemented. No publication speedup is claimed. The sections
+Items 1–4 are **not complete**. The production tree contains the ruled publication-analysis exclusions.
+A tested declaration-closure prototype is preserved in the research patch linked
+below; publication/reconciliation and persistent caching remain unimplemented. No publication speedup is claimed. The sections
 below retain the earlier decision evidence. Item 5 remains outside this assignment.
 
 ## Decision: what constitutes an analysis input?
@@ -496,3 +496,121 @@ Pre-commit namespace load of `seon.fn.analyzer`, `seon.fn`, and
 used the shared checkout, including its foreign dirty bridge bytes; it is not
 a cold gate or a clean-HEAD snapshot proof. The cold command and platform proof
 listed above remain owed to the orchestrator.
+
+
+## Storage boundary: the executing indexer is an analysis input (2026-09-20)
+
+The general closure ruling is accepted: every recorded declaration participates,
+regardless of privacy or declaration family. No further finding-policy ruling is
+requested. The new boundary concerns **stored program facts**, not findings.
+
+The real historical `call-target` change introduced at `af800d1a0` adds Var-quote
+calls without changing the function's name, arguments or metadata. Replaying its
+pre-change body against the current analyzer, then the current body, changes the
+stored calls of an unchanged `(defn g [] (#'a/f 1))`. The consumer does not call
+its indexer, so no declaration edge connects that consumer to `call-target`.
+Current owners: `src/seon/fn.clj:353` (`call-target`), `:386`
+(`call-targets-by-caller`). This is a targeted historical implementation replay,
+not a checkout of the whole historical revision.
+
+The prototype selected only `src/compiler.clj`, exactly as the ruled closure
+requires. Incremental analysis retained `#{clojure.core/defn}` in the consumer's
+call facts; complete analysis produced `#{pub.alpha/f}`. Both final manifests had
+the **same source digest**. Thus source-digest equality is necessary but cannot
+prove equal program facts; the parity regression also compares entire artifacts.
+Excluding a warning cannot remove this stored-fact dependency.
+
+### Preserved implementation and evidence
+
+[Applicable prototype patch](publication-declaration-closure-prototype-2026-09-20.patch)
+contains the exact five source/schema changes and two tests used in the run.
+It shares `seon.test.selection`'s existing reverse-edge traversal; reads declaration
+metadata through the existing LispReader owner; carries an explicitly owned kondo
+resolver cache; analyzes changed files then affected files once each; and retains
+unchanged artifacts. It has NOT been connected to any publisher.
+
+The canonical armed fast run on HEAD-plus-owned-paths (`run.fD0FB7`) recorded
+**2 executed, 0 unchanged, 24 assertions, 0 failures, 0 errors**, run
+`1b08bd6813ce`. Log: `tmp/publication-dissolution/toolchain-fixed-fast.log`.
+The five parity cases (body, arity, deletion, namespace deprecation, private
+metadata) took 1,744 ms together. The historical toolchain replay took 2,389 ms.
+The slot wait was 171 seconds; these are test-body measurements, not publication
+phase benchmarks. The earlier five-case run passed 20 assertions; it was rerun
+only after the helper's input contract changed. Two intermediate failures were
+our prototype defects (nil empty metadata, then an anonymous predicate in a
+serialized contract); both were fixed before this recorded run.
+
+No one-file/full publication before/after claim is made: no complete item has
+landed. No duplicate publisher path has been deleted. Items 2–4 and the lineage
+regression remain owed, as do the requested publication phase measurements.
+
+The prototype is incomplete beyond those cases: schema-resource declaration
+seeds and test-identity normalization need completion, resolver caches need
+candidate-scoped custody, and N-row reconciliation, lineage, shared acquisition,
+live-JVM routing and persistent cache keys are not implemented. The patch is
+research evidence and resumable work, not a production implementation or a
+claim of general closure coverage. Its hunks were reversed exactly from our five
+owned files, and its two newly created tests removed after archival; no foreign
+bytes were restored or changed. `git apply --check` passes for the archive.
+
+### Exactly three options at the storage boundary
+
+1. **Recommended — include publication toolchain content as a shared analysis
+   input.** Its change invalidates all artifacts it can produce; ordinary
+   application body edits remain N-file. Require the live publisher to execute
+   the matching toolchain generation or return a typed refusal. Guarantee:
+   cached rows cannot silently survive a producer implementation change.
+   Cost: estimated half a day to declare toolchain provenance, enforce matching
+   execution and add upgrade regressions, plus complete analysis on toolchain
+   changes. Give up the unconditional N-file ceiling for publisher/compiler
+   body changes. This explicitly widens the spec's declaration-only rule.
+2. **Record actual producer dependencies for analysis outputs.** Invalidate by
+   the content digests of the producers an artifact used. Guarantee: reuse is
+   bounded by recorded producer evidence as well as source declarations.
+   Cost: estimated 1–2 days and new provenance/validation work across owners.
+   Give up the current narrow scope and declaration-only cache contract; this
+   can eventually invalidate fewer outputs than a whole-toolchain digest.
+3. **Pin the publisher between explicit upgrades.** Refuse ordinary publication
+   when its producer implementation changes; upgrade through an explicit complete
+   refresh using matching code. Guarantee: each admitted cache generation has
+   one fixed producer. Cost: estimated 2–4 hours for provenance/admission and
+   upgrade workflow, plus a full analysis and possibly a publisher process
+   transition per upgrade. Give up automatic publication of indexer changes.
+
+Estimates cover this decision's implementation, not all remaining items 1–4.
+This stop uses the explicit storage/validation exception: changing invalidation
+for stored facts and admitting a live publisher generation requires a ruled
+input identity. It is not another declaration/finding variant.
+
+### Ownership and verification boundary
+
+Held paths remain untouched: `src/seon/cluster.clj`, `src/seon/turn.clj`, all
+`src/seon/cluster/*.clj` except owned `source.clj`, `src/seon/schema.clj`,
+`src/seon/schema/internal.cljc`, and foreign dirty launcher/test-system paths.
+At this checkpoint `src/seon/test/runner.clj` and
+`test/seon/test_failure_facts_test.clj` have foreign edits. The latter still
+calls the evidence-copy helper whose removal belongs with lineage conversion;
+that caller must be converted in the same slice when released. Foreign dirty
+`test/seon/fn_test.clj` was excluded from our snapshot. These are integration
+boundaries, not the reason for this decision stop. No foreign session was read,
+operated or contacted. No default operation, cold gate or worktree was used.
+The fast snapshots removed themselves; both regression fixture roots were
+released in `finally`. `tmp/publication-root` remains absent.
+
+The original grounding was read end to end as recorded above; this resume also
+read the complete updated binding spec and the actual producer/cache seams.
+The archived experiment is reproducible after applying its patch with:
+
+```sh
+bin/test-fast --paths src/seon/fn.clj src/seon/fn/analyzer.clj src/seon/fn/signature.cljc src/seon/test/selection.clj resources/seon/schemas/seon.fn.file.edn test/seon/fn/publication_test.clj test/seon/fn/publication_toolchain_test.clj -- seon.fn.publication-test seon.fn.publication-toolchain-test
+```
+
+The corresponding cold command owed to the orchestrator after implementation
+is the same path/namespace list through `bin/test`, followed by `bin/test
+--platform`. The original required cache/source/runner/fn suites and the live
+scratch-root proof remain owed; these two focused tests do not replace them.
+
+Pre-commit namespace load of `seon.fn.analyzer`, `seon.fn`, and
+`seon.cluster.source` returned `:loads`, exit 0, after removing the prototype.
+Log: `tmp/publication-dissolution/toolchain-precommit-load.log`. This used the
+shared checkout including foreign dirty bridge bytes, not a clean-HEAD gate.

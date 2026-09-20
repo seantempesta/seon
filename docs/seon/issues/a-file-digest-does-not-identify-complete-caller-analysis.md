@@ -64,6 +64,19 @@ dependency, not an inferred-body finding. The landing note prices extending
 the existing closure to private declarations versus changing finding or source
 admission policy. No cache implementation is claimed.
 
+
+The owner subsequently generalized the closure to **every** recorded declaration
+and edge; the public/private and namespace finding decisions above are settled.
+The new armed replay proves a different dependency: a body-only change to the
+executing indexer changes stored call edges in unchanged inputs. The historical
+`call-target` replay (before `af800d1a0` versus current) retains
+`#{clojure.core/defn}` incrementally but produces `#{pub.alpha/f}` completely,
+while both source digests are equal. Run `1b08bd6813ce`: 2 tests, 24 assertions,
+zero failures/errors. The landing note preserves the applicable prototype and
+prices shared toolchain provenance, producer-dependency evidence, and explicit
+publisher upgrades. No incremental publisher has been installed. This is a
+storage identity decision, not a further finding class to exclude.
+
 ## Acceptance
 
 The chosen cache contract explicitly includes every input capable of changing
