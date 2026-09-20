@@ -180,3 +180,90 @@ bin/test --paths \
 
 Then `bin/test --platform`. Neither was run by this lane. No scratch root,
 worktree or continuing JVM was created by this investigation.
+
+## Follow-up: expiry ruling accepted; new await distinction condition
+
+The orchestrator accepted `48e377e5a` and ruled option 2. Expiry must carry
+the bound's declared key and elapsed milliseconds; unknown keeps its current
+members and underlying failure evidence. The test-system landing note was
+read end to end again, as requested. `src/seon/test.clj` and
+`resources/seon/schemas/seon.test.edn` were clean and released for this exact
+slice. The data-modeling skill was read for the additive observation members.
+The prior alias decision is settled, not reopened.
+
+The actual producer is `expired-result` (`src/seon/test.clj:1820`), called
+only by `check` at `:1908`. Its bound is `:seon.test/check-time-limit-ms`;
+`:seon.await/config-attribute` and `:seon.await/config-value` already name
+the bound at the await seam. `:seon.test/elapsed-ms` currently appears as an
+inline double in the check-result schema and can be declared once for reuse.
+
+**New PRD section-6 condition:** the consumer needs a distinction the
+callee's facets do not express. `check` classifies every returned complete
+error as expiry. `seon.await/await!` returns completed Future values unchanged,
+including ordinary test unknowns, and declares only
+`[:or :seon.schema/value :seon.error/value]`. Its timeout diagnostic still
+uses a retired kind and has no complete base. No timeout facet exists in
+`seon.await.edn`. The permitted transitional base check detects an error but
+cannot establish that this await's bound fired. Adding elapsed/bound fields
+after that check would falsely classify ordinary completed failures as expiry.
+
+At HEAD `0176024934605b7609aa4d6908b8a2296f00d317`, the
+[new probe](sci-program-expiry-boundary-2026-09-21.clj) executed the actual
+unknown producer, completed FutureTask, await owner and expiry producer. It
+also called the actual timeout path with a never-started FutureTask and a
+one-millisecond bound; no worker thread was launched. Exact output:
+
+```clojure
+:loads
+{:sci-program/await-output [:or :seon.schema/value :seon.error/value]
+ :sci-program/completed-error-preserved true
+ :sci-program/completed-error-selects-expiry true
+ :sci-program/original-unknown ":seon.test/selection"
+ :sci-program/replacement-unknown "reaching selection"
+ :sci-program/timeout-base-members {}
+ :sci-program/timeout-cause :seon.await/backstop-fired}
+```
+
+This unarmed source probe exits 0; clj-kondo reports 0 errors/0 warnings.
+It is not an armed canonical regression. The dependency idiom was checked
+at `reference-code/clojure/src/clj/clojure/core.clj:7212-7214`: timed Future
+get forwards to the underlying Future. The first-party distinction owner is
+`src/seon/await.clj:116-120`, where the timed-get outcome is observed. Reading
+isDone later would re-decide that outcome after a possible completion race.
+
+No production/resource/test edits were made. The coherent expiry slice
+cannot truthfully land before that distinction is available. The SCI/program
+census above remains unchanged by this lane, with no fast tally or new reset
+obligation. This is not a shared-tree load or foreign in-flight failure:
+the four assigned namespaces load, and await source/resource are clean.
+All held files and default remain untouched. The separate
+[issue](../../../seon/issues/test-check-classifies-completed-errors-as-expiry.md)
+records the defect and canonical acceptance conditions.
+
+### Three priced continuation options
+
+1. **Extend this lane to the existing await owner (recommended).** Authorize
+   `src/seon/await.clj`, `resources/seon/schemas/seon.await.edn` and
+   `test/seon/await_test.clj` for a complete timeout facet requiring its
+   existing config-attribute/config-value observations. The `check` consumer
+   recognizes that facet and adds its measured elapsed time to the ruled
+   test expiry; completed failures retain their original evidence. Guarantee:
+   the distinction is made where timed get observes it, with one await owner.
+   Cost: 1–2 hours plus the remaining sweep and any required pass-through
+   contract integration. Give up: keeping this slice strictly inside SCI/test.
+2. **Have the await owner land that contract before this lane resumes.**
+   Guarantee: the same precise distinction, with existing ownership retained.
+   Cost: the same 1–2 hours of implementation plus coordination and a resumed
+   verification pass. Give up: immediate independent progress on the requested
+   first coherent expiry commit. No other lane was contacted or operated.
+3. **Authorize a completion envelope at the await boundary.** Return explicit
+   completion data separately from expiry evidence and convert its callers.
+   Guarantee: arbitrary completed error values cannot be confused with await
+   observations. Cost: approximately one day across callers and contracts.
+   Give up: the existing direct-value await API and this bounded assignment;
+   this larger change is not recommended.
+
+The original cold scope remains owed. Option 1 adds the await source/resource
+and test, plus the test expiry source/resource/regression paths, to the
+orchestrator's eventual cold command. No cold or unchanged fast suite was run.
+The previously recorded foreign Markdown citation errors recur unchanged.

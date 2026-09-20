@@ -34,3 +34,13 @@ aliases are exempt from section 6 at polymorphic pass-through boundaries.
 Acceptance is the selected rule applied consistently to the two SCI output
 contracts, with unchanged preservation of the original observation and the
 remaining sweep's canonical fast and orchestrator cold verification.
+
+## Owner ruling and implementation dependency
+
+The orchestrator chose option 2: expiry carries the declared bound key and
+elapsed milliseconds; unknown retains its current members. That choice is
+settled, but implementation is not yet landed. The producer conversion exposed
+a separate, measured [await distinction defect](test-check-classifies-completed-errors-as-expiry.md):
+the current caller classifies completed failures as expiry, and its await
+callee declares no timeout facet. This issue stays open until the coherent
+producer/schema/consumer slice lands; the former choice is not reopened.
