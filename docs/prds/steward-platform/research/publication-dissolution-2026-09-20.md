@@ -1271,3 +1271,109 @@ initial omitted reidentification was a setup error and refused before tests;
 it is not counted as lineage evidence. No cold gate or second simultaneous JVM
 was used. Namespace load and reidentification completed successfully in the
 same serial setup JVM (`owned-store-load.log`).
+
+
+### Population conversion landed; lineage regression green
+
+`3ac00fb8e` is the population/loaded-producer slice. Its exact HEAD archive
+loaded `seon.cluster`, `seon.cluster.source`, and `seon.fn` successfully; that
+archive and setup JVM are gone. The owned authority reconciled its older base
+through ordinary `bin/seon init` in 149,134 ms (including dependency preparation
+and startup). This was necessary because the older base recorded the former
+two-argument `seon.db/transact-call`; current source calls its three-argument
+contract. The original history was retained. Raw phase events are in
+`tmp/publication-dissolution/owned-authority-publication.log`.
+
+Fast run `98be3c1ae6a8`: **1 executed, 8 assertions, 0 failures, 0 errors**,
+120.8 s in the test. It seeds explicit cluster custody through the canonical
+helper, admits a real eligible `seon.id-test` member, executes and records it,
+publishes a changed unrelated input, resolves the original selection
+transaction and run results, and selects the original green outcome without
+execution. The earlier fixture omissions are corrected: named cluster custody
+is required, and explicitly excluded failure-fixture material is not ordinary
+gate membership. The earlier program identity contract error was corrected by
+handing `id/digest` a sequence of identity parts; the digest test passed all
+7 assertions in run `83bba4bb649b` and is not rerun unchanged.
+
+The duplicate-publisher slice removes cache seed selection/cloning and the
+runner's separate population/seal/manifest preparation. Its CLI now delegates
+to `seon.cluster/publication-base!`: publish on the root's current history, then
+export through the existing export owner. The cache asks the root's advertised
+JVM first and only launches a producer if no live host exists. The scalar
+`upsert!` entry remains as a population adapter to `publish!`; its independent
+branch/seal/publish loop is deleted. `identity-rows`, `evidence-entity`,
+`result-preservation-tx`, and `preserved-evidence-tx` are removed. The obsolete
+test asserting copied tombstones is replaced by the actual history/reuse
+regression, rather than preserving its forbidden expectation.
+
+Snapshot publication additionally requires the gate's declared non-program
+inputs to match the host's tree. Schema resources are read through the loaded
+classpath; silently mixing a snapshot's program with another tree's resources
+would misidentify the publication. This admission uses the existing input
+inventory and reports the differing paths. It never starts another JVM to get
+past a live refusal. This is a validation choice under the standing ruling;
+no coverage is dropped. The explicit child-gate integration command remains
+`bin/test seon.test-runner-integration-test`, owed to the orchestrator and
+outside `--platform`. The fixture checkout now includes the actual operator
+and its scripts, since gate publication uses that authority too.
+
+
+### Storage boundary after the lineage regression
+
+`179f6c4bc` lands the standalone lineage/reuse regression (one file). Its
+unchanged test inputs were not executed again after the green 8-assertion
+run. The precommit exact-HEAD archive plus that file loaded successfully;
+the postcommit load is checked independently. No cold gate was run.
+
+The common-base adapter slice described above is **implemented but not
+landed or behavior-verified**. Its pending files are `bin/test`,
+`script/seon/fresh_operator.clj`, `src/seon/cluster.clj`,
+`src/seon/cluster/source.clj`, `src/seon/test/cache.clj`,
+`src/seon/test/runner.clj`, `test/seon/test_failure_facts_test.clj`,
+`test/seon/test_runner_test.clj`, and
+`test/seon/test_runner_integration_test.clj`. The shared files retain those
+edits; `tmp/publication-dissolution/common-publisher-pending.patch` is an
+additional exact patch copy. This includes the small `source-snapshot`
+identity-parts correction proven by the seven-assertion digest regression.
+The integration helper omitted during the earlier child-gate move is also
+restored; its namespace remains orchestrator-only, declared long.
+
+Fast run `f0c441c8d377` loaded/armed and refused before tests on
+`:seon.test.runner/invalid-marker-reason-error` requiring unstorable
+`:seon.error/offending`. Ordinary publication on the owned snapshot
+reproduced it before analysis (init phase 68,894 ms). This is a committed
+current declaration, not historical-lineage damage, and excludes the bridge
+lane's uncommitted files. The exact evidence, storage semantics, three priced
+options and recommendation are in
+[the storage-boundary issue](../../../seon/issues/stored-runner-facets-require-an-unstorable-offending-value.md).
+No validator or error-storage declaration was changed. This is the spec's
+storage/validation stop, not a request to relax the lane test rules.
+
+The last successful complete publication was the owned authority
+reconciliation on the earlier valid snapshot: 376 inputs; analysis 9,341 ms;
+schema population 272 ms; program-row preparation 1,947 ms; contract
+projection 175 ms; contract-row chunks 11,527 ms; reconciliation preparation
+3,261 ms; reconciliation transaction 23,409 ms; changed-definition comparison
+5,403 ms; initialization 275 ms; issue indexing 1,535 ms; activation seal
+1,530 ms; branch head 3,525 ms. Init including preparation/startup was
+149,134 ms. This is an intermediate measurement, **not** the final before/after
+comparison. The earlier live baselines remain 97.603 s complete and 93.153 s
+for a one-file edit, both rebuilding 380 inputs. Final live one-file-commit
+and complete-publication phase measurements, live producer-mismatch/adoption
+verification, and common gate-export verification remain owed.
+
+After storage repair, the orchestrator's cold proof is:
+
+```sh
+bin/test --paths bin/test script/seon/fresh_operator.clj src/seon/cluster.clj src/seon/cluster/source.clj src/seon/test/cache.clj src/seon/test/runner.clj test/seon/test_failure_facts_test.clj test/seon/test_runner_test.clj test/seon/test_runner_integration_test.clj test/seon/cluster/publication_reuse_test.clj -- seon.test-cache-test seon.cluster.source-test seon.cluster.publication-test seon.cluster.source-lineage-test seon.cluster.publication-reuse-test seon.test-runner-test seon.fn-test
+bin/test --platform
+bin/test seon.test-runner-integration-test
+```
+
+The last command's coverage is outside `--platform` by ruling. This lane
+uses the matching `bin/test-fast --paths` selection only. The held schema,
+turn, cluster subnamespace, and foreign test edits were not changed; default
+was neither touched nor used for these proofs. All named binding authorities
+and groundings were read end to end across this lane's work.
+
+Cleanup: the owned snapshot was downed through `bin/seon --root tmp/publication-wt down` and removed. The serial HEAD-load JVM was closed. No owned cluster host remains; the shared default host was left alone. The additional exact-HEAD archive is removed after its final load check.
