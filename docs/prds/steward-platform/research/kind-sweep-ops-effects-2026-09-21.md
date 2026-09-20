@@ -111,3 +111,29 @@ admission refused the concurrent dirty
 test-system sweep and was neither edited nor added to this overlay. Run
 `cce3e98cf786` therefore has no tally. The background namespaces must be
 included in the final foreground rerun after the runner schema lands.
+
+## Problems slice — `3633edd55`
+
+`seon.problems/problems` now declares the exact test-execution, database-read,
+and missing-projection facets it can pass through, closing the cold gate's
+undeclared-output refusal. The problems derivation no longer projects or
+queries the retired kind datom. Error signatures retain their queryable
+signature and complete latest fact; errored evaluations derive from the
+presence of `:seon.cluster.eval/error`; routable form problems carry their
+error text and provenance without pretending to be error values. HTML and log
+rendering likewise omit the retired classification.
+
+The two unused marker-only schemas were deleted rather than replaced:
+evaluation failure and unbound-var status are already expressed by the
+evaluation's error/interruption/admitted-value facts, and neither schema had a
+producer after the derivation stopped stamping kinds. The remaining problem
+row schemas now describe those derived rows instead of requiring a diagnostic
+base they never carried.
+
+The ordered source/resource searches returned zero kind, class-marker,
+general-predicate, inline-base, and generic-output hits. `seon.problems`
+reloaded from HEAD and printed `:loads`; clj-kondo reported zero errors and
+zero warnings. Fast tally owed — admission remains held by the concurrent
+dirty `resources/seon/schemas/seon.test.runner.edn`. The stale R8 fixtures and
+assertions in `test/seon/problems_test.clj` remain for the final problems test
+slice; they were not changed or claimed by this commit.
