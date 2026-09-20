@@ -44,6 +44,25 @@ Final: **12 executed, 73 assertions, 0 failures, 0 errors**, exit 0,
 test body **4.823160 s**; no long allowance is needed. Source require of
 `seon.cluster.registry` and `seon.schema.datahike` brackets the commit.
 
+### Class 2 — stored history and transaction refusal assertions
+
+Root cause: the store tests asserted retired kind markers instead of the
+declared error schemas. `db/history` already declares `:seon.config/error`
+through `:seon.db/error-result`; its keep-history member names the refusal.
+The third assertion concerns a rejected Double transaction, whose declared
+schema is `:seon.db.write/validation-refusal`, not history. The tests now
+validate those schemas through the carried canonical projection.
+
+Fast command: `bin/test-fast --paths test/seon/cluster/store_test.clj -- seon.cluster.store-test`.
+First run: 18 tests, 72 assertions, 0 failures, 2 errors, **124.522921542 s**
+(`tmp/bridge-platform-class2.log`). Both errors were cold child JVMs exceeding
+the shared 20-second event wait in existing long flock tests. Those tests now
+declare 60,000 ms with their cold-start reason and use that declaration for
+child readiness. Final: **18 executed, 74 assertions, 0 failures, 0 errors**,
+exit 0, **108.026006375 s** (`tmp/bridge-platform-class2-fixed.log`). Child
+tests took 14.595908 and 14.725255 s; all other bodies were under 0.7 s.
+Source require of `seon.cluster.store` and `seon.db` brackets the commit.
+
 ## Final ruled slice and verification
 
 This section supersedes the historical checkpoints below. The orchestrator

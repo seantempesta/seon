@@ -24,7 +24,7 @@
             [seon.schema]
             [seon.test-support :as test-support])
   (:import [java.io File]
-           [java.util.concurrent CompletableFuture]))
+           [java.util.concurrent CompletableFuture TimeUnit]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures
@@ -218,9 +218,10 @@
         (is (true? (:seon.store/created? opened)))
         (is (false? (get-in @(:seon.store/connection-object opened)
                             [:config :keep-history?])))
-        (is (= :seon.db/non-temporal-database
-               (:seon.error/kind
-                (db/history @(:seon.store/connection-object opened)))))
+        (let [failure (db/history @(:seon.store/connection-object opened))]
+          (is ((seon.schema/projection-validator
+                (seon.schema/handed-projection) :seon.config/error) failure))
+          (is (= :seon.config.db/keep-history? (:seon.config/error-key failure))))
         (store/release-store! opened))
       (testing "an omitted request adopts the persisted policy"
         (let [reopened (store/open-store! {:seon.store/dir dir})]
@@ -281,8 +282,10 @@
                      (db/q '[:find ?marker
                             :where [_ :seon.store.test/marker ?marker]]
                           @connection)))
-              (is (= :seon.db/non-temporal-database
-                     (:seon.error/kind (db/history @connection))))
+              (let [failure (db/history @connection)]
+                (is ((seon.schema/projection-validator
+                      (seon.schema/handed-projection) :seon.config/error) failure))
+                (is (= :seon.config.db/keep-history? (:seon.config/error-key failure))))
               (finally
                 (d/release connection))))
           (finally
@@ -326,7 +329,9 @@
                    connection
                    [{:seon.store.test/marker "double"
                      :seon.store.test/measurement (Double/valueOf 9.0)}])]
-              (is (= :seon.db/rejected (:seon.error/kind outcome)))
+              (is ((seon.schema/projection-validator
+                    (seon.schema/handed-projection) :seon.db.write/validation-refusal)
+                   outcome))
               (is (not (contains? (markers opened) "double"))
                   "the refused transaction commits nothing")))
           (finally
@@ -491,7 +496,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest ^{:seon.test/long
-           "Spawns and terminates a child JVM to cover the operating-system store fence."}
+           "Cold child JVM loads the store and its dependencies before proving the operating-system fence."
+           :seon.test/long-ms 60000}
   the-flock-fences-across-processes
   (let [dir (fresh-dir)
         ready-directory (.getParentFile (io/file dir))
@@ -530,9 +536,11 @@
     (try
       ;; a cold JVM loads Clojure + Datahike before it can hold; the
       ;; child's `held` line follows ready-file creation and is authoritative;
-      ;; the clock in await-event! is only the foreign-process backstop
+      ;; the declared long bound is the foreign-process backstop
       (let [observed
-            (test-support/await-event! readiness ::child-readiness)]
+            (.get readiness
+                  (:seon.test/long-ms (meta #'the-flock-fences-across-processes))
+                  TimeUnit/MILLISECONDS)]
         (when (instance? Process observed)
           (throw (ex-info "the child JVM exited before holding"
                           {::exit (.exitValue process)
@@ -558,7 +566,8 @@
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 (deftest ^{:seon.test/long
-           "Spawns a foreign JVM to prove an in-process refusal retains the operating-system fence."}
+           "Cold child JVM loads the store before proving an in-process refusal retains the operating-system fence."
+           :seon.test/long-ms 60000}
   an-in-process-refusal-never-drops-the-os-fence
   ;; fcntl drops EVERY lock a process holds on a file when ANY of its
   ;; descriptors closes — so the same-process refusal path must never
@@ -584,9 +593,9 @@
                             (.redirectErrorStream true)
                             (.start))]
             (try
-              (test-support/await-event!
-               (.onExit process)
-               ::refused-child-exit)
+              (.get (.onExit process)
+                    (:seon.test/long-ms (meta #'an-in-process-refusal-never-drops-the-os-fence))
+                    TimeUnit/MILLISECONDS)
               (is (not (.exists ready-file))
                   "the foreign JVM never acquired — the fence survived the
                    in-process refusal")
