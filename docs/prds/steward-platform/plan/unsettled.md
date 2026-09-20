@@ -5687,3 +5687,22 @@ option 1 = D12: only a value satisfying a declared facet is an error;
 malformed maps are ordinary data. `publication-dissolution` landed
 `6dae626e0` (raw runner offending observations optional) — fast admission
 admits again.
+
+## 2026-09-21 ~15:20 UTC — THE GATE RAN SERIALLY: 868/868 tasks misrouted by a string/symbol mismatch
+
+`gate-restructure-design` landed `0501eeb0d`
+([gate-restructure-spec-2026-09-21.md](gate-restructure-spec-2026-09-21.md)):
+`test-tasks` (`src/seon/test/runner.clj:986`) stringifies `var-symbol`
+into the task-symbol set while `indexed-test-symbols` (:1020) and
+`split-resolved-tasks` (:1027) compare against the manifest's SYMBOLS
+(2,076 identities, all symbols) — so 0/868 matched, every task fell to the
+serial worker, and the three pool workers primed (48,266 worker-ms in the
+complete run; ~10.8 GB resident) and did nothing. The "868 tasks lack
+complete :seon.test rows" log line was false. Owner rule 2026-09-17
+("anything that IS a symbol is stored as a symbol") — this is the class.
+Also measured: the pool starts before selection completes and retains
+workers until the request ends; the fixture base is already shared, what
+repeats per task is measured in the spec. Its verbatim assignment (astra
+low) launches as soon as an editing slot frees (publication lane landing
+now). `publication-dissolution` landed `fa1ff1dbe` (gate bases and scalar
+updates through the common publisher).
