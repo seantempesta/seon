@@ -6615,3 +6615,18 @@ files disjoint from the redesign lane; `one-jvm-redesign` released on
 slice 1 (one JVM). Two lanes, disjoint paths; the orchestrator runs the
 platform gate again when the bridge lane stops. Retained root for the
 reds: `tmp/test-runs/run.HIBgd6` (swept after the rerun).
+
+## 2026-09-22 ~21:10 local — bridge lane: five platform classes fixed (`f08558cb5`…`db704cd1e`, six commits); fixture observations declared; platform gate rerunning, then `--all`
+
+Root causes as landed: the registry test fixture handed a projection
+without its registry (fixed at the fixture; the retained-blob branch now
+recognizes the history refusal by its declared member); store and
+declaration-population tests assert the declared error schemas and
+members; `call-with-custody` declares `:seon.schema/validation-refusal`;
+`test-support/refusal-data` recognizes an error map by `:seon.error/base`
+members; the two expensive-fixture tests carry the observation the runner
+rule requires. Fast: 49 tests, 338 assertions, green. Diffs reviewed:
+test expectations and one fixture, one contract declaration, one helper
+predicate — no new mechanism. `bin/test --platform` at `db704cd1e` then
+`--all` running (`tmp/orchestrator/gate-db704cd1e-{platform,all}.log`);
+the redesign lane continues slice 1 in parallel on disjoint files.
