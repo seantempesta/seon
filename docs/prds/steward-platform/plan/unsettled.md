@@ -5012,3 +5012,16 @@ the lane owns the preservation fix (query, never pull, or an elision naming
 the bound) plus a 1,001-member canonical regression; then thin launchers,
 host integration, the two-run zero-execution proof. If the seam sits in the
 turn-cluster sweep's held `src/seon/cluster.clj`, it stops and reports.
+
+## 2026-09-20 ~22:55 UTC — publication lineage ruled; results-reuse split
+
+`results-reuse-everywhere` (`6e011707c`) verified the 1,001st-member loss at
+`src/seon/cluster/source.clj:350` (unheld) and found the deeper defect: a
+full publication starts a new database history, so a surviving member's
+`selection-tx` points at the old history and execution refuses it. Ruled
+option 1: publication reconciles on the current lineage (now the lineage
+clause of the dissolution spec's item 1). Split: results-reuse lands the
+truncation fix + 1,001 regression and the two-run zero-execution proof on
+the current lineage without a full rebuild; the lineage reconciliation of
+the population owner (`cluster.clj:1741`, held by the turn/cluster sweep)
+is the publication-dissolution lane's.

@@ -35,6 +35,14 @@ publishes CHANGED files as same-identity upserts (`src/seon/cluster.clj`
    costs N files' analysis + rows, not 372. Proof: a gate after a one-file
    commit publishes in single-digit seconds and its program digest equals a
    complete publication's of the same tree (regression compares both).
+   **Lineage ruling (2026-09-20 ~22:55 UTC):** a publication reconciles on the
+   CURRENT published lineage and never starts a new database history. The
+   results-reuse lane proved (`6e011707c`) that a full rebuild orphans recorded
+   test evidence: a member's `selection-tx` refers to the previous history and
+   execution refuses it. Every recorded evidence reference (the note lists them
+   with file:line) must resolve after a publication; a regression records a
+   result, publishes one changed file, and reuses the result.
+
 2. **Publish through the live JVM, never a fresh one.** When `default` (or
    any live cluster JVM of the root) is alive, the publication runs over its
    prepl (the same seam `init --dev` adoption uses), removing the 40–60 s
