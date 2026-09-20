@@ -123,6 +123,14 @@ outside the guard-deletion slice.
 
 ## Error-contract iteration — 2026-09-23
 
+The follow-up run `90b237be1268` passed 48 tests / 388 assertions, but took
+517.82 s. This includes slow execution after fixture acquisition:
+`seon.error-test/error-identity-and-occurrences-are-owned-by-the-writer`
+55.614 s, `recurrence-identity-is-the-complete-observations-stable-evidence`
+51.737 s, and `the-storm-is-bounded-by-the-signature-count` 42.430 s.
+These are unresolved bound failures, not justification for larger test
+allowances. `tmp/error-class3-storage-fast.log` records begin/end timestamps.
+
 The class-1 fast snapshot started its first `seon.error-test` member at
 `2026-09-20T20:58:00.971776Z`. A sample at JVM elapsed 185.06 s found main
 in `retrying-base/acquire-base!`, and the fixture thread in

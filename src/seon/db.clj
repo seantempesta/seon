@@ -3639,8 +3639,8 @@
                                      (when (:db/isComponent properties) a)))
                          (merge (dbi/-schema before) (dbi/-schema after)))
         targets (into {} (map (fn [a]
-                               [a (:seon.db/component-schema
-                                   (m/properties (mr/schema (:seon.schema.projection/registry projection) a)))]))
+                               [a (some-> (mr/schema (:seon.schema.projection/registry projection) a)
+                                          m/properties :seon.db/component-schema)]))
                       components)
         seen (volatile! #{})
         rows (volatile! {})
@@ -4368,11 +4368,16 @@
 
             :else
             (let [failure
-                  {:seon.error/kind :seon.db/unknown-failure
-                   :seon.error/message
-                   (or (ex-message throwable)
-                       (.getName (class throwable)))
-                   :seon.error/data (or data {}) :seon.db/transaction-outcome-unknown true}]
+                  (write-observation
+                   database transaction
+                   {:seon.error/at (java.util.Date.)
+                    :seon.error/layer :seon.db/database-write
+                    :seon.error/operation 'seon.db/transact!
+                    :seon.error/message
+                    (or (ex-message throwable)
+                        (.getName (class throwable)))
+                    :seon.error/data (or data {})
+                    :seon.db/transaction-outcome-unknown true})]
               (when (panic-on-core-error? connection)
                 (throw
                  (ex-info (:seon.error/message failure)

@@ -2974,8 +2974,11 @@ fixture timing issue updated with the observed verification cost.
 
 Recorded fast tally: **47 executed, 0 unchanged / 366 assertions / 0 failures
 / 1 error**, run `946c747f2227`, wall-clock **510.91 s**. The one error is
-the class-3 transaction fallback named above. There are no remaining
-`invalid-schema` test errors in this snapshot. Namespace load of
+the class-3 transaction fallback named above. Its nested writer log still
+contains `invalid-schema` at `seon.db/write-owned-values-error:3643`:
+synthetic component attributes are installed before their projection is
+carried by the connection. This is distinct from `stored-observation` and
+is repaired with class 3 below. Namespace load of
 `seon.error`, `seon.turn`, `seon.db`, and `seon.blob` exited 0 before commit.
 Scratch boot verification remains to run serially after the fast iterations.
 
@@ -3030,6 +3033,38 @@ Focused regression: `seon.db-error-test` throws an unclassified exception
 inside the actual writer transaction, checks its retained evidence and
 complete `:seon.db.write/validation-refusal`, then verifies both successful
 public arity shapes. The fixture's config owner selects `:record`.
+
+The writer's component-target discovery also called `m/properties` on nil
+for an installed component absent from the supplied registry. Discovery now
+preserves an absent target; the existing `missing-component-schema` refusal
+still applies when a written owning value actually traverses that relation.
+This permits schema installation before the extended projection is supplied,
+without inventing a schema or accepting an undeclared owned value. The
+existing `complete-error-children-validate-through-the-writer` regression
+is the canonical proof for this additional writer cause.
+
+The first focused run (before the component-discovery correction) recorded
+**1 executed, 0 unchanged / 7 assertions / 0 failures / 0 errors**, run
+`757d58246e88`, wall-clock **291.93 s**. The test reporter interval was
+185.192 s including initial fixture population; the thread sample
+`tmp/error-class3-threads.log` shows `retrying-base` awaiting
+`populate-database!`. No test duration allowance was added. Final validation
+also selects `seon.error-test` to cover component installation and storage.
+
+Final class-3 command:
+
+```sh
+bin/test-fast --paths src/seon/db.clj test/seon/db_error_test.clj src/seon/error.clj test/seon/error_test.clj -- seon.db-error-test seon.error-test
+```
+
+Recorded **48 executed, 0 unchanged / 388 assertions / 0 failures / 0 errors**,
+run `90b237be1268`, wall-clock **517.82 s**. The existing component regression
+stored **2,018 entities / 7,044 datoms / 1,001 path segments**, preserved both
+observations, and verified that an invalid child update refuses atomically.
+This closes the previously reported class-1-suite red. Timing remains a
+separate defect: occurrence ownership took 55.614 s, recurrence identity
+51.737 s, and the signature-count regression 42.430 s. No duration promise
+is inferred from the green assertions.
 
 ### Class 4 — declare publication callback errors
 
