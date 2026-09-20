@@ -3,12 +3,36 @@
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.db :as db]
+            [seon.dev.docstring :as docstring]
             [seon.fs :as fs]
             [seon.id :as id]
+            [seon.instrument :as instrument]
             [seon.operator.runtime :as runtime]
             [seon.schema :as schema]
             [seon.test.cache :as cache]
             [seon.test-support :as support]))
+
+(deftest failed-loaded-definition-scope-restores-arming
+  (support/with-database
+   (fn [_]
+     (let [before (instrument/instrumented)
+           original @#'docstring/check-file
+           failure (try
+                     (support/preserving-instrumentation-state
+                      (fn []
+                        (load-file (str (io/file (fs/source-directory)
+                                                "script/seon/dev/docstring.clj")))
+                        (throw (ex-info "Failure after loaded definitions changed."
+                                        {::injected true}))))
+                     (catch Exception thrown thrown))]
+       (is (::injected (ex-data failure)))
+       (is (not (identical? original @#'docstring/check-file)))
+       (is (= before (instrument/instrumented)))
+       (is (not-any? var? (tree-seq coll? seq (:malli/schema (meta #'docstring/check-file)))))
+       (is (:seon.dev.docstring/clean?
+            (docstring/check-file {:seon.dev.docstring/file-path
+                                   (str (io/file (fs/source-directory)
+                                                "tmp/absent-docstring-fixture.clj"))})))))))
 
 (deftest ^{:seon.test/long "Boot and adopt the same published tree in the existing test JVM."
            :seon.test/long-ms 600000}

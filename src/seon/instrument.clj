@@ -1080,7 +1080,7 @@
         (:seon.instrument/roots state)))
 
 (defn restore!
-  "Restore `state`, leaving every replaced definition as the loader left it.
+  "Restore `state`, arming replaced definitions without restoring old closures.
 
   Unarm the wrappers this JVM now holds, put Malli's function-schema registry
   and the captured roots back, and skip both steps for the Vars
@@ -1090,7 +1090,10 @@
   that the reloaded `seon.print/sink?` (`src/seon/print.cljc:27`) refuses, so
   the Var's own armed output contract refused every later call in that JVM.
 
-  Returns the Vars left as the loaded program has them; an empty set — the
+  Replaced definitions with captured arming policy are compiled against current
+  declarations and armed around their new roots. No old closure is restored.
+
+  Returns the Vars whose definitions changed; an empty set — the
   ordinary case — says nothing was replaced, and a non-empty set is the
   evidence that something reloaded inside the scope."
   {:malli/schema
@@ -1112,6 +1115,23 @@
         (doseq [[candidate captured] roots
                 :when (and (bound? candidate) (not (contains? replaced candidate)))]
           (alter-var-root candidate (constantly captured)))))
+    (let [pending (keep (fn [candidate]
+                          (when-let [policy (::policy (meta (get roots candidate)))]
+                            (when-let [authored (:malli/schema (meta candidate))]
+                              [candidate authored policy])))
+                        replaced)]
+      (when (seq pending)
+        (let [projection ((mi/-f->original schema/declaration-projection)
+                          (schema.edn/packaged-forms))]
+          ;; Compile the complete replacement set before installing any wrapper.
+          (doseq [[candidate authored policy] pending]
+            (binding [*compiling-contract* true]
+              (compiled-wrapper projection (var-symbol candidate) authored
+                                (mi/-f->original @candidate)
+                                (:seon.sci.admit/caps policy) policy)))
+          (doseq [[candidate authored policy] pending]
+            (arm-var! candidate authored projection projection
+                      (:seon.sci.admit/caps policy) policy)))))
     replaced))
 
 

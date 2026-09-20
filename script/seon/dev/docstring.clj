@@ -116,13 +116,13 @@
 (def ^:private finding-schema
   [:map
    [::fn-name :string]
-   [::rule #'rule-schema]
+   [::rule rule-schema]
    [::line [:int {:min 1}]]
    [::message :string]
    [::first-line {:optional true} :string]
    [::file-path {:optional true} [:string {:min 1}]]])
 
-(def ^:private findings-schema [:vector #'finding-schema])
+(def ^:private findings-schema [:vector finding-schema])
 
 (def ^:private check-source-request-schema
   [:map [::source :string] [::ns-name {:optional true} :string]])
@@ -131,14 +131,14 @@
   [:map
    [::clean? :boolean]
    [::skipped? :boolean]
-   [::findings #'findings-schema]])
+   [::findings findings-schema]])
 
 (def ^:private check-file-request-schema
   [:map [::file-path [:string {:min 1}]]])
 
 (def ^:private format-findings-request-schema
   [:map
-   [::findings #'findings-schema]
+   [::findings findings-schema]
    [::max-length {:optional true} [:int {:min 1}]]])
 
 (def ^:private format-findings-response-schema [:map [::formatted :string]])
@@ -151,8 +151,8 @@
    [::file-count [:int {:min 0}]]
    [::fn-count [:int {:min 0}]]
    [::finding-count [:int {:min 0}]]
-   [::by-rule [:map-of #'rule-schema :int]]
-   [::findings #'findings-schema]])
+   [::by-rule [:map-of rule-schema :int]]
+   [::findings findings-schema]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Source analysis (rewrite-clj — purely syntactic, no eval)
@@ -293,7 +293,7 @@
    Purely syntactic (rewrite-clj) — never evals, tolerant of `#js` and
    reader conditionals. WARN-ONLY: it reports, never blocks."
   {:malli/schema
-   [:=> [:cat #'check-source-request-schema] #'check-response-schema]}
+   [:=> [:cat check-source-request-schema] check-response-schema]}
   [{::keys [source ns-name]}]
   (let [top-nodes (try (n/children (p/parse-string-all source))
                        (catch Exception _ nil))
@@ -320,7 +320,7 @@
    Response keys: same as `check-source`. A missing file returns clean +
    skipped (nothing to lint) rather than throwing."
   {:malli/schema
-   [:=> [:cat #'check-file-request-schema] #'check-response-schema]}
+   [:=> [:cat check-file-request-schema] check-response-schema]}
   [{::keys [file-path]}]
   (let [f (io/file file-path)]
     (if (.exists f)
@@ -338,8 +338,8 @@
      ::formatted - The formatted string (truncated to max-length)."
   {:malli/schema
    [:=>
-    [:cat #'format-findings-request-schema]
-    #'format-findings-response-schema]}
+    [:cat format-findings-request-schema]
+    format-findings-response-schema]}
   [{::keys [findings max-length]}]
   (let [max-len (or max-length 1000)
         lines (map (fn [v]
@@ -366,7 +366,7 @@
      ::by-rule      - Findings grouped/counted by rule
      ::findings     - All findings, each carrying the source path in
                       `::file-path`."
-  {:malli/schema [:=> [:cat #'scan-request-schema] #'scan-response-schema]}
+  {:malli/schema [:=> [:cat scan-request-schema] scan-response-schema]}
   [{::keys [file-paths]}]
   (reduce
    (fn [acc path]
