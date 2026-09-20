@@ -55,6 +55,14 @@ publishes CHANGED files as same-identity upserts (`src/seon/cluster.clj`
    publication's for a body-only edit, an arity change with callers, and a
    deleted public declaration. This is D9 applied to publication.
 
+   **Type-findings ruling (2026-09-20 ~23:55 UTC, lane decision `ad2fe8554`):**
+   clj-kondo's inferred type-mismatch findings are EXCLUDED from publication
+   analysis (declared in the publication's kondo config). One mechanism: Malli
+   contracts armed at every gate and cluster own types; kondo's cross-file
+   inference was the only body-dependent finding class, so the invalidation
+   rule stays "declaration digest changed → caller closure". The lane
+   verifies no other body-dependent class exists and lists kept classes.
+
 2. **Publish through the live JVM, never a fresh one.** When `default` (or
    any live cluster JVM of the root) is alive, the publication runs over its
    prepl (the same seam `init --dev` adoption uses), removing the 40–60 s

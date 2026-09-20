@@ -5079,3 +5079,13 @@ changed public declarations through the published calls/references edges
 cache key = (input digest, resolved-declarations digest); digest-equality
 regression against a complete publication. Recorded in the spec; lane
 resumed.
+
+## 2026-09-20 ~23:55 UTC — publication lane: type findings ruled out (option 1); results-reuse proved recorded fast reuse
+
+`publication-dissolution` stopped at its second decision (`ad2fe8554`: a
+body-only edit changes a kondo inferred-type warning in an unchanged
+caller). Ruled option 1 — exclude kondo type-mismatch findings from
+publication (contracts are the one type authority); invalidation stays at
+the declaration-digest caller closure. Resumed. `results-reuse-everywhere`
+landed `a6fbf412b` (shell worker duplication removed; recorded fast reuse
+proven) — the zero-execution proof numbers land with its note.
