@@ -861,13 +861,13 @@ publisher took **12.653 ms**, retained commit
 The before measurement was 21,567 ms and moved the head. Evidence:
 [step-1 after seal](one-jvm-slice3-step1-after-seal-2026-09-22.edn).
 
-### Step 2 — declaration and attribute differences (in progress)
+### Step 2 — declaration and attribute differences
 
 The first live development probe reduced the one-file publication from
 45,842 ms to 20,167 ms (sum of progress intervals). This is **not the 5-second target**
 and is not a final armed-boot measurement: the three edited namespaces
 were reloaded through the scratch host's prepl. Contract projection was
-1.713 ms and five contract rows took 40.9 ms. Analysis selected-file work
+0.515 ms and five contract rows took 40.9 ms. Analysis selected-file work
 was 64.706 ms; reconciliation 2,547.950 ms; activation sealing 4,355.498 ms;
 source acquisition before analysis 6,608.016 ms. Further progress labels
 separate manifest reading, manifest validation and database acquisition.
@@ -917,3 +917,72 @@ run; the scratch host was down throughout both runs.
 | `src/seon/cluster.clj` | 186,507 | 187,567 | -1,060 |
 | `src/seon/cluster/source.clj` | 32,873 | 33,019 | -146 |
 | `test/seon/fn/publication_test.clj` | 3,497 | 5,380 | -1,883 |
+
+### Final committed-code measurement and remaining boundary
+
+Production commit **`e71e0e4b6`** loaded successfully with
+`clojure -M -e "(require 'seon.fn 'seon.cluster.source 'seon.cluster)"`
+both before and after committing. The own-root snapshot's three production
+files were compared byte-for-byte with that commit. A fresh branch of the
+published program booted normally with instrumentation; no namespace reload
+preceded the final measurement. Boot was 51.814 s, separately paid. Publishing
+the lane's three remaining changed source files to establish the baseline
+was 40.037 s; the following single-file edit was **17.537 s end to end through
+the prepl, excluding adoption** (before: 45.842 s). Evidence:
+[committed-code docstring publication](one-jvm-slice3-step2-after-docstring-2026-09-22.edn).
+
+| Actual operation | Final ms |
+|---|---:|
+| Published manifest validation | 235.058 |
+| Published database/projection acquisition | 3,007.488 |
+| clj-kondo selected files | 171.602 |
+| Contract projection | 0.439 |
+| Contract-row progress intervals (five rows; three functions) | 70.478 |
+| Reconciliation transaction | 2,312.867 |
+| Changed-definition comparison | 108.064 |
+| Issue indexing | 1,089.369 |
+| Activation seal, transaction and final deletion validation | 4,830.735 |
+| Branch head/readback | 66.609 |
+| Artifact write | 566.700 |
+
+The reporter records the interval following its previous label: in the raw
+EDN, `published manifest read` precedes validation, and `published manifest
+validation` precedes database acquisition. The table names the actual
+operations between those transitions. Source-build/manifest-read work was
+1,428.116 ms; the analysis input inventory was 202.075 ms, still above the
+112 ms comparison walk and not presented as that walk's equivalent workload.
+
+**The ≤5 s target is not met.** The three phases above 2 s are explained by
+remaining whole-program algorithms, not by an acceptable-duration claim:
+
+- Published database acquisition queries/parses all schemas, function contracts
+  and source-admission rows and builds their projection. The current caller
+  supplies no previous immutable projection. `schema/projection-from-database`
+  has an explicit reusable-projection arity, but still queries all rows; carrying
+  the existing connection projection across publication is the existing seam
+  to improve, not another cache.
+- Reconciliation submits only changed attributes, but the database writer's
+  `write-report-error` invokes `arity-mismatches-with` over the whole program.
+  Its affected entities and reverse call edges can bound that work to the
+  change and callers. `db.clj` is explicitly another lane's owner.
+- Activation derives the complete schema projection and closure, then runs
+  another writer transaction and `db/deletion-error`'s whole-program identity
+  comparison. The duplicated requirements derivation is gone; the remaining
+  complete derivation and validation have not become incremental.
+
+These findings extend
+[the existing projection/publication issue](../../../seon/issues/full-publication-tests-exceed-liveness-while-compiling-the-commit-projection.md).
+They are unfinished performance work, not proof that O(change) is impossible.
+The orchestrator must measure the complete script at `e71e0e4b6` and gate the
+changed publication, unchanged-head and existing cold-population regressions.
+No cold gate or platform proof is claimed by this lane.
+
+The final unchanged common publisher took **13.483 ms**, returned `built? false`,
+and kept commit `6ab0520a-90f2-5e2d-a03a-407cc19ccf22` exactly:
+[unchanged-seal evidence](one-jvm-slice3-step2-after-seal-2026-09-22.edn).
+The probe's separate artifact-reading preparation was 502.680 ms.
+
+Cleanup: `bin/seon --root tmp/one-jvm-redesign-root down` reaped PID 84063
+and confirmed the store lock free. With no JVM referencing it, the own
+scratch root and source archive were removed without following symlinks.
+No foreign root or session was operated.
