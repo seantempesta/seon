@@ -4920,3 +4920,20 @@ step 3's edit specification and adoption proof. Lane done; session retained.
 prose (`the-edit-hook-published-every-markdown-edit`); status is now the
 bare `resolved` with the prose on a `resolved:` line; check passes (355
 notes, zero refusals).
+
+## 2026-09-20 ~21:00 UTC — step-4 research landed; lanes landing on the fresh base
+
+`step4-validator-measurement` landed `d701b750a`: application 36.1 → 15.7 s,
+validator 29.0 → 9.8 s, owner discovery 24.4 → 3.8 s (three-run medians on
+the canonical population); small/agent writes slowed under the bulk owner
+scan — recommendation: keep selective indexed discovery for small writes,
+probe Datahike's `dbi/search [nil attribute child-id]` before any adaptive
+strategy; six legacy-kind assertion failures in the db/owned-value/reset-edges
+suites are the error family's (1a) to flip. PRD §4 points at the note.
+Both research lanes are done; step 3 and step 4 lane specs derive from
+their notes' "Exact production changes/slice" sections when their turn
+comes (order: step 1 → 2 → 3 (reset) → 4 → 5). Meanwhile
+`results-reuse-everywhere` landed `48e3f80d6` (fast snapshot results
+recorded through the published authority) and 1a landed `ace176c50`
+(source test-evidence errors declared at pass-through boundaries); both
+still running. Load 15.
