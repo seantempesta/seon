@@ -1921,7 +1921,10 @@
                 :seon.config/on-core-error (:seon.config/on-core-error handle)})]
     (or (some (fn [unit]
                 (let [failure (:seon.error/value unit)]
-                  (when-not (:seon.render.walk/elided failure) failure))) units)
+                  (when-not (and (:seon.print/bound-by failure)
+                                 (:seon.render.walk/limit failure)
+                                 (:seon.render.walk/continuation-subject failure))
+                    failure))) units)
         (let [sources (reduce
          (fn [sources unit]
            (let [lookup (:seon.render.walk/lookup unit)
@@ -1936,7 +1939,8 @@
                               (:seon.render/source block) namespace-name
                               (get-in handle [:seon.sci.admit/caps
                                               :seon.config.eval.result/max-source]))]
-                  (if (:seon.error/kind parsed)
+                  (if (and (:seon.error/at parsed) (:seon.error/layer parsed)
+                           (:seon.error/operation parsed))
                     (reduced parsed)
                     (into sources
                           (map #(cond-> (assoc % :seon.render.walk/lookup lookup)
@@ -1945,7 +1949,8 @@
                           parsed))))
               sources blocks)))
          [] units)]
-          (if (:seon.error/kind sources) sources
+          (if (and (:seon.error/at sources) (:seon.error/layer sources)
+                   (:seon.error/operation sources)) sources
               {:seon.turn/forms sources :seon.render.walk/units units})))))
 
 (defn- latest-evaluations [database agent-id]
@@ -2100,7 +2105,9 @@
   Unchanged reads contribute no evaluation. With write? true, save the exact
   evaluated sources as one closed system turn with no provider attempt."
   {:malli/schema [:=> [:cat :seon.turn/system-request]
-                  [:or :seon.turn/system-result :seon.error/value]]}
+                  [:or :seon.turn/system-result :seon.turn/refused-error
+                   :seon.render.walk/no-such-entity-error
+                   :seon.render/error-result :seon.db/error-result]]}
   [{handle :seon.turn.loop/cluster
     agent-id :seon.agent/id
     write? :seon.turn/write?}]
@@ -2112,7 +2119,10 @@
     (cond
       (nil? namespace-name)
       (error/diagnostic
-       {:seon.error/kind ::agent-namespace-missing
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.turn/system
+        :seon.error/operation `system-turn
+        :seon.turn/rule ::agent-namespace-missing
         :seon.error/message "The system turn requires the agent's assigned namespace."
         :seon.error/diagnostic-layer :seon.turn
         :seon.error/diagnostic-operation `system-turn
@@ -2122,7 +2132,8 @@
         :seon.error/diagnostic-cause ::agent-namespace-missing
         :seon.error/diagnostic-evidence {}})
 
-      (:seon.error/kind declared) declared
+      (and (:seon.error/at declared) (:seon.error/layer declared)
+           (:seon.error/operation declared)) declared
 
       :else
       (let [latest (latest-evaluations database agent-id)
@@ -2169,7 +2180,8 @@
                                          unchanged? (assoc :seon.turn/status :unchanged))]
                            [(if unchanged? ordinal (inc ordinal)) (conj previews preview)]))
                        [0 []] selected))]
-        (or (some #(when (:seon.error/kind %) %) previews)
+        (or (some #(when (and (:seon.error/at %) (:seon.error/layer %)
+                             (:seon.error/operation %)) %) previews)
             (some identity
                   (map (fn [source preview]
                          (some #(generated-read-fault database source
@@ -2257,7 +2269,8 @@
                                       (conj (into refresh-tx (:seon.db/tx-data prepared))
                                             [:db.fn/call #'plan/settle-call agent-id])
                                       []))]]))]
-                  (if (:seon.error/kind report) report
+                  (if (and (:seon.error/at report) (:seon.error/layer report)
+                           (:seon.error/operation report)) report
                       (if (some #(and (= :seon.turn/id (:a %))
                                       (= turn-id (:v %))) (:tx-data report))
                         (do

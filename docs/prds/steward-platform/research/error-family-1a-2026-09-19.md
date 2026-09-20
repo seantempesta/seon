@@ -2978,3 +2978,76 @@ the class-3 transaction fallback named above. There are no remaining
 `invalid-schema` test errors in this snapshot. Namespace load of
 `seon.error`, `seon.turn`, `seon.db`, and `seon.blob` exited 0 before commit.
 Scratch boot verification remains to run serially after the fast iterations.
+
+### Class 2 — preserve a failed system-turn read
+
+Root cause: the source generator returned a declared error map, but
+`system-turn` tested the retired kind member and treated it as a successful
+source collection, producing `{:seon.render.walk/units nil}`. The gate's
+exact location is `[:seon.render.walk/units]`; its top-level return was
+not nil. An empty vector would therefore hide a failed read.
+
+Seam: `declared-sources` and `system-turn` now recognize the boundary's
+required base members and preserve declared read/render errors. A walk
+elision is identified by its required members. The absent-agent producer
+now returns a complete `:seon.turn/refused-error`. The output keeps the
+successful vector promise and names the read/render error unions.
+
+Focused canonical regression: `seon.turn-error-test`; its handle receives
+the real fixture SCI fork, connection and process identity. No mock replaces
+the source generator or the armed function.
+
+```sh
+bin/test-fast --paths src/seon/turn.clj test/seon/turn_error_test.clj -- seon.turn-error-test
+```
+
+An initial queued invocation was cancelled before execution to correct its
+fixture's missing context/process inputs; it supplies no test evidence.
+The corrected invocation is the measured run. No attributes change.
+
+Recorded fast tally: **1 executed, 0 unchanged / 3 assertions / 0 failures
+/ 0 errors**, run `d5a1cd04b2b9`, wall-clock **168.02 s**. Reporter time
+includes the initial canonical fixture acquisition (105.963 s); this is
+not evidence of a sub-five-second execution. The existing fixture timing
+issue records that boundary; no duration allowance was added.
+
+### Class 3 — complete an unclassified writer failure
+
+Root cause: `transact-call`'s catch-all returned a legacy message/data map
+without the base error members, so it satisfied neither the transaction
+report nor error output arm. The missing `:db-before` report was the
+wrapper's explanation of that malformed error, not an elided success.
+
+The public `transact!` arities already declare distinct report/result
+outputs. Those contracts remain precise and unchanged. The catch-all now
+uses the existing `write-observation` constructor, providing time, layer,
+operation, submitted transaction, request identity and observed basis.
+The Datahike writer delivers the original exception through its promise
+(`reference-code/datahike/src/datahike/writer.cljc`, transaction catch); its
+ex-data remains in the returned error map.
+
+Focused regression: `seon.db-error-test` throws an unclassified exception
+inside the actual writer transaction, checks its retained evidence and
+complete `:seon.db.write/validation-refusal`, then verifies both successful
+public arity shapes. The fixture's config owner selects `:record`.
+
+### Class 4 — declare publication callback errors
+
+Root cause: `with-publication!` transparently returned its callback's
+database error map but its output named only the polymorphic value schema.
+The contract now includes the callback's existing `:seon.db/error-result`
+union. No publication, GC permit or transaction behavior changes.
+`seon.blob-error-test` verifies that the armed wrapper returns the exact
+same complete turn-refusal object, validated against its declared schema.
+
+### Stale contract-refusal expectations
+
+Converted nine assertion sites in `test/seon/run6_db_test.clj`,
+`test/seon/contracts_plan_test.clj`,
+`test/seon/supplied_documentation_test.clj`, and
+`test/seon/cluster/mcp_test.clj` to the projection validator for
+`:seon.instrument/contract-error`. Loops make these sites account for more
+than nine reported assertions. The adjacent MCP function assertion now
+uses the declared symbol-valued `:seon.instrument/fn`, rather than the
+retired marker. Other legacy expectations in these files are outside this
+specific assertion conversion; their test outcomes will be reported.
