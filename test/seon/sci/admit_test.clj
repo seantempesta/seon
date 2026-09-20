@@ -510,7 +510,8 @@
            (test-support/agent-value
             (test-support/fork-cluster-ctx connection)
             "(seon.sci.admit/admit {:seon.sci.admit/value [1 2 3], :seon.sci.admit/caps {}, :seon.sci.admit/interrupt-fn (fn []), :seon.config/on-core-error :record})")]
-       (is (some? (:seon.error/kind refusal)))
+       (is (= :input (:seon.instrument/check refusal)))
+       (is (= 'seon.sci.admit/admit (:seon.instrument/fn refusal)))
        (is (str/includes? (pr-str refusal)
                           ":seon.config.eval.result/max-bytes"))
        (is (not (str/includes? (pr-str refusal) "RT.longCast")))))))

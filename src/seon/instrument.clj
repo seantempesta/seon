@@ -300,7 +300,7 @@
             (map (fn [problem]
                    (let [union (some #(when (= (:in problem) (:in %)) %) described-unions)]
                      (if union
-                       (-> problem (assoc :path (:path union) :schema (:schema union))
+                       (-> problem (assoc :schema (:schema union))
                            (dissoc :type))
                        problem)))
                  (remove (fn [problem]
@@ -329,7 +329,8 @@
               (fn [problem]
                 (let [position (first (:in problem))
                       label (when (and (= :input arm) (= :catn (m/type offended)))
-                              (first (:path problem)))
+                              (when (integer? position)
+                                (first (nth (m/children offended) position nil))))
                       binding (when (and (= :input arm) (integer? position))
                                 (nth arglist position nil))
                       argument (case arm

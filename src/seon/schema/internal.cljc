@@ -361,9 +361,10 @@
    (assert-compilable-schema! schemas k v {}))
   ([schemas k v compile-options]
    (try
-    (let [registry (mr/composite-registry
-                    (m/default-schemas)
-                    (mr/fast-registry (assoc schemas k v)))]
+    (let [registry (or (:registry compile-options)
+                       (mr/composite-registry
+                        (m/default-schemas)
+                        (mr/fast-registry (assoc schemas k v))))]
       (m/schema k (assoc compile-options :registry registry)))
     nil
     (catch #?(:clj Exception :cljs :default) e

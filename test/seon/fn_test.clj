@@ -1521,9 +1521,8 @@
         (merge (analyzed-test-row (db/db connection) (quote sample.shape/subject-test)) {:seon.test/subject (quote sample.shape/many)})
         (merge (analyzed-test-row (db/db connection) (quote sample.shape/pending-test)) {:seon.test/subject (quote sample.shape/many)})])
       (let [database (db/db connection)
-            test-sym? (schema/call-with-projection
-                       (db/carried-projection database)
-                       #(schema/candidate-validator :seon.test/sym))
+            test-sym? (schema/projection-validator
+                       (db/carried-projection database) :seon.test/sym)
             gate-sets (into {}
                             (map (juxt identity #(seon.fn/gate-set database %)))
                             [(quote sample.shape/none) (quote sample.shape/one)
@@ -1552,19 +1551,7 @@
               ;; A degrading cluster hands a read this flat value; the dev
               ;; dial throws the same diagnostic, so the selection must never
               ;; concatenate it either way.
-              refusal (dissoc (error/diagnostic
-                       {:seon.db/invalid-read true
-                        :seon.error/kind :seon.db/invalid-read
-                        :seon.error/message
-                        "seon.db/q cannot read uninstalled attribute :sample.shape/uninstalled."
-                        :seon.error/diagnostic-layer :database-read
-                        :seon.error/diagnostic-operation 'seon.db/q
-                        :seon.error/diagnostic-member :sample.shape/uninstalled
-                        :seon.error/diagnostic-expected :seon.db/installed-attribute
-                        :seon.error/diagnostic-offending :sample.shape/uninstalled
-                        :seon.error/diagnostic-cause :seon.db/uninstalled-attribute
-                        :seon.error/diagnostic-evidence
-                        {:seon.fn/sym (quote sample.shape/many)}}) :seon.error/kind)
+              refusal (db/projection-fallback 'seon.db/q)
               refused (with-redefs
                         [db/q (fn [& arguments]
                                 (if (and (identical? thread (Thread/currentThread))
@@ -1577,8 +1564,8 @@
                          (seon.fn/gate-sets {:seon.db/db database
                                              :seon.fn/seeds #{(symbol "sample.shape" "many")}})])]
 
-          (is (true? (:seon.db/invalid-read refusal))
-              "the injected read is a flat database refusal")
+          (is (= :seon.schema/projection (:seon.schema/expected-value refusal))
+              "the injected read is the database owner's complete refusal")
           (is (= [refusal refusal refusal refusal] refused)
               "a refused declared-reference read refuses every selection arity")
           (is (every? map? refused)

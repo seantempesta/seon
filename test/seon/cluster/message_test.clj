@@ -467,13 +467,13 @@
         [next-model
          (and
           (or (nil? chain-limit)
-              (schema/valid-candidate-value?
+              (schema/valid-candidate-value? (schema/handed-projection)
                :seon.message/delivery-request request))
           (= (mapv ::id (::rows expected))
              (mapv :seon.message/id rows))
           (= (::error-kinds expected)
              (mapv :seon.error/kind (:seon.error/values delivery)))
-          (every? #(schema/valid-candidate-value? :seon.error/value %)
+          (every? #(schema/valid-candidate-value? (schema/handed-projection) :seon.error/value %)
                   (:seon.error/values delivery))
           (= (::messages next-model) (actual-messages @connection))
           (or (nil? chain-limit)
@@ -835,7 +835,7 @@
                 :seon.message/content-too-large
                 :seon.message/unknown-recipient]
                (mapv :seon.error/kind results)))
-        (is (every? #(schema/valid-candidate-value?
+        (is (every? #(schema/valid-candidate-value? (schema/handed-projection)
                       :seon.error/value %)
                     results))
         (is (not-any? vector? results)

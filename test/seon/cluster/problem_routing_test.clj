@@ -125,7 +125,7 @@
        (is (= "planner" (:seon.problems/author attributed)))
        (is (= "planner" (:seon.agent/id fallback))
            "pre-reader absence and an unowned namespace both fall back to author")
-       (is (schema/valid-candidate-value?
+       (is (schema/valid-candidate-value? (schema/handed-projection)
             :seon.problems/form-problem attributed))))))
 
 (deftest an-author-owned-red-form-remains-unsettled-without-self-assignment
@@ -234,7 +234,7 @@
               (mapv :seon.turn.work/settled? forms)))
        (is (false? (:seon.turn.work/settled? settlement))
            "one unsettled form keeps the plan unsettled regardless of run state")
-       (is (schema/valid-candidate-value?
+       (is (schema/valid-candidate-value? (schema/handed-projection)
             :seon.turn.work/plan-settlement settlement))
        (testing "closing the run cannot falsely settle its plan"
          (test-support/transacted! connection

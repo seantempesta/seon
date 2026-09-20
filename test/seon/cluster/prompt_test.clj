@@ -37,14 +37,14 @@
     (try
       (let [preview (turn/preview-sources
                      {:seon.turn.loop/cluster handle
-                      :seon.db/db @connection
+                      :seon.db/db (db/db connection)
                       :seon.sci.eval/ctx ctx
                       :seon.agent/id "walker"
                       :seon.ns/name 'my.agents.walker
                       :seon.cluster.reply/text source
                       :seon.sci.admit/caps caps})
             prepared (turn/record-evaluated-tx
-                       {:seon.turn.loop/cluster handle :seon.db/db @connection :seon.turn/id run-id :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/starting-ns [:seon.ns/name 'my.agents.walker] :seon.turn/reply source :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources (:seon.turn.loop/evaluated-sources preview)})]
+                       {:seon.turn.loop/cluster handle :seon.db/db (db/db connection) :seon.turn/id run-id :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/starting-ns [:seon.ns/name 'my.agents.walker] :seon.turn/reply source :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources (:seon.turn.loop/evaluated-sources preview)})]
         (let [result (blob/with-publication!
                       connection (:seon.blob/staged-writes prepared)
                       #(db/transact! connection (:seon.db/tx-data prepared)))]
@@ -91,7 +91,7 @@
 (deftest prompt-prices-the-exact-retained-history
   (planted
    (fn [connection ctx]
-     (let [rendered (prompt/prompt @connection (request connection ctx))
+     (let [rendered (prompt/prompt (db/db connection) (request connection ctx))
            text (:seon.cluster.prompt/text rendered)
            contributions (:seon.context/contributions rendered)]
        (is (seq text))
@@ -121,18 +121,18 @@
   (planted
    (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
-                   (prompt/prompt @connection (request connection ctx)))]
+                   (prompt/prompt (db/db connection) (request connection ctx)))]
        (support/transacted! connection
                             [{:seon.message/id "later" :seon.message/to [:seon.agent/id "walker"] :seon.message/content "not evaluated yet"}])
        (let [after (:seon.cluster.prompt/text
-                    (prompt/prompt @connection (request connection ctx)))]
+                    (prompt/prompt (db/db connection) (request connection ctx)))]
          (is (= before after) "a stored observation changes only through a later evaluation")
          (is (not (str/includes? after "not evaluated yet"))))))))
 
 (deftest identical-context-does-not-depend-on-a-retained-prompt-cache
   (planted
    (fn [connection ctx]
-     (let [database @connection
+     (let [database (db/db connection)
            before (prompt/prompt database (request connection ctx))
            basis (db/basis-t database)]
        (reset! (render/shared-cache ctx) {})
@@ -140,18 +140,18 @@
          (is (seq (:seon.cluster.prompt/text before)))
          (is (= (:seon.cluster.prompt/text before)
                 (:seon.cluster.prompt/text after)))
-         (is (= basis (db/basis-t @connection))))))))
+         (is (= basis (db/basis-t (db/db connection)))))))))
 
 (deftest later-evaluations-preserve-the-opening-history
   (planted
    (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
-                   (prompt/prompt @connection (request connection ctx)))]
+                   (prompt/prompt (db/db connection) (request connection ctx)))]
        (let [result (db/transact! connection [[:db/add [:seon.turn/id "walk-run"] :seon.turn/closed-tx "datomic.tx"]])]
          (is (not (:seon.error/kind result)) (pr-str result)))
        (record-evaluation! connection ctx "second-history" "(str \"SECOND-EVALUATION\")")
        (let [after (:seon.cluster.prompt/text
-                    (prompt/prompt @connection (request connection ctx)))]
+                    (prompt/prompt (db/db connection) (request connection ctx)))]
          (is (= after before))
          (is (str/includes? after "inspect this walk"))
          (is (not (str/includes? after "SECOND-EVALUATION"))))))))
@@ -160,11 +160,11 @@
   (planted
    (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
-                   (prompt/prompt @connection
+                   (prompt/prompt (db/db connection)
                                   (request connection ctx)))]
        (support/transacted! connection [])
        (let [after (:seon.cluster.prompt/text
-                    (prompt/prompt @connection
+                    (prompt/prompt (db/db connection)
                                    (request connection ctx)))]
          (is (= before after)
              "a basis-only transaction creates no new history observation")
@@ -180,7 +180,7 @@
                     {:seon.turn/id "plan-wake"
                      :seon.turn/agent [:seon.agent/id "walker"]
                      :seon.turn/opened-tx "datomic.tx"}])
-           rendered (prompt/prompt @connection
+           rendered (prompt/prompt (db/db connection)
                                    (assoc (request connection ctx)
                                           :seon.turn/id "plan-wake"))]
        (is (not (:seon.error/kind result)) (pr-str result))
@@ -261,7 +261,7 @@
    (fn [connection ctx]
      (let [acquired (render/acquire-context!
                      (assoc (request connection ctx)
-                            :seon.db/db @connection
+                            :seon.db/db (db/db connection)
                             :seon.render/distance 2))
            units (vec (:seon.render.history/entries acquired))
            calibration (tokens/prior-calibration 3.2)
@@ -306,14 +306,14 @@
                       [unit-text (str "\n\n" unit-text)]
                       :seon.db/db (:seon.db/db render-request)})]
        (with-redefs [render/acquire-context! acquire]
-         (let [selected (prompt/prompt @connection (request connection ctx))
+         (let [selected (prompt/prompt (db/db connection) (request connection ctx))
                text (:seon.cluster.prompt/text selected)
                contributions (:seon.context/contributions selected)]
            (is (= [2] @distances))
            (is (str/includes? text unit-text) "the newest unit survives whole")
            (is (str/includes? text ":seon.print/elision-unit :evaluations")
                "and the older one is named as an elision")
-           (is (str/ends-with? text (repl/frame @connection "walker"))
+           (is (str/ends-with? text (repl/frame (db/db connection) "walker"))
                "the turn frame still closes the prompt")
            (is (= text (apply str (map :seon.context.contribution/text
                                        contributions)))
@@ -379,7 +379,7 @@
 (deftest calibration-uses-the-agents-recent-attempts-and-config-prior
   (planted
    (fn [connection ctx]
-     (let [model (db/q '[:find ?model . :where [_ :seon.config.ai/model ?model]] @connection)
+     (let [model (db/q '[:find ?model . :where [_ :seon.config.ai/model ?model]] (db/db connection))
            foreign (assoc-in (recorded-usage-tx model 99 9000 1000)
                              [0 :seon.turn/agent] [:seon.agent/id "other"])]
        (support/transacted! connection
@@ -391,17 +391,17 @@
                               :seon.agent/settings {:seon.config.ai/chars-per-token-prior 4.5}}])
        (support/transacted! connection foreign)
        (is (= 9.0 (:seon.ai.tokens/chars-per-token
-                    (prompt/agent-calibration @connection "other" model))))
+                    (prompt/agent-calibration (db/db connection) "other" model))))
        (is (= 4.5 (:seon.ai.tokens/chars-per-token
-                    (prompt/agent-calibration @connection "walker" model)))
+                    (prompt/agent-calibration (db/db connection) "walker" model)))
            "another agent's usage cannot replace this agent's configured prior")
        (doseq [ordinal (reverse (range 12))]
          (support/transacted! connection
                               (recorded-usage-tx model ordinal
                                                  (if (< ordinal 2) 6400 2800) 1000)))
        (support/transacted! connection (recorded-usage-tx model 100 10000 0))
-       (let [calibration (prompt/agent-calibration @connection "walker" model)
-             rendered (prompt/prompt @connection (dissoc (request connection ctx) :seon.turn/id))]
+       (let [calibration (prompt/agent-calibration (db/db connection) "walker" model)
+             rendered (prompt/prompt (db/db connection) (dissoc (request connection ctx) :seon.turn/id))]
          (is (= :seon.ai.tokens/observed (:seon.ai.tokens/basis calibration)))
          (is (= 10 (:seon.ai.tokens/sample-count calibration)))
          (is (= 2.8 (:seon.ai.tokens/chars-per-token calibration))
@@ -420,12 +420,12 @@
    (fn [connection ctx]
      (let [model (db/q '[:find ?model .
                          :where [_ :seon.config.ai/model ?model]]
-                       @connection)]
+                       (db/db connection))]
        (support/transacted! connection
                             [{:seon.agent/id "walker"
                               :seon.agent/settings {:seon.config.ai/prompt-token-budget 100}}])
        (testing "with no recorded usage the measured prior is named"
-         (let [calibration (prompt/model-calibration @connection model)]
+         (let [calibration (prompt/model-calibration (db/db connection) model)]
            (is (= :seon.ai.tokens/shipped-prior
                   (:seon.ai.tokens/basis calibration)))
            (is (= 17 (:seon.ai.tokens/sample-count calibration)))
@@ -437,7 +437,7 @@
                                     (recorded-usage-tx model ordinal 32000 10000))]
            (is (not (:seon.error/kind result)) (pr-str result))))
        (testing "the calibration is fitted to those committed facts"
-         (let [calibration (prompt/model-calibration @connection model)]
+         (let [calibration (prompt/model-calibration (db/db connection) model)]
            (is (= :seon.ai.tokens/observed
                   (:seon.ai.tokens/basis calibration)))
            (is (= 3 (:seon.ai.tokens/sample-count calibration)))
@@ -450,11 +450,11 @@
                          {:seon.cluster.prompt/text text
                           :seon.render.history/entries [(history-unit 0 text)]
                           :seon.db/db (:seon.db/db render-request)})]
-           (let [result (prompt/prompt @connection
+           (let [result (prompt/prompt (db/db connection)
                                        (request connection ctx))]
              (is (= 106 (tokens/estimate text))
                  "the measured prior catches the first turn too")
-             (is (= (str text "\n\n" (repl/frame @connection "walker"))
+             (is (= (str text "\n\n" (repl/frame (db/db connection) "walker"))
                     (:seon.cluster.prompt/text result)))
              (is (= :seon.ai.tokens/over
                     (get-in result [:seon.ai.tokens/budget-report
@@ -492,17 +492,17 @@
                       :seon.db/db (:seon.db/db render-request)})]
        (with-redefs [render/acquire-context! acquire]
          (let [composed (:seon.cluster.prompt/text
-                         (prompt/prompt @connection (request connection ctx)))]
+                         (prompt/prompt (db/db connection) (request connection ctx)))]
            (is (string? composed))
-           (is (not= composed (str join "\n\n" (repl/frame @connection "walker")))
+           (is (not= composed (str join "\n\n" (repl/frame (db/db connection) "walker")))
                "the budget selected, so the capture is not the unselected join")
            (support/transacted!
             connection
             [{:seon.context.capture/id "replayed-capture"
               :seon.context.capture/run [:seon.turn/id "walk-run"]
-              :seon.context.capture/basis-t (db/basis-t @connection)
+              :seon.context.capture/basis-t (db/basis-t (db/db connection))
               :seon.context.capture/prompt composed}])
-           (let [replayed (prompt/prompt @connection (request connection ctx))]
+           (let [replayed (prompt/prompt (db/db connection) (request connection ctx))]
              (is (nil? (:seon.error/kind replayed))
                  (str "a replay of its own capture is not a mismatch: "
                       (pr-str replayed)))
@@ -512,7 +512,7 @@
               connection
               [{:seon.context.capture/id "replayed-capture"
                 :seon.context.capture/prompt (str composed " drifted")}])
-             (let [drifted (prompt/prompt @connection (request connection ctx))]
+             (let [drifted (prompt/prompt (db/db connection) (request connection ctx))]
                (is (= :seon.cluster.prompt/capture-mismatch
                       (:seon.error/kind drifted)))
                (is (= "walk-run" (:seon.turn/id drifted)))))))))))

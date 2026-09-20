@@ -365,7 +365,7 @@
            "a real invalid opening preserves its writer rule")
        (is (= "run transition refused: no-such-agent"
               (:seon.error/message result)))
-       (is (schema/valid-candidate-value? :seon.error/value result)
+       (is ((schema/projection-validator (schema/handed-projection) :seon.error/value) result)
            "classified transaction refusals satisfy the same error contract as their callers")))))
 
 (defn- with-codec-database
@@ -601,9 +601,7 @@
            (get-in result [:seon.error/data :seon.db/binding])))))
 
 (deftest every-public-read-preserves-an-upstream-database-error
-  (let [upstream {:seon.error/kind :seon.db-test/upstream
-                  :seon.error/message "The earlier database read failed."
-                  :seon.error/data {:seon.db-test/stage :opening-basis}}
+  (let [upstream (db/projection-fallback 'seon.db/q)
         reads
         [[:connection-identity #(apply db/connection-identity [upstream])]
          [:database-value-identity #(db/database-value-identity upstream)]
@@ -654,8 +652,7 @@
             #(and (map? %) (contains? % :datahike.pull/plan))
             (tree-seq coll? seq @entries))
            "captured pull replay arguments retain ordinary selector data")
-       (is (every? #(schema/valid-candidate-value?
-                     :seon.db/captured-read %)
+       (is (every? #((schema/projection-validator (schema/handed-projection) :seon.db/captured-read) %)
                    @entries))))))
 
 (deftest retained-read-evidence-invalidates-only-on-a-depended-attribute
@@ -668,8 +665,7 @@
                  :where [_ :seon.cluster/name ?name]]
                @connection))
        (let [evidence (db/read-evidence @captured)]
-         (is (every? #(schema/valid-candidate-value?
-                       :seon.db/read-evidence %)
+         (is (every? #((schema/projection-validator (schema/handed-projection) :seon.db/read-evidence) %)
                      evidence))
          (test-support/transacted! connection
                                    [{:seon.agent/id "unrelated-agent"}])
@@ -905,8 +901,7 @@
              (is (int? (db/basis-t database))))
            (testing "database-value-identity answers, never throws"
              (let [answer (db/database-value-identity database)]
-               (is (or (schema/valid-candidate-value?
-                        :seon.db/database-value-identity answer)
+               (is (or ((schema/projection-validator (schema/handed-projection) :seon.db/database-value-identity) answer)
                        (= :seon.db/uncommitted-database-value
                           (:seon.error/kind answer)))
                    "a committed identity or a flat error value")))
@@ -918,8 +913,7 @@
                        database))
                (let [evidence (db/read-evidence @captured)]
                  (is (seq evidence) "the read was captured")
-                 (is (every? #(schema/valid-candidate-value?
-                               :seon.db/read-evidence %)
+                 (is (every? #((schema/projection-validator (schema/handed-projection) :seon.db/read-evidence) %)
                              evidence)
                      "no view shape may violate read-evidence's contract")
                  (is (true? (db/read-evidence-current? database evidence))
@@ -1292,7 +1286,7 @@
              (.countDown release)
              (let [report (test-support/await-event!
                            outcome "the unbounded system write to settle")]
-               (is (schema/valid-candidate-value? :seon.db/transaction-report report)
+               (is ((schema/projection-validator (schema/handed-projection) :seon.db/transaction-report) report)
                    "the system write settles as a report, never a bound refusal")
                (is (= "unbounded-system-write-target"
                       (:seon.agent/id
@@ -1548,7 +1542,7 @@
      ;; (`my.turn-test`, `my.message-test` prove that boundary).
      (let [refusal (test-support/refusal-data
                     #(db/pull-many @connection schema-pattern ["not-an-eid"]))]
-       (is (schema/valid-candidate-value? :seon.instrument/contract-error refusal))
+       (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
        (is (= :input (:seon.instrument/check refusal)))
        (is (= 'seon.db/pull-many
               (:seon.error/diagnostic-operation (:seon.error/data refusal))))
@@ -1728,7 +1722,7 @@
                 [#(db/transact! connection {:not-tx-data []})
                  'seon.db/transact! [:tx-data]]]]
          (let [refusal (test-support/refusal-data thunk)]
-           (is (schema/valid-candidate-value? :seon.instrument/contract-error refusal))
+           (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
            (is (= :input (:seon.instrument/check refusal)))
            (is (= operation
                   (get-in refusal [:seon.error/data

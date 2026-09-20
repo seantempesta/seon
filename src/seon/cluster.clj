@@ -713,21 +713,15 @@
             (recur false))
         (::published outcome)))))
 
-;; REQUIRES the population: `resolve-bootstrap` asks two questions and each
-;; refusal arm asks a third, so the ambient arity made one bootstrap
-;; resolution two or three complete classpath re-reads (2026-08-07).
 (defn- require-candidate-value
-  ([schema-key value message]
-   (require-candidate-value (schema.edn/packaged-forms)
-                            schema-key value message))
-  ([forms schema-key value message]
-   (if (schema/valid-candidate-value? forms schema-key value)
-     value
-     (refused! message
-               {:seon.boot/schema schema-key
-                :seon.boot/value value
-                :seon.boot/explanation
-                (schema/explain-candidate-value forms schema-key value)}))))
+  [projection schema-key value message]
+  (if (schema/valid-candidate-value? projection schema-key value)
+    value
+    (refused! message
+              {:seon.boot/schema schema-key
+               :seon.boot/value value
+               :seon.boot/explanation
+               (schema/explain-candidate-value projection schema-key value)})))
 
 (declare cluster-paths operator-root)
 
@@ -746,9 +740,9 @@
   [overrides]
   ;; ONE declaration population for the whole resolution — it asks two
   ;; questions and each refusal arm asks a third.
-  (let [forms (schema.edn/packaged-forms)]
+  (let [projection (schema/declaration-projection (schema.edn/packaged-forms))]
     (require-candidate-value
-     forms
+     projection
      :seon.boot/overrides
      overrides
      "The bootstrap overrides were refused.")
@@ -765,7 +759,7 @@
            (cluster-paths (:seon.boot/root base)
                           (:seon.boot/cluster-name base)))]
       (require-candidate-value
-       forms
+       projection
        :seon.boot/config
        (merge {:seon.boot/log-dir derived-log-dir
                :seon.boot/store-dir derived-store-dir}
@@ -2174,7 +2168,9 @@
   [manifest]
   (and (map? manifest)
        (try
-         (schema/valid-candidate-value? :seon.fn.manifest/manifest manifest)
+         (schema/valid-candidate-value?
+          (schema/declaration-projection (schema.edn/packaged-forms))
+          :seon.fn.manifest/manifest manifest)
          (catch Throwable _ false))))
 
 (defn- stable-manifest
@@ -3781,6 +3777,7 @@
                    :seon.boot/executors (root-executors)}
                   instance
                   (require-candidate-value
+                   (schema/declaration-projection (schema.edn/packaged-forms))
                    :seon.boot/instance
                    instance
                    "The started cluster instance was refused.")]
@@ -4014,6 +4011,7 @@
           advertisement (edn/read-string (slurp path))]
       (when (and
              (schema/valid-candidate-value?
+              (schema/declaration-projection (schema.edn/packaged-forms))
               :seon.boot/advertisement advertisement)
              (= cluster-name (:seon.boot/cluster-name advertisement))
              (cluster.process/live?

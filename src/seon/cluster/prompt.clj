@@ -151,10 +151,10 @@
        vec))
 
 (defn- validate-request!
-  [request]
+  [projection request]
   (when-let [explanation
              (schema/explain-candidate-value
-              :seon.cluster.prompt/request request)]
+              projection :seon.cluster.prompt/request request)]
     (let [missing (missing-required-keys explanation)]
       (refuse!
        ::missing-input
@@ -394,7 +394,7 @@
                        :seon.cluster.prompt/request]
                   :seon.cluster.prompt/result]}
   [database request]
-  (validate-request! request)
+  (validate-request! (db/carried-projection database) request)
   (let [agent-id (:seon.agent/id request)
         settings (effective-ai-settings database agent-id)]
     (if (:seon.error/kind settings)

@@ -710,7 +710,7 @@
                                               admission-source)]
         (is (= admission-source (:seon.schema.admission/source row))
             "the row records who admitted it")
-        (is (schema/valid-candidate-value? :seon.program/declaration-row row)
+        (is ((schema/projection-validator (schema/handed-projection) :seon.program/declaration-row) row)
             (str "row refused by its own output contract: " (pr-str row))))))
   (testing "a reader event preserves required namespace symbols"
     (is (= #{'clojure.set}

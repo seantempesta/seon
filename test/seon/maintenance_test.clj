@@ -53,10 +53,9 @@
 
 (deftest result-projection-is-declared-and-keeps-census-evidence-queryable
   (let [public-result (census-result)
-        projected (maintenance/result-entity public-result)]
+        projected (maintenance/result-entity (schema/handed-projection) public-result)]
     (testing "the public vector-of-map contract keeps its meaning"
-      (is (true? (schema/valid-candidate-value?
-                  :seon.operator.process-census/result public-result)))
+      (is (true? ((schema/projection-validator (schema/handed-projection) :seon.operator.process-census/result) public-result)))
       (is (= 'seon.maintenance/project-process-census-result
              (:seon.maintenance/result-projection
               (schema.form/schema-properties
@@ -118,7 +117,7 @@
   (let [store-id (UUID/fromString "00000000-0000-0000-0000-000000000201")
         commit-id (UUID/fromString "00000000-0000-0000-0000-000000000202")
         projected
-        (maintenance/result-entity
+        (maintenance/result-entity (schema/handed-projection)
          {:seon.operator.collect/store-id store-id
           :seon.operator.collect/managed-root "/repo/operator"
           :seon.operator.collect/branches
@@ -164,9 +163,8 @@
            :seon.error/message "The exact process claim is absent."}]
          :seon.operator.reap/reclaimed-bytes 0
          :seon.operator.reap/complete? false}
-        projected (maintenance/result-entity public-result)]
-    (is (true? (schema/valid-candidate-value?
-                :seon.operator.reap/result public-result)))
+        projected (maintenance/result-entity (schema/handed-projection) public-result)]
+    (is (true? ((schema/projection-validator (schema/handed-projection) :seon.operator.reap/result) public-result)))
     (test-support/with-database
       (fn [connection]
         (test-support/transacted!
@@ -209,9 +207,8 @@
          :seon.operator.cluster-cleanup/remaining []
          :seon.operator.cluster-cleanup/reclaimed-bytes 8192
          :seon.operator.cluster-cleanup/complete? true}
-        projected (maintenance/result-entity public-result)]
-    (is (true? (schema/valid-candidate-value?
-                :seon.operator.cluster-cleanup/result public-result)))
+        projected (maintenance/result-entity (schema/handed-projection) public-result)]
+    (is (true? ((schema/projection-validator (schema/handed-projection) :seon.operator.cluster-cleanup/result) public-result)))
     (test-support/with-database
       (fn [connection]
         (test-support/transacted!
@@ -329,7 +326,7 @@
                        census-task census-handler "census/1" at-1
                        {:seon.maintenance.receipt/completed-at at-1
                         :seon.maintenance.receipt/result
-                        (assoc (maintenance/result-entity
+                        (assoc (maintenance/result-entity (schema/handed-projection)
                                 (assoc (census-result)
                                        :seon.operator.process-census/complete? true
                                        :seon.operator.process-census/unresponsive []
@@ -394,9 +391,8 @@
 
 (deftest a-successful-cleanup-persists-its-verified-collection-result
   (let [public-result (cleanup-result (collect-result 4096))
-        projected (maintenance/result-entity public-result)]
-    (is (true? (schema/valid-candidate-value?
-                :seon.operator.cluster-cleanup/result public-result))
+        projected (maintenance/result-entity (schema/handed-projection) public-result)]
+    (is (true? ((schema/projection-validator (schema/handed-projection) :seon.operator.cluster-cleanup/result) public-result))
         "collect-store! returns its verified result, so the slot carries one")
     (is (= 4096
            (get-in projected
@@ -446,7 +442,7 @@
   (let [refusal {:seon.error/kind :seon.operator/collection-incomplete
                  :seon.error/message "Collection did not verify every root."
                  :seon.error/data {:seon.cluster.registry/swept :opaque}}
-        projected (maintenance/result-entity (cleanup-result refusal))]
+        projected (maintenance/result-entity (schema/handed-projection) (cleanup-result refusal))]
     (test-support/with-database
       (fn [connection]
         (test-support/transacted!
@@ -488,7 +484,7 @@
             (fn [reclaimed]
               (test-support/transacted!
                connection
-               [(assoc (maintenance/result-entity
+               [(assoc (maintenance/result-entity (schema/handed-projection)
                         (cleanup-result (collect-result reclaimed)))
                        :seon.maintenance.result/id result-id)]))]
         (record! 4096)
@@ -542,7 +538,7 @@
          (receipt collect-task collect-handler "collect/1" at-1
                   {:seon.maintenance.receipt/completed-at at-1
                    :seon.maintenance.receipt/result
-                   (assoc (maintenance/result-entity (collect-result 4096))
+                   (assoc (maintenance/result-entity (schema/handed-projection) (collect-result 4096))
                           :seon.maintenance.result/id "collect-result/1")}))
         (testing "a collect! receipt answers from its own result entity"
           (let [answer (maintenance/last-collection @connection collected-root)]
@@ -555,14 +551,13 @@
                                  :seon.maintenance.receipt/id
                                  :seon.maintenance.receipt/completed-at
                                  :seon.operator.collect/reclaimed-bytes])))
-            (is (true? (schema/valid-candidate-value?
-                        :seon.maintenance/collection-record answer)))))
+            (is (true? ((schema/projection-validator (schema/handed-projection) :seon.maintenance/collection-record) answer)))))
         (test-support/transacted!
          connection
          (receipt cleanup-task cleanup-handler "cleanup/1" at-2
                   {:seon.maintenance.receipt/completed-at at-2
                    :seon.maintenance.receipt/result
-                   (assoc (maintenance/result-entity
+                   (assoc (maintenance/result-entity (schema/handed-projection)
                            (cleanup-result (collect-result 8192)))
                           :seon.maintenance.result/id "cleanup-result/2")}))
         (testing "a later cleanup's collection is the root's latest answer"

@@ -3209,11 +3209,11 @@
   result. Anything else — a number, a map that merely looks similar, an
   error value — is not a disposition. An accepted provider reply ending
   without one permits another turn under the session bound."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+  {:malli/schema [:=> [:cat :seon.schema/projection [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                          :seon.schema.admission/reason "The final SCI evaluation may return any value; this classifier returns a disposition only when the candidate satisfies my.turn/value."
                          :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :my.turn/value]]}
-  [value]
-  (when (schema/valid-candidate-value? :my.turn/value value)
+  [projection value]
+  (when (schema/valid-candidate-value? projection :my.turn/value value)
     value))
 
 (defn- append-output
@@ -3453,7 +3453,8 @@
     trigger :seon.message/trigger
     batch? :seon.turn.loop/batch?}]
   (let [database (db/db (get cluster :seon.db/connection))
-        raw-settled (disposition (:seon.sci.admit/value evaluation))
+        raw-settled (disposition (db/carried-projection database)
+                                 (:seon.sci.admit/value evaluation))
         settled
         (cond-> raw-settled
           (= :completed (:my.turn/disposition raw-settled))
@@ -4473,7 +4474,7 @@
         database evaluation-id))
 
 (defn- disposition-rule-error
-  [source namespace-name last? evaluation]
+  [projection source namespace-name last? evaluation]
   (let [form (:seon.sci.reader/form
               (first (read-source source namespace-name (count source))))
         calls (tree-seq
@@ -4484,7 +4485,7 @@
         done-calls (filter #(and (seq? %) (= 'my.agent/done (first %))) calls)]
     (when (or (and (seq done-calls)
                    (not (and last? (= form (first done-calls)) (= 1 (count done-calls)))))
-              (and (disposition (:seon.sci.admit/value evaluation)) (not last?)))
+              (and (disposition projection (:seon.sci.admit/value evaluation)) (not last?)))
       {:seon.error/kind :seon.turn/invalid-disposition
        :seon.error/message "(my.agent/done) must be the last form of your reply; a disposition cannot precede another reply form."
        :seon.error/data {:seon.cluster.eval/source source}})))
@@ -4565,6 +4566,7 @@
                    request
                    (sci.eval/evaluate-for-install request))))
               evaluation (or (disposition-rule-error
+                               (db/carried-projection database)
                                (:seon.cluster.eval/source form) namespace-name
                                (nil? (next remaining)) evaluation)
                               evaluation)

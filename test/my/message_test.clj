@@ -51,20 +51,19 @@
       (let [value (message/read "m-1" @connection)]
         (is (= {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "bob"] :seon.message/from [:seon.agent/id "alice"] :seon.message/content "First message"}
                value))
-        (is (seon.schema/valid-candidate-value?
-             :seon.message/message value))))))
+        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.message/message) value))))))
 
 (deftest a-message-is-an-ordinary-value
   (testing "send carries the recipient and the content, and nothing else"
     (let [value (message/send "bob" "how many primes under 100?")]
-      (is (seon.schema/valid-candidate-value? :my.message/message value))
+      (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.message/message) value))
       (is (= "bob" (:my.message/to value)))
       (is (= "how many primes under 100?" (:my.message/content value)))
       (is (= #{:my.message/to :my.message/content :seon.message/id} (set (keys value)))
           "send mints the event identity; delivery resolves sender and recipient")))
   (testing "the optional third argument carries a fact identity"
     (let [value (message/send "bob" "repair this" "failure-17")]
-      (is (seon.schema/valid-candidate-value? :my.message/message value))
+      (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.message/message) value))
       (is (= {:my.message/to "bob"
               :my.message/content "repair this"
               :my.message/about "failure-17"}
@@ -73,10 +72,8 @@
       (is (not= (:seon.message/id value)
                 (:seon.message/id (message/send "bob" "repair this" "failure-17"))))))
   (testing "one send and a vector of sends both validate as the union"
-    (is (seon.schema/valid-candidate-value?
-         :my.message/value (message/send "bob" "hello")))
-    (is (seon.schema/valid-candidate-value?
-         :my.message/value [(message/send "bob" "hello")
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.message/value) (message/send "bob" "hello")))
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.message/value) [(message/send "bob" "hello")
                             (message/send "carol" "hello")]))))
 
 (deftest a-declination-is-an-ordinary-value
@@ -87,11 +84,9 @@
             :my.message/reason "The dependency contract is missing."}
            (dissoc value :seon.message/id)))
     (is (seq (:seon.message/id value)))
-    (is (seon.schema/valid-candidate-value? :my.message/declination value))
-    (is (seon.schema/valid-candidate-value? :my.message/value value))
-    (is (seon.schema/valid-candidate-value?
-         :my.message/value
-         [(message/send "bob" "repair this" "failure-17") value])
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.message/declination) value))
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.message/value) value))
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.message/value) [(message/send "bob" "repair this" "failure-17") value])
         "one form may return messages and declinations together")))
 
 (deftest delivery-preserves-the-returned-message-identity
@@ -147,8 +142,7 @@
     (testing (str "recipient " (pr-str bad))
       (let [value (message/send bad "content")]
         (is (string? (:seon.error/message value)))
-        (is (not (seon.schema/valid-candidate-value?
-                  :my.message/value value))
+        (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :my.message/value) value))
             "and the loop cannot mistake it for a delivery")))
     (testing (str "content " (pr-str bad))
       (is (string? (:seon.error/message (message/send "bob" bad)))))
@@ -172,7 +166,7 @@
         ;; (breaks on accretion), no kind dependence (deleted in W4/W5)
         (is (true? (get value expected-kind ::absent)))
         (is (string? (:seon.error/message value)))
-        (is (seon.schema/valid-candidate-value? :seon.error/value value))))))
+        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/value) value))))))
 
 (deftest a-contract-forbidden-argument-is-a-value-the-agent-reads
   ;; AN AGENT NEVER INVOKES THE VAR. Its reply is read into forms and each
@@ -199,8 +193,7 @@
             (is (map? value) source)
             (is (keyword? (:seon.error/kind value)) source)
             (is (string? (:seon.error/message value)) source)
-            (is (not (seon.schema/valid-candidate-value?
-                      :my.message/value value))
+            (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :my.message/value) value))
                 "and the loop cannot mistake it for a delivery")))))))
 
 (deftest the-error-value-is-the-registered-one
@@ -217,7 +210,7 @@
                  (message/decline "planner" "   " "Cannot repair.")
                  (message/decline "planner" "failure-17" "   ")
                  (run/complete "   ")]]
-    (is (seon.schema/valid-candidate-value? :seon.error/value value)
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/value) value)
         "the error path keeps the output schema too")))
 
 (deftest the-surface-is-exactly-four-functions

@@ -17,19 +17,14 @@
    :seon.error/data data})
 
 (defn- result-projections
-  [result]
-  ;; ONE declaration population for the whole scan. The population is already
-  ;; in hand from `registered-schemas`; asking `valid-candidate-value?` with
-  ;; the ambient arity threw it away and re-read all 152 schema resources per
-  ;; candidate key (2026-08-07).
-  (let [forms (schema/registered-schemas)]
+  [schema-projection result]
+  (let [forms (:seon.schema.projection/forms schema-projection)]
     (->> forms
          (keep (fn [[schema-key definition]]
                  (when-let [projection
                             (:seon.maintenance/result-projection
                              (schema.form/namespaced-properties definition))]
-                   (when (schema/valid-candidate-value?
-                          forms schema-key result)
+                   (when ((schema/projection-validator schema-projection schema-key) result)
                      [schema-key projection]))))
          (sort-by (comp str first))
          vec)))
@@ -37,10 +32,10 @@
 (defn result-entity
   "Project an operation result through its declared persistence producer."
   {:malli/schema
-   [:=> [:cat :seon.maintenance/result-entity-request]
+   [:=> [:cat :seon.schema/projection :seon.maintenance/result-entity-request]
     :seon.maintenance/result-entity-response]}
-  [result]
-  (let [projections (result-projections result)]
+  [projection result]
+  (let [projections (result-projections projection result)]
     (cond
       (empty? projections) result
 

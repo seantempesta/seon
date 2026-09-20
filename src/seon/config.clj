@@ -109,33 +109,35 @@
 (defn result-caps
   "Derive complete value-admission caps or name the first absent key."
   {:malli/schema
-   [:=> [:cat [:or :seon.config/effective
-                :seon.config/missing-effective-error
-                :seon.error/value]]
-    [:or :seon.sci.admit/caps
-     :seon.error/value]]}
+   [:=> [:cat [:or :seon.config/effective :seon.config/error
+                :seon.db/error-result]]
+    [:or :seon.sci.admit/caps :seon.config/error]]}
   [effective]
-  ;; ONE GRAMMAR OUT. A configuration refusal arrives here in one of two
-  ;; shapes — a `missing-effective-error`, which names its cluster and the
-  ;; facts that cluster lacks, or a flat refusal from a database that names
-  ;; no cluster at all and so has no cluster to report. Either way the answer
-  ;; this function owes its callers is its own class marker naming the first
-  ;; cap key it wanted: that marker is what `seon.instrument/wrap-interpreted`
-  ;; reports when a `:panic` contract cannot be armed. A flat refusal is
-  ;; carried as the cause rather than replacing that report, because the cap
-  ;; key alone would bury the configuration absence that produced it.
-  (let [cluster-less-refusal
-        (when (and (:seon.error/kind effective)
-                   (not (:seon.config/missing-effective effective)))
-          effective)
-        reported-missing
+  ;; A valid effective configuration has every cap. A missing cap therefore
+  ;; names the refused constraint; preserve the input's causal observations.
+  (let [reported-missing
         (set (get-in effective [:seon.error/data ::missing]))
         missing
         (or (some reported-missing result-cap-attributes)
             (some #(when-not (contains? effective %) %)
-                  result-cap-attributes))]
+                  result-cap-attributes))
+        cluster-less-refusal (when (and missing
+                                       (not (:seon.config/missing-effective effective)))
+                               effective)]
     (if missing
-      {:seon.error/kind ::missing-result-cap
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.config/read
+       :seon.error/operation 'seon.config/result-caps
+       :seon.config/error-key missing
+       :seon.error/expected-key missing
+       :seon.error/diagnostic-layer :seon.config/read
+       :seon.error/diagnostic-operation 'seon.config/result-caps
+       :seon.error/diagnostic-member missing
+       :seon.error/diagnostic-expected missing
+       :seon.error/diagnostic-offending effective
+       :seon.error/diagnostic-cause :seon.config/missing-result-cap
+       :seon.error/diagnostic-evidence {:seon.config/key missing}
        :seon.error/message
        (str "Value-admission caps require config key " missing
             "; a partial caps map cannot be constructed."
@@ -148,8 +150,7 @@
          (assoc :seon.config/missing-effective
                 (:seon.config/missing-effective effective))
          cluster-less-refusal
-         (assoc ::configuration-refusal cluster-less-refusal))
-       :seon.config/missing-result-cap true}
+         (assoc ::configuration-refusal cluster-less-refusal))})
       (select-keys effective result-cap-attributes))))
 
 ;;; Every function below asks the declaration population one question per
@@ -227,8 +228,9 @@
       (refuse! ::manifest-unreadable {::path path} error))))
 
 (defn- validate-layer
-  [forms layer]
-  (let [dials (set (dial-attributes forms))
+  [projection layer]
+  (let [forms (:seon.schema.projection/forms projection)
+        dials (set (dial-attributes forms))
         declared (select-keys layer dials)]
     (when (contains? layer initialization-key)
       (refuse! ::initialization-not-allowed
@@ -236,11 +238,11 @@
                nil))
     (doseq [[key value] declared]
       (when-not (or (= absent value)
-                    (schema/valid-candidate-value? forms key value))
+                    ((schema/projection-validator projection key) value))
         (refuse!
          ::invalid-value
          {::key key
-          ::explanation (schema/explain-candidate-value forms key value)}
+          ::explanation ((schema/projection-explainer projection key) value)}
          nil)))
     declared))
 
@@ -256,8 +258,9 @@
       (first identities))))
 
 (defn- admit-initialization-rows
-  [forms population]
-  (let [database-attributes (set (schema/canonical-database-attributes forms))]
+  [projection population]
+  (let [forms (:seon.schema.projection/forms projection)
+        database-attributes (set (schema/canonical-database-attributes forms))]
     (mapv
      (fn [row]
        (when-not (map? row)
@@ -274,11 +277,11 @@
                     {::key attribute}
                     nil)
 
-           (not (schema/valid-candidate-value? forms attribute value))
+           (not ((schema/projection-validator projection attribute) value))
            (refuse! ::invalid-initialization-value
                     {::key attribute
                      ::explanation
-                     (schema/explain-candidate-value forms attribute value)}
+                     ((schema/projection-explainer projection attribute) value)}
                     nil)))
        (when-not (row-identity forms row)
          (refuse! ::invalid-initialization-identity
@@ -292,18 +295,12 @@
      population)))
 
 (defn- admit-initialization
-  [forms population]
+  [projection population]
   (when-not (vector? population)
     (refuse! ::invalid-initialization
              {::explanation {:seon.config/expected :vector-of-maps}}
              nil))
-  ;; Admission reaches Malli predicates — `seon.schema/malli-form?` among them
-  ;; — that take only the value and therefore resolve the declaration
-  ;; population themselves. They cannot be handed the value, so the operation
-  ;; SUPPLIES it for the extent of the admission instead. Measured live on a
-  ;; booted cluster 2026-08-07: 82,992 resource reads / 6,495 ms without this,
-  ;; 0 reads / 11.6 ms with it, identical result.
-  (schema/call-with-forms forms #(admit-initialization-rows forms population)))
+  (admit-initialization-rows projection population))
 
 (defn- default-document
   []
@@ -312,22 +309,23 @@
        default-manifest-path)))
 
 (defn- admitted-default-document
-  [forms document]
+  [projection document]
   {:seon.config/decisions (dissoc document initialization-key)
    :seon.config/initialization
-   (admit-initialization forms (get document initialization-key []))})
+   (admit-initialization projection (get document initialization-key []))})
 
 (defn default-population
   "Read and admit the shipped initialization entity rows."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [forms (schema.edn/packaged-forms)]
+  (let [projection (schema/declaration-projection (schema.edn/packaged-forms))]
     (:seon.config/initialization
-     (admitted-default-document forms (default-document)))))
+     (admitted-default-document projection (default-document)))))
 
 (defn- validate-default-decisions
-  [forms document]
-  (let [dials (dial-attributes forms)
+  [projection document]
+  (let [forms (:seon.schema.projection/forms projection)
+        dials (dial-attributes forms)
         decisions (merge (registration-defaults forms)
                          (select-keys document dials))
         missing (set/difference dials (set (keys decisions)))]
@@ -340,11 +338,11 @@
       (when-not (or (= absent decision)
                     (and (= key :seon.config.flow.compute/concurrency)
                          (= available-processors decision))
-                    (schema/valid-candidate-value? forms key decision))
+                    ((schema/projection-validator projection key) decision))
         (refuse!
          ::invalid-value
          {::key key
-          ::explanation (schema/explain-candidate-value forms key decision)}
+          ::explanation ((schema/projection-explainer projection key) decision)}
          nil)))
     decisions))
 
@@ -357,17 +355,18 @@
   absence decisions are resolved only by `compile-manifest`."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (let [forms (schema.edn/packaged-forms)]
+  (let [projection (schema/declaration-projection (schema.edn/packaged-forms))]
     (validate-default-decisions
-     forms
+     projection
      (:seon.config/decisions
-      (admitted-default-document forms (default-document))))))
+      (admitted-default-document projection (default-document))))))
 
 (defn read-manifest
   "Read and validate one sparse plain-EDN overlay without compiling it."
   {:malli/schema [:=> [:cat :string] :seon.config/manifest]}
   [path]
-  (validate-layer (schema.edn/packaged-forms) (read-edn-map path)))
+  (validate-layer (schema/declaration-projection (schema.edn/packaged-forms))
+                  (read-edn-map path)))
 
 (defn- resolve-smart-decision
   [key decision]
@@ -378,13 +377,14 @@
 
 (defn- compile-settings
   [request]
-  (let [forms (schema.edn/packaged-forms)
+  (let [projection (schema/declaration-projection (schema.edn/packaged-forms))
+        forms (:seon.schema.projection/forms projection)
         {:seon.config/keys [decisions initialization]}
-        (admitted-default-document forms (default-document))
-        manifest (validate-layer forms (or (:seon.config/manifest request) {}))
+        (admitted-default-document projection (default-document))
+        manifest (validate-layer projection (or (:seon.config/manifest request) {}))
         environment
-        (validate-layer forms (or (:seon.config/environment request) {}))
-        defaults (validate-default-decisions forms decisions)
+        (validate-layer projection (or (:seon.config/environment request) {}))
+        defaults (validate-default-decisions projection decisions)
         decisions (merge defaults manifest environment)
         required (required-dial-attributes forms)]
     (doseq [[key decision] decisions]
@@ -398,13 +398,11 @@
                   (fn [[key decision]]
                     [key (resolve-smart-decision key decision)])))
                 decisions)]
-      (when-not (schema/valid-candidate-value?
-                 forms :seon.config/effective effective)
+      (when-not ((schema/projection-validator projection :seon.config/effective) effective)
         (refuse!
          ::invalid-value
          {::explanation
-          (schema/explain-candidate-value
-           forms :seon.config/effective effective)}
+          ((schema/projection-explainer projection :seon.config/effective) effective)}
          nil))
       (let [digest
             (schema/sha-256
@@ -567,7 +565,7 @@
    (let [document (read-edn-map path)
          manifest (if (= document (default-document))
                     {}
-                    (validate-layer (schema.edn/packaged-forms) document))]
+                    document)]
      (apply! (assoc request :seon.config/manifest manifest)))))
 
 (declare effective-in)
@@ -576,7 +574,8 @@
   "Read one cluster's effective config from its carried projection."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
-    [:or :seon.config/effective :seon.error/value]]}
+    [:or :seon.config/effective :seon.config/error
+     :seon.schema/validation-refusal :seon.db/error-result]]}
   [db cluster-name]
   (if-let [projection (or (db/carried-projection db)
                           (schema/handed-projection))]
@@ -584,13 +583,19 @@
     (db/projection-fallback 'seon.config/effective)))
 
 (defn- effective-in
+  {:malli/schema
+   [:=> [:cat [:or :seon.db/database-value :seon.db/error-result]
+         :seon.boot/cluster-name :seon.schema/projection]
+    [:or :seon.config/effective :seon.config/error :seon.db/error-result]]}
   [db cluster-name projection]
   (let [forms (:seon.schema.projection/forms projection)
         row (db/pull db '[*] [:seon.config/cluster cluster-name])]
     ;; A refused read is not an absent row. Reading the refusal's own keys as
     ;; the config row reports every dial missing and blames the facts; the
     ;; cause here is the read, so return the read's refusal unchanged.
-    (if (:seon.error/kind row)
+    (if (or (:seon.db/read-operation row)
+            (:seon.db.availability/connection row)
+            (:seon.schema/expected-value row))
       row
       (let [effective (select-keys row (dial-attributes forms))
             missing (vec (sort (set/difference (required-dial-attributes forms)
@@ -606,8 +611,20 @@
                           :where
                           [_ :seon.config/cluster ?available]]
                         db)))]
-            {:seon.config/missing-effective cluster-name
-             :seon.error/kind ::missing-effective
+            (error/diagnostic
+             {:seon.error/at (java.util.Date.)
+             :seon.error/layer :seon.config/read
+             :seon.error/operation 'seon.config/effective-in
+             :seon.config/error-key :seon.config/cluster
+             :seon.error/expected-key :seon.config/effective
+             :seon.error/diagnostic-layer :seon.config/read
+             :seon.error/diagnostic-operation 'seon.config/effective-in
+             :seon.error/diagnostic-member :seon.config/cluster
+             :seon.error/diagnostic-expected :seon.config/effective
+             :seon.error/diagnostic-offending cluster-name
+             :seon.error/diagnostic-cause :seon.config/missing-effective
+             :seon.error/diagnostic-evidence {:seon.config/missing missing}
+             :seon.config/missing-effective cluster-name
              :seon.error/data {::missing missing}
              :seon.error/message
              (if row
@@ -617,4 +634,4 @@
                       (str " and " remaining " more")) ".")
                (str "No effective configuration facts match cluster "
                     (pr-str cluster-name) "; available clusters "
-                    (pr-str available) "."))}))))))
+                    (pr-str available) "."))})))))))

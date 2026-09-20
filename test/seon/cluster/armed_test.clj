@@ -159,7 +159,7 @@
                       (:seon.flow/error-fanout instance)))))
         (testing "the handle retains identity while AI settings stay live"
           (let [handle (:seon.turn.loop/cluster instance)]
-            (is (seon.schema/valid-candidate-value? :seon.turn.loop/cluster
+            (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection) :seon.turn.loop/cluster
                                                     handle))
             (is (= "armed" (:seon.cluster/name handle)))
             (is (= "root" (:seon.config.error/escalate-to handle)))
@@ -179,7 +179,7 @@
               (is (str/starts-with?
                    (:seon.ai/endpoint (:seon.ai/backup targets))
                    "https://"))
-              (is (seon.schema/valid-candidate-value?
+              (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                    :seon.ai.retry/strategy
                    (ai/retry-strategy settings))))))))))
 

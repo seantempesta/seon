@@ -138,7 +138,7 @@
   (let [dir (fresh-dir)]
     (try
       (let [opened (store/open-store! {:seon.store/dir dir})]
-        (is (seon.schema/valid-candidate-value? :seon.store/store opened))
+        (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection) :seon.store/store opened))
         (is (true? (:seon.store/created? opened)))
         (test-support/transacted! (:seon.store/connection-object opened) probe-schema)
         (test-support/transacted! (:seon.store/connection-object opened)
@@ -156,7 +156,7 @@
         ;; the release and at Datahike, never pre-read in a shape.
         (is (nil? (store/release-store! opened))
             "releasing a released store is a no-op, as its docstring rules")
-        (is (seon.schema/valid-candidate-value? :seon.store/store opened)
+        (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection) :seon.store/store opened)
             "a released store value is still a store value")
         (let [reopened (store/open-store! {:seon.store/dir dir})]
           (try

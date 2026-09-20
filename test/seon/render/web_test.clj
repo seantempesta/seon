@@ -304,7 +304,8 @@ handle))}}
                     (as-> builder (reduce-kv (fn [result k v] (.header result k v)) builder headers))
                     (.GET)
                     (.build))]
-    (.send (client) request (HttpResponse$BodyHandlers/ofString)))))
+    (.get (.sendAsync (client) request (HttpResponse$BodyHandlers/ofString))
+          support/event-backstop-seconds java.util.concurrent.TimeUnit/SECONDS))))
 
 (defn- post-form
   ([server path body]
@@ -317,8 +318,9 @@ handle))}}
                      (.POST (HttpRequest$BodyPublishers/ofString body)))
          request (cond-> builder
                    origin (.header "origin" origin))]
-     (.send (client) (.build request)
-            (HttpResponse$BodyHandlers/ofString)))))
+     (.get (.sendAsync (client) (.build request)
+                      (HttpResponse$BodyHandlers/ofString))
+           support/event-backstop-seconds java.util.concurrent.TimeUnit/SECONDS))))
 
 (defn- open-feed
   [server path]
@@ -326,7 +328,8 @@ handle))}}
                      (URI/create (str (:seon.render.web/url server) path)))
                     (.GET)
                     (.build))]
-    (.body (.send (client) request (HttpResponse$BodyHandlers/ofInputStream)))))
+    (.body (.get (.sendAsync (client) request (HttpResponse$BodyHandlers/ofInputStream))
+                 support/event-backstop-seconds java.util.concurrent.TimeUnit/SECONDS))))
 
 (defn- debug-feed-path
   ([agent-id path] (debug-feed-path agent-id path ""))
@@ -2210,7 +2213,7 @@ handle))}}
       (let [id (turn/next-id @connection "web-test" "root")
             refusal (assoc (support/refusal-data #(error/value "fixture prompt acquisition refused"))
                            :seon.error/message "fixture prompt acquisition refused")]
-        (is (seon.schema/valid-candidate-value? :seon.instrument/contract-error refusal))
+        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.instrument/contract-error) refusal))
         (is (= 'seon.error/value (:seon.instrument/fn refusal)))
 
         (support/transacted!

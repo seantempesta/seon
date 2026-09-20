@@ -1041,14 +1041,14 @@
         "an optional properties map does not change the extracted entries")))
 
 (deftest a-disposition-is-read-only-when-it-really-is-one
-  (is (= (seon.run/wait "later") (turn/disposition (seon.run/wait "later"))))
+  (is (= (seon.run/wait "later") (turn/disposition (seon.schema/handed-projection) (seon.run/wait "later"))))
   (is (= (seon.run/complete "done")
-         (turn/disposition (seon.run/complete "done"))))
+         (turn/disposition (seon.schema/handed-projection) (seon.run/complete "done"))))
   (testing "and anything else is not a disposition"
     (doseq [value [42 nil "done" {:my.turn/disposition :invented}
                    {:seon.error/message "boom" :seon.error/kind :x}
                    {:my.turn/disposition :completed}]]
-      (is (nil? (turn/disposition value))
+      (is (nil? (turn/disposition (seon.schema/handed-projection) value))
           (str "must not read as a disposition: " (pr-str value))))))
 
 (deftest a-clean-last-form-without-a-disposition-is-loud-terminal-evidence

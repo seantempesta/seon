@@ -121,7 +121,8 @@
           ":seon.ai.model/provider-id) "
           "(throw (ex-info \"packaged schema missing\" {}))) "
           "(seon.config/defaults) "
-          "(println :fresh-config-ready)")]
+          "(println :fresh-config-ready) "
+          "(shutdown-agents)")]
         process
         (.start
          (doto
@@ -131,8 +132,11 @@
         output (future (slurp (.getInputStream process)))
         exited? (.waitFor process 30 TimeUnit/SECONDS)]
     (when-not exited?
-      (.destroyForcibly process))
-    (is exited? "the fresh config JVM exceeded its external-process backstop")
+      (.destroyForcibly process)
+      (.waitFor process test-support/event-backstop-seconds TimeUnit/SECONDS))
+    (is exited? (str "the fresh config JVM exceeded its external-process backstop: "
+                     (deref output (* 1000 test-support/event-backstop-seconds)
+                            "child output did not close")))
     (when exited?
       (is (zero? (.exitValue process)) @output)
       (is (str/includes? @output ":fresh-config-ready") @output))))
@@ -354,8 +358,11 @@
                 ['seon.config/apply! #(config/apply! {:seon.db/connection connection})]
                 ['seon.config/effective #(apply config/effective [(db/db connection)])]]]
          (let [refusal (test-support/refusal-data invoke)]
-           (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
-           (is (= caller (:seon.instrument/contract-violated refusal)))))
+           (if (= caller 'seon.config/effective)
+             (do (is (= 1 (:seon.instrument/arity refusal)))
+                 (is (seq (:seon.instrument/declared-arities refusal))))
+             (is (= :input (:seon.instrument/check refusal))))
+           (is (= caller (:seon.instrument/fn refusal)))))
        (is (= basis (:max-tx @connection)))))))
 
 (deftest zero-overlay-compilation-resolves-every-registered-config-attribute
@@ -367,8 +374,8 @@
     (is (= effective (select-keys row dial-attributes)))
     (is (= "default" (:seon.config/cluster row))
         "the caller names the cluster explicitly")
-    (is (schema/valid-candidate-value? :seon.config/effective effective))
-    (is (schema/valid-candidate-value? :seon.config/entity row))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.config/effective) effective))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.config/entity) row))
     (is (= (long (.availableProcessors (Runtime/getRuntime)))
            (:seon.config.flow.compute/concurrency effective)))
     (is (true? (:seon.config.db/keep-history? effective))
@@ -406,9 +413,7 @@
            (:seon.config/cluster (:seon.config/desired-row compiled))))))
 
 (deftest explicit-absence-is-a-decision-never-a-stored-value
-  (is (schema/valid-candidate-value?
-       :seon.config/manifest
-       {:seon.config.error/escalate-to config/absent})
+  (is ((schema/projection-validator (schema/handed-projection) :seon.config/manifest) {:seon.config.error/escalate-to config/absent})
       "the derived manifest schema admits explicit absence for an optional dial")
   (let [baseline (config/compile-manifest {:seon.boot/cluster-name "default"})
         omitted (config/compile-manifest {:seon.boot/cluster-name "default" :seon.config/manifest {}})
@@ -468,6 +473,21 @@
       (is (= {:seon.config/on-core-error :record}
              (config/read-manifest (str path)))
           "selection reads a sparse overlay; compile owns all merging")
+      (test-support/with-database
+       (fn [connection]
+         (let [acquire schema/declaration-projection
+               acquisitions (atom 0)
+               result (with-redefs [schema/declaration-projection
+                                    (fn [forms]
+                                      (swap! acquisitions inc)
+                                      (acquire forms))]
+                        (config/apply! {:seon.boot/cluster-name "default"
+                                        :seon.db/connection connection}
+                                       (str path)))]
+           (is (= 1 @acquisitions) "file apply acquires one declaration generation")
+           (is (false? (:seon.reconcile/converged? result)))
+           (is (= :record (:seon.config/on-core-error
+                           (config/effective (db/db connection) "default")))))))
       (finally
         (.delete path)
         (.delete directory)))))
@@ -487,9 +507,9 @@
            #(config/compile-manifest
              {:seon.boot/cluster-name "default" :seon.config/environment
               {:seon.config.flow.compute/queue-depth 0}}))]
-      (is (= :seon.instrument/contract-violated (:seon.error/kind data)))
+      (is (= :input (:seon.instrument/check data)))
       (is (= 'seon.config/compile-manifest
-             (:seon.instrument/contract-violated data)))
+             (:seon.instrument/fn data)))
       (is (= #{[:seon.config/environment
                 :seon.config.flow.compute/queue-depth]}
              (set (get-in data [:seon.error/data
@@ -583,16 +603,17 @@
             "and nothing landed")))))
 
 (deftest caps-refused-for-want-of-a-cluster-carry-that-refusal-as-the-cause
-  ;; `seon.sci.eval/database-effective-config` answers a flat refusal for a
-  ;; database naming no cluster. `result-caps` keeps its own class marker —
-  ;; `seon.instrument/wrap-interpreted` reports that marker when a `:panic`
-  ;; contract cannot be armed — and carries the configuration refusal as the
-  ;; cause, so neither fact is buried by the other.
-  (let [refusal {:seon.error/kind :seon.config/required-absent
-                 :seon.config/required-absent :seon.boot/cluster-name
+  ;; The caps refusal identifies its missing constraint and carries the
+  ;; complete configuration refusal that prevented acquisition.
+  (let [refusal {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :seon.config/read
+                 :seon.error/operation 'seon.config/effective
+                 :seon.config/error-key :seon.boot/cluster-name
+                 :seon.error/expected-key :seon.boot/cluster-name
                  :seon.error/message "this database names no cluster."}
         result (config/result-caps refusal)]
-    (is (= ::config/missing-result-cap (:seon.error/kind result)))
+    (is (= 'seon.config/result-caps (:seon.error/operation result)))
+    (is (= :seon.config.eval.result/max-bytes (:seon.config/error-key result)))
     (is (= :seon.config.eval.result/max-bytes
            (get-in result [:seon.error/data :seon.config/key])))
     (is (= refusal
@@ -626,14 +647,13 @@
                 missing-alpha (config/effective @beta "alpha")]
             (is (= "beta" (:seon.config/missing-effective missing-beta)))
             (is (= "alpha" (:seon.config/missing-effective missing-alpha)))
-            (is (= ::config/missing-result-cap
-                   (:seon.error/kind (config/result-caps missing-beta))))
-            (is (= ::config/missing-result-cap
-                   (:seon.error/kind (config/result-caps missing-alpha))))
-            (is (= "No effective configuration facts match cluster \"beta\"; available clusters [\"alpha\"]."
-                   (:seon.error/message missing-beta)))
-            (is (= "No effective configuration facts match cluster \"alpha\"; available clusters [\"beta\"]."
-                   (:seon.error/message missing-alpha)))))))))
+            (doseq [refusal [missing-beta missing-alpha]
+                    :let [caps-refusal (config/result-caps refusal)]]
+              (is (= :seon.config/effective (:seon.error/expected-key refusal)))
+              (is (= :seon.config.eval.result/max-bytes
+                     (:seon.config/error-key caps-refusal)))
+              (is (= 'seon.config/result-caps (:seon.error/operation caps-refusal)))
+              (is (string? (:seon.error/message refusal))))))))))
 
 (deftest a-refused-read-is-returned-as-the-cause-not-reported-as-missing-facts
   ;; The class: a reader that treats an error value as an ordinary/absent row.
@@ -648,11 +668,8 @@
       (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})
       (let [projection (or (db/carried-projection (db/db connection))
                            (schema/projection-from-database (db/db connection)))
-            refusal {:seon.error/kind :seon.db/invalid-read
-                     :seon.error/message "Datahike refused the database read."}
+            refusal (db/projection-fallback 'seon.config/effective)
             result (#'config/effective-in refusal "default" projection)]
-        (is (= :seon.db/invalid-read (:seon.error/kind result))
-            (pr-str result))
-        (is (not= ::config/missing-effective (:seon.error/kind result))
-            "the refusal names the read, not the facts")
+        (is (identical? refusal result))
+        (is (= :seon.schema/projection (:seon.schema/expected-value result)))
         (is (not (contains? result :seon.config/missing-effective)))))))

@@ -179,7 +179,7 @@
         (is (= {} value)
             "not an empty vector per family, not :healthy? true, not a
              count of zero — nothing, because nothing is wrong")
-        (is (seon.schema/valid-candidate-value? :seon.problems/problems value))))))
+        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))))))
 
 (deftest stale-var-findings-declare-no-render-pair
   ;; A finding row whose ONLY attribute is another family's
@@ -230,8 +230,7 @@
         (is (str/includes?
              (hiccup/->string (problems/html-report value))
              "no registry row"))
-        (is (seon.schema/valid-candidate-value?
-             :seon.problems/problems value))
+        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
 
         (is (nil?
              (:seon.error/kind
@@ -256,9 +255,7 @@
       (is (nil? (:seon.problems/missing-models (found connection)))))))
 
 (deftest missing-model-values-accrete-extra-attributes
-  (is (seon.schema/valid-candidate-value?
-       :seon.problems/missing-model
-       {:seon.config.ai/model "open-model"
+  (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/missing-model) {:seon.config.ai/model "open-model"
         :seon.test/extra "ignored until declared"})))
 
 (deftest a-deleted-function-var-is-derived-from-the-loaded-image
@@ -283,8 +280,7 @@
               (let [value (derive)
                     stale-vars (:seon.problems/stale-vars value)]
                 (is (= [{:seon.fn/sym qualified-name}] stale-vars))
-                (is (seon.schema/valid-candidate-value?
-                     :seon.problems/problems value))
+                (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
                 (is (str/includes? (problems/ai-prose value) qualified-name))
                 (is (str/includes? (problems/log-report value) qualified-name))
                 (is (str/includes?
@@ -313,11 +309,10 @@
             "three occurrences of one signature is ONE problem")
         (is (= 3 (:seon.problems/occurrences entry)))
         (is (= :seon.db/rejected (:seon.error/kind entry)))
-        (is (seon.schema/valid-candidate-value? :seon.error/fact
-                                                (:seon.error/fact entry))
+        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/fact) (:seon.error/fact entry))
             "the latest occurrence rides along in full, so a digger needs
              no second lookup")
-        (is (seon.schema/valid-candidate-value? :seon.problems/problems value)))))
+        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value)))))
   (with-db
     (fn [connection]
       (testing "and two different KINDS stay two problems"
@@ -350,8 +345,8 @@
       (let [value (found connection)
             facts (mapv :seon.error/fact (:seon.problems/error-signatures value))]
         (is (= 4 (count facts)))
-        (is (every? #(seon.schema/valid-candidate-value? :seon.error/fact %) facts))
-        (is (seon.schema/valid-candidate-value? :seon.problems/problems value))
+        (is (every? #((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/fact) %) facts))
+        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
         (is (= 4 (count (str/split-lines (problems/log-report value)))))
         (is (hiccup/hiccup? (problems/html-report value)))))))
 
@@ -425,7 +420,7 @@
             (is (every? #(seq (get value %)) present))
             (is (= expected (set (keys value))))
             (is (= (empty? present) (= {} value)))
-            (is (seon.schema/valid-candidate-value? :seon.problems/problems value))
+            (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
             (is (= present (set/intersection present (set (keys value)))))
             (is (= row-count (count (remove str/blank? (str/split-lines log)))))
             (is (= row-count (count rows)))

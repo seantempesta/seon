@@ -270,8 +270,7 @@
         (is (seq namespace-subjects)
             "a namespace candidate is among them — the producer that broke")
         (doseq [candidate candidates]
-          (is (schema/valid-candidate-value?
-               :seon.render.walk/lookup (:seon.repl/subject candidate))
+          (is ((schema/projection-validator (schema/handed-projection) :seon.render.walk/lookup) (:seon.repl/subject candidate))
               (str "candidate " (pr-str (:seon.repl/key candidate))
                    " carries subject " (pr-str (:seon.repl/subject candidate))
                    ", which is not a :seon.render.walk/lookup")))

@@ -54,8 +54,7 @@
     (test-support/with-database
       (fn [connection]
         (is (schema/valid-candidate-value?
-             (:seon.schema.projection/forms
-              (schema/projection-from-database @connection))
+             (seon.db/carried-projection @connection)
              :seon.test.accretion/install-refused-error refusal))))
     (is (= 3 (count (re-seq #"Test fixture.feedback/red-" rendered))))
     (is (re-find #"2 more in the complete gate-report blob" rendered))
@@ -360,7 +359,7 @@
                   "bad [x] \"wrong\")"))
             bad-row
             (get-in bad [:seon.test.accretion/evaluation :seon.program/row])
-            _ (when-not (schema/valid-candidate-value? :seon.program/row bad-row)
+            _ (when-not (schema/valid-candidate-value? (schema/handed-projection) :seon.program/row bad-row)
                 (throw (ex-info "The candidate did not return an admissible function." bad)))
             bad-request
             (check-request (:seon.test.accretion/candidate-ctx bad) bad-row)

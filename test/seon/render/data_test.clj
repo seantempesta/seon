@@ -30,8 +30,7 @@
                (prop/for-all
                 [path (gen/one-of [gen/string-ascii (gen/return nil)])
                  offset (gen/one-of [gen/string-ascii (gen/return nil)])]
-                (seon.schema/valid-candidate-value?
-                 :seon.render.data/cursor (data/parse-cursor path offset)))
+                ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.render.data/cursor) (data/parse-cursor path offset)))
                :seed 202607280401)]
     (is (true? (:result check)) (pr-str check))))
 
@@ -58,9 +57,9 @@
         refused (data/at root (cursor [:absent] 0))]
     (is (identical? root (:seon.error/diagnostic-offending refused)))
     (is (= [:absent] (:seon.render.data/path refused)))
-    (is (seon.schema/valid-candidate-value? :seon.render.data/no-such-path-error refused)))
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.render.data/no-such-path-error) refused)))
   (let [refused (data/at nested-value (cursor [:agents 99] 0))]
-    (is (seon.schema/valid-candidate-value? :seon.render.data/no-such-path-error refused))
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.render.data/no-such-path-error) refused))
     (is (= [:agents 99] (:seon.render.data/path refused)))
     (is (identical? nested-value (:seon.error/diagnostic-offending refused)))
     (is (= 'seon.render.data/at (:seon.error/operation refused))))

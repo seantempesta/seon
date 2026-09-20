@@ -142,7 +142,7 @@
               (is (schema/call-with-projection-state
                    (projection-state-of instance)
                    (fn []
-                     (schema/valid-candidate-value?
+                     (schema/valid-candidate-value? (schema/handed-projection)
                       :seon.activation/closure closure)))
                   (str label "'s stored closure validates against "
                        ":seon.activation/closure"))

@@ -161,11 +161,10 @@
                          :seon.config/on-core-error :panic
                          :seon.render.walk/root-acquisition acquisition))]
        (is (not (contains? acquisition-request :seon.render/output)))
-       (is (schema/valid-candidate-value?
-            :seon.render.walk/acquisition-request acquisition-request))
+       (is ((schema/projection-validator (schema/handed-projection) :seon.render.walk/acquisition-request) acquisition-request))
        (is (= [::root-id "root"]
               (first (:seon.render.walk/order acquisition))))
-       (is (schema/valid-candidate-value? :seon.render.walk/units units))
+       (is ((schema/projection-validator (schema/handed-projection) :seon.render.walk/units) units))
        (is (every? #(not (contains? % :seon.render.walk/changed-at))
                    units))))))
 

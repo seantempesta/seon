@@ -310,15 +310,11 @@
 
 (deftest the-request-is-what-the-contract-says-it-is
   ;; the dial is REQUIRED, so a caller cannot forget to decide
-  (is (seon.schema/valid-candidate-value?
-       :seon.sci.eval/request
-       {:seon.cluster.eval/source "(+ 1 1)"
+  (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.sci.eval/request) {:seon.cluster.eval/source "(+ 1 1)"
         :seon.sci.admit/caps caps
         :seon.sci.eval/time-limit-ms 1000
         :seon.config/on-core-error :panic}))
-  (is (not (seon.schema/valid-candidate-value?
-            :seon.sci.eval/request
-            {:seon.cluster.eval/source "(+ 1 1)"
+  (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.sci.eval/request) {:seon.cluster.eval/source "(+ 1 1)"
              :seon.sci.admit/caps caps
              :seon.sci.eval/time-limit-ms 1000}))
       "no dial, no evaluation"))
@@ -435,8 +431,7 @@
   (let [evaluation (run "leaked")]
     (is (failed? evaluation)
         "one evaluation's def cannot reach the next")
-    (is (schema/valid-candidate-value? :seon.sci.kernel/error
-                                      (:seon.sci.admit/value evaluation)))))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) (:seon.sci.admit/value evaluation)))))
 
 (deftest a-live-context-preserves-definition-value-class-and-metadata
   (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
@@ -600,7 +595,7 @@
                {:fn-name 'seon.sci.eval-test/compiled-runtime-victim
                 :arity 9})]
           (is (failed? evaluation) source)
-          (is (schema/valid-candidate-value? :seon.sci.kernel/error refusal)
+          (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) refusal)
               source)
           (is (str/includes? (:seon.error/message refusal)
                              "metadata is read-only from SCI")
@@ -1000,6 +995,11 @@
                     "allocation-contract [x] x)")
                5000)
               allocation-limit (* 64 1024 1024)]
+          (println "registry-generation declaration allocation"
+                   {:schema-bytes (get-in schema-evaluation
+                                          [:seon.sci.admit/record :seon.eval/allocated-bytes])
+                    :function-bytes (get-in function-evaluation
+                                            [:seon.sci.admit/record :seon.eval/allocated-bytes])})
           (is (= :seon.sci.eval-test.allocation/score
                  (:seon.sci.admit/value schema-evaluation)))
           (is (= :ok
@@ -1173,7 +1173,7 @@
             (is (empty? @missing))
             (let [refusal (test-support/refusal-data
                            #(#'eval/evaluation-projection {}))]
-              (is (schema/valid-candidate-value? :seon.schema/validation-refusal refusal))
+              (is ((schema/projection-validator (schema/handed-projection) :seon.schema/validation-refusal) refusal))
               (is (= :seon.schema/projection (:seon.schema/expected-value refusal)))
               (is (= {:seon.db/operation 'seon.sci.eval/evaluate}
                      (:seon.schema/refused-value refusal)))
@@ -1336,7 +1336,7 @@
         ;; read as a message drift.
         (is (identical? @#'db/as-of (sci/eval-string* ctx "seon.db/as-of"))
             "the fork calls the armed root, not a pre-arming copy")
-        (is (schema/valid-candidate-value? :seon.instrument/arity-error failure))
+        (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/arity-error) failure))
         (is (= 0 (get-in failure [:seon.error/data :seon.instrument/arity])))
         (is (= arglists (get-in failure [:seon.error/data :seon.instrument/arglists])))
         (is (= (:seon.error/message failure) (:seon.cluster.eval/error evaluation)))
@@ -1438,8 +1438,7 @@
         "the cut instant is the one fact — presence is the state")
     (is (= :time (:seon.eval/outcome (:seon.sci.admit/record evaluation))))
     (testing "and the agent is told what happened, as a value"
-      (is (schema/valid-candidate-value? :seon.sci.kernel/error
-                                        (:seon.sci.admit/value evaluation)))
+      (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) (:seon.sci.admit/value evaluation)))
       (is (re-find #"(?i)time"
                    (:seon.cluster.eval/error evaluation))))))
 
@@ -1465,8 +1464,7 @@
     (is (cut? evaluation))
     (is (= :time
            (:seon.eval/outcome (:seon.sci.admit/record evaluation))))
-    (is (schema/valid-candidate-value? :seon.sci.kernel/error
-                                      (:seon.sci.admit/value evaluation))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) (:seon.sci.admit/value evaluation))
         "the wrapped sci interrupt remains a flat time-limit value")))
 
 (deftest a-base-created-function-uses-the-invoking-threads-arm
@@ -1621,7 +1619,7 @@
          failure
          (:seon.sci.admit/value evaluation)]
         (is
-         (schema/valid-candidate-value? :seon.instrument/contract-error failure)
+         ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) failure)
          moment)
         (is
          (=
@@ -2037,8 +2035,7 @@
                                       (failed? evaluation)
                                       (cut? evaluation)])))
                  (string? (:seon.eval/shown evaluation))
-                 (seon.schema/valid-candidate-value?
-                  :seon.sci.eval/evaluation evaluation)))
+                 ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.sci.eval/evaluation) evaluation)))
               evaluations))))
          :seed 202607280802)]
     (test-support/assert-check! check
@@ -2244,8 +2241,8 @@
                           (deadlined-in nil "(loop [i 0] (recur (inc i)))" 50))
            invoked-cut (invoked-value ctx database 'user/probe-spin [0] 50)]
        (testing "an agent mistake"
-         (is (schema/valid-candidate-value? :seon.sci.kernel/error evaluated-throw))
-         (is (schema/valid-candidate-value? :seon.sci.kernel/error invoked-throw))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) evaluated-throw))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) invoked-throw))
          (is (= 'user/probe-throw (get-in invoked-throw [:seon.error/data :seon.fn/sym])))
          (is (= "boom" (:seon.error/message evaluated-throw)))
          (is (= "Invocation of user/probe-throw failed: boom"
@@ -2265,8 +2262,8 @@
            (is (not-any? #(and (map? %) (contains? % :sci.impl/interrupt))
                          (tree-seq coll? seq failure))
                "SCI's private interrupt marker never becomes outward evidence"))
-         (is (schema/valid-candidate-value? :seon.sci.kernel/error evaluated-cut))
-         (is (schema/valid-candidate-value? :seon.sci.kernel/error invoked-cut))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) evaluated-cut))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) invoked-cut))
          (is (str/starts-with? (:seon.error/message evaluated-cut)
                                "Ran out of time after"))
          (is (str/starts-with?
@@ -2299,7 +2296,7 @@
           :seon.eval/allocated-bytes 0
           :seon.eval/outcome :error})]
     (is (= "inner failure" (:seon.error/message failure)))
-    (is (schema/valid-candidate-value? :seon.agent/error failure))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.agent/error) failure))
     (is (= "inner-observed" (:seon.agent/error-agent-id failure)))
     (is (= :error
            (get-in failure [:seon.error/data
@@ -2418,6 +2415,5 @@
                     5000)]
         (is (string? (:seon.cluster.eval/error evaluation))
             "a failed evaluation names its failure with the string it declares")
-        (is (nil? (schema/explain-candidate-value
-                   :seon.sci.eval/evaluation evaluation))
+        (is (nil? ((schema/projection-explainer (schema/handed-projection) :seon.sci.eval/evaluation) evaluation))
             "and the whole evaluation satisfies the contract it declares")))))

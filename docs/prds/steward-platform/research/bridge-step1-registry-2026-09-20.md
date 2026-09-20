@@ -1,120 +1,94 @@
 ---
 type: research
-status: checkpoint; required green proof blocked
+status: implementation landed; cold and live proof owed
 created: 2026-09-20
 tags: [schema, malli, bridge, projection]
 ---
 
 # Step 1: registry value, compile once, seal, carry
 
-Step 1 is implemented in working bytes but **not landed**. The public arity
-retirement and all caller conversions remain one uncommitted slice. The
-required six namespaces are not green, so the orchestrator's landing
-condition is not satisfied. No step-2 change, storage guarantee change,
-worktree, cold gate, default adoption, restart, or stop occurred.
+This commit lands the public arity retirement, every inventoried caller
+conversion, and the compiled registry carried by its projection as one
+coherent slice. No step-2 change or storage/validation guarantee change.
+No worktree, cold gate, default adoption, restart, or stop occurred.
 
-Checkpoint commit: `2cbb2cdad`. During its post-commit load, publication commit
-`8edfae1b7` landed and the four inspected publication paths (`src/seon/fn.clj`,
-`src/seon/cluster/source.clj`, `src/seon/test/cache.clj`,
-`src/seon/test/selection.clj`) became clean. The load exited 0. The fast
-tallies below precede that commit: the fn errors are observations of their
-tested HEAD bytes, not claims that the newly landed fixes still fail.
-Current-HEAD integration remains owed, together with the separate 1a/facet
-repairs and the unproved walk-allocation attribution. No released publication
-file was edited by this lane.
+The owner accepted `667f6519e` (complete recorder refusal) and `d076fff47`
+(evidence checkpoint), then extended this slice to the existing pass-through
+facet declarations in `src/seon/error.clj`, `src/seon/sci/admit.clj`, and
+`src/seon/sci/kernel.clj`. The final ruling explicitly authorizes landing
+with remaining foreign reds classified below. The SCI walk allocation is
+an open measurement, not a step-1 landing condition. The separate SCI
+row-acquisition facet remains 1a's work; this slice does not implement it.
 
-## Latest checkpoint — 2026-09-20
+## Final fast evidence and boundaries
 
-**Committed `667f6519e`, recorder producer only:** the live recording form's
-catch in `src/seon/test/runner.clj:3190` preserves exception data, including
-schema/member facets, drops the retired kind stamp, and supplies absent
-base observations. Existing base observations win. The error-conversion
-PRD was read end to end. The prescribed eight namespaces plus the recorder
-loaded before and after this commit. The earlier boolean-facet admission
-refusal did not recur: subsequent requests admitted. Its offending
-declaration remains unknown; no speculative schema/resource repair was made.
+The combined HEAD-plus-owned-path snapshot at
+`8b996e67e2de089df840538cd6f97aac1c8fa450`, request `c44b612d89df`,
+ran the six section-7 namespaces plus `seon.error-test`,
+`seon.sci.admit-test`, and `seon.sci.kernel-arm-carriage-test`:
+**313 tests / 7,337 assertions / 4 failures / 24 errors**.
+The canonical runner armed 1,420 loaded contracts (1,394 program-armable).
+This is an execution tally, not a durable verdict: completion recording
+refused at the blob publication boundary below.
 
-The full six-namespace run plus SCI evaluation and prompt callers completed
-**337 tests / 7,345 assertions / 15 failures / 36 errors** at snapshot HEAD
-`fe1aaad68bdfa3e491e56439bbab2df9bbe5bad4`, request `eefc617a8263`.
-Completion recording hit the existing 30,000 ms prepl silence backstop.
-This is a raw execution tally, not a durable verdict. The held authority
-paths are `src/seon/cluster/source.clj` and `script/seon/fresh_operator.clj`.
-See [the existing persistence issue](../../../seon/issues/test-results-persistence-can-time-out-during-development-adoption.md).
-
-Only config was rerun after correcting its remaining arity expectation;
-other namespace inputs had not changed. That request **recorded 23 executed,
-0 unchanged, 179 assertions, 0 failures, 3 errors**, run `77212b9df870`.
-The arity/input expectations and fresh-process construction regression pass.
-No bound was raised. The three remaining errors are the upstream-error and
-config-refusal boundaries below, not those corrected expectations.
-
-Corrections verified by these runs:
-
-- Fresh config fully realizes the registry after acquiring predicate Vars
-  through the existing `runtime-predicate` owner. Supplied bindings win;
-  retained roots remain unchanged. This fixes the new construction failure
-  naming `seon.shell/stdin?`; `compilable-form` retains its inspection policy.
-  The fresh child completes under the unchanged 30-second bound. The earlier
-  timeout and scratch live boot remain open observations in
-  [the predicate issue](../../../seon/issues/scratch-boot-refuses-the-shell-stdin-predicate.md).
-- Eleven prompt fixture failures were caused by this lane's missing custody:
-  raw `@connection` snapshots reached the newly explicit disposition API.
-  `test/seon/cluster/prompt_test.clj` now uses `db/db`; all eleven nil-projection
-  errors disappear. One different prompt return-contract error remains.
-- The injected fn-test diagnostic now supplies its base observations. This
-  exposes the held `declared-reference-edges` return contract's missing facet;
-  the separate production missing-`:at` diagnostic remains at HEAD `fn.clj:971`.
-- Eight config assertions used retired kind/contract fields. Input refusals
-  now assert check/function identity; the missing positional argument asserts
-  actual and declared arity. The latter correction passes the recorded run.
-- Incremental registry construction avoids rebuilding retained maps only to
-  remove their members again. Schema declaration allocation now passes the
-  existing 64 MiB bound, with no threshold change.
-
-## Remaining boundaries and next owner decision
-
-| Required namespace | Latest result boundary |
+| Namespace / boundary | Observed result and owner |
 |---|---|
-| `seon.schema-test` | One baseline failure: `declared-reference-maps-accept-the-pull-reference-grammar`, `:seon.render/ambiguous-error`, `:in [:seon.render/candidates]`. The pre-implementation snapshot also fails it. |
-| `seon.schema.edn-test` | No failures/errors in the latest combined run. |
-| `seon.config-test` | Recorded 0 F / 3 E: `src/seon/config.clj:586` hands the incomplete upstream map to `db/pull`; missing-cluster refusals from `effective` fail their declared output or `result-caps` input (`:seon.config.agent/turn-completion-backstop-ms` is the first reported success-arm requirement). |
-| `seon.instrument-test` | Three facet-census failures: `src/seon/sci/admit.clj` semantic-value and `src/seon/error.clj` refusal/latest-fact do not declare 23 installed render/MCP/process facets. The assertion is retained. |
-| `seon.db-test` | 22 errors at the database/error-conversion boundary. The 15 upstream-map reader errors originate in `test/seon/db_test.clj:631` (the orchestrator's 1a family); remaining history, identity and write-return refusals exercise `src/seon/db.clj`. No database policy was changed. |
-| `seon.fn-test` | Two errors in held `src/seon/fn.clj`: missing base `:at` at HEAD `:971`, and `declared-reference-edges` returning a base error without a declared facet. Dirty checkout fixes are excluded by the snapshot. |
+| `seon.schema-test`, `seon.schema.edn-test` | Green. Registry providers run at most once, warm acquisition makes zero compiler calls, and supplied-registry admission makes zero copies. The ambiguous-render fixture now respects the collection schema's declared minimum. |
+| `seon.instrument-test` | Green. The facet census includes all four existing pass-through boundaries: error refusal/latest-fact, SCI semantic-value, and kernel failure-value. Their exact installed facet declarations now agree. |
+| `seon.error-test`, `seon.sci.kernel-arm-carriage-test` | Green. |
+| `seon.config-test` | 1 E: upstream refusal reaches `src/seon/db.clj:1115` (`schema-database`, called at `:1329`) because the DB owner still recognizes the retired kind at `:194`. Config's own missing-effective and missing-cap producers now carry complete base/facet data and pass. |
+| `seon.db-test` | 3 F / 22 E, error-family 1a boundary. The canonical upstream error fixture at `test/seon/db_test.clj:604` now uses `db/projection-fallback`; 18 assertions expose the kind-only consumer at `src/seon/db.clj:194`. Seven additional errors reach kind-only `error-value` at `:164` through identity/history/write wrappers (`:321`, `:390`, temporal views and transact). No DB implementation was edited. |
+| `seon.fn-test` | 1 E: `src/seon/fn.clj:1397` / return contract `:1403`, `declared-reference-edges`, does not declare the `:seon.schema/validation-refusal` facet (1a conversion family). The prior `fn.clj:971` missing-`:at` error disappeared after publication `8edfae1b7`; it is not a current red. |
+| `seon.sci.admit-test` | 1 F was a stale `:seon.error/kind` assertion at `test/seon/sci/admit_test.clj:513`; converted to the armed input check and function identity, retaining the offending-key assertion. Follow-up evidence below. |
+| Recording | `src/seon/blob.clj:271`, `with-publication!`, declares zero error facets and returns `:seon.db.write/validation-refusal` plus `:seon.test/execution-error`; the armed wrapper refuses. This is the publication/recorder pass-through boundary, outside the bounded released owners. Its nested returned-error projection reports 16,430 bytes against unchanged 16,384. No bound was raised; [the existing issue](../../../seon/issues/test-refusal-observations-overflow-in-projection-acquisition.md) records the same propagation boundary. |
 
-The held production path that prevents completing the required fn proof is
-**`src/seon/fn.clj`**. Other held paths remain untouched:
-`src/seon/cluster/source.clj`, `src/seon/test/cache.clj`,
-`src/seon/test/selection.clj`, `bin/test`, `bin/seon-hook`, and
-`script/seon/fresh_operator.clj`. Snapshot provenance explicitly says source,
-fn and `test/seon/cluster/source_test.clj` use HEAD bytes. These observations
-never attribute a failure to excluded dirty bytes.
+The final changed-input follow-up selects only `seon.config-test`,
+`seon.fn-test`, and `seon.sci.admit-test`. It covers the file-based config
+apply path's single projection acquisition, the private effective reader's
+explicit contract, the honest upstream fn fixture, and the retired-kind
+expectation correction. It does not rerun the other unchanged namespaces. This follow-up durably
+recorded **101 executed / 0 unchanged / 712 assertions / 0 failures /
+2 errors**, request `dc69a5a7013b`, program digest
+`c8c970e3e9d17effb0cefd1d1754eaaa612eee43624ac5f8cf7d9c8d7ae1662d`.
+The two errors are exactly the DB schema-database and fn declared-reference-edges
+boundaries above. SCI admission is green, the file-apply regression observes
+one declaration-projection acquisition, and the fresh-config child completes
+in 12.9 seconds under the unchanged 30-second backstop. Recording succeeded
+on this request; the earlier combined request's refusal remains its actual
+outcome, not an ongoing claim about the converging publication owner.
 
-The SCI walk also records **4,228,637,320 bytes** against its unchanged 1 GiB
-bound and fails its pull-plan reuse assertion. The selected-render test
-hits an array-length OutOfMemoryError while printing a nested map. Their
-causes are not proven by this lane's baseline. JFR samples from the same
-foreground JVM identify instrumentation wrapper selection, DB identity
-acquisition, projection-from-rows and fingerprint work. The sample interval
-includes the direct/web calls after the SCI evaluation, so sample weights
-are not the SCI counter's measured bytes. These are unresolved boundaries,
-not falsely classified as foreign fixes. See
-[the allocation issue](../../../seon/issues/guarded-public-walk-exceeds-allocation-bound.md).
-Ordinary reconstruction retirement is step 3; this lane did not change it.
+Publication `8edfae1b7` is included automatically through HEAD. Snapshot
+provenance names foreign `test/seon/test_runner_test.clj` as tested at HEAD
+bytes. Later foreign edits to `script/seon/fresh_operator.clj` briefly
+refused the edit hook for syntax at lines 2112–2140 and 2801–2820; the running
+snapshot continued with HEAD bytes. Foreign `src/seon/operator/state.clj`
+and `test/seon/dev/publication_test.clj` were also left untouched.
+No claim here attributes snapshot failures to excluded checkout edits.
 
-Three priced next steps:
+The recorder producer fix in `667f6519e` preserves all exception data,
+including schema/member facets, drops the retired kind stamp, and supplies
+absent base observations. Subsequent requests admitted; the earlier boolean
+facet admission failure did not recur. Its offending declaration remains
+unknown, so no speculative schema/resource change was made.
 
-1. **Coordinate the held fn and 1a/error-census repairs, then resume this
-   slice (recommended).** Preserves the six-namespace green condition;
-   costs those owners' integration checkpoint and one changed-input fast
-   pass. The orchestrator can supply the coordinated baseline for the walk.
-2. Release the relevant producer owners and expand this assignment to their
-   error-conversion slice. Costs a broader producer/resource/consumer review
-   plus affected tests; still needs coordination of the held publication files.
-3. Authorize a provisional implementation commit with these named reds and
-   allocation proof owed. Costs no immediate repair, but explicitly relaxes
-   the latest landing condition and does not constitute a completed proof.
+Fresh config resolves predicate Vars through the existing `runtime-predicate`
+owner before full registry realization; supplied bindings win and retained
+roots stay unchanged. Its fresh child passed the unchanged 30-second bound.
+The earlier timeout remains an open observation in
+[the predicate issue](../../../seon/issues/scratch-boot-refuses-the-shell-stdin-predicate.md).
+Eleven prompt fixture custody failures were corrected by taking `db/db`
+instead of raw connection dereference; a different prompt return-contract
+failure remains in the earlier caller evidence.
+
+The SCI walk measured **4,228,637,320 bytes** against its unchanged 1 GiB
+assertion, with a pull-plan reuse failure; the selected-render test hit an
+array-length OutOfMemoryError while printing a nested map. Attribution is
+unproved. Same-JVM JFR samples include instrumentation, DB identity reads,
+projection-from-rows and fingerprint work; their interval also includes
+later direct/web calls, so sample weights are not the SCI counter's bytes.
+The owner ruled this a recorded measurement, not a step-1 landing condition.
+[The allocation issue](../../../seon/issues/guarded-public-walk-exceeds-allocation-bound.md)
+retains the method, exact numbers and unresolved attribution. No bound changed.
 
 ## Failure inventory from the full caller run
 
@@ -166,12 +140,12 @@ explainer acquisition use `mr/schema` and Malli's schema-owned caches.
 The existing holder retains only additional derived products, not duplicate
 plain validators/explainers. No new metadata or public registry family.
 
-`candidate-validator` and `candidate-explainer` are retired in working bytes;
+`candidate-validator` and `candidate-explainer` are retired;
 the sole fn-test caller uses its fixture projection. Both value APIs accept
 only `[projection schema-key value]`. Production callers use existing
 DB/request custody or construct once per operation. Maintenance's result
 projection and turn disposition receive the generation explicitly, with
-all discovered callers converted in the same pending slice. Render's
+all discovered callers converted in this same commit. Render's
 existing default profile is delayed to break the config/generator/render
 load cycle exposed by complete realization.
 
@@ -210,8 +184,8 @@ no implementation changes; it was interrupted after the probe (exit 143).
 | Full registry copies during acquisitions | 0 | 0 |
 | Ten supplied-registry admissions, copied entries | 32,280 (source-derived) | 0 (measured) |
 | Whole before schema-admission loop, copied entries | 10,419,984 (source-derived N²) | No per-admission copies |
-| Full generation providers | Not measured | 4,678; maximum 1 call each |
-| Final sealed table | Not measured | 4,826 entries, one deliberate copy |
+| Full generation providers | Not measured | 4,694; maximum 1 call each |
+| Final sealed table | Not measured | 4,842 entries, one deliberate copy |
 | SCI schema declaration bytes, prior implementation iteration vs latest | 67,456,856 | 44,510,808 |
 | SCI function declaration bytes, latest | — | 9,289,792 |
 
@@ -223,28 +197,26 @@ They are copied-entry counts, **not heap-byte measurements**. The SCI
 pre-change baseline. Both latest SCI declarations pass the unchanged
 67,108,864-byte limit.
 
-Latest fixture population: 3,237 schemas / 1,436 contracts; the synthetic
+Latest fixture population: 3,241 schemas / 1,448 contracts; the synthetic
 replacement-generation probe adds four schemas and one contract, producing
-4,678 providers. Earlier after runs measured **4,667 providers, max one**
-and then 4,676/max one as HEAD's canonical population grew. Those remain
-valid dated observations, not constants asserted by tests. Warm acquisition
-and supplied-registry admission both copy zero entries.
+4,694 providers. Earlier after runs measured **4,667 providers, max one**,
+then 4,676/max one and the accepted **4,678/max one** as HEAD's population
+grew. Those remain dated observations, not constants asserted by tests.
+Warm acquisition and supplied-registry admission both copy zero entries.
 
-## Proof still owed
+## Proof and proof still owed
 
-The prescribed load command is run before/after the recorder-only commit;
-a final shared-tree load is recorded below. It does not substitute for the
-unlanded coherent slice's HEAD proof. Required six-namespace green, affected
-caller proof, and the orchestrator's cold/platform gates remain owed.
-The final prescribed eight-namespace shared-tree load exited 0. HEAD had
-advanced to `4d2f2d1ca` when inspected after that load; working implementation
-changes were present, so this is not a clean-HEAD implementation proof.
-`git diff --check` passed. Both fast sessions and the load JVM exited;
-no lane JVM or scratch root remains active.
-No post-change hot reload, in-place development adoption, owned scratch fork,
-or browser paint is claimed. Initial read-only default observations below
-are pre-change only. The orchestrator owns the reset-boundary live proof;
-this lane must not adopt or restart default.
+The prescribed eight-namespace load exited **0 immediately before this
+coherent implementation commit**. The same command is repeated after commit
+as the final HEAD load check. The recorder-only and prior evidence commits also passed
+their prescribed loads; none substitutes for this implementation's proof.
+
+Cold six-namespace and affected-caller gates, platform proof, and the
+post-change live proof remain owed to the orchestrator. No post-change hot
+reload, development adoption, scratch fork, or browser paint is claimed.
+Initial read-only default observations below are pre-change only. This lane
+must not adopt or restart default. The combined fast run is not a durable verdict; the final focused request
+is recorded but is not green. Neither substitutes for the cold gate.
 
 ## Authority and inherited state
 
@@ -280,11 +252,11 @@ fixture measurement or adoption-freshness proof.
 
 ## Complete changed paths
 
-Includes the recorder commit and all pending code, regression and evidence
+Includes the recorder commit and all code, regression and evidence
 paths; excludes foreign checkout edits. This is a dated inventory.
 The initial accepted `55076261e` also changed
 `docs/seon/issues/mcp-exception-projection-is-opaque-after-the-kind-removal.md`;
-that already-landed observation is unchanged in this pending overlay.
+that already-landed observation is unchanged in this final overlay.
 
 ```text
 src/seon/config.clj
@@ -345,6 +317,10 @@ docs/seon/issues/scratch-boot-refuses-the-shell-stdin-predicate.md
 docs/prds/steward-platform/research/bridge-step1-evidence-2026-09-20.py
 docs/prds/steward-platform/research/bridge-step1-failures-2026-09-20.tsv
 docs/seon/issues/guarded-public-walk-exceeds-allocation-bound.md
+src/seon/error.clj
+src/seon/sci/admit.clj
+src/seon/sci/kernel.clj
+test/seon/sci/admit_test.clj
 ```
 
 ## Exact commands owed to the orchestrator
@@ -409,6 +385,10 @@ bin/test --paths \
   docs/prds/steward-platform/research/bridge-step1-evidence-2026-09-20.py \
   docs/prds/steward-platform/research/bridge-step1-failures-2026-09-20.tsv \
   docs/seon/issues/guarded-public-walk-exceeds-allocation-bound.md \
+  src/seon/error.clj \
+  src/seon/sci/admit.clj \
+  src/seon/sci/kernel.clj \
+  test/seon/sci/admit_test.clj \
   -- seon.schema-test seon.schema.edn-test seon.config-test \
   seon.instrument-test seon.db-test seon.fn-test \
   my.background-test \
@@ -445,16 +425,19 @@ bin/test --paths \
   seon.test.accretion-test \
   seon.turn-loop-test \
   seon.schedule-test \
-  seon.cluster.prompt-test
+  seon.cluster.prompt-test \
+  seon.sci.admit-test \
+  seon.sci.kernel-arm-carriage-test
 bin/test --platform
 clojure -M -e "(require 'seon.schema 'seon.schema.internal 'seon.config 'seon.maintenance 'seon.cluster 'seon.turn 'seon.render 'seon.cluster.prompt)"
 ```
 
 Cold commands are recorded, not executed by this lane. The equivalent fast
-invocations use `bin/test-fast --paths` with the owned list above; the latest
-combined run selected the six required namespaces plus `seon.sci.eval-test`
-and `seon.cluster.prompt-test`. The final config-only follow-up changed only
-a config test input and reran no unchanged namespace.
+invocations use `bin/test-fast --paths` with the complete owned list above.
+The latest combined run selected the six required namespaces plus
+`seon.error-test`, `seon.sci.admit-test`, and
+`seon.sci.kernel-arm-carriage-test`; the changed-input follow-up selected
+`seon.config-test seon.fn-test seon.sci.admit-test` only.
 
 ## Raw evidence identities
 
@@ -467,3 +450,10 @@ a config test input and reran no unchanged namespace.
 | `tmp/bridge-step1-config-arity-fast.log` | `54f01c07937ce9f710d34f556dcb671c182029d9e5d2e5f9f785e936d043f759` |
 
 JFR recording SHA-256: `6b70d0b00749108f4857fdb76c85fda5891d9f4c7a1abea04a959b719db3ebb1`.
+
+Final execution log identities:
+
+| Log | SHA-256 |
+|---|---|
+| `tmp/bridge-step1-landing-fast.log` | `6218cc88eea82321ddb3bcdcd570f470c8e36fe89854bcd9948a2a110c4b6181` |
+| `tmp/bridge-step1-final-followup-fast.log` | `ab6a63d5a6dad026e867cb0d64ec7daac008e3b4017eba7c1bc93bc46d2c7600` |

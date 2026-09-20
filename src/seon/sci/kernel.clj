@@ -535,6 +535,18 @@
          :seon.instrument/contract-error :seon.instrument/registration-error
          :seon.instrument/undeclared-error :seon.message/error :seon.operator/error
          :seon.operator.collect/error :seon.problems/error :seon.program/error
+     :seon.render/request-error :seon.render.transcript/request-error
+     :seon.render.walk/elided-error :seon.render.value/window-failed-error
+     :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error
+     :seon.render/ambiguous-error :seon.render.data/no-such-path-error
+     :seon.cluster.process/start-instant-unavailable-error
+     :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
+     :seon.render.walk/no-such-entity-error :seon.dev.mcp/projection-failed-error
+     :seon.render/walk-failed-error :seon.dev.mcp/jvm-exception-error
+     :seon.render.web/value-not-found-error :seon.render.value/missing-root-identity-error
+     :seon.render/unknown :seon.render.web/function-unavailable-error
+     :seon.render.data/observation-error :seon.render.value/window-realization-failed-error
+     :seon.render.web/request-error :seon.render.lint/absent-element-error
          :seon.reconcile/error :seon.render/error :seon.render.data/error
          :seon.render.value/error :seon.render.walk/error :seon.render.web/error
          :seon.schedule/error :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error

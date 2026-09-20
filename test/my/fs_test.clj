@@ -25,13 +25,9 @@
                  {:my.fs/expected-absence? true
                   :my.fs/expected-digest (apply str (repeat 64 "b"))})))))
   (testing "the registered request maps remain open"
-    (is (true? (schema/valid-candidate-value?
-                :my.fs/read-request
-                {:my.fs/path "src/example.clj"
+    (is (true? ((schema/projection-validator (schema/handed-projection) :my.fs/read-request) {:my.fs/path "src/example.clj"
                  :example/extra :ignored})))
-    (is (true? (schema/valid-candidate-value?
-                :my.fs/write-request
-                {:my.fs/path "src/example.clj"
+    (is (true? ((schema/projection-validator (schema/handed-projection) :my.fs/write-request) {:my.fs/path "src/example.clj"
                  :my.fs/content {:my.fs/text "x" :example/extra :ignored}
                  :my.fs/precondition {:my.fs/expected-absence? true}
                  :example/extra :ignored}))))

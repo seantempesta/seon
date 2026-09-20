@@ -18,18 +18,16 @@
 (deftest a-disposition-is-an-ordinary-value
   (testing "wait carries its reason"
     (let [value (run/wait "waiting for the file to land")]
-      (is (seon.schema/valid-candidate-value? :my.turn/wait value))
+      (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.turn/wait) value))
       (is (= :wait (:my.turn/disposition value)))))
   (testing "complete carries the reply itself — there is no result attribute"
     (let [value (run/complete "the answer is 42")]
-      (is (seon.schema/valid-candidate-value? :my.turn/completed value))
+      (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.turn/completed) value))
       (is (= :completed (:my.turn/disposition value)))
       (is (= "the answer is 42" (:my.turn/result value)))))
   (testing "both validate as the disposition union the loop reads"
-    (is (seon.schema/valid-candidate-value?
-         :my.turn/value (run/wait "later")))
-    (is (seon.schema/valid-candidate-value?
-         :my.turn/value (run/complete "done")))))
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.turn/value) (run/wait "later")))
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.turn/value) (run/complete "done")))))
 
 (deftest a-blank-completion-is-an-error-value-not-a-throw
   ;; `:my.turn/result` admits any non-empty string, so whitespace reaches the
@@ -40,7 +38,7 @@
     (let [value (run/complete blank)]
       (is (string? (:seon.error/message value))
           "the agent gets something it can read and correct")
-      (is (not (seon.schema/valid-candidate-value? :my.turn/value value))
+      (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :my.turn/value) value))
           "and the loop cannot mistake it for a disposition"))))
 
 (deftest a-contract-forbidden-argument-is-a-value-the-agent-reads
@@ -62,7 +60,7 @@
            (is (map? value) source)
            (is (string? (:seon.error/message value)) source)
            (is (keyword? (:seon.error/kind value)) source)
-           (is (not (seon.schema/valid-candidate-value? :my.turn/value value))
+           (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :my.turn/value) value))
                "and the loop cannot mistake it for a disposition")))))))
 
 (deftest the-lifecycle-surface-has-two-actions-and-its-own-presentation

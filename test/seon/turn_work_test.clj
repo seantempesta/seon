@@ -305,15 +305,15 @@
   ;; exactly that, and an unread required key cannot be reintroduced without
   ;; failing here.
   (let [complete {:seon.agent/id agent-id}]
-    (is (true? (seon.schema/valid-candidate-value?
+    (is (true? (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                 :seon.turn.work/agent-request complete))
         "the agent identity the derivation reads are the whole request")
-    (is (true? (seon.schema/valid-candidate-value?
+    (is (true? (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                 :seon.turn.work/agent-request
                 (assoc complete :seon.turn.work/now (Date.))))
         "a caller still passing a clock is accreted, never refused")
     (doseq [required (keys complete)]
-      (is (false? (seon.schema/valid-candidate-value?
+      (is (false? (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                    :seon.turn.work/agent-request
                    (dissoc complete required)))
           (str required " is genuinely required")))))
@@ -340,7 +340,7 @@
               (is (= (some? derived) (turn/more-agent-work? db request))))
             (testing "and the situation validates against its own schema"
               (when derived
-                (is (seon.schema/valid-candidate-value?
+                (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                      :seon.turn.work/next derived))))))))))
 
 (deftest a-generated-run-resumes-then-requests-one-more-form
@@ -370,7 +370,7 @@
                 :seon.turn/id run-id
                 :seon.agent/id agent-id}
                derived))
-        (is (seon.schema/valid-candidate-value?
+        (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
              :seon.turn.work/next derived))))))
 
 (deftest comment-only-input-is-recorded-but-never-becomes-eval-work
@@ -433,7 +433,7 @@
                       :seon.message/id "concurrent-message"}
                      next-trigger)
                   "only a new outside trigger starts another turn")
-              (is (seon.schema/valid-candidate-value?
+              (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                    :seon.turn.work/next next-trigger)))))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -516,7 +516,7 @@
                  (= (some? derived) (turn/more-agent-work? db request))
                  ;; a derived situation always validates its own schema
                  (or (nil? derived)
-                     (seon.schema/valid-candidate-value?
+                     (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                       :seon.turn.work/next derived))
                  ;; An accepted reply without a disposition continues even
                  ;; after its wake is answered. Receipt content cannot

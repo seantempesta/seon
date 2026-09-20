@@ -266,7 +266,7 @@
          (doseq [term ["nonempty string subject identity token"
                        ":my.message/assignment" ":seon.message/from"]]
            (is (str/includes? (:body documentation) term)))
-         (is (schema/valid-candidate-value? :seon.error/value value))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.error/value) value))
          (is (str/includes? (:seon.eval/shown failed) "Example:"))
          (is (str/includes? (:seon.eval/shown failed) (:example documentation)))
          (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] (db/db connection))))

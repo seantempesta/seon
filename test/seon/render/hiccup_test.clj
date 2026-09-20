@@ -219,8 +219,7 @@
            (hiccup/shorthand :span))))
   (testing "a head the grammar refuses is a value, never nil and never a throw"
     (doseq [refused [42 nil {:a 1}]]
-      (is (seon.schema/valid-candidate-value?
-           :seon.error/value (hiccup/shorthand refused))
+      (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/value) (hiccup/shorthand refused))
           (str "a refused head must name itself: " (pr-str refused))))))
 
 (deftest classes-merge-shorthand-first

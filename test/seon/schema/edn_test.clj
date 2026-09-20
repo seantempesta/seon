@@ -139,13 +139,10 @@
     (testing "a cross-section alias is a candidate like any other"
       (is (contains? forms :seon.schema.edn.fixture/label)))
     (testing "a loaded attribute validates values end to end"
-      (schema/call-with-forms
-       forms
-       (fn []
-         (is (schema/valid-candidate-value?
-              :seon.schema.edn.fixture/name "alpha"))
-         (is (not (schema/valid-candidate-value?
-                   :seon.schema.edn.fixture/name ""))))))))
+      (let [projection (schema/declaration-projection forms)
+            valid? (schema/projection-validator projection :seon.schema.edn.fixture/name)]
+        (is (valid? "alpha"))
+        (is (not (valid? "")))))))
 
 (deftest duplicates-across-sections-refuse
   (with-temporary-resources

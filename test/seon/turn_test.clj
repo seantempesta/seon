@@ -2063,14 +2063,14 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest run-schema-admits-and-refuses
-  (is (seon.schema/valid-candidate-value?
+  (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
        :seon.turn/turn
        {::turn/id "r1" ::turn/agent [:seon.agent/id "runner"] :seon.turn/opened-tx "datomic.tx"}))
-  (is (not (seon.schema/valid-candidate-value?
+  (is (not (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
             :seon.turn/turn
             {::turn/agent [:seon.agent/id "runner"] :seon.turn/opened-tx "datomic.tx"}))
       "identity is required")
-  (is (not (seon.schema/valid-candidate-value?
+  (is (not (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
             :seon.turn/turn
             {::turn/id "" ::turn/agent [:seon.agent/id "runner"] :seon.turn/opened-tx "datomic.tx"}))
       "a blank identity is refused"))

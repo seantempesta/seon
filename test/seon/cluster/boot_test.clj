@@ -350,7 +350,7 @@
            (let [config (cluster/resolve-bootstrap overrides)]
              (and
               ;; complete and valid against the declared requirements
-              (seon.schema/valid-candidate-value? :seon.boot/config config)
+              (seon.schema/valid-candidate-value? (seon.schema/handed-projection) :seon.boot/config config)
               ;; every supplied override wins verbatim
               (every? (fn [[k v]] (= v (get config k))) overrides)
               ;; defaults fill exactly the absent keys
@@ -485,7 +485,7 @@
                     (cluster/require-activation!
                      @(:seon.boot/cluster-connection instance))))))
           (testing "the advertisement validates and is discoverable"
-            (is (seon.schema/valid-candidate-value?
+            (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                  :seon.boot/advertisement advertisement))
             (is (= advertisement
                    (cluster/read-advertisement root "solo"))))

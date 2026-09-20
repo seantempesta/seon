@@ -19,11 +19,11 @@
     (let [error {marker true :seon.error/message message}
           ai (background/render-ai error)
           html (background/render-html error)]
-      (is (schema/valid-candidate-value? schema-key error))
+      (is ((schema/projection-validator (schema/handed-projection) schema-key) error))
       (is (= message ai))
       (is (= [:p message] html))
-      (is (schema/valid-candidate-value? :seon.render/ai ai))
-      (is (schema/valid-candidate-value? :seon.render/hiccup html)))))
+      (is ((schema/projection-validator (schema/handed-projection) :seon.render/ai) ai))
+      (is ((schema/projection-validator (schema/handed-projection) :seon.render/hiccup) html)))))
 
 (deftest background-macro-expands-one-direct-call
   (is (= '(seon.effect/request!

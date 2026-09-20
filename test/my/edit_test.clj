@@ -23,9 +23,7 @@
                  (assoc base :my.edit/operation :delete
                         :my.edit/source "(def example 1)"))))
     (testing "the registered request remains open"
-      (is (true? (schema/valid-candidate-value?
-                  :my.edit/form-request
-                  (assoc base :my.edit/operation :delete
+      (is (true? ((schema/projection-validator (schema/handed-projection) :my.edit/form-request) (assoc base :my.edit/operation :delete
                          :example/extra :ignored)))))))
 
 (deftest public-entries-declare-resolvable-io-capabilities

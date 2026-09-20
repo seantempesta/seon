@@ -552,7 +552,8 @@
         failure (:seon.maintenance.settlement/failure result-or-failure)
         result (if failure
                  handler-result
-                 (maintenance/result-entity handler-result))
+                 (maintenance/result-entity
+                  (db/carried-projection (db/db connection)) handler-result))
         returned-error? (flat-error? result)
         source (cond
                  failure failure

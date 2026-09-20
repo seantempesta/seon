@@ -317,10 +317,8 @@
         (is (empty? (filter entity-ids (numbers-in current))))
         (is (not (str/includes? ai (str (first entity-ids)))))
         (testing "the contract refuses a bare numeric reference"
-          (is (seon.schema/valid-candidate-value? :my.plan/render-step step))
-          (is (not (seon.schema/valid-candidate-value?
-                    :my.plan/render-step
-                    (assoc step :my.plan/needs [42])))))))))
+          (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.plan/render-step) step))
+          (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :my.plan/render-step) (assoc step :my.plan/needs [42])))))))))
 
 (deftest whole-tree-reconciliation-refuses-incoherent-documents
   (with-plan

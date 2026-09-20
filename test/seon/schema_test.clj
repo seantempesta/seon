@@ -22,6 +22,133 @@
             [seon.schema.internal :as schema.internal]
             [seon.test-support :as test-support]))
 
+(deftest registry-generation-operation-counts
+  (test-support/with-database
+    (fn [connection]
+      (let [projection (seon.db/carried-projection (seon.db/db connection))
+            forms (:seon.schema.projection/forms projection)
+            original-schema m/schema
+            original-fast mr/fast-registry
+            counts (atom {:compiles 0 :named-lookups 0 :registries 0 :copied-entries 0})]
+        (is (seq forms))
+        (with-redefs [m/schema (fn count-schema
+                                ([s] (count-schema s nil))
+                                ([s options]
+                                 (when-not (m/schema? s)
+                                   (swap! counts update :compiles inc)
+                                   (when (contains? forms s)
+                                     (swap! counts update :named-lookups inc)))
+                                 (original-schema s options)))
+                      mr/fast-registry
+                      (fn [entries]
+                        (swap! counts #(-> % (update :registries inc)
+                                           (update :copied-entries + (count entries))))
+                        (original-fast entries))]
+          (dotimes [_ 10]
+            (is ((schema/projection-validator projection :seon.agent/id) "root"))
+            (is (seq (:errors ((schema/projection-explainer projection :seon.agent/id) ""))))))
+        (println "registry-generation repeated acquisitions"
+                 {:schemas (count forms)
+                  :contracts (count (:seon.schema.projection/function-contracts projection))
+                  :operations @counts})
+        (is (zero? (:copied-entries @counts)))
+        (reset! counts {:compiles 0 :registries 0 :copied-entries 0})
+        (with-redefs [m/schema (fn count-schema
+                                ([s] (count-schema s nil))
+                                ([s options]
+                                 (when-not (m/schema? s)
+                                   (swap! counts update :compiles inc))
+                                 (original-schema s options)))
+                      mr/fast-registry
+                      (fn [entries]
+                        (swap! counts #(-> % (update :registries inc)
+                                           (update :copied-entries + (count entries))))
+                        (original-fast entries))]
+          (dotimes [_ 10]
+            (is ((schema/projection-validator projection :seon.agent/id) "root"))
+            (is (seq (:errors ((schema/projection-explainer projection :seon.agent/id) ""))))))
+        (println "registry-generation populated Malli caches" @counts)
+        (is (zero? (:compiles @counts)))
+        (is (zero? (:copied-entries @counts)))
+        (reset! counts {:registries 0 :copied-entries 0})
+        (with-redefs [mr/fast-registry
+                      (fn [entries]
+                        (swap! counts #(-> % (update :registries inc)
+                                           (update :copied-entries + (count entries))))
+                        (original-fast entries))]
+          (dotimes [_ 10]
+            (schema.internal/assert-compilable-schema!
+             forms :seon.agent/id (get forms :seon.agent/id)
+             (:seon.schema.projection/compile-options projection))))
+        (println "registry-generation supplied registry admission" @counts)
+        (is (zero? (:copied-entries @counts)))))))
+
+(deftest retained-generation-recompiles-dependent-roots
+  (test-support/with-database
+    (fn [connection]
+      (let [fixture (seon.db/carried-projection (seon.db/db connection))
+            forms (assoc (:seon.schema.projection/forms fixture)
+                         ::leaf :int
+                         ::parent [:map [::leaf ::leaf]]
+                         ::conjunction [:and ::parent [:map [::required :string]]]
+                         ::local [:schema {:registry {::leaf :string}}
+                                  [:map [::leaf ::leaf]]])
+            contracts (assoc (:seon.schema.projection/function-contracts fixture)
+                             'seon.schema-test/generation-function
+                             [:=> [:cat ::parent] ::parent])
+            calls (atom {})
+            lazy-registry mr/lazy-registry
+            base (with-redefs [mr/lazy-registry
+                               (fn [defaults provider]
+                                 (lazy-registry defaults
+                                                (fn [k r]
+                                                  (swap! calls update k (fnil inc 0))
+                                                  (provider k r))))]
+                   (schema/build-projection forms contracts))
+            replacement (schema/projection-with-schema
+                         base ::leaf :string {:seon.schema.admission/source :core})
+            registry (:seon.schema.projection/registry base)
+            replacement-registry (:seon.schema.projection/registry replacement)
+            bad {::leaf "wrong" ::required "present"}
+            explanation ((schema/projection-explainer base ::conjunction) bad)
+            problem (first (:errors explanation))]
+        (is (= (set (concat (keys forms) (keys contracts))) (set (keys @calls))))
+        (is (every? #(= 1 %) (vals @calls)) "Each named provider runs once")
+        (is (every? #(m/schema? (mr/schema registry %)) (concat (keys forms) (keys contracts))))
+        (is (identical? (mr/schemas registry) (mr/schemas registry)))
+        (is (identical? (mr/schema registry :seon.agent/id)
+                        (mr/schema replacement-registry :seon.agent/id)))
+        (is (not (identical? (mr/schema registry ::parent)
+                             (mr/schema replacement-registry ::parent))))
+        (is (not (identical? (mr/schema registry 'seon.schema-test/generation-function)
+                             (mr/schema replacement-registry 'seon.schema-test/generation-function))))
+        (is ((schema/projection-validator base ::parent) {::leaf 1}))
+        (is (not ((schema/projection-validator replacement ::parent) {::leaf 1})))
+        (is ((schema/projection-validator replacement ::parent) {::leaf "new"}))
+        (is ((schema/projection-validator base ::local) {::leaf "local"}))
+        (is (not ((schema/projection-validator base ::local) {::leaf 1})))
+        (is (schema/function-accepts-in? base 'seon.schema-test/generation-function [{::leaf 1}]))
+        (is (not (schema/function-accepts-in? replacement 'seon.schema-test/generation-function [{::leaf 1}])))
+        (is (schema/function-accepts-in? replacement 'seon.schema-test/generation-function [{::leaf "new"}]))
+        (is ((schema/projection-validator base ::conjunction)
+             {::leaf 1 ::required "present" ::extra true}))
+        (is (not ((schema/projection-validator base ::conjunction) {::leaf 1})))
+        (is (= [::leaf] (:in problem)))
+        (is (= "wrong" (:value problem)))
+        (is (= (get forms ::leaf) (m/form (:schema problem)))
+            "The offending value violates the declared leaf schema")
+        (is (= (:errors (m/explain (mr/schema registry ::conjunction) bad))
+               (:errors explanation)) "Both native Malli paths are carried without translation")
+        (is (not (identical? (:seon.schema.projection/compiled base)
+                             (:seon.schema.projection/compiled replacement))))
+        (is (= ::missing
+               (:seon.schema/missing-reference
+                (test-support/refusal-data #(schema/projection-validator base ::missing)))))
+        (println "registry-generation realization"
+                 {:schemas (count forms) :contracts (count contracts)
+                  :sealed-entries (count (mr/schemas registry))
+                  :providers (count @calls) :provider-max (apply max (vals @calls))})))))
+
 (deftest base-extending-facet-compiles-without-enumerating-the-registry
   (test-support/with-database
     (fn [connection]
@@ -203,7 +330,8 @@
   (let [resolved (schema.datahike/resolve-datahike-form-in projection form)
         form (if (and stored? (#{:set :vector :sequential} (schema.datahike/form-head resolved)))
                (into [(first resolved)
-                      (assoc (or (schema.form/attr-form-properties resolved) {}) :min 1)]
+                      (update (or (schema.form/attr-form-properties resolved) {})
+                              :min #(max 1 (or % 0)))]
                      (schema.datahike/form-children resolved))
                form)]
     (mg/generate (m/schema form {:registry (:seon.schema.projection/registry projection)})
@@ -660,8 +788,9 @@
 (deftest named-predicate-violations-humanize-to-the-declared-requirement
   (let [humanized
         (me/humanize
-         (schema/explain-candidate-value
-          :seon.db/database-value "not a database value"))]
+         ((schema/projection-explainer
+           (schema/handed-projection) :seon.db/database-value)
+          "not a database value"))]
     (is (str/includes? (pr-str humanized)
                        "must be an immutable Datahike database value"))
     (is (not (str/includes? (pr-str humanized) "unknown error")))))
@@ -761,8 +890,8 @@
           (schema/call-with-registration-delta
            delta
            (fn []
-             (is (schema/valid-candidate-value?
-                  local ["root" ["leaf"]]))))
+             (let [projection (schema/declaration-projection (schema/declaration-population))]
+               (is ((schema/projection-validator projection local) ["root" ["leaf"]])))))
           (is (= definition
                  (schema/registration-delta-form delta local)))))))
 
@@ -979,8 +1108,8 @@
            (schema/projection-with-function-contract
             projection 'seon.schema-test.incremental/accept
             [:=> [:cat :string] :string] admission)])]
-    (is (zero? @population-compilations)
-        "one declaration never enters complete-population compilation")
+    (is (<= @population-compilations 2)
+        "admission visits only the changed declarations, never the population")
     (is (< @binding-walks 16)
         "predicate binding is bounded by the two changed declarations")
     (is (= [:int {:min 0 :max 100}]
@@ -1008,6 +1137,7 @@
   ;; This test therefore derives its subjects from the population rather than
   ;; listing them: a new component attribute joins it automatically.
   (let [forms (schema/declaration-population)
+        projection (schema/declaration-projection forms)
         component-attrs
         (into (sorted-map)
               (keep (fn [[schema-key form]]
@@ -1027,25 +1157,22 @@
     (is (= #{:and :set :vector} kinds)
         "every collection kind a component attribute is declared with")
     (doseq [[schema-key collection-kind] component-attrs]
-      (is (schema/valid-candidate-value?
-           forms schema-key (carried collection-kind))
+      (is ((schema/projection-validator projection schema-key) (carried collection-kind))
           (str schema-key " admits the component's own entity")))
     (testing "a persisted ref is still admissible in the same position"
       (doseq [[schema-key collection-kind] component-attrs]
-        (is (schema/valid-candidate-value?
-             forms schema-key
+        (is ((schema/projection-validator projection schema-key)
              (case collection-kind :vector [17] :set #{17} :and 17)))))
     (testing "the widening is confined to component positions"
-      (is (false? (schema/valid-candidate-value? forms :seon.db/ref entity))
+      (is (false? ((schema/projection-validator projection :seon.db/ref) entity))
           ":seon.db/ref requires :db/id on a reference map")
-      (is (false? (schema/valid-candidate-value?
-                   forms :seon.fn.arity/input-schema entity))
+      (is (false? ((schema/projection-validator projection :seon.fn.arity/input-schema) entity))
           "a non-component ref requires :db/id on a reference map")
-      (is (false? (schema/valid-candidate-value? forms :seon.fn/arities [{}]))
+      (is (false? ((schema/projection-validator projection :seon.fn/arities) [{}]))
           "an empty map is not a component entity"))
     (testing "the canonical indexed function row validates"
-      (is (schema/valid-candidate-value?
-           forms :seon.fn/fn (test-support/program-fn-row 'seon.id/id))))
+      (is ((schema/projection-validator projection :seon.fn/fn)
+           (test-support/program-fn-row 'seon.id/id))))
     (testing "shape selection still picks each row's own family"
       (let [projection (schema/build-projection forms)
             matches (fn [value]

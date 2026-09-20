@@ -74,11 +74,9 @@
 (deftest generated-tier-local-binary-values-satisfy-the-registry
   (let [input-streams (gen/sample blob/input-stream-generator 20)
         octet-arrays (gen/sample blob/octet-array-generator 20)]
-    (is (every? #(schema/valid-candidate-value?
-                  :seon.blob/input-stream %)
+    (is (every? #((schema/projection-validator (schema/handed-projection) :seon.blob/input-stream) %)
                 input-streams))
-    (is (every? #(schema/valid-candidate-value?
-                  :seon.blob/octet-array %)
+    (is (every? #((schema/projection-validator (schema/handed-projection) :seon.blob/octet-array) %)
                 octet-arrays))))
 
 (deftest binary-content-round-trips-on-both-sides-of-the-inline-threshold

@@ -325,14 +325,9 @@
    was compiled from, so it lives on that instance and cache identity is
    structural — there is nothing to invalidate and nothing to compare.
 
-   Seon's compiled validators, explainers, and identity-only descriptors used
-   to live in two process-global slots with room for ONE projection each,
-   guarded by comparing the slot's projection against the caller's. That
-   comparison was a check-then-act on shared mutable state — the check and
-   the returned value were two independent derefs — so one environment could
-   be handed another environment's validator for the same schema key,
-   reproduced in both directions, 2 runs in 5 (2026-08-07 parallel isolation
-   audit, Defect II, `probe_shape_generation_cache`).
+   Plain validators and explainers belong to Malli's retained schemas. This
+   holder owns only additional products, including arity descriptors and
+   selector-derived projections. It never stores a second plain validator.
 
    The holder is installed FRESH at every construction and never inherited: a
    projection derived by changing forms would otherwise carry its parent's
@@ -422,19 +417,53 @@
   (update-vals forms #(compilable-form % predicate-functions)))
 
 (defn- projection-registry
-  "Registry over immutable forms that binds only the requested declaration."
-  [forms predicate-functions]
-  (let [defaults (mr/fast-registry (m/default-schemas))
-        all-schemas (delay (merge (mr/-schemas defaults) forms))]
-    (reify
-      mr/Registry
-      (-schema [this type]
-        (or (mr/-schema defaults type)
-            (when-let [definition (get forms type)]
-              (m/schema (compilable-form definition predicate-functions)
-                        {:registry this}))))
-      (-schemas [_]
-        @all-schemas))))
+  "Compile one immutable generation serially, then seal its complete table.
+
+   Retained entries must be unaffected by the candidate's changes. All other
+   declarations close over prepared immutable definitions; a captured lazy
+   scope can only memoize those same answers, never consult current state."
+  {:malli/schema
+   [:function
+    [:=> [:cat :map :map] [:fn malli.registry/registry?]]
+    [:=> [:cat :map :map :map :map] [:fn malli.registry/registry?]]]}
+  ([forms predicate-functions]
+   (projection-registry forms predicate-functions {} {}))
+  ([forms predicate-functions contracts retained]
+   (let [definitions
+         (if (seq retained)
+           (reduce
+            (fn [changed population]
+              (reduce-kv
+               (fn [changed identity definition]
+                 (if (contains? retained identity)
+                   changed
+                   (assoc changed identity definition)))
+               changed population))
+            {} [forms contracts])
+           (merge forms contracts))
+         predicate-functions
+         (reduce (fn [bindings predicate]
+                   (if (contains? bindings predicate)
+                     bindings
+                     (if-let [callable (runtime-predicate predicate)]
+                       (assoc bindings predicate callable)
+                       bindings)))
+                 predicate-functions
+                 (into #{} (mapcat predicate-symbols-in) (vals definitions)))
+         prepared (bound-forms definitions predicate-functions)
+         registry
+         (mr/lazy-registry
+          (mr/composite-registry (m/default-schemas) retained)
+          (fn [identity scope]
+            (when-let [definition (get prepared identity)]
+              ((if (qualified-symbol? identity) m/function-schema m/schema)
+               definition {:registry scope}))))]
+     (doseq [identity (sort-by str (remove #(contains? retained %) (keys forms)))]
+       (internal/assert-compilable-schema!
+        forms identity (get forms identity) {:registry registry}))
+     (doseq [identity (sort-by str (remove #(contains? retained %) (keys contracts)))]
+       (mr/schema registry identity))
+     (mr/fast-registry (mr/schemas registry)))))
 
 (defn canonical-definition
   "Return one Malli definition as durable EDN.
@@ -1158,22 +1187,6 @@
                         " must declare a nonempty :seon.config/display-label.")}]
       (throw (ex-info (:seon.error/message refusal) refusal)))))
 
-(defn- candidate-registry
-  ([] (candidate-registry (declaration-population)))
-  ([forms]
-   (assert-config-display! forms)
-   (let [defaults (mr/fast-registry (m/default-schemas))]
-     (reify
-       mr/Registry
-       (-schema [this type]
-         (or (mr/-schema defaults type)
-             (when-let [form (get forms type)]
-               (m/schema
-                (compilable-form form {})
-                {:registry this}))))
-       (-schemas [_]
-         (merge (mr/-schemas defaults) forms))))))
-
 (defn declaration-projection
   "One immutable projection over the declaration population in hand.
 
@@ -1182,15 +1195,18 @@
    doing so). It carries the registry as well as the forms, because a
    projection without one cannot compile a validator — a forms-only map made
    `projection-validator` throw `:malli.core/invalid-schema` for every
-   EDN-backed attribute (2026-08-07). The registry is a lazy `reify`, so
-   pairing it costs nothing beyond the population itself."
+   EDN-backed attribute (2026-08-07). Construction realizes and retains every
+   named schema; ordinary validation never rebuilds this generation."
   {:malli/schema
    [:function
     [:=> [:cat] ::projection]
     [:=> [:catn [::forms :map]] ::projection]]}
   ([] (declaration-projection (declaration-population)))
   ([forms]
-   (let [registry (candidate-registry forms)]
+   (let [_ (assert-config-display! forms)
+         _ (assert-acyclic-references!
+            forms (keys forms) (canonical-reference-graph forms {}))
+         registry (projection-registry forms {})]
      (with-compiled-cache
       {:seon.schema.projection/forms forms
        :seon.schema.projection/registry registry
@@ -1893,26 +1909,20 @@
          compiled-contracts
          (bound-forms function-contracts predicate-functions)
          core-admission {:seon.schema.admission/source :core}
-         registry (mr/composite-registry
-                    (m/default-schemas)
-                    (mr/fast-registry compiled-forms))
+         registry (projection-registry compiled-forms {} compiled-contracts {})
          options  {:registry registry}
          canonical-keys (set (keys forms))
          _ (doseq [[k form] (sort-by key forms)]
-             (internal/assert-compilable-schema!
-              compiled-forms k
-              (get compiled-forms k)
-              options)
              (internal/assert-non-nilable-value-schema! forms k form))
          compiled-schemas
          (into (sorted-map)
                (map (fn [k]
-                      [k (m/schema (get compiled-forms k) options)]))
+                      [k (mr/schema registry k)]))
                (sort (keys forms)))
          compiled-function-contracts
          (into (sorted-map)
-               (map (fn [[sym contract]]
-                      [sym (m/function-schema contract options)]))
+               (map (fn [[sym _contract]]
+                      [sym (mr/schema registry sym)]))
                compiled-contracts)
          !reference-advisories (atom {})
          reference-advisories
@@ -2323,7 +2333,7 @@
   ([pure-data {:seon.schema/keys [predicate-functions]
                :or {predicate-functions {}}}]
    (let [forms (:seon.schema.projection/forms pure-data)
-         contracts (:seon.schema.projection/function-contracts pure-data)
+         contracts (get pure-data :seon.schema.projection/function-contracts {})
          predicate-symbols
          (into (into #{} (mapcat predicate-symbols-in) (vals forms))
                (mapcat predicate-symbols-in)
@@ -2337,23 +2347,18 @@
                        bindings)))
                  predicate-functions
                  predicate-symbols)
-         compiled-forms (bound-forms forms predicate-functions)
-         registry (mr/composite-registry
-                   (m/default-schemas)
-                   (mr/fast-registry compiled-forms))
+         registry (projection-registry forms predicate-functions contracts {})
          options {:registry registry}]
-     ;; Materialization still compiles the runtime objects, but all population
-     ;; validation and pure-data derivation was completed before publication.
-     (doseq [[_ form] compiled-forms]
-       (m/schema form options))
+     ;; Population policy was proved before publication. Runtime roots are
+     ;; realized serially by the same construction owner as a fresh build.
      (with-compiled-cache
       (with-predicate-functions
        (assoc pure-data
               :seon.schema.projection/registry registry
               :seon.schema.projection/compile-options options)
        predicate-functions)
-      (update-vals (bound-forms contracts predicate-functions)
-                   #(m/function-schema % options))))))
+      (into {} (map (fn [sym] [sym (mr/schema registry sym)]))
+            (keys contracts))))))
 
 (defn- predicate-functions-with
   [projection definitions]
@@ -2378,8 +2383,8 @@
         (:seon.schema.projection/compile-options projection)
         bound (compilable-form definition predicate-functions)
         function? (qualified-symbol? identity)
-        compiled ((if function? m/function-schema m/schema)
-                  bound compile-options)]
+        compiled (mr/schema (:seon.schema.projection/registry projection)
+                            identity)]
     (assert-complete-contract!
      {:seon.schema/identity identity
       :seon.schema/definition definition
@@ -2737,15 +2742,14 @@
         old-definition (get old-forms schema-key ::absent)
         forms (assoc old-forms schema-key definition)
         predicate-functions (predicate-functions-with projection [definition])
-        registry (projection-registry forms predicate-functions)
-        compile-options {:registry registry}
         canonical-keys
         (conj (or (:seon.schema.projection/canonical-keys projection)
                   (set (keys old-forms)))
               schema-key)
         direct-dependencies
         (direct-reference-keys-in
-         definition predicate-functions canonical-keys registry)
+         definition predicate-functions canonical-keys
+         (:seon.schema.projection/registry projection))
         old-dependencies
         (get (:seon.schema.projection/schema-dependencies projection)
              schema-key #{})
@@ -2754,14 +2758,21 @@
                schema-key direct-dependencies)
         _ (assert-acyclic-references!
            forms [schema-key] schema-dependencies)
-        compiled (m/schema (compilable-form definition predicate-functions)
-                           compile-options)
         reverse-schema-dependencies
         (replace-reverse-dependencies
          (:seon.schema.projection/reverse-schema-dependencies projection)
          schema-key old-dependencies direct-dependencies)
         affected-schema-keys
         (dependent-schema-keys projection #{schema-key})
+        affected-function-symbols
+        (function-dependents-of projection affected-schema-keys)
+        contracts (get projection :seon.schema.projection/function-contracts {})
+        retained
+        (apply dissoc
+               (mr/schemas (:seon.schema.projection/registry projection))
+               (into affected-schema-keys affected-function-symbols))
+        registry (projection-registry forms predicate-functions contracts retained)
+        compile-options {:registry registry}
         schema-admissions
         (assoc (:seon.schema.projection/schema-admissions projection)
                schema-key admission)
@@ -2782,8 +2793,6 @@
              candidate affected (get forms affected)
              (get schema-admissions affected
                   {:seon.schema.admission/source :core})))
-        affected-function-symbols
-        (function-dependents-of candidate affected-schema-keys)
         _ (doseq [function-symbol (sort-by str affected-function-symbols)]
             (validate-one-contract!
              candidate function-symbol
@@ -3149,16 +3158,16 @@
     ::projection]}
   [projection function-symbol definition admission]
   (let [forms (:seon.schema.projection/forms projection)
-        old-contracts (:seon.schema.projection/function-contracts projection)
+        old-contracts (get projection :seon.schema.projection/function-contracts {})
         old-definition (get old-contracts function-symbol ::absent)
         contracts (assoc old-contracts function-symbol definition)
         predicate-functions (predicate-functions-with projection [definition])
-        registry (projection-registry forms predicate-functions)
+        retained
+        (dissoc (mr/schemas (:seon.schema.projection/registry projection))
+                function-symbol)
+        registry (projection-registry forms predicate-functions contracts retained)
         compile-options {:registry registry}
-        compiled
-        (m/function-schema
-         (compilable-form definition predicate-functions)
-         compile-options)
+        compiled (mr/schema registry function-symbol)
         canonical-keys
         (or (:seon.schema.projection/canonical-keys projection)
             (set (keys forms)))
@@ -3211,10 +3220,11 @@
               (:seon.schema.projection/function-source-admissions projection)
               function-symbol ::absent)
              admission))]
-    (assoc candidate
-           :seon.schema.projection/fingerprint-version
-           projection-fingerprint-version
-           :seon.schema.projection/fingerprint fingerprint)))
+    (with-compiled-cache
+     (assoc candidate
+            :seon.schema.projection/fingerprint-version
+            projection-fingerprint-version
+            :seon.schema.projection/fingerprint fingerprint))))
 
 (defn activate-projection!
   "Return an already validated projection.
@@ -3507,34 +3517,20 @@
   ([k] (get (candidate-forms) k))
   ([forms k] (get forms k)))
 
+(declare projection-validator projection-explainer)
+
 (defn valid-candidate-value?
-  "True when `value` satisfies `schema-key` in the current candidate.
-
-   Candidate declarations never mutate Malli's process-global default registry. Boundaries
-   validating a declaration and its first facts together use this function so
-   they see the complete candidate without publishing it early.
-
-   A caller validating more than one value supplies the population it already
-   resolved (see [[declaration-population]]); the two-argument arity resolves
-   one per call."
-  {:malli/schema
-   [:function [:=> [:catn [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]]] :boolean] [:=> [:catn [:seon.schema/forms :map] [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]]] :boolean]]}
-  ([schema-key value]
-   (m/validate schema-key value {:registry (candidate-registry)}))
-  ([forms schema-key value]
-   (m/validate schema-key value {:registry (candidate-registry forms)})))
+  "True when value satisfies schema-key in the supplied generation."
+  {:malli/schema [:=> [:cat ::projection ::registry-key ::value] :boolean]}
+  [projection schema-key value]
+  ((projection-validator projection schema-key) value))
 
 (defn explain-candidate-value
-  "Explain a value rejected by the current declaration candidate.
-
-   Uses the same explicit candidate registry as `valid-candidate-value?`; nil
-   means the value is valid."
-  {:malli/schema
-   [:function [:=> [:catn [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]] [:=> [:catn [:seon.schema/forms :map] [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]]]}
-  ([schema-key value]
-   (m/explain schema-key value {:registry (candidate-registry)}))
-  ([forms schema-key value]
-   (m/explain schema-key value {:registry (candidate-registry forms)})))
+  "Native Malli explanation in the supplied generation; nil means valid."
+  {:malli/schema [:=> [:cat ::projection ::registry-key ::value]
+                  [:maybe ::explanation]]}
+  [projection schema-key value]
+  ((projection-explainer projection schema-key) value))
 
 (def ^:const shape-candidate-limit
   "Maximum schema rows examined and returned for structural diagnostics."
@@ -3549,28 +3545,28 @@
   (fn [_schema-key] nil))
 
 (defn projection-validator
-  "Compile a validator against exactly one immutable projection."
+  "Acquire the retained schema's Malli-owned validator."
   {:malli/schema [:=> [:catn [::projection ::projection]
                              [::registry-key ::registry-key]]
                   ::compiled-validator]}
   [projection schema-key]
-  (m/validator
-    (m/deref-recursive
-      schema-key
-      {:registry (:seon.schema.projection/registry projection)})))
+  (if-let [compiled (mr/schema (:seon.schema.projection/registry projection)
+                              schema-key)]
+    (m/validator compiled)
+    (throw (ex-info (str "Missing schema declaration " schema-key ".")
+                    {:seon.schema/invalid-schema schema-key
+                     :seon.schema/key schema-key
+                     :seon.schema/missing-reference schema-key
+                     :seon.schema/missing-reference-namespace (namespace schema-key)}))))
 
 (defn- function-arities-in [projection function-symbol]
   (projection-cache-value
    projection [::function-arities function-symbol]
    (fn []
-     (if-let [contract
-              (get (:seon.schema.projection/function-contracts projection)
-                   function-symbol)]
-       (compiled-function-arities
-        (m/function-schema
-         (compilable-form
-          contract (predicate-functions-in projection))
-         {:registry (:seon.schema.projection/registry projection)}))
+     (if-let [compiled
+              (mr/schema (:seon.schema.projection/registry projection)
+                         function-symbol)]
+       (compiled-function-arities compiled)
        []))))
 
 (defn function-matching-outputs-in
@@ -3635,15 +3631,19 @@
     (catch Throwable _ false)))
 
 (defn projection-explainer
-  "Compile an explainer against exactly one immutable projection."
+  "Acquire the retained schema's Malli-owned explainer, with native paths."
   {:malli/schema [:=> [:catn [::projection ::projection]
                              [::registry-key ::registry-key]]
                   ::compiled-validator]}
   [projection schema-key]
-  (m/explainer
-    (m/deref-recursive
-      schema-key
-      {:registry (:seon.schema.projection/registry projection)})))
+  (if-let [compiled (mr/schema (:seon.schema.projection/registry projection)
+                              schema-key)]
+    (m/explainer compiled)
+    (throw (ex-info (str "Missing schema declaration " schema-key ".")
+                    {:seon.schema/invalid-schema schema-key
+                     :seon.schema/key schema-key
+                     :seon.schema/missing-reference schema-key
+                     :seon.schema/missing-reference-namespace (namespace schema-key)}))))
 
 (defn- shape-projection []
   (or (handed-projection)
@@ -3722,23 +3722,6 @@
   {:malli/schema [:=> [:catn [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :map]]}
   [value]
   (identity-only-projection-in (shape-projection) value))
-
-(defn- cached-compiler-in!
-  "One compiled validator or explainer for `schema-key` in `projection`.
-
-   The compiled result is kept on the projection's own holder, so the cache
-   cannot be asked about one projection and answer about another. The old
-   shape — reset a process-global slot to the caller's projection, then deref
-   it AGAIN to read the answer — was two independent reads of shared mutable
-   state between which a second environment could reset the slot to its own
-   projection; that check-then-act is banned rather than tightened."
-  [projection cache-key compiler schema-key]
-  (if-let [cache (projection-cache projection)]
-    (or (get-in @cache [cache-key schema-key])
-        (let [compiled (compiler projection schema-key)]
-          (swap! cache assoc-in [cache-key schema-key] compiled)
-          compiled))
-    (compiler projection schema-key)))
 
 (defn- shape-rank [row]
   [(- (count (:seon.schema/required-attrs row)))
@@ -3822,10 +3805,7 @@
                      (every? present (:seon.schema/required-attrs row))))
            (sort-by shape-rank)
            (filter (fn [{:seon.schema/keys [key]}]
-                      ((cached-compiler-in!
-                        projection :seon.schema.shape/validators
-                        projection-validator key)
-                      value)))
+                      ((projection-validator projection key) value)))
            vec))
     []))
 
@@ -3849,9 +3829,7 @@
                     {:seon.schema/error :seon.schema/unknown-shape
                      :seon.schema/key schema-key
                      :seon.error/kind :core-bug :seon.schema/unknown-shape schema-key})))
-  ((cached-compiler-in!
-     projection :seon.schema.shape/explainers projection-explainer schema-key)
-   value))
+  ((projection-explainer projection schema-key) value))
 
 (defn explain-shape
   "Explain `value` against one activated structural schema.
@@ -3863,26 +3841,6 @@
   [schema-key value]
   (let [projection (shape-projection)]
     (explain-shape-in projection schema-key value)))
-
-(defn candidate-validator
-  "Compile a recursively resolved validator from current declarations."
-  {:malli/schema [:=> [:catn [::registry-key ::registry-key]]
-                  ::compiled-validator]}
-  [schema-key]
-  (m/validator
-   (m/deref-recursive
-    schema-key
-    {:registry (candidate-registry)})))
-
-(defn candidate-explainer
-  "Compile a recursively resolved explainer from current declarations."
-  {:malli/schema [:=> [:catn [::registry-key ::registry-key]]
-                  ::compiled-validator]}
-  [schema-key]
-  (m/explainer
-   (m/deref-recursive
-    schema-key
-    {:registry (candidate-registry)})))
 
 (defn schemas-in-namespace
   "The `{keyword definition}` map of schemas registered under `ns-name`.

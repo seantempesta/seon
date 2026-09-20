@@ -48,9 +48,7 @@
                      [?note :my.note/id "design"]
                      [?note :my.note/content ?content]]
                    @connection)))
-      (is (seon.schema/valid-candidate-value?
-           :my.note/note
-           (first (note/notes @connection "alice")))))))
+      (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.note/note) (first (note/notes @connection "alice")))))))
 
 (deftest forget-retracts-current-entity-and-history-keeps-content
   (with-notes
@@ -68,8 +66,7 @@
                    (db/history @connection))))
       (let [missing (note/forget! "temporary" connection "alice")]
         (is (= :my.note/not-found (:seon.error/kind missing)))
-        (is (seon.schema/valid-candidate-value?
-             :seon.error/value missing))))))
+        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/value) missing))))))
 
 (deftest notes-is-agent-scoped-current-and-whole
   (with-notes
@@ -84,7 +81,7 @@
         (is (= "note-00" (:my.note/id (first current))))
         (is (= "note-54" (:my.note/id (last current))))
         (is (not-any? #(= "bob-only" (:my.note/id %)) current))
-        (is (seon.schema/valid-candidate-value? :my.note/notes current))))))
+        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.note/notes) current))))))
 
 (deftest rebirth-renders-only-the-current-facts
   (with-notes
@@ -104,6 +101,5 @@
         (testing "all three declared projections accept the collection"
           (is (= '(my.note/notes) (note/render-notes-form current)))
           (is (= :section (first html)))
-          (is (seon.schema/valid-candidate-value? :seon.render/ai ai))
-          (is (seon.schema/valid-candidate-value?
-               :seon.render/hiccup html)))))))
+          (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.render/ai) ai))
+          (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.render/hiccup) html)))))))

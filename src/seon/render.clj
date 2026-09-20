@@ -84,7 +84,7 @@
      (:seon.config.render.agent/composition effective)}))
 
 (def ^:private default-agent-profile
-  (agent-render-profile (config/defaults)))
+  (delay (agent-render-profile (config/defaults))))
 
 (defn request-projection
   "The schema projection one render request asks its selection questions of.
@@ -133,7 +133,7 @@
           (if (and (:seon.error/at effective) (:seon.error/layer effective) (:seon.error/operation effective)) ;; debt: seon.config/effective declares :seon.error/value, directly or through its result union.
             effective
             (or (when effective (agent-render-profile effective))
-                default-agent-profile)))
+                @default-agent-profile)))
         (let [observation
               {:seon.error/at (java.util.Date.)
                :seon.error/layer :seon.render/render
@@ -1079,8 +1079,7 @@
 (defn- valid-projection?
   [projection output value]
   (or (and (:seon.error/at value) (:seon.error/layer value) (:seon.error/operation value)) ;; debt: seon.sci.kernel/invoke declares :seon.error/value through its admitted result.
-      (schema/valid-candidate-value?
-       (:seon.schema.projection/forms projection) output value)))
+      ((schema/projection-validator projection output) value)))
 
 (declare project-node*)
 

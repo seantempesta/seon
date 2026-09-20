@@ -80,12 +80,9 @@
          :seon.maintenance.receipt/started-at observed-at
          :seon.maintenance-schema-test/extra-receipt-value true}]
     (testing "required entries validate while unrelated entries accrete"
-      (is (true? (schema/valid-candidate-value?
-                  :seon.maintenance.request/value request)))
-      (is (true? (schema/valid-candidate-value?
-                  :seon.maintenance.result/value result)))
-      (is (true? (schema/valid-candidate-value?
-                  :seon.maintenance.receipt/receipt receipt))))
+      (is (true? ((schema/projection-validator (schema/handed-projection) :seon.maintenance.request/value) request)))
+      (is (true? ((schema/projection-validator (schema/handed-projection) :seon.maintenance.result/value) result)))
+      (is (true? ((schema/projection-validator (schema/handed-projection) :seon.maintenance.receipt/receipt) receipt))))
     (testing "the request and result are component refs, not serialized maps"
       (doseq [attribute [:seon.maintenance.receipt/request
                          :seon.maintenance.receipt/result]]
@@ -193,9 +190,9 @@
              :seon.operator.collect/complete? true}]
         (test-support/transacted!
                      connection
-                     [(assoc (maintenance/result-entity log-result)
+                     [(assoc (maintenance/result-entity (schema/handed-projection) log-result)
                              :seon.maintenance.result/id "maintenance-result/log")
-                      (assoc (maintenance/result-entity collect-result)
+                      (assoc (maintenance/result-entity (schema/handed-projection) collect-result)
                              :seon.maintenance.result/id "maintenance-result/collect")])
         (is (= "/repo/operator/logs/seon.log"
                (db/q '[:find ?path .
@@ -305,15 +302,11 @@
                [:seon.error/value
                 :seon.maintenance.result/cluster-cleanup-collection-component
                 error-component]]]
-        (is (true? (schema/valid-candidate-value? component-key value))
+        (is (true? ((schema/projection-validator (schema/handed-projection) component-key) value))
             (str component-key " must admit the " public-key " arm"))))
     (testing "the success arm is the one collect component, not a copy"
-      (is (true? (schema/valid-candidate-value?
-                  :seon.maintenance.result/collect-component
-                  collect-component))))
-    (is (false? (schema/valid-candidate-value?
-                 :seon.maintenance.result/cluster-cleanup-collection-component
-                 {:seon.maintenance-schema-test/only-unrelated true}))
+      (is (true? ((schema/projection-validator (schema/handed-projection) :seon.maintenance.result/collect-component) collect-component))))
+    (is (false? ((schema/projection-validator (schema/handed-projection) :seon.maintenance.result/cluster-cleanup-collection-component) {:seon.maintenance-schema-test/only-unrelated true}))
         "neither arm admits a value carrying no collection evidence")))
 
 (deftest empty-maintenance-memberships-retain-their-positive-observation

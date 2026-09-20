@@ -13,27 +13,21 @@
     (is (contains? attributes :seon.fn/workload))
     (is (contains? attributes :seon.ns.alias/local))
     (is (contains? attributes :seon.ns.refer/target-name)))
-  (is (schema/valid-candidate-value?
-       :seon.fn/fn
-       {:seon.fn/sym "sample/f"
+  (is ((schema/projection-validator (schema/handed-projection) :seon.fn/fn) {:seon.fn/sym "sample/f"
         :seon.schema.admission/source :core
         :seon.fn/ns [:seon.ns/name 'sample]
         :seon.fn/source "(defn ^{:seon.workload :io} f [x] x)"
         :seon.fn/arglists "([x])"
         :seon.fn/private? false
         :seon.fn/workload :io}))
-  (is (schema/valid-candidate-value?
-       :seon.ns/ns
-       {:seon.ns/name 'sample
+  (is ((schema/projection-validator (schema/handed-projection) :seon.ns/ns) {:seon.ns/name 'sample
         :seon.schema.admission/source :core
         :seon.ns/source "(ns sample)"
         :seon.ns/requires #{}
         :seon.ns/aliases #{}
         :seon.ns/imports #{}
         :seon.ns/refers #{}}))
-  (is (schema/valid-candidate-value?
-       :seon.ns/ns
-       {:seon.ns/name 'my.agents.source-less
+  (is ((schema/projection-validator (schema/handed-projection) :seon.ns/ns) {:seon.ns/name 'my.agents.source-less
         :seon.schema.admission/source :agent})
       "an agent namespace is valid without invented source bytes"))
 
@@ -64,18 +58,16 @@
          :seon.fn.manifest/digest (apply str (repeat 64 "1"))
          :seon.fn.manifest/artifacts [artifact]
          :seon.fn.manifest/identities [[:seon.fn/sym "sample/f"]]}]
-    (is (schema/valid-candidate-value? :seon.program/row declaration))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.program/row) declaration))
     (is (= {:seon.schema/key :sample/value
             :seon.schema/form ":string"
             :seon.schema.admission/source :core}
            schema-declaration))
-    (is (schema/valid-candidate-value? :seon.program/row
-                                       schema-declaration))
-    (is (schema/valid-candidate-value? :seon.program/row deletion))
-    (is (schema/valid-candidate-value? :seon.program/rows
-                                       [declaration deletion]))
-    (is (schema/valid-candidate-value? :seon.fn.file/artifact artifact))
-    (is (schema/valid-candidate-value? :seon.fn.manifest/manifest manifest))))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.program/row) schema-declaration))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.program/row) deletion))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.program/rows) [declaration deletion]))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.fn.file/artifact) artifact))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.fn.manifest/manifest) manifest))))
 
 (deftest evaluation-drive-values-have-declared-leaf-shapes
   (let [run-id "proof:sample"
@@ -89,16 +81,10 @@
                  :seon.cluster.eval/at (java.util.Date.)}
         terminal {:seon.eval.drive/outcome :completed
                   :seon.eval.drive/run-ids [run-id]}]
-    (is (schema/valid-candidate-value?
-         :seon.eval.drive/evaluation receipt))
-    (is (schema/valid-candidate-value?
-         :seon.eval.drive/terminal-state terminal))
-    (is (not (schema/valid-candidate-value?
-              :seon.eval.drive/evaluation
-              (dissoc receipt :seon.cluster.eval/at))))
-    (is (not (schema/valid-candidate-value?
-              :seon.eval.drive/terminal-state
-              (assoc terminal :seon.eval.drive/outcome :unknown))))))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.eval.drive/evaluation) receipt))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.eval.drive/terminal-state) terminal))
+    (is (not ((schema/projection-validator (schema/handed-projection) :seon.eval.drive/evaluation) (dissoc receipt :seon.cluster.eval/at))))
+    (is (not ((schema/projection-validator (schema/handed-projection) :seon.eval.drive/terminal-state) (assoc terminal :seon.eval.drive/outcome :unknown))))))
 
 (deftest database-shape-render-declarations-resolve
   (let [catalog (schema/entity-catalog)

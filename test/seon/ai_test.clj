@@ -79,7 +79,7 @@
 
 (deftest the-shipped-cluster-has-a-primary-and-configured-backup
   (let [targets (ai/targets @dials)]
-    (is (schema/valid-candidate-value? :seon.ai/targets targets))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/targets) targets))
     (is (= {:seon.ai/endpoint (:seon.config.ai/endpoint @dials)
             :seon.ai/model (:seon.config.ai/model @dials)
             :seon.ai/max-tokens (:seon.config.ai/max-tokens @dials)
@@ -98,9 +98,7 @@
         "the pinned 0731 GA slug, never the bare 0423 preview slug")
     (testing "and a target is a request minus what to say, which is why
     the call site is one assoc"
-      (is (schema/valid-candidate-value?
-           :seon.ai/request
-           (assoc (:seon.ai/primary targets) :seon.ai/prompt "hello"))))
+      (is ((schema/projection-validator (schema/handed-projection) :seon.ai/request) (assoc (:seon.ai/primary targets) :seon.ai/prompt "hello"))))
     (is (= 65536 (:seon.ai/max-tokens (:seon.ai/primary targets)))
         "the interim output budget remains until flash calibration lands")
     (is (= :disabled (:seon.ai/thinking (:seon.ai/primary targets)))
@@ -188,17 +186,11 @@
                 :seon.ai/max-tokens 8192
                 :seon.config.ai/no-auth true
                 :seon.ai/timeout-ms 300000}]
-    (is (schema/valid-candidate-value? :seon.ai/target target))
-    (is (schema/valid-candidate-value?
-         :seon.ai/request
-         (assoc target :seon.ai/prompt "hello")))
-    (is (schema/valid-candidate-value?
-         :seon.ai/target
-         (assoc target :seon.ai/api-key-variable "DUMMY"))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/target) target))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/request) (assoc target :seon.ai/prompt "hello")))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/target) (assoc target :seon.ai/api-key-variable "DUMMY"))
         "each open union arm ignores data it does not declare")
-    (is (not (schema/valid-candidate-value?
-              :seon.ai/target
-              (dissoc target :seon.config.ai/no-auth)))
+    (is (not ((schema/projection-validator (schema/handed-projection) :seon.ai/target) (dissoc target :seon.config.ai/no-auth)))
         "omitting a credential does not silently mean no-auth")))
 
 (deftest a-no-auth-config-row-assembles-and-sends-without-authorization
@@ -224,7 +216,7 @@
         "assembly carries the descriptor's declared authentication state")
     (is (not (contains? target :seon.ai/api-key-variable))
         "the assembled target keeps exactly one authentication declaration")
-    (is (schema/valid-candidate-value? :seon.ai/target target))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/target) target))
     (is (= "local reply" (:seon.ai/text outcome)))
     (is (int? (:seon.ai.model/last-latency-ms outcome)))
     (is (= {"content-type" "application/json"}
@@ -237,7 +229,7 @@
   (let [targets (ai/targets (assoc @dials :seon.config.ai.backup/model
                                    "deepseek-v4-pro"))
         {:seon.ai/keys [primary backup]} targets]
-    (is (schema/valid-candidate-value? :seon.ai/targets targets))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/targets) targets))
     (is (.equals "deepseek-v4-pro" (:seon.ai/model backup)))
     (is (= (dissoc primary :seon.ai/model) (dissoc backup :seon.ai/model))
         "same provider, same credential, same deadline — one dial said
@@ -402,11 +394,11 @@
              here to update")
         (is (not (contains? model :seon.config.ai/endpoint))
             "provider wire facts never duplicate onto model rows")
-        (is (schema/valid-candidate-value? :seon.ai.model/entity accreted)
+        (is ((schema/projection-validator (schema/handed-projection) :seon.ai.model/entity) accreted)
             "a tailored fact can accrete without breaking the open row")
         (is (str/includes? ai-render "input $0.250000/M"))
         (is (str/includes? ai-render "registered-model"))
-        (is (schema/valid-candidate-value? :seon.render/hiccup html-render))))))
+        (is ((schema/projection-validator (schema/handed-projection) :seon.render/hiccup) html-render))))))
 
 (deftest no-history-gauges-retain-current-and-drop-superseded-values
   (test-support/with-database
@@ -470,7 +462,7 @@
   (let [shipped-dials @dials
         derived (ai/retry-strategy shipped-dials)
         midpoint-schedule (ai/delays derived (constantly 0.5))]
-    (is (schema/valid-candidate-value? :seon.ai.retry/strategy derived))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai.retry/strategy) derived))
     (is (= {:seon.ai.retry/base-delay-ms 500
             :seon.ai.retry/multiplier 2.0
             :seon.ai.retry/jitter-fraction 0.25
@@ -530,7 +522,7 @@
                              (fn [] (let [v (first @drawn)]
                                       (swap! drawn rest)
                                       v)))]
-     (and (schema/valid-candidate-value? :seon.ai.retry/delays schedule)
+     (and ((schema/projection-validator (schema/handed-projection) :seon.ai.retry/delays) schedule)
           ;; FINITE, and never longer than the configured count
           (<= (count schedule) retries)
           ;; every single wait is clamped
@@ -562,13 +554,11 @@
          "details" {"cached" true
                     "classes" [nil "hit" 1.5]}}]
     (doseq [value [nil false 7 1.25 "text" [] {} [nil {"ok" true}]]]
-      (is (schema/valid-candidate-value? :seon.ai/json-value value)
+      (is ((schema/projection-validator (schema/handed-projection) :seon.ai/json-value) value)
           (pr-str value)))
-    (is (schema/valid-candidate-value? :seon.ai/usage payload))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/usage) payload))
     (is (= payload (json/read-str (json/write-str payload))))
-    (is (not (schema/valid-candidate-value?
-              :seon.ai/json-value
-              (fn [] :not-json))))))
+    (is (not ((schema/projection-validator (schema/handed-projection) :seon.ai/json-value) (fn [] :not-json))))))
 
 (deftest generated-json-values-validate-and-round-trip
   (let [compiled (compiled-json-value-schema)
@@ -617,7 +607,7 @@
     (is (= :high (:seon.config.ai/thinking resolved)))
     (is (= (:seon.config.ai/endpoint cluster)
            (:seon.config.ai/endpoint resolved)))
-    (is (schema/valid-candidate-value? :seon.config/effective resolved))))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.config/effective) resolved))))
 
 (deftest agent-overlay-reads-only-derived-per-agent-attributes
   (test-support/with-database
@@ -829,7 +819,7 @@
     (is (= "stop" (:seon.ai/finish-reason completion)))
     (is (= 42 (:seon.ai/tokens completion)))
     (is (= thinking-usage (:seon.ai/usage completion)))
-    (is (schema/valid-candidate-value? :seon.ai/completion completion))))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/completion) completion))))
 
 (deftest a-reasoning-only-response-is-a-named-evidenced-error
   (let [usage {"prompt_tokens" 104
@@ -857,7 +847,7 @@
                        [:seon.error/data :seon.ai/reasoning-received])))
     (is (zero? (get-in failure
                         [:seon.error/data :seon.ai/text-received])))
-    (is (schema/valid-candidate-value? :seon.error/value failure))))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.error/value) failure))))
 
 (deftest streaming-reasoning-never-becomes-text-and-retains-terminal-evidence
   (let [lines [(str "data: {\"choices\":[{\"delta\":{"
@@ -1436,9 +1426,8 @@
                    backup? gen/boolean]
       (let [value (partition-value partition)
             request {:seon.error/value value :seon.ai/backup? backup?}]
-        (and (schema/valid-candidate-value? :seon.error/value value)
-             (schema/valid-candidate-value? :seon.ai/disposition-request
-                                            request)
+        (and ((schema/projection-validator (schema/handed-projection) :seon.error/value) value)
+             ((schema/projection-validator (schema/handed-projection) :seon.ai/disposition-request) request)
              (= (expected-disposition partition backup?)
                 (ai/disposition request)))))
     :seed 202607280401)
@@ -1476,7 +1465,7 @@
     (is (= :seon.ai/transport-failure (:seon.error/kind value))
         (str "the production transport boundary must construct the subject: "
              (pr-str value)))
-    (is (schema/valid-candidate-value? :seon.error/value value)
+    (is ((schema/projection-validator (schema/handed-projection) :seon.error/value) value)
         "the derived subject is one complete typed error value")
     (let [evidence (:seon.error/data value)]
       (is (false? (:seon.ai/request-transmitted? evidence)))

@@ -42,6 +42,6 @@ bound or suppressing instrumentation.
 Acceptance: compare the same canonical walk at a coordinated baseline,
 locate allocation in the owning function, retain the unchanged allocation
 and pull-plan behavior assertions, and prove the selected-render failure
-without printing an unbounded runtime object. The registry construction and
-call-site cut remains uncommitted pending its required proofs; see
+without printing an unbounded runtime object. The owner ruled this an open measurement, not a step-1 landing condition.
+The registry construction and call-site cut lands independently; see
 [the step-1 note](../../prds/steward-platform/research/bridge-step1-registry-2026-09-20.md).

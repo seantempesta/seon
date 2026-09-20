@@ -119,8 +119,7 @@
           (let [status (seon.cluster.status/snapshot {:seon.db/db database :seon.db/connection connection})]
             (is (= 6 (get (into {} (:seon.cluster.status/faults status))
                           (second (:seon.error/ref a)))))
-            (is (schema/valid-candidate-value? :seon.error/base
-                                             (:seon.cluster.status/store-bytes status)))
+            (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) (:seon.cluster.status/store-bytes status)))
             (is (str/includes? (:seon.error/message (:seon.cluster.status/store-bytes status))
                                "not scanned")))
           (is (str/includes? (pr-str (#'seon.render.transcript/fault-problems database "error-graph-steward" [])) "occurrences: 6"))
@@ -133,7 +132,7 @@
           (is (= 1 (:seon.render.transcript/count (first (#'seon.render.transcript/fault-problems database "error-graph-steward" [])))))
           (is (:db-after (db/transact! connection [[:db/add (:seon.error/ref a) :seon.error/resolved-tx "datomic.tx"]])))
           (is (str/includes? (pr-str (error/render-html (read-error))) "Resolved"))
-          (is (schema/valid-candidate-value? :seon.error/fact (:seon.error/fact (first (#'seon.problems/error-signatures (db/db connection)))))))
+          (is ((schema/projection-validator (schema/handed-projection) :seon.error/fact) (:seon.error/fact (first (#'seon.problems/error-signatures (db/db connection)))))))
         (let [flat (error/recording (db/db connection)
                                   (commit-request {:seon.error/message "flat error", :seon.error/data {:seon.error/diagnostic-operation (quote seon.id/valid?)}} {}))]
           (is (:seon.error/ref flat))
@@ -221,7 +220,7 @@
         unavailable
         (error/diagnostic
          {:seon.error/diagnostic-evidence nil, :seon.error/operation (quote seon.error-test/check), :seon.error/diagnostic-expected nil, :seon.error/diagnostic-member nil, :seon.error/message "The evidence could not be observed.", :seon.error/layer :seon.error-test/diagnostic, :seon.error/diagnostic-layer nil, :seon.error/data {:seon.error-test/context :kept, :seon.error/diagnostic-evidence-availability :cannot-replace, :seon.error/diagnostic-layer :cannot-replace}, :seon.error/diagnostic-offending nil, :seon.error/diagnostic-operation nil, :seon.error/at (java.util.Date.), :seon.error/diagnostic-cause nil})]
-    (is (schema/valid-candidate-value? :seon.error/base complete))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) complete))
     (is (= {:seon.error-test/context :kept
             :seon.error/diagnostic-layer :agent-boundary
             :seon.error/diagnostic-operation 'seon.error-test/check
@@ -381,10 +380,9 @@
                 ;; and its VALUE is not, because `nil` is a perfectly
                 ;; good projection of a source that was nil
                 _read-back (edn/read-string (:seon.error/data-edn fact))]
-            (and (seon.schema/valid-candidate-value? :seon.error/fact fact)
-                 (seon.schema/valid-candidate-value? :seon.error/base
-                                                     (error/value fact))
-                 (schema/valid-candidate-value? :seon.error/base fact)
+            (and ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/fact) fact)
+                 ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/base) (error/value fact))
+                 ((schema/projection-validator (schema/handed-projection) :seon.error/base) fact)
                  (re-matches #"^[0-9a-f]{64}$" (:seon.error/signature fact))
                  ;; attribution rides exactly when it was supplied
                  (= attributed? (contains? fact :seon.error/run))
@@ -482,7 +480,7 @@
              prepared (error/prepare (request thrown))
              fact (:seon.error/fact prepared)
              fact-bytes (alength (.getBytes (pr-str fact) "UTF-8"))]
-         (is (schema/valid-candidate-value? :seon.instrument/contract-error (ex-data thrown))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data thrown))
              (pr-str fact))
          (is (str/includes? (:seon.instrument/actual fact) ":seon.ns/name")
              "the value at the violation path is kept, bounded by what it is")
@@ -568,7 +566,7 @@
   ;; a second error.
   (let [exploding (lazy-seq (throw (ex-info "realizing me throws" {})))
         fact (error/normalize (request {:seon.error/message "rejected", :seon.error/data {:rows exploding}}))]
-    (is (seon.schema/valid-candidate-value? :seon.error/fact fact))
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/fact) fact))
     (is (str/includes? (:seon.error/data-edn fact) "seon.print/failed"))))
 
 ;;; ---------------------------------------------------------------------------
@@ -600,7 +598,7 @@
 (deftest a-value-that-was-never-a-throwable-has-no-class
   (let [fact (error/normalize (request {:seon.error/message "unset"}))]
     (is (not (contains? fact :seon.error/throwable-class)))
-    (is (schema/valid-candidate-value? :seon.error/base fact))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) fact))
     (is (= "unset" (:seon.error/message fact)))))
 
 (deftest the-message-comes-from-the-rule-not-the-wrapper
@@ -624,9 +622,9 @@
 (deftest an-unclassifiable-source-is-fail-closed-never-absent
   (doseq [source [42 "a string" {:not-an-error true} nil]]
     (let [fact (error/normalize (request source))]
-      (is (schema/valid-candidate-value? :seon.error/base fact)
+      (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) fact)
           (str "source: " (pr-str source)))
-      (is (seon.schema/valid-candidate-value? :seon.error/fact fact)))))
+      (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/fact) fact)))))
 
 (deftest attribution-is-a-lookup-ref-or-nothing
   (let [with (error/normalize (request {:seon.error/message "no"}
@@ -689,7 +687,7 @@
             human (rendered notice :ai)
             line (rendered notice :log)]
         (and
-         (seon.schema/valid-candidate-value? :seon.error/notice notice)
+         ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/notice) notice)
          (= fact (:seon.error/fact notice))
          (= [:seon.error/id (:seon.error/id fact)]
             (:seon.error/evidence notice))
@@ -728,7 +726,7 @@
        (is (str/includes? ai (:seon.error/message value))
            "AI explains the failure without dumping internal evidence")
        (is (= :article (first html)))
-       (is (schema/valid-candidate-value? :seon.render/hiccup html))
+       (is ((schema/projection-validator (schema/handed-projection) :seon.render/hiccup) html))
        (is (str/includes? (pr-str html) (:seon.error/message value)))))))
 
 (deftest the-default-html-face-links-committed-evidence
@@ -827,7 +825,7 @@
 (deftest the-flat-value-projects-from-the-fact
   (let [fact (fact)
         value (error/value fact)]
-    (is (seon.schema/valid-candidate-value? :seon.error/base value))
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/base) value))
     (is (= (select-keys fact [:seon.error/at :seon.error/layer :seon.error/operation])
            (select-keys value [:seon.error/at :seon.error/layer :seon.error/operation])))
     (is (= (:seon.error/message fact) (:seon.error/message value)))
@@ -1156,7 +1154,7 @@
              segment (:v (first (db/datoms database :eavt location :seon.error.location/segments)))
              before (db/basis-t database)
              result (db/transact! connection [[:db/add segment :seon.error.location.segment/ordinal 3]])]
-         (is (schema/valid-candidate-value? :seon.db.write/validation-refusal result) (pr-str result))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.db.write/validation-refusal) result) (pr-str result))
          (is (= [[:db/add segment :seon.error.location.segment/ordinal 3]]
                 (get-in result [:seon.error/data :seon.db.write.attempt/transaction])))
          (is (= before (get-in result [:seon.error/basis :seon.error.basis/t])))
