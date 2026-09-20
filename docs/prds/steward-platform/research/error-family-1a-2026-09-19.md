@@ -2407,13 +2407,18 @@ above. No pending producer is made green by accepting incomplete error data.
   printing; canonical and armed regressions pass as measured above.
   Namespace loads before and after this commit both returned `:loads`
   (`tmp/error-family-resume-final-load-1.log` and `-2.log`).
-- The following producer/assertion slice contains `src/seon/db.clj`,
+- `494c40715`: the producer/assertion slice contains `src/seon/db.clj`,
   `test/seon/db_test.clj`, and `test/seon/sci/eval_test.clj`: complete raw
   missing-projection refusals, specific raw-facet propagation, and the
   successful declared-facet assertions measured by the second combined run.
-  It adds no schema or stored attribute.
+  It adds no schema or stored attribute. The required namespace-load command
+  returned `:loads` after this commit as well
+  (`tmp/error-family-resume-final-load-3.log`).
 
 The lane stops at the **acquisition model decision**, with the exact three
 priced options above and recommendation 2. The required whole-program digest
 cannot truthfully be fabricated from a failed row. Outstanding red tests and
 the cold command remain explicit; this is not a six-suite green landing.
+All fast and load JVMs were awaited serially. The final fast snapshot root
+was removed by its launcher; no worktree was created. Only foreign edits
+remain outside this final documentation update.
