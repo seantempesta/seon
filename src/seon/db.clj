@@ -191,12 +191,6 @@
        (map? (ex-data error))
        (assoc ::dependency-data (ex-data error))))))
 
-(defn- error-value?
-  [value]
-  (and (map? value)
-       (keyword? (:seon.error/kind value))
-       (string? (:seon.error/message value))))
-
 (defn- connection-projection-state
   [connection]
   ;; The operator owns this table. Do not load the operator during database
@@ -243,7 +237,9 @@
          [:maybe :seon.sci.eval/projection-state]]
     [:or :seon.db/database-value :seon.error/value]]}
   [database state]
-  (if (and state (not (error-value? database)))
+  (if (and state (not (and (map? database) (inst? (:seon.error/at database))
+             (qualified-keyword? (:seon.error/layer database))
+             (qualified-symbol? (:seon.error/operation database)))))
     (let [projection (or (:seon.schema/projection (meta database))
                          (:seon.schema/projection @state))]
       (cond-> (vary-meta database assoc :seon.sci.eval/projection-state state)
@@ -330,7 +326,9 @@
     [:or :seon.db/connection-identity :seon.error/value]]}
   [connection]
   (cond
-    (error-value? connection) connection
+    (and (map? connection) (inst? (:seon.error/at connection))
+             (qualified-keyword? (:seon.error/layer connection))
+             (qualified-symbol? (:seon.error/operation connection))) connection
 
     (not (map? (:config @connection)))
     (error-value
@@ -398,7 +396,9 @@
    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
     [:or :seon.db/database-value-identity :seon.error/value]]}
   [database]
-  (if (error-value? database)
+  (if (and (map? database) (inst? (:seon.error/at database))
+             (qualified-keyword? (:seon.error/layer database))
+             (qualified-symbol? (:seon.error/operation database)))
     database
     (let [configuration (dbi/-config database)
           commit-id (d/commit-id database)]
@@ -424,7 +424,9 @@
    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
     [:or :int :seon.error/value]]}
   [database]
-  (if (error-value? database)
+  (if (and (map? database) (inst? (:seon.error/at database))
+             (qualified-keyword? (:seon.error/layer database))
+             (qualified-symbol? (:seon.error/operation database)))
     database
     (long (dbi/-max-tx database))))
 
@@ -1066,7 +1068,9 @@
                        [:vector :seon.db/read-evidence]]
                   [:or :boolean :seon.db/error-result]]}
   [database retained]
-  (if (error-value? database)
+  (if (and (map? database) (inst? (:seon.error/at database))
+             (qualified-keyword? (:seon.error/layer database))
+             (qualified-symbol? (:seon.error/operation database)))
     database
     (every?
      (fn [{source-position :seon.db/source-argument-position
@@ -1245,7 +1249,9 @@
    (if (and (nil? database) (= :seon.db/relation-only absent))
      (continue relation-only-declarations)
      (let [declarations (read-declarations database operation)]
-       (if (error-value? declarations)
+       (if (and (map? declarations) (inst? (:seon.error/at declarations))
+             (qualified-keyword? (:seon.error/layer declarations))
+             (qualified-symbol? (:seon.error/operation declarations)))
          declarations
          (continue declarations))))))
 
@@ -1754,7 +1760,9 @@
   ([]
    (current-database-value))
   ([connection]
-   (if (error-value? connection)
+   (if (and (map? connection) (inst? (:seon.error/at connection))
+             (qualified-keyword? (:seon.error/layer connection))
+             (qualified-symbol? (:seon.error/operation connection)))
      connection
      (resolve-database-value connection))))
 
@@ -1822,7 +1830,9 @@
           (let [position (:datahike.query.source/argument-position source)]
             (when (< position (count arguments))
               (let [argument (nth arguments position)]
-                (when (error-value? argument)
+                (when (and (map? argument) (inst? (:seon.error/at argument))
+             (qualified-keyword? (:seon.error/layer argument))
+             (qualified-symbol? (:seon.error/operation argument)))
                   argument)))))
         source-bindings))
 
@@ -1866,7 +1876,9 @@
                         value (get arguments (if (and omitted? (> index position))
                                                (dec index) index))]
                     (or (and omitted? (= index position))
-                        (db.utils/db? value) (error-value? value))))
+                        (db.utils/db? value) (and (map? value) (inst? (:seon.error/at value))
+             (qualified-keyword? (:seon.error/layer value))
+             (qualified-symbol? (:seon.error/operation value))))))
                 sources)]
     (cond
       (not valid-sources?) :invalid
@@ -1883,7 +1895,9 @@
             :explicit arguments
             :invalid (query-input-shape-error query-form arguments)
             (let [database (or explicit-database (current-database-value))]
-              (if (error-value? database)
+              (if (and (map? database) (inst? (:seon.error/at database))
+             (qualified-keyword? (:seon.error/layer database))
+             (qualified-symbol? (:seon.error/operation database)))
                 database
                 (into (conj (subvec arguments 0 position) database)
                       (subvec arguments position)))))))))
@@ -1908,7 +1922,9 @@
 (defn- query-call-valid?
   [[call-arguments _result]]
   (let [[query-or-database & arguments] call-arguments]
-    (if (error-value? query-or-database)
+    (if (and (map? query-or-database) (inst? (:seon.error/at query-or-database))
+             (qualified-keyword? (:seon.error/layer query-or-database))
+             (qualified-symbol? (:seon.error/operation query-or-database)))
       true
       (try
         (let [explicit? (db.utils/db? query-or-database)
@@ -1924,7 +1940,9 @@
 (defn- query-guard-message
   [{value :value} _options]
   (let [[[head & tail] result] value]
-    (or (when (error-value? result) (:seon.error/message result))
+    (or (when (and (map? result) (inst? (:seon.error/at result))
+             (qualified-keyword? (:seon.error/layer result))
+             (qualified-symbol? (:seon.error/operation result))) (:seon.error/message result))
         (try
           (let [explicit? (db.utils/db? head)
                 query-input (if explicit? (first tail) head)
@@ -1940,7 +1958,9 @@
   {:malli/schema
    [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.db/error-result] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
   [query-or-database & arguments]
-  (if (error-value? query-or-database)
+  (if (and (map? query-or-database) (inst? (:seon.error/at query-or-database))
+             (qualified-keyword? (:seon.error/layer query-or-database))
+             (qualified-symbol? (:seon.error/operation query-or-database)))
     query-or-database
     (let [explicit-database? (db.utils/db? query-or-database)
         query-input
@@ -1964,7 +1984,9 @@
                (when explicit-database? query-or-database)
                (:query normalized)
                (:args normalized)))]
-        (if (error-value? aligned)
+        (if (and (map? aligned) (inst? (:seon.error/at aligned))
+             (qualified-keyword? (:seon.error/layer aligned))
+             (qualified-symbol? (:seon.error/operation aligned)))
           aligned
           (let [request (assoc normalized :args aligned)
                 parsed-query (query/memoized-parse-query (:query request))]
@@ -2101,9 +2123,8 @@
      declare a present attribute and whose required attributes are all
      present. Exactly one is the key; none or several leaves it undecided,
      because the index is an over-approximation, not a declaration.
-   - nil means NOTHING declares this entity's schema. That is a gap in the
-     declared facts — this tree has many, the provider descriptor rows among
-     them — and the caller passes the value through unvalidated rather than
+   - nil means nothing declares this entity's schema. In that case the
+     caller passes the value through unvalidated rather than
      converting a missing declaration into a refused read."
   {:malli/schema
    [:=> [:cat :seon.schema/projection :seon.db/database-value
@@ -2255,7 +2276,9 @@
                                     (pulled-entity-schema-key
                                      projection database entity-id))]
                  (cond
-                   (error-value? schema-key) (reduced schema-key)
+                   (and (map? schema-key) (inst? (:seon.error/at schema-key))
+             (qualified-keyword? (:seon.error/layer schema-key))
+             (qualified-symbol? (:seon.error/operation schema-key))) (reduced schema-key)
 
                    (nil? schema-key) nil
 
@@ -2263,14 +2286,18 @@
                    (let [checked (validate-pulled-value
                                   projection public-operation schema-key
                                   selector element)]
-                     (if (error-value? checked) (reduced checked) nil))))))
+                     (if (and (map? checked) (inst? (:seon.error/at checked))
+             (qualified-keyword? (:seon.error/layer checked))
+             (qualified-symbol? (:seon.error/operation checked))) (reduced checked) nil))))))
            nil
            (map vector entity-ids values))]
       (or refusal value))))
 
 (defn- pull-call
   [database arguments operation operation-key result-key public-operation]
-  (if (error-value? database)
+  (if (and (map? database) (inst? (:seon.error/at database))
+             (qualified-keyword? (:seon.error/layer database))
+             (qualified-symbol? (:seon.error/operation database)))
     database
     (or (missing-pull-selector-error public-operation arguments)
         (let [many? (= :pull-many operation-key)
@@ -2337,8 +2364,12 @@
 (defn- pull-call-valid?
   [[arguments _result]]
   (let [[head & tail] arguments
-        inputs (if (or (db.utils/db? head) (error-value? head)) tail arguments)]
-    (or (error-value? head)
+        inputs (if (or (db.utils/db? head) (and (map? head) (inst? (:seon.error/at head))
+             (qualified-keyword? (:seon.error/layer head))
+             (qualified-symbol? (:seon.error/operation head)))) tail arguments)]
+    (or (and (map? head) (inst? (:seon.error/at head))
+             (qualified-keyword? (:seon.error/layer head))
+             (qualified-symbol? (:seon.error/operation head)))
         (and (= 1 (count inputs)) (map? (first inputs)))
         (and (= 2 (count inputs)) (vector? (first inputs))
              (not (map? (second inputs)))))))
@@ -2371,7 +2402,9 @@
               'seon.db/pull))
   ([database-or-selector options-or-eid]
    (if (or (db.utils/db? database-or-selector)
-           (error-value? database-or-selector))
+           (and (map? database-or-selector) (inst? (:seon.error/at database-or-selector))
+             (qualified-keyword? (:seon.error/layer database-or-selector))
+             (qualified-symbol? (:seon.error/operation database-or-selector))))
      (pull-call database-or-selector
                 [options-or-eid]
                 pull-plan-with-evidence
@@ -2422,7 +2455,9 @@
               'seon.db/pull-many))
   ([database-or-selector options-or-eids]
    (if (or (db.utils/db? database-or-selector)
-           (error-value? database-or-selector))
+           (and (map? database-or-selector) (inst? (:seon.error/at database-or-selector))
+             (qualified-keyword? (:seon.error/layer database-or-selector))
+             (qualified-symbol? (:seon.error/operation database-or-selector))))
      (pull-call database-or-selector
                 [options-or-eids]
                 pull-many-plan-with-evidence
@@ -2495,7 +2530,9 @@
 
 (defn- datoms-call
   [database arguments]
-  (if (error-value? database)
+  (if (and (map? database) (inst? (:seon.error/at database))
+             (qualified-keyword? (:seon.error/layer database))
+             (qualified-symbol? (:seon.error/operation database)))
     database
     (try
       ;; Datahike's index cursor is lazy and each element is a host Datom.
@@ -2544,7 +2581,9 @@
   (let [[head & tail] arguments
         inputs (if (db.utils/db? head) tail arguments)
         [index & components] inputs]
-    (or (error-value? head)
+    (or (and (map? head) (inst? (:seon.error/at head))
+             (qualified-keyword? (:seon.error/layer head))
+             (qualified-symbol? (:seon.error/operation head)))
         (if (map? index)
           (empty? components)
           (and (#{:eavt :aevt :avet} index)
@@ -2556,7 +2595,9 @@
    [:=> [:cat [:or :seon.db/database-value :seon.error/value :seon.db/index-lookup :keyword] [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike index components include arbitrary attribute values. The function guard checks index, component count and argument-map exclusivity.", :gen/elements [[]]} :seon.schema/value]] [:or :seon.db/datoms :seon.db/error-result] [:fn #:error{:message "Use (seon.db/datoms index & components) or (seon.db/datoms database index & components); an index argument map takes no trailing arguments, and an index has at most four components."} seon.db/datoms-call-valid?]]}
   [database-or-index & arguments]
   (if (or (db.utils/db? database-or-index)
-          (error-value? database-or-index))
+          (and (map? database-or-index) (inst? (:seon.error/at database-or-index))
+             (qualified-keyword? (:seon.error/layer database-or-index))
+             (qualified-symbol? (:seon.error/operation database-or-index))))
     (datoms-call database-or-index arguments)
     (datoms-call (current-database-value)
                  (cons database-or-index arguments))))
@@ -2572,7 +2613,9 @@
      [:or ::index-page-result :seon.db/error-result]]]}
   ([options] (index-page (current-database-value) options))
   ([database options]
-   (if (error-value? database)
+   (if (and (map? database) (inst? (:seon.error/at database))
+             (qualified-keyword? (:seon.error/layer database))
+             (qualified-symbol? (:seon.error/operation database)))
      database
      (try
        (with-declarations database 'seon.db/index-page
@@ -2595,7 +2638,9 @@
 (defn- database-view
   [operation database arguments]
   (cond
-    (error-value? database)
+    (and (map? database) (inst? (:seon.error/at database))
+             (qualified-keyword? (:seon.error/layer database))
+             (qualified-symbol? (:seon.error/operation database)))
     database
 
     (not (dbi/-temporal-index? database))
@@ -2618,7 +2663,9 @@
 
 (defn- database-identity
   [operation operation-name database]
-  (if (error-value? database)
+  (if (and (map? database) (inst? (:seon.error/at database))
+             (qualified-keyword? (:seon.error/layer database))
+             (qualified-symbol? (:seon.error/operation database)))
     database
     (try
       (let [result (operation database)]
@@ -2750,8 +2797,12 @@
              [?sink :seon.fn/external-sink ?sink-kind]]
            database external-sink-reach-rules function-symbol)]
     (cond
-      (error-value? direct) direct
-      (error-value? reached) reached
+      (and (map? direct) (inst? (:seon.error/at direct))
+             (qualified-keyword? (:seon.error/layer direct))
+             (qualified-symbol? (:seon.error/operation direct))) direct
+      (and (map? reached) (inst? (:seon.error/at reached))
+             (qualified-keyword? (:seon.error/layer reached))
+             (qualified-symbol? (:seon.error/operation reached))) reached
       :else (into (set direct) reached))))
 
 (defn- diff-plan
@@ -2759,20 +2810,26 @@
   (let [snapshot
         (@call-preparation-snapshot
          database projection)]
-    (if (error-value? snapshot)
+    (if (and (map? snapshot) (inst? (:seon.error/at snapshot))
+             (qualified-keyword? (:seon.error/layer snapshot))
+             (qualified-symbol? (:seon.error/operation snapshot)))
       snapshot
       (let [plan
             (@call-preparation-plan-for
              database snapshot function-symbol)
             database-slots
-            (when-not (error-value? plan)
+            (when-not (and (map? plan) (inst? (:seon.error/at plan))
+             (qualified-keyword? (:seon.error/layer plan))
+             (qualified-symbol? (:seon.error/operation plan)))
               (->> (:seon.call-preparation/arities plan)
                    (mapcat :seon.call-preparation/slots)
                    (filter #(= :seon.db/db
                                (:seon.call-preparation/key %)))
                    vec))
             candidates
-            (when-not (error-value? plan)
+            (when-not (and (map? plan) (inst? (:seon.error/at plan))
+             (qualified-keyword? (:seon.error/layer plan))
+             (qualified-symbol? (:seon.error/operation plan)))
               (->> (:seon.call-preparation/arities plan)
                    (keep
                     (fn [arity]
@@ -2789,7 +2846,9 @@
                            (:seon.fn.argument/index (first slots))}))))
                    vec))]
         (cond
-          (error-value? plan) plan
+          (and (map? plan) (inst? (:seon.error/at plan))
+             (qualified-keyword? (:seon.error/layer plan))
+             (qualified-symbol? (:seon.error/operation plan))) plan
 
           (nil? plan)
           (diff-refusal
@@ -2990,10 +3049,14 @@
         (output-schema-refs database function-symbol
                             (:seon.fn.arity/order plan))
         identity-attribute
-        (when-not (error-value? output-refs)
+        (when-not (and (map? output-refs) (inst? (:seon.error/at output-refs))
+             (qualified-keyword? (:seon.error/layer output-refs))
+             (qualified-symbol? (:seon.error/operation output-refs)))
           (result-identity-attribute database projection output-refs))]
     (cond
-      (error-value? output-refs) output-refs
+      (and (map? output-refs) (inst? (:seon.error/at output-refs))
+             (qualified-keyword? (:seon.error/layer output-refs))
+             (qualified-symbol? (:seon.error/operation output-refs))) output-refs
 
       (nil? identity-attribute)
       (diff-refusal
@@ -3007,17 +3070,25 @@
 
       :else
       (let [historical (as-of database basis)]
-        (if (error-value? historical)
+        (if (and (map? historical) (inst? (:seon.error/at historical))
+             (qualified-keyword? (:seon.error/layer historical))
+             (qualified-symbol? (:seon.error/operation historical)))
           historical
           (let [position (:seon.fn.argument/index plan)
                 before (invoke-diff-function function-var arguments
                                              position historical)
-                after (when-not (error-value? before)
+                after (when-not (and (map? before) (inst? (:seon.error/at before))
+             (qualified-keyword? (:seon.error/layer before))
+             (qualified-symbol? (:seon.error/operation before)))
                         (invoke-diff-function function-var arguments
                                               position database))]
             (cond
-              (error-value? before) before
-              (error-value? after) after
+              (and (map? before) (inst? (:seon.error/at before))
+             (qualified-keyword? (:seon.error/layer before))
+             (qualified-symbol? (:seon.error/operation before))) before
+              (and (map? after) (inst? (:seon.error/at after))
+             (qualified-keyword? (:seon.error/layer after))
+             (qualified-symbol? (:seon.error/operation after))) after
               (or (not (coll? before)) (not (coll? after)))
               (diff-refusal
                "The diffed function did not return collections."
@@ -3086,7 +3157,9 @@
   (let [database (current-database-value)
         function-symbol (callee-symbol function-var)]
     (cond
-      (error-value? database) database
+      (and (map? database) (inst? (:seon.error/at database))
+             (qualified-keyword? (:seon.error/layer database))
+             (qualified-symbol? (:seon.error/operation database))) database
 
       (nil? function-symbol)
       (diff-refusal
@@ -3098,7 +3171,9 @@
       :else
       (let [sinks (external-sinks database function-symbol)]
         (cond
-          (error-value? sinks) sinks
+          (and (map? sinks) (inst? (:seon.error/at sinks))
+             (qualified-keyword? (:seon.error/layer sinks))
+             (qualified-symbol? (:seon.error/operation sinks))) sinks
 
           (seq sinks)
           (diff-refusal
@@ -3114,7 +3189,9 @@
               (let [projection @(::read-projection declarations)
                     plan (diff-plan database projection function-symbol
                                     (count arguments))]
-                (if (error-value? plan)
+                (if (and (map? plan) (inst? (:seon.error/at plan))
+             (qualified-keyword? (:seon.error/layer plan))
+             (qualified-symbol? (:seon.error/operation plan)))
                   plan
                   (perform-diff database projection plan basis function-var
                                 arguments function-symbol)))))))))))
@@ -3699,24 +3776,34 @@
                          (or [?caller :seon.fn/sym ?caller-symbol]
                              [?caller :seon.test/sym ?caller-symbol])]
                        database)
-        bounds (when-not (error-value? edges)
+        bounds (when-not (and (map? edges) (inst? (:seon.error/at edges))
+             (qualified-keyword? (:seon.error/layer edges))
+             (qualified-symbol? (:seon.error/operation edges)))
                  (declared-arity-bounds query-fn database))]
-    (or (when (error-value? edges) edges)
-        (when (error-value? bounds) bounds)
+    (or (when (and (map? edges) (inst? (:seon.error/at edges))
+             (qualified-keyword? (:seon.error/layer edges))
+             (qualified-symbol? (:seon.error/operation edges))) edges)
+        (when (and (map? bounds) (inst? (:seon.error/at bounds))
+             (qualified-keyword? (:seon.error/layer bounds))
+             (qualified-symbol? (:seon.error/operation bounds))) bounds)
         (let [checked (filterv (fn [[_ [callee _]]] (contains? bounds callee)) edges)
               candidates (filterv (fn [[_ [callee n]]]
                                     (not (arity-admitted? (get bounds callee) n)))
                                   checked)
               snapshot (when (seq candidates)
                          (@call-preparation-snapshot database projection))
-              refusal (or (when (error-value? snapshot) snapshot)
+              refusal (or (when (and (map? snapshot) (inst? (:seon.error/at snapshot))
+             (qualified-keyword? (:seon.error/layer snapshot))
+             (qualified-symbol? (:seon.error/operation snapshot))) snapshot)
                           (first (:seon.call-preparation/refusals snapshot)))]
           (or refusal
               (let [plans (into {} (map (fn [callee]
                                          [callee (@call-preparation-plan-for
                                                   database snapshot callee)]))
                                 (distinct (map (comp first second) candidates)))
-                    refused (some #(when (error-value? %) %) (vals plans))]
+                    refused (some #(when (and (map? %) (inst? (:seon.error/at %))
+             (qualified-keyword? (:seon.error/layer %))
+             (qualified-symbol? (:seon.error/operation %))) %) (vals plans))]
                 (or refused
                     {:seon.fn/arity-mismatches
                      (->> candidates
@@ -3943,7 +4030,9 @@
      (when (seq affected)
        (let [result (arity-mismatches-with d/q database projection)
              mismatches (:seon.fn/arity-mismatches result)]
-         (if (error-value? result)
+         (if (and (map? result) (inst? (:seon.error/at result))
+             (qualified-keyword? (:seon.error/layer result))
+             (qualified-symbol? (:seon.error/operation result)))
            (assoc result ::transaction-refused true)
            (when (seq mismatches)
            (diagnostic
@@ -4124,7 +4213,9 @@
          :seon.store/transaction]
     [:or :seon.db/transaction-report :seon.db/error-result]]}
   [connection transaction]
-  (if (error-value? connection)
+  (if (and (map? connection) (inst? (:seon.error/at connection))
+             (qualified-keyword? (:seon.error/layer connection))
+             (qualified-symbol? (:seon.error/operation connection)))
     connection
     (try
       (let [database (d/db connection)
@@ -4444,7 +4535,9 @@
          (or
           (missing-transaction-data-error transaction)
           (cond
-            (error-value? connection) connection
+            (and (map? connection) (inst? (:seon.error/at connection))
+             (qualified-keyword? (:seon.error/layer connection))
+             (qualified-symbol? (:seon.error/operation connection))) connection
 
             (not (connection? connection))
             (dependency-error

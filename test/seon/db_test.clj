@@ -2217,11 +2217,11 @@
        (is (nil? (db/pull database [:db/id]
                           [:seon.ai.model/provider-id "no-such-provider"]))
            "a lookup ref to a nonexistent entity stays nil, never an error")
-       (is (not (@#'db/error-value?
-                 (@#'db/pulled-entity-schema-key
+       (is (= :seon.ai.model/provider-entity
+              (@#'db/pulled-entity-schema-key
                   projection database
-                  [:seon.ai.model/provider-id "openrouter"])))
-           "no attribute present declaring a row schema is undecided, not refused")
+                  [:seon.ai.model/provider-id "openrouter"]))
+           "the canonical provider row selects its declared entity schema")
        (is (string? (:seon.config.ai/endpoint
                      (db/pull database [:seon.config.ai/endpoint]
                               [:seon.ai.model/provider-id "openrouter"])))

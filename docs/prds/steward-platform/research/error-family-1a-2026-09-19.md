@@ -2494,3 +2494,47 @@ at HEAD bytes, including `src/seon/cluster.clj`, `src/seon/schema/edn.clj`,
 tests. Their checkout changes were preserved. The required namespace load
 returned `:loads` before the row-facet commit
 (`tmp/error-family-row-load-before.log`).
+
+### Database propagation and SCI boundary follow-up
+
+`2a59e5e11` landed the row facet; the post-commit load also returned `:loads`
+(`tmp/error-family-row-load-after.log`). The next DB-only snapshot did not
+execute tests: a test still dereferenced the retired private DB predicate.
+The caller was converted in the same slice. Its positive observation is
+the canonical provider's `:seon.ai.model/provider-entity` schema key, not
+the old comment's claim that the provider has no entity schema.
+
+The following six-suite snapshot executed **276 tests / 6,088 assertions /
+9 failures / 10 errors** (`tmp/error-family-boundaries.log`). Error,
+instrumentation, schema, and cluster namespaces had zero failure/error
+events. All 18 upstream DB propagation assertions passed after dissolving
+the private `db/error-value?` into the base's three required-member checks
+at its 50 consumers. No lookup, projection acquisition, or replacement
+general predicate was added. Remaining old DB producers are explicitly
+incomplete; this slice does not make their marker-only values valid.
+
+SCI's foreign-arm refusal, preserved reader/installer facets, and the
+noncanonical declaration spelling now pass. The pre-arm refusal uses the
+same failure handler as the armed body; an armed body's failure is still
+admitted before disarm. The outer catch handles only failed acquisition,
+not a second attempt to report a body failure. The existing reader count
+schema now composes the base and its observed integer count, and all
+pass-through unions name it explicitly. No source projection is fabricated
+for a failure to obtain exactly one event.
+
+The configless regression still had one stale assertion: registration
+evidence names the absent recorder in its required
+`:seon.instrument/registration-observation`, not an optional expected-key.
+Its exact-member assertion was updated accordingly. Its config producer
+now returns the existing complete config facet. The provider schema
+assertion and this registration-member assertion were corrected from the
+actual values measured in this run; their next execution is still owed.
+
+`src/seon/render.clj` is clean/released under the latest scope. Read-only
+inspection isolated the selected-render failure at its private
+`present-output`: an identity function with an input that excluded the
+typed unknown returned by `raw-output`. The redundant function and all
+three local callers are removed together; the existing error output
+contracts remain the authority. This correction and the typed-unknown
+assertion await the next changed-input run. The render-owner skill and UI
+architecture were read end to end before this edit.
