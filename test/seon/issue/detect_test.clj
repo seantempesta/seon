@@ -69,13 +69,13 @@
           {:seon.test/sym (sym-in 'seon.detect-fixture-test "covers")
            :seon.schema.admission/source :core
            :seon.fn/calls #{[:seon.fn/sym complete-fn] [:seon.fn/sym uncontracted-fn]}}])]
-    (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))
+    (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
     report))
 
 (defn- named
   "The fixture symbols one detector call names, as a set."
   [subjects]
-  (clojure.test/is (nil? (:seon.error/kind subjects)) (pr-str subjects))
+  (clojure.test/is (vector? subjects) (pr-str subjects))
   (into #{} (comp (map :seon.fn/sym) (filter fixture-symbols)) subjects))
 
 (clojure.test/deftest the-contract-standard-names-only-the-declaration-without-a-spec
@@ -148,7 +148,7 @@
                     connection
                     [(function-row shared source-ns source-file {:seon.fn/form-span [10 20]})
                      (function-row sibling source-ns source-file {:seon.fn/form-span [10 20]})])
-            _ (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))
+            _ (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
             database (seon.db/db connection)
             contract (into #{} (map :seon.fn/sym)
                            (seon.issue.detect/public-without-contract
@@ -182,7 +182,7 @@
                      (function-row defined source-ns source-file
                                    {:seon.fn/defined-by 'clojure.core/defn
                                     :seon.fn/form-span [70 80]})])
-            _ (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))
+            _ (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
             database (seon.db/db connection)
             contract (into #{} (map :seon.fn/sym)
                            (seon.issue.detect/public-without-contract

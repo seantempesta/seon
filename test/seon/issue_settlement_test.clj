@@ -35,12 +35,12 @@
                   [{:seon.cluster.eval/source source
                     :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                     :seon.program/row (:seon.program/row evaluated)}])
-        row (when-not (:seon.error/kind analysis) (second (first analysis)))]
+        row (when (sequential? analysis) (second (first analysis)))]
     (when (or (:seon.cluster.eval/error evaluated) (not row))
       (throw (ex-info "Issue test source admission failed."
                       {:seon.test/evaluation evaluated :seon.test/analysis analysis})))
     (let [report (db/transact! connection [(dissoc row :seon.sci.eval/evaluated?)])]
-      (when (:seon.error/kind report) (throw (ex-info "Issue test admission transaction failed." report)))
+      (when-not (:db-after report) (throw (ex-info "Issue test admission transaction failed." report)))
       (evaluation/install-evaluated-rows!
        {:seon.sci.eval/ctx ctx :seon.db/db (:db-after report)
         :seon.sci.eval/installations [{:seon.program/row row :seon.sci.eval/evaluation evaluated}]}))))
@@ -80,7 +80,7 @@
              (let [report (turn/system-turn
                             {:seon.turn.loop/cluster handle
                              :seon.agent/id aid :seon.turn/write? true})]
-               (is (nil? (:seon.error/kind report)) (pr-str report))))
+               (is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))))
            closed? (fn [tid]
                      (some? (:seon.turn/closed-tx
                              (db/pull (db/db connection) [:seon.turn/closed-tx]
@@ -200,7 +200,7 @@
              (is (str/includes? (first messages) "after 2 ordinary turns")))
            (let [resumed (seon.issue/start! {:seon.db/connection connection
                                            :seon.issue/id "settlement-fixture" :seon.issue/budget 4})]
-             (is (nil? (:seon.error/kind resumed)) (pr-str resumed))
+             (is (let [observed resumed] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str resumed))
              (is (= aid (get-in resumed [:seon.issue/agent :seon.agent/id])))
              (is (= 2 (turn/turns-left (db/db connection) aid)))
              (let [database (db/db connection)
@@ -309,22 +309,20 @@
                      [[:db/retract issue :seon.issue/agent worker]]
                      [[:db/add issue :seon.issue/created-by worker]]]]
             (let [result (write worker tx)]
-              (is (= :seon.db/retention-refused (:seon.error/kind result)) (pr-str result))
+              (is (string? (:seon.db.write.attempt/request-id result)) (pr-str result))
               (is (= #{"my.agents.retention/a" "my.agents.retention/b"} (tests-now)))))
           (let [refused (write worker [[:db/retract issue :seon.issue/tests a]])]
             (is (.contains (:seon.error/message refused "") "retention-fixture"))
             (is (.contains (:seon.error/message refused "") "my.agents.retention/a")))
           (is (:db-after (write creator [[:db/retract issue :seon.issue/agent worker]])))
-          (is (= :seon.db/retention-refused
-                 (:seon.error/kind (write worker [[:db/retract issue :seon.issue/tests a]]))))
+          (is (string? (:seon.db.write.attempt/request-id (write worker [[:db/retract issue :seon.issue/tests a]]))))
           (is (:db-after (write creator [[:db/retract issue :seon.issue/tests a]])))
           (is (= #{"my.agents.retention/b"} (tests-now)))
-          (is (= :seon.db/retention-refused
-                 (:seon.error/kind (write creator [[:db/retract issue :seon.issue/tests b]]))))
+          (is (string? (:seon.db.write.attempt/request-id (write creator [[:db/retract issue :seon.issue/tests b]]))))
           (is (= #{"my.agents.retention/b"} (tests-now)))
-          (is (= :seon.db/retention-refused
-                 (:seon.error/kind
-                  (db/transact! connection [[:db.fn/call #'seon.issue/adopt-tx []]]))))
+          (is (string?
+               (:seon.db.write.attempt/request-id
+                (db/transact! connection [[:db.fn/call #'seon.issue/adopt-tx []]]))))
           (is (= #{"my.agents.retention/b"} (tests-now)))
           (is (= "retention-creator"
                  (get-in (db/pull (db/db connection)

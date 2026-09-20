@@ -44,7 +44,7 @@
   them with `:db/add`/`:db/retract` forms, which carry no entity map."
   [connection tx]
   (let [report (seon.db/transact! connection tx)]
-    (clojure.test/is (nil? (:seon.error/kind report)) (pr-str report))
+    (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
     report))
 
 (defn- some-subject
@@ -70,7 +70,7 @@
            first-run (generate! connection)
            issue-id (subject-issue-id subject)
            row (issue-row connection issue-id)]
-       (clojure.test/is (nil? (:seon.error/kind first-run)) (pr-str first-run))
+       (clojure.test/is (let [observed first-run] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str first-run))
        (clojure.test/is (pos? (:seon.issue/count first-run)) (pr-str first-run))
        (clojure.test/is (= :open (:seon.issue/status row)) (pr-str row))
        (clojure.test/is (= detector (get-in row [:seon.issue/detector :seon.fn/sym])))
@@ -131,18 +131,18 @@
      (let [before (:max-tx (seon.db/db connection))
            result (seon.issue/generate!
                    {:seon.db/connection connection
-                    :seon.issue/detector "seon.issue-generate-test/bare-entity-subject"
+                    :seon.issue/detector 'seon.issue-generate-test/bare-entity-subject
                     :seon.issue/severity :cleanup})]
-       (clojure.test/is (= :seon.issue/subject-without-identity (:seon.error/kind result))
+       (clojure.test/is (= 0 (:seon.issue/subject-identity-count result))
                         (pr-str result))
        (clojure.test/is (string? (:seon.error/message result)))
        (clojure.test/is (= before (:max-tx (seon.db/db connection)))
                         "a refused detector writes nothing at all")
        (let [unknown (seon.issue/generate!
                       {:seon.db/connection connection
-                       :seon.issue/detector "seon.issue.detect/absent-detector"
+                       :seon.issue/detector 'seon.issue.detect/absent-detector
                        :seon.issue/severity :cleanup})]
-         (clojure.test/is (= :seon.issue/detector-unknown (:seon.error/kind unknown))
+         (clojure.test/is (= 'seon.issue.detect/absent-detector (:seon.issue/missing-detector unknown))
                           (pr-str unknown)))))))
 
 (clojure.test/deftest a-generated-issue-names-its-detector-and-promises-no-tests

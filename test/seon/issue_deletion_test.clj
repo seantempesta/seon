@@ -86,7 +86,7 @@
                after (db/db connection)]
            (is (seq (:seon.issue/tests row)) "Retention must protect a real test ref.")
            (is (seq (:seon.issue/files row)) "Refusal must retain citation components.")
-           (is (= :seon.db/retention-refused (:seon.error/kind result)) (pr-str result))
+           (is (string? (:seon.db.write.attempt/request-id result)) (pr-str result))
            (is (= (db/basis-t before) (db/basis-t after)))
            (is (= row (db/pull after '[*] lookup)))
            (is (= sibling (db/pull after '[*] [:seon.issue/id "deletion-sibling"])))))))))

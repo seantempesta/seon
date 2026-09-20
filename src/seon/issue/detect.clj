@@ -69,7 +69,7 @@
   own `:seon.db/component` declaration plus one datom witnessing it, never a
   name pattern."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or [:vector [:map [:seon.schema/key :seon.schema/key]]] :seon.error/value]]}
+                  [:or [:vector [:map [:seon.schema/key :seon.schema/key]]] :seon.db/error-result]]}
   [database]
   (let [paired (set (db/q '[:find [?key ...] :where
                             [?e :seon.schema/key ?key] [?e :seon.db/attributes true]
@@ -91,11 +91,14 @@
   by a single form (a `defrecord`'s constructors), so neither a docstring nor a
   `:malli/schema` can be written on them individually. The exclusion is the
   stored span, never a name pattern."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:set :qualified-symbol] :seon.db/error-result]]}
   [database]
   (let [spans (db/q '[:find ?sym ?file ?span :where
                       [?f :seon.fn/sym ?sym] [?f :seon.fn/file ?file] [?f :seon.fn/form-span ?span]]
                     database)]
-    (if (:seon.error/kind spans)
+    (if (and (map? spans) (:seon.error/at spans)
+                      (:seon.error/layer spans) (:seon.error/operation spans)) ; debt: seon.db/q and basis-t declare generic errors.
+
       spans
       (into #{}
             (comp (filter (fn [[_ group]] (> (count group) 1)))
@@ -107,11 +110,14 @@
 
   One attribute index scan, joined in Clojure by the callers below, so the
   standards differ by WHICH fact is absent and share one candidate query."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] [:or [:set :qualified-symbol] :seon.db/error-result]]}
   [database attribute]
   (let [rows (db/q '[:find [?sym ...] :in $ ?attribute :where
                      [?f :seon.fn/sym ?sym] [?f ?attribute _]]
                    database attribute)]
-    (if (:seon.error/kind rows) rows (set rows))))
+    (if (and (map? rows) (:seon.error/at rows)
+                      (:seon.error/layer rows) (:seon.error/operation rows)) ; debt: seon.db/q and basis-t declare generic errors.
+ rows (set rows))))
 
 (def ^:private bodiless-defining-forms
   "Clojure's own var-interning forms that write no body for the author.
@@ -127,11 +133,14 @@
 
 (defn- bodiless-symbols
   "Declarations interned by a form that writes no body."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:set :qualified-symbol] :seon.db/error-result]]}
   [database]
   (let [rows (db/q '[:find [?sym ...] :in $ [?form ...] :where
                      [?f :seon.fn/sym ?sym] [?f :seon.fn/defined-by ?form]]
                    database (vec bodiless-defining-forms))]
-    (if (:seon.error/kind rows) rows (set rows))))
+    (if (and (map? rows) (:seon.error/at rows)
+                      (:seon.error/layer rows) (:seon.error/operation rows)) ; debt: seon.db/q and basis-t declare generic errors.
+ rows (set rows))))
 
 (defn- declarations
   "Public source-bearing declarations as sorted `[symbol namespace-name]` rows.
@@ -141,6 +150,7 @@
   `:seon.fn.file/relative-root`, the fact the indexer wrote for the source
   directory it walked the file under, so a declaration under no declared root
   is scoped out rather than assumed to be production."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.fn.file/relative-root]] [:or [:sequential [:tuple :qualified-symbol :symbol]] :seon.db/error-result]]}
   [database root]
   (let [rows (if root
                (db/q '[:find ?sym ?name :in $ ?root :where
@@ -152,7 +162,9 @@
                        [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
                        [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]]
                      database))]
-    (if (:seon.error/kind rows) rows (sort rows))))
+    (if (and (map? rows) (:seon.error/at rows)
+                      (:seon.error/layer rows) (:seon.error/operation rows)) ; debt: seon.db/q and basis-t declare generic errors.
+ rows (sort rows))))
 
 (defn- doc-subject [[sym namespace-name]]
   {:seon.fn/sym sym
@@ -184,16 +196,18 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value]
-     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.db/error-result]]
     [:=> [:cat :seon.db/database-value
           [:map [:seon.fn.file/relative-root {:optional true} :seon.fn.file/relative-root]]]
-     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]]}
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.db/error-result]]]}
   ([database] (public-without-doc database {}))
   ([database request]
    (let [subjects (declarations database (:seon.fn.file/relative-root request))
          documented (carrying database :seon.fn/doc)
          shared (shared-form-symbols database)]
-     (or (some #(when (:seon.error/kind %) %) [subjects documented shared])
+     (or (some #(when (and (map? %) (:seon.error/at %)
+                      (:seon.error/layer %) (:seon.error/operation %)) ; debt: seon.db/q and basis-t declare generic errors.
+ %) [subjects documented shared])
          (into []
                (comp (remove (fn [[sym _]] (or (documented sym) (shared sym)))) (map doc-subject))
                subjects)))))
@@ -232,10 +246,10 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value]
-     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.db/error-result]]
     [:=> [:cat :seon.db/database-value
           [:map [:seon.fn.file/relative-root {:optional true} :seon.fn.file/relative-root]]]
-     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]]}
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.db/error-result]]]}
   ([database] (public-without-contract database {}))
   ([database request]
    (let [subjects (declarations database (:seon.fn.file/relative-root request))
@@ -243,7 +257,9 @@
          macros (carrying database :seon.fn/macro?)
          bodiless (bodiless-symbols database)
          shared (shared-form-symbols database)]
-     (or (some #(when (:seon.error/kind %) %)
+     (or (some #(when (and (map? %) (:seon.error/at %)
+                      (:seon.error/layer %) (:seon.error/operation %)) ; debt: seon.db/q and basis-t declare generic errors.
+ %)
                [subjects contracted macros bodiless shared])
          (into []
                (comp (remove (fn [[sym _]] (or (contracted sym) (macros sym)
@@ -292,18 +308,23 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value]
-     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.db/error-result]]
     [:=> [:cat :seon.db/database-value
           [:map [:seon.fn.file/relative-root {:optional true} :seon.fn.file/relative-root]]]
-     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.error/value]]]}
+     [:or [:vector [:map [:seon.fn/sym :seon.fn/sym]]] :seon.db/error-result]]]}
   ([database] (public-without-reaching-test database {}))
   ([database request]
    (let [subjects (declarations database (:seon.fn.file/relative-root request))
          shared (shared-form-symbols database)
          basis-t (db/basis-t database)]
-     (or (some #(when (:seon.error/kind %) %) [subjects shared basis-t])
+     (or (some #(when (and (map? %) (:seon.error/at %)
+                      (:seon.error/layer %) (:seon.error/operation %)) ; debt: seon.db/q and basis-t declare generic errors.
+ %) [subjects shared basis-t])
          (let [candidates (remove (fn [[sym _]] (shared sym)) subjects)
                gates (fn/gate-sets database (map first candidates))]
+           ;; PRD §6: held seon.fn/gate-sets declares two marker-only facets.
+           ;; Their substantive required member sets are identical. The owner
+           ;; must correct that contract before this consumer can select a facet.
            (if (:seon.error/kind gates)
              gates
              (into []

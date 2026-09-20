@@ -66,4 +66,77 @@
                      [:seon.issue/detector {:optional true} :seon.issue/detector]
                      [:seon.issue/budget {:optional true} :seon.issue/budget]
                      [:seon.issue/budget-exhausted-tx {:optional true} :seon.issue/budget-exhausted-tx]
-                     [:seon.issue/resolved-tx {:optional true} :seon.issue/resolved-tx]]}
+                     [:seon.issue/resolved-tx {:optional true} :seon.issue/resolved-tx]] :seon.issue/subject-identity-count :int
+ :seon.issue/subject-without-identity-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/subject-identity-count :seon.issue/subject-identity-count]]]
+ :seon.issue/uncited-subject-attribute :qualified-keyword
+ :seon.issue/subject-unlinkable-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/uncited-subject-attribute :seon.issue/uncited-subject-attribute]]]
+ :seon.issue/missing-subject-attribute :qualified-keyword
+ :seon.issue/subject-absent-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/missing-subject-attribute :seon.issue/missing-subject-attribute]]]
+ :seon.issue/missing-detector :qualified-symbol
+ :seon.issue/detector-unknown-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/missing-detector :seon.issue/missing-detector]]]
+ :seon.issue/unresolved-detector :qualified-symbol
+ :seon.issue/detector-unresolved-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/unresolved-detector :seon.issue/unresolved-detector]]]
+ :seon.issue/refused-detector :qualified-symbol
+ :seon.issue/detector-refused-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/refused-detector :seon.issue/refused-detector]]]
+ :seon.issue/non-test-reference-member :qualified-keyword
+ :seon.issue/not-a-test-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/non-test-reference-member :seon.issue/non-test-reference-member]]]
+ :seon.issue/missing-issue-id :string
+ :seon.issue/not-found-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/missing-issue-id :seon.issue/missing-issue-id]]]
+ :seon.issue/assigned-issue-id :string
+ :seon.issue/already-started-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/assigned-issue-id :seon.issue/assigned-issue-id]]]
+ :seon.issue/unverifiable-issue-id :string
+ :seon.issue/no-tests-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/unverifiable-issue-id :seon.issue/unverifiable-issue-id]]]
+ :seon.issue/unassigned-namespace-issue-id :string
+ :seon.issue/no-namespace-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/unassigned-namespace-issue-id :seon.issue/unassigned-namespace-issue-id]]]
+ :seon.issue/unscoped-issue-id :string
+ :seon.issue/no-cluster-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/unscoped-issue-id :seon.issue/unscoped-issue-id]]]
+ :seon.issue/existing-worker-id :string
+ :seon.issue/worker-exists-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/existing-worker-id :seon.issue/existing-worker-id]]]
+ :seon.issue/existing-issue-id :string
+ :seon.issue/already-exists-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/existing-issue-id :seon.issue/existing-issue-id]]]
+ :seon.issue/missing-author-id :string
+ :seon.issue/no-author-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/missing-author-id :seon.issue/missing-author-id]]]
+ :seon.issue/history-root :string
+ :seon.issue/git-unbounded-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/history-root :seon.issue/history-root]]]
+ :seon.issue/missing-notes-path :string
+ :seon.issue/notes-absent-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/missing-notes-path :seon.issue/missing-notes-path]]]
+ :seon.issue/uncited-identity-count :int
+ :seon.issue/citations-undeclared-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.issue/uncited-identity-count :seon.issue/uncited-identity-count]]]
+ :seon.issue/refusal [:or :seon.issue/subject-without-identity-error :seon.issue/subject-unlinkable-error :seon.issue/subject-absent-error :seon.issue/detector-unknown-error :seon.issue/detector-unresolved-error :seon.issue/detector-refused-error :seon.issue/not-a-test-error :seon.issue/not-found-error :seon.issue/already-started-error :seon.issue/no-tests-error :seon.issue/no-namespace-error :seon.issue/no-cluster-error :seon.issue/worker-exists-error :seon.issue/already-exists-error :seon.issue/no-author-error :seon.issue/git-unbounded-error :seon.issue/notes-absent-error :seon.issue/citations-undeclared-error]
+}

@@ -347,3 +347,195 @@ schema/recording family. No live adoption proof claimed.
 Cold command owed (orchestrator only): `bin/test --paths src/seon/config.clj
 resources/seon/schemas/seon.config.edn test/seon/config_test.clj --
 seon.config-test seon.config-application-test`, then accumulated platform proof.
+
+### ops-effects-2: issue checkpoint and section 6 handoff
+
+Read every named authority end to end: this note, the error-conversion PRD,
+the my-protocol and test-system sweep notes, error-family-1a, and the supplied
+AGENTS.md (including lane rules 11–16). The roadmap entry was also read.
+No held source was edited, no foreign session was operated, and no default
+cluster lifecycle operation was performed.
+
+Issue producers now construct complete observations with substantive subject,
+detector, reference, assignment and path evidence. Returned contracts name
+the corresponding local facets and the inherited database refusal contract.
+Detector reads propagate database refusals with documented debt. Tests assert
+positive success evidence or the concrete refusal member and retain their
+database-state assertions. The recorder result consumer uses its declared
+unknown/execution-refusal members.
+
+The owned source load printed `:loads`; lint reported 0 errors / 0 warnings.
+One accumulated fast invocation selected seon.issue-test,
+seon.issue-generate-test, seon.issue-settlement-test,
+seon.issue-deletion-test and seon.issue.detect-test. It armed **1,451**
+contracts and stopped before tests at the same held
+`:seon.test.runner/invalid-marker-reason-error` declaration, member
+`:seon.error/offending`. **Fast tally owed — admission held by
+resources/seon/schemas/seon.test*.edn and src/seon/test/*.clj.**
+Final review narrowed the local returned-facet lists and preserved the
+existing message-delivery error collection; final bytes were loaded and
+linted afterward. The refused fast request is not claimed as proof of these
+final bytes. No tests executed and no green verdict is claimed.
+
+#### New declaration boundary — not a foreign gate failure
+
+The reproducible declaration-only probe is
+`docs/prds/steward-platform/research/kind-sweep-ops-effects-gate-facet-probe-2026-09-21.clj`.
+It exited zero and printed the loaded `seon.fn/gate-sets` output:
+
+```clojure
+[:or [:map-of :seon.fn/sym [:vector :seon.test/sym]]
+ :seon.db/invalid-read-error :seon.schema/missing-projection-error]
+```
+
+Derived required-member sets:
+
+| Declared facet | Current required members | Boolean marker | Required after marker retirement |
+| --- | --- | --- | --- |
+| :seon.db/invalid-read-error | :seon.db/invalid-read, :seon.error/message | :seon.db/invalid-read | :seon.error/message |
+| :seon.schema/missing-projection-error | :seon.schema/missing-projection, :seon.error/message | :seon.schema/missing-projection | :seon.error/message |
+
+The assignment's marker retirement would leave identical required sets.
+PRD §1.3 says the consumer must select a REQUIRED distinguishing member from
+the callee's declared union and invokes §6 for that collision. Neither
+`:seon.db/read-operation` nor `:seon.schema/expected-value` is required by
+the declared facets. The generic-check exception does not apply because
+gate-sets does not declare `:seon.error/value`; §1.4 forbids using the
+message for recognition. The lane therefore stops before introducing that
+collision and retains **one** explicit pending kind check in
+`src/seon/issue/detect.clj`. This is a schema/contract decision at the held
+`src/seon/fn.clj` seam, not the recorder failure and not dirty-source breakage.
+
+Issue:
+`docs/seon/issues/gate-selection-refusal-contracts-only-distinguish-markers.md`.
+
+Three concrete options for the orchestrator:
+
+1. **Recommended — correct the held gate-selection contract.** The owning lane
+   traces gate-sets and its helper outputs and declares their actual substantive
+   database/schema facets; this lane then converts the consumer. Cost: one
+   bounded owner slice plus the detector regression/fast admission. Guarantee:
+   exact declared outputs and a consumer grounded in required evidence.
+2. **Permit an explicit transitional generic output.** The owner temporarily
+   declares its actual database pass-through union, allowing the documented
+   base-three exception. Cost: a contract edit and a later retirement follow-up.
+   Gives up exact-output completion at this seam until that follow-up.
+3. **Defer this one consumer by explicit scope ruling.** Continue the remaining
+   owned families while recording this held seam for integration. Cost: no
+   immediate owner source edit, but a later detector conversion and verification.
+   Gives up a kind-free detector at this checkpoint.
+
+#### Measured retirement census
+
+Counts are literal occurrences of `:seon.error/kind`,
+`:seon.error/class`, and `error/error?`, measured against each family's
+pre-slice commit (issue against its pre-edit HEAD), then final checkout bytes.
+Zero in this census does not imply an executed green test or completed live
+publication.
+
+| Path | Before | After |
+| --- | ---: | ---: |
+| src/seon/ai.clj | 26 | 0 |
+| resources/seon/schemas/seon.ai.edn | 20 | 0 |
+| test/seon/ai_test.clj | 25 | 0 |
+| test/seon/ai_stream_fold_test.clj | 9 | 0 |
+| src/seon/plan.clj | 5 | 0 |
+| resources/seon/schemas/my.plan.edn | 13 | 0 |
+| resources/seon/schemas/seon.plan.edn | 0 | 0 |
+| test/seon/plan_completion_test.clj | 2 | 0 |
+| src/seon/schedule.clj | 10 | 0 |
+| resources/seon/schemas/seon.schedule.edn | 7 | 0 |
+| test/seon/schedule_test.clj | 7 | 0 |
+| src/seon/maintenance.clj | 9 | 0 |
+| resources/seon/schemas/seon.maintenance.edn | 0 | 0 |
+| test/seon/maintenance_test.clj | 6 | 0 |
+| test/seon/maintenance_schema_test.clj | 4 | 0 |
+| src/seon/config.clj | 4 | 0 |
+| resources/seon/schemas/seon.config.edn | 7 | 0 |
+| test/seon/config_test.clj | 3 | 0 |
+| src/seon/issue.clj | 14 | 0 |
+| src/seon/issue/detect.clj | 8 | 1 |
+| resources/seon/schemas/seon.issue.edn | 0 | 0 |
+| test/seon/issue_test.clj | 19 | 0 |
+| test/seon/issue_generate_test.clj | 4 | 0 |
+| test/seon/issue_settlement_test.clj | 8 | 0 |
+| test/seon/issue_deletion_test.clj | 1 | 0 |
+| test/seon/issue/detect_test.clj | 4 | 0 |
+
+Remaining assigned source census at the section 6 stop:
+
+| Path | Remaining occurrences |
+| --- | ---: |
+| src/seon/issue/detect.clj | 1 |
+| src/seon/effect.clj | 12 |
+| src/seon/flow.clj | 10 |
+| src/seon/env.clj | 10 |
+| src/seon/blob.clj | 5 |
+| src/seon/shell/jvm.clj | 17 |
+| src/seon/context.clj | 11 |
+| src/seon/edit.clj | 9 |
+| src/seon/bootstrap.clj | 12 |
+| src/seon/operator.clj | 12 |
+| src/seon/operator/state.clj | 16 |
+
+`src/seon/store.clj` is absent. No differently owned store namespace was
+substituted. `src/seon/operator/state.clj` was clean at the final census and
+remains untouched; recheck before resuming.
+
+#### Handoffs and proof still owed
+
+- seon.db, seon.cluster.message, seon.turn and seon.cluster.reply producers
+  remain the other sweeps' owners. Database generic-output debt is named at
+  propagation sites. Error/refusal pass-through manifests need the new facets
+  reviewed by their owners.
+- Held gate-selection contract: the section 6 issue above. All assignment-held
+  paths remain untouched, including fn.clj even when locally clean.
+- Maintenance's nested operator refusal summaries and schedule's polymorphic
+  handler-result recognition remain local follow-through with the operator
+  conversion; no complete durable nested diagnostic preservation is claimed.
+- The default runtime-status tool was degraded at entry by a stored occurrence
+  missing `:seon.error/at`; the existing foreign dirty issue
+  `docs/seon/issues/runtime-status-refuses-error-occurrence-count.md` owns it.
+  No live adoption or browser proof is claimed. New attributes and removed
+  marker declarations join the wave publication/reset boundary.
+- Issue fixture files still contain prior symbol/fixture-generation debt
+  beyond the changed retirement assertions. The existing foreign dirty issue
+  `fixtures-that-ignore-a-refused-transaction-read-absence-as-behaviour.md`
+  is not edited by this lane. Gate admission prevented their execution.
+- Documentation hooks report stale Datahike gitlink citations in
+  wave-3a-task-family-spec-2026-09-21.md:737 and
+  wave-3bc-render-pairs-and-template-proofs-spec-2026-09-21.md:750
+  (`fcbd8862800e638dc0f8f5521111f999279cbcd2` versus current
+  `e11845bac78e1241bca0766ddc07d978bd63d74a`). Those foreign documents were
+  not edited.
+
+Accumulated cold command owed, **orchestrator only**, after recorder admission
+and the section 6 decision are resolved:
+
+```sh
+bin/test --paths \
+  src/seon/ai.clj resources/seon/schemas/seon.ai.edn \
+  test/seon/ai_test.clj test/seon/ai_stream_fold_test.clj \
+  src/seon/plan.clj resources/seon/schemas/my.plan.edn \
+  resources/seon/schemas/seon.plan.edn test/seon/plan_completion_test.clj \
+  src/seon/schedule.clj resources/seon/schemas/seon.schedule.edn \
+  test/seon/schedule_test.clj \
+  src/seon/maintenance.clj resources/seon/schemas/seon.maintenance.edn \
+  test/seon/maintenance_test.clj test/seon/maintenance_schema_test.clj \
+  src/seon/config.clj resources/seon/schemas/seon.config.edn \
+  test/seon/config_test.clj \
+  src/seon/issue.clj src/seon/issue/detect.clj \
+  resources/seon/schemas/seon.issue.edn \
+  test/seon/issue_test.clj test/seon/issue_generate_test.clj \
+  test/seon/issue_settlement_test.clj test/seon/issue_deletion_test.clj \
+  test/seon/issue/detect_test.clj \
+  -- seon.ai-test seon.ai-stream-fold-test \
+  seon.plan-test seon.plan-completion-test my.plan-test \
+  seon.schedule-test seon.maintenance-test seon.maintenance-schema-test \
+  seon.config-test seon.config-application-test \
+  seon.issue-test seon.issue-generate-test seon.issue-settlement-test \
+  seon.issue-deletion-test seon.issue.detect-test
+bin/test --platform
+```
+
+Earlier background/problems proof obligations remain as recorded above.
