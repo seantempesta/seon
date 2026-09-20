@@ -137,3 +137,14 @@ zero warnings. Fast tally owed — admission remains held by the concurrent
 dirty `resources/seon/schemas/seon.test.runner.edn`. The stale R8 fixtures and
 assertions in `test/seon/problems_test.clj` remain for the final problems test
 slice; they were not changed or claimed by this commit.
+
+The runner resource briefly appeared clean, so the required accumulated pass
+ran background and problems together. It executed **19 tests / 71 assertions /
+5 failures / 9 errors** before result recording refused the still-live
+test-runner draft; run `ff32517c9a41`. The run exposed and the next commits
+fixed two owned causes: `034181b55` copies the latest complete error fact's
+base summary into each signature row, and `4e62f6370` supplies symbolic effect
+owner/capability facts in both background fixtures. Both corrections load from
+HEAD and lint with zero warnings. The remaining problems-test failures include
+retired-kind fixtures/assertions still owed by this lane; the refreshed
+background/problems fast pass is owed after those test inputs change.
