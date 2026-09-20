@@ -1,6 +1,6 @@
 ---
 type: research
-status: blocked
+status: complete
 created: 2026-09-21
 tags: [error-model, kind-retirement, test-system]
 ---
@@ -198,3 +198,82 @@ No final fast tally is claimed. The option-2 and accretion slices load and are
 committed, but the family remains at **89 matching lines** because the binding
 stop rule forbids continuing past this undeclared foreign boundary. The final
 fast command and cold command remain those already recorded above.
+
+## Terminal landing — convertible family complete
+
+The orchestrator subsequently ruled that the fresh-operator transport facet is
+owned by the bin/script sweep and that `recording-failure` must remain byte-for-
+byte on its kind branch until that owner declares the facet. All other
+convertible sites are now retired in commits `3c0018771`, `b5e3a5e40`,
+`decff675f`, `1fbba3fd3`, and `a740b93ee`. The required HEAD load after every
+commit succeeded. The final load was:
+
+```clojure
+(require 'seon.test.bounds 'seon.test 'seon.test.runner
+         'seon.test.selection 'seon.test.accretion 'seon.test.arm
+         'seon.test.fast)
+;; :loads
+```
+
+The completed census over `src/seon/test.clj`, every `src/seon/test/*.clj`,
+`resources/seon/schemas/seon.test*.edn`, and the owned tests has **zero
+convertible** `:seon.error/kind`, `seon.error/class`, or `error/error?` sites.
+Eleven matching lines remain, all at the ruled foreign boundary below.
+
+### Owed to the bin/script sweep
+
+`script/seon/fresh_operator.clj` must first declare the exact prepl/transport
+facet. The follow-on sweep then converts these sites together:
+
+- `src/seon/test/runner.clj:3484`, `:3486`, `:3491-3493`, and `:3516` — the
+  `recording-failure` pass-through/fallback and its notice.
+- `test/seon/test_runner_test.clj:658-659` — the local recording-failure
+  injection consumed by that unchanged branch.
+- `test/seon/test_runner_test.clj:1377`, `:1380`, `:1387`, `:1390`, and
+  `:1402` — the fresh-operator prepl exception fixture, nested contract
+  evidence, assertions, and bare fallback fixture.
+
+There are no other foreign-facet debts in the owned family.
+
+### Fast tally and verification boundary
+
+Exactly one foreground fast invocation was run, as required:
+
+```sh
+bin/test-fast --paths src/seon/test/runner.clj src/seon/test/arm.clj \
+  src/seon/test/accretion.clj resources/seon/schemas/seon.test.runner.edn \
+  resources/seon/schemas/seon.test.accretion.edn \
+  test/seon/test_runner_test.clj test/seon/test/runner_test.clj \
+  test/seon/test/check_request_test.clj -- \
+  seon.test-runner-test seon.test.runner-test seon.test.check-request-test
+```
+
+Fast tally: **0 executed; snapshot admission refused before test execution**.
+Contract arming succeeded with 1,425 registered, 1,425 instrumented, and 1,420
+program-armable Vars. Admission then named
+`:seon.test.accretion/arguments` as a non-storable promised member of
+`:seon.test.accretion/install-refused-error`. Commit `1fbba3fd3` corrected that
+owned facet to retain only its queryable scalar observations; arbitrary values
+remain open in memory and ride the error occurrence's existing projection.
+The required HEAD load passed after the correction. The namespace was not
+rerun because its inputs changed after the one permitted fast invocation.
+
+The cold command owed to the orchestrator is:
+
+```sh
+bin/test --paths src/seon/test.clj src/seon/test/runner.clj \
+  src/seon/test/selection.clj src/seon/test/accretion.clj \
+  src/seon/test/arm.clj src/seon/test/bounds.clj \
+  resources/seon/schemas/seon.test.edn \
+  resources/seon/schemas/seon.test.runner.edn \
+  resources/seon/schemas/seon.test.accretion.edn \
+  test/seon/test_runner_test.clj test/seon/test/runner_test.clj \
+  test/seon/test/check_request_test.clj test/seon/test_cache_test.clj -- \
+  seon.test-runner-test seon.test.runner-test seon.test.check-request-test \
+  seon.test-cache-test
+```
+
+followed by `bin/test --platform`. This lane ran neither cold command. Held and
+foreign dirty paths remained untouched, including
+`script/seon/fresh_operator.clj`; the foreign boundary is the undeclared
+fresh-operator prepl/transport facet above.
