@@ -6851,3 +6851,15 @@ program reconciliation 17–25 s, changed-definition comparison 8–16 s,
 reconciliation transaction 9–12 s, issue reconciliation 6.5–7 s, and the
 lint "findings" delta 6–6.5 s (622 findings compared whole; the delta is
 per changed file). Platform tier at `c402d3c1d`: green (97, 0/0, 719 s).
+
+## 2026-09-23 ~03:00 local — OWNER: "focus on fixing the highest value things first… we don't need 100% green and once the system is stable we can use the system itself (namespace agents) to fix the remaining issues"
+
+RULED: no further lanes on bulk-tier red classes after the error lane's
+current four (the boot fault + three contract shapes, which block boot
+honesty and the platform). The remaining classes (stale kind
+expectations, fixture writes refused, NPEs in run6/render tests, …) are
+the namespace agents' first real work: each red is a detected defect → a
+task → an agent, i.e. the wave-5 demonstration on real debt instead of a
+staged one. Priority order for the machine: slice 3 → slice 4 (one-file
+edit in seconds, hook publication on) → test-system fork (agents' test
+loop) → reset + platform + measurement → the build lane (wave 3a) tonight.
