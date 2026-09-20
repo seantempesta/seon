@@ -300,3 +300,89 @@ Namespace loading succeeds. Await source/resource lint is clean; test lint
 resolves the new private consumer when run with its source, with zero errors.
 `seon.test` retains its pre-existing shadowed-var warnings outside this slice.
 The two previously recorded Markdown citation errors remain foreign.
+
+## New section-6 decision: malformed returned error observations
+
+Expiry landed in `603d2587c`; the required four namespaces loaded before and
+after that commit. Continued inventory found a different consumer decision in
+`shown-result` (`src/seon/sci/eval.clj:2460`). The existing regression
+`a-returned-values-non-string-error-message-is-still-the-declared-string`
+(`test/seon/sci/eval_test.clj:2454`) deliberately returns an arbitrary map with
+the retired stamp and a vector-valued error message, and requires a string
+`:seon.cluster.eval/error`. It is grounded in the earlier production incident,
+not a marker-only test that can be silently removed.
+
+The base schema permits an optional message, but when present it must satisfy
+`:seon.error/message` (a nonempty string). The malformed return has no facet.
+Adding base members and the kernel's substantive guard observation still gives
+no facet; changing only the message to prose gives the kernel facet. Exact
+output of the committed
+[probe](sci-program-returned-error-recognition-2026-09-21.clj):
+
+```clojure
+{:sci-program/original-selects-evaluation-error true
+ :sci-program/original-facets #{}
+ :sci-program/base-members-with-malformed-message-facets #{}
+ :sci-program/valid-message-facets #{:seon.sci.kernel/error}
+ :sci-program/derived-failure-text "[:seon.ns/name user]"}
+```
+
+The probe exits 0 and loads all four owned namespaces; clj-kondo has zero
+errors/warnings. Its first draft correctly refused an ambient declaration
+lookup; the committed version hands the complete packaged declarations
+explicitly. This is unarmed source/schema evidence, not canonical test proof.
+No unchanged test namespace was rerun. An independent required-member census
+of the kernel pass-through union found no equal required-member sets after
+the expiry slice.
+
+This meets §6's consumer condition: the existing behavior distinguishes an
+invalid error claim from ordinary returned data, but no valid facet expresses
+that distinction. Rule 1.3's transitional base check is limited to a callee
+declaring `:seon.error/value`; arbitrary evaluation results have no such
+contract. Facet validation changes the regression's behavior. Structural
+recognition would need an explicit polymorphic-boundary ruling. The existing
+[incident note](../../../seon/issues/the-over-bound-evaluation-path-returns-a-lookup-ref-where-its-contract-promises-a-string.md)
+is reopened for this decision, without claiming the old string bug recurred.
+
+### Three priced options
+
+1. **Recognize complete declared facets only (recommended).** Treat an
+   arbitrary malformed returned map as ordinary data; retain its live object
+   and shown text, and revise this regression to assert that it does not set
+   an evaluation failure. Keep a separate complete-facet case proving the
+   failure string and evidence. Guarantee: recognition follows declarations
+   without inventing a general error predicate. Cost: about 30–60 minutes
+   for the consumer and canonical regression, plus the remaining sweep.
+   Give up: the legacy promise that a malformed error claim itself marks a
+   failed evaluation.
+2. **Recognize and diagnose malformed base claims at this inspection seam.**
+   Authorize a structural base-member check specifically for arbitrary
+   evaluation results; construct a complete eval-owned malformed-observation
+   facet with the failed schema/member and raw offending return. Guarantee:
+   malformed claimed diagnostics still become explicit evaluation failures
+   without weakening the base schema. Cost: 1–2 hours for declaration,
+   producer, consumer and tests. Give up: rule 1.3's current restriction on
+   structural recognition; the scope of this exception must be stated.
+3. **Make failure an explicit evaluation outcome independent of returned data.**
+   Only a thrown/refused execution or separately admitted outcome marks the
+   evaluation failed; an arbitrary returned map remains a value. Guarantee:
+   no inspection of arbitrary return values decides execution status. Cost:
+   approximately one day to inventory and convert evaluation/status callers
+   and tests, including held boundaries. Give up: this bounded sweep's scope
+   and automatic failure classification for returned complete error values.
+
+No additional production edits were made after the expiry commit. Current
+literal occurrence census: eval 37 (33 matching lines), kernel 2, admit 4,
+reader 2, program 11; await and test source each zero. These remaining families
+are not claimed kind-free. The prior held-file handoffs remain owed, including
+fn.clj and schema/edn and schema/datahike sites; none was edited.
+
+Fast evidence remains **0 executed**, refused before execution as recorded
+above. The orchestrator still owes the accumulated cold command and platform
+proof. For the landed expiry slice specifically:
+
+```sh
+bin/test --paths src/seon/await.clj resources/seon/schemas/seon.await.edn src/seon/test.clj resources/seon/schemas/seon.test.edn src/seon/sci/kernel.clj src/seon/sci/admit.clj test/seon/await_test.clj test/seon/test_reaching_test.clj -- seon.await-test seon.test-reaching-test
+```
+
+No cold gate, default lifecycle command, foreign repair, or worktree was run.

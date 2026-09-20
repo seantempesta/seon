@@ -1,7 +1,7 @@
 ---
 type: issue
-status: resolved
-severity: blocker
+status: open
+severity: friction
 tags: [sci, evaluation, contract, admission, platform]
 created: 2026-09-17
 ---
@@ -86,3 +86,32 @@ DIFFERENT seam from the arm fixed here:
    and no copy of the offending return value (no `:seon.instrument/actual`
    datom; `:seon.instrument/path` is not an installed attribute). The value
    could not be recovered from the database at all.
+
+## Reopened for retirement semantics — 2026-09-21
+
+The original string derivation remains fixed. The kind-retirement sweep found
+a decision about its recognition precondition, not a recurrence of the original
+contract failure. `shown-result` at `src/seon/sci/eval.clj:2460` recognizes the
+regression's arbitrary returned map solely by its retired stamp. The regression
+at `test/seon/sci/eval_test.clj:2454` supplies a vector as the error message;
+`:seon.error/base` requires a string when the message is present. Even adding
+all three base members and a complete kernel observation leaves zero valid
+facets. Replacing the message with valid prose yields `:seon.sci.kernel/error`.
+
+The committed [probe](../../prds/steward-platform/research/sci-program-returned-error-recognition-2026-09-21.clj)
+prints these observations and asserts them against the complete packaged
+declarations. This is unarmed schema/source evidence, not a canonical test run.
+No default or foreign lane was operated.
+
+PRD §6 applies: a consumer needs to distinguish more than the facet members
+express. Rule 1.3 permits a transitional base check only for a callee that
+declares `:seon.error/value`; an arbitrary evaluation return is not such a
+callee. Choosing to recognize only valid facets changes this regression's
+explicit behavior. Choosing to recognize malformed claims needs a stated
+boundary policy. No general predicate or replacement marker was added.
+
+The [lane note](../../prds/steward-platform/research/kind-sweep-sci-program-2026-09-21.md)
+records three priced options. Acceptance after ruling: preserve the actual
+returned object, assert the selected evaluation-error behavior and concrete
+evidence, and keep the evaluation's string contract satisfied under the
+canonical real-SCI regression. The historical resolution above remains valid.
