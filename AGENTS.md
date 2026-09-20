@@ -103,10 +103,12 @@ exact verification boundary when reporting.
     the re-enable in the working edge. Documentation edits never publish
     and never widen a gate: gate inputs are DECLARED
     (`seon.test.cache/input-roots`), not "everything outside src and test".
-16. **Models for lanes** (owner, 2026-09-19/20): `gpt-6-astra` high for design
-    cuts, planning and review; `gpt-6-astra` low for bounded well-specified
-    slices; `gpt-5.6-sol` low for PRD-driven mechanical sweeps; Opus never
-    for implementation (it overdoes core work). A stopped lane on a Codex
+16. **Models for lanes** (owner, 2026-09-19/20, amended 2026-09-22):
+    `gpt-6-astra` LOW for bounded well-specified slices and MEDIUM for
+    design cuts and review — never high (owner: credits burn too fast and
+    every decision gets slower); `gpt-5.6-sol` low for PRD-driven
+    mechanical sweeps; Opus never for implementation (it overdoes core
+    work). A stopped lane on a Codex
     usage limit is reported to the owner and resumed after the go-ahead,
     never relaunched under a new name.
 
