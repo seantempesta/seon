@@ -5539,3 +5539,15 @@ identities, keys, bounds and phases. No per-facet EDN string (one
 mechanism, §2.5). The lane lands its runner resource and consumer together
 as early as they load, because the dirty resource is holding every other
 lane's snapshot admission. Ops-effects resumed for a continuous pass.
+
+## 2026-09-21 ~11:25 UTC — ops-effects: problems evidence + background fixtures landed; resumed (sol stops at seams)
+
+`kind-sweep-ops-effects` landed `034181b55` (problem signature rows carry
+the latest fact's required base evidence), `4e62f6370` (background effect
+fixtures repaired with symbolic owner/capability facts), `03cb92d3f`
+(accumulated fast run: 19 tests / 71 assertions / 5 F / 9 E before result
+recording hit the live runner draft). The sol lane ends its turn at every
+coherent seam despite the continuous-pass instruction; each resume costs
+one orchestrator turn — acceptable, recorded as a lane-runner behaviour
+to fold into `bin/codex-agent` (tools queue: a "continue until done"
+resume mode). Resumed.
