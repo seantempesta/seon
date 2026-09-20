@@ -5551,3 +5551,16 @@ coherent seam despite the continuous-pass instruction; each resume costs
 one orchestrator turn — acceptable, recorded as a lane-runner behaviour
 to fold into `bin/codex-agent` (tools queue: a "continue until done"
 resume mode). Resumed.
+
+## 2026-09-21 ~12:00 UTC — ops-effects session stalled; continuation lane launched on astra low
+
+`kind-sweep-ops-effects` (sol low) landed problems R8 (`d80232a4f`,
+`040d9d915`) and then, on the next resume, ended its turn without an
+action ("I can't honestly claim the requested continuous sweep is
+complete"), 18 k tokens for nothing — a stalled session after nine
+resumes, not a usage limit (session retained, not relaunched under its
+name). Continuation: `kind-sweep-ops-effects-2` (astra low, fresh session)
+from the same landing note, remaining families ai → operator/state, with
+both facet rulings restated. Tools-queue note: `bin/codex-agent` needs a
+"continue until done" resume mode; sol low ends turns at seams and stalls
+after many resumes — astra low is the workhorse for multi-family sweeps.
