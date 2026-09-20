@@ -4,22 +4,37 @@
   (:require [clojure.string :as str]
             #?(:clj [clojure.tools.reader.reader-types :as rt]
                :cljs [cljs.tools.reader.reader-types :as rt])
-            [sci.core :as sci]))
+            [sci.core :as sci]
+            [seon.error.refusal :as error]))
 
 (def ^:private eof ::eof)
 
 (defn- error-value
-  [kind message data]
-  {kind (if (= ::refused-tag kind) (::tag data) true)
-   :seon.error/kind kind
-   :seon.error/message message
-   :seon.error/data data})
+  {:malli/schema [:=> [:cat :qualified-keyword :string :map :map]
+                  :seon.sci.reader/failure]}
+  [member message data observation]
+  (error/diagnostic
+   (merge
+    {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
+     :seon.error/layer :seon.sci.reader/source
+     :seon.error/operation 'seon.sci.reader/error-value
+     :seon.error/message message
+     :seon.error/offending (::text data data)
+     :seon.error/diagnostic-layer :seon.sci.reader/source
+     :seon.error/diagnostic-operation 'seon.sci.reader/error-value
+     :seon.error/diagnostic-member member
+     :seon.error/diagnostic-expected :seon.sci.reader/accepted-source
+     :seon.error/diagnostic-offending (::text data data)
+     :seon.error/diagnostic-cause :seon.error/unknown
+     :seon.error/diagnostic-evidence data
+     :seon.error/data data}
+    observation)))
 
 (defn- refusal-handler
   [tag]
   (fn [_]
     (throw
-     (ex-info (str "Reader tag is not accepted: " tag)
+     (ex-info "Reader tag is not accepted; supply an explicitly declared reader."
               {::refusal true
                ::tag tag}))))
 
@@ -620,10 +635,11 @@
                                    (= "seon.repl" (namespace %))) (keys form)))
                   (assoc ::error
                          (error-value
-                          ::fabricated-response
+                          ::response-keys
                           "You wrote a response. Only the REPL writes responses; send forms and wait."
                           {::text source ::line source-line
-                           ::column source-column ::phase "reply"})))]
+                           ::column source-column ::phase "reply"}
+                          {::response-keys (into #{} (filter #(and (keyword? %) (= "seon.repl" (namespace %)))) (keys form))})))]
             (recur (next-reading-context state form)
                    (conj events event))))))))
 
@@ -654,17 +670,12 @@
           classification (merge classification)
           refused? (assoc ::tag (::tag data)))]
     (error-value
-     (if refused? ::refused-tag ::unreadable)
-     (let [message (or (ex-message failure) (str failure))]
-       (if (= :stray-closer (::error-kind classification))
-         (let [offset (::failure-offset classification)
-               start (inc (.lastIndexOf text "\n" (dec offset)))
-               next-line (.indexOf text "\n" offset)
-               end (if (neg? next-line) (count text) next-line)]
-           (str message " in reply text " (pr-str (subs text start end))
-                ". The reader reads each reply from scratch; nothing is buffered between turns."))
-         message))
-     error-data))))
+     (if refused? ::tag ::form)
+     (or (ex-message failure) "Source could not be read; correct the supplied reader form.")
+     error-data
+     (if refused?
+       {::refused-token (::tag data)}
+       {::unreadable-member ::form})))))
 
 (defn- shift-event
   [event offset line-offset column-offset]
@@ -877,10 +888,7 @@
    [:=> [:cat :map]
     [:or
      [:vector :map]
-     [:map
-      [:seon.error/kind :keyword]
-      [:seon.error/message :string]
-      [:seon.error/data :map]]]]}
+     :seon.sci.reader/failure]]}
   [{text ::text
     namespace-name ::ns
     aliases ::aliases
@@ -902,26 +910,28 @@
     (cond
       (not (string? text))
       (error-value
-       ::unreadable
-       "Reader text must be a string."
-       {::text text
-        ::phase "parse"})
+       ::text
+       "Reader text must be a string; supply Clojure source text."
+       {::text text ::phase "parse"}
+       {::unreadable-member ::text})
 
       (or (not (integer? (::max-source reading-context)))
           (neg? (::max-source reading-context)))
       (error-value
-       ::unreadable
-       "Reader max-source must be a non-negative integer."
+       :seon.config.eval.result/max-source
+       "Reader max-source must be a non-negative integer; supply its declared bound."
        {::text text
         :seon.config.eval.result/max-source (::max-source reading-context)
-        ::phase "parse"})
+        ::phase "parse"}
+       {::unreadable-member :seon.config.eval.result/max-source})
 
       (> (count text) (::max-source reading-context))
       (error-value
-       ::oversize
-       "Clojure source exceeds the declared character bound."
-       {::length (count text)
-        :seon.config.eval.result/max-source (::max-source reading-context)})
+       :seon.config.eval.result/max-source
+       "Clojure source exceeds the declared character bound; submit a smaller source."
+       {::text text ::length (count text)
+        :seon.config.eval.result/max-source (::max-source reading-context)}
+       {::length (count text) ::source-bound (::max-source reading-context)})
 
       :else
       (try

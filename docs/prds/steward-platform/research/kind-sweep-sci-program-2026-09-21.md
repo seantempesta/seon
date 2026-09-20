@@ -457,3 +457,24 @@ style warnings excluded. Cold command owed: `bin/test --paths
 src/seon/sci/admit.clj resources/seon/schemas/seon.sci.admit.edn
 src/seon/sci/kernel.clj resources/seon/schemas/seon.sci.kernel.edn
 test/seon/sci/admit_test.clj -- seon.sci.admit-test`.
+
+## Reader conversion
+
+Reader source kinds 2 → 0, resource class markers 5 → 0, reader test kinds
+14 → 0. The existing diagnostic producer now declares its four actual
+facets. Required observations identify the unreadable member, refused token,
+fabricated response keys, or observed source length/bound. A refused tag stays
+a symbol; the reader-eval token stays its observed string. The pure reader
+already accepts zero as a source bound, so its observed nonnegative bound is
+separate from the config dial's positive-only schema. Source objects remain
+raw offending evidence, not a new per-facet serialized field. Messages no
+longer append source excerpts. Both SCI pass-through contracts name the facets.
+
+The reader fast snapshot run.uxXAxl armed 1,465 contracts (1,462 program-armable)
+then refused at the same runner offending-member recording boundary;
+**0 executed; tally owed** (`tmp/sci-program-reader-fast.log`). Conversion lint
+has zero errors/warnings (one pre-existing unused excluded-var info), and all
+four namespaces load. Cold command owed: `bin/test --paths
+src/seon/sci/reader.cljc resources/seon/schemas/seon.sci.reader.edn
+test/seon/sci/reader_test.clj src/seon/sci/kernel.clj src/seon/sci/admit.clj --
+seon.sci.reader-test`.

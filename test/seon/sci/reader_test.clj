@@ -8,6 +8,7 @@
             [clojure.test.check.properties :as prop]
             [sci.core :as sci]
             [seon.sci.reader :as reader]
+            [seon.schema :as schema]
             [seon.test-support :as support]))
 
 (defn- source-files
@@ -33,9 +34,9 @@
             :seon.config.eval.result/max-source 1048576}
            context))))
 
-(defn- error?
+(defn- reader-failure?
   [value]
-  (contains? value :seon.error/kind))
+  ((schema/projection-validator (schema/handed-projection) :seon.sci.reader/failure) value))
 
 (deftest fences-are-whitespace-between-reader-forms
   (doseq [delimiter ["```" "```clojure" "```edn" "  ```clj" "~~~clojure"]
@@ -61,8 +62,10 @@
     (is (= 2 (count parsed)))
     (is (nil? (:seon.sci.reader/error (first parsed))))
     (is (= source (:seon.sci.reader/source (second parsed))))
-    (is (= "You wrote a response. Only the REPL writes responses; send forms and wait."
-           (get-in parsed [1 :seon.sci.reader/error :seon.error/message])))
+    (is (= #{:seon.repl/value}
+           (get-in parsed [1 :seon.sci.reader/error :seon.sci.reader/response-keys])))
+    (is (= 'seon.sci.reader/error-value
+           (get-in parsed [1 :seon.sci.reader/error :seon.error/operation])))
     (doseq [text ["(identity #:seon.repl{:value 2})"
                   "'#:seon.repl{:value 2}"
                   "\"my.agents.juniper=>\\n#:seon.repl{:value 2}\""]]
@@ -184,8 +187,8 @@
         [['foo/bar "#foo/bar {:x 1}"]]]
     (doseq [[tag text] tag-cases]
       (let [refused (events text)]
-        (is (= :seon.sci.reader/refused-tag
-               (:seon.error/kind refused)))
+        (is (= tag (:seon.sci.reader/refused-token refused)))
+        (is (= 'seon.sci.reader/error-value (:seon.error/operation refused)))
         (is (= tag
                (get-in refused
                        [:seon.error/data :seon.sci.reader/tag]))))
@@ -199,15 +202,13 @@
            (events "#foo/bar 1"
                    {:seon.sci.reader/tags
                     {'foo/bar (fn [value] value)}})))
-      (is (= :seon.sci.reader/refused-tag
-             (:seon.error/kind (events "#foo/bar 1")))))
+      (is (= 'foo/bar (:seon.sci.reader/refused-token (events "#foo/bar 1")))))
     (testing "#= is not a tag-map escape hatch"
       (let [result
             (events "#=(+ 20 22)"
                     {:seon.sci.reader/tags
                      {(symbol "#=") identity}})]
-        (is (= :seon.sci.reader/refused-tag
-               (:seon.error/kind result)))
+        (is (= "#=" (:seon.sci.reader/refused-token result)))
         (is (= "#="
                (get-in result
                        [:seon.error/data :seon.sci.reader/tag])))))))
@@ -225,10 +226,8 @@
       ;; the hostile :hostile-tag-value
       (is (inst? (first (mapv :seon.sci.reader/form
                               (events "#inst \"2020-01-01\"")))))
-      (is (= :seon.sci.reader/refused-tag
-             (:seon.error/kind (events "#=(+ 20 22)"))))
-      (is (= :seon.sci.reader/refused-tag
-             (:seon.error/kind (events "#foo/bar {:x 1}"))))
+      (is (= "#=" (:seon.sci.reader/refused-token (events "#=(+ 20 22)"))))
+      (is (= 'foo/bar (:seon.sci.reader/refused-token (events "#foo/bar {:x 1}"))))
       (is (= [['inst "2020-01-01"]]
              (mapv :seon.sci.reader/form
                    (events
@@ -253,8 +252,8 @@
                   "::str/word"
                   {:seon.sci.reader/aliases
                    {'str 'clojure.string}}))))
-    (is (= :seon.sci.reader/unreadable
-           (:seon.error/kind (first-read-error (events "::str/word"))))))
+    (is (= :seon.sci.reader/form
+           (:seon.sci.reader/unreadable-member (first-read-error (events "::str/word"))))))
   (testing "namespace and refers drive syntax quote without ambient state"
     (is (= 'clojure.core/inc
            (-> (events
@@ -274,7 +273,7 @@
 
 (deftest the-reader-never-invents-an-absent-source-bound
   (let [result (reader/read {:seon.sci.reader/text "(+ 1 2)"})]
-    (is (= :seon.sci.reader/unreadable (:seon.error/kind result)))
+    (is (= :seon.config.eval.result/max-source (:seon.sci.reader/unreadable-member result)))
     (is (contains? (:seon.error/data result)
                    :seon.config.eval.result/max-source))
     (is (nil? (get-in result
@@ -296,11 +295,10 @@
               (and (seq errors)
                    (every?
                     (fn [failure]
-                      (and (error? failure)
-                           (contains?
-                            #{:seon.sci.reader/unreadable
-                              :seon.sci.reader/refused-tag}
-                            (:seon.error/kind failure))
+                      (and (reader-failure? failure)
+                           (or (:seon.sci.reader/unreadable-member failure)
+                               (:seon.sci.reader/refused-token failure))
+                           (= 'seon.sci.reader/error-value (:seon.error/operation failure))
                            (string? (:seon.error/message failure))
                            (map? (:seon.error/data failure))))
                     errors)))
@@ -309,12 +307,13 @@
     (support/assert-check!
      (tc/quick-check 100 property :seed 1785291018)
      "Malformed and refused source must always become flat data."))
-  (testing "oversize is the third and only other kind"
+  (testing "oversize reports the source length and bound"
     (let [result
           (events "(+ 1 2)"
                   {:seon.config.eval.result/max-source 3})]
-      (is (= :seon.sci.reader/oversize
-             (:seon.error/kind result)))
+      (is (= 3 (:seon.sci.reader/source-bound result)))
+      (is (= 7 (:seon.sci.reader/length result)))
+      (is (= 'seon.sci.reader/error-value (:seon.error/operation result)))
       (is (= 7
              (get-in result
                      [:seon.error/data :seon.sci.reader/length])))
@@ -324,8 +323,8 @@
                       :seon.config.eval.result/max-source])))))
   (testing "unreadable source carries the parser position"
     (let [result (first-read-error (events "(defn f\n  [x]"))]
-      (is (= :seon.sci.reader/unreadable
-             (:seon.error/kind result)))
+      (is (= :seon.sci.reader/form
+             (:seon.sci.reader/unreadable-member result)))
       (is (pos-int?
            (get-in result
                    [:seon.error/data :seon.sci.reader/line])))
@@ -339,8 +338,8 @@
     (let [result (events "(+ 1 ]\n(+ 2 3)")]
       (is (vector? result))
       (is (= 2 (count result)))
-      (is (= :seon.sci.reader/unreadable
-             (get-in result [0 :seon.sci.reader/error :seon.error/kind])))
+      (is (= :seon.sci.reader/form
+             (get-in result [0 :seon.sci.reader/error :seon.sci.reader/unreadable-member])))
       (is (= '(+ 2 3) (:seon.sci.reader/form (second result)))))))
 
 (deftest read-failures-are-isolated
@@ -355,16 +354,16 @@
     (testing (pr-str source)
       (let [result (events source)]
         (if (= :refused expected)
-          (is (= :seon.sci.reader/refused-tag (:seon.error/kind result)))
+          (is (= 'unknown-tag (:seon.sci.reader/refused-token result)))
           (do
             (is (= expected (read-kinds result)))
             (doseq [event result :when (:seon.sci.reader/error event)]
               (is (string? (:seon.sci.reader/source event)))
               (is (vector? [(:seon.sci.reader/start event)
                             (:seon.sci.reader/end event)]))
-              (is (= :seon.sci.reader/unreadable
+              (is (= :seon.sci.reader/form
                      (get-in event [:seon.sci.reader/error
-                                    :seon.error/kind]))))))))))
+                                    :seon.sci.reader/unreadable-member]))))))))))
 
 (deftest structured-error-kind-classification
   (doseq [[source expected]

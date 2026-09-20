@@ -10,16 +10,24 @@
            [:edamame/row :int]
            [:edamame/column :int]
            [:edamame/elements [:vector :seon.schema/value]]]]
- :seon.sci.reader/fabricated-response [:= true]
- :seon.sci.reader/fabricated-response-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify a fabricated REPL response in agent source"} [:seon.sci.reader/fabricated-response :seon.sci.reader/fabricated-response] [:seon.error/message :seon.error/message]]
- :seon.sci.reader/unreadable [:= true]
- :seon.sci.reader/unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark unreadable Clojure source"} [:seon.sci.reader/unreadable :seon.sci.reader/unreadable] [:seon.error/message :seon.error/message]]
- :seon.sci.reader/oversize [:= true]
- :seon.sci.reader/oversize-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark Clojure source that exceeds its reader bound"} [:seon.sci.reader/oversize :seon.sci.reader/oversize] [:seon.error/message :seon.error/message]]
- :seon.sci.reader/refused-tag :seon.sci.reader/tag
- :seon.sci.reader/refused-tag-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the reader tag that was refused"} [:seon.sci.reader/refused-tag :seon.sci.reader/refused-tag] [:seon.error/message :seon.error/message]]
- :seon.sci.reader/keyword [:= true]
- :seon.sci.reader/keyword-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an invalid keyword read from agent source"} [:seon.sci.reader/keyword :seon.sci.reader/keyword] [:seon.error/message :seon.error/message]]
+
+ :seon.sci.reader/fabricated-response-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.reader/response-keys :seon.sci.reader/response-keys]]]
+
+ :seon.sci.reader/unreadable-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.reader/unreadable-member :seon.sci.reader/unreadable-member]]]
+
+ :seon.sci.reader/oversize-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.reader/length :seon.sci.reader/length] [:seon.sci.reader/source-bound :seon.sci.reader/source-bound]]]
+
+ :seon.sci.reader/refused-tag-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.reader/refused-token :seon.sci.reader/refused-token]]]
+
+
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.sci.reader/error
@@ -43,4 +51,11 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.projection/entity}
  :seon.db/ref]
+
+:seon.sci.reader/unreadable-member :qualified-keyword
+:seon.sci.reader/refused-token [:or :symbol :string]
+:seon.sci.reader/length [:int {:min 0}]
+:seon.sci.reader/source-bound [:int {:min 0 :description "The character bound actually supplied to this pure reader, including a zero bound."}]
+:seon.sci.reader/response-keys [:set {:min 1} :qualified-keyword]
+:seon.sci.reader/failure [:or :seon.sci.reader/unreadable-error :seon.sci.reader/refused-tag-error :seon.sci.reader/oversize-error :seon.sci.reader/fabricated-response-error]
 }
