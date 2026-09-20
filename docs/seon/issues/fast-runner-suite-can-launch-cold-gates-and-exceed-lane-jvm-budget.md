@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-20
 tags: [issue, test, gate, bounded-execution, publication]
@@ -92,3 +92,16 @@ Three options (engineering estimates, excluding the orchestrator's cold proof):
 
 `src/seon/cluster.clj` remains dirty/held. The held function fixture is untouched.
 Items 2–4 have not advanced during this read-only selection audit.
+
+
+## Resolution — accepted invocation convention
+
+The orchestrator ruled a separate long integration namespace, explicit cold
+invocation only, with coverage outside platform for now. The 24 subprocess
+fixtures now live in `test/seon/test_runner_integration_test.clj`; remaining
+runner tests do not invoke those helpers. A positive local regression loads
+the moved tests and verifies the existing selector skips all of them without
+long admission. Fast run `658ac7335177` passes that regression; its unrelated
+4 failures/2 errors remain named in the publication landing note. No nested
+JVM or cold gate was launched by this run. The new namespace's real execution
+is owed to the orchestrator under the exact command in that note.

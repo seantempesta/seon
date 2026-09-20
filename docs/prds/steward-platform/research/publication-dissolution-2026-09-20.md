@@ -935,3 +935,49 @@ No production or fixture changes, no suite rerun, and no default operation in
 this followup. The population owner is still dirty/held. The requested ordering
 was fixture-split commit first; that slice stops before changing validation
 policy. Items 2–4 remain unimplemented.
+
+
+### Runner integration split (accepted standing selection rule)
+
+Moved 24 tests whose local helper graph reaches `ProcessBuilder` into
+`seon.test-runner-integration-test`. This includes the direct Java thread-dump
+fixture, dependency-tool JVM, actual fast snapshot JVM, cold gates, and the
+shell/Python launcher fixtures that share those helpers. Existing helpers remain
+one implementation in `seon.test-runner-test`; the moved tests reference their
+Vars. Every moved test carries a nonblank long reason and `long-ms` (1,800,000
+ms, preserving the existing longest child-gate allowance), with no platform
+marker. The destructive-platform guard is unchanged. Ordinary lane selection
+only names the remaining runner namespace; integration is never named in a
+lane's fast request. The explicitly accepted invocation convention supplies
+isolation, not a new orchestrator-only eligibility fact.
+
+The exact recurring ORCHESTRATOR command is:
+
+```sh
+bin/test --paths test/seon/test_runner_test.clj test/seon/test_runner_integration_test.clj -- seon.test-runner-integration-test
+```
+
+Its coverage is outside `--platform` for now. The lane did not execute it.
+Explicit cold namespaces include long members (`runner.clj` explicit partition);
+bare/platform requests exclude these long members. The new local regression
+loads the moved namespace, positively observes its tests and long declarations,
+and exercises the existing tier selector: all are skipped, no platform/bulk
+members. Loading a namespace does not execute its `deftest` bodies.
+
+Fast run `658ac7335177`, `tmp/publication-dissolution/runner-split-fast.log`:
+**28 executed, 161 assertions, 4 failures, 2 errors**. The isolation regression
+passes. Remaining verification is qualified by these pre-existing behavior
+expectations in the now-safe runner namespace:
+
+- two instrumentation assertions expect thrown `:seon.error/kind`; the current
+  refusal surface is changing under the held instrumentation/schema owners;
+- staged completion's form is 1,074 bytes, exceeding a literal 1,024 assertion;
+  its refusal also crosses `db/transact-call`'s report-shaped return contract;
+- concurrent retraction produces `test-definition-absent` through that writer;
+- the agent-fork fixture's selection lacks explicit cluster custody.
+
+These obligations remain listed, not silently dropped. No production refusal,
+writer, or selection policy was changed to satisfy them. A tentative local
+refusal-helper edit was removed before this commit, restoring the exact tested
+bytes. No suite rerun is warranted for unchanged bytes. The integration
+namespace compiled when the passing isolation regression loaded it.
