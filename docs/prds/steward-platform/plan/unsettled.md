@@ -6202,3 +6202,28 @@ transaction. Retirement of `data-edn`/`data-size`/`offending-projection`
 stays the atomic later slice. **Owner veto point:** this places the
 mechanism at the recorder rather than the constructor; if the owner wants
 the constructor to store, option 3 is the price. Lane resumed (astra low).
+
+## 2026-09-22 ~11:50 local — gate-restructure LANDED; publication lane RESUMED for its proof (both blockers gone at HEAD)
+
+`gate-restructure` landed `4028a8996` (docstring contracts expanded, replaced
+definitions re-armed on restoration — the docstring Var-contract blocker),
+`5930edbb5` (report preparation carried; canonical fixture branch work
+measured: first 27.09 ms, subsequent nine median 2.64 ms, p90/max 3.32 ms)
+and `a13b27245` (note). Its fast runs were refused admission at
+`:seon.call-preparation/candidates` — a snapshot older than `955482c22`;
+at HEAD the ambiguous-call error schema declares target symbol, supplied
+count and candidate count only (`seon.call-preparation.edn:244–246`), so
+that blocker is gone. Its recurrence retry recorded one error at
+`seon.error/stored-observation` (`src/seon/error.clj:287`,
+`:malli.core/invalid-schema` from `malli.core/properties`) on a snapshot
+carrying the error lane's staged edits — handed to the error lane at its
+next stop. Cold gate/platform and the process-exit proof remain owed
+([gate-restructure-2026-09-21.md](../research/gate-restructure-2026-09-21.md)).
+
+`publication-dissolution` RESUMED (astra low) in the freed slot on its
+option 1: same-tree adoption/export proof on its own scratch root, per-phase
+measurements, and the fresh-host loaded-producer guard (fix in cluster.clj
+if it still refuses; `freshly-booted-host-adopts-its-own-tree` is the
+regression). Default stays stopped until that proof passes. The two dirty
+test schemas (`[:vector {:seon.db/cardinality :many} …]` → `[:vector …]`)
+are step 2's.
