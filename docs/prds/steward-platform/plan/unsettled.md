@@ -6956,3 +6956,18 @@ each publication re-arms all ~1,500 wrappers (`projection-executor` →
 `arm-var!`, thread sample `tmp/orchestrator/default-idle-burn/`); idle
 now at 0 %. This is slice 4's "re-arm only wrappers whose contract digest
 changed" — measured evidence for it.
+
+## 2026-09-23 ~06:10 local — error lane accretion LANDED (`366ad0be0`): `prepare` mints the result id, renders through `seon.render.value` (complete → blob, capped → `:seon.error/shown`), binds `result/e<id>` via the existing admit/eval seams; RESET NEEDED `:seon.error/result-id`, `:seon.error/shown`. Its regressions cannot run yet: the fixture is a branch of the PUBLISHED base, which predates the two attributes
+
+Diff reviewed: +68 src, every step on an existing seam (`admit/result-handle`,
+`render.value/prepare` + `render-ai-data` under the html profile for the
+complete rendering and the AI profile for the capped one, `blob/put!`,
+`bind-result!`); legacy members still written. Consequence of the
+fixture-fork design: a schema-changing commit needs a fresh published
+base before its own regressions can run — the orchestrator is running
+`bin/test --prepare-head-base` now, and the rule is queued for the
+test-system lane: a `--paths` fast run whose snapshot declares attributes
+the published base lacks publishes ITS OWN base through the live JVM
+(seconds now) instead of refusing or reading absence. Test-system lane
+landed `30baf050a` (worker projection acquired from indexed rows and the
+carried schemas — its 5.4 s item; reviewed at its stop).
