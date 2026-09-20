@@ -539,3 +539,70 @@ bin/test --platform
 ```
 
 Earlier background/problems proof obligations remain as recorded above.
+
+### ops-effects-2 continuation after 7721e5893
+
+#### owed to fn.clj's release
+
+The orchestrator ruled option 3 now, option 1 later. The previous gate-sets
+condition is deferred, not a reason to stop this continuation. Held consumer
+contract: `src/seon/fn.clj:1487`, `seon.fn/gate-sets`. Pending owned consumer:
+`src/seon/issue/detect.clj:328`, `public-without-reaching-test`.
+
+The substantive members proposed for the two currently marker-only facets
+are, in addition to the base:
+
+- `:seon.db/invalid-read-error`: require `:seon.db/read-operation` and
+  `:seon.db.read/target`, reusing the existing `:seon.db.read/error` members
+  and their declared types. The target is a substantive evidence component.
+- `:seon.schema/missing-projection-error`: require
+  `:seon.schema/expected-value` and `:seon.schema/refused-value`, reusing the
+  existing `:seon.schema/validation-refusal` members and types. The existing
+  `seon.db/projection-fallback` producer already supplies both. The expected
+  key is the missing projection schema; the refused value records the caller.
+
+The owning lane must make the producer and gate helper contracts agree in
+one slice; then the detector can branch on `:seon.db/read-operation` and
+`:seon.schema/expected-value`. No new boolean or per-facet EDN member is
+proposed. `src/seon/fn.clj` remains untouched even when clean.
+
+#### New section-6 boundary: polymorphic effect settlement
+
+At inspected HEAD `61374edb8`, `src/seon/effect.clj:557` excludes a handler
+refusal from ordinary effect datoms, but its admitted payload is explicitly
+polymorphic (`resources/seon/schemas/seon.sci.admit.edn:68`). It declares no
+refusal union whose distinguishing members could implement that decision.
+This is a different condition from the deferred gate-selection collision.
+Exact producer/consumer evidence, acceptance, and three priced options are
+in [the effect settlement issue](../../../seon/issues/effect-settlement-cannot-classify-polymorphic-handler-results.md).
+
+Recommended option: explicitly allow local base recognition at this genuine
+polymorphic inspection boundary (1–2 hours, complete base errors excluded
+from ordinary argument datoms, exception to §1.3). Alternative: carry and
+validate the actual handler output contract (3–6 hours; stronger declaration
+coupling, changes settlement inputs and needs a polymorphic-handler rule).
+Third: expressly defer this consumer (15 minutes bookkeeping; retains kind
+debt and postpones either implementation cost).
+
+No production conversion or test edits in this continuation; remaining family
+counts and the cold command above remain owed. Foreign schema and SCI files
+were dirty and were not edited. No worktree, scratch cluster, or foreign
+session was created or operated. No live adoption is claimed.
+
+The one accumulated fast pass on 2026-09-20 at 08:59 UTC selected all 15
+namespaces in the cold command above, with the same owned paths. Snapshot
+HEAD `61374edb8507779462778113377026eb9cd91821`, published graph
+`e8cb1a8c76cfe6b393cf4b1a167ff815b1dbd56ef90d15c2373fa7fa53635411`
+(83 commits behind HEAD); 1454 contracts instrumented. Run
+`454bb6a0f88f` refused snapshot recording before test execution:
+`:seon.test.runner/invalid-marker-reason-error` includes the now-optional
+`:seon.error/offending`, but the recording authority still returns
+"A stored error member must have a storable registered attribute."
+Fast tally owed — admission held by
+`resources/seon/schemas/seon.test.runner.edn`, at that facet's offending
+member. This is not a dirty-resource overlay refusal and is not evidence
+that making the field optional was absent from the snapshot: the refusal
+prints `{:optional true}`. Recorded tally unavailable; no tests executed.
+No repeat pass was made. The launcher exited and removed its snapshot.
+`clojure -M -e "(require 'seon.effect)"` then exited zero in the shared
+tree. No source changed, so no new source lint or runtime proof is claimed.
