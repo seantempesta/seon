@@ -1168,7 +1168,7 @@
                                          "import sys; sys.exit(23)\n")
           journal (::runner/worker-journal
                    (assoc worker ::runner/worker-journal
-                          (atom [{::runner/task-symbols ["seon.leaker/strips"]
+                          (atom [{::runner/task-symbols ['seon.leaker/strips]
                                   ::runner/task-ambient-drift
                                   {::runner/snapshot-instrumented
                                    {::runner/drift-removed ["seon.db/pull"]}}}])))
@@ -1180,7 +1180,7 @@
                       worker ((deref (var fixture/exchange-task)) "write-failure-attributed"))]
           (is (= "write-failure-attributed" (::runner/executed-by result))
               "the red names the worker that produced it")
-          (is (= [["seon.leaker/strips"]]
+          (is (= [['seon.leaker/strips]]
                  (mapv ::runner/task-symbols
                        (::runner/prior-ambient-drift result)))
               "and it carries its suspects, so the verdict names a leaker

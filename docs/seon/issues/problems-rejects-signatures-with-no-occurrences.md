@@ -32,3 +32,9 @@ Acceptance: the error owner and health projection agree on signatures without
 occurrences, and runtime status returns truthful health data for that real
 fixture rather than failing the whole observation. Probe the signature's
 creation provenance before choosing whether to repair its producer or query.
+
+Gate-restructure startup observation (2026-09-20T09:23:21Z): default PID
+24777 is alive, but MCP runtime status refuses `seon.problems/problems` at
+`[:seon.problems/error-signatures 0 :seon.error/at]`: the returned map lacks
+the required timestamp. This is an unavailable health observation, not a
+healthy result. No cause or fix is inferred; default was not changed.

@@ -999,7 +999,7 @@
                 [ordered]
                 (mapv vector ordered)))))
          (map (fn [task-vars]
-                (let [symbols (mapv (comp str var-symbol) task-vars)
+                (let [symbols (mapv var-symbol task-vars)
                       reason (some->> task-vars
                                       (keep #(:seon.test/long (declared %)))
                                       seq (str/join "; "))
@@ -1623,7 +1623,7 @@
         started-nanos (System/nanoTime)]
     (try
       (let [test-vars (mapv #(@resolve-admitted-test
-                              (assoc resolution :seon.test/identity (symbol %)))
+                              (assoc resolution :seon.test/identity %))
                             (::task-symbols task))
             _ (when-let [failure (first (filter :seon.test/resolution-refusal test-vars))]
                 (throw (ex-info (:seon.error/message failure) failure)))
@@ -1908,7 +1908,7 @@
         (throw (or (.getCause failure) failure)))
       (catch TimeoutException _
         (.cancel ^java.util.concurrent.Future execution true)
-        (let [test-symbols (mapv str (::task-symbols task))
+        (let [test-symbols (::task-symbols task)
               elapsed-ms (quot (- (System/nanoTime) started-nanos) 1000000)
               message (str "Worker task reached its " bound-seconds
                            "s execution bound before returning.")]
@@ -4016,7 +4016,7 @@
                      (pr-str (into (sorted-map) drift))))
         result
         (if (exchange-failure? result)
-          (let [test-symbols (mapv str (::task-symbols task))
+          (let [test-symbols (::task-symbols task)
                 message (str "Worker exchange failed: " (pr-str result))]
             (assoc task
                    ::task-summary {::test-count (count test-symbols)
@@ -4149,7 +4149,7 @@
                 (mapv #(execute-worker-task! progress (force serial-worker) %)
                       leftovers)
                 (mapv (fn [task]
-                        (let [test-symbols (mapv str (::task-symbols task))
+                        (let [test-symbols (::task-symbols task)
                               message
                               (str "Worker pool exhausted before this task"
                                    " could run; every pool worker retired.")]
@@ -4534,12 +4534,12 @@
 
 (defn- confirmation-symbols
   []
-  (into #{} (remove str/blank?)
+  (into #{} (comp (remove str/blank?) (map symbol))
         (str/split-lines (or (System/getProperty "seon.test.confirm") ""))))
 
 (defn- confirmation-vars
   [all-vars symbols]
-  (let [by-symbol (into {} (map (juxt (comp str var-symbol) identity)) all-vars)
+  (let [by-symbol (into {} (map (juxt var-symbol identity)) all-vars)
         absent (set/difference symbols (set (keys by-symbol)))]
     (when (seq absent)
       (throw (ex-info "Named confirmation tests are unavailable."

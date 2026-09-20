@@ -40,6 +40,21 @@
 (def ^:private project-root
   (.getCanonicalFile (io/file (System/getProperty "user.dir"))))
 
+(deftest published-test-identities-remain-symbols-through-task-classification
+  (let [manifest (#'runner/program-manifest)
+        indexed (#'runner/indexed-test-symbols manifest)
+        selected [#'coordinator-uses-the-prepared-worker-count]
+        tasks (#'runner/test-tasks selected selected {})
+        absent (assoc (first tasks)
+                      ::runner/task-symbols ['seon.absent-gate-fixture/missing])
+        classified (#'runner/split-resolved-tasks manifest (conj tasks absent))]
+    (is (seq indexed) "The canonical manifest must contain positive evidence.")
+    (is (every? symbol? indexed))
+    (is (= ['seon.test-runner-test/coordinator-uses-the-prepared-worker-count]
+           (::runner/task-symbols (first tasks))))
+    (is (= tasks (::runner/resolved classified)))
+    (is (= [absent] (::runner/unresolved classified)))))
+
 (deftest ^{:seon.test/platform "Dependency cache identity excludes checkout locations."}
   dependency-source-digest-does-not-name-the-checkout
   (let [root (doto (io/file project-root "tmp" (str "digest-" (random-uuid))) .mkdirs)
@@ -245,7 +260,7 @@
   [case-name]
   {::runner/task-id (str case-name)
    ::runner/task-ordinal 1
-   ::runner/task-symbols [(str "seon.exchange-test/" case-name)]})
+   ::runner/task-symbols [(symbol "seon.exchange-test" case-name)]})
 
 (defn- execute-injected-task!
   [worker task]
@@ -464,14 +479,14 @@
   (let [task-results
         [{::runner/task-id :unlaunchable
           ::runner/task-ordinal 7
-          ::runner/task-symbols ["seon.example-test/unlaunchable"]
+          ::runner/task-symbols ['seon.example-test/unlaunchable]
           ::runner/task-summary {::runner/test-count 1
                                  ::runner/pass-count 2
                                  ::runner/fail-count 1
                                  ::runner/error-count 0}}
          {::runner/task-id :green
           ::runner/task-ordinal 8
-          ::runner/task-symbols ["seon.example-test/green"]
+          ::runner/task-symbols ['seon.example-test/green]
           ::runner/task-summary {::runner/test-count 1
                                  ::runner/pass-count 3
                                  ::runner/fail-count 0
@@ -518,7 +533,7 @@
         "confirmation launch is outside the already-complete bulk tally")
     (is (= :unconfirmed (::runner/parallel-failure unconfirmed)))
     (is (= ["clojure" "-M:test"] (::runner/launch-request failure)))
-    (is (= ["seon.example-test/unlaunchable"]
+    (is (= ['seon.example-test/unlaunchable]
            (::runner/task-symbols failure))
         "the typed launch failure carries the task known before readiness")
     (is (not (str/includes? output "Recorded"))
@@ -1269,7 +1284,7 @@
              {::runner/test-count 4 ::runner/pass-count 0
               ::runner/fail-count 0 ::runner/error-count 4}
              [{::runner/task-ordinal 1
-               ::runner/task-symbols ["seon.a/one"]
+               ::runner/task-symbols ['seon.a/one]
                ::runner/worker-exchange-result
                {::runner/worker-id "pool-1"
                 ::runner/worker-phase :exited
@@ -1277,22 +1292,22 @@
                 ::runner/worker-exit 1
                 ::runner/worker-error-log "/tmp/pool-1.log"}}
               {::runner/task-ordinal 2
-               ::runner/task-symbols ["seon.b/two"]
+               ::runner/task-symbols ['seon.b/two]
                ::runner/worker-pool-exhausted true}
               ;; a RETIRED worker never published an exit code or a log
               {::runner/task-ordinal 5
-               ::runner/task-symbols ["seon.d/four"]
+               ::runner/task-symbols ['seon.d/four]
                ::runner/worker-exchange-result
                {::runner/worker-id "serial"
                 ::runner/worker-phase :retired
                 ::runner/missing-worker-event :task-complete}}
               {::runner/task-ordinal 3
-               ::runner/task-symbols ["seon.c/three"]
+               ::runner/task-symbols ['seon.c/three]
                ::runner/executed-by "pool-2"
                ::runner/parallel-failure :parallel-only
                ::runner/parallel-only-suspects [["seon.leaker/strips"]]}
               {::runner/task-ordinal 4
-               ::runner/task-symbols ["seon.leaker/strips"]
+               ::runner/task-symbols ['seon.leaker/strips]
                ::runner/task-ambient-drift
                {::runner/snapshot-instrumented
                 {::runner/drift-removed ["seon.db/pull"]
@@ -1328,7 +1343,7 @@
                      ::runner/task-summary {::runner/fail-count 1}
                      ::runner/task-ordinal 1
                      ::runner/task-namespace "seon.a-test"
-                     ::runner/task-symbols ["seon.a-test/one"]}]
+                     ::runner/task-symbols ['seon.a-test/one]}]
     (with-redefs-fn
       {#'runner/start-worker! (fn [worker-id _ _] {::runner/worker-id worker-id})
        #'runner/initialize-worker! (fn [worker _namespaces]

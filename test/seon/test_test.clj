@@ -161,7 +161,7 @@
          (let [worker-result
                (#'runner/run-task!
                 {:seon.test.runner/task-namespace "seon.test-test"
-                 :seon.test.runner/task-symbols ["seon.test-test/admitted-fileless-test"]}
+                 :seon.test.runner/task-symbols ['seon.test-test/admitted-fileless-test]}
                 (assoc request :seon.sci.eval/ctx ctx
                                :seon.db/custody-request {:seon.db/connection connection}))]
            (is (= {:seon.test.runner/test-count 1 :seon.test.runner/pass-count 1

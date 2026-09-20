@@ -84,7 +84,7 @@
          (test-support/transacted! connection [[:db.fn/call seon-test/admit-run admission]])
          (let [executed (#'runner/run-task!
                          {:seon.test.runner/task-namespace "seon.test.runner-test"
-                          :seon.test.runner/task-symbols [(str target)]}
+                          :seon.test.runner/task-symbols [target]}
                          {:seon.db/db database :seon.db/connection connection :seon.sci.eval/ctx ctx
                           :seon.schema/projection (schema/projection-from-database database)
                           :seon.test/class-loader (clojure.lang.RT/baseLoader)
@@ -133,7 +133,7 @@
              (is (= :inside value))))
          (let [result (#'runner/run-resolved-tests!
                        {:seon.sci.eval/ctx base-ctx}
-                       {::runner/task-symbols [(str (symbol probe))]}
+                       {::runner/task-symbols [(symbol probe)]}
                        [probe])]
            (is (= [:inside] @observed)
                "worker initialization must not leave its base armed across a host test body")
@@ -148,7 +148,7 @@
                                              {::runner/worker-command :run
                                               ::runner/worker-task
                                               {::runner/task-symbols
-                                               [(str (symbol probe))]}
+                                               [(symbol probe)]}
                                               ::runner/exchange-id %})
                                             "\n")
                                       exchange-ids))
@@ -193,7 +193,7 @@
          (let [exchange-id "serial/bounded-host-task"
                input (str (pr-str {::runner/worker-command :run
                                    ::runner/worker-task
-                                   {::runner/task-symbols [(str (symbol probe))]}
+                                   {::runner/task-symbols [(symbol probe)]}
                                    ::runner/exchange-id exchange-id})
                           "\n"
                           (pr-str {::runner/worker-command :stop
@@ -228,8 +228,8 @@
          ;; The worker's own bound only produces a terminal event if it fires
          ;; while the coordinator is still listening. Ordinary and declared-long
          ;; tasks both have to sit strictly inside the exchange bound.
-         (doseq [task [{::runner/task-symbols ["ordinary"]}
-                       {::runner/task-symbols ["declared-long"]
+         (doseq [task [{::runner/task-symbols ['ordinary]}
+                       {::runner/task-symbols ['declared-long]
                         ::runner/task-long-ms 900000}]]
            (is (< (bounds/exchange-seconds (or (::runner/task-long-ms task) 0) 0)
                   (#'runner/task-exchange-bound-seconds task))
@@ -726,7 +726,7 @@
           task {::runner/task-id "default-red"
               ::runner/task-ordinal 0
               ::runner/task-namespace "seon.test-runner-failure-fixture"
-              ::runner/task-symbols ["seon.test-runner-failure-fixture/failing-example"]}
+              ::runner/task-symbols ['seon.test-runner-failure-fixture/failing-example]}
         red (assoc (#'runner/run-task! task resolution) ::runner/executed-by "pool-1")
         launches (atom 0)
         outcome (atom nil)]
@@ -749,9 +749,9 @@
            (#'runner/confirmation-vars
             [#'seon.test-runner-failure-fixture/passing-example
              #'seon.test-runner-failure-fixture/failing-example]
-            #{"seon.test-runner-failure-fixture/failing-example"})))
+            #{'seon.test-runner-failure-fixture/failing-example})))
     (is (thrown? clojure.lang.ExceptionInfo
-                 (#'runner/confirmation-vars [] #{"missing/test"})))))))
+                 (#'runner/confirmation-vars [] #{'missing/test})))))))
 
 (deftest initialization-acquires-one-projection
   ;; TWO call shapes, ONE acquisition between them. `arm/initialize-contracts!`
