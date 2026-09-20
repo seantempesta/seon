@@ -7,8 +7,8 @@
 # in docs/prds/steward-platform/plan/unsettled.md (14:00, 14:40, 15:10 blocks).
 set -eu
 REPO=$(git rev-parse --show-toplevel)
-WT=${1:-$REPO/tmp/head-wt}
-ROOT=${2:-$REPO/tmp/head-root}
+WT=$(cd "$REPO" && mkdir -p "$(dirname "${1:-tmp/head-wt}")" && cd "$(dirname "${1:-tmp/head-wt}")" && pwd)/$(basename "${1:-tmp/head-wt}")
+ROOT=$(cd "$REPO" && mkdir -p "${2:-tmp/head-root}" && cd "${2:-tmp/head-root}" && pwd)
 [ -d "$WT" ] || git -C "$REPO" worktree add -q "$WT" HEAD
 # The worktree's submodule directories are empty; the classpath needs the real vendored sources.
 if [ ! -L "$WT/reference-code" ]; then
