@@ -2247,6 +2247,8 @@
                                {:seon.source/loaded-producers
                                 [:seon.source/producer-namespace :seon.source/producer-path :seon.source/producer-digest]}]
                               [:seon.source/loaded-host host]))
+          _ (when (:seon.error/at observed)
+              (refused! "The live host's recorded producer generation could not be read." observed))
           loaded (:seon.source/loaded-producer-digest observed)
           inputs (test.cache/input-digests directory)
           requested (loaded-producer-digest
@@ -2265,7 +2267,7 @@
         (let [name (get-in instance [:seon.boot/config :seon.boot/cluster-name])
               message "The live host's loaded producers do not match the requested toolchain."
               root (-> (io/file (get-in instance [:seon.boot/config :seon.boot/root]))
-                       .getParentFile .getParentFile .getCanonicalPath)
+                       .getCanonicalFile .getParentFile .getParentFile .getPath)
               command (str "bin/seon --root " (pr-str root))
               class-namespaces
               (into #{} (comp (mapcat :seon.fn.file/rows)
