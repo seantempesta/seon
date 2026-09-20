@@ -793,3 +793,21 @@ name these facets. Inline base checks are exclusively the remaining
 and plan/ready-subjects. Load and source/test lint pass. Add bootstrap source,
 resource and bootstrap-test to the accumulated commands; fast tally remains
 reserved for the end pass.
+
+Context continuation: nine source sites → two explicitly deferred durable
+projections, now `src/seon/context.clj:494` and `:540`. The turn/cluster
+handoff above still owns the occurrence ref, transaction data and relation;
+no recording inputs were added to capture. Selection now supplies base,
+diagnostic evidence, requested agent id and actual selection condition.
+Selection/comparison declare that facet and the db/error-result pass-through.
+Other consumers carry named db/pull/db/q/turn/system-turn generic-output debt.
+Capture prose no longer prints a kind. Source and affected tests/fixture lint
+are clean; `require seon.context` passes. Add context source/resource,
+context_selection_test, context_capture_test and context_blocks_fixture to
+the accumulated paths, with both context test namespaces.
+
+Morning handoff: `seon.call-preparation` is assigned to sci-program. Its
+`error-value` still builds a kind marker and `error-value?` is a general
+predicate; the orchestrator traced six db-test reds to snapshot's output
+contract. This lane does not edit that family. Restored foreign staged changes
+are preserved and omitted from the lane's overlay; their HEAD bytes are tested.

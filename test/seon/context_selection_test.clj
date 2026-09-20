@@ -56,7 +56,7 @@
                               #inst "2026-09-06T00:00:00Z"}
                        (not= "selection-pending" run-id)
                        (assoc :seon.eval/shown (pr-str ordinal)))))))
-           _ (is (nil? (:seon.error/kind seed)))
+           _ (is (some? (:db-after seed)))
            before-count (db/q '[:find (count ?e) .
                                 :where [?e :seon.cluster.eval/id]] @connection)
            committed (db/transact!
@@ -66,7 +66,7 @@
                        (append-call "selection-a" "selection-first" "chosen-1")
                        (append-call "selection-b" "selection-foreign" "chosen-b")])
            selected (context/selection @connection "selection-a")]
-       (is (nil? (:seon.error/kind committed)))
+       (is (some? (:db-after committed)))
        (is (= ["chosen-1" "chosen-2"]
               (mapv :seon.context.contribution/id selected)))
        (is (= [0 1] (mapv :seon.context.contribution/position selected))
@@ -106,6 +106,7 @@
                                         "must-roll-back")
                            (append-call agent-id run-id contribution-id)])]
              (is (= rule (:seon.context/selection-refused refused)))
+             (is (= agent-id (:seon.context/selection-agent-id refused)))
              (is (= basis (db/basis-t @connection)))
              (is (nil? (db/pull @connection [:seon.context.contribution/id]
                                 [:seon.context.contribution/id "must-roll-back"])))
@@ -122,9 +123,9 @@
                     [[:db.fn/call context/remove-tx
                       (assoc remove-request :seon.agent/id "selection-b")]])]
        (is (= :seon.context/foreign-contribution (:seon.context/selection-refused foreign)))
-       (is (nil? (:seon.error/kind
+       (is (some? (:db-after
                   (db/transact! connection [[:db.fn/call context/remove-tx remove-request]]))))
-       (is (nil? (:seon.error/kind
+       (is (some? (:db-after
                   (db/transact! connection [[:db.fn/call context/remove-tx remove-request]]))))
        (is (= ["chosen-2"] (mapv :seon.context.contribution/id
                                  (context/selection @connection "selection-a"))))
@@ -207,7 +208,7 @@
             [(compact-call "compact-agent" "compact-after" "compact-choice"
                            expected)])
            after (first (context/selection @connection "compact-agent"))]
-       (is (nil? (:seon.error/kind committed)))
+       (is (some? (:db-after committed)))
        (is (= :ready (:seon.context.comparison/status comparison)))
        (is (= expected
               (set (:seon.context.comparison/baseline-evaluations comparison))))

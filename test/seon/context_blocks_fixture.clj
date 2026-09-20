@@ -137,7 +137,8 @@
            (range) steps)}))
 
 (defn- checked [result]
-  (when (:seon.error/kind result)
+  ;; Debt: db/transact! and turn/system-turn retain generic error outputs.
+  (when (and (:seon.error/at result) (:seon.error/layer result) (:seon.error/operation result))
     (throw (ex-info (str "Juniper fixture operation failed: " (pr-str result)) result)))
   result)
 
@@ -341,4 +342,4 @@
                    :seon.agent/id "juniper"})
       (merge (declared! handle)
              (select-keys opening
-                          [:seon.turn/id :seon.error/kind :seon.error/message]))))))
+                          [:seon.turn/id :seon.error/at :seon.error/layer :seon.error/operation :seon.error/message]))))))

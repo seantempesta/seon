@@ -60,13 +60,19 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- selection-refusal
+  {:malli/schema [:=> [:cat :seon.context/selection-refused :map :map]
+                  :seon.context/selection-refused-error]}
   [rule request evidence]
   (assoc
    (error/diagnostic
-    {:seon.error/kind ::selection-refused
-     :seon.error/message (str "Context selection refused: " (name rule) ".")
+    {:seon.error/at (java.util.Date.)
+     :seon.error/layer ::selection
+     :seon.error/operation 'seon.context/selection-refusal
+     :seon.context/selection-agent-id (:seon.agent/id request)
+     :seon.error/offending request
+     :seon.error/message "Select terminal evaluations from an existing agent's closed turn with an available contribution identity."
      :seon.error/diagnostic-layer ::selection
-     :seon.error/diagnostic-operation ::selection
+     :seon.error/diagnostic-operation 'seon.context/selection-refusal
      :seon.error/diagnostic-member rule
      :seon.error/diagnostic-expected
      "An existing agent's closed run with terminal evaluations and an available contribution identity."
@@ -83,7 +89,7 @@
   {:malli/schema
    [:=> [:catn [:database :seon.db/database-value]
                 [:agent-id :seon.agent/id]]
-    [:or :seon.context/selection :seon.error/value]]}
+    [:or :seon.context/selection :seon.context/selection-refused-error :seon.db/error-result]]}
   [database agent-id]
   (let [agent-data
         (db/pull database
@@ -94,7 +100,7 @@
                     {:seon.context.contribution/evaluations [:db/id]}]}]
                  [:seon.agent/id agent-id])]
     (cond
-      (:seon.error/kind agent-data) agent-data
+      (and (:seon.error/at agent-data) (:seon.error/layer agent-data) (:seon.error/operation agent-data)) agent-data
       (nil? agent-data)
       (selection-refusal ::no-such-agent
                          {:seon.agent/id agent-id} {})
@@ -109,9 +115,11 @@
                           :seon.context.contribution/id))
            vec))))
 
+;; Debt: db/pull and db/q still declare :seon.error/value through seon.db/error-result.
+;; Selection and comparison pass those named callee refusals through unchanged.
 (defn- transaction-read
   [value]
-  (if (:seon.error/kind value)
+  (if (and (:seon.error/at value) (:seon.error/layer value) (:seon.error/operation value))
     (throw (ex-info (:seon.error/message value) value))
     value))
 
@@ -306,7 +314,7 @@
   {:malli/schema
    [:=> [:catn [:database :seon.db/database-value]
                 [:request :seon.context/comparison-request]]
-    [:or :seon.context/comparison :seon.error/value]]}
+    [:or :seon.context/comparison :seon.context/selection-refused-error :seon.db/error-result]]}
   [database request]
   (let [agent-id (:seon.agent/id request)
         run-id (:seon.turn/id request)
@@ -332,9 +340,9 @@
         (set (keep #(get-in % [:seon.cluster.eval/run :db/id])
                    (:seon.context.contribution/evaluations contribution)))
         rule (cond
-               (:seon.error/kind contribution) contribution
-               (:seon.error/kind agent-data) agent-data
-               (:seon.error/kind refreshed) refreshed
+               (and (:seon.error/at contribution) (:seon.error/layer contribution) (:seon.error/operation contribution)) contribution
+               (and (:seon.error/at agent-data) (:seon.error/layer agent-data) (:seon.error/operation agent-data)) agent-data
+               (and (:seon.error/at refreshed) (:seon.error/layer refreshed) (:seon.error/operation refreshed)) refreshed
                (nil? contribution) ::no-such-contribution
                (nil? agent-data) ::no-such-agent
                (not= (:db/id agent-data)
@@ -460,8 +468,7 @@
         (str "Context capture at database basis " basis-t
              " — approximately " (tokens/estimate prompt)
              " tokens on the uncalibrated chars/4 basis")
-        (str "Context derivation refused at database basis " basis-t
-             " (" (:seon.error/kind unit) ")"))]
+        (str "Context derivation refused at database basis " basis-t))]
      [:pre {:class "seon-context-capture-prompt"}
       (or prompt (:seon.error/message unit))]]))
 

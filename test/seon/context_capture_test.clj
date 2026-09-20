@@ -21,7 +21,7 @@
                            :seon.cluster.eval/ordinal ordinal
                            :seon.cluster.eval/result-edn (pr-str ordinal)})
                         evaluation-ids)))
-           _ (is (nil? (:seon.error/kind seed)))
+           _ (is (some? (:db-after seed)))
            rendered {:seon.db/db @connection
                      :seon.cluster.prompt/text "existing evaluated context"
                      :seon.context/contributions
@@ -45,7 +45,7 @@
                          [:seon.cluster.eval/id :seon.cluster.eval/ordinal]}]}]
                      [:seon.context.capture/id capture-id])
            contribution (first (:seon.context.capture/contributions selected))]
-       (is (nil? (:seon.error/kind committed)))
+       (is (some? (:db-after committed)))
        (is (= 0 (:seon.context.contribution/position contribution)))
        (is (= (set evaluation-ids)
               (set (map :seon.cluster.eval/id
