@@ -6130,3 +6130,28 @@ step 3 lands); then step 3 (spec ready), 4, 5, wave-1 families, wave 2,
 and wait; never relaunch under a new name; a stalled sol session is
 continued under a fresh astra-low session from its note; the owner rules
 by priced options; every ruling lands here in the same turn.
+
+## 2026-09-22 ~11:00 local — post-compaction: sci-program LANDED; error lane resumed on the offending-value slice
+
+`kind-sweep-sci-program` landed `d51a6d91e`, `fd93f709a`, `955482c22`:
+`seon.call-preparation` converted (its ambiguity candidates now declared
+storably — target, supplied count, alternative count; the placements ride as
+error evidence), `my.program` option 1 landed; call preparation 17/96 green,
+program 10 green, `seon.db-test` 64 executed with ONE error — the
+wildcard-pull rearming refusal, filed as
+[wildcard-pull-rearming-refuses-a-loaded-contract](../../../seon/issues/wildcard-pull-rearming-refuses-a-loaded-contract.md)
+(the ex-data of the contract-compile refusal is not in the report; the
+instrumentation/db owners diagnose it — gate-restructure or the cold gate).
+Its note still says "facet" throughout (written before the ruling); the
+retirement pass covers it. Cold proof owed is recorded at the note's end
+([kind-sweep-sci-program-2026-09-21.md](../research/kind-sweep-sci-program-2026-09-21.md)).
+
+`error-family-1a` RESUMED (astra low) in the freed slot on the
+offending-value slice exactly as the two owner blocks above rule it: result
+id, `result/e<id>` intern via the existing admit binding site, blob, value
+printer text; `data-edn`/`data-size`/`offending-projection`/raw `offending`
+retired with readers converted; held paths named (step 2's and
+gate-restructure's dirty files). The `publication-dissolution` proof still
+waits on gate-restructure's docstring Var-contract item (the candidates
+declaration has landed). The stale gate poller and the broken usage-limit
+monitor were stopped; a fixed monitor watches lane exits and usage limits.
