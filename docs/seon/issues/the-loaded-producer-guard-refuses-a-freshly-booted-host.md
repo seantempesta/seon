@@ -25,3 +25,30 @@ producers when the digests differ" converts an unexplained aggregate into
 a refusal of everything. Owner: the publication-dissolution lane
 (`3ac00fb8e`), at resume. Regression: a host that just booted from the
 tree adopts a publication of the same tree.
+
+## Morning evidence and repair
+
+The retained refusal contains no `:seon.source/loaded-producer-digest` at
+all. It does not establish an aggregate mismatch. `ef6dee041` preserves a
+refused generation read instead of converting it into “all producers
+mismatch”, and canonicalizes relative roots before formatting the host
+transition. The recorder additionally carries the booted instance's
+projection on its retained database, so its caller's schema binding cannot
+choose that observation's world.
+
+The real one-JVM boot regression recorded/read the generation and passed
+the guard when recording ran with no caller projection, then reached
+`development-source-refresh!`. Adoption failed later while compiling
+`seon.dev.docstring/check-file`'s Var-based contract; the runner's re-arm
+failed on the same contract. Evidence:
+`tmp/publication-dissolution/morning-publication-head-retry.log` and
+`morning-host-retry-threads.txt` (main thread inside development indexing,
+after guard admission). This is a separate boundary, not a green adoption.
+
+Recurring coverage is `seon.cluster.publication-host-test` (record with a
+caller projection, assert the carried projection is the booted instance's,
+then publish the same tree) and `seon.cluster.publication-adoption-test`
+(the complete development adoption, long and explicitly selected). The
+new explicit-projection assertion is not yet verified: subsequent fast
+admission is blocked by the SCI sweep's unstorable required candidates
+member. Status remains open; final scratch-root adoption remains owed.

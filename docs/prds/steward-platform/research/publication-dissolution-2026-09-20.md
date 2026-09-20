@@ -1467,3 +1467,126 @@ with the same inputs would repeat admission failure rather than provide new
 publication evidence, so none was launched. Resume the fast check and shared
 tree `tmp/publication-root` measurement after the held schema/SCI owners land
 their corresponding admitted declarations.
+
+## Morning repair continuation — 2026-09-21 assignment
+
+Read both new issue notes and `unsettled.md` from **OVERNIGHT CHARTER** to
+its end; reviewed `2d0e9b17e`, `ebd64b493`, and the unified
+`loaded-producer-digest` derivation from `d8921fbd4`. The original binding
+specification and its named grounding were read end to end earlier in this
+lane. Default remains stopped and untouched; no worktree was created.
+
+The retained reset-adoption log has **no**
+`:seon.source/loaded-producer-digest` key. Thus an unequal aggregate is not
+established by that refusal: the guard had treated missing/read-refused
+observations as mismatches. The manually seeded guard regression passes
+(2 tests, 6 assertions, `morning-guard-fast.log`), but it does not exercise
+boot recording. A new named, long `seon.cluster.publication-host-test`
+executes publication, actual boot, recording and same-tree adoption in one
+JVM. Its first run recorded/read the digest successfully and reached the
+guard; refusal formatting then threw for a relative bootstrap root.
+
+Scratch operator initialization in the shared tree was refused before any
+JVM started: `test/seon/config_application_test.clj:249` calls
+`seon.ai/targets` with one argument; `test/seon/maintenance_test.clj:308,339,340,348`
+call render functions at their former arities. Both paths contain foreign
+edits and were left untouched. Evidence:
+`tmp/publication-dissolution/morning-scratch-init.log`. The preflight printed
+its complete large analyzer result after the useful finding summary; that
+output is not useful to paste into a report.
+
+Foreign staged schema-acquisition/development-reconciliation hunks in
+`src/seon/cluster.clj` remain intact alongside this lane's guard/export
+changes. `bin/test`, `src/seon/test/cache.clj`, `src/seon/test/runner.clj`,
+and all parked schema/turn/effect edits remain foreign. Fast snapshots name
+only the files needed for the selected regression. The standalone launch
+form regression passed: bounded serialized bytes, no parent-side input
+inventory computation, and child capture before producer namespace loading.
+
+### Repair commits and current verification boundary
+
+- `ef6dee041`: preserve refused producer observations; canonicalize the
+  bootstrap root before formatting a transition.
+- `4b0347f20`: acquire the exported database with its own projection; read
+  its digest once; add the fresh export/reopen identity regression.
+- `9cf20817f`: compute inputs inside the child **before** producer loading,
+  never inline the inventory. Launch form measured **5906 UTF-8 bytes**;
+  the regression asserts **<16384 bytes** and the capture/load order.
+- `94ec20414`: the recorded database explicitly carries the booted
+  instance's projection, rather than accepting the recorder caller's
+  handed projection. Add real boot/publication and separate complete
+  development-adoption regressions. The latter runs explicitly on its own,
+  because a failed loaded-definition adoption can prevent worker re-arming.
+
+The cluster commits were constructed in an alternate Git index containing
+only the named publication changes and new tests. After each commit, the
+shared index retained the foreign staged cluster changes with the publication
+changes included, so no reverse publication hunk or foreign byte entered
+these commits. No working file was reverted and no worktree was created.
+The shared tree's `seon.cluster` load passed before these source commits;
+the final committed load is recorded in `morning-committed-load.log`.
+
+**STOPPED at a cross-owner storage/validation boundary; not LANDED.**
+The same-tree boot reached guard admission and development indexing, then
+failed contract recompilation for `seon.dev.docstring/check-file`'s Var
+schemas. The next test could not run because worker re-arming failed on
+that same contract. Exact evidence:
+`tmp/publication-dissolution/morning-publication-head-retry.log`.
+The separate export retry subsequently executed zero tests because
+`fd93f709a`'s `:seon.call-preparation/ambiguous-call-error` requires the
+unstorable nested-vector `:seon.call-preparation/candidates` member:
+`tmp/publication-dissolution/morning-export-fast.log`. This is admission
+before the export body, not a failed export assertion. Issues:
+
+- `docs/seon/issues/a-call-preparation-facet-requires-unstorable-candidates.md`
+- `docs/seon/issues/development-adoption-cannot-compile-docstring-var-contracts.md`
+
+The final carried-projection assertion and export/reopen regression remain
+unverified. The previously run manual-generation regression remains green
+(2 tests / 6 assertions); the launch-form regression passed. No claim of
+same-tree **adoption** success is made. A zero-test store-lock refusal was
+retried only after the holder disappeared; no already-executed namespace
+with unchanged inputs was rerun.
+
+Final complete/one-file-commit **after** phase timings remain unavailable:
+shared-tree preflight refused the foreign arity callers named above, and
+snapshot validation then met the storage boundary. The earlier baseline
+phase tables in this note remain the before evidence; substituting failed
+run duration or an isolated snapshot timing would misrepresent the required
+shared-tree measurement. `tmp/publication-root` was downed (zero recorded
+JVMs, flock free) and deleted. Every test JVM exited. Default stayed stopped
+and untouched. No cold gate was launched.
+
+After the owners repair the boundaries, resume with these focused proofs:
+
+```
+bin/test-fast --paths test/seon/cluster/publication_host_test.clj test/seon/cluster/publication_export_test.clj -- seon.cluster.publication-host-test seon.cluster.publication-export-test
+```
+
+The orchestrator's cold commands owed (run adoption alone):
+
+```
+bin/test seon.cluster.publication-host-test seon.cluster.publication-export-test seon.dev.publication-launch-test
+bin/test seon.cluster.publication-adoption-test
+bin/test seon.test-runner-integration-test
+bin/test
+bin/test
+bin/test --platform
+```
+
+The two explicitly named long integration namespaces are outside implicit
+`--platform` coverage; their coverage has not been dropped. Then measure
+complete publication and a one-file body commit on the owned shared-tree
+scratch root, by phase, before claiming LANDED.
+
+Three sequencing choices at this boundary:
+1. **Recommended:** complete the SCI/schema owners' fixes, then resume the
+   focused proofs and scratch measurements. Cost: those owner fixes plus two
+   focused proof invocations and the two publication measurements; proves
+   the integrated current tree.
+2. The orchestrator proves these publication commits on a clean pre-sweep
+   baseline. Cost: one orchestrator-owned isolated baseline plus the same
+   proofs; current-tree integration remains owed.
+3. Hold these commits until the next integrated checkpoint. Cost: no
+   immediate extra JVM work; adoption/export acceptance and measurements
+   remain explicitly unproven.
