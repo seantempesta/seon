@@ -7,6 +7,51 @@ tags: [plan, task, namespace-agents, schema, rendering, wake, identity]
 
 # Wave 3a — the task family
 
+> **Launch amendment, 2026-09-23 (orchestrator; binding over the body below where they differ).**
+> Read this block first, then the body. The body was written on 2026-09-21,
+> before the owner's rulings of the 22nd; its schema delta, D1/D2 semantics,
+> fingerprint contract, regressions and per-file census stand. What changes:
+>
+> 1. **Vocabulary.** Wherever the body says "facet" read *error schema*
+>    (`[:and :seon.error/base [:map …]]`) or *error map* (the value); wherever
+>    it says "family" read *the task entity and its declared attributes*
+>    (`seon.task`). Never write either retired word in code, docstrings, notes
+>    or issues. Explain only in Clojure, Malli, Datahike, SCI, core.async terms.
+> 2. **Error shape (owner, 2026-09-22).** A stored error entity carries only
+>    what its Malli error schema declares; a validation failure stores Malli's
+>    explanation data; any value outside the schema is one `result/e<id>`
+>    reference. A task's `:seon.task/errors` cite error roots by
+>    `:seon.error/signature`; no task member ever carries a raw value.
+> 3. **Seconds, not minutes (owner law, AGENTS.md).** Every writer this cut
+>    adds (`seon.task/trigger-call`, occurrence update, settlement) is one
+>    Datahike transaction and must complete in well under a second on the
+>    canonical fixture; an opening render on the fixture under two seconds.
+>    Any phase above ~2 s is a finding to explain by algorithm in the note.
+>    Regressions assert facts and datom sets, never timing; the lane records
+>    wall-clock per fast run.
+> 4. **The platform under this cut is the one-JVM redesign**
+>    ([one-jvm-publication-redesign-2026-09-22.md](one-jvm-publication-redesign-2026-09-22.md)):
+>    publication and adoption go through the running cluster's prepl; the
+>    body's instructions about paused hook publication, scratch-root proofs
+>    "after release" and the reset batch (1a, 1d, the bridge stamp) are
+>    superseded — the orchestrator resets `default` after the landing;
+>    RESET NEEDED is still recorded with the exact attribute list.
+> 5. **Prerequisites re-evaluated.** Bridge step 2 landed (`0f5f849bd`):
+>    compiled Malli nodes are the projection; `seon.schema.form` is gone —
+>    use `malli.core/properties`/`children` through the projection's
+>    registry as the converted callers do. The "wait for error-family-1a's
+>    D13/precise-error contracts" prerequisite is dropped: D13 is
+>    `seon.error/signature` as it exists; consume it, do not extend it.
+> 6. **Effort and size.** Launch at `LANE_EFFORT=low`. Cut the body's
+>    4–6 lane-days into three stops, each a coherent path-limited slice with
+>    HEAD loading after it and its fast tally recorded: (i) the schema delta
+>    + `seon.issue → seon.task` rename in place with every caller converted;
+>    (ii) `seon.task/trigger-call` (D2) + the canonical regression that one
+>    trigger yields one task and one agent, and a repeat occurrence updates
+>    without a new task, agent or notification; (iii) opening through the
+>    task render pair + the dedup/wake/deletion regressions. Stop after each.
+>
+
 **Guarantee:** one trigger identity names one task in a cluster. The writer
 links a new occurrence to that task and wakes its existing agent, or creates
 the task and its one agent atomically. Namespace responsibility is
