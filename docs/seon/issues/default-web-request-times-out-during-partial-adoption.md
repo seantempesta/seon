@@ -29,3 +29,17 @@ protected web/adoption owners were left unchanged; the cause remains unproven.
 PID 36758, PREPL 51624, HTTP 7994. A bounded request to `/` returned HTTP 000,
 zero bytes, curl exit 28 after 20.008842 seconds. This observation establishes
 an unanswered request, not an adoption cause or a closed listening socket.
+
+2026-09-20, bridge step-1 selected-path fixture recurrence: snapshot
+`run.FwfzWs` stopped making progress in
+`seon.render.web-test/an-agent-page-is-the-same-mechanism-as-root`. The main
+thread was in the fixture's unbounded `HttpClient.send`
+(`test/seon/render/web_test.clj:307`); the thread sample contained no active
+page-render stack. No default adoption was performed by this lane.
+The fixture HTTP helpers now await async responses under the declared
+`seon.test-support/event-backstop-seconds`. Corrected snapshot `run.b7dtUo`
+reported `TimeoutException` for the same test and continued, from
+04:19:26.373558Z to 04:19:48.534372Z including fixture setup/cleanup.
+This fixes the test's unbounded wait, not the missing page response. The
+cause remains unverified. Exact scope and other failures are in the
+[bridge step-1 note](../../prds/steward-platform/research/bridge-step1-registry-2026-09-20.md).

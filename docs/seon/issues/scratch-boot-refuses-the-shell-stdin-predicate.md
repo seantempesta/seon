@@ -28,3 +28,22 @@ The earlier
 is resolved and concerns an already-loaded owner. This new observation is
 fresh boot; its cause has not been established. Acceptance: the authorized
 scratch start reaches readiness with the converged schema and program.
+
+Bridge step 1 reproduced the same predicate refusal in the canonical
+`seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm` child
+at 05:32 UTC. This time the child exited inside the unchanged 30-second
+bound and its output named `seon.shell/stdin?`. Earlier iterations only
+observed the 30-second backstop, which remains an open observation rather
+than evidence of an executor-shutdown cause.
+
+The step-1 declaration registry now realizes the complete population;
+unlike `build-projection`, its constructor had not acquired the population's
+predicate Vars with the existing `runtime-predicate` resolver. The common
+registry constructor now performs that construction-time acquisition before
+compilation, preserving supplied bindings and retained roots. The canonical
+fresh-process regression passes in the 337-test combined iteration and the
+subsequent recorded config iteration (23 tests, 179 assertions, 0 failures,
+3 unrelated refusal-boundary errors). Its 30-second bound is unchanged.
+The earlier timeout observation remains open, and scratch-start acceptance
+is still owed; a passing fixture child does not establish live boot readiness.
+See [the bridge evidence](../../prds/steward-platform/research/bridge-step1-registry-2026-09-20.md).
