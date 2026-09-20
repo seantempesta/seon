@@ -56,7 +56,7 @@
   ([state transition]
    (when (= ::flow/resume transition)
      (throw (ex-info "earliest resume fault"
-                     {:seon.error/kind ::earliest-resume-fault})))
+                     {::resume-transition transition})))
    state)
   ([state _input _message]
    [state nil]))
@@ -83,8 +83,8 @@
         {::keys [error-mult tap]} (::error-tap joins)]
     (try
       (let [fault (test-support/await-event! tap ::earliest-resume-fault)]
-        (is (= ::earliest-resume-fault
-               (:seon.error/kind (ex-data (::flow/ex fault))))
+        (is (= ::flow/resume
+               (::resume-transition (ex-data (::flow/ex fault))))
             "the first resume transition reaches the declared tap"))
       (finally
         (flow/stop graph)
@@ -248,7 +248,6 @@
   (or (db/q
        '[:find (sum ?count) .
          :where
-         [?error :seon.error/kind :seon.flow/fault-channel-overflow]
          [?error :seon.error/occurrences ?drop]
          [?drop :seon.error/dropped-fault-count ?count]]
        database)
@@ -259,7 +258,6 @@
   (db/q
    '[:find ?count ?digest ?proc ?message
      :where
-     [?error :seon.error/kind :seon.flow/fault-channel-overflow]
      [?error :seon.error/occurrences ?drop]
      [?drop :seon.error/dropped-fault-count ?count]
      [?drop :seon.error/dropped-fault-digest ?digest]
@@ -423,8 +421,8 @@
             (test-support/await-event!
              (future @(nth terminals 2))
              ::background-io-refused)]
-        (is (= ::sut/submission-capacity
-               (get-in refused [::sut/value :seon.error/kind]))))
+        (is (= :io
+               (get-in refused [::sut/value ::sut/submission-capacity]))))
       (sut/stop-work-launcher! launcher)
       (is (every? realized? (take 2 terminals))
           "stop joins terminal callbacks for every accepted submission")
@@ -446,7 +444,7 @@
         result
         (sut/stop-work-launcher!
          (assoc launcher ::sut/proc-stopped (promise)))]
-    (is (= :seon.await/backstop-fired (:seon.error/kind result)))
+    (is (number? (:seon.await/elapsed-ms result)))
     (is (= ::sut/work-launcher-proc-stopped
            (get-in result
                    [:seon.error/data :seon.error/diagnostic-member])))
@@ -573,8 +571,8 @@
                refused
                ::saturated-submission-refused)]
           (is (= ::sut/completed (::sut/outcome result)))
-          (is (= ::sut/submission-capacity
-                 (get-in result [::sut/value :seon.error/kind])))
+          (is (= :compute
+                 (get-in result [::sut/value ::sut/submission-capacity])))
           (is (= ::sut/queued @buffered-status)
               "capacity refusal retains the already-buffered submission"))
         (.countDown release)
@@ -679,8 +677,8 @@
         calls-a (atom 0)
         launcher-a
         (sut/start-work-launcher! {:seon.env/environment @test-environment
-                                   ::sut/configuration configuration})]
-    (let [result-a
+                                   ::sut/configuration configuration})
+        result-a
           (future
             (sut/submit!!
              launcher-a
@@ -721,7 +719,7 @@
               (sut/stop-work-launcher! launcher-b))))
         (finally
           (.countDown release-a)
-          (sut/stop-work-launcher! launcher-a))))))
+          (sut/stop-work-launcher! launcher-a)))))
 
 (deftest turn-evaluation-completion-is-a-flat-diagnostic-value
   (test-support/with-database
@@ -791,7 +789,7 @@
               (doseq [command [:probe :another-probe]]
                 (let [result (flow.graph/command-proc
                               (::sut/graph fanout) :source command {})]
-                  (is (= ::sut/unsupported-command (:seon.error/kind result)))
+                  (is (= 'clojure.core.async.flow.impl.graph/command-proc (::sut/unsupported-method result)))
                   (is (m/validate :seon.error/value result
                                   {:registry (:seon.schema.projection/registry
                                               (schema/projection-from-database @connection))}))
@@ -864,14 +862,10 @@
          ::flow/op :step
          ::flow/ex
          (ex-info
-          "seon.render.walk/root-acquisition violated its contract"
-          {:seon.error/kind :seon.instrument/contract-violated
-           :seon.error/data
-           {:seon.instrument/fn "seon.render.walk/root-acquisition"
-            :seon.instrument/arm :input
-            :seon.instrument/schema
-            ":seon.render.walk/acquisition-request"
-            :seon.instrument/args "[{:seon.render.walk/lookup :root}]"}})}]
+          "A Flow proc requires a pinned workload."
+          (test-support/refusal-data
+           #(sut/var-process #'earliest-resume-fault-step :mixed
+                             {:seon.env/environment @test-environment})))}]
     (test-support/with-database
       (fn [connection]
         (let [cluster-name "fault-test"
@@ -914,13 +908,11 @@
                   (db/q '[:find (pull ?error [*]) .
                           :where
                           [?error :seon.instrument/fn
-                           "seon.render.walk/root-acquisition"]]
+                           seon.flow/var-process]]
                         (:db-after transaction))]
-              (is (= "seon.render.walk/root-acquisition"
+              (is (= 'seon.flow/var-process
                      (:seon.instrument/fn stored)))
-              (is (= ":seon.render.walk/acquisition-request"
-                     (:seon.instrument/expected stored)))
-              (is (boolean? (:seon.error/capped? stored))))
+              (is (= :input (:seon.instrument/check stored))))
             (finally
               (stop-database-events! connection transactions)
               (sut/stop-error-fanout! fanout)

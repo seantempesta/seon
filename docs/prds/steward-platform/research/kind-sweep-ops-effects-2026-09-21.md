@@ -606,3 +606,31 @@ prints `{:optional true}`. Recorded tally unavailable; no tests executed.
 No repeat pass was made. The launcher exited and removed its snapshot.
 `clojure -M -e "(require 'seon.effect)"` then exited zero in the shared
 tree. No source changed, so no new source lint or runtime proof is claimed.
+
+### Continuation ruling and flow conversion
+
+The orchestrator accepted `9c6ae56db` and ruled option 3 now, option 2 last.
+`src/seon/effect.clj:557` remains owed, unchanged: settlement must validate
+against THAT handler's declared output contract. Local base recognition is
+forbidden by D12; the earlier recommendation is rejected. Use loaded contract
+metadata if the program-graph owner remains held. No new recognition mechanism.
+
+Flow: source kind sites 10 → 0; flow tests 9 → 0 and configuration test
+1 → 0. Capacity and stopped-launcher facets carry workload/launcher plus
+submission identity; missing configuration carries the missing keys; missing
+launcher carries the affected submission identity; overflow carries count
+and digest; unsupported command carries the actual protocol method symbol.
+The old configuration boolean declaration and overflow marker are removed.
+Awaited shutdown completions are known keywords, so only the declared await
+timeout facet can escape `stop-work-launcher!`; its output now names that
+facet. Tests assert those observations and occurrence evidence. The contract
+fault fixture obtains a real armed refusal rather than stamping a map.
+
+`clojure -M -e "(require 'seon.flow)"` exited zero; clj-kondo on source and
+both changed tests reports zero errors and warnings. Fast tally owed under
+the runner recording boundary recorded above; no unchanged-input repeat.
+Add `src/seon/flow.clj`, `resources/seon/schemas/seon.flow.edn`,
+`test/seon/flow_test.clj`, `test/seon/flow_configuration_test.clj` to the
+accumulated fast/cold paths, with `seon.flow-test` and
+`seon.flow-configuration-test`. Cold and platform proof remain orchestrator
+work. This is a conversion checkpoint, not a live adoption claim.

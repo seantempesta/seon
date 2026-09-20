@@ -269,12 +269,25 @@
   (:seon.sci.kernel/arm (env/of work)))
 
 (defn- submission-capacity-error
+  {:malli/schema [:=> [:cat ::submission-id ::workload]
+                  ::submission-capacity-error]}
   [submission-id workload]
-  {:seon.error/kind ::submission-capacity
+  (error/diagnostic
+   {:seon.error/at (java.util.Date.)
+   :seon.error/layer ::submission
+   :seon.error/operation 'seon.flow/submission-capacity-error
    :seon.flow/submission-capacity workload
+   ::submission-id submission-id
    :seon.error/message "The bounded work submission queue is full."
+   :seon.error/diagnostic-layer ::submission
+   :seon.error/diagnostic-operation 'seon.flow/submission-capacity-error
+   :seon.error/diagnostic-member ::submission-id
+   :seon.error/diagnostic-expected "available submission capacity"
+   :seon.error/diagnostic-offending submission-id
+   :seon.error/diagnostic-cause ::submission-capacity
+   :seon.error/diagnostic-evidence {::workload workload}
    :seon.error/data {::submission-id submission-id
-                     ::workload workload}})
+                     ::workload workload}}))
 
 (defn- refuse-compute-submission!
   [{::keys [submission-id result status]}]
@@ -599,11 +612,21 @@
       (throw
        (ex-info
         "The work launcher is not ready: required config facts are missing."
-        {:seon.error/kind :configuration
-         :seon.flow/configuration true
+        (error/diagnostic
+         {:seon.error/at (java.util.Date.)
+         :seon.error/layer ::configuration
+         :seon.error/operation 'seon.flow/required-launcher-configuration
+         :seon.error/diagnostic-layer ::configuration
+         :seon.error/diagnostic-operation 'seon.flow/required-launcher-configuration
+         :seon.error/diagnostic-member ::configuration
+         :seon.error/diagnostic-expected flow-workload-attributes
+         :seon.error/diagnostic-offending configuration
+         :seon.error/offending configuration
+         :seon.error/diagnostic-cause ::missing-config-facts
+         :seon.error/diagnostic-evidence (vec missing)
          :seon.error/message
          "The work launcher is not ready: required config facts are missing."
-         ::missing-config-facts (vec missing)})))
+         ::missing-config-facts (vec missing)}))))
     selected))
 
 (defn- work-launcher-graph-definition
@@ -707,7 +730,7 @@
   "Close IO admission, settle accepted work, then stop the Flow graph."
   {:malli/schema
    [:=> [:cat :seon.flow/work-launcher]
-    [:or :nil :seon.error/value]]}
+    [:or :nil :seon.await/timeout-error]]}
   [{::keys [graph accepting? io-submissions drained proc-stopped active-work
             configuration]}]
   (when graph
@@ -721,11 +744,20 @@
        nil active-work io-submissions work
        {::started-at (System/nanoTime)
         ::value
-        {:seon.error/kind ::launcher-stopped
-         :seon.flow/launcher-stopped ::work-launcher
-         :seon.error/message
-         "The work launcher stopped before the background call completed."
-         :seon.error/data {::submission-id (::submission-id work)}}}))
+        (error/diagnostic
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer ::submission
+          :seon.error/operation 'seon.flow/stop-work-launcher!
+          :seon.flow/launcher-stopped ::work-launcher
+          ::submission-id (::submission-id work)
+          :seon.error/message "The work launcher stopped before the background call completed."
+          :seon.error/diagnostic-layer ::submission
+          :seon.error/diagnostic-operation 'seon.flow/stop-work-launcher!
+          :seon.error/diagnostic-member ::submission-id
+          :seon.error/diagnostic-expected "a running launcher accepting work"
+          :seon.error/diagnostic-offending (::submission-id work)
+          :seon.error/diagnostic-cause ::launcher-stopped
+          :seon.error/diagnostic-evidence {::launcher-stopped ::work-launcher}})}))
     (when (empty? @io-submissions)
       (deliver drained ::drained))
     (let [bound
@@ -755,8 +787,8 @@
             :seon.await/diagnostic (observation ::work-launcher-proc-stopped)
             :seon.await/blocking-deref proc-stopped})]
       (cond
-        (:seon.error/kind drained-result) drained-result
-        (:seon.error/kind stopped-result) stopped-result
+        (:seon.await/elapsed-ms drained-result) drained-result
+        (:seon.await/elapsed-ms stopped-result) stopped-result
         :else nil))))
 
 (defn submit!
@@ -799,22 +831,40 @@
              io-submissions work
              {::started-at (System/nanoTime)
               ::value
-              {:seon.error/kind ::launcher-stopped
-               :seon.flow/launcher-stopped ::work-launcher
-               :seon.error/message
-               "The work launcher is no longer accepting background calls."
-               :seon.error/data {::submission-id submission-id}}})
+              (error/diagnostic
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer ::submission
+          :seon.error/operation 'seon.flow/submit!
+          :seon.flow/launcher-stopped ::work-launcher
+          ::submission-id submission-id
+          :seon.error/message "The work launcher is no longer accepting background calls."
+          :seon.error/diagnostic-layer ::submission
+          :seon.error/diagnostic-operation 'seon.flow/submit!
+          :seon.error/diagnostic-member ::submission-id
+          :seon.error/diagnostic-expected "a running launcher accepting work"
+          :seon.error/diagnostic-offending submission-id
+          :seon.error/diagnostic-cause ::launcher-stopped
+          :seon.error/diagnostic-evidence {::launcher-stopped ::work-launcher}})})
             false)))
       (do
         (completion
          (env/carry
           {::started-at (System/nanoTime)
            ::value
-           {:seon.error/kind ::launcher-stopped
-            :seon.flow/launcher-stopped ::work-launcher
-            :seon.error/message
-            "A background call requires a running work launcher."
-            :seon.error/data {::submission-id submission-id}}}
+           (error/diagnostic
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer ::submission
+          :seon.error/operation 'seon.flow/submit!
+          :seon.flow/launcher-stopped ::work-launcher
+          ::submission-id submission-id
+          :seon.error/message "A background call requires a running work launcher."
+          :seon.error/diagnostic-layer ::submission
+          :seon.error/diagnostic-operation 'seon.flow/submit!
+          :seon.error/diagnostic-member ::submission-id
+          :seon.error/diagnostic-expected "a running launcher accepting work"
+          :seon.error/diagnostic-offending submission-id
+          :seon.error/diagnostic-cause ::launcher-stopped
+          :seon.error/diagnostic-evidence {::launcher-stopped ::work-launcher}})}
           (env/of submission)))
         false))))
 
@@ -834,10 +884,19 @@
     (throw
      (ex-info
       "A compute submission must name its cluster's work launcher."
-      {:seon.error/kind :configuration
-       :seon.flow/configuration true
-       :seon.error/message
-       "A compute submission must name its cluster's work launcher."})))
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer ::submission
+        :seon.error/operation 'seon.flow/submit!!
+        ::missing-launcher-submission (::submission-id submission)
+        :seon.error/message "A compute submission must name its cluster's work launcher."
+        :seon.error/diagnostic-layer ::submission
+        :seon.error/diagnostic-operation 'seon.flow/submit!!
+        :seon.error/diagnostic-member ::work-launcher
+        :seon.error/diagnostic-expected ::work-launcher
+        :seon.error/diagnostic-offending work-launcher
+        :seon.error/diagnostic-cause ::missing-launcher
+        :seon.error/diagnostic-evidence {::submission-id (::submission-id submission)}}))))
   (env/refuse-absent-environment! submission ::submit!!)
   (let [{::keys [submission-id workload work-fn time-limit-ms] :as submission}
         (with-current-arm submission)
@@ -925,10 +984,21 @@
      (str "The core-fault channel overflowed and dropped "
           dropped-fault-count
           (if (= 1 dropped-fault-count) " fault." " faults."))
-     {:seon.error/kind ::fault-channel-overflow
+     (error/diagnostic
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer ::fault-channel
+       :seon.error/operation 'seon.flow/overflow-core-fault
+       :seon.error/message "The core-fault channel dropped faults because its buffer was full."
+       :seon.error/diagnostic-layer ::fault-channel
+       :seon.error/diagnostic-operation 'seon.flow/overflow-core-fault
+       :seon.error/diagnostic-member ::dropped-fault-count
+       :seon.error/diagnostic-expected "capacity for every reported fault"
+       :seon.error/diagnostic-offending dropped-fault-count
+       :seon.error/diagnostic-cause ::fault-channel-overflow
+       :seon.error/diagnostic-evidence dropped-fault
       ::dropped-fault-count dropped-fault-count
       ::dropped-fault-digest dropped-fault-digest
-      ::dropped-fault dropped-fault :seon.flow/fault-channel-overflow true})
+      ::dropped-fault dropped-fault}))
     ::dropped-fault-count dropped-fault-count
     ::dropped-fault-digest dropped-fault-digest
     ::dropped-fault dropped-fault}
@@ -1081,10 +1151,14 @@
       (flow.graph/ping-proc graph pid timeout-ms))
     (command-proc [_ pid command more-kvs]
       (error/diagnostic
-       {:seon.error/kind ::unsupported-command
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer ::monitor
+        :seon.error/operation 'seon.flow/monitor-graph
+        ::unsupported-method 'clojure.core.async.flow.impl.graph/command-proc
+        :seon.error/offending [pid command more-kvs]
         :seon.error/message "core.async.flow does not implement command-proc."
         :seon.error/diagnostic-layer :flow
-        :seon.error/diagnostic-operation 'clojure.core.async.flow.impl.graph/command-proc
+        :seon.error/diagnostic-operation 'seon.flow/monitor-graph
         :seon.error/diagnostic-member :command-proc
         :seon.error/diagnostic-expected :implemented-protocol-method
         :seon.error/diagnostic-cause :unimplemented-dependency-method

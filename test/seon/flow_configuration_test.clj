@@ -1,6 +1,5 @@
 (ns seon.flow-configuration-test
   (:require [clojure.core.async :as async]
-            [seon.config :as config]
             [clojure.string :as str]
             [clojure.core.async.flow.spi :as flow.spi]
             [clojure.test :refer [deftest is]]
@@ -11,12 +10,12 @@
   (:import [java.util.concurrent ExecutorService]))
 
 (defn- private-var
-  [namespace function-name]
-  (or (ns-resolve namespace function-name)
+  [namespace-symbol function-name]
+  (or (ns-resolve namespace-symbol function-name)
       (throw
        (ex-info
         "The expected graph-definition owner is absent."
-        {::namespace namespace
+        {::namespace namespace-symbol
          ::function-name function-name}))))
 
 (defn- inert-step
@@ -44,7 +43,7 @@
                  (fn []
                    (constructor #'inert-step :mixed
                                 {:seon.env/environment @test-environment})))]
-    (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+    (is (= :input (:seon.instrument/check refusal)))
     (is (= 'seon.flow/var-process
            (:seon.error/diagnostic-operation (:seon.error/data refusal))))
     (is (str/includes? (:seon.error/message refusal)

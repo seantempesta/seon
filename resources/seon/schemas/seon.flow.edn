@@ -192,18 +192,58 @@
              [:seon.env/environment :seon.env/environment]],
             :workload [:enum :compute :io],
             :proc-id :keyword,
-            :submission-capacity :seon.flow/proc-id
-            :submission-capacity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the proc whose submission capacity was exhausted"} [:seon.flow/submission-capacity :seon.flow/submission-capacity] [:seon.error/message :seon.error/message]]
-            :launcher-stopped :seon.flow/proc-id
-            :launcher-stopped-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the proc whose launcher has stopped"} [:seon.flow/launcher-stopped :seon.flow/launcher-stopped] [:seon.error/message :seon.error/message]]
-            :time-limit :seon.flow/proc-id
-            :time-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the proc whose compute time limit was reached"} [:seon.flow/time-limit :seon.flow/time-limit] [:seon.error/message :seon.error/message]]
-            :configuration [:= true]
-            :configuration-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an invalid flow configuration"} [:seon.flow/configuration :seon.flow/configuration] [:seon.error/message :seon.error/message]]
-            :timeout :seon.flow/proc-id
-            :timeout-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the proc whose observable completion timed out"} [:seon.flow/timeout :seon.flow/timeout] [:seon.error/message :seon.error/message]]
- :seon.flow/fault-channel-overflow [:= true]
- :seon.flow/fault-channel-overflow-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.flow/fault-channel-overflow class marker"} [:seon.flow/fault-channel-overflow :seon.flow/fault-channel-overflow] [:seon.error/message :seon.error/message]]
+ :seon.flow/submission-capacity :seon.flow/proc-id
+ :seon.flow/submission-capacity-error
+ [:and :seon.error/base
+  [:map
+   [:seon.flow/submission-capacity :seon.flow/submission-capacity]
+   [:seon.flow/submission-id :seon.flow/submission-id]
+]]
+ :seon.flow/launcher-stopped :seon.flow/proc-id
+ :seon.flow/launcher-stopped-error
+ [:and :seon.error/base
+  [:map
+   [:seon.flow/launcher-stopped :seon.flow/launcher-stopped]
+   [:seon.flow/submission-id :seon.flow/submission-id]
+]]
+ :seon.flow/time-limit :seon.flow/proc-id
+ :seon.flow/time-limit-error
+ [:and :seon.error/base
+  [:map
+   [:seon.flow/time-limit :seon.flow/time-limit]
+]]
+ :seon.flow/missing-config-facts [:vector {:min 1} :qualified-keyword]
+ :seon.flow/configuration-error
+ [:and :seon.error/base
+  [:map
+   [:seon.flow/missing-config-facts :seon.flow/missing-config-facts]
+]]
+ :seon.flow/missing-launcher-submission :seon.flow/submission-id
+ :seon.flow/missing-launcher-error
+ [:and :seon.error/base
+  [:map
+   [:seon.flow/missing-launcher-submission :seon.flow/missing-launcher-submission]
+]]
+ :seon.flow/timeout :seon.flow/proc-id
+ :seon.flow/timeout-error
+ [:and :seon.error/base
+  [:map
+   [:seon.flow/timeout :seon.flow/timeout]
+]]
+ :seon.flow/dropped-fault-count [:int {:min 1}]
+ :seon.flow/dropped-fault-digest :string
+ :seon.flow/fault-channel-overflow-error
+ [:and :seon.error/base
+  [:map
+   [:seon.flow/dropped-fault-count :seon.flow/dropped-fault-count]
+   [:seon.flow/dropped-fault-digest :seon.flow/dropped-fault-digest]
+]]
+ :seon.flow/unsupported-method :qualified-symbol
+ :seon.flow/unsupported-command-error
+ [:and :seon.error/base
+  [:map
+   [:seon.flow/unsupported-method :seon.flow/unsupported-method]
+]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.flow/control-observation
