@@ -104,6 +104,16 @@ publishes CHANGED files as same-identity upserts (`src/seon/cluster.clj`
    lifecycle heartbeat (issue
    `the-lifecycle-watchdog-measures-silence-from-lock-acquisition`); a flat
    subprocess deadline never fires while phases progress.
+   **Landed (2026-09-21 ~07:30 UTC):** `4686e5c91` live-JVM publication with
+   phase heartbeat (item 2), `08ce441a6` analysis artifact cache (item 3),
+   `cf4d8d6ef` finding counts/deltas (item 4), `fb4dfee98` long runner
+   integration namespace. **Producer-mismatch ruling:** a live JVM whose loaded
+   producer definitions differ from the tree's toolchain digest REFUSES to
+   publish, naming both digests, the producer namespaces and the host
+   transition (development adoption of those namespaces, or a restart when a
+   reload cannot replace them); a fresh JVM only when no live JVM exists, never
+   on mismatch. The loaded-producer digest is a compared fact.
+
 3. **Analysis cached by input digest.** clj-kondo analysis results per input
    are stored keyed by the input's content digest and reused; only changed
    inputs are analyzed. (Falls out of item 1's digest key; separate commit.)

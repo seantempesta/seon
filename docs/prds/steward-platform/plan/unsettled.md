@@ -5375,3 +5375,18 @@ Read-only slot → `wave3a-task-family-design` (the `seon.task` family per
 D1/D2/D13: schema delta, trigger→task writer with fingerprint identity via
 `seon.id`, task render pair, rename census, regressions, reset batch).
 Step-1 gate: 51 serial tasks done, still executing.
+
+## 2026-09-21 ~07:30 UTC — publication items 2–4 landed; producer-mismatch ruled; 1a's facet landed
+
+`publication-dissolution` landed `4686e5c91` (publish through the live JVM;
+phase events refresh the lifecycle heartbeat), `08ce441a6` (analysis
+cache), `cf4d8d6ef` (finding counts and deltas instead of the 645-line
+roster); focused proofs 3/13, 6/50, 1/4 green. Stopped at: old loaded
+producer code in the live JVM could emit different facts under the new
+toolchain digest. Ruled option 1 — refuse the mismatch (typed, naming both
+digests and the host transition); fresh JVM only with no live JVM. Resumed
+to finish: cluster.clj population conversion (file free), duplicate
+publisher deletions, lineage-reuse regression, final per-phase
+measurement. `error-family-1a` landed `2a59e5e11` (row-acquisition
+failures declared without a program digest — the option-2 facet). Step-1
+gate: 410 tasks executed so far.
