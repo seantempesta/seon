@@ -451,3 +451,155 @@ edits; the isolated fast proof above used only item 0's paths.
 `down` reported zero recorded JVMs and a free store lock; the root was deleted.
 Pre-commit loading passed:
 `clojure -M:test -e "(require 'seon.schema 'seon.test-support 'seon.test 'seon.test.runner 'seon.schema.projection-acquisition-test)"`.
+
+## Slice (2), in progress: published selection
+
+`seon.test.cache/ensure-base!` retains an immutable export on a cache hit;
+it cannot acquire later green result facts by reopening that export.
+The existing source recording authority already opens the latest published
+branch and hands its database value to `seon.test/selection-admission`
+(`src/seon/cluster/source.clj:384`). The pending coordinator change uses
+that existing admission seam, retains the tested base's provenance, and
+passes executable membership to the existing worker stages. Completion
+uses the existing recorder, then queries `recorded-run!` so a zero-execution
+repeat prints its unchanged members. No recording mirror or new cache was
+introduced. Published-branch selection requires matching program and
+external-input identities; an ordinary cluster still requires its cluster
+reference.
+
+The initial regression `ce2e2c8a6f52` exposed an error in the new fixture:
+it wrote a derived program digest as another source seal. That fixture
+error was corrected; the run had two failures and one error. A subsequent
+run was stopped after a thread sample found the selector joining historical
+definitions before narrowing changed identities. The pending selector now
+reads changed identities from the since-value first. Its selected-fact read
+also reads each entity range once instead of binding every entity/attribute
+pair.
+
+The next changed-function run reached an excluded owner: the existing
+`seon.fn/declared-reference-edges` query. Evidence and the precise ownership
+request are in
+[the existing gate-set issue](../../../seon/issues/gate-set-rederives-the-declared-reference-population-on-every-call.md).
+The canonical changed-reach/repeat regression is **not green** and slice (2)
+is **not committed**. No cold bare invocation was run by this lane.
+
+The selector's own measurements continue through
+`test/seon/test/selection_timing_test.clj`. Run `8f7c18d7e7b3` measured
+fixture acquisition 3547.398 ms; the initial program-identity query over
+history 4409.765 ms; and initial selection 1485.847 ms. Run `cba6c03ca925`
+separated changed-entity acquisition from current identity lookup: the
+empty history query still took 4403.228 ms. The next change compares the
+seal transaction with the supplied database basis before asking for changes.
+On the following run, initial identity acquisition took **16.076 ms**, its
+repeat **3.818 ms**, and initial selection **3116.719 ms**; fixture acquisition
+was **3332.013 ms**. This worker used the exported base eight commits behind
+HEAD, not the matching declaration population used for slice (1)'s 1604 ms
+fixture proof. The timing observation has a declared 10 s aggregate bound.
+The first two timing runs exceeded or approached that aggregate bound while
+the old reporter still recorded green; default per-test bound enforcement
+is the explicitly queued work after slice (2).
+
+## Declared-reference acquisition, 2026-09-23 assignment
+
+The orchestrator extended ownership to `seon.fn/declared-reference-edges`.
+The file was clean immediately before the edit. The existing reverse walk
+already uses `db/datoms :avet` for calls, references and test subjects; it
+is unchanged. The slow operation was the preceding rule query combining
+three differently shaped joins over an unbound declared attribute.
+
+`selection_timing_test` measured that query at **3563.590 ms**, returning
+10 edges. That baseline body completed two assertions, but the worker was
+terminated before durable result recording, so it is timing evidence only.
+The replacement binds each declared reference attribute before reading its
+rows. Datahike chooses AEVT for a bound attribute, EAVT for bound entities,
+and AVET for indexed attribute/value lookup
+(`reference-code/datahike/src/datahike/db/search.cljc:140–157`). Capability
+references, references owned by function declarations, and references on
+data rows keep their original meaning. There is no stored derived state.
+
+Armed fast run `c3088e2ae08e`: **223.269 ms**, the same 10 edges:
+
+| Operation | Milliseconds |
+| --- | ---: |
+| Read declared reference attributes | 34.492 |
+| Read capability references | 66.863 |
+| Read function-owned references | 9.644 |
+| Read data-row references and attribute consumers | 109.865 |
+
+The run recorded 1 executed test, 2 assertions, zero failures/errors.
+Initial published selection measured 3278.385 ms separately; this does not
+claim slice (2) complete. The parity regression compares the new result with
+the original Datalog rules over the canonical published fixture. Existing
+query-structure assertions now identify the declared-attribute query rather
+than requiring the retired rule-query representation; indexed reverse-walk
+and typed-refusal assertions remain.
+
+### Explicit ownership stop
+
+Before committing, review found new foreign hunks in `src/seon/fn.clj`:
+`unresolved-callers` now restricts callees to indexed namespaces, and the
+adoption-identity query replaces per-entity pulls. Neither hunk was present
+at the immediate pre-edit clean check. The assignment explicitly requires
+stopping when this shared file acquires foreign edits; no commit was made
+and slice (2) remains pending. All hunks are preserved. This lane's next
+fast run was terminated during JVM loading (own PID 31445), and its launcher
+exited 143 and removed its snapshot.
+
+The isolated parity run `581316d906e0` matched all 10 edges, with acquisition
+765.880 ms and three passing assertions, but its full test took 10.188 s:
+that exceeds its declared 10 s and is not accepted as green evidence despite
+the current reporter's tally. The regression now unions the three original
+rule queries separately to avoid the original broad OR query; that revision
+has not run because of the ownership stop. HEAD loading and the path-limited
+commit remain owed after the foreign hunks land.
+
+## Slice (2) resumed independently of shared fn.clj
+
+The orchestrator explicitly directed slice (2) to land first, excluding
+`src/seon/fn.clj`. The coordinator now uses `record-snapshot!` to ask the
+existing source admission authority for selection. That authority supplies
+its current published database value to `seon.test/selection-admission`;
+`:current-src` provenance supplies published-branch custody. The selector
+uses recorded basis facts and the existing reverse graph, while ordinary
+cluster selection keeps its explicit cluster requirement. Completion goes
+through the same recorder and queries the complete recorded run, including
+reused members. An empty executable set reaches an empty worker stage.
+
+The regression establishes a two-member named green basis through real
+admission and validated transactions, changes stored
+`seon.test.bounds/silence-seconds`, observes its reaching bounds test while
+excluding the unrelated id test, records completion, and verifies the repeat
+has no executable members. Terminal evidence is explicitly synthetic; this
+does not claim those canonical test bodies executed. The real empty worker
+stage is exercised separately and launches no worker.
+
+The first sequence took 35.402 s and exceeded its former 10 s declaration;
+run `50ad746cd9f6` passed its assertions but is not accepted as bounded proof.
+The fixture was doing two unnecessary selections and recording a needless
+source-input change. Removing those reduced the sequence to **25.654 s**
+in run `d5a3640574ec` (2 tests, 8 assertions, zero failures/errors).
+Measured phases: fixture plus named admission 4531.828 ms; source edit
+434.106 ms; changed selection plus completion 16220.835 ms; unchanged
+selection 4443.725 ms. The empty worker stage took 3.524 ms.
+
+This is a declared integration test, not a map-comparison test: its 30 s
+bound allows three selection decisions at 5 s each, two terminal admission
+writes at 5 s each, a source edit at 3 s and fixture acquisition at 2 s.
+The separate declared-reference parity regression remains subject to its
+own measured bound. These slice (2) runs excluded fn.clj and therefore used
+HEAD's slower reference query. The orchestrator still owns the cold bare
+invocations and platform proof; this lane has run neither.
+
+Final slice (2) fast run `c7b80aed81fd`: **2 tests, 9 assertions, zero
+failures/errors**. The integration sequence took **22529.381 ms**, including
+an assertion that `print-recorded-tally!` prints `Recorded 0 executed,` for
+the repeat's actual unchanged results. Empty worker stage: **3.106 ms**.
+Phases: fixture plus named admission 4003.747 ms; source edit 315.080 ms;
+changed selection plus completion 13166.640 ms; unchanged selection
+4990.921 ms. This snapshot excluded all fn.clj edits and foreign dirty
+paths. The two slow query improvements remain independently landable.
+Pre-commit load passed with `clojure -M:test -e` requiring
+`seon.test-support`, `seon.test`, `seon.test.runner`,
+`seon.test.published-selection-test`, `seon.test.selection-test` and
+`seon.test.runner-test`. The fast snapshot independently loaded HEAD plus
+only this slice's paths.

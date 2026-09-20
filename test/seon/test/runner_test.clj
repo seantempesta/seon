@@ -23,31 +23,6 @@
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
 
-(deftest ^{:seon.test/fixture-observation
-           "Observes the real coordinator refusing before manifest loading and expensive fixture acquisition; no expensive fixture is acquired. Run: bin/test seon.test.runner-test"}
-  bare-selection-refuses-without-authority-before-launch
-  (test-support/with-database
-   (fn [connection]
-     (test-support/seed-cluster! connection "bare-selection")
-     (let [database (db/db connection)
-           cluster (db/pull database [:seon.cluster/name]
-                            [:seon.cluster/name "bare-selection"])]
-       (is (= {:seon.cluster/name "bare-selection"} cluster))
-       (doseq [[name expected] [[(:seon.cluster/name cluster)
-                                :seon.test/selection-authority-unavailable]
-                               ["-" :seon.test/cluster-required]]]
-         (let [output (with-out-str
-                        (is (= 2 (#'runner/run-coordinator!
-                                  name "tmp/a0-no-worker-root" "a0" "changed" []))))
-               refusal (edn/read-string output)]
-           (is (= expected (:seon.test/selection-refusal refusal)))
-           (is (= 'seon.test/select
-                  (get-in refusal [:seon.error/data :seon.error/diagnostic-operation])))
-           (is (= {:seon.test.run/cluster :explicit-cluster-ref
-                   :seon.db/db :published-database-value}
-                  (get-in refusal [:seon.error/data :seon.error/diagnostic-expected])))
-           (is (= name (get-in refusal [:seon.error/data :seon.error/diagnostic-offending])))))))))
-
 (deftest selection-is-one-function-on-both-hosts
   (test-support/with-database
    (fn [connection]

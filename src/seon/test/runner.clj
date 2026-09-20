@@ -2313,15 +2313,21 @@
             (throw (ex-info "The tested program has no source snapshot identity." {})))
         before (db/as-of database basis)
         changed (db/since (db/history database) basis)
-        entities (db/q '[:find [?entity ...]
-                         :in $ $changed [?identity ...]
-                         :where [$changed ?entity]
-                                [?entity ?identity]]
-                       database changed program/identity-attributes)
+        changed-entities (if (= basis (db/basis-t database))
+                           []
+                           (db/q '[:find [?entity ...] :where [?entity]] changed))
+        _ (when (and (map? changed-entities) (:seon.error/at changed-entities))
+            (throw (ex-info "Cannot identify changes since the source identity." changed-entities)))
+        entities (if (seq changed-entities)
+                   (db/q '[:find [?entity ...]
+                           :in $ [?entity ...] [?identity ...]
+                           :where [?entity ?identity]]
+                         database changed-entities program/identity-attributes)
+                   [])
         _ (when (and (map? entities) (contains? entities :seon.error/at) (contains? entities :seon.error/layer) (contains? entities :seon.error/operation))
             (throw (ex-info "Cannot identify changed program rows." entities)))
-        old-rows (db/pull-many before '[*] entities)
-        current-rows (db/pull-many database '[*] entities)
+        old-rows (if (seq entities) (db/pull-many before '[*] entities) [])
+        current-rows (if (seq entities) (db/pull-many database '[*] entities) [])
         _ (doseq [rows [old-rows current-rows]]
             (when (and (map? rows) (contains? rows :seon.error/at) (contains? rows :seon.error/layer) (contains? rows :seon.error/operation))
               (throw (ex-info "Cannot read tested program rows." rows))))
@@ -3546,28 +3552,22 @@
       (System/getProperty "seon.test.root")
       "."))
 
-(defn- bare-selection-refusal
-  "Refuse checkout selection until the launcher supplies named-cluster custody."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name] :seon.test/selection-error]}
-  [cluster-name]
-  (assoc (error/diagnostic
-   {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/selection
-    :seon.error/operation 'seon.test/select
-    :seon.error/message
-    "Bare bin/test requires an explicitly named cluster and its immutable published database at seon.test/select; the checkout coordinator has only publication provenance."
-    :seon.error/diagnostic-layer :test
-    :seon.error/diagnostic-operation 'seon.test/select
-    :seon.error/diagnostic-member :seon.db/db
-    :seon.error/diagnostic-expected
-    {:seon.test.run/cluster :explicit-cluster-ref
-     :seon.db/db :published-database-value}
-    :seon.error/diagnostic-offending cluster-name
-    :seon.error/diagnostic-cause :seon.test/selection-authority-unavailable
-    :seon.error/diagnostic-evidence
-    {:seon.boot/cluster-name cluster-name
-     :seon.test.run/policy :incremental}})
-    :seon.test/selection-refusal (if (= "-" cluster-name) :seon.test/cluster-required
-                                   :seon.test/selection-authority-unavailable)))
+(defn- published-selection-request
+  "Ask the source authority to select from its published database and run facts."
+  {:malli/schema [:=> [:cat :seon.test.run/provenance] :seon.source/test-selection-request]}
+  [provenance]
+  (let [inputs (cache/input-digests ".")
+        external (cache/test-input-digest "." inputs)]
+    {:seon.test.run/provenance
+     (assoc provenance
+            :seon.test.run/published-base-digest
+            (id/digest 64 (select-keys provenance [:seon.test.run/program-digest
+                                                  :seon.test.run/basis-t :seon.test.run/branch]))
+            :seon.test.run/overlay-input-digest
+            (id/digest 64 [(into (sorted-map) (cache/source-inputs inputs)) external]))
+     :seon.test.run/input-digest external
+     :seon.test.run/policy :incremental
+     :seon.test.run/members []}))
 
 (defn- worker-count
   {:malli/schema [:function
@@ -4640,8 +4640,8 @@
   "Run selected tests with progress and a liveness backstop.
 
   Explicit tiers run the declared `:seon.test/platform` regressions first
-  and stop there when red. Bare `changed` requests return a typed refusal
-  before worker startup until named-cluster selection custody is supplied.
+  and stop there when red. Bare requests select through the published source
+  authority, which supplies its database value and recorded green members.
   Record results in either the explicitly named non-default cluster
   or the persistent operator-owned branch selected by the launcher, then exit
   zero exactly when no test failed or errored and its evidence was recorded."
@@ -4669,8 +4669,6 @@
         ::selection-mode selection-mode
         ::known selection-modes
         :seon.test.runner/invalid-selection-mode selection-mode}))))
-  (if (= "changed" selection-mode)
-    (do (prn (bare-selection-refusal cluster-name)) 2)
   (let [manifest (program-manifest)
         ;; Named namespaces are the selection; with none named, the gate's
         ;; membership is a FACT read from the manifest the base already
@@ -4721,8 +4719,25 @@
                                     :seon.test.run/id (id/id)
                                     :seon.test.run/at (java.util.Date.)
                                     :seon.test.run/git-sha git-sha)
+              persistent-root
+              (configured-persistent-results-root
+               (System/getProperty "seon.test.persistent-results-root")
+               (System/getenv "SEON_TEST_RESULT_ROOT"))
+              admission (when (= "changed" selection-mode)
+                          (when-not persistent-root
+                            (throw (ex-info "Bare selection requires the published source authority." {})))
+                          (let [result (record-snapshot! persistent-root
+                                         (published-selection-request run-provenance))]
+                            (when-not (:seon.test.run/provenance result)
+                              (throw (ex-info "Published selection refused." result)))
+                            result))
+              run-provenance (or (:seon.test.run/provenance admission) run-provenance)
+              executable (when admission
+                           (set (map :seon.test.member/symbol (:seon.test.run/members admission))))
               explicit? (= "explicit" selection-mode)
               bulk (case selection-mode
+                     "changed" {::symbols executable ::reason "published database reach and recorded green members"
+                                ::unchanged? (empty? executable)}
                      ("all" "full")
                      {::symbols :all ::reason (str "the " selection-mode " tier")
                       ::digests (selection/input-digests ".")}
@@ -4745,6 +4760,13 @@
                                ::platform-declarations platform-rows
                                ::selected-symbols (::symbols bulk)
                                ::unchanged? (::unchanged? bulk)}))
+              platform (if admission (filterv #(executable (var-symbol %)) platform) platform)
+              selected (if admission (filterv #(executable (var-symbol %)) selected) selected)
+              _ (when (and admission
+                           (not= executable (set (map var-symbol (concat platform selected)))))
+                  (throw (ex-info "Admitted tests are absent from the loaded executable population."
+                                  {::admitted executable
+                                   ::loaded (set (map var-symbol (concat platform selected)))})))
             _ (when bulk
                 (announce! progress
                            (str "SELECTION " selection-mode " — "
@@ -4788,12 +4810,20 @@
                :seon.test.runner/results
                (into [] (mapcat ::task-results) task-results)
                ::stopped-after (when platform-red? :platform))
-              persistent-root
-              (configured-persistent-results-root
-               (System/getProperty "seon.test.persistent-results-root")
-               (System/getenv "SEON_TEST_RESULT_ROOT"))
               record-results!
               (cond
+                admission
+                #(let [recorded (record-snapshot!
+                                 persistent-root
+                                 {:seon.test.run/provenance run-provenance
+                                  :seon.test/run-basis-t (:seon.test.run/basis-t run-provenance)
+                                  :seon.test/run-at (:seon.test.run/at run-provenance)
+                                  :seon.test.run/terminated? true
+                                  :seon.test.runner/results (:seon.test.runner/results run-result)})]
+                   (if (vector? recorded)
+                     (recorded-run! persistent-root (:seon.test.run/id run-provenance))
+                     recorded))
+
                 (not= "-" cluster-name)
                 #(record! {:seon.test.runner/run-result run-result
                            :seon.boot/cluster-name cluster-name
@@ -4823,7 +4853,7 @@
         (.shutdownNow backstop)
         (try
           (.removeShutdownHook (Runtime/getRuntime) shutdown-hook)
-          (catch IllegalStateException _)))))))
+          (catch IllegalStateException _))))))
 
 (defn- coordinator-main!
   [cluster-name root git-sha selection-mode namespace-names]

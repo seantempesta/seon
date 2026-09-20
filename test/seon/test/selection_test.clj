@@ -46,25 +46,30 @@
     (support/transacted! connection rows)
     nil))
 
+(defn- complete-selection-tx
+  "Admit and mark synthetic fixture evidence in one transaction."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/admission]
+                  :seon.store/transaction-data]}
+  [database admission]
+  (mapv (fn [row]
+          (if (:seon.test.run/members row)
+            (update row :seon.test.run/members
+                    (fn [members]
+                      (mapv #(assoc %
+                                    :seon.test.member/completed-tx "datomic.tx"
+                                    :seon.test.member/terminated-tx "datomic.tx"
+                                    :seon.test.member/began? true :seon.test.member/ended? true
+                                    :seon.test.member/pass-count 1 :seon.test.member/fail-count 0
+                                    :seon.test.member/error-count 0) members)))
+            row))
+        (sut/admit-run database admission)))
+
 (defn- complete-selection!
   "Establish terminal run evidence; no claim that the canonical suite executed here."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.test.selection/request] :seon.test.run/admission]}
   [connection request]
   (let [admission (sut/selection-admission (assoc request :seon.db/db (db/db connection)))]
-    (support/transacted! connection [[:db.fn/call sut/admit-run admission]])
-    (let [ids (db/q '[:find [?member ...] :in $ ?id
-                      :where [?run :seon.test.run/id ?id]
-                             (or [?run :seon.test.run/members ?member]
-                                 [?run :seon.test.run/covered-by ?member])]
-                    (db/db connection) (get-in admission [:seon.test.run/provenance :seon.test.run/id]))]
-      (when (seq ids)
-        (support/transacted! connection
-          (mapv (fn [eid] {:db/id eid
-                           :seon.test.member/completed-tx "datomic.tx"
-                           :seon.test.member/terminated-tx "datomic.tx"
-                           :seon.test.member/began? true :seon.test.member/ended? true
-                           :seon.test.member/pass-count 1 :seon.test.member/fail-count 0
-                           :seon.test.member/error-count 0}) ids))))
+    (support/transacted! connection [[:db.fn/call complete-selection-tx admission]])
     admission))
 
 (deftest named-selection-reuses-green-members-by-reachable-content

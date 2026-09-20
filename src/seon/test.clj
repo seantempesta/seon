@@ -630,7 +630,7 @@
     result))
 
 (defn- selection-facts
-  "Read complete selected attributes through bound entity indexes."
+  "Read each selected entity range once, then retain the requested attributes."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :int] [:vector :qualified-keyword]]
                   [:map-of :int [:map-of :qualified-keyword [:set :seon.schema/value]]]]}
   [database entities attributes]
@@ -638,8 +638,10 @@
             (update-in facts [entity attribute] (fnil conj #{}) value))
           {} (selection-read!
               (db/q '[:find ?entity ?attribute ?value
-                      :in $ [?entity ...] [?attribute ...] :where [?entity ?attribute ?value]]
-                    database entities attributes))))
+                      :in $ [?entity ...] ?attributes
+                      :where [?entity ?attribute ?value]
+                             [(contains? ?attributes ?attribute)]]
+                    database entities (set attributes)))))
 
 (defn- definition-digests
   "Identify definition content independently of branch-local entities.
@@ -670,35 +672,40 @@
   [database basis]
   (let [history (db/history database)
         changes (db/since history basis)
-        direct (selection-read!
-                (db/q '[:find [?symbol ...]
-                        :in $history $changes [?attribute ...]
-                        :where [$changes ?entity ?attribute]
-                        (or [$history ?entity :seon.fn/sym ?symbol]
-                            [$history ?entity :seon.test/sym ?symbol])]
-                      history changes
+        changed-entities (selection-read!
+                (db/q '[:find [?entity ...] :in $ [?attribute ...]
+                        :where [?entity ?attribute]]
+                      changes
                       [:seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references
                        :seon.fn/sym :seon.test/sym :seon.test/source :seon.test/subject
                        :seon.test/platform :seon.test/fixture :seon.test/fixture-observation
                        :seon.test/long :seon.schema.admission/source
                        :seon.program/analyzed-source-digest]))
+        direct (selection-read!
+                (db/q '[:find [?symbol ...] :in $ [?entity ...]
+                        :where (or [?entity :seon.fn/sym ?symbol]
+                                   [?entity :seon.test/sym ?symbol])]
+                      history changed-entities))
         before (definition-digests (db/as-of database basis) (vec direct))
         after (definition-digests database (vec direct))
         direct (filter #(not= (get before %) (get after %)) direct)
-        namespaces (selection-read!
-                    (db/q '[:find [?ns ...] :in $history $changes [?attribute ...]
-                            :where [$changes ?entity ?attribute]
-                            (or-join [?entity ?ns]
-                              (and [$history ?entity :seon.ns/name] [(identity ?entity) ?ns])
-                              [$history ?ns :seon.ns/aliases ?entity]
-                              [$history ?ns :seon.ns/refers ?entity]
-                              [$history ?ns :seon.ns/imports ?entity])]
-                          history changes
+        changed-bindings (selection-read!
+                    (db/q '[:find [?entity ...] :in $ [?attribute ...]
+                            :where [?entity ?attribute]]
+                          changes
                           [:seon.ns/source :seon.ns/requires :seon.ns/aliases
                            :seon.ns/refers :seon.ns/imports :seon.ns/name
                            :seon.ns.alias/local :seon.ns.alias/target-ns
                            :seon.ns.refer/local :seon.ns.refer/target-ns :seon.ns.refer/target-name
                            :seon.ns.import/local :seon.ns.import/target-class]))
+        namespaces (selection-read!
+                    (db/q '[:find [?ns ...] :in $ [?entity ...]
+                            :where (or-join [?entity ?ns]
+                                     (and [?entity :seon.ns/name] [(identity ?entity) ?ns])
+                                     [?ns :seon.ns/aliases ?entity]
+                                     [?ns :seon.ns/refers ?entity]
+                                     [?ns :seon.ns/imports ?entity])]
+                          history changed-bindings))
         namespace-symbols (if (seq namespaces)
                             (selection-read!
                              (db/q '[:find [?symbol ...] :in $ [?ns ...]
@@ -831,7 +838,7 @@
      :seon.test.selection/unchanged unchanged}))
 
 (defn select
-  "Select complete test memberships for one explicit cluster and immutable database.
+  "Select test memberships from explicit cluster or published-branch custody.
   Baselines and outstanding work derive from admitted run/member facts, ordered
   by selection transaction. Calls, references and declared subjects use one
   union gate walk. Named requests retain their declared eligibility scope.
@@ -845,18 +852,22 @@
     requested-namespaces :seon.test/namespaces requested-identities :seon.test/identities
     supplied-basis :seon.test.run/change-basis-t :as request}]
   (try
-    (if (:seon.test.run/published-base-digest (:seon.test.run/provenance request))
+    (if (and (:seon.test.run/published-base-digest (:seon.test.run/provenance request))
+             (or (not= :incremental (:seon.test.run/policy request))
+                 (seq requested-namespaces) (seq requested-identities)))
       (select-snapshot request)
-    (if-not cluster
+    (if-not (or cluster
+                (and (:seon.test.run/published-base-digest (:seon.test.run/provenance request))
+                     (= :current-src (:seon.test.run/branch (:seon.test.run/provenance request)))))
       (selection-refusal database :seon.test/cluster-required "Selection requires explicit cluster custody." :absent)
-      (let [cluster-row (selection-read! (db/pull database [:db/id :seon.cluster/name] cluster))
+      (let [cluster-row (when cluster (selection-read! (db/pull database [:db/id :seon.cluster/name] cluster)))
             cluster-id (:db/id cluster-row)
             refuse! (fn [kind message observed]
                       (let [refusal (selection-refusal database kind message observed)]
                         (throw (ex-info message refusal))))
-            _ (when-not (:seon.cluster/name cluster-row)
+            _ (when (and cluster (not (:seon.cluster/name cluster-row)))
                 (refuse! :seon.test/cluster-unavailable "The requested cluster is absent." cluster))
-            branch (get-in (db/schema-database database) [:config :branch])
+            branch (if cluster (get-in (db/schema-database database) [:config :branch]) :current-src)
             basis-t (db/basis-t database)
             _ (when (and supplied-basis (> supplied-basis basis-t))
                 (refuse! :seon.test/invalid-basis "A comparison basis cannot be in the future." supplied-basis))
@@ -872,8 +883,13 @@
                        (when (or (seq namespaces) (seq identities)) :named) :incremental)
             include-long? (or (= :full policy) (true? (:seon.test/include-long? request)))
             run-ids (selection-read!
-                     (db/q '[:find [?run ...] :in $ ?cluster
-                             :where [?run :seon.test.run/cluster ?cluster]] database cluster-id))
+                     (if cluster
+                       (db/q '[:find [?run ...] :in $ ?cluster
+                               :where [?run :seon.test.run/cluster ?cluster]] database cluster-id)
+                       (db/q '[:find [?run ...] :in $ ?branch
+                               :where [?run :seon.test.run/branch ?branch]
+                                      (not [?run :seon.test.run/cluster])]
+                             database branch)))
             source-ids (selection-read!
                         (db/q '[:find [?source ...] :where [?source :seon.source/digest]] database))
             member-ids (selection-read!
@@ -901,6 +917,11 @@
             _ (when-not input-digest
                 (refuse! :seon.test/input-evidence-unavailable
                          "The publication has no unique external-input identity." (vec sources)))
+            _ (when (and (nil? cluster)
+                         (not= input-digest (:seon.test.run/input-digest request)))
+                (refuse! :seon.test/input-evidence-unavailable
+                         "The requested external inputs differ from the published database."
+                         (:seon.test.run/input-digest request)))
             _ (when-not (selection-read!
                           (db/q '[:find ?test . :where [?test :seon.test/sym]] database))
                 (refuse! :seon.test/population-unknown "No indexed test population is available." :absent))
@@ -1037,8 +1058,10 @@
                                         (or (not= :named policy) (named? [test-symbol entity]))
                                         (not (excluded? [test-symbol entity])) (one entity :seon.test/long))
                                {:seon.test/sym test-symbol :seon.test/long (one entity :seon.test/long)
-                                :seon.test/command ["bin/test-check" (:seon.cluster/name cluster-row)
-                                                    "--test" (str test-symbol)]}))) tests)
+                                :seon.test/command (if cluster
+                                                    ["bin/test-check" (:seon.cluster/name cluster-row)
+                                                     "--test" (str test-symbol)]
+                                                    ["bin/test" "--full"])}))) tests)
             reasons (reduce-kv
                      (fn [result symbol entity]
                        (let [entry [symbol entity]
@@ -1050,6 +1073,11 @@
                          (if (seq reasons) (assoc result symbol reasons) result)))
                      (sorted-map) eligible)
             digest (selection-read! (runner/program-digest database))
+            _ (when (and (nil? cluster)
+                         (not= (:seon.test.run/program-digest (:seon.test.run/provenance request)) digest))
+                (refuse! :seon.test/coverage-unknown
+                         "The published database no longer contains the requested program."
+                         (:seon.test.run/provenance request)))
             latest (reduce
                     (fn [result run-eid]
                       (reduce (fn [result member]
@@ -1101,12 +1129,12 @@
                          reuse-candidates)
             reasons (apply dissoc reasons (keys reused))]
         (cond-> {:seon.test.run/basis-t basis-t
-                 :seon.test.run/cluster cluster-id
                  :seon.test.run/policy policy
                  :seon.test.run/include-long? include-long?
                  :seon.test.run/input-digest input-digest
                  :seon.test.run/members (mapv (fn [[symbol reasons]]
                                                {:seon.test/sym symbol :seon.test.member/reasons reasons}) reasons)}
+          cluster-id (assoc :seon.test.run/cluster cluster-id)
           (seq reused) (assoc :seon.test.selection/unchanged (vec (vals reused))
                               :seon.test.run/covered-by
                               (set (map #(second (get latest %)) (keys reused))))
