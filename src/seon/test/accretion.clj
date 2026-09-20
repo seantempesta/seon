@@ -352,7 +352,7 @@
                         [:seon.test.accretion/arguments
                          :seon.test.accretion/expected
                          :seon.test.accretion/actual])
-           {:seon.test.accretion/install-refused true})))
+           {})))
 
 (defn- render-failure
   [failure]
@@ -378,7 +378,7 @@
    [:=> [:cat :seon.test.accretion/install-refused-error]
     :seon.render/ai]}
   [unit]
-  (when (:seon.test.accretion/install-refused unit)
+  (when (false? (:seon.test.accretion/install? unit))
     (str/join
      "\n\n"
      (concat
