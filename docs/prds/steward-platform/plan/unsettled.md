@@ -5737,3 +5737,17 @@ landed `6cea2c6b9` (eval kinds retired; complete returned facets
 recognized — D12). Publication lane paused with measurements owed; the
 gate-restructure lane takes the next free slot. Editing lanes: step 2,
 ops-effects-2, sci-program.
+
+## 2026-09-21 ~16:35 UTC — step 2 admitted optional in-memory members; sweeps landing fast; context capture ruled
+
+`bridge-step2-walker` landed `22a1a0567` (optional in-memory facet
+members admitted; compiled schema navigation prepared) — the bridge
+storability rule; recorder admission should admit again.
+`kind-sweep-sci-program` landed `239468635` (kernel), `92b351219`
+(admission), `d67eb2bb3` (reader). `kind-sweep-ops-effects-2` landed
+`cade2f346` (flow), `192742aea` (env), `1b5d19c0e` (shell) and stopped at
+context capture (raw errors without occurrence custody; issue
+`context-capture-does-not-carry-error-recording-custody`). Ruled option 3
+now, option 1 owed to the turn/cluster sweep (the turn seam supplies
+occurrence recording). Resumed through blob, edit, operator,
+operator/state, bootstrap, then effect per option 2.
