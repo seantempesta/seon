@@ -5841,3 +5841,23 @@ therefore cannot publish a complete population — every publisher is
 blocked, default is down, and no gate can run until this is found. Next:
 reproduce the single row write on the canonical fixture and read the
 writer's full refusal data (it names the validated schema).
+
+## 2026-09-21 ~20:50 UTC — ROOT CAUSE FOUND AND FIXED: facets observing an identity became write schemas for that identity's rows
+
+`seon.db/write-entity-schemas` registered every entity-shaped schema that
+REQUIRES an identity attribute as a write schema for rows carrying it.
+Tonight's sweeps declared error facets (`[:and :seon.error/base [:map …]]`,
+entity-shaped through the base) that observe `:seon.test/sym`
+(`seon.test.runner.edn:8/:84/:102`, `seon.test.edn:60/:240`) and
+`:seon.turn/id` (`seon.bootstrap.edn`), so every test row was validated
+as a facet and refused for a missing `:seon.error/at` — the canonical
+population could not be built at HEAD, every fast run "executed 0 tests",
+and no publisher could publish. Fix (orchestrator, no lanes available):
+an identity attribute that declares `:seon.program/row-schema` registers
+only that schema (`:seon.test/sym` → `:seon.test/test`); identities
+without a declared row schema keep the old rule. Regression
+`an-identity-with-a-declared-row-schema-is-validated-as-that-schema-only`
+in db_test. The fixture base builds again (write probe). Follow-up for the
+sweeps: an identity attribute reused as a facet member is a modeling smell
+(the facet observes a VALUE — the ruling said reuse names, not identities);
+list for the test-system/bootstrap owners.
