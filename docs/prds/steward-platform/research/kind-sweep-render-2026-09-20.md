@@ -112,7 +112,6 @@ The owned diagnostic JVM and launcher exited. The scratch worktree was
 removed after copying nothing over the main draft. All six source/schema
 drafts remain in the main working tree; unrelated edits were preserved.
 
-
 ## Continuation — producer evidence ruling
 
 The orchestrator rejected all three interim options. The binding rule is
@@ -146,7 +145,6 @@ The scratch worktree is based at `a931e68b8` and overlays only the owned
 paths. Its `reference-code` and published-base cache link to this checkout.
 It excludes held in-flight edits. No foreign source, schema, test, lane
 session, or lifecycle command is part of the change.
-
 
 ## Conversion census
 
@@ -410,3 +408,68 @@ updated facet declarations; no migration, default lifecycle operation, cold
 gate, or platform proof was performed by this lane. Remaining failed history,
 page and fixture observations above still require verification; they are not
 all attributed to the repaired projection stall.
+
+## Landed continuation — `f5716e841`
+
+After error-family-1a landed, this lane read its four landing commits and the
+current `seon.error.refusal` constructor before resuming. The final 23-file
+source/schema/test slice is `f5716e841`. The before/after counts remain those
+in the conversion census above: the five source owners moved from 143 matching
+lines to zero, and every owned schema and test file is also at zero. A final
+path-limited `rg` probe found no `:seon.error/kind` in any owned file.
+
+The final contract correction makes `seon.render/invoked`, `raw-output`, and
+`render-form-value` return the explicit open union
+`:seon.render/error-result`; that union names the request, ambiguity,
+invalid-output, unknown, walk-failed, and transcript-request facets. This
+falsified the first refreshed run's one owned failure: an invoked transcript
+renderer could return `:seon.render.transcript/request-error` while the caller
+declared only `:seon.render/unknown`. The second run did not reproduce that
+undeclared-facet refusal. All other producer declarations and distinguishing
+observations remain as tabulated above. `seon.render.data/at` retains the raw
+offending value without acquiring or applying a bound.
+
+The refreshed shared-tree fast command used all 23 owned paths and these twelve
+namespaces:
+
+```text
+seon.render.data-test seon.render.faults-test seon.render.history-test
+seon.render.page-review-test seon.render.retained-test
+seon.render.root-pull-test seon.render.runtime-test
+seon.render.transcript-run-test seon.render.transcript-test
+seon.render.walk-test seon.render.web-debug-test seon.render.web-test
+```
+
+It admitted a published graph six commits behind HEAD and completed **130 tests
+/ 1,029 assertions / 60 failures / 28 errors**, exit 1. This is a total tally,
+not a green claim. The verified foreign boundaries are:
+
+- `seon.turn/system-turn` returned `nil` walk units, and
+  `seon.turn/turn-completion-error` called the tightened diagnostic constructor
+  without the required base members;
+- `seon.fn.schema-shape/normalized-form:130` rejected the canonical form of a
+  generator-bearing Hiccup schema, which caused the downstream web/SSE page
+  failures;
+- old component fixtures and turn-edge retractions were refused by current
+  database/schema authority.
+
+The overlay announcement also recorded that dirty foreign callers
+`src/seon/error.clj` and `test/seon/db_test.clj` were tested from HEAD, with
+their checkout edits excluded. No foreign path was edited or added to the
+overlay. The prescribed load probe returned `:loads` before and after
+`f5716e841`:
+
+```text
+clojure -M -e "(require 'seon.render 'seon.render.data
+  'seon.render.transcript 'seon.render.walk 'seon.render.web) (println :loads)"
+```
+
+The current cross-file probe finds 27 literal references outside this lane in
+the later render-2 owners: `src/seon/render/{hiccup,lint,ns,test,value}.clj`
+and their owned tests. Those paths remain for that lane; this lane did not edit
+them.
+
+The orchestrator still owes the cold path-limited gate over the 23 files and
+twelve namespaces, followed by `bin/test --platform`. Live adoption and browser
+observation also remain orchestration work. This lane ran no cold gate,
+lifecycle command, or worktree.
