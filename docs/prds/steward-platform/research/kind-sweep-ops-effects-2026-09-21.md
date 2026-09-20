@@ -811,3 +811,8 @@ Morning handoff: `seon.call-preparation` is assigned to sci-program. Its
 predicate; the orchestrator traced six db-test reds to snapshot's output
 contract. This lane does not edit that family. Restored foreign staged changes
 are preserved and omitted from the lane's overlay; their HEAD bytes are tested.
+
+Operator final resource census: the unused low-disk-space legacy declaration
+still carried `seon.error/class`; it now extends the base with its existing
+required managed-root path. No operator resource class markers remain.
+`require seon.operator` passes after that correction.
