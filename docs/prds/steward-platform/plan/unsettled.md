@@ -5089,3 +5089,16 @@ publication (contracts are the one type authority); invalidation stays at
 the declaration-digest caller closure. Resumed. `results-reuse-everywhere`
 landed `a6fbf412b` (shell worker duplication removed; recorded fast reuse
 proven) — the zero-execution proof numbers land with its note.
+
+## 2026-09-21 ~00:10 UTC — results-reuse: 1,001 members preserved; host integration ruled option 1
+
+`results-reuse-everywhere` landed `44b51bab0`, `a6fbf412b`, `3f0a92135`:
+publication preserves all 1,001 admitted members (regression); identical
+fast runs 4 executed → 0 executed / 4 unchanged with three confidence
+values each; 82 launcher lines deleted. Stopped at host integration
+(`seon.test/run`, `run-owned` reuse) needing callers in `src/seon/plan.clj`
+and `src/my/test.clj`. Ruled option 1: ownership extended (unheld); one
+atomic slice; an agent's second identical request executes zero tests.
+Resumed. Still owed by the orchestrator, deferred until the publication
+dissolution lands (owner: no repeated rebuilds): bare `bin/test` twice,
+`--platform`, the 1a/1d/render cold gates.
