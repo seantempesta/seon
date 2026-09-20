@@ -5041,3 +5041,17 @@ workers that sit idle at full heap while the serial tier runs; a serial
 tier that pays the cold fixture per test. Owner-side: exclude `tmp/`,
 `target/`, `data/` from Spotlight and Backblaze (both index/back up every
 run root and published base).
+
+## 2026-09-20 ~23:20 UTC — step 1 checkpoint: free paths converted (uncommitted), held callers block the arity removal
+
+`bridge-step1-registry` stopped correctly at the held-caller boundary
+(checkpoint note committed): the free-path implementation (registry
+compiled once, sealed, carried; native explanation paths) is in the tree
+UNCOMMITTED and loads; the old candidate value arities remain until the 13
+held callers convert — `src/seon/cluster.clj`, `src/seon/cluster/prompt.clj`,
+`src/seon/turn.clj` and ten cluster/turn/accretion tests, all held by
+`kind-sweep-turn-cluster`. Critical path now: the turn/cluster sweep lands →
+step 1 resumes (final conversion + arity removal in ONE commit) → the
+publication-dissolution lane launches on the freed `cluster.clj`. Nobody
+edits `src/seon/schema.clj` or `schema/internal.cljc` meanwhile (step 1's
+uncommitted bytes).
