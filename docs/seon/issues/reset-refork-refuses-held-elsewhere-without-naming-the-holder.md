@@ -49,3 +49,16 @@ A reset on a scratch root whose republish child is made to exit slowly
 (a planted delay after publication) must still end in a started adopted
 cluster, and a genuine foreign holder must be refused naming its pid and
 liveness.
+
+## Fast recording observation, 2026-09-20
+
+The ops-effects-2 accumulated fast request `89a0e6ed63f9` loaded its snapshot
+and armed 1,498 contracts, then `seon.test.runner/record-snapshot!` refused
+at `2026-09-20T15:07:29.120Z`: `seon.cluster.store/open-store!` reported
+`/Users/sean/src/seon/data/store` held elsewhere, naming `data/store.lock`
+but no holder identity. No tests executed and no durable tally was available.
+This is an additional observation of the incomplete holder evidence; it does
+not establish that the reset race described above caused this occurrence.
+The lane did not operate the holder. Exact snapshot provenance and the owed
+command are in
+[the ops-effects landing note](../../prds/steward-platform/research/kind-sweep-ops-effects-2026-09-21.md).

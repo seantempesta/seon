@@ -816,3 +816,298 @@ Operator final resource census: the unused low-disk-space legacy declaration
 still carried `seon.error/class`; it now extends the base with its existing
 required managed-root path. No operator resource class markers remain.
 `require seon.operator` passes after that correction.
+
+### Final ops-effects-2 landing after the morning continuation
+
+Effect: source kind sites 12 → 0; effect tests 6 → 0. Producers now carry
+complete leaf diagnostics and substantive effect identities, owner/handler
+symbols, missing bound/member observations or the actual owner class.
+The exception path retains the throwable on `:seon.error/offending`.
+No marker, local base recognizer, or per-facet EDN field was introduced.
+
+The option-2 settlement is implemented in
+`src/seon/effect.clj:586` (`handler-refusal-validators`) and
+`:608` (`settle-value!`). It compiles the selected loaded Var's
+`:malli/schema` with the supplied projection and the existing
+`schema/compilable-form` mechanism. Malli's own function info selects the
+two-argument handler arities; `mu/subschemas` supplies result locations,
+and only named base-extending schemas at an empty value path are validated.
+Nested payloads do not classify the enclosing successful value. Validators
+travel with background settlement. Effect-owned exceptions and await timeout
+results skip result-attribute projection explicitly. The general
+`db/transact!` return contract is the only inline base-check debt here.
+
+Dependency grounding: `reference-code/malli/src/malli/core.cljc:2194`
+provides arity input/output metadata; `reference-code/malli/src/malli/util.cljc:168`
+provides schema paths and value paths; `src/seon/schema/internal.cljc:111`
+owns base-extension inspection at HEAD. No held owner was edited.
+The genuinely polymorphic effect return explicitly enumerates the canonical
+facet population; its drift regression compares against the canonical
+fixture. The settlement regression exercises a declared refusal and a
+successful result carrying a nested refusal, checking actual stored effect
+attributes as well as retained result EDN.
+
+Verification: the final shared-tree require of effect, context, blob, edit,
+operator, operator.state and bootstrap succeeded. Source/test lint is zero
+errors/warnings (one existing redundant-str informational finding in
+effect_test). The sole accumulated fast pass loaded the HEAD-plus-owned-paths
+snapshot and armed **1,498 contracts** across **29 requested namespaces**.
+It executed **zero tests**: snapshot recording refused before selection.
+
+Exact admission evidence:
+- run `89a0e6ed63f9`, snapshot HEAD `9ac15864080ead2032b332def4f8e9b61611382d`;
+- `seon.test.runner/record-snapshot!` at `2026-09-20T15:07:29.120Z`;
+- `seon.cluster.store/open-store!` refused `:seon.cluster.store/held-elsewhere`;
+- directory `/Users/sean/src/seon/data/store`, lock `data/store.lock`;
+- message: “the store at /Users/sean/src/seon/data/store is held by another live process”;
+- published graph `e8cb1a8c76cfe6b393cf4b1a167ff815b1dbd56ef90d15c2373fa7fa53635411`,
+  122 commits behind the snapshot HEAD;
+- snapshot program digest `13c34d240d5ba722c31ab399fa3fa0146e09701a3c6aac97f147579ba0ceac65`;
+- overlay input digest `d9751d15e73be98fd810768d4ba2e7324bfc58b141a440bf9e8b133339d140aa`.
+
+**Fast tally owed — admission held by `data/store.lock`.** No durable
+pass/fail tally is claimed. The final low-space resource correction and
+explicit await-result exclusion were loaded after that refused pass and
+remain included in the owed verification. No unchanged namespace was rerun.
+The launcher removed `tmp/test-runs/run.qs7on5`; no lane JVM or scratch
+worktree remains. No live adoption, reset, cold gate, or platform proof was
+performed by this lane.
+
+Foreign dirty paths explicitly excluded from the selected overlay:
+- `src/seon/ai.clj`
+- `test/seon/ai_test.clj`
+- `test/seon/ai_stream_fold_test.clj`
+- `src/seon/maintenance.clj`
+- `test/seon/maintenance_test.clj`
+- `test/seon/maintenance_schema_test.clj`
+- `src/seon/config.clj`
+- `test/seon/config_test.clj`
+- `src/seon/issue.clj`
+- `src/seon/shell/jvm.clj`
+The launcher additionally reported foreign callers at HEAD; these include
+cluster, db, error, fn, schema/internal, sci/eval, turn, render owners and
+the runner. Snapshot differences were exactly the three effect paths.
+A foreign checkout mutation during snapshot construction was not imported.
+
+Final source census (the two context projections and detector are explicitly
+ruled deferrals, not unreported unfinished conversions):
+
+| Family | Kind sites before | Remaining |
+| --- | ---: | ---: |
+| ai | 26 | 0 |
+| plan | 5 | 0 |
+| schedule | 10 | 0 |
+| maintenance | 8 | 0 |
+| config | 8 | 0 |
+| issue and issue/detect | 23 | 1 (fn handoff) |
+| flow | 10 | 0 |
+| env | 10 | 0 |
+| shell/jvm | 17 | 0 |
+| context | 9 | 2 (turn/cluster handoff) |
+| blob | 5 | 0 |
+| edit | 9 | 0 |
+| operator | 12 | 0 |
+| operator/state | 16 | 0 |
+| bootstrap | 12 | 0 |
+| effect | 12 | 0 |
+
+`src/seon/store.clj` does not exist; `seon.cluster.store` remains another
+owner, including the observed lock refusal. Earlier background/problems
+commits and their verification obligations remain as recorded above.
+
+Still owed to fn.clj's release: `src/seon/issue/detect.clj:328` and the
+gate-sets contract at `src/seon/fn.clj:1485`; exact proposed substantive
+members remain in that handoff above. Still owed to the turn/cluster sweep:
+`src/seon/context.clj:494` and `:540`, with the occurrence reference,
+recording transaction data and owning relation described above.
+`seon.db`, `seon.cluster.message`, `seon.turn`, `seon.cluster.reply`
+and now `seon.call-preparation` are other sweeps' producers. Generic
+pass-through owners must keep their explicit facet manifests synchronized.
+Removed marker declarations join the orchestrator's wave reset.
+
+Exact fast command used (not rerun):
+
+```bash
+bin/test-fast --paths \
+  resources/seon/schemas/seon.ai.edn \
+  src/seon/plan.clj \
+  resources/seon/schemas/my.plan.edn \
+  resources/seon/schemas/seon.plan.edn \
+  test/seon/plan_completion_test.clj \
+  src/seon/schedule.clj \
+  resources/seon/schemas/seon.schedule.edn \
+  test/seon/schedule_test.clj \
+  resources/seon/schemas/seon.maintenance.edn \
+  resources/seon/schemas/seon.config.edn \
+  src/seon/issue/detect.clj \
+  resources/seon/schemas/seon.issue.edn \
+  test/seon/issue_test.clj \
+  test/seon/issue_generate_test.clj \
+  test/seon/issue_settlement_test.clj \
+  test/seon/issue_deletion_test.clj \
+  test/seon/issue/detect_test.clj \
+  src/seon/flow.clj \
+  resources/seon/schemas/seon.flow.edn \
+  test/seon/flow_test.clj \
+  test/seon/flow_configuration_test.clj \
+  src/seon/env.clj \
+  resources/seon/schemas/seon.env.edn \
+  test/seon/env_test.clj \
+  resources/seon/schemas/my.shell.edn \
+  test/seon/shell/jvm_test.clj \
+  resources/seon/schemas/seon.blob.edn \
+  src/seon/blob.clj \
+  resources/seon/schemas/my.edit.edn \
+  src/seon/edit.clj \
+  test/seon/edit_test.clj \
+  resources/seon/schemas/seon.operator.collect.edn \
+  resources/seon/schemas/seon.operator.edn \
+  src/seon/operator.clj \
+  test/seon/operator_test.clj \
+  resources/seon/schemas/seon.operator.claim.edn \
+  resources/seon/schemas/seon.operator.lock.edn \
+  resources/seon/schemas/seon.operator.state.edn \
+  resources/seon/schemas/seon.operator.subprocess.edn \
+  src/seon/operator/state.clj \
+  test/seon/dev/fresh_operator_reset_test.clj \
+  resources/seon/schemas/seon.bootstrap.edn \
+  src/seon/bootstrap.clj \
+  test/seon/bootstrap_test.clj \
+  resources/seon/schemas/seon.context.edn \
+  src/seon/context.clj \
+  test/seon/context_blocks_fixture.clj \
+  test/seon/context_capture_test.clj \
+  test/seon/context_selection_test.clj \
+  src/seon/effect.clj \
+  resources/seon/schemas/seon.effect.edn \
+  test/seon/effect_test.clj \
+  -- \
+  seon.ai-test \
+  seon.ai-stream-fold-test \
+  seon.plan-test \
+  seon.plan-completion-test \
+  my.plan-test \
+  seon.schedule-test \
+  seon.maintenance-test \
+  seon.maintenance-schema-test \
+  seon.config-test \
+  seon.config-application-test \
+  seon.issue-test \
+  seon.issue-generate-test \
+  seon.issue-settlement-test \
+  seon.issue-deletion-test \
+  seon.issue.detect-test \
+  seon.flow-test \
+  seon.flow-configuration-test \
+  seon.env-test \
+  seon.shell.jvm-test \
+  seon.blob-test \
+  seon.blob-threshold-test \
+  seon.blob-publication-test \
+  seon.edit-test \
+  seon.operator-test \
+  seon.dev.fresh-operator-reset-test \
+  seon.bootstrap-test \
+  seon.context-selection-test \
+  seon.context-capture-test \
+  seon.effect-test
+```
+
+Cold proof owed to the orchestrator after the foreign cuts are coherent:
+
+```bash
+bin/test --paths \
+  src/seon/ai.clj \
+  resources/seon/schemas/seon.ai.edn \
+  test/seon/ai_test.clj \
+  test/seon/ai_stream_fold_test.clj \
+  src/seon/plan.clj \
+  resources/seon/schemas/my.plan.edn \
+  resources/seon/schemas/seon.plan.edn \
+  test/seon/plan_completion_test.clj \
+  src/seon/schedule.clj \
+  resources/seon/schemas/seon.schedule.edn \
+  test/seon/schedule_test.clj \
+  src/seon/maintenance.clj \
+  resources/seon/schemas/seon.maintenance.edn \
+  test/seon/maintenance_test.clj \
+  test/seon/maintenance_schema_test.clj \
+  src/seon/config.clj \
+  resources/seon/schemas/seon.config.edn \
+  test/seon/config_test.clj \
+  src/seon/issue.clj \
+  src/seon/issue/detect.clj \
+  resources/seon/schemas/seon.issue.edn \
+  test/seon/issue_test.clj \
+  test/seon/issue_generate_test.clj \
+  test/seon/issue_settlement_test.clj \
+  test/seon/issue_deletion_test.clj \
+  test/seon/issue/detect_test.clj \
+  src/seon/flow.clj \
+  resources/seon/schemas/seon.flow.edn \
+  test/seon/flow_test.clj \
+  test/seon/flow_configuration_test.clj \
+  src/seon/env.clj \
+  resources/seon/schemas/seon.env.edn \
+  test/seon/env_test.clj \
+  src/seon/shell/jvm.clj \
+  resources/seon/schemas/my.shell.edn \
+  test/seon/shell/jvm_test.clj \
+  resources/seon/schemas/seon.blob.edn \
+  src/seon/blob.clj \
+  resources/seon/schemas/my.edit.edn \
+  src/seon/edit.clj \
+  test/seon/edit_test.clj \
+  resources/seon/schemas/seon.operator.collect.edn \
+  resources/seon/schemas/seon.operator.edn \
+  src/seon/operator.clj \
+  test/seon/operator_test.clj \
+  resources/seon/schemas/seon.operator.claim.edn \
+  resources/seon/schemas/seon.operator.lock.edn \
+  resources/seon/schemas/seon.operator.state.edn \
+  resources/seon/schemas/seon.operator.subprocess.edn \
+  src/seon/operator/state.clj \
+  test/seon/dev/fresh_operator_reset_test.clj \
+  resources/seon/schemas/seon.bootstrap.edn \
+  src/seon/bootstrap.clj \
+  test/seon/bootstrap_test.clj \
+  resources/seon/schemas/seon.context.edn \
+  src/seon/context.clj \
+  test/seon/context_blocks_fixture.clj \
+  test/seon/context_capture_test.clj \
+  test/seon/context_selection_test.clj \
+  src/seon/effect.clj \
+  resources/seon/schemas/seon.effect.edn \
+  test/seon/effect_test.clj \
+  -- \
+  seon.ai-test \
+  seon.ai-stream-fold-test \
+  seon.plan-test \
+  seon.plan-completion-test \
+  my.plan-test \
+  seon.schedule-test \
+  seon.maintenance-test \
+  seon.maintenance-schema-test \
+  seon.config-test \
+  seon.config-application-test \
+  seon.issue-test \
+  seon.issue-generate-test \
+  seon.issue-settlement-test \
+  seon.issue-deletion-test \
+  seon.issue.detect-test \
+  seon.flow-test \
+  seon.flow-configuration-test \
+  seon.env-test \
+  seon.shell.jvm-test \
+  seon.blob-test \
+  seon.blob-threshold-test \
+  seon.blob-publication-test \
+  seon.edit-test \
+  seon.operator-test \
+  seon.dev.fresh-operator-reset-test \
+  seon.bootstrap-test \
+  seon.context-selection-test \
+  seon.context-capture-test \
+  seon.effect-test
+bin/test --platform
+```

@@ -12,6 +12,8 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
+            [seon.error :as error]
+            [seon.error.refusal :as error.refusal]
             [seon.flow :as flow]
             [seon.id :as id]
             [seon.schema :as schema]
@@ -33,12 +35,34 @@
   {:malli/schema [:=> [:cat
                        [:map [:seon.effect-test/value :int]]
                        :seon.config/effective]
-                  :map]}
+                  [:or :map :my.shell/cwd-refused-error]]}
   [request effective]
   (swap! handler-calls conj request)
-  {:seon.effect-test/value (:seon.effect-test/value request)
-   :seon.effect-test/cluster (:seon.config/cluster effective)
-   :seon.effect-test/virtual-thread? (.isVirtual (Thread/currentThread))})
+  (let [refusal
+        (error.refusal/diagnostic
+         {:seon.error/at (Date.)
+          :seon.error/layer :seon.effect-test/handler
+          :seon.error/operation 'seon.effect-test/test-handler
+          :seon.error/message "Use the permitted fixture working directory."
+          :seon.error/offending request
+          :seon.error/diagnostic-layer :seon.effect-test/handler
+          :seon.error/diagnostic-operation 'seon.effect-test/test-handler
+          :seon.error/diagnostic-member :my.shell/cwd
+          :seon.error/diagnostic-expected "the permitted fixture directory"
+          :seon.error/diagnostic-offending request
+          :seon.error/diagnostic-cause :my.shell/cwd
+          :seon.error/diagnostic-evidence request
+          :my.shell/refused-cwd "refused-fixture-directory"
+          :my.fs/after-digest (apply str (repeat 64 "a"))})]
+    (if (neg? (:seon.effect-test/value request))
+      refusal
+      (cond->
+       {:seon.effect-test/value (:seon.effect-test/value request)
+        :seon.effect-test/cluster (:seon.config/cluster effective)
+        :seon.effect-test/virtual-thread? (.isVirtual (Thread/currentThread))}
+        (zero? (:seon.effect-test/value request))
+        (assoc :seon.effect-test/nested refusal
+               :my.fs/after-digest (:my.fs/after-digest refusal))))))
 
 (defn capability-owner
   {:malli/schema [:=> [:cat [:map [:seon.effect-test/value :int]]]
@@ -584,8 +608,7 @@
                 (effect/request! #'arm-probe-owner
                                  {:seon.effect-test/iterations 1}
                                  {:seon.effect/background? true}))]
-          (is (= :seon.effect/missing-background-time-limit
-                 (:seon.error/kind result))
+          (is (= :seon.config.effect.background/time-limit-ms (:seon.effect/missing-bound result))
               (str "unbounded detached work must be refused loudly; got "
                    (pr-str result)))
           (is (nil? (db/pull (db/db connection) [:seon.effect/id]
@@ -666,9 +689,48 @@
                 (binding [effect/*request-context* (request-context connection)]
                   (effect/request! #'capability-owner
                                    {:seon.effect-test/value 7}))]
-            (is (= :seon.effect/already-recorded
-                   (:seon.error/kind second-result)))
+            (is (= (:seon.effect/id receipt) (:seon.effect/recorded-effect-id second-result)))
             (is (= 1 (count @handler-calls)))))))))
+
+(deftest effect-pass-through-enumerates-the-canonical-facets
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (db/db connection))
+           declared (get (:seon.schema.projection/forms projection)
+                         :seon.effect/request-result)]
+       (is (= (error/facet-keys projection)
+              (disj (set (rest declared)) :seon.schema/value :seon.db/error-result)))))))
+
+(deftest settlement-records-only-successful-handler-result-attributes
+  (test-support/with-database
+   (fn [connection]
+     (transact-fixture! connection
+       [(cluster-config 600000)
+        {:seon.turn/id "effect-run"
+         :seon.turn/agent {:seon.agent/id "effect-agent"}
+         :seon.turn/opened-tx "datomic.tx"}])
+     (install-capability! connection)
+     (let [context (request-context connection)]
+       (doseq [[ordinal input] [[0 -1] [1 0]]]
+         (let [result (binding [effect/*request-context* context]
+                        (effect/request! #'capability-owner
+                                         {:seon.effect-test/value input}))
+               receipt (db/pull (db/db connection) '[*]
+                         [:seon.effect/id
+                          (id/digest 12 [:seon.effect/id "effect-run" 3 ordinal])])]
+           (is (inst? (:seon.effect/settled-at receipt)))
+           (is (= (:my.fs/after-digest result)
+                  (:my.fs/after-digest (edn/read-string (:seon.effect/result-edn receipt)))))
+           (if (neg? input)
+             (do
+               (is (= "refused-fixture-directory" (:my.shell/refused-cwd result)))
+               (is (nil? (:my.fs/after-digest receipt))
+                   "a declared handler refusal settles without result attribute datoms"))
+             (do
+               (is (= "refused-fixture-directory"
+                      (get-in result [:seon.effect-test/nested :my.shell/refused-cwd])))
+               (is (= (:my.fs/after-digest result) (:my.fs/after-digest receipt))
+                   "a nested refusal payload does not classify its successful result")))))))))
 
 (deftest invalid-requests-never-open-a-receipt
   (test-support/with-database
@@ -678,7 +740,7 @@
             (binding [effect/*request-context* (request-context connection)]
               (effect/request! #'capability-owner
                                {:seon.effect-test/value "wrong"}))]
-        (is (= :seon.effect/invalid-request (:seon.error/kind result)))
+        (is (= 'seon.effect-test/capability-owner (:seon.effect/request-owner result)))
         (is (nil? (db/pull (db/db connection) [:seon.effect/id]
                            [:seon.effect/id
                             (id/digest 12 [:seon.effect/id "effect-run" 3 0])])))))))
@@ -701,7 +763,7 @@
             result (binding [effect/*request-context* context]
                      (effect/request! #'capability-owner
                                       {:seon.effect-test/value 41}))]
-        (is (= :seon.effect/request-too-large (:seon.error/kind result))
+        (is (= 'seon.effect-test/capability-owner (:seon.effect/unadmitted-owner result))
             (pr-str result))
         (is (= :over-bound
                (get-in result [:seon.error/data :seon.sci.admit/reason]))
@@ -736,7 +798,7 @@
                 (db/pull (db/db connection) '[*]
                          [:seon.effect/id
                           (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
-            (is (= :seon.effect/interrupted (:seon.error/kind result)))
+            (is (= (:seon.effect/id receipt) (:seon.effect/interrupted-effect-id result)))
             (is (inst? (:seon.effect/interrupted-at receipt)))
             (is (nil? (:seon.effect/result-edn receipt)))))))))
 
@@ -870,7 +932,7 @@
                              :my.fs/content {:my.fs/text "written\n"}
                              :my.fs/precondition {:my.fs/expected-absence? true}}))
             receipt (effect-receipt connection '[*])]
-        (is (nil? (:seon.error/kind written)) (pr-str written))
+        (is (string? (:my.fs/after-digest written)) (pr-str written))
         (testing "the request's declared keys are datoms on the effect"
           (is (= path (:my.fs/path receipt))
               (str "which path this effect touched must be a query, not a "
