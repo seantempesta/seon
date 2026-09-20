@@ -6681,3 +6681,21 @@ move to checkpoints instead of every working-edge commit; (4) cadence:
 the complete `--all` tier is deferred to a quiet window; each slice is
 gated by the platform tier + the measurement script, and the next slice
 launches the moment those two are in hand.
+
+## 2026-09-22 ~23:10 local — PLATFORM GATE GREEN at `0c6be06f3` (97 tests, 0 F / 0 E, 911 s) — first green tier since the cut; measurement at slice 1: fork-before-start 21.5 s, boot 64.3 s, FIRST adoption after fork 115.6 s
+
+The five bridge fixes and slices 0–1 are proven by the platform tier;
+`--all` is running behind it. The script's rows at `0c6be06f3` (so far):
+from zero 266.2 s, fork 21.5 s, start 64.3 s, first adoption 115.6 s.
+Two of those disagree with the lane's numbers and the disagreement is
+informative, not a contradiction: the script forks BEFORE the cluster
+starts (no running JVM → the cold child path; the lane's 439 ms fork was
+against a running cluster), and the script's "no change" is the FIRST
+`init --dev` after a fork — a freshly forked cluster carries no recorded
+adoption commit, so the short-circuit cannot fire and the whole-program
+adoption runs (the reset's own adopt after refork cost 123 s for the same
+reason). The fork is AT the published commit by construction, so the
+fork should record that commit on the cluster row and the first adoption
+should be the no-op; handed to slice 4. The script now has two rows
+(`adopt-first`, `adopt-nochange`). Boot 64 s vs 38 s earlier: load from
+the concurrent platform tier; re-measured in a quiet window.

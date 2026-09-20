@@ -22,7 +22,9 @@ run() { local name=$1; shift; { time "$@"; } > "$ROOT/$name.log" 2>&1; echo "exi
 run init-zero bin/seon --root "$ROOT" init --result-file "$ROOT/init-zero.edn"
 run fork      bin/seon --root "$ROOT" init head
 run start     bin/seon --root "$ROOT" start head
-# Case A: no change at all.
+# Case A: the first adoption after the fork (nothing changed on disk; the cluster row has no adoption recorded yet).
+run adopt-first bin/seon --root "$ROOT" init --dev head --changed src/my/note.clj
+# Case A2: no change at all, cluster already at the published commit.
 run adopt-nochange bin/seon --root "$ROOT" init --dev head --changed src/my/note.clj
 # Case B: docstring-only edit in a non-core namespace.
 perl -0pi -e 's/^  "/  "(measured edit) /m' src/my/note.clj
