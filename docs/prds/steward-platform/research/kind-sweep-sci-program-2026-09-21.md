@@ -439,3 +439,21 @@ existing style warnings are excluded from the clean conversion lint. The
 required four namespaces load. Cold scope owed: `bin/test --paths
 src/seon/sci/kernel.clj resources/seon/schemas/seon.sci.kernel.edn
 test/seon/sci/kernel_arm_carriage_test.clj -- seon.sci.kernel-arm-carriage-test`.
+
+## Admission conversion
+
+Admission source kinds 4 → 0, resource class markers 1 → 0, tests 1 → 0.
+The emitted-byte refusal uses the existing bound/observation facet; projection
+failure requires the actual failed value's class symbol and retains that value
+raw in offending evidence. Missing caps use the config facet and declared key.
+Public admission and partitioned admission name the config failure they pass
+through. Both SCI unions name projection failure. No per-facet EDN field was
+introduced. Kernel resource whitespace from the preceding deletion is cleaned.
+
+The single admission snapshot (`tmp/sci-program-admit-fast.log`) again refused
+recording admission at the optional raw offending member; **0 executed, tally
+owed**. All four namespaces load and conversion lint is clean with baseline
+style warnings excluded. Cold command owed: `bin/test --paths
+src/seon/sci/admit.clj resources/seon/schemas/seon.sci.admit.edn
+src/seon/sci/kernel.clj resources/seon/schemas/seon.sci.kernel.edn
+test/seon/sci/admit_test.clj -- seon.sci.admit-test`.

@@ -45,6 +45,7 @@
             [sci.impl.types :as sci.types]
             [sci.lang]
             [seon.env :as env]
+            [seon.error.refusal :as error]
             [seon.id :as id]
             [seon.print :as print]
             [seon.schema :as schema]
@@ -113,8 +114,6 @@
                             :else 3)))))
         total))))
 
-(def ^:private over-bound-marker ::over-bound)
-
 (defn- write!
   "Emit one fragment, or stop the walk because the storage bound is reached.
 
@@ -129,16 +128,29 @@
         total (+ emitted (utf8-length text))]
     (when (and bound (> total (long bound)))
       (throw (ex-info "value admission reached its storage bound"
-                      {:seon.error/kind over-bound-marker
-                       over-bound-marker true
-                       :seon.sci.admit/bytes total})))
+                      (error/diagnostic
+                       {:seon.error/at (java.util.Date.)
+                        :seon.error/layer :seon.sci.admit/projection
+                        :seon.error/operation 'seon.sci.admit/write!
+                        :seon.error/message "Value admission reached its byte bound; request a smaller value or a larger declared bound."
+                        :seon.error/offending total
+                        :seon.error/diagnostic-layer :seon.sci.admit/projection
+                        :seon.error/diagnostic-operation 'seon.sci.admit/write!
+                        :seon.error/diagnostic-member :seon.config.eval.result/max-bytes
+                        :seon.error/diagnostic-expected bound
+                        :seon.error/diagnostic-offending total
+                        :seon.error/diagnostic-cause :seon.error/unknown
+                        :seon.error/diagnostic-evidence total
+                        ::bound-bytes bound ::bytes total
+                        ::projection-observation {:seon.error.evidence/attribute ::bytes
+                                                  :seon.error.evidence/value total}}))))
     (vreset! (:bytes state) total)
     (.append ^StringBuilder (:builder state) text)
     nil))
 
 (defn- over-bound?
   [failure]
-  (true? (over-bound-marker (ex-data failure))))
+  (contains? (ex-data failure) :seon.sci.admit/bound-bytes))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The walk — one pass, inside the armed boundary
@@ -414,11 +426,23 @@
   ;; project is a core degradation, so development panics on it
   ;; immediately and production degrades.
   (when (= :panic (:on-core-error state))
-    (throw (ex-info (str "value admission could not project a "
-                         (.getName (class value)))
-                    {:seon.error/kind ::projection-failed
-                     ::class (.getName (class value))
-                     :seon.sci.admit/projection-failed true}
+    (throw (ex-info "Value admission could not project the supplied value."
+                    (error/diagnostic
+                     {:seon.error/at (java.util.Date.)
+                      :seon.error/layer :seon.sci.admit/projection
+                      :seon.error/operation 'seon.sci.admit/rethrow-or-degrade!
+                      :seon.error/message "Value admission could not project this value; inspect the codec failure evidence."
+                      :seon.error/offending value
+                      :seon.error/diagnostic-layer :seon.sci.admit/projection
+                      :seon.error/diagnostic-operation 'seon.sci.admit/rethrow-or-degrade!
+                      :seon.error/diagnostic-member :seon.sci.admit/value
+                      :seon.error/diagnostic-expected :seon.print/node
+                      :seon.error/diagnostic-offending value
+                      :seon.error/diagnostic-cause :seon.error/unknown
+                      :seon.error/diagnostic-evidence value
+                      ::failed-class (symbol (.getName (class value)))
+                      :seon.error/data {:seon.error/exception-class (symbol (.getName (class failure)))
+                                        :seon.error/throw-site-message (or (ex-message failure) "Projection failed.")}})
                     failure))))
 
 (defn- project
@@ -578,7 +602,7 @@
      :seon.render/error :seon.render.data/error :seon.render.value/error
      :seon.render.walk/error :seon.render.web/error :seon.schedule/error
      :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error :seon.sci.eval/missing-function-row-error :seon.sci.eval/schema-refused-error :seon.sci.eval/documentation-unavailable-error :seon.sci.eval/namespace-binding-cycle-error :seon.sci.eval/declaration-absent-error :seon.sci.eval/install-mismatch-error
+     :seon.sci.admit/error :seon.sci.admit/projection-failed-error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error :seon.sci.eval/missing-function-row-error :seon.sci.eval/schema-refused-error :seon.sci.eval/documentation-unavailable-error :seon.sci.eval/namespace-binding-cycle-error :seon.sci.eval/declaration-absent-error :seon.sci.eval/install-mismatch-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
      :seon.test/admission-error :seon.test/execution-error :seon.test/expired
      :seon.test/not-runnable-error :seon.test/resolution-error
@@ -701,14 +725,22 @@
   that handed an incomplete caps map got `RT.longCast` on nil instead of a
   diagnostic naming the absent key
   (docs/seon/issues/absent-admission-cap-crashes-the-print-walk.md)."
+  {:malli/schema [:=> [:cat :map] :seon.config/error]}
   [caps]
-  {:seon.error/kind ::missing-bound
-   :seon.error/message
-   (str "Value admission requires the storage bound "
-        :seon.config.eval.result/max-bytes
-        ", and the supplied caps map does not carry it. Nothing was walked.")
-   :seon.error/diagnostic-member :seon.config.eval.result/max-bytes
-   :seon.error/data {:seon.sci.admit/caps (vec (sort (keys caps)))}})
+  (error/diagnostic
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.sci.admit/projection
+    :seon.error/operation 'seon.sci.admit/missing-bound-refusal
+    :seon.error/message "Value admission requires a byte bound; supply the declared max-bytes attribute."
+    :seon.error/offending caps
+    :seon.error/diagnostic-layer :seon.sci.admit/projection
+    :seon.error/diagnostic-operation 'seon.sci.admit/missing-bound-refusal
+    :seon.error/diagnostic-member :seon.config.eval.result/max-bytes
+    :seon.error/diagnostic-expected :seon.sci.admit/bound-bytes
+    :seon.error/diagnostic-offending caps
+    :seon.error/diagnostic-cause :seon.error/unknown
+    :seon.error/diagnostic-evidence caps
+    :seon.config/error-key :seon.config.eval.result/max-bytes}))
 
 (defn required-cap
   "One declared cap as a long, or a core fault NAMING the key that is absent.
@@ -727,17 +759,24 @@
     (if (int? declared)
       (long declared)
       (throw (ex-info
-              (str "A declared bound is missing: " cap-key
-                   ". The supplied caps map carries "
-                   (pr-str (vec (sort (keys caps)))) ".")
-              {:seon.error/kind ::missing-cap
-               :seon.error/message
-               (str "A declared bound is missing: " cap-key ".")
-               :seon.error/diagnostic-member cap-key
-               :seon.error/data {:seon.sci.admit/caps
-                                 (vec (sort (keys caps)))}})))))
+              "A declared bound is missing; supply the required cap."
+              (error/diagnostic
+               {:seon.error/at (java.util.Date.)
+                :seon.error/layer :seon.sci.admit/projection
+                :seon.error/operation 'seon.sci.admit/required-cap
+                :seon.error/message "A declared bound is missing; supply the required cap."
+                :seon.error/offending caps
+                :seon.error/diagnostic-layer :seon.sci.admit/projection
+                :seon.error/diagnostic-operation 'seon.sci.admit/required-cap
+                :seon.error/diagnostic-member cap-key
+                :seon.error/diagnostic-expected :int
+                :seon.error/diagnostic-offending caps
+                :seon.error/diagnostic-cause :seon.error/unknown
+                :seon.error/diagnostic-evidence caps
+                :seon.config/error-key cap-key}))))))
 
 (defn- admit*
+  {:malli/schema [:=> [:cat :seon.sci.admit/request] [:or :seon.sci.admit/admitted :seon.config/error]]}
   [{::keys [value interrupt-fn caps record unbounded?]
     supplied-projection :seon.schema/projection
     on-core-error :seon.config/on-core-error
@@ -796,7 +835,7 @@
   the value went over the storage bound or could not be projected into data
   at all, nothing but `:seon.sci.admit/reason` and the size that names why."
   {:malli/schema
-   [:=> [:cat :seon.sci.admit/request] :seon.sci.admit/admitted-value]}
+   [:=> [:cat :seon.sci.admit/request] [:or :seon.sci.admit/admitted-value :seon.config/error]]}
   [request]
   (dissoc (admit* request) :seon.sci.admit/edn))
 
@@ -839,7 +878,7 @@
   Never throws for a value it cannot project — that node becomes a
   marker. The one throwable it deliberately does NOT catch is sci's
   uncatchable interrupt, which must reach `evaluate`."
-  {:malli/schema [:=> [:cat :seon.sci.admit/request] :seon.sci.admit/admitted]}
+  {:malli/schema [:=> [:cat :seon.sci.admit/request] [:or :seon.sci.admit/admitted :seon.config/error]]}
   [request]
   (admit* request))
 
@@ -852,7 +891,7 @@
   admitted first as ordinary data beside the original missing marker. If that
   partition itself cannot fit, the honest missing answer is returned."
   {:malli/schema [:=> [:cat :seon.sci.admit/request :map]
-                  :seon.sci.admit/admitted]}
+                  [:or :seon.sci.admit/admitted :seon.config/error]]}
   [request priority]
   (let [admitted (admit request)]
     (if-let [marker (missing-marker admitted)]

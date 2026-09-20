@@ -9,20 +9,7 @@
                    [:seon.fn/sym {:optional true} :seon.fn/sym]
                    [:seon.sci.kernel/time-limit-kind :qualified-keyword]
                    [:seon.sci.kernel/failure-kind :qualified-keyword]],
-                  
-                  
-                  
-                  
-                  
-                  
-                  
-                  
-                  
-                  
-                  
-                  
-                  
-                  
+
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.sci.kernel/error

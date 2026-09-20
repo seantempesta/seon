@@ -379,9 +379,9 @@
                            :seon.config/on-core-error :panic))
                    ::committed
                    (catch Exception failure (ex-data failure)))]
-        (is (= :seon.sci.admit/projection-failed (:seon.error/kind data))
-            "and it names itself as a projection failure, not as an
-             agent mistake")))
+        (is (= (symbol (.getName (class hostile))) (:seon.sci.admit/failed-class data)))
+        (is (= 'seon.sci.admit/rethrow-or-degrade! (:seon.error/operation data)))
+        (is (identical? hostile (:seon.error/offending data)))))
     (testing "an ordinary opaque value is NOT a failure in either mode"
       (doseq [mode [:record :panic]]
         (let [admitted (admit/admit

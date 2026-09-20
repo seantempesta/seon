@@ -77,8 +77,10 @@
                     {:optional true}
                     :seon.sci.admit/record]]
                   :seon.sci.admit/missing],
-                 :projection-failed [:= true]
-                 :projection-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a value that could not be projected into admitted data"} [:seon.sci.admit/projection-failed :seon.sci.admit/projection-failed] [:seon.error/message :seon.error/message]]
+
+                 :projection-failed-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.admit/failed-class :seon.sci.admit/failed-class]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.sci.admit/bound-bytes
@@ -99,4 +101,6 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.evidence/entity}
  :seon.db/ref]
+
+:failed-class :symbol
 }

@@ -564,7 +564,7 @@
          :seon.reconcile/error :seon.render/error :seon.render.data/error
          :seon.render.value/error :seon.render.walk/error :seon.render.web/error
          :seon.schedule/error :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error
-         :seon.schema.shape/error :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error :seon.sci.eval/missing-function-row-error :seon.sci.eval/schema-refused-error :seon.sci.eval/documentation-unavailable-error :seon.sci.eval/namespace-binding-cycle-error :seon.sci.eval/declaration-absent-error :seon.sci.eval/install-mismatch-error
+         :seon.schema.shape/error :seon.sci.admit/error :seon.sci.admit/projection-failed-error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error :seon.sci.eval/missing-function-row-error :seon.sci.eval/schema-refused-error :seon.sci.eval/documentation-unavailable-error :seon.sci.eval/namespace-binding-cycle-error :seon.sci.eval/declaration-absent-error :seon.sci.eval/install-mismatch-error
          :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
          :seon.test/admission-error :seon.test/execution-error :seon.test/expired
          :seon.test/not-runnable-error :seon.test/resolution-error
@@ -670,21 +670,21 @@
               (throw
                (ex-info (str function-symbol " is not an installed SCI Var.")
                         (error/diagnostic
- {:seon.error/at (java.util.Date.)
-  :seon.error/layer :seon.sci.kernel/evaluation
-  :seon.error/operation 'seon.sci.kernel/invoke
-  :seon.error/message "Requested function has no installed SCI Var; acquire the function before invocation."
-  :seon.sci.kernel/guard-observation
-  {:seon.error.evidence/attribute :seon.fn/sym
-   :seon.error.evidence/value function-symbol}
-  :seon.error/diagnostic-layer :seon.sci.kernel/evaluation
-  :seon.error/diagnostic-operation 'seon.sci.kernel/invoke
-  :seon.error/diagnostic-member :seon.fn/sym
-  :seon.error/diagnostic-expected :seon.sci.eval/invocation-result
-  :seon.error/diagnostic-offending function-symbol
-  :seon.error/diagnostic-cause :seon.error/unknown
-  :seon.error/diagnostic-evidence function-symbol
-  :seon.fn/sym function-symbol}))))
+                         {:seon.error/at (java.util.Date.)
+                          :seon.error/layer :seon.sci.kernel/evaluation
+                          :seon.error/operation 'seon.sci.kernel/invoke
+                          :seon.error/message "Requested function has no installed SCI Var; acquire the function before invocation."
+                          :seon.sci.kernel/guard-observation
+                          {:seon.error.evidence/attribute :seon.fn/sym
+                           :seon.error.evidence/value function-symbol}
+                          :seon.error/diagnostic-layer :seon.sci.kernel/evaluation
+                          :seon.error/diagnostic-operation 'seon.sci.kernel/invoke
+                          :seon.error/diagnostic-member :seon.fn/sym
+                          :seon.error/diagnostic-expected :seon.sci.eval/invocation-result
+                          :seon.error/diagnostic-offending function-symbol
+                          :seon.error/diagnostic-cause :seon.error/unknown
+                          :seon.error/diagnostic-evidence function-symbol
+                          :seon.fn/sym function-symbol}))))
             (let [;; The SECOND of the two ruled call-preparation
                   ;; entrances. SCI's analyzed call path hooks itself; a
                   ;; named invocation applies the Var directly, so it
@@ -732,19 +732,19 @@
             (catch Throwable admission-failure
               {:seon.sci.admit/value
                (error/diagnostic
- {:seon.error/at (java.util.Date.)
-  :seon.error/layer :seon.sci.kernel/evaluation
-  :seon.error/operation 'seon.sci.kernel/invoke
-  :seon.error/message "The invocation failure could not be admitted; inspect its admission evidence."
-  :seon.sci.kernel/guard-observation
-  {:seon.error.evidence/attribute :seon.error/message
-   :seon.error.evidence/value (or (ex-message admission-failure) "Failure admission failed.")}
-  :seon.error/diagnostic-layer :seon.sci.kernel/evaluation
-  :seon.error/diagnostic-operation 'seon.sci.kernel/invoke
-  :seon.error/diagnostic-member :seon.error/message
-  :seon.error/diagnostic-expected :seon.sci.eval/invocation-result
-  :seon.error/diagnostic-offending (or (ex-message admission-failure) "Failure admission failed.")
-  :seon.error/diagnostic-cause :seon.error/unknown
-  :seon.error/diagnostic-evidence (or (ex-message admission-failure) "Failure admission failed.")
-  :seon.error/offending failure :seon.error/data {:seon.error/exception-class (symbol (.getName (class admission-failure)))}})
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :seon.sci.kernel/evaluation
+                 :seon.error/operation 'seon.sci.kernel/invoke
+                 :seon.error/message "The invocation failure could not be admitted; inspect its admission evidence."
+                 :seon.sci.kernel/guard-observation
+                 {:seon.error.evidence/attribute :seon.error/message
+                  :seon.error.evidence/value (or (ex-message admission-failure) "Failure admission failed.")}
+                 :seon.error/diagnostic-layer :seon.sci.kernel/evaluation
+                 :seon.error/diagnostic-operation 'seon.sci.kernel/invoke
+                 :seon.error/diagnostic-member :seon.error/message
+                 :seon.error/diagnostic-expected :seon.sci.eval/invocation-result
+                 :seon.error/diagnostic-offending (or (ex-message admission-failure) "Failure admission failed.")
+                 :seon.error/diagnostic-cause :seon.error/unknown
+                 :seon.error/diagnostic-evidence (or (ex-message admission-failure) "Failure admission failed.")
+                 :seon.error/offending failure :seon.error/data {:seon.error/exception-class (symbol (.getName (class admission-failure)))}})
                :seon.sci.admit/record record-value})))))))
