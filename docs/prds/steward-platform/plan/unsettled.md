@@ -5390,3 +5390,16 @@ publisher deletions, lineage-reuse regression, final per-phase
 measurement. `error-family-1a` landed `2a59e5e11` (row-acquisition
 failures declared without a program digest — the option-2 facet). Step-1
 gate: 410 tasks executed so far.
+
+## 2026-09-21 ~07:50 UTC — wave-3a spec written; wave-1-families design lane launched; 1a landing slices
+
+`wave3a-task-family-design` landed `d9a783632`
+([wave-3a-task-family-spec-2026-09-21.md](wave-3a-task-family-spec-2026-09-21.md):
+one stored family, trigger writer with identity and occurrence updates,
+render pair and opening consolidation, detector census, regressions,
+reset batch, deletion budget). `error-family-1a` landed `d6867a306`
+(structural upstream errors preserved across database reads). Read-only
+slot → `wave1-families-design`: launch texts for 1b, 1c (with `:seon.ns/agents`
+ownership settled against 3a), 1e deletion-dial sweep, and C4 option 1 —
+the families that declare once on the new bridge after steps 1–2. Step-1
+gate at 626 tasks executed.
