@@ -378,9 +378,10 @@
   its own tests inside its evaluation is doing that cluster's work; a host
   REPL running the same test Var is not, and hands nothing."
   {:malli/schema [:=> [:cat :seon.db/custody-request [:fn clojure.core/ifn?]]
-                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                  [:or :seon.schema/validation-refusal
+                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                          :seon.schema.admission/reason "A scope wrapper returns its body's arbitrary result unchanged."
-                         :gen/elements [nil false 0 "" :k [] {}]}]]}
+                         :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [request f]
   (binding [*conn* (:seon.db/connection request) *read-database* nil]
     (f)))
@@ -403,9 +404,10 @@
   This is `call-with-custody` with nothing handed: ONE scope, and absence is
   one of its two ordinary answers."
   {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]]
-                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                  [:or :seon.schema/validation-refusal
+                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                          :seon.schema.admission/reason "A scope wrapper returns its body's arbitrary result unchanged."
-                         :gen/elements [nil false 0 "" :k [] {}]}]]}
+                         :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [f]
   (call-with-custody {} f))
 

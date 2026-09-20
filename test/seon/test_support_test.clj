@@ -573,8 +573,10 @@
   (test-support/with-database
     (fn [connection]
       (let [refusal (db/call-without-custody #(db/transact! {:tx-data []}))]
-        (is (:seon.error/kind refusal)
+        (is ((schema/projection-validator
+              (schema/handed-projection) :seon.schema/validation-refusal) refusal)
             "an elided write with no custody is a typed refusal, never a silent write")
+        (is (= :seon.db/connection (:seon.schema/expected-value refusal)))
         (is (str/includes? (:seon.error/message refusal) "connection")
             "the refusal names what was missing"))
       (is (map? (db/transact! connection {:tx-data []}))

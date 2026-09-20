@@ -82,6 +82,24 @@ facts (`tmp/bridge-platform-class3-threads.txt`). The test now declares
 (`tmp/bridge-platform-class3-bounded.log`). Source require of `seon.db`
 brackets the commit. No fixture implementation or publication owner changed.
 
+### Class 4 — custody wrapper return contracts
+
+Root cause: the custody wrappers transparently return the callback's
+missing-connection error, but their polymorphic return contracts did not
+declare `:seon.schema/validation-refusal`. Both `call-with-custody` and its
+`call-without-custody` caller now declare that schema alongside the arbitrary
+callback result. The custody regression validates the error schema and its
+expected connection member. No execution behavior changed.
+
+Fast command: `bin/test-fast --paths src/seon/db.clj test/seon/test_support_test.clj -- seon.test-support-test`.
+The custody regression passed in **0.673291 s**. The whole namespace run took
+**749.105036750 s**, exit 1 (`tmp/bridge-platform-class4.log`); its sole
+failure is the unchanged class 5 kind-only fixture. Independent canonical
+population and isolated fixture publication dominate this namespace's cost;
+the thread sample is `tmp/bridge-platform-class4-threads.txt`. The final
+class 5 run below is the combined green proof. Source require of `seon.db`
+brackets this class's commit.
+
 ## Final ruled slice and verification
 
 This section supersedes the historical checkpoints below. The orchestrator
