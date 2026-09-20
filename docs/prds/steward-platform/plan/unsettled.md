@@ -4787,3 +4787,18 @@ Order when 1d lands: `bin/seon init` → `bin/seon start` →
 `bin/test --prepare-head-base` → resume 1a (its writer read-back probe is
 the next decision input) → 1a's cold gate on
 seon.error/instrument/schema/db/cluster/sci.eval-test.
+
+## 2026-09-20 ~19:00 UTC — bridge PRD binding; step 1 queued behind 1d
+
+`bridge-dissolution-review` landed `af839b516`: every [verify] in
+[malli-native-bridge-prd-2026-09-20.md](malli-native-bridge-prd-2026-09-20.md)
+resolved against reference-code file:line; status "reviewed against source;
+binding". Probes: 52 attribute comparisons, zero mismatches; Datahike's
+native checks accept a missing numeric ref target and a wholly invalid
+heterogeneous tuple (Seon keeps both guarantees; handed to the step-4
+lane). §7 carries step 1's verbatim launch text (astra low, 2–4 lane-days,
+~46 files) with the dated caller inventory. Step 1 owns `src/seon/schema.clj`,
+`render.clj`, `turn.clj`, `test/seon/config_test.clj` — all held dirty by
+1d — so it launches only after 1d lands and default is republished
+(order in the 18:50 block, step 1 appended after 1a's resume). Lane done;
+session retained.
