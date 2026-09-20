@@ -95,3 +95,53 @@ bin/test --paths src/seon/test.clj src/seon/test/runner.clj \
 ```
 
 followed by `bin/test --platform`. This lane ran neither command.
+
+## Follow-up ruling and second stop
+
+The orchestrator accepted the first stop and ruled the five substantive
+observations. A candidate conversion then exposed a different modeling conflict
+before any implementation commit: the required offending marker value is
+genuinely polymorphic, while a facet marked `:seon.db/attributes true` must
+persist its promised observation as a Datahike attribute. The schema bridge
+does not map `:map`, `:any`, or `:seon.schema/value` to a Datahike value type
+(`src/seon/schema/datahike.clj:123-185`; the datahike skill names this exact
+silent-absence failure class). Therefore a facet requiring the raw marker value
+through one of those forms validates transiently but silently loses that member
+from occurrence datoms. That violates PRD section 0's storage guarantee that
+facets persist on the occurrence.
+
+The existing `:seon.error/data` does not dissolve the conflict. The diagnostic
+constructor nests raw diagnostic evidence there, and the recorder persists a
+bounded `:seon.error/data-edn` rendering; it does not preserve the original
+domain key/value as a queryable facet member. Requiring `:seon.error/data` on
+the facet would also make the facet cease to validate after occurrence
+acquisition. Minting `:seon.test.runner/marker-value-edn` would be storable but
+would promise rendered bytes rather than "the offending marker value as
+observed." That is a semantic choice, not a mechanical application of the
+ruling.
+
+Three concrete options, simplest first:
+
+1. **Declare exact EDN bytes (recommended):** add a required nonempty
+   `:seon.test.runner/marker-value-edn` string and have the producer retain both
+   the raw value in diagnostic data and its canonical `pr-str` bytes in the
+   facet. Guarantee: the occurrence keeps a queryable, exact authored metadata
+   observation for every EDN marker. Cost: specify/refuse non-EDN runtime Var
+   metadata and add round-trip regressions. Give up: claiming arbitrary JVM
+   objects are stored as their original object.
+2. **Declare a bounded projection component:** use the existing error
+   projection/value machinery as an owned component. Guarantee: every ordinary
+   JVM value has bounded structural evidence with explicit omissions. Cost:
+   schema component and recorder/acquisition work across the error owner. Give
+   up: byte-for-byte identity of the observed object.
+3. **Keep the raw member transient:** require `:seon.error/data` on the facet
+   and retain only the recorder's `data-edn`. Guarantee: producers and immediate
+   consumers see the original value. Cost: explicitly weaken the PRD storage
+   guarantee and facet revalidation after acquisition. Give up: querying that
+   facet member as a datom; this is not recommended.
+
+The candidate schema/source edits were removed before this note update. The
+owned implementation paths are byte-identical to HEAD, the shared-tree
+`seon.test.runner` load printed `:loads` during the probe, and no test JVM,
+cold gate, default lifecycle operation, held-path edit, or foreign-session
+operation occurred. The retirement census and cold proof above remain owed.
