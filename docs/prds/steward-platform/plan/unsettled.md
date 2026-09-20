@@ -6062,3 +6062,24 @@ changes). Owner of the slice: the error-family lane (1a, session
 retained) at the next free editing slot, with a regression: an error map
 constructed with a large nested value stores a blob reference and a capped
 shown text, validates as stored, and renders through the same printer.
+
+## 2026-09-22 ~10:40 local — OWNER AMENDMENT: the offending value is a normal `result/<id>` reachable from the agent's REPL
+
+Owner: "it should be a normal result/<result-id> blob accessible from the
+agents repl". RULED: an error map's offending value is a RESULT, with
+exactly the evaluation-result mechanism — a `seon.id` result identity, the
+live object interned in the agent's SCI context under the same handle
+every evaluation gets (`result/e<id>`, `seon.id/symbol-in "result" \e id`,
+`src/seon/sci/admit.clj:614`), the blob as its durable payload (the
+reference on the error entity), and the value printer's capped shown text
+stored on the entity — so an agent inspects the bad value in its REPL as
+`result/e<id>` exactly as it inspects any evaluation result, and after a
+restart reads the shown text or the blob. No second retention path, no
+`pr-str` copy, no raw in-memory member. The error-family slice queued
+above carries this: constructor mints the result id, interns the object
+when an agent context is in hand (a core fault without an agent context
+still gets the blob and the shown text), stores the reference and the
+text; regression on the canonical fixture: a contract refusal in an agent
+turn yields `result/e<id>` bound to the offending value, the stored
+entity carries the blob reference and the shown text, and the walk renders
+it through the same printer.
