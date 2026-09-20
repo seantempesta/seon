@@ -4802,3 +4802,32 @@ lane). §7 carries step 1's verbatim launch text (astra low, 2–4 lane-days,
 1d — so it launches only after 1d lands and default is republished
 (order in the 18:50 block, step 1 appended after 1a's resume). Lane done;
 session retained.
+
+## 2026-09-20 ~19:20 UTC — 1d landed R1/R2/needs/C7/R3; C4 ruled option 1, deferred behind bridge step 1
+
+`config-plan-family-1d` landed `ed3f44225` (display metadata on every
+dial; settings mirror and display roster retired; per-agent dial without a
+label refused at admission), with R2/needs/C7/R3 in the earlier commits;
+loads pass. Fast tally stays 80 tests / 3,849 assertions / 9 F / 10 E —
+the reds are the recorded refusal classes plus one schema assertion naming
+`seon.schema/pulled-selector-refusal` where the test expects
+`pulled-form-in` (both in the cold gates the note lists). RESET NEEDED
+accumulates: `:my.plan.item/needs` (refs → identity strings),
+`:seon.ai.attempt/model` retired, stored false under
+`:seon.config.agent/show-all-settings` / `:seon.config.ai/retain-reasoning`,
+plus 1a's earlier list and the population stamp.
+
+**C4 ruling (orchestrator, D11 authority):** option 1 — extend the
+declaration cut: `seon.db.edn`, `seon.error.edn`, `seon.issue.edn`,
+`seon.schema.admission.edn` declare their properties, the default takes a
+storable non-nil shape (never `:any`), and the strict undeclared-property
+refusal lives in the one schema owner. Rationale: the laws (declare at the
+seam, no silent omission; `canonical-rows-carry-arbitrary-namespaced-properties`
+is the stale expectation to flip). **Deferred** behind bridge step 1
+because the check lands in `src/seon/schema.clj`'s admission, which step 1
+rewrites; C4 becomes a wave-1 family declared once on the new bridge (§6
+order). 1d stops here; session retained; C14 stays deferred as ruled.
+
+Default republish running (`tmp/orchestrator/default-republish-2026-09-20b.log`)
+from the tree with results-reuse's and the held render drafts' edits in
+it — a refusal names which.
