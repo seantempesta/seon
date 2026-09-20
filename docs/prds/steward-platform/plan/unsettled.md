@@ -5583,3 +5583,15 @@ publication lane today against lane rule 12, holding one live fast-run
 JVM. Left until that run ends; removed and the lane corrected at its next
 stop (its remaining items run in the shared tree with --paths). `tmp/` is
 12 GB — the run-root sweep runs at the next quiet point under rule 14.
+
+## 2026-09-21 ~12:40 UTC — test-system: fresh-operator facet is a cross-owner boundary; convertible sites continue; tmp swept
+
+`kind-sweep-test-system` (`a4eb08f4b`): `seon.test.runner/recording-failure`
+branches on `:seon.fresh-operator/prepl-exception`, which
+`script/seon/fresh_operator.clj` still emits only as a kind and has no
+contract — the bin/script sweep's family (held by the publication lane
+until it lands; that sweep launches right after). Ruled: those sites are
+listed as owed to bin/script; every site convertible with existing facets
+converts now. tmp swept under rule 14: two dead run roots (3.7 GB), five
+stale worktrees, two old probe dirs, orchestrator logs older than two days
+— 12 GB → 4.8 GB; lane session records intact (79).
