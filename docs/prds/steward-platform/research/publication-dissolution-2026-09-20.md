@@ -411,3 +411,88 @@ bin/test --paths src/seon/fn/analyzer.clj test/seon/fn/analyzer_test.clj -- seon
 The orchestrator also owns platform proof. This is an item-1 prerequisite,
 not completion of item 1 or any later item. No publisher path is deleted and
 no one-file/complete-publication performance improvement is claimed.
+
+## Private declaration decision after the namespace ruling
+
+The owner accepted `f62978613` and ruled namespace-interface invalidation
+through the published requires/alias/refer relations. That decision is settled:
+the namespace digest includes metadata and public names, never bodies.
+
+One further qualification prevents the stated analysis guarantee: only
+**public** changed declarations seed the caller/referrer closure. Clojure's
+Var quote can name a private function in another namespace. This fixture is
+admitted by publication's retained lint policy:
+
+```clojure
+(ns callee)
+(defn- f {:malli/schema [:=> [:cat :int] :int]} [x] x)
+
+(ns caller (:require [callee]))
+(defn g {:malli/schema [:=> [:cat] :int]} [] (#'callee/f 1))
+```
+
+Adding `^{:deprecated "now"}` to private `f` changes the unchanged caller's
+`deprecated-var` finding. The callee's body, arity and contract are unchanged;
+its namespace form and public name set are also unchanged. The published
+reference can already name this target: `src/seon/fn.clj:353–386` retains
+Var-quote calls/references, without excluding private targets. Kondo's
+`reg-deprecated-var!` reads the callee declaration at
+`reference-code/clj-kondo/src/clj_kondo/impl/linters.clj:441–465`; it is invoked
+independently of private-call admission at lines 660–661.
+
+Reproducer: [publication-private-interface-probe-2026-09-20.py](publication-private-interface-probe-2026-09-20.py).
+Native analysis with all seven publication exclusions declared reports:
+
+| Phase | Deprecated-var findings | Elapsed |
+|---|---:|---:|
+| Before, both files | 0 | 41 ms |
+| Changed private declaration only | 0 | 38 ms |
+| Complete final tree | 1 | 39 ms |
+
+All three analyses have zero errors. Caller content digest is unchanged, and
+the analyzer positively reports `caller/g` referencing private `callee/f`.
+Raw output: `tmp/publication-dissolution/private-interface.json`. This is
+dependency evidence, not an armed publication or performance proof. An earlier
+arity-only Var-quote probe did **not** produce an invalid-arity finding; that
+hypothesis is refuted, not evidence for the stop.
+
+Exactly three choices; estimates cover this policy adjustment and regression,
+not the remaining publication implementation:
+
+1. **Recommended: include referenced private declarations in the same closure.**
+   Seed changed declaration digests regardless of privacy; unreferenced private
+   declarations naturally add no files. Guarantee: this retained finding stays
+   fresh and body-only edits remain N-file. Cost: approximately 30–60 minutes
+   for selection and regression beyond the planned closure. Give up the
+   public-only interface ceiling; the ceiling becomes the actual referrer
+   closure of every changed declaration.
+2. **Disable `deprecated-var` in publication config.** Guarantee: this finding
+   cannot become stale. Cost: approximately 15–30 minutes for config, census
+   delta and regression. Give up deprecation diagnostics for public functions
+   too; this alone does not prove every private-interface dependency absent.
+3. **Refuse cross-namespace references to private declarations.** Guarantee:
+   this dependency is unconstructable in an admitted program. Cost: an estimated
+   half day or more to inventory and convert existing private-Var consumers,
+   spanning other owners. Give up currently legal Clojure introspection and
+   tests of private seams. This is substantially broader than publication.
+
+No additional analyzer classes are excluded without a ruling. Items 1–4 remain
+unlanded beyond the previously accepted analyzer-policy prerequisite.
+
+Ownership boundary: `src/seon/cluster.clj` was clean at the initial edit check
+but acquired foreign bridge edits during this resume, including the manifest
+validation seam. I removed only my two population hunks, preserving all foreign
+bytes. The associated uncommitted lineage changes in `cluster/source.clj` and
+its two test files were also reversed before stopping; none remain in the tree.
+No foreign session was operated or contacted. The scratch root remains absent;
+default was untouched, no worktree or test JVM was launched, and no unchanged
+suite was rerun. The named authorities were read end to end as recorded in the
+grounding section above; this resume additionally reread the complete updated
+binding spec and the relevant dependency cache/linter seams.
+
+Pre-commit namespace load of `seon.fn.analyzer`, `seon.fn`, and
+`seon.cluster.source` returned `:loads`, exit 0. Log:
+`tmp/publication-dissolution/private-interface-precommit-load.log`. This load
+used the shared checkout, including its foreign dirty bridge bytes; it is not
+a cold gate or a clean-HEAD snapshot proof. The cold command and platform proof
+listed above remain owed to the orchestrator.
