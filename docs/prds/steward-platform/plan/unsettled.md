@@ -5502,3 +5502,15 @@ facets: the facet gains its producer's substantive required members
 1a's evidence members); ops-effects owns src/my/background.clj and its
 test for that conversion; further marker-only facets follow the same rule
 without a stop. Resumed (199 references remain in its family).
+
+## 2026-09-21 ~10:25 UTC — ops-effects background slice landed; admission held by the runner resource
+
+`kind-sweep-ops-effects` landed `5a42b6f2f` (background markers retired;
+substantive required observations; exact output facets) + `18a325000`;
+its fast run was refused at snapshot admission by the test-system sweep's
+dirty `seon.test.runner.edn` (class: live resources outrun the loaded
+identity list — a resource and its consumer land in ONE publication).
+Resumed to keep converting family by family on load+lint proofs, with the
+fast tally taken once that resource is committed. Editing lanes:
+publication (closing), ops-effects, test-system; wave-2 design read-only;
+step 2 parked.
