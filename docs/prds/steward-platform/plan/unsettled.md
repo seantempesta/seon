@@ -6656,3 +6656,28 @@ shelved to `tmp/orchestrator/parked-2026-09-22/publication-lane-progress-line.pa
 Running serially: `bin/test --platform` → `--all` → the measurement
 script at `0c6be06f3`. Slice 2 (no double caching) is released after the
 diff review and those results.
+
+## 2026-09-22 ~22:40 local — OWNER: anything over a couple of seconds is suspect; our failures are algorithmic choices, not correctness; `:any` is not a hard rule; automatic publication stays OFF until an edit is cheap; pick up the cadence — design, not firefighting
+
+Owner (verbatim): "Nothing we are doing should take minutes so always
+consider anything larger than a couple of seconds with suspicion.
+Especially when we are using highly tuned libraries where their creators
+really nailed the implementations. Our fuckups have almost always been
+bad algorithmic choices not code correctness." "Ideally we don't want any
+:any schemas but that isn't a hard rule. Not everything that will be
+processed by functions will be stored in the database. Just make sure the
+errors are the right shape and we stop trying to jam the square peg
+through the round hole." "Turn off the automatic push's until we fix the
+'minutes for every edit' problem. I want you to pick up the cadence and
+we need to move past fire fighting to do the actual design."
+RULED/APPLIED: (1) a phase over ~2 s in any slice is a finding the lane
+must explain by algorithm (what is O(program) that should be O(change)),
+never accepted as "fast enough"; (2) `:any` at a genuinely polymorphic,
+non-stored boundary is admissible when the error shapes it returns are
+declared exactly — the custody wrapper's `[:or refusal :any]` stands;
+(3) hook publication (`:current-source :enabled false`) stays off until
+slices 2 and 4 make a one-file edit cheap; the orchestrator's git pushes
+move to checkpoints instead of every working-edge commit; (4) cadence:
+the complete `--all` tier is deferred to a quiet window; each slice is
+gated by the platform tier + the measurement script, and the next slice
+launches the moment those two are in hand.
