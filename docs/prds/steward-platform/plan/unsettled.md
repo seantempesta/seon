@@ -6319,3 +6319,28 @@ was also the post-reset complete case. The one-file measurement is the
 publication lane's first item after the boot boundary clears; the two
 Datahike transaction phases above are the named bottleneck candidates for
 the complete case.
+
+## 2026-09-22 ~13:30 local — the turn-row refusal is an UPSERT, not a selection problem: five error schemas reuse identity attributes; RULED option 3 (small), bridge refuses the class, the row-schema patch dissolves
+
+Step 2 stopped (`fdfc564af`): compiled inheritance selects bootstrap error
+schemas as turn write schemas; valid turns refused for `:seon.error/at`.
+The publication lane's scratch boot hit the same refusal (`dbad91c5c`).
+Probe (`tmp/orchestrator/identity-in-error-schemas.clj`, bb): exactly five
+error schemas declare another entity's `:seon.db/identity true` attribute
+as a member — `seon.bootstrap` prefix-drift and unmatched-source
+(`:seon.turn/id`), `seon.test.accretion` install-refused (`:seon.fn/sym`),
+`seon.test.runner` invalid-marker-reason and unresolved-test-var
+(`:seon.test/sym`). The cause is Datahike's own semantics: a transaction
+map carrying a `:db.unique/identity` attribute upserts onto the entity
+holding that value (`reference-code/datahike/src/datahike/db/transaction.cljc:530`),
+so the bootstrap error map MERGED INTO THE TURN ROW, and the turn then
+failed the error schema. The modeling law already forbade it (observation =
+value). RULED: step 2's option 3, scoped to those five (existing
+`:seon.error/run`/agent observation members; `:qualified-symbol` values for
+function/test names); the bridge refuses the class at admission (an error
+schema declaring an identity attribute as a member is unstorable); the
+orchestrator's `2d0e9b17e` `declared-row-schema` selection patch and
+`:seon.program/row-schema` are DELETED (dissolution — the patch treated a
+symptom); a scratch boot on the lane's own root is part of step 2's
+landing proof. Step 2 resumed (astra low). This also clears the error
+lane's and the publication lane's boundary.
