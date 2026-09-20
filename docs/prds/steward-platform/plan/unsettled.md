@@ -4831,3 +4831,36 @@ order). 1d stops here; session retained; C14 stays deferred as ruled.
 Default republish running (`tmp/orchestrator/default-republish-2026-09-20b.log`)
 from the tree with results-reuse's and the held render drafts' edits in
 it — a refusal names which.
+
+## 2026-09-20 ~19:35 UTC — republish refused by the rebuild-from-rows path; RESET running
+
+`bin/seon init` after 1d's `ed3f44225` refused with the SAME message
+("Per-agent dial :seon.config.ai.backup/api-key-variable must declare a
+nonempty :seon.config/display-label") although the resource on disk
+carries the label. Frames (`data/operator/operations/init-init-18390.log`):
+`assert-config-display!` ← `build-projection` ← `projection-from-rows` ←
+`derive-projection-from-database` ← `db/carry-derived-projection` ←
+`cluster.source/database` ← `cluster/current-publication` ←
+`full-source-refresh!`. The publication derived its projection from the
+OLD current-src rows (stamped population absent → rebuild from rows), and
+the new admission rule refuses the old population before the new one can
+replace it. This is bridge step 3's exact subject (retire rebuild-from-rows;
+a value carries its stamped projection) observed as an operational
+dead-end: with publication paused, no republish can pass a stricter
+admission rule than the stored population satisfies. Handed to
+`step3-carried-projection` as evidence. Recovery per the standing ruling:
+`bin/seon reset --force` (running, `tmp/orchestrator/default-reset-2026-09-20.log`)
+— destroys the store, republishes from the tree, reforks, starts, adopts;
+the accumulated RESET NEEDED list (1a's, 1d's) lands with it.
+`bin/test --prepare-head-base` running alongside for the fast overlay base.
+
+`results-reuse-everywhere` stopped at the same authority: "the published
+recording authority predates snapshot result admission" — landed
+`db24035ee` (dirty callers admitted at HEAD bytes, named, recorded) and
+`a86344441` (snapshot admission/recording checkpoint); launcher edits
+(bin/test, bin/test-fast, src/seon/test/fast.clj) uncommitted; steps 2–5
+and the two-run zero-execution proof open. Resumes after the reset with
+option 1 (enable and verify fast recording). `kind-sweep-render` resumed
+(sol low) to land its 23 drafts and free `src/seon/render.clj` for bridge
+step 1. Editing lanes after the reset: results-reuse, 1a, render sweep;
+step 1 when render.clj is free.
