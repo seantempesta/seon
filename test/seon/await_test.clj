@@ -1,7 +1,11 @@
 (ns seon.await-test
   (:require [clojure.core.async :as async]
             [clojure.test :refer [deftest is testing]]
-            [seon.await :as await]))
+            [seon.await :as await]
+            [seon.db :as db]
+            [seon.schema :as schema]
+            [seon.test :as test]
+            [seon.test-support :as support]))
 
 (defn- observation
   [member]
@@ -43,7 +47,8 @@
             :seon.await/diagnostic (observation ::matching-package)
             :seon.await/port-operations [events]
             :seon.await/accept? ::wanted})]
-      (is (= ::await/backstop-fired (:seon.error/kind result)))
+      (is (<= 20 (:seon.await/elapsed-ms result)))
+      (is (= 20 (:seon.await/config-value result)))
       (is (= ::matching-package
              (get-in result
                      [:seon.error/data :seon.error/diagnostic-member])))
@@ -67,7 +72,8 @@
               {:seon.await/bound (bound 20)
                :seon.await/diagnostic (observation label)}
               request))]
-        (is (= ::await/backstop-fired (:seon.error/kind result)))
+        (is (<= 20 (:seon.await/elapsed-ms result)))
+        (is (= 20 (:seon.await/config-value result)))
         (is (= label
                (get-in result
                        [:seon.error/data
@@ -85,7 +91,34 @@
          {:seon.await/bound (bound 1000)
           :seon.await/diagnostic (observation ::completion)
           :seon.await/port-operations [completion]})]
-    (is (= ::await/completion-closed (:seon.error/kind result)))
+    (is (= :take (:seon.await/closed-operation result)))
+    (is (= 0 (:seon.await/operation-index result)))
     (is (= ::completion
            (get-in result
                    [:seon.error/data :seon.error/diagnostic-member])))))
+
+(deftest check-completion-distinguishes-expiry-from-a-completed-failure
+  (support/with-database
+   (fn [connection]
+     (let [projection (db/carried-projection (db/db connection))
+           failure (#'test/unknown ::selection "Selection was unavailable.")
+           completed (java.util.concurrent.FutureTask.
+                      ^java.util.concurrent.Callable (fn [] failure))
+           request {:seon.await/bound (bound 20)
+                    :seon.await/diagnostic (observation ::check)}
+           started (System/nanoTime)
+           _ (.run completed)
+           returned (await/await! (assoc request :seon.await/future completed))
+           timeout (await/await! (assoc request :seon.await/blocking-deref (promise)))
+           expiry (#'test/check-completion {:seon.test/progress "selection"} started timeout)]
+       (is (identical? failure (#'test/check-completion {} started returned)))
+       (is ((schema/projection-validator projection :seon.test/unknown-error) returned))
+       (is (not ((schema/projection-validator projection :seon.test/expired) returned)))
+       (is ((schema/projection-validator projection :seon.await/timeout-error) timeout))
+       (is ((schema/projection-validator projection :seon.test/expired) expiry))
+       (is (not ((schema/projection-validator projection :seon.test/unknown-error) expiry)))
+       (is (= :seon.config.eval/time-limit-ms (:seon.await/config-attribute expiry)))
+       (is (= 20 (:seon.await/config-value expiry)))
+       (is (<= (:seon.await/elapsed-ms timeout) (:seon.test/elapsed-ms expiry)))
+       (is (= 'seon.test/expired-result (:seon.error/operation expiry)))
+       (is (= ::check (get-in expiry [:seon.error/data :seon.error/diagnostic-member])))))))

@@ -548,6 +548,7 @@
             :seon.schema.admission/reason "A print node represents an arbitrary original Clojure value; semantic decoding preserves its scalar or collection shape.",
             :gen/elements [nil false 0 "" :k [] {}]}]
      :seon.error/base
+     :seon.await/timeout-error :seon.await/closed-error
      :my.background/error :my.edit/error :my.fs/error :my.message/error
      :my.plan/error :my.shell/error :my.turn/error
      :seon.agent/error :seon.agent.graph/error :seon.ai/request-error

@@ -267,3 +267,36 @@ The original cold scope remains owed. Option 1 adds the await source/resource
 and test, plus the test expiry source/resource/regression paths, to the
 orchestrator's eventual cold command. No cold or unchanged fast suite was run.
 The previously recorded foreign Markdown citation errors recur unchanged.
+
+## Await and test expiry implementation
+
+The orchestrator authorized the await owner. Added `:seon.await/timeout-error`
+with required existing config-attribute/config-value and measured elapsed-ms;
+the awaited identity remains raw offending/diagnostic evidence. Channel closure
+has a separate substantive operation/index facet. `await!` and its channel
+helper preserve arbitrary completed values (their documented polymorphic
+completion boundary declares the base), and name their own two exact facets.
+No new predicate or per-facet projection was introduced.
+
+`:seon.test/expired` now requires the observed bound and test elapsed time;
+it no longer aliases unknown. `check-completion` branches on the await elapsed
+member and preserves completed failures unchanged. Both SCI pass-through
+unions include the new await facets. The await regression uses real futures,
+promises, canonical database fixture and its projection; it validates both
+distinct facets and the original unknown. Await source/tests are kind-free.
+
+The one foreground fast request `29d134798b4d` selected `seon.await-test` with
+exactly those seven changed source/resource/test paths. **0 tests executed**:
+snapshot admission refused the recording authority's old
+`:seon.test.runner/invalid-marker-reason-error`, which requires non-storable
+`:seon.error/offending`. The actual overlay graph was
+`e8cb1a8c76cfe6b393cf4b1a167ff815b1dbd56ef90d15c2373fa7fa53635411`, 72 commits
+behind HEAD. 1,445 contracts armed successfully before the refusal. Evidence:
+`tmp/sci-program-await-fast.log`. The held cluster caller used HEAD bytes.
+No baseline publication or foreign repair was attempted, and this does not
+stop the remaining sweep. Canonical fast/cold proof remains owed.
+
+Namespace loading succeeds. Await source/resource lint is clean; test lint
+resolves the new private consumer when run with its source, with zero errors.
+`seon.test` retains its pre-existing shadowed-var warnings outside this slice.
+The two previously recorded Markdown citation errors remain foreign.

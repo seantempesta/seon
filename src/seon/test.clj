@@ -1826,19 +1826,46 @@
   result and its remaining selection as it goes, so the expiry is derived from
   what the check genuinely holds: the completed runs with their verdicts, plus
   the typed expiry naming what was pending."
-  [snapshot started message]
+  {:malli/schema [:=> [:cat :map :int :seon.await/timeout-error]
+                  [:or :seon.test/check-result :seon.test/expired]]}
+  [snapshot started timeout]
   (let [phase (:seon.test/progress snapshot)
         recorded (:seon.test/recorded snapshot)
         pending (vec (:seon.test/pending snapshot))
-        expiry (unknown phase (str message " Pending: " phase))]
+        elapsed (/ (double (- (System/nanoTime) started)) 1000000.0)
+        expiry (-> timeout
+                   (dissoc :seon.await/elapsed-ms)
+                   (assoc :seon.error/operation 'seon.test/expired-result
+                          :seon.error/layer :seon.test/execution
+                          :seon.test/elapsed-ms elapsed
+                          :seon.error/offending phase
+                          :seon.test/next-tier :none)
+                   (assoc-in [:seon.error/data :seon.test/pending] pending))]
     (if (map? recorded)
       (cond-> (assoc recorded
                      :seon.test/next-tier :none
                      :seon.test/expired expiry
                      :seon.test/elapsed-ms
-                     (/ (double (- (System/nanoTime) started)) 1000000.0))
+                     elapsed)
         (seq pending) (assoc :seon.test/pending pending))
       expiry)))
+
+(defn- check-completion
+  "Preserve completed results; only an observed await timeout becomes expiry."
+  {:malli/schema
+   [:=> [:cat :map :int
+         [:or :seon.test/check-result :seon.await/timeout-error
+          :seon.test/selection-error :seon.test/unknown-error :seon.test/admission-error
+          :seon.test.run/unavailable-error :seon.config/error :seon.db.write/error
+          :seon.db.availability/error :seon.db/invalid-read-error :seon.schema/missing-projection-error]]
+    [:or :seon.test/check-result :seon.test/expired
+     :seon.test/selection-error :seon.test/unknown-error :seon.test/admission-error
+     :seon.test.run/unavailable-error :seon.config/error :seon.db.write/error
+     :seon.db.availability/error :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
+  [snapshot started result]
+  (if (contains? result :seon.await/elapsed-ms)
+    (expired-result snapshot started result)
+    result))
 
 (defn check
   "Run tests observing this change in the calling JVM and record their facts.
@@ -1866,7 +1893,7 @@
   share the total :seon.test/check-time-limit-ms fact; each test receives
   the remaining allowance. Timeout reports expiry without interrupting resource acquisition."
   {:malli/schema [:=> [:cat :seon.test/check-request]
-                  [:or :seon.test/check-result :seon.test/selection-error :seon.test/unknown-error
+                  [:or :seon.test/check-result :seon.test/expired :seon.test/selection-error :seon.test/unknown-error
                    :seon.test/admission-error :seon.test.run/unavailable-error
                    :seon.config/error :seon.db.write/error :seon.db.availability/error
                    :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
@@ -1904,12 +1931,9 @@
                             :seon.error/diagnostic-expected :check-result
                             :seon.error/diagnostic-offending :pending
                             :seon.error/diagnostic-evidence {:seon.test/changed (:seon.test/changed request)}}})]
-              (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation))
-                (expired-result @progress started (:seon.error/message result))
-                (do
-                  (when-let [n (:seon.test/skipped-count result)]
-                    (println "Skipped" n "tests:" (:seon.test/skip-reason result)))
-                  result)))
+              (when-let [n (:seon.test/skipped-count result)]
+                (println "Skipped" n "tests:" (:seon.test/skip-reason result)))
+              (check-completion @progress started result))
             (catch Exception failure
               (let [phase (:seon.test/progress @progress)]
                 (unknown phase (str "Check failed at " phase ": "

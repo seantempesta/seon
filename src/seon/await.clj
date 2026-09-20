@@ -2,7 +2,7 @@
   "One bounded owner for synchronous completion awaits."
   (:require [clojure.core.async :as async]
             [clojure.test.check.generators :as gen]
-            [seon.error :as error]
+            [seon.error.refusal :as error]
             [seon.schema :as schema])
   (:import [clojure.lang IBlockingDeref]
            [java.util.concurrent Future TimeUnit TimeoutException]))
@@ -26,13 +26,18 @@
 (def ^:private timed-out (Object.))
 
 (defn- diagnostic
-  [request cause]
+  {:malli/schema
+   [:=> [:cat :seon.await/request
+         [:or [:map [:seon.await/elapsed-ms :seon.await/elapsed-ms]]
+          [:map [:seon.await/closed-operation :seon.await/closed-operation]
+           [:seon.await/operation-index :seon.await/operation-index]]]]
+    [:or :seon.await/timeout-error :seon.await/closed-error]]}
+  [request outcome]
   (let [{attribute :seon.await/config-attribute
          backstop-ms :seon.await/config-value}
         (:seon.await/bound request)
         observation (:seon.await/diagnostic request)
         member (:seon.error/diagnostic-member observation)
-        operation (:seon.error/diagnostic-operation observation)
         evidence
         {:seon.await/config-attribute attribute
          :seon.await/config-value backstop-ms
@@ -41,32 +46,50 @@
     (error/diagnostic
      (merge
       observation
-      {:seon.error/kind cause
+      outcome
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.await/completion
+       :seon.error/operation 'seon.await/diagnostic
+       :seon.await/config-attribute attribute
+       :seon.await/config-value backstop-ms
+       :seon.error/offending member
        :seon.error/message
-       (str (pr-str member) " never arrived for " (pr-str operation)
-            " within the declared " (pr-str attribute) " bound of "
-            backstop-ms " ms.")
-       :seon.error/diagnostic-cause cause
+       (if (:seon.await/closed-operation outcome)
+         "The awaited channel closed before completion. Fix: publish the completion before closing the channel."
+         "The declared await bound fired before completion. Fix: inspect the awaited operation and its bound.")
+       :seon.error/diagnostic-cause
+       (if (:seon.await/closed-operation outcome) ::completion-closed ::backstop-fired)
        :seon.error/diagnostic-evidence evidence}))))
 
+(defn- timeout-observation
+  {:malli/schema [:=> [:cat :seon.await/request :int] :seon.await/timeout-error]}
+  [request started]
+  (diagnostic request {:seon.await/elapsed-ms
+                       (/ (double (- (System/nanoTime) started)) 1000000.0)}))
+
 (defn- remaining-ms
+  {:malli/schema [:=> [:cat :int] [:maybe [:int {:min 1}]]]}
   [deadline-nanos]
   (let [remaining (- deadline-nanos (System/nanoTime))]
     (when (pos? remaining)
       (max 1 (long (Math/ceil (/ (double remaining) 1000000.0)))))))
 
 (defn- closed-operation?
+  {:malli/schema [:=> [:cat :seon.await/port-operation :seon.schema/value] :boolean]}
   [operation value]
   (if (vector? operation)
     (false? value)
     (nil? value)))
 
 (defn- await-port-operations
+  {:malli/schema [:=> [:cat :seon.await/port-request :int]
+                  [:or :seon.schema/value :seon.error/base
+                   :seon.await/timeout-error :seon.await/closed-error]]}
   [{operations :seon.await/port-operations
     accept? :seon.await/accept?
     {backstop-ms :seon.await/config-value} :seon.await/bound
-    :as request}]
-  (let [deadline-nanos (+ (System/nanoTime) (* 1000000 backstop-ms))]
+    :as request} started]
+  (let [deadline-nanos (+ started (* 1000000 backstop-ms))]
     (loop [remaining-operations operations]
       (if-let [backstop-ms (remaining-ms deadline-nanos)]
         (let [operation (first remaining-operations)
@@ -75,10 +98,12 @@
               (async/alts!! [operation backstop] :priority true)]
           (cond
             (= selected backstop)
-            (diagnostic request ::backstop-fired)
+            (timeout-observation request started)
 
             (closed-operation? operation value)
-            (diagnostic request ::completion-closed)
+            (diagnostic request
+                        {:seon.await/closed-operation (if (vector? operation) :put :take)
+                         :seon.await/operation-index (- (count operations) (count remaining-operations))})
 
             (next remaining-operations)
             (recur (next remaining-operations))
@@ -87,7 +112,7 @@
             (recur remaining-operations)
 
             :else value))
-        (diagnostic request ::backstop-fired)))))
+        (timeout-observation request started)))))
 
 (defn await!
   "Await one exact completion event under its carried config fact.
@@ -104,23 +129,27 @@
   caller still owns cleanup of its exact task, reply channel, or response."
   {:malli/schema
    [:=> [:cat :seon.await/request]
-    [:or :seon.schema/value :seon.error/value]]}
+    ;; Completion is genuinely polymorphic and preserves complete errors from
+    ;; arbitrary work. Only this boundary's own failures have await facets.
+    [:or :seon.schema/value :seon.error/base
+     :seon.await/timeout-error :seon.await/closed-error]]}
   [{java-future :seon.await/future
     blocking-deref :seon.await/blocking-deref
     {backstop-ms :seon.await/config-value} :seon.await/bound
     :as request}]
-  (cond
+  (let [started (System/nanoTime)]
+   (cond
     (:seon.await/port-operations request)
-    (await-port-operations request)
+    (await-port-operations request started)
 
     java-future
     (try
       (.get ^Future java-future (long backstop-ms) TimeUnit/MILLISECONDS)
       (catch TimeoutException _
-        (diagnostic request ::backstop-fired)))
+        (timeout-observation request started)))
 
     blocking-deref
     (let [value (deref blocking-deref (long backstop-ms) timed-out)]
       (if (identical? timed-out value)
-        (diagnostic request ::backstop-fired)
-        value))))
+        (timeout-observation request started)
+        value)))))

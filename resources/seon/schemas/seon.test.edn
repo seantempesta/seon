@@ -257,9 +257,14 @@
  [:vector [:map [:seon.test/sym :seon.test/sym]
            [:seon.test/long :seon.test/long]
            [:seon.test/command :seon.test/command]]]
+ :seon.test/elapsed-ms [:double {:min 0}]
  :seon.test/expired
  [:and {:description "The declared check bound fired with runs already recorded. It names what never returned; the verdicts it accompanies are the tests that did complete."}
-  :seon.test/unknown-error]
+  :seon.error/base
+  [:map
+   [:seon.await/config-attribute :seon.await/config-attribute]
+   [:seon.await/config-value :seon.await/config-value]
+   [:seon.test/elapsed-ms :seon.test/elapsed-ms]]]
  :seon.test/check-result
  [:map
   [:seon.test/skipped-count {:optional true} :seon.test/skipped-count]
@@ -274,7 +279,7 @@
   [:seon.test/results :seon.test/results]
   [:seon.test.run/basis-t :seon.test.run/basis-t]
   [:seon.test.run/program-digest {:optional true} :seon.test.run/program-digest]
-  [:seon.test/elapsed-ms :double]
+  [:seon.test/elapsed-ms :seon.test/elapsed-ms]
   [:seon.test/next-tier :seon.test/next-tier]
   [:seon.test/widened {:optional true} :string]
   [:seon.test/pending {:optional true} [:vector :seon.test/sym]]

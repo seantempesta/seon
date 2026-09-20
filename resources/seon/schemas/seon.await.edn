@@ -1,4 +1,26 @@
-#:seon.await{:config-attribute :qualified-keyword
+#:seon.await{:elapsed-ms
+             [:double {:min 0 :description "Elapsed monotonic milliseconds when the declared await bound fired. A value observation, retained after the awaited subject is gone."}]
+             :closed-operation
+             [:enum {:description "The actual channel operation that observed closure before completion; a bounded operation vocabulary, not an entity discriminator."} :put :take]
+             :operation-index [:int {:min 0}]
+             :timeout-error
+             [:and {:seon.db/attributes true
+                    :seon.render/ai seon.error/render-ai
+                    :seon.render/html seon.error/render-html}
+              :seon.error/base
+              [:map
+               [:seon.await/config-attribute :seon.await/config-attribute]
+               [:seon.await/config-value :seon.await/config-value]
+               [:seon.await/elapsed-ms :seon.await/elapsed-ms]]]
+             :closed-error
+             [:and {:seon.db/attributes true
+                    :seon.render/ai seon.error/render-ai
+                    :seon.render/html seon.error/render-html}
+              :seon.error/base
+              [:map
+               [:seon.await/closed-operation :seon.await/closed-operation]
+               [:seon.await/operation-index :seon.await/operation-index]]]
+             :config-attribute :qualified-keyword
              :config-value
              [:or
               :seon.config.eval/time-limit-ms

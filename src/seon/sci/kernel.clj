@@ -536,6 +536,7 @@
   {:malli/schema
    [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record]
     [:or :seon.error/base
+         :seon.await/timeout-error :seon.await/closed-error
          :my.background/error :my.edit/error :my.fs/error :my.message/error :my.plan/error
          :my.shell/error :my.turn/error :seon.agent/error :seon.agent.graph/error
          :seon.ai/request-error :seon.artifact/error :seon.boot/error :seon.bootstrap/error
