@@ -300,10 +300,9 @@
       (let [before (artifact)
             _ (spit file revised)
             after (artifact)
-            plan (fn/plan-file-change
-                  {:seon.fn.change/status :modified
+            plan (fn/plan-file-change (assoc {:seon.fn.change/status :modified
                    :seon.fn.change/current-artifact before
-                   :seon.fn.change/desired-artifact after})
+                   :seon.fn.change/desired-artifact after} :seon.schema/projection (seon.schema/handed-projection)))
             rows (:seon.fn.change/rows plan)]
         (is (not= original revised))
         (is (= :incremental-upsert (:seon.fn.change/action plan)))
@@ -480,7 +479,7 @@
     (fn [connection]
       (test-support/transacted!
        connection
-       (seon.schema.datahike/malli->datahike-schema @#'source/source-attributes))
+       (seon.schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) @#'source/source-attributes))
       (let [seal #'source/activation-seal-tx
             requested #{'seon.cluster/derive-activation}
             initial-digest (or (db/q '[:find ?digest .

@@ -19,7 +19,9 @@
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form])
+            [malli.core :as m]
+            [malli.registry :as mr]
+            [seon.schema.internal :as internal])
   (:import [java.nio.charset StandardCharsets]))
 
 (schema.edn/load! {})
@@ -158,43 +160,36 @@
 ;;; packaged-forms-rereads-every-schema-resource-per-call).
 
 (defn dial-attributes
-  "Config membership declared by leaf schemas, independent of their names."
-  {:malli/schema [:=> [:cat :map] [:set :qualified-keyword]]}
-  [forms]
+  "Config membership declared by retained leaf schemas."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
+  [projection]
   (into #{}
-        (keep (fn [[attribute definition]]
-                (when (true? (:seon.config/dial
-                              (schema.form/attr-form-properties definition)))
-                  attribute)))
-        forms))
+        (filter (fn [attribute]
+                  (true? (:seon.config/dial
+                          (m/properties (mr/schema (:seon.schema.projection/registry projection)
+                                                   attribute))))))
+        (keys (:seon.schema.projection/forms projection))))
 
 (defn- required-dial-attributes
-  [forms]
-  (into #{}
-        (comp
-         (filter vector?)
-         (keep
-          (fn [entry]
-            (when-not (and (map? (second entry))
-                           (:optional (second entry)))
-              (first entry)))))
-        (get forms :seon.config/effective)))
+  [projection]
+  (set (internal/map-required-attrs
+        (mr/schema (:seon.schema.projection/registry projection) :seon.config/effective))))
 
 (defn- registration-defaults
-  [forms]
-  (let [required (required-dial-attributes forms)]
+  [projection]
+  (let [required (required-dial-attributes projection)]
     (into {}
           (keep
            (fn [attribute]
              (let [properties
-                   (schema.form/attr-form-properties (get forms attribute))]
+                   (m/properties (mr/schema (:seon.schema.projection/registry projection) attribute))]
                (cond
                  (contains? properties :seon.config/default)
                  [attribute (:seon.config/default properties)]
 
                  (not (contains? required attribute))
                  [attribute absent])))
-          (dial-attributes forms)))))
+          (dial-attributes projection)))))
 
 (defn- refuse!
   {:malli/schema [:=> [:cat :seon.config/rule-error [:maybe :seon.error/throwable]] :nil]}
@@ -239,7 +234,7 @@
 (defn- validate-layer
   [projection layer]
   (let [forms (:seon.schema.projection/forms projection)
-        dials (set (dial-attributes forms))
+        dials (set (dial-attributes projection))
         declared (select-keys layer dials)]
     (when (contains? layer initialization-key)
       (refuse!
@@ -288,11 +283,11 @@
     declared))
 
 (defn- row-identity
-  [forms row]
+  [projection row]
   (let [identities
         (into []
               (comp
-               (filter #(schema/identity-attr? forms %))
+               (filter #(schema/identity-attr? projection %))
                (map (fn [attribute] [attribute (get row attribute)])))
               (keys row))]
     (when (= 1 (count identities))
@@ -301,7 +296,7 @@
 (defn- admit-initialization-rows
   [projection population]
   (let [forms (:seon.schema.projection/forms projection)
-        database-attributes (set (schema/canonical-database-attributes forms))]
+        database-attributes (set (schema/canonical-database-attributes projection))]
     (mapv
      (fn [row]
        (when-not (map? row)
@@ -392,7 +387,7 @@
                      ::explanation
                      ((schema/projection-explainer projection attribute) value)}})
        nil)))
-       (when-not (row-identity forms row)
+       (when-not (row-identity projection row)
          (refuse!
        (error/diagnostic
         {:seon.error/at (java.util.Date.)
@@ -412,12 +407,12 @@
          :seon.error/diagnostic-evidence {::explanation
                    {:seon.config/identity-attributes
                     (into []
-                          (filter #(schema/identity-attr? forms %))
+                          (filter #(schema/identity-attr? projection %))
                           (keys row))}}
          :seon.error/data {::explanation
                    {:seon.config/identity-attributes
                     (into []
-                          (filter #(schema/identity-attr? forms %))
+                          (filter #(schema/identity-attr? projection %))
                           (keys row))}}})
        nil))
        row)
@@ -470,8 +465,8 @@
 (defn- validate-default-decisions
   [projection document]
   (let [forms (:seon.schema.projection/forms projection)
-        dials (dial-attributes forms)
-        decisions (merge (registration-defaults forms)
+        dials (dial-attributes projection)
+        decisions (merge (registration-defaults projection)
                          (select-keys document dials))
         missing (set/difference dials (set (keys decisions)))]
     (when (seq missing)
@@ -562,7 +557,7 @@
         (validate-layer projection (or (:seon.config/environment request) {}))
         defaults (validate-default-decisions projection decisions)
         decisions (merge defaults manifest environment)
-        required (required-dial-attributes forms)]
+        required (required-dial-attributes projection)]
     (doseq [[config-key decision] decisions]
       (when (and (= absent decision) (contains? required config-key))
         (refuse!
@@ -673,8 +668,8 @@
   (str "seon.config.initialization/" (pr-str config-identity)))
 
 (defn- population-transaction-data
-  [forms database desired]
-  (let [identities (mapv #(row-identity forms %) desired)
+  [projection database desired]
+  (let [identities (mapv #(row-identity projection %) desired)
         entity-ids
         (into {}
               (map
@@ -716,7 +711,7 @@
             value))]
     (mapv
      (fn [row]
-       (into {:db/id (get entity-ids (row-identity forms row))}
+       (into {:db/id (get entity-ids (row-identity projection row))}
              (map
               (fn [[attribute value]]
                 (let [attribute-schema (get-in database [:schema attribute])]
@@ -754,7 +749,7 @@
                       [_ :seon.config/cluster ?cluster-name]]
                     database))
         identities (into inherited-config-identities
-                         (keep #(row-identity forms %))
+                         (keep #(row-identity projection %))
                          desired)
         request
         {::reconcile/desired desired
@@ -772,7 +767,7 @@
                  connection
                  {:tx-data
                   (conj
-                   (population-transaction-data forms database desired)
+                   (population-transaction-data projection database desired)
                    [:db.fn/call #'reconcile/reconcile-call request])
                   :tx-meta
                   {:seon.db/process
@@ -863,8 +858,8 @@
             (:seon.db.availability/connection row)
             (:seon.schema/expected-value row))
       row
-      (let [config-effective (select-keys row (dial-attributes forms))
-            missing (vec (sort (set/difference (required-dial-attributes forms)
+      (let [config-effective (select-keys row (dial-attributes projection))
+            missing (vec (sort (set/difference (required-dial-attributes projection)
                                                (set (keys config-effective)))))]
         (if (and row (empty? missing))
           config-effective

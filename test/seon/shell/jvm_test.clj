@@ -26,6 +26,24 @@
   [function-name]
   (deref (ns-resolve 'seon.shell.jvm function-name)))
 
+(deftest environment-overrides-use-the-supplied-generation
+  (support/with-database
+   (fn [_connection]
+     (let [base (seon.schema/handed-projection)
+           generation (fn [name]
+                        (seon.schema/projection-with-schema
+                         base ::environment-value
+                         [:string {:seon.shell/environment name}]
+                         {:seon.schema.admission/source :core}))
+           first-generation (generation "FIRST")
+           second-generation (generation "SECOND")
+           effective (assoc (config/defaults) ::environment-value "carried")
+           overrides (shell-private 'environment-overrides)]
+       (is (= "carried" (get (overrides first-generation effective) "FIRST")))
+       (is (nil? (get (overrides first-generation effective) "SECOND")))
+       (is (= "carried" (get (overrides second-generation effective) "SECOND")))
+       (is (nil? (get (overrides second-generation effective) "FIRST")))))))
+
 (defn- temp-tree
   []
   (let [base (io/file "tmp/my-shell-test" (str (random-uuid)))]
@@ -73,7 +91,8 @@
     (:seon.config.fs/working-root effective-map)
     (fn [connection]
       (binding [effect/*request-context*
-                {:seon.db/connection connection}]
+                {:seon.db/connection connection
+                 :seon.env/environment (support/environment "shell-test" connection)}]
         (f connection
            (fn [request effective-config]
              (let [result ((handler) request effective-config)]
@@ -378,7 +397,8 @@
                 result
                 (try
                   (binding [effect/*request-context*
-                            {:seon.db/connection connection}]
+                            {:seon.db/connection connection
+                             :seon.env/environment (support/environment "shell-test" connection)}]
                     ((handler)
                      {:my.shell/argv
                       ["/bin/sh" "-c"

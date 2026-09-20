@@ -16,7 +16,8 @@
   and the attributes come from
   `canonical-database-attributes` — the live boot derivation, not a
   hand-listed fixture set."
-  (:require [clojure.set :as set]
+  (:require [malli.registry :as mr]
+            [seon.schema.internal] [malli.core] [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
@@ -26,7 +27,6 @@
             [seon.render.hiccup :as hiccup]
             [seon.schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support]))
 
 (def ^:private live "9999-1785191833372")
@@ -202,19 +202,18 @@
   (let [properties
         (-> (schema.edn/packaged-forms)
             (get :seon.problems/stale-var)
-            schema.form/schema-properties)]
+            (comp seon.schema.internal/entity-properties seon.schema/structural-schema))]
     (is (nil? (:seon.render/ai properties)))
     (is (nil? (:seon.render/html properties)))
     (is (= [:seon.fn/sym]
-           (mapv first (schema.form/map-entries
-                        (get (schema.edn/packaged-forms) :seon.problems/stale-var))))
+           (mapv first (seon.schema.internal/entity-entries (mr/schema (:seon.schema.projection/registry (seon.schema/handed-projection)) :seon.problems/stale-var))))
         "the shape itself is unchanged; only the selection path is gone")))
 
 (deftest missing-model-findings-declare-their-render-producers
   (let [properties
         (-> (schema.edn/packaged-forms)
             (get :seon.problems/missing-model)
-            schema.form/schema-properties)]
+            (comp seon.schema.internal/entity-properties seon.schema/structural-schema))]
     (is (= `problems/missing-model-ai (:seon.render/ai properties)))
     (is (= `problems/missing-model-html (:seon.render/html properties)))))
 

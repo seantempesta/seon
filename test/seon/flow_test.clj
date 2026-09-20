@@ -895,7 +895,7 @@
           (try
             ;; Reproduce the live boundary: both config/effective and this
             ;; public bridge require the projection on the committer thread.
-            (is (some? (-> #'schema.datahike/resolve-datahike-form-in
+            (is (some? (-> #'schema.datahike/storage-schema
                            deref meta ::mi/original))
                 "the canonical gate already armed the production bridge")
             (async/>!! (:error-chan started) contract-fault)

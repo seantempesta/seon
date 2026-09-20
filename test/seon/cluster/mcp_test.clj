@@ -491,8 +491,7 @@
             "the content digest identifies its durable artifact root")
         (is (true?
              (:db/noHistory
-              (schema.datahike/malli->datahike-attr
-               :seon.dev.mcp.artifact/digest)))
+              (schema.datahike/malli->datahike-attr-in (seon.schema/handed-projection) :seon.dev.mcp.artifact/digest)))
             "the direct digest root derives Datahike noHistory")
         (support/transacted!
                 connection

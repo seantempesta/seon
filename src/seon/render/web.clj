@@ -71,7 +71,9 @@
             [seon.render.walk :as render.walk]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
+            [malli.registry :as mr]
+            [seon.schema.internal :as internal]
+            [malli.core :as m]
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as sci.kernel]
             [starfederation.datastar.clojure.adapter.common :as datastar.common]
@@ -686,8 +688,8 @@
        (into []
              (comp (map :seon.schema/key)
                    (distinct)
-                   (keep #(some->> (projection-form projection %)
-                                   schema.form/map-entries
+                   (keep #(some->> (mr/schema (:seon.schema.projection/registry projection) %)
+                                   internal/entity-entries
                                    (map first)
                                    (filter qualified-keyword?)
                                    (filter (partial declared-unit? projection))))
@@ -701,8 +703,8 @@
 (defn- attribute-description
   "One attribute's authored Malli `:description`, or nil when undeclared."
   [projection attribute]
-  (some-> (projection-form projection (forward-attribute attribute))
-          schema.form/attr-form-properties
+  (some-> (mr/schema (:seon.schema.projection/registry projection) (forward-attribute attribute))
+          m/properties
           :description))
 
 (defn- debug-diagnostic
@@ -1256,14 +1258,13 @@
                                            (= producer (:seon.render/html %))))
                               %) matches)
                      (some #(when (:seon.db/attributes
-                                   (schema.form/attr-form-properties
-                                    (projection-form projection (:seon.schema/key %))))
+                                   (m/properties (mr/schema (:seon.schema.projection/registry projection) (:seon.schema/key %))))
                               %) matches))
         schema-key (:seon.schema/key matching)
         form (projection-form projection schema-key)
-        properties (schema.form/attr-form-properties form)
-        attribute-properties (some-> (projection-form projection (forward-attribute attribute))
-                                     schema.form/attr-form-properties)]
+        properties (some-> (mr/schema (:seon.schema.projection/registry projection) schema-key) m/properties)
+        attribute-properties (some-> (mr/schema (:seon.schema.projection/registry projection) (forward-attribute attribute))
+                                     m/properties)]
     {:seon.schema/key schema-key
      :seon.schema/form form
      :seon.render.web/block-title (or (:title properties) (:title attribute-properties)
@@ -1675,8 +1676,8 @@
                   (into []
                         (comp
                          (map :seon.schema/key)
-                         (keep #(projection-form projection %))
-                         (map schema.form/attr-form-properties)
+                         (keep #(mr/schema (:seon.schema.projection/registry projection) %))
+                         (map m/properties)
                          (mapcat :seon.render/units)
                          (filter reverse-attribute?)
                          (distinct))
@@ -3453,7 +3454,8 @@
             (generic-entity db eid caps false))
 
           :else
-          (schema/canonical-database-attributes))
+          (schema/canonical-database-attributes
+           (sci.kernel/context-projection (:seon.sci.eval/ctx service))))
         projection (sci.kernel/context-projection
                     (:seon.sci.eval/ctx service))
         effective (schema/call-with-projection

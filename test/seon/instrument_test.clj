@@ -995,9 +995,8 @@
      (let [database-form
            [:symbol {:seon.db/identity true :seon.search/index :symbol}]]
        (is (= database-form
-              (schema.datahike/resolve-datahike-form database-form))
-           "the observed one-argument resolver remains callable under the
-            operation's handed projection")
+              (m/form (schema.datahike/storage-schema (schema/structural-schema database-form))))
+           "compiled storage navigation remains callable under instrumentation")
        (is (= 7 (prefix-contract 7)))
        (is (= "left-right" (prefix-contract-in "left-" "right")))
        (doseq [[expected-function invoke]

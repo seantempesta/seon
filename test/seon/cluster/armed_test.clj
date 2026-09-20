@@ -170,7 +170,7 @@
             (let [settings (ai/settings
                             (config/effective @connection "armed")
                             (ai/agent-overlay @connection "root"))
-                  targets (ai/targets settings)]
+                  targets (ai/targets (seon.schema/handed-projection) settings)]
               (is (str/starts-with?
                    (:seon.ai/endpoint (:seon.ai/primary targets))
                    "https://"))
@@ -245,7 +245,7 @@
   ;; The system-authored bootstrap plan evaluates locally; boot must not
   ;; spend a provider call. After that one run, an empty wake stays free.
   (let [calls (atom 0)]
-    (with-redefs [ai/complete (fn [_]
+    (with-redefs [ai/complete (fn [_projection _]
                                 (swap! calls inc)
                                 (throw (ex-info "boot made a model call" {})))]
       (with-cluster
@@ -305,7 +305,7 @@
                         [{:seon.message/id "boot-window-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "answer during boot"}])
            entry))
        ai/complete
-       (fn [_request]
+       (fn [_projection _request]
          {:seon.ai/text "(seon.run/complete \"answered\")"})]
       (let [instance (cluster/start! {:seon.boot/cluster-name name
                                       :seon.boot/root root})]
@@ -454,7 +454,7 @@
          ([state input message]
           (armer-step state input message)))
        ai/complete
-       (fn [_request]
+       (fn [_projection _request]
          {:seon.ai/text "(seon.run/complete \"fault observed\")"})]
       (let [instance (cluster/start! {:seon.boot/cluster-name name
                                       :seon.boot/root root})]

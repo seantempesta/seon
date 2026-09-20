@@ -61,7 +61,7 @@
                         :advisories [:vector :string],
                         :install? :boolean,
                         :gate-tests
-                        [:vector {:seon.db/cardinality :many} :seon.db/ref],
+                        [:vector :seon.db/ref],
                         :gate-test-count [:int {:min 0}],
                         :gate-pass-count [:int {:min 0}],
                         :gate-fail-count [:int {:min 0}],
@@ -95,6 +95,7 @@
                           :seon.test.accretion/results]
                          [:seon.test.accretion/auto-check
                           :seon.test.accretion/auto-check]],
+                        :function-sym [:qualified-symbol {:description "The function name observed by an install refusal; never an upsert identity."}]
                         :install-refused-error
                         [:and
                          {:seon.render/ai seon.test.accretion/render-ai
@@ -102,7 +103,7 @@
                           :error/message "must identify a refused green-to-install decision"}
                          :seon.error/base
                          [:map
-                         [:seon.fn/sym :seon.fn/sym]
+                         [:seon.test.accretion/function-sym :seon.test.accretion/function-sym]
                          [:seon.test.accretion/orientation
                           :seon.test.accretion/orientation]
                          [:seon.test.accretion/test-count

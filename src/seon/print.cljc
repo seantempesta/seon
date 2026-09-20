@@ -6,7 +6,8 @@
             [seon.ai.tokens :as tokens]
             [seon.schema :as schema]
             #?(:clj [seon.schema.edn :as schema.edn])
-            [seon.schema.form :as schema.form]))
+            [malli.core :as m]
+            [seon.schema.internal :as internal]))
 
 (defn- literal
   [value]
@@ -346,11 +347,12 @@
                (when (vector? entry)
                  (let [attribute (first entry)
                        properties
-                       (schema.form/attr-form-properties
-                        (get forms attribute))]
+                       (m/properties (schema/structural-schema
+                                      (get forms attribute)))]
                    (when (contains? properties ::default)
                      [attribute (::default properties)])))))
-            (get forms ::options)))))
+            (internal/entity-entries
+             (schema/structural-schema (get forms ::options)))))))
 
 (defn- option-defaults
   []

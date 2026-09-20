@@ -1,6 +1,6 @@
 (ns seon.program-test
   "Recurring proof for the one build/runtime declaration contract."
-  (:require [clojure.core.async :as async]
+  (:require [seon.schema.internal] [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.cluster :as cluster]
@@ -14,13 +14,13 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [malli.core :as m]
+            [malli.registry :as mr]
             [seon.db :as db]
             [seon.turn :as turn]
             [seon.fn.schema-shape :as schema-shape]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
             [seon.sci.reader :as reader]
             [seon.test-support :as test-support]))
 
@@ -675,11 +675,11 @@
         (let [event (one-event source)]
           ;; Expected data is literal. It is not produced by another path that
           ;; shares `seon.program`'s canonicalizer.
-          (is (= expected (program/declaration-row event :all :agent)))
+          (is (= expected (program/declaration-row (seon.schema/handed-projection) event :all :agent)))
           (if (= "private uncontracted function" label)
-            (is (nil? (program/declaration-row event :contracted :agent)))
+            (is (nil? (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)))
             (is (= expected
-                   (program/declaration-row event :contracted :agent)))))))))
+                   (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)))))))))
 
 (deftest every-declaration-row-satisfies-its-own-output-contract
   ;; The class: `declaration-row` emitting a row its own declared output
@@ -706,8 +706,7 @@
           policy [:all :contracted]
           admission-source [:core :agent]]
     (testing (str source " " policy " " admission-source)
-      (when-let [row (program/declaration-row (one-event source) policy
-                                              admission-source)]
+      (when-let [row (program/declaration-row (seon.schema/handed-projection) (one-event source) policy admission-source)]
         (is (= admission-source (:seon.schema.admission/source row))
             "the row records who admitted it")
         (is ((schema/projection-validator (schema/handed-projection) :seon.program/declaration-row) row)
@@ -715,9 +714,7 @@
   (testing "a reader event preserves required namespace symbols"
     (is (= #{'clojure.set}
            (:seon.ns/requires
-            (program/declaration-row
-             (one-event "(ns sample (:require clojure.set))")
-             :contracted :agent))))))
+            (program/declaration-row (seon.schema/handed-projection) (one-event "(ns sample (:require clojure.set))") :contracted :agent))))))
 
 (deftest declaration-admission-refuses-ambiguous-or-incomplete-rows
   (testing "one event cannot claim two declaration identity families"
@@ -741,7 +738,7 @@
     (doseq [event [{:seon.schema/key :sample/missing-form}
                    {:seon.test/sym (quote sample/missing-source)
                     :seon.test/ns [:seon.ns/name 'sample]}]]
-      (let [data (refusal-data #(program/declaration-row event :all :agent))]
+      (let [data (refusal-data #(program/declaration-row (seon.schema/handed-projection) event :all :agent))]
         (is (= 'seon.program/declaration-refused! (:seon.error/operation data)))
         (is (= #{(first (program/row-identity event))} (:seon.program/identity-attributes data)))
         (is (= [(program/row-identity event)]
@@ -802,7 +799,7 @@
 (deftest runtime-schema-declarations-project-namespaced-properties
   (let [event (one-event
                "(seon.schema/register! ::error [:map {:seon.db/attributes false :seon.render/ai sample/render-ai} [:seon.error/message :seon.error/message]])")
-        row (program/declaration-row event :contracted :agent)]
+        row (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)]
     (is (= false (:seon.db/attributes row)))
     (is (= 'sample/render-ai (:seon.render/ai row)))
     (is (= :agent (:seon.schema.admission/source row)))))
@@ -894,11 +891,11 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- program-entity-map
-  "The entity map form one identity attribute's declaration names."
-  [forms identity-attribute]
-  (get forms
-       (:seon.program/row-schema
-        (schema.form/attr-form-properties (get forms identity-attribute)))))
+  "The retained row schema named by an identity attribute's declaration."
+  [projection identity-attribute]
+  (let [registry (:seon.schema.projection/registry projection)]
+    (mr/schema registry (:seon.program/row-schema
+                         (m/properties (mr/schema registry identity-attribute))))))
 
 (deftest declaring-an-attribute-on-a-program-row-schema-is-sufficient
   ;; The class both 7cfe02790 and 925ca19fe hit: an attribute declared on the
@@ -914,13 +911,13 @@
         declared (update-in forms [:seon.fn/fn 2] conj
                          [:sample/facet {:optional true} :string])]
     (is (nil? (:sample/facet
-               (program/canonical-row (program/shapes-in forms) row)))
+               (program/canonical-row (program/shapes-in (seon.schema/build-projection forms)) row)))
         "an undeclared attribute is not a program row attribute")
     (is (= "carried" (:sample/facet
-                      (program/canonical-row (program/shapes-in declared) row)))
+                      (program/canonical-row (program/shapes-in (seon.schema/build-projection declared)) row)))
         "declaring it on :seon.fn/fn is sufficient — no code names it")
     (is (contains? (set (program/changed-attributes
-                         (program/shapes-in declared)
+                         (program/shapes-in (seon.schema/build-projection declared))
                          row (dissoc row :sample/facet)))
                    :sample/facet)
         "and an exact replacement retracts it when the source stops carrying it"))
@@ -938,9 +935,9 @@
                :seon.fn/private? false
                :sample/outcome "written elsewhere"}]
       (is (nil? (:sample/outcome
-                 (program/canonical-row (program/shapes-in foreign) row))))
+                 (program/canonical-row (program/shapes-in (seon.schema/build-projection foreign)) row))))
       (is (not (contains? (set (program/changed-attributes
-                                (program/shapes-in foreign)
+                                (program/shapes-in (seon.schema/build-projection foreign))
                                 row (dissoc row :sample/outcome)))
                           :sample/outcome))
           "so an exact re-index can never retract another writer's fact"))))
@@ -950,19 +947,19 @@
   ;; attribute that canonical-row neither keeps nor sees declared as written
   ;; elsewhere — the silent strip cannot return. It also fails LOUDLY when it
   ;; is measuring nothing, because an empty derivation would read as health.
-  (let [forms (schema/registered-schemas)
-        shapes (program/shapes-in forms)]
+  (let [projection (schema/handed-projection)
+        shapes (program/shapes-in projection)]
     (is (= (set program/identity-attributes) (set (keys shapes)))
         "every identity family has a derived shape")
     (is (<= 6 (count shapes)) "the derivation found the program families")
     (let [foreign
           (into {}
                 (for [identity-attribute program/identity-attributes
-                      :let [definition (program-entity-map forms identity-attribute)
+                      :let [definition (program-entity-map projection identity-attribute)
                             owned (:seon.program/owned-attributes
                                    (get shapes identity-attribute))
                             owned (if (coll? owned) (set owned) nil)
-                            entries (schema.form/map-entries definition)]
+                            entries (seon.schema.internal/entity-entries definition)]
                       :when owned]
                   [identity-attribute
                    (into []
@@ -990,34 +987,35 @@
                 (some (fn [entry]
                         (and (map? (second entry))
                              (:seon.program/written-by (second entry))))
-                      (schema.form/map-entries
-                       (program-entity-map forms identity-attribute))))
+                      (seon.schema.internal/entity-entries (program-entity-map projection identity-attribute))))
               program/identity-attributes)
         "at least one entry declares another writer, so the exclusion is exercised")))
 
 (deftest program-identity-attributes-are-exactly-the-declared-row-schemas
-  (let [forms (schema/registered-schemas)
+  (let [projection (schema/handed-projection)
+        forms (:seon.schema.projection/forms projection)
+        shapes (program/shapes-in projection)
         declaring (into #{}
-                        (keep (fn [[schema-key definition]]
+                        (keep (fn [[schema-key _definition]]
                                 (when (:seon.program/row-schema
-                                       (schema.form/attr-form-properties definition))
+                                       (m/properties (mr/schema (:seon.schema.projection/registry projection) schema-key)))
                                   schema-key)))
                         forms)]
     (is (seq declaring) "declarations were found")
     (is (= (set program/identity-attributes) declaring)
         "seon.program/identity-attributes names exactly the declared families")
     (is (= (set program/identity-attributes)
-           (set (rest (get forms :seon.program/identity-attribute))))
+           (set (schema/enum-members projection :seon.program/identity-attribute)))
         "the identity-attribute enum does not drift from the declarations")
     (is (= (into #{}
                  (map #(:seon.program/source-attribute
-                        (program/shape (program/shapes-in forms) %)))
+                        (program/shape shapes %)))
                  program/identity-attributes)
-           (set (rest (get forms :seon.program/source-attribute))))
+           (set (schema/enum-members projection :seon.program/source-attribute)))
         "the source-attribute enum does not drift from the declarations")))
 
 (deftest resolved-shapes-match-the-current-declarations
-  (is (= (program/shapes-in (schema/registered-schemas))
+  (is (= (program/shapes-in (seon.schema/build-projection (schema/registered-schemas)))
          (program/shapes))
       "the shapes answered with none in hand still describe the live declarations"))
 
@@ -1049,7 +1047,7 @@
                   (program/shapes))]
       (is (contains? (owned after) ::declared-after)
           "a changed resource stamp re-derives, without restarting the JVM")
-      (is (= row (program/canonical-row (program/shapes-in declared) row))
+      (is (= row (program/canonical-row (program/shapes-in (seon.schema/build-projection declared)) row))
           "and the row built from that population carries the attribute"))
     (is (= before (program/shapes))
         "an unchanged stamp answers the same derivation, so the per-row
@@ -1068,8 +1066,7 @@
         rows-from
         (fn [connection]
           (let [database (db/db connection)
-                shapes (program/shapes-in
-                        (:seon.schema.projection/forms (db/carried-projection database)))
+                shapes (program/shapes-in (db/carried-projection database))
                 identity-attributes (db/identity-attributes database)]
             (into {}
                   (map (fn [identity]
@@ -1114,7 +1111,7 @@
                           :seon.program/schema-forms forms})
                        (into (:seon.fn.file/rows artifact)
                              (map #(accretion/schema-row forms %))
-                             (schema/canonical-schema-rows fixture-forms)))
+                             (schema/canonical-schema-rows projection fixture-forms)))
                  selected (filterv #(or (:seon.fn.file/relative-path %)
                                         (some #{(program/row-identity %)} identities)) rows)]
              (test-support/transacted!

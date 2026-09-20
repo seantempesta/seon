@@ -63,7 +63,7 @@
                         :seon.cluster.eval/ns [:seon.ns/name 'seon.test.runner-test]
                         :seon.sci.admit/caps (config/result-caps (config/defaults))
                         :seon.sci.eval/time-limit-ms 120000 :seon.config/on-core-error :panic})
-           declaration (program/declaration-row (:seon.program/row evaluation) :all :agent)
+           declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)
            target (symbol "seon.test.runner-test" "custody-observation")]
        (is (map? declaration) (pr-str evaluation))
        (test-support/transacted! connection [declaration])

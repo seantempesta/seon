@@ -5,7 +5,8 @@
             [seon.fn.schema-shape :as schema-shape]
             [seon.fn.signature :as signature]
             [seon.schema :as schema]
-            [seon.schema.form :as schema.form]
+            [malli.registry :as mr]
+            [seon.schema.internal :as internal]
             #?(:clj [clojure.edn :as edn]
                :cljs [cljs.reader :as reader])
             ;; CLJ-only: `seon.schema.edn` has no CLJS side, and the two uses
@@ -82,13 +83,10 @@
 #?(:clj
    (defn base-context-injected-symbols
      "Interpreter bindings declared with their reason in the schema population."
-     {:malli/schema [:function
-                     [:=> [:cat] [:vector :symbol]]
-                     [:=> [:cat :map] [:vector :symbol]]]}
-     ([] (base-context-injected-symbols (schema/declaration-population)))
-     ([forms]
-     (->> (vals forms)
-          (map schema.form/attr-form-properties)
+     {:malli/schema [:=> [:cat :seon.schema/projection] [:vector :symbol]]}
+     [projection]
+     (->> (keys (:seon.schema.projection/forms projection))
+          (map #(m/properties (mr/schema (:seon.schema.projection/registry projection) %)))
           (filter :seon.sci.binding/reason)
           (mapcat
            (fn [properties]
@@ -100,7 +98,7 @@
                       (keys (ns-publics namespace-name)))))))
           distinct
           (sort-by str)
-          vec))))
+          vec)))
 
 (defn- declaration-refused!
   {:malli/schema [:=> [:cat :string [:vector :seon.program/identity] :map] :nil]}
@@ -140,14 +138,14 @@
   an empty shape: each absence refuses, naming the identity and the member,
   because an empty owned set would silently strip every attribute of the
   family it describes."
-  [forms identity-attribute]
+  [projection identity-attribute]
   (let [refuse!
         (fn [message data]
           (declaration-refused!
            message [[identity-attribute nil]]
            (merge {:seon.program/identity-attribute identity-attribute} data)))
-        attribute-form (get forms identity-attribute)
-        properties (or (schema.form/attr-form-properties attribute-form) {})
+        registry (:seon.schema.projection/registry projection)
+        properties (some-> (mr/schema registry identity-attribute) m/properties)
         row-schema (:seon.program/row-schema properties)
         _ (when-not (qualified-keyword? row-schema)
             (refuse! "A program identity attribute declares no row schema."
@@ -157,11 +155,11 @@
             (refuse! "A program identity attribute declares no source attribute."
                      {:seon.program/missing-attributes
                       [:seon.program/source-attribute]}))
-        definition (get forms row-schema)
-        _ (when-not (schema.form/map-shape? definition)
+        definition (mr/schema registry row-schema)
+        _ (when-not (and definition (internal/entity-schema? definition))
             (refuse! "A program row schema is not a declared entity map."
                      {:seon.program/row-schema row-schema}))
-        entries (schema.form/map-entries definition)
+        entries (internal/entity-entries definition)
         owned (into [] (comp (filter #(nil? (:seon.program/written-by
                                              (entry-properties %))))
                              (keep entry-attribute))
@@ -173,7 +171,7 @@
      :seon.program/source-attribute source-attribute
      :seon.program/owned-attributes
      (if (true? (:seon.program/projected-properties
-                 (schema.form/schema-properties definition)))
+                 (internal/entity-properties definition)))
        :seon.program/schema-row-properties
        owned)}))
 
@@ -211,7 +209,7 @@
         test-marker-attributes))
 
 (defn shapes-in
-  "Program-row shapes derived from the entity maps `forms` declares.
+  "Program-row shapes derived from the supplied generation's retained entity roots.
 
   THE ONE ANSWER to \"which attributes does a program row own\". Declaring an
   attribute on `:seon.fn/fn`, `:seon.test/test`, `:seon.ns/ns`,
@@ -219,11 +217,11 @@
   therefore sufficient for the indexer to keep, write and exactly replace it:
   there is no second list, which is what twice silently stripped an owned
   attribute on 2026-09-16 (`7cfe02790`, `925ca19fe`)."
-  {:malli/schema [:=> [:cat :map] :seon.program/shapes]}
-  [forms]
+  {:malli/schema [:=> [:cat :seon.schema/projection] :seon.program/shapes]}
+  [projection]
   (into {}
         (map (fn [identity-attribute]
-               [identity-attribute (derived-shape forms identity-attribute)]))
+               [identity-attribute (derived-shape projection identity-attribute)]))
         identity-attributes))
 
 #?(:clj (defonce ^:private !authored-shapes (atom nil)))
@@ -251,12 +249,12 @@
            cached @!authored-shapes]
        (if (= stamp (:seon.program/declaration-stamp cached))
          (:seon.program/shapes cached)
-         (let [derived (shapes-in (schema.edn/packaged-forms))]
+         (let [derived (shapes-in (schema/build-projection (schema.edn/packaged-forms)))]
            (reset! !authored-shapes
                    {:seon.program/declaration-stamp stamp
                     :seon.program/shapes derived})
            derived)))
-     :cljs (shapes-in (schema/registered-schemas))))
+     :cljs (shapes-in (schema/build-projection (schema/registered-schemas)))))
 
 (defn shapes
   "Program-row shapes keyed by their database identity attribute.
@@ -915,10 +913,10 @@
   rather than an event key a caller can forget: a row with no admission
   source is not constructable here."
   {:malli/schema
-   [:=> [:cat :map [:enum :all :contracted]
+   [:=> [:cat :seon.schema/projection :map [:enum :all :contracted]
          :seon.schema.admission/source]
     [:maybe :seon.program/declaration-row]]}
-  [event function-policy admission-source]
+  [projection event function-policy admission-source]
   (let [event (assoc event :seon.schema.admission/source admission-source)
         candidate
         (cond
@@ -942,10 +940,13 @@
                (:seon.schema/form candidate))
           (let [schema-key (:seon.schema/key candidate)
                 definition (read-edn (:seon.schema/form candidate))
+                candidate-projection
+                (schema/projection-with-schema
+                 projection schema-key definition
+                 {:seon.schema.admission/source admission-source})
                 row (some #(when (= schema-key (:seon.schema/key %)) %)
                           (schema/canonical-schema-rows
-                           (assoc (schema/registered-schemas)
-                                  schema-key definition)))]
+                           candidate-projection {schema-key definition}))]
             (cond-> (assoc (merge (select-keys candidate
                                               [:seon.schema/generatable?
                                                :seon.schema/shape])
@@ -956,11 +957,12 @@
               (assoc :seon.schema/ns (:seon.schema/ns candidate))))
 
           :else candidate)
-        row (canonical-row candidate)]
+        row-shapes (shapes-in projection)
+        row (canonical-row row-shapes candidate)]
     (when row
       (let [[identity-attribute _ :as program-identity] (row-identity row)
             source-attribute (:seon.program/source-attribute
-                              (shape (shapes) identity-attribute))]
+                              (shape row-shapes identity-attribute))]
         (when-not (get row source-attribute)
           (declaration-refused!
            "A reader declaration has no source. Analysis has not run at this stage."

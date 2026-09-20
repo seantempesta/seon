@@ -26,7 +26,8 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
+            [malli.registry :as mr]
+            [seon.schema.internal :as internal]
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as sci.kernel])
   (:import [java.util Date]))
@@ -372,10 +373,9 @@
                                  (max (count (:seon.schema/required-attrs row))
                                       (count (filter #(some? (get value %))
                                                      (map first
-                                                          (schema.form/map-entries
-                                                           (get-in projection
-                                                                   [:seon.schema.projection/forms
-                                                                    (:seon.schema/key row)])))))))
+                                                          (internal/entity-entries
+                                                           (mr/schema (:seon.schema.projection/registry projection)
+                                                                      (:seon.schema/key row))))))))
                    most-specific (apply max 0 (map specificity matches))]
                (filter #(= most-specific (specificity %))
                        matches))
@@ -399,8 +399,8 @@
 (defn- attribute-producer
   [projection request output]
   (when-let [attribute (:seon.render.walk/attribute request)]
-    (some-> (get-in projection [:seon.schema.projection/forms attribute])
-            schema.form/attr-form-properties
+    (some-> (mr/schema (:seon.schema.projection/registry projection) attribute)
+            m/properties
             (get output))))
 
 (defn- attribute-scoped?

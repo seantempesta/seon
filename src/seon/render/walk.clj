@@ -41,7 +41,9 @@
             [seon.render :as render]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
+            [malli.registry :as mr]
+            [seon.schema.internal :as internal]
+            [malli.core :as m]
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as sci.kernel]))
 
@@ -92,9 +94,9 @@
   [projection entity]
   (into []
         (distinct)
-        (mapcat #(-> (get-in projection [:seon.schema.projection/forms
-                                         (:seon.schema/key %)])
-                    schema.form/schema-properties :seon.render/units)
+        (mapcat #(-> (mr/schema (:seon.schema.projection/registry projection)
+                               (:seon.schema/key %))
+                    internal/entity-properties :seon.render/units)
                 (schema/matching-shapes-in projection (render/transacted entity)))))
 
 (defn- connection-attributes
@@ -712,8 +714,7 @@
        (fn [result display]
          (let [reverse? (str/starts-with? (name display) "_")
                attribute (if reverse? (keyword (namespace display) (subs (name display) 1)) display)
-               properties (schema.form/attr-form-properties
-                           (get-in projection [:seon.schema.projection/forms attribute]))
+               properties (some-> (mr/schema (:seon.schema.projection/registry projection) attribute) m/properties)
                producer (when (or (:seon.render/derived properties)
                                   (and reverse? (:seon.render/form properties))
                                   (and (not reverse?) (:seon.db/component properties)))

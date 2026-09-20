@@ -162,7 +162,7 @@
                     (swap! calls conj
                            [:settings actual-cluster-settings actual-overlay])
                     settings)
-                  ai/targets (fn [actual-db actual-settings]
+                  ai/targets (fn [_projection actual-db actual-settings]
                                (swap! calls conj
                                       [:targets actual-db actual-settings])
                                {:seon.ai/primary primary
@@ -622,7 +622,7 @@
                     (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}))
 
        (with-redefs [prompt/prompt (fn [_database _request] refusal)
-                     ai/complete (fn [_request]
+                     ai/complete (fn [_projection _request]
                                    (swap! provider-calls inc)
                                    {:seon.ai/text "(identity :unexpected)"})]
          (let [report
@@ -852,7 +852,7 @@
                             (swap! resolutions conj resolved)
                             resolved))
                         ai/complete
-                        (fn [request]
+                        (fn [_projection request]
                           (swap! requests conj request)
                           (let [completion (first @completions)]
                             (swap! completions subvec 1)
@@ -1010,7 +1010,7 @@
        (is (= 6 (committed-error-count connection)))))))
 
 (deftest the-committed-set-is-computed-and-covers-what-the-loop-writes
-  (let [committed (turn/committed-attributes)]
+  (let [committed (turn/committed-attributes (seon.schema/handed-projection))]
     (is (set? committed))
     (testing "every family the turn commits is in it"
       (is (some #(= "seon.turn" (namespace %)) committed))
@@ -1029,10 +1029,12 @@
         expected #{:seon.test/first :seon.test/second}
         committed-test-attributes
         (fn [definition]
-          (with-redefs [schema/schema-definition (constantly definition)]
+          (let [projection (schema/build-projection
+                            (assoc (:seon.schema.projection/forms (schema/handed-projection))
+                                   :seon.test/test definition))]
             (into #{}
                   (filter #(= "seon.test" (namespace %)))
-                  (turn/committed-attributes))))]
+                  (turn/committed-attributes projection))))]
     (is (= expected (committed-test-attributes (into [:map] entries)))
         "a propertyless Malli map keeps its first entry")
     (is (= expected
@@ -1165,9 +1167,9 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest everything-the-loop-writes-is-installable-by-boot
-  (let [installable (set (schema/canonical-database-attributes))]
+  (let [installable (set (schema/canonical-database-attributes (seon.schema/handed-projection)))]
     (testing "every attribute the loop commits"
-      (is (empty? (remove installable (turn/committed-attributes)))
+      (is (empty? (remove installable (turn/committed-attributes (seon.schema/handed-projection))))
           "an attribute the loop writes that boot cannot install is a
            run that dies on its first transaction"))
     (testing "and every attribute the wake listens for"
@@ -1188,8 +1190,7 @@
         connection (d/connect configuration)]
     (try
       (test-support/transacted! connection
-                              (schema.datahike/malli->datahike-schema
-                               (schema/canonical-database-attributes)))
+                              (schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) (schema/canonical-database-attributes (seon.schema/handed-projection))))
       (testing "the trigger — the exact transact the live drive failed on"
         (is (map? (db/transact! connection
                               [{:seon.agent/id "alice"}

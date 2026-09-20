@@ -87,7 +87,7 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (support/transacted! connection (schema.datahike/malli->datahike-schema attributes))
+      (support/transacted! connection (schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) attributes))
       (body connection)
       (finally
         (d/release connection)

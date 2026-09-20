@@ -67,7 +67,9 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
+            [malli.core :as m]
+            [malli.registry :as mr]
+            [seon.schema.internal :as internal]
             [seon.search :as search])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file CopyOption Files InvalidPathException LinkOption Paths
@@ -1096,7 +1098,7 @@
   attribute reaches Datahike's atomic AVET backfill instead of forcing a
   destructive refork of an existing cluster. A facet Datahike would not apply
   refuses, naming that property and both of its values."
-  [db forms cluster-name]
+  [db projection cluster-name]
   (into
    []
    (keep
@@ -1127,8 +1129,8 @@
               declaration)))
         declaration)))
    (schema.datahike/malli->datahike-schema-in
-    {:seon.schema.projection/forms forms}
-    (schema/canonical-database-attributes forms))))
+    projection
+    (schema/canonical-database-attributes projection))))
 
 (defn- missing-process-rows
   "Return required process rows absent from `db`, or its read refusal."
@@ -1266,14 +1268,14 @@
         config-dials
         (into #{}
               (map first)
-              (schema.form/map-entries
-               (get forms :seon.config/manifest)))
+              (internal/entity-entries
+               (mr/schema (:seon.schema.projection/registry projection) :seon.config/manifest)))
         config-defaults
         (into #{}
               (filter
                (fn [dial]
                  (let [properties
-                       (schema.form/attr-form-properties (get forms dial))]
+                       (m/properties (mr/schema (:seon.schema.projection/registry projection) dial))]
                    (or (contains? properties :seon.config/default)
                        (true? (:seon.config/optional properties))))))
               config-dials)
@@ -1680,16 +1682,16 @@
   Deriving a projection from a branch is legitimate only once the branch is
   admitted."
   [database cluster-name]
-  (let [forms (schema.edn/packaged-forms)]
+  (let [forms (schema.edn/packaged-forms)
+        projection (or (schema/handed-projection) (schema/declaration-projection forms))]
     (schema/call-with-forms
      forms
      (fn []
        (schema/call-with-projection
-        (or (schema/handed-projection)
-            (schema/declaration-projection forms))
+        projection
         (fn []
           (require-activation! database)
-          (declaration-changes database forms cluster-name))))))
+          (declaration-changes database projection cluster-name))))))
   nil)
 
 (defn- accrete-schema-population!
@@ -1712,16 +1714,16 @@
   ([connection cluster-name]
    (accrete-schema-population! connection cluster-name true))
   ([connection cluster-name publish-schema-rows?]
-  (let [forms (schema.edn/packaged-forms)]
+  (let [forms (schema.edn/packaged-forms)
+        projection (or (schema/handed-projection) (schema/declaration-projection forms))]
     (schema/call-with-forms
      forms
      (fn []
        (schema/call-with-projection
-        (or (schema/handed-projection)
-            (schema/declaration-projection forms))
+        projection
         (fn []
           (let [declarations
-                (declaration-changes (db/db connection) forms cluster-name)]
+                (declaration-changes (db/db connection) projection cluster-name)]
             (when (seq declarations)
               (require-committed!
                (db/transact! connection {:tx-data declarations})
@@ -2542,8 +2544,8 @@
                                   (throw failure))))
                             (db/db connection))
         published-database (source/database held-store (:seon.source/commit-id published))
-        forms (:seon.schema.projection/forms
-               (schema/projection-from-database published-database))
+        published-projection (schema/projection-from-database published-database)
+        forms (:seon.schema.projection/forms published-projection)
         _ (report-source-progress! "development schema declarations")
         _ (schema/call-with-forms
            forms
@@ -2553,7 +2555,7 @@
               {:tx-data
                [[:db.fn/call
                  (fn [database]
-                   (declaration-changes database forms cluster-name))]]})
+                   (declaration-changes database published-projection cluster-name))]]})
              {:seon.boot/population :seon.schema/declarations}))
         scalar-rows (:seon.source/upsert-rows published)
         scalar? (and scalar-rows

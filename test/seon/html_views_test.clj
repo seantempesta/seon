@@ -156,14 +156,13 @@
 
 (deftest maintenance-pair-preserves-ai
   (support/with-database
-    (fn [_]
+    (fn [connection]
       (let [report {:seon.maintenance/entries []}]
-        (readable! (maintenance/render-report-html report) ["No maintenance tasks are recorded."])
-        (readable! (maintenance/render-report-html
-                    {:seon.maintenance/entries
-                     [{:seon.schedule.task/id "collect" :seon.fn/sym "seon.maintenance/collect"}]})
+        (readable! (maintenance/render-report-html report @connection) ["No maintenance tasks are recorded."])
+        (readable! (maintenance/render-report-html {:seon.maintenance/entries
+                     [{:seon.schedule.task/id "collect" :seon.fn/sym "seon.maintenance/collect"}]} @connection)
                    ["collect" "not run"])
-        (is (= (golden :maintenance) (maintenance/render-report-ai report)))))))
+        (is (= (golden :maintenance) (maintenance/render-report-ai report @connection)))))))
 
 (deftest namespace-binding-pairs-preserve-ai
   (support/with-database

@@ -28,7 +28,8 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.form :as schema.form]
+            [malli.registry :as mr]
+            [seon.schema.internal :as internal]
             [seon.sci.admit :as admit])
   (:import [java.nio.charset StandardCharsets]))
 
@@ -275,15 +276,15 @@
          projection ::observation-attributes
          (fn []
            (let [forms (:seon.schema.projection/forms projection)
-                 stored-attributes (set (schema.form/database-attributes forms))
+                 stored-attributes (set (schema.datahike/database-attributes-core-in projection))
                  attributes
                  (loop [pending (vec (conj (facet-keys projection) :seon.error/base))
                         seen #{} result #{}]
                    (if-let [entity (peek pending)]
                      (if (seen entity)
                        (recur (pop pending) seen result)
-                       (let [members (map first (schema.form/map-entries forms (get forms entity)))
-                             children (keep #(-> (get forms %) schema.form/attr-form-properties
+                       (let [members (map first (internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) entity)))
+                             children (keep #(-> (mr/schema (:seon.schema.projection/registry projection) %) m/properties
                                                   :seon.db/component-schema) members)]
                          (recur (into (pop pending) children) (conj seen entity)
                                 (into result members))))
@@ -1565,12 +1566,12 @@
     (if read-refusal
       read-refusal
       (let [projection (schema/projection-from-database database)
-        forms (:seon.schema.projection/forms projection)
+        stored-attributes (set (schema.datahike/database-attributes-core-in projection))
         diagnostic-attributes
         (schema/projection-cache-value
          projection ::facet-attributes
          #(into #{} (mapcat (fn [facet]
-                              (map first (schema.form/map-entries forms (get forms facet)))))
+                              (filter stored-attributes (map first (internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) facet))))))
                 (conj (facet-keys projection) :seon.error/base)))
         replacements (mapv (fn [attribute]
                              [:db.fn/retractAttribute occurrence-ref attribute])
@@ -1600,9 +1601,9 @@
                                               #(schema/projection-validator projection :seon.error/base))]
                                    (when (and (map? source) (base? source))
                                      (let [attributes (into #{}
-                                                            (mapcat #(map first (schema.form/map-entries forms (get forms %))))
+                                                            (mapcat #(map first (internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) %))))
                                                             (conj (facets projection source) :seon.error/base))]
-                                       (select-keys source attributes))))
+                                       (select-keys source (filter stored-attributes attributes)))))
                                  {:seon.error.occurrence/id occurrence-id
                                   :seon.error.occurrence/count count
                                   :seon.error.occurrence/first-at (or (:seon.error.occurrence/first-at old) at)
@@ -1729,17 +1730,17 @@
    projection ::observation-selector
    (fn []
      (let [forms (:seon.schema.projection/forms projection)
-           stored-attributes (set (schema.form/database-attributes forms))
+           stored-attributes (set (schema.datahike/database-attributes-core-in projection))
            observation-keys (conj (facet-keys projection)
                                   :seon.error/base :seon.error.occurrence/occurrence)]
        (letfn [(members [schemas]
-                 (sort (into #{} (comp (mapcat #(map first (schema.form/map-entries forms (get forms %))))
+                 (sort (into #{} (comp (mapcat #(map first (internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) %))))
                                        (filter stored-attributes)) schemas)))
                (selector [schemas active]
                  (into [:db/id]
                        (map (fn [attribute]
                               (let [child (:seon.db/component-schema
-                                           (schema.form/attr-form-properties (get forms attribute)))]
+                                           (m/properties (mr/schema (:seon.schema.projection/registry projection) attribute)))]
                                 (if (and child (not (contains? active child)))
                                   {[attribute :limit nil]
                                    (selector (if (= child :seon.error.occurrence/occurrence)
@@ -1884,10 +1885,9 @@
        (into #{}
              (keep (fn [[k definition]]
                      (when (and (not= k :seon.error/base)
-                                (vector? definition)
-                                (= :and (first definition))
-                                (schema.form/extends-schema?
-                                 forms definition :seon.error/base))
+                                (= :and (m/type (mr/schema (:seon.schema.projection/registry projection) k)))
+                                (internal/extends-schema?
+                                 (mr/schema (:seon.schema.projection/registry projection) k) :seon.error/base))
                        k)))
              forms)))))
 

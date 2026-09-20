@@ -1,5 +1,5 @@
 (ns seon.turn-backstop-test
-  (:require [clojure.core.async :as async]
+  (:require [seon.schema] [clojure.core.async :as async]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.ai :as ai]
@@ -43,14 +43,13 @@
                        :seon.config.ai.retry/multiplier 2.0
                        :seon.config.ai.retry/jitter-fraction 0.0
                        :seon.config.ai.retry/maximum-total-delay-ms 300})
-            targets (ai/targets @connection settings)
+            targets (ai/targets (seon.schema/handed-projection) @connection settings)
             schedule (ai/delays (ai/retry-strategy settings) (constantly 0.5))]
         (is (= [100 200] schedule))
         (is (= 90300 (#'turn/provider-wait-ms
                      (assoc targets :seon.turn.loop/schedule schedule))))
         (is (= 70000 (#'turn/provider-wait-ms
-                     (assoc (ai/targets @connection
-                                       (assoc settings :seon.config.ai.backup/model "deepseek-flash"
+                     (assoc (ai/targets (seon.schema/handed-projection) @connection (assoc settings :seon.config.ai.backup/model "deepseek-flash"
                                                        :seon.config.ai.backup/timeout-ms 40000))
                             :seon.turn.loop/schedule [])))))
       (doseq [[expected message] [[:seon.ai/completion "provider response"]

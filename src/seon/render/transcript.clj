@@ -23,7 +23,8 @@
             [seon.render.route :as route]
             [seon.render.value :as value]
             [seon.repl :as repl]
-            [seon.schema.form :as schema.form]
+            [malli.registry :as mr]
+            [malli.core :as m]
             [seon.sci.admit :as admit])
   (:import [java.io PushbackReader StringReader]))
 
@@ -1494,8 +1495,7 @@
                           (vals (:seon.schema.projection/shape-rows projection))))
         schema-key (or (when (= 1 (count attributes)) (first attributes))
                        (when (= 1 (count matches)) (:seon.schema/key (first matches))))]
-    (or (:title (schema.form/attr-form-properties
-                  (get-in projection [:seon.schema.projection/forms schema-key])))
+    (or (:title (some-> (mr/schema (:seon.schema.projection/registry projection) schema-key) m/properties))
         (some-> schema-key str)
         (str "Evaluation " (inc (or (:seon.cluster.eval/ordinal saved) 0))))))
 

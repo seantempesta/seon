@@ -1,9 +1,11 @@
 (ns seon.schema-audit-test
   "Graph-derived permissive contract inventory. No function exemption list."
-  (:require [clojure.edn :as edn]
+  (:require [seon.schema.datahike] [clojure.edn :as edn]
             [clojure.test :refer [deftest is]]
             [seon.db :as db]
-            [seon.schema.form :as form]
+            [malli.core :as m]
+            [malli.registry :as mr]
+            [seon.schema :as schema]
             [seon.schema.internal :as internal]
             [seon.test-support :as test-support]))
 
@@ -20,7 +22,7 @@
                          [?f :seon.fn/private? false]
                          [?f :seon.fn/arities ?arity]
                          (not [?arity :seon.fn.arity/max])
-                         (not [?arity :seon.fn.arity/guard])] database)
+                         (not [?arity :seon.fn.arity/guard-schema])] database)
         schemas (db/q '[:find ?key ?form
                        :where [?s :seon.schema/key ?key]
                        [?s :seon.schema/form ?form]] database)]
@@ -28,13 +30,14 @@
     (assert (and (set? schemas) (seq schemas)) "Missing schema graph")
     (assert (set? unguarded) "Unavailable arity graph query")
     (let [forms (into {} (map (fn [[k v]] [(keyword k) (edn/read-string v)])) schemas)
-          stored (set (form/database-attributes forms))
+          stored (set (seon.schema.datahike/database-attributes-core-in (db/carried-projection database)))
           findings (into []
             (mapcat (fn [[identity definition stored?]]
                       (map #(assoc % :seon.schema/identity identity)
                            (internal/permissive-positions
-                            {:seon.schema/definition definition
-                             :seon.schema/forms forms
+                            {:seon.schema/compiled
+                             (mr/schema (:seon.schema.projection/registry
+                                         (db/carried-projection database)) identity)
                              :seon.schema/stored? stored?}))))
             (concat
              (map (fn [[sym spec]] [sym (edn/read-string spec) false]) functions)
@@ -49,7 +52,7 @@
 (deftest every-permissive-graph-position-has-its-own-justification
   (test-support/with-database
    (fn [connection]
-     (let [findings (inventory @connection)]
+     (let [findings (inventory (db/db connection))]
        (is (seq findings) "The canonical graph must actually be inspected")
        (doseq [finding (remove :seon.schema/justified? findings)]
          (is false (pr-str (select-keys finding [:seon.schema/identity
@@ -61,7 +64,7 @@
                      :seon.schema.admission/polymorphic-boundary
                      :seon.schema.admission/reason "An arbitrary returned JVM value."
                      :gen/elements [nil false 0]}]
-        inspect #(internal/permissive-positions {:seon.schema/definition %})]
+        inspect #(internal/permissive-positions {:seon.schema/compiled (schema/structural-schema %)})]
     (is (empty? (inspect [:= :any])))
     (is (empty? (inspect [:enum :any :some])))
     (is (= [true false]
@@ -77,11 +80,13 @@
     (is (= [:stored-nil]
            (mapv :seon.schema.advisory/kind
                  (internal/permissive-positions
-                  {:seon.schema/definition [:maybe :string]
+                  {:seon.schema/compiled (schema/structural-schema [:maybe :string])
                    :seon.schema/stored? true}))))
     (is (= [false]
            (mapv :seon.schema/justified?
                  (internal/permissive-positions
-                  {:seon.schema/definition :audit/attribute
-                   :seon.schema/forms {:audit/attribute [:maybe (second exempt) :string]}
+                  {:seon.schema/compiled
+                   (m/schema :audit/attribute
+                             {:registry (merge (m/default-schemas)
+                                               {:audit/attribute [:maybe (second exempt) :string]})})
                    :seon.schema/stored? true}))))))

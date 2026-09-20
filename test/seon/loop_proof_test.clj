@@ -298,7 +298,7 @@
                     :seon.cluster/name "loop-refusal-proof"
                     :seon.sci.eval/ctx ctx
                     :seon.db.process/id cluster/boot-process-identity})
-           target (-> (:seon.ai/primary (ai/targets (support/effective-config)))
+           target (-> (:seon.ai/primary (ai/targets (seon.schema/handed-projection) (support/effective-config)))
                       (dissoc :seon.config.ai/no-auth)
                       (assoc :seon.ai/api-key-variable "SEON_LOOP_PROOF_UNSET_CREDENTIAL"
                              :seon.ai/prompt "Probe terminal refusal."))]
@@ -309,7 +309,7 @@
          (is (nil? (:seon.error/kind
                     (db/transact! connection
                                   (turn/open-tx {:seon.turn/id "refusal-proof" :seon.turn/agent [:seon.agent/id "root"] :seon.turn/opened-tx "datomic.tx"})))))
-         (let [failure (ai/complete target)
+         (let [failure (ai/complete (seon.schema/handed-projection) target)
                _ (is (= :seon.ai/no-credential (:seon.error/kind failure)))
                result (turn/settle! {:seon.turn.loop/cluster handle
                                      :seon.turn.loop/now (java.util.Date.)

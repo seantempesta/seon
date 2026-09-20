@@ -194,6 +194,7 @@
                          :seon.store/branch branch})
       (let [connection (store/open-branch! opened branch)
             forms (schema.edn/packaged-forms)
+            projection (schema/build-projection forms)
             declarations
             (mapv
              (fn [declaration]
@@ -201,8 +202,8 @@
                  (assoc declaration :db/valueType :db.type/symbol)
                  declaration))
              (schema.datahike/malli->datahike-schema-in
-              {:seon.schema.projection/forms forms}
-              (schema/canonical-database-attributes forms)))]
+              projection
+              (schema/canonical-database-attributes projection)))]
         (try
           (test-support/transacted! connection declarations)
           (let [source-digest (apply str (repeat 64 "a"))]

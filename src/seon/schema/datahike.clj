@@ -11,50 +11,7 @@
             [malli.registry :as mr]
             [seon.schema :as schema]
             [seon.id :as id]
-            [seon.schema.internal :as internal]
-            [seon.schema.form :as schema.form]))
-
-(defn- packaged-forms []
-  ((requiring-resolve 'seon.schema.edn/packaged-forms)))
-
-(defn form-children
-  "The non-property children of one Malli form."
-  {:malli/schema
-   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] [:vector :seon.schema/value]]}
-  [form]
-  (if (vector? form)
-    (into [] (remove map?) (rest form))
-    []))
-
-(defn resolve-malli-form-in
-  "Resolve registered aliases against exactly one immutable projection.
-
-  It takes and returns any authored VALUE, not only a parseable form: the
-  bridge hands it every child of a declaration — predicate symbols,
-  properties maps, unregistered keywords — and answers them unchanged. The
-  declared `:seon.schema/definition` was a narrower promise than the
-  function keeps, which only an armed contract could say out loud."
-  {:malli/schema
-   [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
-  [projection form]
-  (cond
-    (= :seon.db/ref form) form
-    (and (keyword? form)
-         (contains? (:seon.schema.projection/forms projection) form))
-    (let [definition (get (:seon.schema.projection/forms projection) form)]
-      (if (or (keyword? definition) (vector? definition))
-        (resolve-malli-form-in projection definition)
-        form))
-    :else form))
-
-(defn resolve-malli-form
-  "Resolve aliases against the canonical JVM declaration population."
-  {:malli/schema
-   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
-  [form]
-  (resolve-malli-form-in
-   {:seon.schema.projection/forms (packaged-forms)}
-   form))
+            [seon.schema.internal :as internal]))
 
 (def malli-type->datahike-type
   {:string :db.type/string
@@ -71,41 +28,9 @@
    :qualified-symbol :db.type/symbol
    :tuple :db.type/tuple})
 
-(defn form-head
-  "The head of one Malli form.
-
-  It takes any authored VALUE: the bridge walks every child of a
-  declaration through it, and a child is often not a parseable form on its
-  own."
-  {:malli/schema
-   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
-  [form]
-  (if (vector? form) (first form) form))
-
-(defn resolve-datahike-form-in
-  "Resolve aliases and wrappers in one projection to the stored form."
-  {:malli/schema
-   [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
-  [projection form]
-  (let [resolved (resolve-malli-form-in projection form)]
-    (if (= :and (form-head resolved))
-      (resolve-datahike-form-in projection (first (form-children resolved)))
-      resolved)))
-
-(defn resolve-datahike-form
-  "Resolve aliases and wrappers against canonical JVM declarations."
-  {:malli/schema
-   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
-  [form]
-  (resolve-datahike-form-in
-   {:seon.schema.projection/forms (packaged-forms)}
-   form))
-
 (defn- registration-form
   [attr schema-form]
   (pr-str (list 'schema/register! attr schema-form)))
-
-(declare form->datahike-value-type-in)
 
 (defn- literal->datahike-value-type
   [literal]
@@ -123,6 +48,31 @@
     (instance? Float literal)
     :db.type/float
     :else nil))
+
+(defn storage-schema
+  "The compiled native value shape, preserving the named reference token."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:fn malli.core/schema?]]}
+  [compiled]
+  (loop [node compiled seen #{}]
+    (let [reference (when (m/-ref-schema? node) (m/-ref node))
+          identity [(m/options node) reference]]
+      (cond
+        (= :seon.db/ref reference) node
+        (and reference (contains? seen identity))
+        (throw (ex-info "Cyclic native storage declaration."
+                        {:seon.schema/definition (m/form compiled)}))
+        (m/-ref-schema? node) (recur (m/deref node) (conj seen identity))
+        (= :and (m/type node)) (recur (first (m/children node)) seen)
+        :else node))))
+
+(defn value-schema
+  "The compiled child of native-many collections, otherwise the scalar schema."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:fn malli.core/schema?]]}
+  [compiled]
+  (let [node (storage-schema compiled)]
+    (if (#{:set :vector :sequential} (m/type node))
+      (first (m/children node))
+      node)))
 
 (defn- compiled-storage
   "Fold compiled value nodes; reference identity precedes logical dereference."
@@ -154,7 +104,8 @@
 
              (#{:set :vector :sequential} t)
              (assoc child ::cardinality :db.cardinality/many
-                          ::properties properties ::edn? false)
+                          ::properties properties ::edn? false ::collection? true
+                          ::value-type (when-not (::collection? child) (::value-type child)))
 
              (and (= :or t)
                   (some #(and (m/-ref-schema? %)
@@ -171,35 +122,52 @@
                 ::edn? (and (nil? (:seon.db/value-type properties))
                             (or (> (count types) 1) (contains? types nil)))})
 
-             (= := t) {::value-type (literal->datahike-value-type child)}
-             (= :enum t) {::value-type (when (every? keyword? children) :db.type/keyword)}
-             (= :tuple t) {::value-type :db.type/tuple
-                            ::tuple-types (mapv ::value-type children)}
+             (= := t) (if-let [value-type (literal->datahike-value-type child)]
+                        {::value-type value-type}
+                        {::refusal [::literal-not-storable (m/form node)]})
+             (= :enum t) (if (every? keyword? children)
+                           {::value-type :db.type/keyword}
+                           {::refusal [::enum-not-storable (m/form node)]})
+             (= :maybe t) {::refusal [::nilable-attribute (m/form node)]}
+             (= :tuple t) (if-let [invalid (some #(when (or (::refusal %) (::collection? %) (nil? (::value-type %))) %) children)]
+                            {::refusal (or (::refusal invalid) [::value-type-unavailable (m/form node)])}
+                            {::value-type :db.type/tuple
+                             ::tuple-types (mapv ::value-type children)})
              (= 'inst? t) {::value-type :db.type/instant}
              :else {::value-type (malli-type->datahike-type t)})]
-       (cond-> (merge {::cardinality :db.cardinality/one ::properties properties} result)
-         (:seon.db/component properties)
-         (assoc ::value-type :db.type/ref ::edn? false))))))]
+       (merge {::cardinality :db.cardinality/one ::properties properties} result))))) ]
     (fold compiled #{})))
 
-(defn- compiled-attribute
-  "Derive a native declaration from one retained root for parity verification."
+(defn malli->datahike-attr-in
+  "Derive a native declaration from the supplied generation's retained root."
   {:malli/schema [:=> [:cat :map :qualified-keyword] :map]}
   [projection attribute]
   (let [root (mr/schema (:seon.schema.projection/registry projection) attribute)
         _ (when-not (m/schema? root)
-            (throw (ex-info "Missing retained attribute declaration."
-                            {:seon.schema/missing-reference attribute})))
-        {::keys [value-type cardinality properties tuple-types]}
+            (throw (ex-info
+                    (str "The attribute has no registered schema. Run "
+                         (registration-form attribute :string)
+                         " with the intended concrete type before transacting it.")
+                    {::attr attribute ::attribute-absent attribute
+                     :seon.error/kind :user-input})))
+        {::keys [value-type cardinality properties tuple-types refusal]}
         (compiled-storage root)
         value-type (if (= :seon.db/ref attribute) :db.type/ref value-type)
         secondary? (:db.secondary/only properties)]
-    (when-not value-type
-      (throw (ex-info "Compiled attribute has no native storage type."
-                      {::attr attribute ::value-type-unavailable true})))
+    (when (or refusal (nil? value-type))
+      (let [[reason form] (or refusal [::value-type-unavailable (m/form (value-schema root))])
+            message (case reason
+                      ::literal-not-storable "Only scalar Malli literals are storable. Register a literal whose value has a native Datahike type."
+                      ::enum-not-storable "Only keyword Malli enums are storable. Register keyword members."
+                      ::nilable-attribute "Stored attributes cannot use `:maybe`. Register the non-nil base shape, then omit an absent key or mark its entity-map entry `{:optional true}`."
+                      "The Malli form has no Datahike value type. Register a concrete storable shape.")]
+        (throw (ex-info message {::attr attribute ::form form
+                                 reason (if (= reason ::nilable-attribute) ::form true)
+                                 :seon.error/kind :user-input}))))
     (when (and secondary? (not (#{:db.type/float :db.type/double} value-type)))
       (throw (ex-info "A secondary-only attribute must contain floats."
-                      {::attr attribute ::invalid-secondary-attribute attribute})))
+                      {::attr attribute ::invalid-secondary-attribute attribute
+                       :seon.error/kind :user-input})))
     (cond-> {:db/ident attribute
              :db/valueType (if secondary? :db.type/tuple value-type)
              :db/cardinality (if secondary? :db.cardinality/one cardinality)}
@@ -210,6 +178,24 @@
       (:seon.db/index properties) (assoc :db/index true)
       (:seon.db/component properties) (assoc :db/isComponent true)
       (:seon.db/no-history? properties) (assoc :db/noHistory true))))
+
+(defn assert-storable-schema!
+  "Refuse an error declaration whose members could upsert another entity."
+  {:malli/schema [:=> [:cat :keyword [:fn malli.core/schema?]] :nil]}
+  [schema-key compiled]
+    (when (internal/extends-schema? compiled :seon.error/base)
+      (doseq [[attribute _ member] (internal/entity-entries compiled)
+              :let [registry (:registry (m/options member))
+                    declaration (mr/schema registry attribute)]
+              :when (and declaration
+                         (:seon.db/identity
+                          (m/properties (m/schema declaration {:registry registry}))))]
+        (throw (ex-info
+                "An error observation cannot carry an entity's upsert identity."
+                {:seon.error/kind :user-input
+                 :seon.schema/error :seon.schema/invalid-schema
+                 :seon.schema/identity schema-key
+                 :seon.schema/member attribute})))))
 
 (defn- compiled-attribute-selection
   "Select core and storable property attributes from retained canonical roots."
@@ -228,7 +214,7 @@
                              (comp
                               (filter (fn [[attribute properties _]]
                                         (or (not (:optional properties))
-                                            (try (compiled-attribute projection attribute)
+                                            (try (malli->datahike-attr-in projection attribute)
                                                  true
                                                  (catch clojure.lang.ExceptionInfo _ false)))))
                               (map first) (filter qualified-keyword?))
@@ -241,188 +227,18 @@
         (into (sorted-set)
               (comp (mapcat #(keys (m/properties %)))
                     (filter qualified-keyword?)
-                    (filter #(try (compiled-attribute projection %) true
+                    (filter #(try (malli->datahike-attr-in projection %) true
                                   (catch clojure.lang.ExceptionInfo _ false))))
               roots)]
     {::core (vec (sort-by str core))
      ::properties properties
      ::attributes (vec (sort-by str (into core properties)))}))
 
-(defn form->datahike-value-type-in
-  "The Datahike value type represented by a form in one projection."
-  {:malli/schema [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :keyword]}
-  [projection form]
-  (let [resolved (resolve-datahike-form-in projection form)
-        head (form-head resolved)]
-    (cond
-      (= :seon.db/ref head) :db.type/ref
-      (= := head)
-      (or (some-> resolved form-children first
-                  literal->datahike-value-type)
-          (throw
-           (ex-info
-            (str "Only scalar Malli literals are storable. Register a "
-                 "literal whose value has a native Datahike type, for "
-                 "example "
-                 (registration-form :my.domain/enabled [:= true]) ".")
-            {::form resolved
-             ::literal-not-storable true
-             :seon.error/kind :user-input})))
-      (= :enum head)
-      (if (every? keyword? (form-children resolved))
-        :db.type/keyword
-        (throw (ex-info
-                (str "Only keyword Malli enums are storable. Register keyword "
-                     "members, for example "
-                     (registration-form :my.domain/status
-                                        [:enum :open :done]) ".")
-                {::form resolved
-                 ::enum-not-storable true
-                 :seon.error/kind :user-input})))
-      (= :or head)
-      (let [explicit (:seon.db/value-type
-                      (schema.form/attr-form-properties resolved))
-            types (into #{} (map #(try
-                                    (form->datahike-value-type-in projection %)
-                                    (catch Throwable _
-                                      ::unmappable)))
-                        (form-children resolved))]
-        (or explicit
-            (when (and (= 1 (count types))
-                       (not (contains? types ::unmappable)))
-              (first types))
-            ;; Mixed unions deliberately store their logical values as EDN
-            ;; strings. `edn-encoded-attr-in?`, `encode-transaction`, and
-            ;; `decode-attribute-value` own the matching codec at this bridge.
-            :db.type/string))
-      (schema.form/nilable-value-schema? resolved)
-      (throw (ex-info (str "Stored attributes cannot use `:maybe`. Register the "
-                           "non-nil base shape, then omit an absent key or mark "
-                           "its entity-map entry `{:optional true}`.")
-                      {::form resolved
-                       ::nilable-attribute ::form
-                       :seon.error/kind :user-input}))
-      :else
-      (or (malli-type->datahike-type head)
-          (throw (ex-info
-                  (str "The Malli form has no Datahike value type. Register a "
-                       "concrete storable shape, for example "
-                       (registration-form :my.domain/value :string) ".")
-                  {::form resolved
-                   ::value-type-unavailable true
-                   :seon.error/kind :user-input}))))))
-
-(defn form->datahike-value-type
-  "The Datahike value type represented by a canonical JVM Malli form."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :keyword]}
-  [form]
-  (form->datahike-value-type-in
-   {:seon.schema.projection/forms (packaged-forms)}
-   form))
-
-(defn form->cardinality
-  "The Datahike cardinality represented by one Malli form."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :keyword]}
-  [form]
-  (let [resolved (resolve-datahike-form form)]
-    (if (and (vector? resolved)
-             (#{:vector :set :sequential} (form-head resolved)))
-      :db.cardinality/many
-      :db.cardinality/one)))
-
-(defn- form->cardinality-in
-  [projection form]
-  (let [resolved (resolve-datahike-form-in projection form)]
-    (if (and (vector? resolved)
-             (#{:vector :set :sequential} (form-head resolved)))
-      :db.cardinality/many
-      :db.cardinality/one)))
-
-(defn form->child-form
-  "The stored child form for a collection schema, or the scalar form."
-  {:malli/schema
-   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
-  [form]
-  (let [resolved (resolve-datahike-form form)]
-    (if (and (vector? resolved)
-             (#{:vector :set :sequential} (form-head resolved)))
-      (first (form-children resolved))
-      resolved)))
-
-(defn- form->child-form-in
-  [projection form]
-  (let [resolved (resolve-datahike-form-in projection form)]
-    (if (and (vector? resolved)
-             (#{:vector :set :sequential} (form-head resolved)))
-      (first (form-children resolved))
-      resolved)))
-
-(defn malli->datahike-attr-in
-  "Derive one Datahike attribute declaration from one projection."
-  {:malli/schema [:=> [:cat :map :keyword] :map]}
-  [projection attr]
-  (let [raw (or (get (:seon.schema.projection/forms projection) attr)
-                (throw (ex-info
-                        (str "The attribute has no registered schema. Run "
-                             (registration-form attr :string)
-                             " with the intended concrete type before "
-                             "transacting it.")
-                        {::attr attr
-                         ::attribute-absent attr
-                         :seon.error/kind :user-input})))
-        resolved (resolve-malli-form-in projection raw)
-        props (schema.form/attr-form-properties resolved)
-        value-form (form->child-form-in projection resolved)
-        value-type (form->datahike-value-type-in projection value-form)
-        secondary? (boolean (:db.secondary/only props))]
-    (when (and secondary?
-               (not (contains? #{:db.type/float :db.type/double} value-type)))
-      (throw (ex-info
-              (str "A secondary-only attribute must contain floats. Register "
-                   (registration-form attr
-                                      [:float {:db.secondary/only true}]) ".")
-              {::attr attr
-               ::invalid-secondary-attribute attr
-               :seon.error/kind :user-input})))
-    (cond-> {:db/ident attr
-             :db/valueType (if secondary?
-                             :db.type/tuple
-                             value-type)
-             :db/cardinality (if secondary?
-                               :db.cardinality/one
-                               (form->cardinality-in projection resolved))}
-      (= :tuple (form-head (resolve-datahike-form-in projection value-form)))
-      (assoc :db/tupleTypes
-             (mapv #(form->datahike-value-type-in projection %)
-                   (form-children (resolve-datahike-form-in projection value-form))))
-      secondary? (assoc :db.secondary/only true)
-      (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
-      (:seon.db/unique props) (assoc :db/unique :db.unique/value)
-      (:seon.db/index props) (assoc :db/index true)
-      (:seon.db/component props) (assoc :db/isComponent true)
-      (:seon.db/no-history? props) (assoc :db/noHistory true))))
-
-(defn malli->datahike-attr
-  "Derive one Datahike attribute from canonical JVM declarations."
-  {:malli/schema [:=> [:cat :keyword] :map]}
-  [attr]
-  (malli->datahike-attr-in
-   {:seon.schema.projection/forms (packaged-forms)}
-   attr))
-
 (defn malli->datahike-schema-in
   "Derive ordered Datahike declarations from one projection."
   {:malli/schema [:=> [:cat :map [:sequential :keyword]] [:vector :map]]}
   [projection attrs]
   (mapv #(malli->datahike-attr-in projection %) attrs))
-
-(defn malli->datahike-schema
-  "Derive ordered Datahike attribute declarations."
-  {:malli/schema [:=> [:cat [:sequential :keyword]] [:vector :map]]}
-  [attrs]
-  (malli->datahike-schema-in
-   {:seon.schema.projection/forms (packaged-forms)}
-   attrs))
 
 (defn storable-attribute-in?
   "True when an attribute exists and the bridge maps its declared value."
@@ -437,84 +253,40 @@
 
 (defn storable-properties-in
   "Namespaced properties whose own declarations are database-storable."
-  {:malli/schema [:=> [:cat :map :seon.schema/definition] :map]}
-  [projection definition]
+  {:malli/schema [:=> [:cat :map :keyword] :map]}
+  [projection schema-key]
   (into {}
         (filter (fn [[property _]]
                   (storable-attribute-in? projection property)))
-        (schema.form/namespaced-properties definition)))
+        (into {} (filter (fn [[k v]] (and (qualified-keyword? k) (some? v))))
+              (m/properties (mr/schema (:seon.schema.projection/registry projection) schema-key)))))
+
+(defn database-attributes-core-in
+  "Entity members and independently persisted attributes, without metadata properties."
+  {:malli/schema [:=> [:cat :map] [:vector :qualified-keyword]]}
+  [projection]
+  (::core (compiled-attribute-selection projection)))
 
 (defn database-attributes-for-in
-  "Database attributes in `forms`, including properties storable by `projection`."
-  {:malli/schema
-   [:=> [:cat :map [:fn clojure.core/map?]]
-    [:vector :qualified-keyword]]}
+  "Select attributes of authored rows using the complete supplied generation."
+  {:malli/schema [:=> [:cat :map :map] [:vector :qualified-keyword]]}
   [projection forms]
-  ;; Passing the projection answers this bridge's explicit lookups. Supplying
-  ;; the same forms answers registered predicates such as `malli-form?`, which
-  ;; Malli invokes with the candidate value alone while the attribute walk is
-  ;; in progress. Without both, one 525-attribute `/data` derivation resolved
-  ;; the complete classpath population 530 times (7.1-8.2 s, 2026-08-10).
-  (schema/call-with-forms
-   (:seon.schema.projection/forms projection)
-   #(->> (schema.form/property-attributes forms)
-         (filter (fn [attribute]
-                   (storable-attribute-in? projection attribute)))
-         (into
-          (reduce-kv
-           (fn [attributes _ definition]
-             (if (true? (:seon.db/attributes (schema.form/schema-properties forms definition)))
-               (reduce
-                (fn [selected entry]
-                  (let [attribute (first entry)
-                        optional? (and (= 3 (count entry)) (:optional (second entry)))]
-                    (if (and optional? (not (storable-attribute-in? projection attribute)))
-                      selected
-                      (conj selected attribute))))
-                attributes (schema.form/map-entries forms definition))
-               attributes))
-           (into #{}
-                 (filter (fn [attribute]
-                           (or (storable-attribute-in? projection attribute)
-                               (some (set (keys (schema.form/attr-form-properties
-                                                (get forms attribute))))
-                                     [:seon.db/identity :seon.db/unique :seon.db/index
-                                      :seon.db/component :seon.db/no-history? :db.secondary/only]))))
-                 (schema.form/database-attributes forms))
-           forms))
-         (sort-by str)
-         vec)))
+  (::attributes (compiled-attribute-selection
+                 (assoc projection :seon.schema.projection/forms forms))))
 
 (defn database-attributes-in
   "Database attributes plus bridge-storable schema-row properties."
   {:malli/schema [:=> [:cat :map] [:vector :qualified-keyword]]}
   [projection]
-  (database-attributes-for-in
-   projection (:seon.schema.projection/forms projection)))
+  (::attributes (compiled-attribute-selection projection)))
 
 (defn edn-encoded-attr-in?
-  "True when an attribute in `projection` uses the EDN string fallback."
+  "Whether a retained attribute uses the heterogeneous-union EDN string codec."
   {:malli/schema [:=> [:cat :map :keyword] :boolean]}
   [projection attr]
   (boolean
-   (when (contains? (:seon.schema.projection/forms projection) attr)
-     (let [form (resolve-datahike-form-in
-                 projection
-                 (get (:seon.schema.projection/forms projection) attr))
-           explicit
-           (:seon.db/value-type (schema.form/attr-form-properties form))
-           types
-           (when (= :or (form-head form))
-             (into #{}
-                   (map #(try
-                           (form->datahike-value-type-in projection %)
-                           (catch Throwable _
-                             ::unmappable)))
-                   (form-children form)))]
-       (and types
-            (nil? explicit)
-            (or (> (count types) 1)
-                (contains? types ::unmappable)))))))
+   (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
+     (::edn? (compiled-storage compiled)))))
 
 (defn- refuse-slot!
   [rule attr value]

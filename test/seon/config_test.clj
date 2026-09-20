@@ -1,13 +1,12 @@
 (ns seon.config-test
   "Acceptance proofs for the one manifest compiler and config apply."
-  (:require [clojure.edn :as edn]
+  (:require [malli.core] [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.agent :as agent]
             [seon.cluster.agent :as cluster-agent]
-            [seon.schema.form :as schema.form]
             [seon.config :as config]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
@@ -41,7 +40,7 @@
             forms (:seon.schema.projection/forms projection)
             dials (into {}
                         (keep (fn [[attribute definition]]
-                                (let [properties (schema.form/attr-form-properties definition)]
+                                (let [properties (malli.core/properties (seon.schema/structural-schema definition))]
                                   (when (and (:seon.config/dial properties)
                                              (:seon.config/per-agent properties))
                                     [attribute properties]))))

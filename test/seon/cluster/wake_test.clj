@@ -253,7 +253,7 @@
   (with-connection
     (fn [connection]
       (let [wakes (wake/wake-attributes (db/db connection))
-            commits (turn/committed-attributes)]
+            commits (turn/committed-attributes (seon.schema/handed-projection))]
         (is (seq wakes) "the routed set is not empty")
         (is (seq commits) "and neither is the committed set")
         (is (empty? (set/intersection wakes commits))
@@ -731,7 +731,7 @@
     (with-connection
       (fn [connection]
         (let [wakes (wake/wake-attributes (db/db connection))
-              commits (turn/committed-attributes)]
+              commits (turn/committed-attributes (seon.schema/handed-projection))]
           (is (every? (fn [attribute] (not (contains? commits attribute)))
                       wakes))
           (is (every? (fn [attribute] (not (contains? wakes attribute)))

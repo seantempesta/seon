@@ -346,7 +346,8 @@
              :seon.error/diagnostic-offending false
              :seon.error/diagnostic-cause :install-refused
              :seon.error/diagnostic-evidence {:seon.fn/sym (:seon.fn/sym report)}})
-           report
+           (assoc (dissoc report :seon.fn/sym)
+                  :seon.test.accretion/function-sym (:seon.fn/sym report))
            (select-keys (get-in report [:seon.test.accretion/auto-check
                                        :seon.test.accretion/failure])
                         [:seon.test.accretion/arguments

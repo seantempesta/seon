@@ -32,7 +32,7 @@
     (let [run-drives! (ns-resolve 'seon.bootstrap-drive 'run-drives!)
           reports
           (with-redefs [ai/complete
-                        (fn [_]
+                        (fn [_projection _]
                           {:seon.ai/text contracted-o1-reply})]
             (run-drives!
              {:seon.bootstrap-drive/objective :o1

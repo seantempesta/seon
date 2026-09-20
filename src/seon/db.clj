@@ -34,7 +34,8 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form])
+            [malli.registry :as mr]
+            [seon.schema.internal :as internal])
   (:import [datahike.db AsOfDB DB]
            [java.util.concurrent TimeoutException]
            [datalog.parser.type And BindColl BindTuple BindScalar Constant FindColl FindRel FindScalar
@@ -2177,9 +2178,7 @@
         (into #{}
               (keep (fn [attribute]
                       (:seon.program/row-schema
-                       (schema.form/attr-form-properties
-                        (schema.datahike/resolve-malli-form-in
-                         projection (get forms attribute))))))
+                       (some-> (mr/schema (:seon.schema.projection/registry projection) attribute) m/properties))))
               attributes)]
     (cond
       (= 1 (count declared)) (first declared)
@@ -2946,68 +2945,45 @@
      database function-symbol arity-order))
 
 (defn- terminal-schema-key
-  [forms schema-key]
-  (loop [current schema-key, seen #{}]
-    (let [definition (get forms current)]
-      (cond
-        (contains? seen current) nil
-        (and (keyword? definition) (contains? forms definition))
-        (recur definition (conj seen current))
-        :else current))))
+  [compiled]
+  (loop [node compiled current nil seen #{}]
+    (if (m/-ref-schema? node)
+      (let [reference (m/-ref node)
+            scope [(m/options node) reference]]
+        (when-not (contains? seen scope)
+          (recur (m/deref node) (or reference current) (conj seen scope))))
+      current)))
 
 (defn- collection-entry-schemas
-  [forms schema-value]
-  (letfn [(entries [value seen]
-            (cond
-              (and (keyword? value)
-                   (contains? forms value)
-                   (not (contains? seen value)))
-              (entries (get forms value) (conj seen value))
-
-              (vector? value)
-              (let [body (remove map? (rest value))]
-                (case (first value)
-                  :vector [(last body)]
-                  :sequential [(last body)]
-                  :set [(last body)]
-                  :or (mapcat #(entries % seen) body)
-                  :and (mapcat #(entries % seen) body)
-                  []))
-
-              :else []))]
-    (entries schema-value #{})))
+  [compiled]
+  (letfn [(entries [node seen]
+            (let [scope [(m/options node) (when (m/-ref-schema? node) (m/-ref node))]]
+              (cond
+                (and (m/-ref-schema? node) (not (contains? seen scope)))
+                (entries (m/deref node) (conj seen scope))
+                (#{:vector :sequential :set} (m/type node)) [(first (m/children node))]
+                (#{:or :and} (m/type node)) (mapcat #(entries % seen) (m/children node))
+                :else [])))]
+    (entries compiled #{})))
 
 (defn- row-identity-attribute
-  [forms row-schema identity-attributes]
-  (let [row-form
-        (loop [value row-schema, seen #{}]
-          (if (and (keyword? value)
-                   (contains? forms value)
-                   (not (contains? seen value)))
-            (recur (get forms value) (conj seen value))
-            value))]
-    (when (and (vector? row-form) (= :map (first row-form)))
-      (->> (schema.form/map-entries row-form)
-           (keep
-            (fn [[entry-key & declaration]]
-              (let [value-schema (last declaration)
-                    terminal-key
-                    (when (keyword? value-schema)
-                      (terminal-schema-key forms value-schema))]
-                (when (and terminal-key
-                           (not (some map? declaration))
-                           (contains? identity-attributes terminal-key))
-                  entry-key))))
-           (sort-by str)
-           first))))
+  [compiled identity-attributes]
+  (->> (internal/entity-entries compiled)
+       (keep (fn [[entry-key properties child]]
+               (let [terminal-key (terminal-schema-key child)]
+                 (when (and terminal-key (nil? properties)
+                            (contains? identity-attributes terminal-key))
+                   entry-key))))
+       (sort-by str)
+       first))
 
 (defn- result-identity-attribute
   [database projection output-refs]
-  (let [forms (:seon.schema.projection/forms projection)
+  (let [registry (:seon.schema.projection/registry projection)
         identities (set (identity-attributes database))]
     (->> output-refs
-         (mapcat #(collection-entry-schemas forms %))
-         (keep #(row-identity-attribute forms % identities))
+         (mapcat #(collection-entry-schemas (mr/schema registry %)))
+         (keep #(row-identity-attribute % identities))
          distinct
          (sort-by str)
          first)))
@@ -3356,54 +3332,37 @@
        :tx-meta {::receipt *receipt*}})))
 
 (defn- write-entity-schemas
-  "Identity attribute -> the entity schemas a row carrying it is validated as.
-
-   An identity attribute that DECLARES its row schema (`:seon.program/row-schema`
-   on the attribute, e.g. `:seon.test/sym` -> `:seon.test/test`) registers that
-   one schema only. Error facets (`[:and :seon.error/base [:map …]]`) may
-   observe such an identity as a required member — the test a runner could
-   not resolve, the turn a bootstrap refused — and are entity-shaped through
-   the base; before this rule every test row was validated as every facet
-   that observed `:seon.test/sym` and refused for a missing `:seon.error/at`
-   (2026-09-21, the canonical population could not be built at HEAD). An
-   identity without a declared row schema keeps the previous rule: every
-   entity schema requiring it."
+  "Identity attribute -> every entity schema requiring that attribute."
   [projection]
   (schema/projection-cache-value
    projection ::write-required-identity-schemas
    (fn []
-     (let [forms (:seon.schema.projection/forms projection)
-           declared-row-schema
-           (fn [attribute]
-             (:seon.program/row-schema
-              (schema.form/attr-form-properties
-               (schema.datahike/resolve-malli-form-in projection (get forms attribute)))))]
+     (let [forms (:seon.schema.projection/forms projection)]
        (reduce-kv
-        (fn [by-identity schema-key authored]
-          (let [form (schema.datahike/resolve-malli-form-in projection authored)]
-            (if (and (schema.form/map-shape? form)
-                     (:seon.db/attributes (schema.form/schema-properties form)))
+        (fn [by-identity schema-key _authored]
+          (let [compiled (mr/schema (:seon.schema.projection/registry projection) schema-key)]
+            (if (and (internal/entity-schema? compiled)
+                     (:seon.db/attributes (internal/entity-properties compiled)))
               (reduce
                (fn [result [attribute options]]
                  (if (and (not (and (map? options) (:optional options)))
-                          (schema/identity-attr? forms attribute)
-                          (let [row (declared-row-schema attribute)]
-                            (or (nil? row) (= row schema-key))))
+                          (schema/identity-attr? projection attribute))
                    (update result attribute (fnil conj []) schema-key)
                    result))
-               by-identity (schema.form/map-entries form))
+               by-identity (internal/entity-entries compiled))
               by-identity)))
         {} forms)))))
 
 (defn- write-validator
-  [projection form]
+  [projection compiled]
   (schema/projection-cache-value
-   projection [::write-validator form]
-   #(m/validator form {:registry (:seon.schema.projection/registry projection)})))
+   projection [::write-validator compiled]
+   #(m/validator compiled)))
 
 (defn- invalid-write
-  [projection attribute form value path entity-form cause candidates]
-  (let [problem
+  [_projection attribute compiled value path entity-form cause candidates]
+  (let [form (if (= ::attribute-not-installed cause) compiled (m/form compiled))
+        problem
         (if (= ::attribute-not-installed cause)
           {:seon.error/argument "transaction data"
            :seon.error/path path
@@ -3416,7 +3375,7 @@
            {:seon.error/argument "transaction data"
             :seon.error/path path
             :seon.error/problem
-            (cond-> {:schema (m/schema form {:registry (:seon.schema.projection/registry projection)})
+            (cond-> {:schema compiled
                      :value value :in path}
               (= :malli.core/missing-key cause) (assoc :type cause))}))]
   (diagnostic
@@ -3469,14 +3428,14 @@
 (defn- write-value
   "Normalize Datahike's reference and many-value syntax for Malli only."
   [database projection attribute value single?]
-  (let [form (schema.datahike/resolve-datahike-form-in projection attribute)
+  (let [form (schema.datahike/storage-schema (mr/schema (:seon.schema.projection/registry projection) attribute))
         many? (and (not single?) (db.utils/multival? database attribute))
         normalize (if (db.utils/ref? database attribute)
                     #(if (or (map? %) (sequential? %)) 0 %)
                     identity)]
     (if many?
       (let [values (write-many-values database attribute value)]
-        (case (schema.datahike/form-head form)
+        (case (m/type form)
           :set (into #{} (map normalize) values)
           (mapv normalize values)))
       (normalize value))))
@@ -3515,17 +3474,15 @@
                                        entity-form))
                     children))
             form (if (and single? (db.utils/multival? database attribute))
-                   (first (schema.datahike/form-children
-                           (schema.datahike/resolve-datahike-form-in
-                            projection attribute)))
-                   attribute)]
+                   (schema.datahike/value-schema (mr/schema (:seon.schema.projection/registry projection) attribute))
+                   (mr/schema (:seon.schema.projection/registry projection) attribute))]
         (or nested-error
             ;; Dependency-owned schema attributes have no authored Malli form;
             ;; Datahike continues to validate and classify those declarations.
             (when (and authored
                        (not ((write-validator projection form)
                              (write-value database projection attribute value single?))))
-              (invalid-write projection attribute authored value path entity-form
+              (invalid-write projection attribute form value path entity-form
                              ::invalid-value nil)))))))
 
 (defn- write-key-candidates
@@ -3596,17 +3553,17 @@
    (fn []
      (let [authored (get (:seon.schema.projection/forms projection) attribute)
            form (when authored
-                  (schema.datahike/resolve-datahike-form-in projection attribute))
+                  (schema.datahike/storage-schema (mr/schema (:seon.schema.projection/registry projection) attribute)))
            decode (if (and authored (schema.datahike/edn-encoded-attr-in? projection attribute))
                     #(schema.datahike/decode-attribute-value-in projection attribute %)
                     identity)]
        {::decode decode
-        ::normalize-many (if (= :set (schema.datahike/form-head form)) set vec)
+        ::normalize-many (if (= :set (some-> form m/type)) set vec)
         ::validate (when authored
                      (write-validator projection
                                       (if many?
-                                        (first (schema.datahike/form-children form))
-                                        attribute)))}))))
+                                        (schema.datahike/value-schema form)
+                                        (mr/schema (:seon.schema.projection/registry projection) attribute))))}))))
 
 (defn- write-entity-value
   "Read a resulting entity as logical values without expanding reference graphs."
@@ -3649,7 +3606,7 @@
       (some
        (fn [schema-key]
          (when-not
-          ((write-validator projection schema-key) normalized)
+          ((write-validator projection (mr/schema (:seon.schema.projection/registry projection) schema-key)) normalized)
            (let [explain (schema/projection-cache-value
                           projection [::write-explainer schema-key]
                           #(schema/projection-explainer projection schema-key))
@@ -3660,7 +3617,7 @@
                          :seon.error/unknown
                          (:value failure))
                  refusal (invalid-write projection attribute
-                                        (or (get forms attribute) (get forms schema-key))
+                                        (:schema failure)
                                         value (into [entity-id] in) (get forms schema-key)
                                         (or (:type failure) ::invalid-entity) nil)]
              (-> refusal
@@ -3681,8 +3638,7 @@
                          (merge (dbi/-schema before) (dbi/-schema after)))
         targets (into {} (map (fn [a]
                                [a (:seon.db/component-schema
-                                   (schema.form/attr-form-properties
-                                    (get (:seon.schema.projection/forms projection) a)))]))
+                                   (m/properties (mr/schema (:seon.schema.projection/registry projection) a)))]))
                       components)
         seen (volatile! #{})
         rows (volatile! {})
@@ -3918,7 +3874,7 @@
         (into []
               (mapcat
                (fn [[schema-key encoded]]
-                 (let [properties (schema.form/attr-form-properties (edn/read-string encoded))]
+                 (let [properties (m/properties (schema/structural-schema (edn/read-string encoded)))]
                    (keep (fn [property]
                            (let [renderer (get properties property)]
                              (when (and (qualified-symbol? renderer)
@@ -4140,9 +4096,8 @@
   (schema/projection-cache-value
    projection ::retention-rules
    #(into []
-          (keep (fn [[attribute form]]
-                  (let [properties (schema.form/attr-form-properties
-                                    (schema.datahike/resolve-malli-form-in projection form))]
+          (keep (fn [[attribute _form]]
+                  (let [properties (m/properties (mr/schema (:seon.schema.projection/registry projection) attribute))]
                     (when-let [activation (:seon.db/append-only-after properties)]
                       {:seon.db/attribute attribute
                        :seon.db/activation activation
@@ -4304,9 +4259,7 @@
                     (map :v (d/datoms database :aevt bound-attribute)))
                   declared-bound
                   (:seon.config/default
-                   (schema.form/attr-form-properties
-                    (get (:seon.schema.projection/forms projection)
-                         bound-attribute)))
+                   (m/properties (mr/schema (:seon.schema.projection/registry projection) bound-attribute)))
                   prepared
                   (jdk-integers->long
                    (let [request (stamp-receipt transaction)

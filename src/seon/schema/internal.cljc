@@ -6,16 +6,12 @@
    (the `*.internal` convention drops them from the curated namespaces
    body — see `seon.agent.ctx.ns-name/hidden-ns-name?`).
 
-   Reusable Malli-form inspection lives in `seon.schema.form`. The registry
-   atom lives in `seon.schema`;
-   the identity check ([[identity-attr?]]) reads it through a passed-in
-   `schemas` map so this namespace never requires `seon.schema` (no cycle:
-   schema → schema.internal only)."
+   Compiled schemas carry their registry scope. This namespace never requires
+   `seon.schema`; the dependency is schema → schema.internal only."
   (:require [clojure.string :as str]
             [malli.core :as m]
             [malli.registry :as mr]
-            [malli.util :as mu]
-            [seon.schema.form :as form]))
+            [malli.util :as mu]))
 
 (def ^:private undefined-types #{:any :some :nil})
 
@@ -131,13 +127,13 @@
    justified only by its own recorded exemption, reason and generator;
    adding another permissive slot therefore creates another finding."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
-  [{:seon.schema/keys [definition stored? forms]}]
+  [{:seon.schema/keys [compiled stored?]}]
   (letfn [(visit [node path input-slot? guarded? seen]
-            (let [tag (if (vector? node) (first node) node)
-                  properties (when (and (vector? node) (map? (second node)))
-                               (second node))
-                  start (if properties 2 1)
-                  children (when (vector? node) (subvec node start))
+            (let [tag (m/type node)
+                  properties (m/properties node)
+                  children (m/children node)
+                  reference (when (m/-ref-schema? node) (m/-ref node))
+                  node-id (or (reference-id node) node)
                   reason (:seon.schema.admission/reason properties)
                   justified? (and (= :seon.schema.admission/polymorphic-boundary
                                      (:seon.schema.admission/exemption properties))
@@ -148,40 +144,42 @@
                             (#{:any :some} tag) :undefined
                             (and stored? (= :maybe tag)) :stored-nil
                             (and input-slot?
-                                 (or (= :seon.schema/value tag)
-                                     (and (= :schema tag)
-                                          (= [:seon.schema/value] children)))) :bare-value
+                                 (or (= :seon.schema/value reference)
+                                     (= :seon.schema/value tag))) :bare-value
                             (and (= :* tag)
-                                 (some #{:seon.schema/value} children)) :value-tail
+                                 (some #(and (m/schema? %)
+                                             (or (= :seon.schema/value (m/type %))
+                                                 (and (m/-ref-schema? %)
+                                                      (= :seon.schema/value (m/-ref %))))) children)) :value-tail
                             (and input-slot? (#{:* :+ :repeat} tag)
                                  (not guarded?)) :unguarded-tail)]
               (into
                (if problem
                  [(cond-> {:seon.schema/path path
-                           :seon.schema/definition node
+                           :seon.schema/definition (m/form node)
                            :seon.schema.advisory/kind problem
                            :seon.schema/justified? (boolean (and justified? (not= :stored-nil problem)))}
                     (and justified? (not= :stored-nil problem))
                     (assoc :seon.schema.admission/reason reason))]
                  [])
                (concat
-                (when (and stored? (keyword? node) (get forms node)
-                           (not (contains? seen node)))
-                  (visit (get forms node) (conj path node) false guarded? (conj seen node)))
+                (when (and stored? reference (not (contains? seen node-id)))
+                  (visit (m/deref node) (conj path 0) false guarded? (conj seen node-id)))
                (mapcat
                 (fn [[offset child]]
-                  (let [child-path (conj path (+ start offset))]
+                  (let [child-path (conj path offset)]
                     (cond
-                      (#{:enum := :fn :ref :re} tag) []
+                      (or reference (#{:enum := :fn :ref :re} tag)) []
                       (#{:map :mapn :catn :altn :orn :multi} tag)
                       (if (vector? child)
-                        (visit (peek child) (conj child-path (dec (count child)))
+                        (visit (peek child) (conj path (first child))
                                (= :catn tag) guarded? seen) [])
-                      :else
+                      (m/schema? child)
                       (visit child child-path (= :cat tag)
-                             (if (= :=> tag) (= 3 (count children)) guarded?) seen))))
+                             (if (= :=> tag) (= 3 (count children)) guarded?) seen)
+                      :else [])))
                 (map-indexed vector children))))))]
-    (visit definition [] false false #{})))
+    (visit compiled [] false false #{})))
 
 (defn- contract-error!
   [identity definition path error message data]
@@ -381,49 +379,16 @@
      walk-options)
     @advisories))
 
-(defn identity-attr?
-  "True when the schema form for `attr-key` in `schemas` carries
-   `{:seon.db/identity true}`. Covers the three shapes Seon uses:
-     [:string  {:seon.db/identity true}]
-     [:keyword {:seon.db/identity true}]
-     [:and {:seon.db/identity true} :seon.db/id]"
-  {:malli/schema
-   [:=> [:cat :map :keyword] :boolean]}
-  [schemas attr-key]
-  (boolean
-   (some-> (get schemas attr-key) form/attr-form-properties :seon.db/identity)))
-
-(defn map-identity-entry-key
-  "The first entry key of `:map` schema `v` that is itself an identity
-   attr in `schemas` (`{:seon.db/identity true}`), or nil."
-  {:malli/schema
-   [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :keyword]]}
-  [schemas v]
-  (when (form/map-shape? schemas v)
-    (some (fn [entry]
-            (when-let [k (and (vector? entry) (first entry))]
-              (when (identity-attr? schemas k) k)))
-          (form/map-entries schemas v))))
-
-
 (defn map-required-attrs
-  "Required map-entry keys reached through refs and `:and` composition.
-
-   This is the required-attrs index for schemas-as-queryable-data. Optional
-   entries and Malli's default sentinel are excluded."
-  {:malli/schema
-   [:function [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe [:vector :keyword]]] [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe [:vector :keyword]]]]}
-  ([v]
-   (map-required-attrs {} v))
-  ([schemas v]
-   (not-empty
-    (vec (sort-by str
-                  (keep (fn [entry]
-                          (let [k (first entry)]
-                            (when (and (keyword? k) (not= k :malli.core/default)
-                                       (not (:optional (second entry)))) k)))
-                        (form/map-entries schemas v)))))))
-
+  "Required keys of a compiled entity composition, excluding Malli's default."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:maybe [:vector :keyword]]]}
+  [compiled]
+  (not-empty
+   (vec (sort-by str
+                 (keep (fn [[k properties _]]
+                         (when (and (keyword? k) (not= k :malli.core/default)
+                                    (not (:optional properties))) k))
+                       (entity-entries compiled))))))
 
 (defn- missing-schema-reference
   [error]
@@ -511,11 +476,10 @@
    population."
   {:malli/schema
    [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :nil]}
-  [_schemas k v]
-  (when (form/nilable-value-schema? v)
-    (let [body (rest v)
-          body (if (and (seq body) (map? (first body))) (rest body) body)
-          inner (first body)]
+  [_schemas k compiled]
+  (when (= :maybe (m/type compiled))
+    (let [v (m/form compiled)
+          inner (m/form (first (m/children compiled)))]
       (throw (ex-info
                (str "schema/register! " k ": " (pr-str v)
                     " — a registered value is never nil in seon (absent = the "

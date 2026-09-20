@@ -9,7 +9,7 @@
   The deadlines are short (a few hundred ms) and the runaway cases are
   genuinely unbounded, so a regression does not slow the suite: it
   fails it."
-  (:require [clojure.edn :as edn]
+  (:require [malli.core] [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -37,7 +37,6 @@
             [seon.render.web :as render.web]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
@@ -763,10 +762,10 @@
         "namespace dependencies observe their symbol values")))
 
 (deftest base-context-bindings-resolve-without-dependency-stubs
-  (let [injected (set (program/base-context-injected-symbols))
+  (let [injected (set (program/base-context-injected-symbols (seon.schema/handed-projection)))
         public-namespaces
         (into #{}
-              (keep #(some-> % schema.form/attr-form-properties
+              (keep #(some-> % (comp malli.core/properties seon.schema/structural-schema)
                              :seon.sci.binding/public-namespace))
               (vals (:seon.schema.projection/forms (schema/handed-projection))))
         dependency-bindings
@@ -781,7 +780,7 @@
         "first-party bindings resolve to program declarations")
     (is (empty? (set/intersection dependency-bindings published))
         "copied dependency bindings do not manufacture first-party program rows")
-    (is (every? #(sci/resolve ctx %) (program/base-context-injected-symbols))
+    (is (every? #(sci/resolve ctx %) (program/base-context-injected-symbols (seon.schema/handed-projection)))
         "every declared injection resolves in the constructed context")))
 
 (deftest
@@ -2442,7 +2441,7 @@
       (let [reader-row {:seon.schema/key :example.storable/order
                         :seon.schema/form "[:string #:seon.db{:identity true}]"
                         :seon.schema.admission/source :agent}
-            canonical (program/declaration-row reader-row :all :agent)]
+            canonical (program/declaration-row (seon.schema/handed-projection) reader-row :all :agent)]
         (test-support/transacted! connection [canonical])
         (is (not= (:seon.schema/form reader-row) (:seon.schema/form canonical))
             "the writer's canonical printing genuinely differs from the reader's")

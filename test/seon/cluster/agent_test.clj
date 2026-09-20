@@ -298,7 +298,7 @@
 (defn- recording-completer
   "A stub `ai/complete`: the ledger of calls is the countable oracle."
   [ledger text-fn]
-  (fn [request]
+  (fn [_projection request]
     (swap! ledger conj request)
     {:seon.ai/text (text-fn request)}))
 
@@ -891,7 +891,7 @@
         (try
           (with-redefs
             [ai/complete
-             (fn [_request]
+             (fn [_projection _request]
                (with-open [client (Socket. "127.0.0.1"
                                            (.getLocalPort server))]
                  (.countDown provider-entered)
@@ -1211,7 +1211,7 @@
                                              {:seon.config.run/max-episode-runs 100})])
         (try
           (with-redefs [ai/complete
-                        (fn [request]
+                        (fn [_projection request]
                           (swap! ledger conj request)
                           (.countDown provider-entered)
                           (test-support/await-event! release-provider ::release-provider)

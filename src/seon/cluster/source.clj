@@ -22,7 +22,8 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form])
+            [malli.core :as m]
+            [malli.registry :as mr])
   (:import [java.nio.file Files]))
 
 (schema.edn/load! {})
@@ -404,9 +405,10 @@
         head (database held-store (:seon.source/commit-id published))
         allowance (or (:seon.test/remaining-ms completion)
                       (:seon.config/default
-                        (schema.form/attr-form-properties
-                          (get-in (schema/projection-from-database head)
-                                  [:seon.schema.projection/forms :seon.test/check-time-limit-ms]))))
+                        (m/properties
+                          (mr/schema (:seon.schema.projection/registry
+                                      (schema/projection-from-database head))
+                                     :seon.test/check-time-limit-ms))))
         deadline (+ (System/nanoTime) (* 1000000 allowance))]
     (loop [attempt 1]
       (let [outcome (try
@@ -479,7 +481,8 @@
     populate-request :seon.source/populate-request
     progress! :seon.source/progress!
     :or {progress! (constantly nil)}}]
-  (let [input-digest (publication-input-digest! (or directory (fs/source-directory)))
+  (let [projection (schema/declaration-projection)
+        input-digest (publication-input-digest! (or directory (fs/source-directory)))
           populate-fn (resolve-population populate source-digest)
           activation-fn (resolve-activation activation source-digest)
           expected-commit (or requested-commit (:seon.source/commit-id (current store)))
@@ -503,7 +506,7 @@
                                 (not= definition
                                       (select-keys (get (:schema @connection) (:db/ident row))
                                                    (keys definition)))))
-                            (schema.datahike/malli->datahike-schema source-attributes))]
+                            (schema.datahike/malli->datahike-schema-in projection source-attributes))]
               (when (seq missing)
                 (require-committed! (db/transact! connection {:tx-data missing})
                                    ::scratch-schema-refused

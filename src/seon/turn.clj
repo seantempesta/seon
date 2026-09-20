@@ -29,7 +29,8 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
+            [malli.registry :as mr]
+            [seon.schema.internal :as internal]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as reader]
@@ -1001,8 +1002,8 @@
   "Database attributes derived by the affected schema forms."
   [projection affected]
   (set
-   (schema.form/database-attributes
-    (select-keys (:seon.schema.projection/forms projection) affected))))
+   (schema.datahike/database-attributes-core-in
+    (update projection :seon.schema.projection/forms select-keys affected))))
 
 (defn- current-schema-data-attributes
   "Installed affected database attributes carrying current datoms in `db`."
@@ -1272,7 +1273,10 @@
              (fn [[_ _ declaration]]
                [:db/retractEntity (:db/id declaration)]))
             declarations))
-    (let [row (or (program/declaration-row row :all :agent)
+    (let [projection (if (or (:seon.schema/key row) (:seon.fn/spec row))
+                       (declaration-projection db request)
+                       (db/carried-projection db))
+          row (or (program/declaration-row projection row :all :agent)
                   (refuse! `receipt-settle-call
                            ::row-not-admitted request))
           [identity identity-value] (program/row-identity row)
@@ -1287,7 +1291,7 @@
             (when (or (= :seon.schema/key identity)
                       (and (= :seon.fn/sym identity)
                            (:seon.fn/spec row)))
-              (declaration-projection db request))
+              projection)
             schema-redefinition?
             (and (= identity :seon.schema/key)
                  existing
@@ -1985,7 +1989,7 @@
     (and (nil? (:seon.cluster.eval/error evaluation))
          (seq (:seon.cluster.eval/read-evidence evaluation))
          (vector? events)
-         (not-any? #(program/declaration-row % :all :agent) events)
+         (not-any? #(program/declaration-row (db/carried-projection database) % :all :agent) events)
          (nil? (db/q '[:find ?transaction . :in $ ?evaluation
                         :where [?transaction :seon.db/receipt ?evaluation]]
                       database evaluation-id))
@@ -3162,8 +3166,8 @@
   reviewed list — it exists so the wake/commit disjointness property
   (C2) has two computed sets to compare rather than one list to
   believe."
-  {:malli/schema [:=> [:cat] [:set :keyword]]}
-  []
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:set :keyword]]}
+  [projection]
   ;; WHAT THIS SET IS NOT, since the messaging rung: it is the loop's
   ;; ROUTINE bookkeeping, not everything the loop can ever commit. A
   ;; turn that delivers an agent's message commits
@@ -3192,8 +3196,8 @@
   ;; builds it.
   (into #{}
         (comp (mapcat (fn [entity]
-                        (schema.form/map-entries
-                         (schema/schema-definition entity))))
+                        (internal/entity-entries
+                         (mr/schema (:seon.schema.projection/registry projection) entity))))
               (filter vector?)
               (map first))
         [:seon.turn/turn
@@ -3880,7 +3884,7 @@
     agent-id :seon.agent/id}]
   (let [settings (ai/settings (config/effective db cluster-name)
                               (ai/agent-overlay db agent-id))
-        targets (ai/targets db settings)
+        targets (ai/targets (db/carried-projection db) db settings)
         primary (:seon.ai/primary targets)
         backup (:seon.ai/backup targets)
         strategy (ai/retry-strategy settings)]
@@ -4374,6 +4378,7 @@
                waits schedule
                system nil]
           (let [completion (ai/complete
+                            (db/carried-projection db)
                             (cond-> (assoc target :seon.ai/prompt text)
                               system (assoc :seon.ai/system system)
                               sink (assoc :seon.ai/stream? true

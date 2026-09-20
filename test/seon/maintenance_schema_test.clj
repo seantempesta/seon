@@ -90,7 +90,7 @@
                 :db/valueType :db.type/ref
                 :db/cardinality :db.cardinality/one
                 :db/isComponent true}
-               (schema.datahike/malli->datahike-attr attribute)))))))
+               (schema.datahike/malli->datahike-attr-in (seon.schema/handed-projection) attribute)))))))
 
 (deftest receipt-request-and-operation-result-attributes-are-queryable
   (test-support/with-database

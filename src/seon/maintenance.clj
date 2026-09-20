@@ -5,7 +5,8 @@
             [seon.error :as error]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]))
+            [malli.core :as m]
+            [malli.registry :as mr]))
 
 (schema.edn/load! {})
 
@@ -18,7 +19,7 @@
          (keep (fn [[schema-key definition]]
                  (when-let [projection
                             (:seon.maintenance/result-projection
-                             (schema.form/namespaced-properties definition))]
+                             (m/properties (mr/schema (:seon.schema.projection/registry schema-projection) schema-key)))]
                    (when ((schema/projection-validator schema-projection schema-key) result)
                      [schema-key projection]))))
          (sort-by (comp str first))
@@ -400,12 +401,12 @@
    (last-collection-in database managed-root)))
 
 (defn- attention-rules
-  []
-  (->> (schema/registered-schemas)
-       (keep (fn [[attribute definition]]
+  [projection]
+  (->> (keys (:seon.schema.projection/forms projection))
+       (keep (fn [attribute]
                (when-let [rule
                           (:seon.maintenance/attention-when
-                           (schema.form/attr-form-properties definition))]
+                           (m/properties (mr/schema (:seon.schema.projection/registry projection) attribute)))]
                  [attribute rule])))
        (sort-by (comp str first))))
 
@@ -420,7 +421,7 @@
            :non-empty (boolean (seq value))))))
 
 (defn- entry-attention
-  [entry]
+  [rules entry]
   (let [receipt (:seon.maintenance/receipt-facts entry)
         result (:seon.maintenance/result-facts entry)
         error (:seon.maintenance/error-facts entry)]
@@ -429,11 +430,11 @@
       error :error
       (:seon.maintenance.receipt/interrupted-at receipt) :interrupted
       (nil? result) :unterminated
-      :else (some #(when (rule-triggered? result %) %) (attention-rules)))))
+      :else (some #(when (rule-triggered? result %) %) rules))))
 
 (defn- succeeded?
-  [entry]
-  (nil? (entry-attention entry)))
+  [rules entry]
+  (nil? (entry-attention rules entry)))
 
 (defn- latest-at
   [entries]
@@ -462,8 +463,8 @@
   (format "%.1f" (* 100.0 (double ratio))))
 
 (defn- attention-detail
-  [entry]
-  (let [attention (entry-attention entry)
+  [rules entry]
+  (let [attention (entry-attention rules entry)
         receipt (:seon.maintenance/receipt-facts entry)
         result (:seon.maintenance/result-facts entry)
         error (:seon.maintenance/error-facts entry)
@@ -500,11 +501,11 @@
              "; receipt " receipt-id ".")))))
 
 (defn- report-lines
-  [report-value]
+  [rules report-value]
   (let [entries (:seon.maintenance/entries report-value)
         ran (filter :seon.maintenance/receipt-facts entries)
-        succeeded (count (filter succeeded? entries))
-        attention (remove succeeded? entries)]
+        succeeded (count (filter (partial succeeded? rules) entries))
+        attention (remove (partial succeeded? rules) entries)]
     (cond
       (empty? ran)
       ["Maintenance: no task has run yet."]
@@ -517,37 +518,38 @@
       :else
       (into [(str "Maintenance: " succeeded " succeeded; "
                   (count attention) " need attention.")]
-            (map attention-detail)
+            (map (partial attention-detail rules))
             attention))))
 
 (defn render-report-ai
   "`:seon.render/ai` — root's concise latest maintenance report."
-  {:malli/schema [:=> [:cat :seon.maintenance/report] [:string {:min 1}]]}
-  [report-value]
-  (str/join "\n" (report-lines report-value)))
+  {:malli/schema [:=> [:cat :seon.maintenance/report :seon.db/database-value] [:string {:min 1}]]}
+  [report-value database]
+  (str/join "\n" (report-lines (attention-rules (db/carried-projection database)) report-value)))
 
 (defn render-report-html
   "`:seon.render/html` — root's latest maintenance report card."
   {:malli/schema
-   [:=> [:cat :seon.maintenance/report] :seon.render/hiccup]}
-  [report-value]
-  (let [entries (:seon.maintenance/entries report-value)]
+   [:=> [:cat :seon.maintenance/report :seon.db/database-value] :seon.render/hiccup]}
+  [report-value database]
+  (let [rules (attention-rules (db/carried-projection database))
+        entries (:seon.maintenance/entries report-value)]
     [:article {:class "seon-family-entry seon-maintenance-entry"}
      [:h3 "Maintenance"]
      (if (seq entries)
        (into [:ul {:class "seon-maintenance-attention"}]
              (map (fn [entry]
-                    (let [attention (entry-attention entry)
+                    (let [attention (entry-attention rules entry)
                           result (:seon.maintenance/error-facts entry)
                           at (when (:seon.maintenance/receipt-facts entry)
                                (latest-at [entry]))]
                       [:li
                        [:strong (operation-name entry)]
-                       [:span {:class (if (succeeded? entry) "is-success" "is-attention")}
+                       [:span {:class (if (succeeded? rules entry) "is-success" "is-attention")}
                         "● " (case attention
                                 :not-run "not run" :error "failed"
                                 :interrupted "interrupted" :unterminated "running"
-                                (if (succeeded? entry) "succeeded" "needs attention"))]
+                                (if (succeeded? rules entry) "succeeded" "needs attention"))]
                        (when at
                          [:time {:datetime (str (.toInstant ^java.util.Date at))
                                  :title (str at)}

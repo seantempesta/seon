@@ -185,7 +185,7 @@
           (await-bootstrap! connection "restart-a")
           (with-redefs
             [ai/complete
-             (fn [_]
+             (fn [_projection _]
                {:seon.ai/text
                 (if (= "restart-a" (active-agent-id @connection))
                   (str
@@ -356,7 +356,7 @@
           (await-bootstrap! connection "restart-b")
           (with-redefs
             [ai/complete
-             (fn [_]
+             (fn [_projection _]
                {:seon.ai/text
                 (if (= "restart-b" (active-agent-id @connection))
                   (str

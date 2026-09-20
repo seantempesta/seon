@@ -99,7 +99,7 @@
             "a genuinely different cardinality-many value is still a change")
         (doseq [namespace-maps? [false true]]
           (binding [*print-namespace-maps* namespace-maps?]
-            (let [delta (changes database (schema/registered-schemas))]
+            (let [delta (changes database (schema/handed-projection) )]
               (is (= [] delta)
                   (str "canonical schema bytes converge with namespace-map printing "
                        namespace-maps?)))))))))
@@ -213,14 +213,14 @@
             "which the bridge derives WITHOUT uniqueness")
         (is (= [] (schema/call-with-forms
                    forms
-                   #(changes database forms "converged-fixture")))
+                   #(changes database (schema/handed-projection) "converged-fixture")))
             "a converged branch reopens with no declaration change")
         (let [stale (assoc-in database [:schema attribute :db/unique]
                               :db.unique/identity)
               refusal (test-support/refusal-data
                        #(schema/call-with-forms
                          forms
-                         (fn [] (changes stale forms "stale-fixture"))))]
+                         (fn [] (changes stale (schema/handed-projection) "stale-fixture"))))]
           (is (= :seon.boot/refused (:seon.error/kind refusal))
               "a facet the current declaration no longer carries refuses")
           (is (= attribute (:seon.boot/attribute (:seon.boot/offense refusal))))
@@ -261,7 +261,7 @@
         (let [older (update-in @connection [:schema attribute] dissoc :db/index)
               declarations (schema/call-with-forms
                             forms
-                            #(changes older forms "older-fixture"))]
+                            #(changes older (schema/handed-projection) "older-fixture"))]
           (is (= [attribute] (mapv :db/ident declarations))
               "a branch forked before the index addition adopts exactly that
                declaration in place instead of refusing to reopen")
@@ -315,7 +315,7 @@
             refusal (test-support/refusal-data
                      #(schema/call-with-forms
                        forms
-                       (fn [] (changes stale forms "stale-fixture"))))
+                       (fn [] (changes stale (schema/handed-projection) "stale-fixture"))))
             offense (:seon.boot/offense refusal)]
         (is (= :db.type/string declared)
             "the bridge derives the subject attribute as a string")

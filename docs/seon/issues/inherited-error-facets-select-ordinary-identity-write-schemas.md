@@ -1,11 +1,26 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [schema, datahike, bridge, error, class/p1]
 ---
 
 # Inherited error facets select ordinary identity write schemas
+
+## Resolution, 2026-09-21
+
+The owner ruled separate observation members for the five error schemas.
+Both bootstrap errors now use the existing `:seon.error/run`; accretion and
+runner errors use namespace-owned qualified-symbol values. Admission refuses
+any error schema with a declared identity attribute member. Writer selection
+uses all required identity schemas again, with no row-schema exception.
+
+The bridge scratch publication and `s2` boot succeeded. Its actual startup
+turn `12a2b18544e6` was stored, and the compiled writer selects only
+`:seon.turn/turn` for `:seon.turn/id`. A synthetic direct probe refuses both
+required and optional identity members with schema and attribute named.
+The canonical regression is retained; its final recorded rerun awaits the
+published-base refresh described in the bridge note. Historical evidence follows.
 
 The bridge step-2 compiled conversion exposes a writer selection decision.
 `seon.db/write-entity-schemas` selects entity schemas with

@@ -16,7 +16,8 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
+            [malli.core :as m]
+            [malli.registry :as mr]
             [seon.schema.internal :as schema.internal]
             [clj-kondo.impl.utils :as kondo.utils]
             [seon.test.accretion :as accretion]
@@ -97,12 +98,12 @@
         roots))
 
 (defn- many-or-component-attributes
-  [attributes]
+  [projection attributes]
   (into #{}
         (keep (fn [{:db/keys [ident cardinality isComponent]}]
                 (when (or (= :db.cardinality/many cardinality) isComponent)
                   ident)))
-        (schema.datahike/malli->datahike-schema (sort attributes))))
+        (schema.datahike/malli->datahike-schema-in projection (sort attributes))))
 
 (defn- sha-256
   [source-bytes]
@@ -544,30 +545,29 @@
     value))
 
 (defn- function-value-schema?
-  "Whether a declaration explicitly admits a function identity or symbol.
-  Follow aliases and scalar alternatives, never map entry names."
-  [forms form seen]
-  (cond
-    (= :seon.fn/sym form) true
-    (contains? #{:symbol :qualified-symbol} form) true
-    (and (keyword? form) (not (seen form)) (get forms form))
-    (function-value-schema? forms (get forms form) (conj seen form))
-    (vector? form)
-    (or (= :seon.fn/sym (:seon.fn/reference-to (schema.form/attr-form-properties form)))
-        (contains? #{:symbol :qualified-symbol} (first form))
-        (and (contains? #{:or :and :schema} (first form))
-             (some #(function-value-schema? forms % seen)
-                   (remove map? (rest form)))))
-    :else false))
+  "Follow compiled aliases and scalar alternatives in their captured scope."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?] [:set :seon.schema/value]] :boolean]}
+  [node seen]
+  (let [reference (when (m/-ref-schema? node) (m/-ref node))
+        identity [(m/options node) reference]]
+    (boolean
+     (or (= :seon.fn/sym reference)
+         (= :seon.fn/sym (:seon.fn/reference-to (m/properties node)))
+         (contains? #{:symbol :qualified-symbol} (m/type node))
+         (and (m/-ref-schema? node) (not (contains? seen identity))
+              (function-value-schema? (m/deref node) (conj seen identity)))
+         (and (contains? #{:or :and} (m/type node))
+              (some #(function-value-schema? % seen) (m/children node)))))))
 
 (defn- declared-function-targets
   "Literal function-valued declarations, classified by their own schema.
   Consumers are joined by the attribute they use; no callable-key roster."
-  [forms values first-party-functions]
-  (let [attributes (into #{} (keep (fn [[k v]]
+  [projection values first-party-functions]
+  (let [registry (:seon.schema.projection/registry projection)
+        attributes (into #{} (keep (fn [k]
                                     (when (or (= :seon.fn/sym k)
-                                              (function-value-schema? forms v #{k})) k)))
-                         forms)]
+                                              (function-value-schema? (mr/schema registry k) #{})) k)))
+                         (keys (:seon.schema.projection/forms projection)))]
     (reduce
      (fn [targets value]
        (if (map? value)
@@ -758,17 +758,16 @@
   EVALUATION resolves, or a bare `deftest` analyses to no var definition at
   all and its test row is never minted. The declared attribute name is the
   bare name the interpreter binds."
-  [forms]
+  [projection]
   (into []
-        (keep (fn [[attribute definition]]
+        (keep (fn [attribute]
                 (when-let [target (:seon.sci.binding/target
-                                   (schema.form/attr-form-properties
-                                    definition))]
+                                   (m/properties (mr/schema (:seon.schema.projection/registry projection) attribute)))]
                   (let [local (symbol (name attribute))]
                     {:seon.ns.refer/local local
                      :seon.ns.refer/target-ns (symbol (namespace target))
                      :seon.ns.refer/target-name local}))))
-        forms))
+        (keys (:seon.schema.projection/forms projection))))
 
 (defn- runtime-namespace-form
   [namespace-name namespace-row referenced-namespaces]
@@ -826,8 +825,8 @@
         prelude (analyzer/program-prelude available-functions)
         interpreter-refers
         (interpreter-refer-rows
-         (or (:seon.schema.projection/forms (db/carried-projection database))
-             (schema/declaration-population)))
+         (or (db/carried-projection database)
+             (schema/projection-from-database database)))
         {:keys [source spans]}
         (loop [remaining requests
                source (if (seq prelude) (str prelude "\n") "")
@@ -1115,11 +1114,10 @@
   re-read the authored resources a SECOND time per file, at 18 ms a call,
   against a population that cannot change while one operation runs
   (AGENTS.md 2.1)."
-  ([analysis first-party-functions contexts declared-attributes]
-   (analysis-rows-by-file analysis first-party-functions contexts declared-attributes {}))
-  ([analysis first-party-functions contexts declared-attributes forms]
-  (let [used-keywords (keywords-by-holder analysis)
-        schema-targets (declared-function-targets forms (vals forms) first-party-functions)
+  [analysis first-party-functions contexts declared-attributes projection]
+  (let [forms (:seon.schema.projection/forms projection)
+        used-keywords (keywords-by-holder analysis)
+        schema-targets (declared-function-targets projection (vals forms) first-party-functions)
         keywords-by-file (group-by ::analyzer/filename (::analyzer/keywords analysis))
         declared-calls
         (reduce-kv
@@ -1127,7 +1125,7 @@
            (let [values (map kondo.utils/sexpr
                              (:children (kondo.utils/parse-string-all (:text context))))
                  targets (merge-with set/union schema-targets
-                                     (declared-function-targets forms values first-party-functions))
+                                     (declared-function-targets projection values first-party-functions))
                  holders (keywords-by-holder
                           {::analyzer/keywords (get keywords-by-file filename)})]
              (merge-with set/union calls (declared-calls-by-caller holders targets))))
@@ -1169,7 +1167,7 @@
          rows))
      {}
      (concat (::analyzer/namespace-definitions analysis)
-             (::analyzer/var-definitions analysis))))))
+             (::analyzer/var-definitions analysis)))))
 
 (defn source-rows
   "Construct source declarations through the indexer's analysis and row owners.
@@ -1198,11 +1196,12 @@
         rows (analysis-rows-by-file
               (source-analysis analysis first-row last-row)
               functions {"<stdin>" (text-context text)} declared-attributes
-              (:seon.schema.projection/forms (db/carried-projection database)))]
+              (db/carried-projection database))]
     (into []
           (comp
            (filter #(or (:seon.fn/sym %) (:seon.test/sym %)))
            (map #(program/declaration-row
+                  (db/carried-projection database)
                   (program/canonical-row
                    row-shapes (dissoc % :seon.fn/file :seon.fn/form-span))
                   :all :agent)))
@@ -1628,40 +1627,23 @@
      (when (:seon.error/kind function-symbols) function-symbols)
      (when (:seon.error/kind specs) specs)
      (when (:seon.error/kind caller-counts) caller-counts)
-     (let [forms (:seon.schema.projection/forms projection)
-           stored-attributes (set (schema.form/database-attributes forms))
+     (let [stored-attributes (set (schema.datahike/database-attributes-core-in projection))
            specs (into {} specs)
            caller-counts (into {} caller-counts)
-           body (fn [form]
-                  (let [xs (rest form)]
-                    (if (map? (first xs)) (rest xs) xs)))
-           schema-children
-           (fn [form]
-             (when (vector? form)
-               (let [tag (first form)
-                     children (vec (body form))]
-                 (cond
-                   (#{:enum := :fn :ref :re} tag) []
-                   (#{:map :mapn :catn :altn :orn :multi} tag)
-                   (into [] (keep #(when (vector? %) (peek %))) children)
-                   :else children))))
            schema-nodes
            (fn [slot]
-             (loop [pending [slot] nodes []]
-               (if-let [form (peek pending)]
-                 (recur (into (pop pending) (schema-children form))
-                        (conj nodes form))
-                 nodes)))
+             (let [nodes (volatile! [])]
+               (m/walk slot (fn [node _ _ _] (vswap! nodes conj node) nil))
+               @nodes))
            structural-findings
            (fn [slot]
              (into []
-                   (keep (fn [form]
+                   (keep (fn [node]
                            (cond
-                             (= :map form)
-                             [:seon.fn.contract.finding/bare-map form]
-
-                             (and (vector? form) (= :maybe (first form)))
-                             [:seon.fn.contract.finding/maybe form])))
+                             (and (= :map (m/type node)) (empty? (m/children node)))
+                             [:seon.fn.contract.finding/bare-map (m/form node)]
+                             (= :maybe (m/type node))
+                             [:seon.fn.contract.finding/maybe (m/form node)])))
                    (schema-nodes slot)))
            permissive-findings
            (fn [slot guarded?]
@@ -1688,22 +1670,22 @@
                                nil)]
                          (when finding [finding form])))))
                    (schema.internal/permissive-positions
-                    {:seon.schema/definition slot
-                     :seon.schema/forms forms})))
+                    {:seon.schema/compiled slot})))
            slot-findings
            (fn [slot position guarded?]
              (let [permissive (permissive-findings slot guarded?)
                    structural (structural-findings slot)
                    unguarded
-                   (when (and (not guarded?) (vector? slot)
-                              (#{:* :+ :repeat} (first slot))
+                   (when (and (not guarded?)
+                              (#{:* :+ :repeat} (m/type slot))
                               (not-any? #(= :seon.fn.contract.finding/unguarded-variadic
                                             (first %))
                                         permissive))
-                     [[:seon.fn.contract.finding/unguarded-variadic slot]])
+                     [[:seon.fn.contract.finding/unguarded-variadic (m/form slot)]])
                    unstorable
                    (into []
                          (comp
+                          (keep #(when (m/-ref-schema? %) (m/-ref %)))
                           (filter stored-attributes)
                           (remove #(schema.datahike/storable-attribute-in?
                                     projection %))
@@ -1717,31 +1699,21 @@
                         :seon.fn.contract/finding finding})
                      (concat permissive structural unguarded unstorable))))
            arity-findings
-           (fn [spec]
-             (let [arities (if (and (vector? spec) (= :function (first spec)))
-                             (body spec)
-                             [spec])]
-               (into []
-                     (mapcat
-                      (fn [arity]
-                        (let [[input output guard] (body arity)
-                              guarded? (some? guard)
-                              input-body (when (vector? input) (vec (body input)))
-                              slots (case (first input)
-                                      :cat input-body
-                                      :catn (mapv peek input-body)
-                                      [input])]
-                          (concat
-                           (mapcat (fn [index slot]
-                                     (slot-findings
-                                      slot
-                                      [:seon.fn.contract.position/input index]
-                                      guarded?))
-                                   (range) slots)
-                           (slot-findings output
-                                          :seon.fn.contract.position/output
-                                          guarded?))))
-                      arities))))]
+           (fn [contract]
+             (into []
+                   (mapcat
+                    (fn [arity]
+                      (let [{:keys [input output guard]} (m/-function-info arity)
+                            guarded? (some? guard)
+                            slots (if (= :catn (m/type input))
+                                    (mapv peek (m/children input))
+                                    (m/children input))]
+                        (concat
+                         (mapcat (fn [index slot]
+                                   (slot-findings slot [:seon.fn.contract.position/input index] guarded?))
+                                 (range) slots)
+                         (slot-findings output :seon.fn.contract.position/output guarded?)))))
+                   (m/-function-schema-arities contract)))]
        (->> function-symbols
             (mapcat
              (fn [function-symbol]
@@ -1749,7 +1721,7 @@
                      spec-string (get specs function-symbol)
                      findings
                      (if spec-string
-                       (arity-findings (edn/read-string spec-string))
+                       (arity-findings (mr/schema (:seon.schema.projection/registry projection) function-symbol))
                        [{:seon.fn.contract/position
                          :seon.fn.contract.position/contract
                          :seon.fn.contract/form :seon.fn.contract/missing
@@ -2079,6 +2051,7 @@
             [:vector :qualified-symbol]]
            [:seon.fn/roots {:optional true} :seon.fn/roots]
            [:seon.fn/root {:optional true} :string]
+           [:seon.schema/projection {:optional true} :seon.schema/projection]
            [:seon.schema.projection/forms {:optional true} :map]]]
     :seon.fn.file/artifact]}
   [{path :seon.fn/source-path
@@ -2102,13 +2075,14 @@
       (assert-clean-analysis! analysis first-party-functions)
       ;; ONE declaration world per operation: the population resolved once,
       ;; its shapes derived once, both carried to every row (AGENTS.md 2.1).
-      (let [forms (declaration-forms request)]
-        (artifact (program/shapes-in forms)
+      (let [forms (declaration-forms request)
+            projection (or (:seon.schema/projection request) (schema/build-projection forms))]
+        (artifact (program/shapes-in projection)
                   directory file
                   (containing-root directory (or roots source-roots) file)
                   (get contexts canonical-path)
                   (get (analysis-rows-by-file analysis first-party-functions
-                                              contexts (set (keys forms)) forms)
+                                              contexts (set (keys forms)) projection)
                        canonical-path
                        [])
                   findings)))))
@@ -2288,10 +2262,11 @@
                        [:vector :string]
                        [:set :qualified-symbol] [:or :nil :string]]
                   [:vector :seon.fn.file/artifact]]}
-  [forms roots directory paths known-functions cache-root]
+  [projection roots directory paths known-functions cache-root]
   (if (empty? paths)
     []
-    (let [files (mapv io/file paths)
+    (let [forms (:seon.schema.projection/forms projection)
+          files (mapv io/file paths)
           contexts (source-contexts files)
           analysis (analyzer/analyze
                     (cond-> {::analyzer/sources (update-vals contexts :text)
@@ -2300,8 +2275,8 @@
           functions (into known-functions (first-party-function-symbols analysis))
           _ (assert-clean-analysis! analysis functions)
           findings (group-by ::analyzer/filename (publication-findings analysis functions))
-          rows (analysis-rows-by-file analysis functions contexts (set (keys forms)) forms)
-          row-shapes (program/shapes-in forms)]
+          rows (analysis-rows-by-file analysis functions contexts (set (keys forms)) projection)
+          row-shapes (program/shapes-in projection)]
       (mapv (fn [file]
               (let [path (.getCanonicalPath ^java.io.File file)]
                 (artifact row-shapes directory file (containing-root directory roots file)
@@ -2368,6 +2343,7 @@
   {:malli/schema
    [:=> [:cat [:map
               [:seon.fn/roots :seon.fn/roots]
+              [:seon.source/progress! {:optional true} :seon.source/progress!]
               [:seon.fn/root {:optional true} :string]
               [:seon.fn/previous-manifest {:optional true} :seon.fn.manifest/manifest]
               [:seon.fn/published-rows {:optional true} :seon.program/rows]
@@ -2376,7 +2352,10 @@
               [:seon.schema.projection/forms {:optional true} :map]]]
     :seon.fn.manifest/manifest]}
   [request]
-  (let [forms (declaration-forms request)
+  (let [progress! (:seon.source/progress! request)
+        _ (report-index-progress! progress! "analysis input inventory")
+        forms (declaration-forms request)
+        projection (or (:seon.schema/projection request) (schema/build-projection forms))
         directory (fs/absolute-path (fs/source-directory) (or (:seon.fn/root request) "."))
         roots (:seon.fn/roots request)
         files (source-files directory roots)
@@ -2389,6 +2368,7 @@
         files-by-path (into {} (map #(vector (fs/relative-path directory (.getCanonicalPath ^java.io.File %)) (.getCanonicalPath ^java.io.File %))) files)
         input-digests (update-vals files-by-path current-file-digest)
         analysis-cache (str (io/file (or cache-root (str (io/file directory "target/publication-analysis"))) "artifacts"))
+        _ (report-index-progress! progress! "analysis toolchain comparison")
         reusable? (and previous
                        (= (:seon.source/toolchain-digest previous)
                           (toolchain-digest previous input-digests dependencies)))]
@@ -2399,7 +2379,7 @@
                  cache-root (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.ns/name))
                                   (:seon.fn.manifest/artifacts previous))))
             manifest (manifest-data directory relative-roots
-                       (analyzed-artifacts forms roots directory (vec (vals (into (sorted-map) files-by-path))) #{} cache-root))]
+                       (analyzed-artifacts projection roots directory (vec (vals (into (sorted-map) files-by-path))) #{} cache-root))]
         (assoc manifest :seon.source/toolchain-digest
                (toolchain-digest manifest input-digests dependencies)
                :seon.fn.manifest/declaration-digests schema-digests))
@@ -2415,42 +2395,55 @@
                             (concat (keys old-digests) (keys files-by-path)))
               changed-artifacts (filter #(changed (:seon.fn.file/relative-path %)) old-artifacts)
               changed-namespaces (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.ns/name)) changed-artifacts)
+              _ (report-index-progress! progress! "analysis forget changed namespaces")
               _ (analyzer/forget-namespaces! cache-root changed-namespaces)
+              _ (report-index-progress! progress! "analysis known symbols")
               known (set (manifest-function-symbols previous))
-              first-artifacts (analyzed-artifacts forms roots directory
+              _ (report-index-progress! progress! "analysis changed artifacts")
+              first-artifacts (analyzed-artifacts projection roots directory
                                                   (vec (keep files-by-path (sort changed))) known cache-root)
+              _ (report-index-progress! progress! "analysis candidate manifest")
               retained (remove #(changed (:seon.fn.file/relative-path %)) old-artifacts)
               candidate (assoc (manifest-data directory relative-roots (concat retained first-artifacts))
                                :seon.fn.manifest/declaration-digests schema-digests)
+              _ (report-index-progress! progress! "analysis published rows")
               published-rows (when (not= (resolution-digest previous) (resolution-digest candidate))
                                (or (:seon.fn/published-rows request)
                                    (some-> (:seon.source/previous-database request) published-index-rows)))
+              _ (report-index-progress! progress! "analysis caller closure")
               affected (publication-inputs previous candidate changed (or published-rows []))
+              _ (report-index-progress! progress! "analysis cache keys")
               additional (set/difference affected changed)
               resolution (resolution-digest candidate)
               toolchain (id/digest 64 [(:seon.source/toolchain-digest previous) schema-digests])
+              _ (report-index-progress! progress! "analysis cache reads")
               cached-artifacts (into {} (keep (fn [path]
                                          (when-let [artifact (cached-analysis analysis-cache
                                                                (artifact-cache-key toolchain resolution path (get input-digests path)))]
                                            [path artifact]))) additional)
+              _ (report-index-progress! progress! "analysis additional artifacts")
               additional-artifacts (into (vec (vals cached-artifacts))
-                                    (analyzed-artifacts forms roots directory
+                                    (analyzed-artifacts projection roots directory
                                       (vec (keep files-by-path (sort (remove (set (keys cached-artifacts)) additional))))
                                       (into known (manifest-function-symbols candidate)) cache-root))
+              _ (report-index-progress! progress! "analysis replace artifacts")
               result (replace-manifest-artifacts candidate additional-artifacts)]
           (assoc result :seon.source/toolchain-digest
                  (toolchain-digest result input-digests dependencies)
                  :seon.fn.manifest/declaration-digests schema-digests))))
+            _ (report-index-progress! progress! "analysis result cache keys")
             resolution (resolution-digest result)
             toolchain (id/digest 64 [(:seon.source/toolchain-digest result) schema-digests])
             previous-artifacts (into {} (map (juxt :seon.fn.file/relative-path identity))
                                      (:seon.fn.manifest/artifacts previous))]
+        (report-index-progress! progress! "analysis cache writes")
         (doseq [artifact (:seon.fn.manifest/artifacts result)
                 :when (or (not reusable?)
                           (not= artifact (get previous-artifacts (:seon.fn.file/relative-path artifact))))]
           (cache-analysis! analysis-cache
                            (artifact-cache-key toolchain resolution (:seon.fn.file/relative-path artifact)
                                                (:seon.fn.file/digest artifact)) artifact))
+        (report-index-progress! progress! "analysis manifest complete")
         result)))
 
 (defn- row-by-identity
@@ -2487,6 +2480,7 @@
   {:malli/schema
    [:=>
     [:cat [:map
+           [:seon.schema/projection :seon.schema/projection]
            [:seon.fn.change/status
             [:enum :added :modified :deleted :moved :schema-resource
              :analysis-error]]
@@ -2501,7 +2495,8 @@
     desired :seon.fn.change/desired-artifact
     stale? :seon.fn.change/stale?
     uncertain? :seon.fn.change/uncertain?
-    findings :seon.fn.change/findings}]
+    findings :seon.fn.change/findings
+    projection :seon.schema/projection}]
   (let [current-identities (set (:seon.fn.file/identities current))
         desired-identities (set (:seon.fn.file/identities desired))
         current-rows (row-by-identity (:seon.fn.file/rows current))
@@ -2519,6 +2514,7 @@
               shared-identities)
         unsafe-attributes
         (many-or-component-attributes
+         projection
          (into #{} (mapcat keys) (concat (vals current-rows)
                                          (vals desired-rows))))
         added-many-or-component?
@@ -2840,10 +2836,12 @@
         packaged-forms (declaration-forms request)
         partial? (some? (:seon.fn/changed-paths request))
         selected-forms (if partial? (select-keys packaged-forms (changed-schema-keys request)) packaged-forms)
+        projection (or (when partial? (incremental-projection request source-rows))
+                       (schema/build-projection packaged-forms))
         canonical-schemas
         (if (seq selected-forms)
           (mapv (partial accretion/schema-row packaged-forms)
-                (schema/canonical-schema-rows selected-forms)) [])
+                (schema/canonical-schema-rows projection selected-forms)) [])
         canonical-keys (into #{} (map :seon.schema/key) canonical-schemas)
         source-only
         (remove (fn [row]
@@ -2862,7 +2860,7 @@
      (mapv #(assoc % :seon.schema.admission/source :core)
            (into (vec source-only) canonical-schemas))
      progress!
-     (when partial? (incremental-projection request source-rows)))))
+     (when partial? projection))))
 
 (defn- commit-index-phase!
   [connection process progress! phase tx-data]
@@ -3127,7 +3125,7 @@
           :seon.fn.file/identities]
     [:or [:vector :seon.schema/value] :seon.error/value]]}
   [database rows previous-identities]
-  (reconcile-tx-in (program/shapes-in (declaration-forms nil))
+  (reconcile-tx-in (program/shapes-in (db/carried-projection database))
                    database rows previous-identities))
 
 (defn published-index-rows
@@ -3240,7 +3238,9 @@
      previous-database :seon.source/previous-database
      source-database :seon.source/database :as request}
     progress!]
-   (let [row-shapes (program/shapes-in (declaration-forms request))
+   (let [row-shapes (program/shapes-in
+                     (or (:seon.schema/projection request)
+                         (schema/build-projection (declaration-forms request))))
          rows (if source-database
                 (published-index-rows source-database)
                 (desired-rows request progress!))]

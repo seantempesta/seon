@@ -37,7 +37,7 @@
                 handle (:seon.turn.loop/cluster instance)]
             (with-redefs
               [ai/complete
-               (fn [request]
+               (fn [_projection request]
                  (async/offer! attempt-requests request)
                  {:seon.ai/text
                   "(seon.run/complete \"instrumented acquisition ran\")"})]

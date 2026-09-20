@@ -10,7 +10,8 @@
             [seon.error.refusal :as error]
             [seon.id :as id]
             [seon.repl :as repl]
-            [seon.schema.form :as schema.form]
+            [malli.core :as m]
+            [malli.registry :as mr]
             [seon.test :as seon.test]))
 
 ;;; LOAD-CYCLE BOUNDARIES. `seon.plan` reads `seon.issue/done-query` at load
@@ -188,12 +189,13 @@
   `:seon.issue/cites` on one issue attribute, never by a new recogniser."
   [database]
   (let [installed (set (db/identity-attributes database))
+        registry (:seon.schema.projection/registry (db/carried-projection database))
         cites (into {}
-                    (for [[attribute form] (db/q '[:find ?key ?form :where
-                                                   [?e :seon.schema/key ?key]
-                                                   [?e :seon.schema/form ?form]]
+                    (for [[attribute] (db/q '[:find ?key :where
+                                                   [?e :seon.schema/key ?key]]
                                                  database)
-                          :let [properties (schema.form/attr-form-properties (edn/read-string form))]
+                          :let [properties
+                                (m/properties (mr/schema registry attribute))]
                           cited (:seon.issue/cites properties)
                           :when (contains? installed cited)]
                       [cited attribute]))]

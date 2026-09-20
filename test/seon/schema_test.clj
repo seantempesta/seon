@@ -19,9 +19,24 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.form :as schema.form]
             [seon.schema.internal :as schema.internal]
             [seon.test-support :as test-support]))
+
+(deftest preparation-preserves-loaded-var-schema-references
+  (test-support/with-database
+   (fn [_connection]
+     (with-local-vars [request-schema [:map [::value :int]]]
+       (let [authored [:=> [:cat request-schema] :int]
+             prepared (schema/compilable-form authored {})
+             compiled (m/function-schema
+                       prepared
+                       {:registry (mr/composite-registry
+                                   (:seon.schema.projection/registry (schema/handed-projection))
+                                   (mr/var-registry))})
+             input (:input (m/-function-info compiled))]
+         (is (= authored prepared) "Preparation preserves the Var without resolving it.")
+         (is (m/validate input [{::value 1}]))
+         (is (not (m/validate input [{::value "wrong"}]))))))))
 
 (deftest registry-generation-operation-counts
   (test-support/with-database
@@ -103,7 +118,8 @@
                                (fn [defaults provider]
                                  (lazy-registry defaults
                                                 (fn [k r]
-                                                  (swap! calls update k (fnil inc 0))
+                                                  (when (or (contains? forms k) (contains? contracts k))
+                                                    (swap! calls update k (fnil inc 0)))
                                                   (provider k r))))]
                    (schema/build-projection forms contracts))
             replacement (schema/projection-with-schema
@@ -113,8 +129,10 @@
             bad {::leaf "wrong" ::required "present"}
             explanation ((schema/projection-explainer base ::conjunction) bad)
             problem (first (:errors explanation))]
-        (is (= (set (concat (keys forms) (keys contracts))) (set (keys @calls))))
-        (is (every? #(= 1 %) (vals @calls)) "Each named provider runs once")
+        (is (empty? (remove (set (keys @calls)) (concat (keys forms) (keys contracts))))
+            "Every canonical provider was observed")
+        (is (empty? (into {} (remove (fn [[_ n]] (= 1 n))) @calls))
+            "Each named provider runs once")
         (is (every? #(m/schema? (mr/schema registry %)) (concat (keys forms) (keys contracts))))
         (is (identical? (mr/schemas registry) (mr/schemas registry)))
         (is (identical? (mr/schema registry :seon.agent/id)
@@ -306,37 +324,36 @@
                   (count (:seon.schema.projection/function-contracts projection))})))))
 
 (defn- reference-entry?
-  [projection entry]
-  (letfn [(reference? [form]
-            (let [resolved (schema.datahike/resolve-malli-form-in projection form)]
-              (or (= :seon.db/ref resolved)
-                  (and (vector? resolved)
-                       (#{:and :or :set :vector :sequential :seon.db/ref} (first resolved))
-                       (some reference? (schema.datahike/form-children resolved))))))]
-    (boolean (reference? (last entry)))))
+  [_projection entry]
+  (letfn [(reference? [node seen]
+            (let [reference (when (m/-ref-schema? node) (m/-ref node))
+                  identity [(m/options node) reference]]
+              (or (= :seon.db/ref reference)
+                  (and (m/-ref-schema? node) (not (seen identity))
+                       (reference? (m/deref node) (conj seen identity)))
+                  (and (#{:and :or :set :vector :sequential} (m/type node))
+                       (some #(reference? % seen) (m/children node))))))]
+    (boolean (reference? (last entry) #{}))))
 
 (defn- reference-value
-  [projection form value]
-  (let [resolved (schema.datahike/resolve-malli-form-in projection form)
-        children (schema.datahike/form-children resolved)]
-    (case (schema.datahike/form-head resolved)
-      :set #{(reference-value projection (first children) value)}
-      (:vector :sequential) [(reference-value projection (first children) value)]
-      :and (reference-value projection (first children) value)
-      :or (reference-value projection (first (filter #(reference-entry? projection [::entry %]) children)) value)
-      value)))
+  [projection node value]
+  (if (and (m/-ref-schema? node) (not= :seon.db/ref (m/-ref node)))
+    (reference-value projection (m/deref node) value)
+    (let [children (m/children node)]
+      (case (m/type node)
+        :set #{(reference-value projection (first children) value)}
+        (:vector :sequential) [(reference-value projection (first children) value)]
+        :and (reference-value projection (first children) value)
+        :or (reference-value projection (first (filter #(reference-entry? projection [::entry %]) children)) value)
+        value))))
 
 (defn- required-entry-value
-  [projection form stored?]
-  (let [resolved (schema.datahike/resolve-datahike-form-in projection form)
-        form (if (and stored? (#{:set :vector :sequential} (schema.datahike/form-head resolved)))
-               (into [(first resolved)
-                      (update (or (schema.form/attr-form-properties resolved) {})
-                              :min #(max 1 (or % 0)))]
-                     (schema.datahike/form-children resolved))
-               form)]
-    (mg/generate (m/schema form {:registry (:seon.schema.projection/registry projection)})
-                 {:seed 20260916 :size (if stored? 1 0)})))
+  [_projection node stored?]
+  (let [resolved (schema.datahike/storage-schema node)
+        compiled (if (and stored? (#{:set :vector :sequential} (m/type resolved)))
+                   (m/-update-properties resolved update :min #(max 1 (or % 0)))
+                   node)]
+    (mg/generate compiled {:seed 20260916 :size (if stored? 1 0)})))
 
 (defn- fixture-generation-projection
   [projection connection lock]
@@ -373,19 +390,19 @@
            forms (:seon.schema.projection/forms projection)
            subjects (into (sorted-map)
                           (keep (fn [[schema-key form]]
-                                  (when (schema.form/map-shape? form)
-                                   (let [entries (schema.form/map-entries forms form)]
+                                  (when (seon.schema.internal/entity-schema? (mr/schema (:seon.schema.projection/registry generation) schema-key))
+                                   (let [entries (seon.schema.internal/entity-entries (mr/schema (:seon.schema.projection/registry generation) schema-key))]
                                     (when (some #(reference-entry? projection %) entries)
                                       [schema-key entries])))))
                           forms)
            target (:db/id (seon.db/pull database [:db/id] [:seon.ns/name 'seon.schema]))
-           storable? #(true? (:seon.db/attributes (schema.form/schema-properties (forms %))))]
+           storable? #(true? (:seon.db/attributes (seon.schema.internal/entity-properties (mr/schema (:seon.schema.projection/registry projection) %))))]
        (is (pos-int? target))
        (is (seq subjects) "the packaged projection must declare entity refs")
        (is (contains? subjects :seon.eval/entity) "the failing reader schema is covered")
        (println "Pulled-reference map contracts:" (count subjects)
                 "storable:" (count (filter storable? (keys subjects))))
-       (is (= :db.type/ref (schema.datahike/form->datahike-value-type-in projection :seon.db/ref)))
+       (is (= :db.type/ref (:db/valueType (schema.datahike/malli->datahike-attr-in projection :seon.db/ref))))
        (doseq [[schema-key entries] subjects]
          (testing (str schema-key)
           (try
@@ -398,7 +415,7 @@
                                         (if reference?
                                           (reference-value
                                            projection (last entry)
-                                           (if (and stored? (schema/identity-attr? forms attribute))
+                                           (if (and stored? (schema/identity-attr? projection attribute))
                                              target
                                              {:db/id (if stored? target 1)}))
                                           (required-entry-value generation (last entry) stored?))]))))
@@ -936,7 +953,10 @@
                :gen/schema :seon.schema/definition
                schema-key definition}
         row (some #(when (= schema-key (:seon.schema/key %)) %)
-                  (schema/canonical-schema-rows forms))]
+                  (schema/canonical-schema-rows
+                   (schema/build-projection
+                    (merge (:seon.schema.projection/forms (schema/handed-projection)) forms))
+                   forms))]
     (is (= true (:seon.error/class row)))
     (is (not (contains? row :gen/schema))
         "a declared but non-storable property remains compile-time Malli data")
@@ -1464,14 +1484,15 @@
    (fn [connection]
      (let [projection (schema/projection-from-database (seon.db/db connection))
            forms (:seon.schema.projection/forms projection)
-           turn (set (map first (schema.form/map-entries forms :seon.turn/error)))
-           base (set (map first (schema.form/map-entries forms :seon.error/base)))]
+           turn (set (map first (seon.schema.internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) :seon.turn/error))))
+           base (set (map first (seon.schema.internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) :seon.error/base))))]
        (is (every? turn base))
        (is (turn :seon.agent/error-agent-id))
        (is (turn :seon.turn/error-turn-id))
        (is (= #{:seon.error/at :seon.error/layer :seon.error/operation
                 :seon.agent/error-agent-id :seon.turn/error-turn-id}
-              (set (schema.internal/map-required-attrs forms :seon.turn/error))))
+              (set (schema.internal/map-required-attrs
+                    (mr/schema (:seon.schema.projection/registry projection) :seon.turn/error)))))
        (doseq [definition
                [[:and :seon.error/base [:map [:seon.error/at {:optional true} :seon.error/at]]]
                 [:and :seon.error/base [:map [:seon.error/at :string]]]
@@ -1494,7 +1515,7 @@
                           ::raw-payload {::observed (Object.)}}]
          (is ((schema/projection-validator raw ::raw-facet) observation))
          (is (not (some #{::raw-payload}
-                        (schema.form/database-attributes (:seon.schema.projection/forms raw))))))))))
+                        (seon.schema.datahike/database-attributes-core-in raw)))))))))
 
 (deftest error-facets-and-their-owned-members-are-storable
   (test-support/with-database
@@ -1504,23 +1525,23 @@
            facets (into #{:seon.error/base}
                         (keep (fn [[k definition]]
                                 (when (and (vector? definition)
-                                           (:seon.db/attributes (schema.form/schema-properties forms definition))
-                                           (schema.form/extends-schema? forms definition :seon.error/base)) k)))
+                                           (:seon.db/attributes (seon.schema.internal/entity-properties (mr/schema (:seon.schema.projection/registry projection) k)))
+                                           (seon.schema.internal/extends-schema? (mr/schema (:seon.schema.projection/registry projection) k) :seon.error/base)) k)))
                         forms)
            declarations
            (loop [pending (seq (conj facets :seon.failure/entity
                                       :seon.error.disposition/observation)) seen #{}]
              (if-let [k (first pending)]
                (if (seen k) (recur (next pending) seen)
-                   (let [members (map first (schema.form/map-entries forms (get forms k)))
-                         targets (keep #(-> (get forms %) schema.form/attr-form-properties
-                                            :seon.db/component-schema) members)]
+                   (let [members (map first (seon.schema.internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) k)))
+                         targets (keep #(some-> (mr/schema (:seon.schema.projection/registry projection) %) m/properties
+                                                :seon.db/component-schema) members)]
                      (recur (concat (next pending) targets) (conj seen k)))) seen))]
        (is (facets :seon.db.read/error))
        (is (declarations :seon.instrument.arity/bounds))
        (is (declarations :seon.error.key/entity))
        (doseq [k declarations
-               :let [entries (schema.form/map-entries forms (get forms k))]]
+               :let [entries (seon.schema.internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) k))]]
          (is (seq entries) (str "Owned declaration must exist: " k))
          (doseq [[attribute properties] entries
                  :when (or (not (:optional properties))

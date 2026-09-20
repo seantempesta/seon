@@ -7,7 +7,7 @@
 (schema.edn/load! {})
 
 (deftest rows-have-one-canonical-persisted-shape
-  (let [attributes (set (schema/canonical-database-attributes))]
+  (let [attributes (set (schema/canonical-database-attributes (seon.schema/handed-projection)))]
     (is (= [:enum :io :compute]
            (schema/schema-definition :seon.fn/workload)))
     (is (contains? attributes :seon.fn/workload))
@@ -40,10 +40,8 @@
          :seon.fn/arglists "([x])"
          :seon.fn/private? false}
         schema-declaration
-        (program/declaration-row
-         {:seon.schema/key :sample/value
-          :seon.schema/form ":string"}
-         :contracted :core)
+        (program/declaration-row (seon.schema/handed-projection) {:seon.schema/key :sample/value
+          :seon.schema/form ":string"} :contracted :core)
         deletion
         {:seon.program/delete-identities [[:seon.fn/sym "sample/f"]]
          :seon.program/source "(ns-unmap 'sample 'f)"}

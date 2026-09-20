@@ -246,8 +246,7 @@
         suffix (content-chunk "\")")]
     (with-provider {:body (str/join "\n" [prefix malformed suffix])}
       (fn [endpoint]
-        (let [completion (ai/complete
-                          (request endpoint {:seon.ai/stream? true}))
+        (let [completion (ai/complete (seon.schema/handed-projection) (request endpoint {:seon.ai/stream? true}))
               evidence (:seon.error/data completion)]
           (is ((schema/projection-validator (schema/handed-projection) :seon.ai/unparseable-body-error) completion))
           (is (not (contains? completion :seon.ai/text))
@@ -268,15 +267,15 @@
   ;; not be able to tell which transport ran.
   (with-provider {}
     (fn [endpoint]
-      (let [completion (ai/complete (request endpoint {:seon.ai/stream? true}))]
+      (let [completion (ai/complete (seon.schema/handed-projection) (request endpoint {:seon.ai/stream? true}))]
         (is (contains? completion :seon.ai/text))
         (is (= "Hello, world" (:seon.ai/text completion)))
         (is (= 7 (:seon.ai/tokens completion)))
         (is (= 3 (get (:seon.ai/usage completion) "prompt_tokens")))))))
 
 (deftest the-request-body-asks-for-a-stream-and-for-usage-on-it
-  (let [streamed (ai/request-body (request "x" {:seon.ai/stream? true}))
-        one-shot (ai/request-body (request "x" {}))]
+  (let [streamed (ai/request-body (seon.schema/handed-projection) (request "x" {:seon.ai/stream? true}))
+        one-shot (ai/request-body (seon.schema/handed-projection) (request "x" {}))]
     (is (true? (get streamed "stream")))
     (is (= {"include_usage" true} (get streamed "stream_options")))
     (is (false? (get one-shot "stream")))
@@ -297,7 +296,7 @@
     (try
       (let [endpoint (str "http://127.0.0.1:" (http/server-port server)
                           "/v1/chat/completions")
-            completion (ai/complete (request endpoint {}))
+            completion (ai/complete (seon.schema/handed-projection) (request endpoint {}))
             document @received]
         (is (= "bounded" (:seon.ai/text completion)))
         (is (= 8192 (get document "max_tokens")))
@@ -310,14 +309,14 @@
   ;; cleanly it closed the socket.
   (with-provider {:body "data: [DONE]\n"}
     (fn [endpoint]
-      (let [completion (ai/complete (request endpoint {:seon.ai/stream? true}))]
+      (let [completion (ai/complete (seon.schema/handed-projection) (request endpoint {:seon.ai/stream? true}))]
         (is ((schema/projection-validator (schema/handed-projection) :seon.ai/unparseable-body-error) completion))))))
 
 (deftest a-non-2xx-streaming-response-still-reads-its-body
   ;; The error path has to work when the body handler changed under it.
   (with-provider {:status 429 :body "slow down"}
     (fn [endpoint]
-      (let [completion (ai/complete (request endpoint {:seon.ai/stream? true}))]
+      (let [completion (ai/complete (seon.schema/handed-projection) (request endpoint {:seon.ai/stream? true}))]
         (is ((schema/projection-validator (schema/handed-projection) :seon.ai/provider-error-error) completion))
         (is (= 429 (:seon.ai/http-status (:seon.error/data completion))))
         (is (str/includes? (str (:seon.ai/body (:seon.error/data completion)))
@@ -337,7 +336,7 @@
       (let [target (-> (request endpoint {})
                        (dissoc :seon.ai/prompt)
                        (assoc :seon.ai/thinking :disabled))
-            failure (ai/complete (assoc target :seon.ai/prompt "hello"))
+            failure (ai/complete (seon.schema/handed-projection) (assoc target :seon.ai/prompt "hello"))
             sent-body @received-body
             status (:seon.ai/http-status (:seon.error/data failure))]
         (is ((schema/projection-validator (schema/handed-projection) :seon.ai/provider-error-error) failure))
@@ -371,7 +370,10 @@
               (is (some? (:seon.ai.attempt/error attempt))
                   "the provider error and attempt committed together")))))))))
 
-(deftest ^{:seon.test/fixture-observation "Reasoning crosses the inline threshold into store-global blobs, whose isolation an ordinary branch cannot provide."} settled-reasoning-reuses-the-eval-result-inline-blob-split
+(deftest ^{:seon.test/fixture-observation "Reasoning crosses the inline threshold into store-global blobs, whose isolation an ordinary branch cannot provide."
+           :seon.test/long "Acquire an isolated file-backed canonical store and settle provider reasoning across the inline/blob boundary."
+           :seon.test/long-ms 90000}
+  settled-reasoning-reuses-the-eval-result-inline-blob-split
   (support/with-database
     {::support/fresh-store? true}
     (fn [connection]
@@ -415,8 +417,7 @@
 (deftest a-broken-sink-cannot-fail-a-real-call
   (with-provider {}
     (fn [endpoint]
-      (let [completion (ai/complete
-                        (request endpoint {:seon.ai/stream? true
+      (let [completion (ai/complete (seon.schema/handed-projection) (request endpoint {:seon.ai/stream? true
                                            :seon.ai/sink
                                            (fn [_] (throw (ex-info "no" {})))}))]
         (is (= "Hello, world" (:seon.ai/text completion)))))))

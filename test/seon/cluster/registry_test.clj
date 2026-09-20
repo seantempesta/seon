@@ -109,7 +109,7 @@
            (test-support/transacted!
             connection
             (into (schema-datahike/malli->datahike-schema-in
-                   projection (seon.schema/canonical-database-attributes forms))
+                   projection (seon.schema/canonical-database-attributes (seon.schema/build-projection forms)))
                   probe-schema))
            (test-support/transacted!
             connection (probe-schema-rows forms (keys probe-forms))))

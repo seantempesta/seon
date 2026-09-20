@@ -739,7 +739,7 @@
                              :seon.error/diagnostic-offending marker
                              :seon.error/diagnostic-cause :invalid-marker-reason
                              :seon.error/diagnostic-evidence {:seon.test/sym (var-symbol test-var)}})
-                           :seon.test/sym (var-symbol test-var)
+                           :seon.test.runner/test-sym (var-symbol test-var)
                            :seon.test.runner/marker-key marker-attribute
                            :seon.error/offending marker)))))
       marker)))

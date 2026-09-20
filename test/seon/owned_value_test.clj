@@ -1,9 +1,8 @@
 (ns seon.owned-value-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [malli.core] [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
@@ -102,9 +101,9 @@
 
 (deftest every-canonical-owned-relation-declares-its-child-schema
   (let [forms (schema.edn/packaged-forms)
-        owned (filter (fn [[_ form]] (:seon.db/component (schema.form/attr-form-properties form))) forms)]
+        owned (filter (fn [[_ form]] (:seon.db/component (malli.core/properties (seon.schema/structural-schema form)))) forms)]
     (is (seq owned))
     (doseq [[attribute form] owned]
-      (let [child (:seon.db/component-schema (schema.form/attr-form-properties form))]
+      (let [child (:seon.db/component-schema (malli.core/properties (seon.schema/structural-schema form)))]
         (is (and (qualified-keyword? child) (get forms child))
             (str "Owned relation must name its child schema: " attribute))))))

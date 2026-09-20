@@ -609,7 +609,7 @@
 (deftest ^{:seon.test/fixture-observation "The observation concerns concurrent agent graphs acquired by a complete cluster boot, with real listener and shutdown ownership."} n-agents-fold-independently-on-one-live-cluster
   (let [model-calls (atom [])]
     (with-redefs [ai/complete
-                  (fn [request]
+                  (fn [_projection request]
                     (swap! model-calls conj request)
                     {:seon.ai/text
                      "(seon.run/complete \"unexpected model call\")"})]

@@ -65,7 +65,9 @@
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form])
+            [malli.core :as m]
+            [malli.registry :as mr]
+            [seon.schema.internal :as internal])
   (:import [java.io BufferedReader InputStreamReader]
            [java.net URI]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
@@ -307,10 +309,10 @@
 ;; Both helpers REQUIRE the population, so a future caller cannot silently
 ;; reintroduce the per-attribute shape these two derivations had.
 (defn- map-attributes
-  [forms schema-key]
-  (into #{}
-        (comp (filter vector?) (map first))
-        (schema/schema-definition forms schema-key)))
+  [projection schema-key]
+  (into #{} (map first)
+        (internal/entity-entries
+         (mr/schema (:seon.schema.projection/registry projection) schema-key))))
 
 (defn settings
   "Resolved AI settings for one agent. Pure."
@@ -366,19 +368,19 @@
           (select-keys (:seon.agent/settings row) attributes))))))
 
 (defn request-attributes
-  "Declared config-to-request routes from one schema population."
-  {:malli/schema [:=> [:cat :map] [:map-of :qualified-keyword :qualified-keyword]]}
-  [forms]
+  "Declared config-to-request routes from one supplied generation."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:map-of :qualified-keyword :qualified-keyword]]}
+  [projection]
   (into {}
-        (keep (fn [[config-ident definition]]
+        (keep (fn [config-ident]
                 (when-let [attribute (:seon.ai/request-attribute
-                                     (schema.form/attr-form-properties definition))]
+                                     (m/properties (mr/schema (:seon.schema.projection/registry projection) config-ident)))]
                   [config-ident attribute])))
-        forms))
+        (keys (:seon.schema.projection/forms projection))))
 
 (defn- primary-setting-entries
-  [forms dials]
-  (let [routes (request-attributes forms)]
+  [projection dials]
+  (let [routes (request-attributes projection)]
     (into {}
         (keep
          (fn [[config-ident value]]
@@ -423,8 +425,8 @@
     target))
 
 (defn- configured-targets
-  [dials]
-   (let [primary-settings (primary-setting-entries (schema/declaration-population) dials)
+  [projection dials]
+   (let [primary-settings (primary-setting-entries projection dials)
          primary
          (if (:seon.config.ai/no-auth dials)
            (dissoc primary-settings :seon.ai/api-key-variable)
@@ -467,12 +469,12 @@
   is exactly what `:seon.ai/backup?` reads downstream."
   {:malli/schema
    [:function
-    [:=> [:cat :seon.config/effective] :seon.ai/targets]
-    [:=> [:cat :seon.db/database-value :seon.config/effective]
+    [:=> [:cat :seon.schema/projection :seon.config/effective] :seon.ai/targets]
+    [:=> [:cat :seon.schema/projection :seon.db/database-value :seon.config/effective]
      :seon.ai/targets]]}
-  ([dials] (configured-targets dials))
-  ([database dials]
-   (let [{:seon.ai/keys [primary backup]} (configured-targets dials)
+  ([projection dials] (configured-targets projection dials))
+  ([projection database dials]
+   (let [{:seon.ai/keys [primary backup]} (configured-targets projection dials)
          primary-model (model-details database (:seon.ai/model primary))
          backup-model (some->> backup :seon.ai/model
                                (model-details database))
@@ -584,25 +586,18 @@
   {"type" (str/replace (name response-format) "-" "_")})
 
 (defn- config-registration-properties
-  [forms config-ident]
-  (schema.form/attr-form-properties
-   (schema/schema-definition forms config-ident)))
+  [projection config-ident]
+  (m/properties (mr/schema (:seon.schema.projection/registry projection) config-ident)))
 
-;; ONE declaration population per derivation. Asking `schema-definition` per
-;; config attribute read and merged all 152 schema resources per question —
-;; ~66 complete classpath populations on EVERY model request, to answer a
-;; question about one map already in hand (2026-08-07).
 (defn- wire-setting-triples
-  [forms]
-    (->> (map-attributes forms :seon.config/effective)
-         (mapcat
-          (fn [config-ident]
-            (map (fn [[wire-key coercion]]
-                   [config-ident wire-key coercion])
-                 (:seon.ai/wire
-                  (config-registration-properties forms config-ident)))))
-         (sort-by (juxt (comp str first) second))
-         vec))
+  [projection]
+  (->> (map-attributes projection :seon.config/effective)
+       (mapcat
+        (fn [config-ident]
+          (map (fn [[wire-key coercion]] [config-ident wire-key coercion])
+               (:seon.ai/wire (config-registration-properties projection config-ident)))))
+       (sort-by (juxt (comp str first) second))
+       vec))
 
 (defn- coercion-function
   [coercion]
@@ -610,17 +605,16 @@
 
 (defn wire-settings
   "Wire fields honoured for a request and configured fields that are inert."
-  {:malli/schema [:=> [:cat :seon.ai/request] :seon.ai/wire-settings]}
-  [request]
-  (let [forms (schema/declaration-population)
-        routes (request-attributes forms)
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.ai/request] :seon.ai/wire-settings]}
+  [projection request]
+  (let [routes (request-attributes projection)
         thinking? (not= :disabled (:seon.ai/thinking request))
         inert (if thinking?
                 (into #{}
                       (keep (fn [[config-ident attribute]]
                               (when (and (contains? request attribute)
                                          (:seon.ai/inert-when-thinking
-                                          (config-registration-properties forms config-ident)))
+                                          (config-registration-properties projection config-ident)))
                                 config-ident)))
                       routes)
                 #{})]
@@ -642,23 +636,22 @@
                (assoc-in result [:seon.ai/sent wire-key] wire-value))))))
      {:seon.ai/sent {}
       :seon.ai/inert inert}
-     (wire-setting-triples forms))))
+     (wire-setting-triples projection))))
 
 (defn- extra-body-request-ident
-  []
-  (let [forms (schema/declaration-population)]
+  [projection]
     (some
      (fn [config-ident]
        (when (true? (:seon.ai/extra-body
-                     (config-registration-properties forms config-ident)))
+                     (config-registration-properties projection config-ident)))
          (:seon.ai/request-attribute
-          (config-registration-properties forms config-ident))))
-     (map-attributes forms :seon.config/effective))))
+          (config-registration-properties projection config-ident))))
+     (map-attributes projection :seon.config/effective)))
 
 (defn- extra-body
-  {:malli/schema [:=> [:cat :seon.ai/request] [:or :seon.ai/sent :seon.ai/invalid-extra-body-error]]}
-  [request]
-  (if-let [encoded (get request (extra-body-request-ident))]
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.ai/request] [:or :seon.ai/sent :seon.ai/invalid-extra-body-error]]}
+  [projection request]
+  (if-let [encoded (get request (extra-body-request-ident projection))]
     (try
       (let [decoded (edn/read-string encoded)]
         (if (and (map? decoded) (every? string? (keys decoded)))
@@ -709,8 +702,8 @@
 
 (defn request-body
   "The provider request document, or a pre-call flat error. Pure."
-  {:malli/schema [:=> [:cat :seon.ai/request] :seon.ai/request-body]}
-  [{:keys [:seon.ai/model :seon.ai/system :seon.ai/prompt]
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.ai/request] :seon.ai/request-body]}
+  [projection {:keys [:seon.ai/model :seon.ai/system :seon.ai/prompt]
     stream? :seon.ai/stream?
     :as request}]
   ;; STRING keys: this is the wire document, not Clojure data. It is
@@ -724,9 +717,9 @@
                              true (conj {"role" "user" "content" prompt}))}
                ;; `docs/seon/reference/llm-adapters.md:169-179`.
                stream? (assoc "stream_options" {"include_usage" true}))
-        sent (:seon.ai/sent (wire-settings request))
+        sent (:seon.ai/sent (wire-settings projection request))
         builder-body (merge base sent)
-        extra (extra-body request)]
+        extra (extra-body projection request)]
     (if (contains? extra :seon.ai/extra-body-edn)
       extra
       (let [builder-owned-keys
@@ -1643,11 +1636,11 @@
     text arrived. A stream that ends early after some text arrived is
     NOT an error: it returns the ordinary completion carrying a
     `:seon.ai/truncation` fact, so the turn keeps what was paid for."
-  {:malli/schema [:=> [:cat :seon.ai/request] :seon.ai/completion]}
-  [{:keys [:seon.ai/api-key-variable]
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.ai/request] :seon.ai/completion]}
+  [projection {:keys [:seon.ai/api-key-variable]
     no-auth :seon.config.ai/no-auth
     :as request}]
-  (let [body (request-body request)
+  (let [body (request-body projection request)
         api-key (when-not no-auth (credential api-key-variable))]
     (cond
       (or (contains? body :seon.ai/extra-body-edn)

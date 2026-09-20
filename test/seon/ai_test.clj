@@ -76,7 +76,7 @@
   (delay (config/defaults)))
 
 (deftest the-shipped-cluster-has-a-primary-and-configured-backup
-  (let [targets (ai/targets @dials)]
+  (let [targets (ai/targets (seon.schema/handed-projection) @dials)]
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/targets) targets))
     (is (= {:seon.ai/endpoint (:seon.config.ai/endpoint @dials)
             :seon.ai/model (:seon.config.ai/model @dials)
@@ -105,7 +105,7 @@
 (deftest the-shipped-openrouter-backup-resolves-through-its-provider-row
   (test-support/with-database
     (fn [connection]
-      (let [backup (:seon.ai/backup (ai/targets @connection @dials))]
+      (let [backup (:seon.ai/backup (ai/targets (seon.schema/handed-projection) @connection @dials))]
         (is (= {:seon.ai/model "deepseek/deepseek-v4-flash-20260731"
                 :seon.ai/endpoint
                 "https://openrouter.ai/api/v1/chat/completions"
@@ -122,18 +122,14 @@
             "the backup inherits the configured output bound")
         (is (= "EXPLICIT_BACKUP_KEY"
                (get-in
-                (ai/targets
-                 @connection
-                 (assoc @dials
+                (ai/targets (seon.schema/handed-projection) @connection (assoc @dials
                         :seon.config.ai.backup/api-key-variable
                         "EXPLICIT_BACKUP_KEY"))
                 [:seon.ai/backup :seon.ai/api-key-variable]))
             "an explicit backup credential still outranks its descriptor")
         (is (= "PRIMARY_OVERRIDE_KEY"
                (get-in
-                (ai/targets
-                 @connection
-                 (assoc @dials
+                (ai/targets (seon.schema/handed-projection) @connection (assoc @dials
                         :seon.config.ai/api-key-variable
                         "PRIMARY_OVERRIDE_KEY"
                         :seon.config.ai.backup/model "deepseek-v4-pro"))
@@ -147,10 +143,9 @@
                       [:seon.ai.model/id "deepseek-flash"])))
      (doseq [thinking [:disabled :high]]
        (let [target (:seon.ai/primary
-                     (ai/targets @connection
-                                 (assoc @dials :seon.config.ai/model "deepseek-flash"
+                     (ai/targets (seon.schema/handed-projection) @connection (assoc @dials :seon.config.ai/model "deepseek-flash"
                                         :seon.config.ai/thinking thinking)))
-             body (ai/request-body (assoc target :seon.ai/prompt "hello"))]
+             body (ai/request-body (seon.schema/handed-projection) (assoc target :seon.ai/prompt "hello"))]
          (is (= "deepseek-flash" (get body "model")))
          (is (= thinking (:seon.ai/thinking target)))
          (is (= {"type" (if (= :disabled thinking) "disabled" "enabled")}
@@ -161,19 +156,18 @@
 
 (deftest thinking-is-one-config-fact-with-three-wire-states
   (testing "absence leaves the provider default untouched"
-    (let [body (ai/request-body base)]
+    (let [body (ai/request-body (seon.schema/handed-projection) base)]
       (is (not (contains? body "thinking")))
       (is (not (contains? body "reasoning_effort")))))
   (testing "explicit disable sends only the off switch"
-    (let [body (ai/request-body (assoc base :seon.ai/thinking :disabled))]
+    (let [body (ai/request-body (seon.schema/handed-projection) (assoc base :seon.ai/thinking :disabled))]
       (is (= {"type" "disabled"} (get body "thinking")))
       (is (not (contains? body "reasoning_effort")))))
   (testing "each configured effort means explicit on plus that effort"
     (doseq [effort [:low :high :max]]
-      (let [target (get-in (ai/targets
-                            (assoc @dials :seon.config.ai/thinking effort))
+      (let [target (get-in (ai/targets (seon.schema/handed-projection) (assoc @dials :seon.config.ai/thinking effort))
                            [:seon.ai/primary])
-            body (ai/request-body (assoc target :seon.ai/prompt "hello"))]
+            body (ai/request-body (seon.schema/handed-projection) (assoc target :seon.ai/prompt "hello"))]
         (is (= effort (:seon.ai/thinking target)))
         (is (= {"type" "enabled"} (get body "thinking")))
         (is (= (name effort) (get body "reasoning_effort")))))))
@@ -198,8 +192,7 @@
         ;; shape its contract forbids. `config/absent` is the one explicit
         ;; retraction a manifest has, and compiling with it is exactly how a
         ;; no-auth cluster's effective map comes to be.
-        targets (ai/targets
-                 (assoc (test-support/effective-config
+        targets (ai/targets (seon.schema/handed-projection) (assoc (test-support/effective-config
                          {:seon.config.ai/api-key-variable config/absent})
                         :seon.config.ai/no-auth true))
         target (:seon.ai/primary targets)
@@ -209,7 +202,7 @@
            (fn [request-data]
              (swap! requests conj request-data)
              {:seon.ai/text "local reply"})}
-          #(ai/complete (assoc target :seon.ai/prompt "hello")))]
+          #(ai/complete (seon.schema/handed-projection) (assoc target :seon.ai/prompt "hello")))]
     (is (= true (:seon.config.ai/no-auth target))
         "assembly carries the descriptor's declared authentication state")
     (is (not (contains? target :seon.ai/api-key-variable))
@@ -224,7 +217,7 @@
 (deftest one-dial-configures-a-backup-and-the-rest-inherit
   ;; the shape that makes a PARTIAL backup unrepresentable: `model`
   ;; decides, everything else is an override
-  (let [targets (ai/targets (assoc @dials :seon.config.ai.backup/model
+  (let [targets (ai/targets (seon.schema/handed-projection) (assoc @dials :seon.config.ai.backup/model
                                    "deepseek-v4-pro"))
         {:seon.ai/keys [primary backup]} targets]
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/targets) targets))
@@ -235,7 +228,7 @@
 
 (deftest a-backup-at-another-provider-overrides-what-differs
   (let [{:seon.ai/keys [primary backup]}
-        (ai/targets (assoc @dials
+        (ai/targets (seon.schema/handed-projection) (assoc @dials
                            :seon.config.ai.backup/model "claude-probe"
                            :seon.config.ai.backup/endpoint
                            "https://example.invalid/v1/messages"
@@ -264,7 +257,7 @@
   ;; three of four backup dials cannot produce a half-built target
   (doseq [dial [:seon.config.ai.backup/endpoint
                 :seon.config.ai.backup/api-key-variable]]
-    (is (not (contains? (ai/targets (-> @dials
+    (is (not (contains? (ai/targets (seon.schema/handed-projection) (-> @dials
                                         (dissoc :seon.config.ai.backup/model)
                                         (assoc dial "set-but-alone")))
                         :seon.ai/backup))
@@ -302,8 +295,8 @@
                        :seon.config.ai/max-tokens 500
                        :seon.config.ai/thinking :disabled
                        :seon.config.ai/api-key-variable config/absent})
-            target (:seon.ai/primary (ai/targets @connection settings))
-            body (ai/request-body (assoc target :seon.ai/prompt "hello"))]
+            target (:seon.ai/primary (ai/targets (seon.schema/handed-projection) @connection settings))
+            body (ai/request-body (seon.schema/handed-projection) (assoc target :seon.ai/prompt "hello"))]
         (is (= "https://example.invalid/v1/chat/completions"
                (:seon.ai/endpoint target)))
         (is (= "TEST_PROVIDER_KEY" (:seon.ai/api-key-variable target)))
@@ -322,8 +315,8 @@
       (let [settings (assoc @dials
                             :seon.config.ai/model "registered-model"
                             :seon.config.ai/thinking :high)
-            target (:seon.ai/primary (ai/targets @connection settings))
-            body (ai/request-body (assoc target :seon.ai/prompt "hello"))]
+            target (:seon.ai/primary (ai/targets (seon.schema/handed-projection) @connection settings))
+            body (ai/request-body (seon.schema/handed-projection) (assoc target :seon.ai/prompt "hello"))]
         (is (= :high (:seon.ai/thinking target))
             "a supported keyword is membership data, never a vector index")
         (is (= {"type" "enabled"} (get body "thinking")))
@@ -336,8 +329,7 @@
       (let [missing-variable "SEON_AI_AGENT_OVERRIDE_VERIFIED_ABSENT"
             target
             (:seon.ai/primary
-             (ai/targets @connection
-                         (assoc @dials
+             (ai/targets (seon.schema/handed-projection) @connection (assoc @dials
                                 :seon.config.ai/model "registered-model"
                                 :seon.config.ai/api-key-variable
                                 missing-variable)))
@@ -348,7 +340,7 @@
                (fn [request]
                  (swap! requests conj request)
                  {:seon.ai/text "must not happen"})}
-              #(ai/complete (assoc target :seon.ai/prompt "hello")))]
+              #(ai/complete (seon.schema/handed-projection) (assoc target :seon.ai/prompt "hello")))]
         (is (= missing-variable (:seon.ai/api-key-variable target)))
         (is ((schema/projection-validator (schema/handed-projection) :seon.ai/no-credential-error) outcome))
         (is (empty? @requests)
@@ -361,7 +353,7 @@
       (let [settings (test-support/effective-config
                       {:seon.config.ai/model "registered-model"
                        :seon.config.ai/api-key-variable config/absent})
-            target (:seon.ai/primary (ai/targets @connection settings))]
+            target (:seon.ai/primary (ai/targets (seon.schema/handed-projection) @connection settings))]
         (is (= "TEST_PROVIDER_KEY" (:seon.ai/api-key-variable target)))))))
 
 (deftest a-missing-registry-row-leaves-the-working-call-target-unchanged
@@ -370,8 +362,8 @@
       (let [settings (test-support/effective-config
                       {:seon.config.ai/model "unregistered-model"
                        :seon.config.ai.backup/model config/absent})]
-        (is (= (ai/targets settings)
-               (ai/targets @connection settings)))))))
+        (is (= (ai/targets (seon.schema/handed-projection) settings)
+               (ai/targets (seon.schema/handed-projection) @connection settings)))))))
 
 (deftest model-rows-are-queryable-open-and-rendered-without-wire-duplication
   (test-support/with-database
@@ -585,7 +577,7 @@
                  (pr-str check)))))))
 
 (deftest the-request-body-carries-the-model-and-the-messages
-  (let [body (ai/request-body (assoc base :seon.ai/system "be brief"))]
+  (let [body (ai/request-body (seon.schema/handed-projection) (assoc base :seon.ai/system "be brief"))]
     (is (map? body))
     ;; STRING keys at the wire boundary, no keyword fallback: the body is one
     ;; named JSON provider document, not arbitrary Clojure data.
@@ -627,7 +619,7 @@
                        :seon.ai/top-p 0.8
                        :seon.ai/stop ["END"]
                        :seon.ai/response-format :json-object)
-        {:seon.ai/keys [sent inert]} (ai/wire-settings request)]
+        {:seon.ai/keys [sent inert]} (ai/wire-settings (seon.schema/handed-projection) request)]
     (is (= {"max_tokens" 8192
             "thinking" {"type" "enabled"}
             "reasoning_effort" "high"
@@ -635,7 +627,7 @@
             "response_format" {"type" "json_object"}}
            sent))
     (is (= #{:seon.config.ai/temperature :seon.config.ai/top-p} inert))
-    (is (not (contains? (ai/request-body request) "temperature")))))
+    (is (not (contains? (ai/request-body (seon.schema/handed-projection) request) "temperature")))))
 
 (deftest stop-is-effective-per-agent-and-recorded-with-the-attempt
   (test-support/with-database
@@ -654,8 +646,8 @@
                                          [1 "stop-agent" ["END"]]]]
        (let [settings (ai/settings (config/effective @connection "default")
                                    (ai/agent-overlay @connection agent-id))
-             target (:seon.ai/primary (ai/targets settings))
-             body (ai/request-body (assoc target :seon.ai/prompt "(+ 1 1)"))
+             target (:seon.ai/primary (ai/targets (seon.schema/handed-projection) settings))
+             body (ai/request-body (seon.schema/handed-projection) (assoc target :seon.ai/prompt "(+ 1 1)"))
              recorded (#'turn/record-attempt!
                        {:seon.db/connection connection}
                        {:seon.ai/target target :seon.ai/settings settings
@@ -700,8 +692,7 @@
        (is (pos? @evaluated) "At least one preceding form must actually evaluate.")))))
 
 (deftest disabled-thinking-emits-sampling-and-omits-effort
-  (let [body (ai/request-body
-              (assoc base
+  (let [body (ai/request-body (seon.schema/handed-projection) (assoc base
                      :seon.ai/thinking :disabled
                      :seon.ai/temperature 0.4
                      :seon.ai/presence-penalty -0.5))]
@@ -712,13 +703,11 @@
 
 (deftest extra-body-merges-last-but-cannot-rewrite-any-builder-owned-key
   (is (= true
-         (get (ai/request-body
-               (assoc base :seon.ai/extra-body-edn
+         (get (ai/request-body (seon.schema/handed-projection) (assoc base :seon.ai/extra-body-edn
                       "{\"vendor_option\" true}"))
               "vendor_option")))
   (doseq [protected ["model" "max_tokens" "authorization"]]
-    (let [failure (ai/request-body
-                   (assoc base :seon.ai/extra-body-edn
+    (let [failure (ai/request-body (seon.schema/handed-projection) (assoc base :seon.ai/extra-body-edn
                           (pr-str {protected "override"})))]
       (is ((schema/projection-validator (schema/handed-projection) :seon.ai/extra-body-conflict-error) failure))
       (is (= [protected]
@@ -726,15 +715,14 @@
                      [:seon.error/data :seon.ai/protected-keys])))))
   (is (= "[:not :a-map]"
          (:seon.ai/extra-body-edn
-          (ai/request-body (assoc base :seon.ai/extra-body-edn "[:not :a-map]"))))))
+          (ai/request-body (seon.schema/handed-projection) (assoc base :seon.ai/extra-body-edn "[:not :a-map]"))))))
 
 (deftest an-extra-body-conflict-refuses-before-the-http-leaf
   (let [sent (atom 0)
         outcome
         (with-redefs-fn
           {#'seon.ai/send-request (fn [_] (swap! sent inc))}
-          #(ai/complete
-            (assoc base :seon.ai/extra-body-edn
+          #(ai/complete (seon.schema/handed-projection) (assoc base :seon.ai/extra-body-edn
                    "{\"authorization\" \"leak\"}")))]
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/extra-body-conflict-error) outcome))
     (is (zero? @sent))))
@@ -1013,7 +1001,7 @@
            (fn [request]
              (swap! requests conj request)
              {:seon.ai/text "must not happen"})}
-          #(ai/complete base))]
+          #(ai/complete (seon.schema/handed-projection) base))]
     (is (= :seon.ai/request (:seon.error/layer outcome)))
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/no-credential-error) outcome))
     (is (re-find #"SEON_AI_TEST_KEY_ABSENT" (:seon.error/message outcome))
@@ -1032,7 +1020,7 @@
            (fn [request-data]
              (swap! requests conj request-data)
              {:seon.ai/text "local reply"})}
-          #(ai/complete request))]
+          #(ai/complete (seon.schema/handed-projection) request))]
     (is (= "local reply" (:seon.ai/text outcome)))
     (is (int? (:seon.ai.model/last-latency-ms outcome)))
     (is (= 1 (count @requests)))
@@ -1044,7 +1032,7 @@
   ;; port 1 answers nothing; the credential is present so the call is
   ;; genuinely attempted
   (let [outcome (with-redefs [ai/credential (constantly "test-key")]
-                  (ai/complete base))]
+                  (ai/complete (seon.schema/handed-projection) base))]
     (is (= :seon.ai/request (:seon.error/layer outcome)))
     (is (or (contains? outcome :seon.ai/transport-failure)
             (contains? outcome :seon.ai/timeout)))))
@@ -1054,7 +1042,7 @@
   ;; refusing, which is the genuinely unobservable case the deadline
   ;; exists for
   (let [outcome (with-redefs [ai/credential (constantly "test-key")]
-                  (ai/complete (assoc base
+                  (ai/complete (seon.schema/handed-projection) (assoc base
                                       :seon.ai/endpoint
                                       "http://10.255.255.1:8080/v1"
                                       :seon.ai/timeout-ms 300)))]
@@ -1068,8 +1056,8 @@
   ;; nothing retries a paid call — the count is the contract
   (let [calls (atom 0)]
     (with-redefs [ai/credential (constantly "test-key")
-                  ai/request-body (fn [_request] (swap! calls inc) {})]
-      (ai/complete base))
+                  ai/request-body (fn [_projection _request] (swap! calls inc) {})]
+      (ai/complete (seon.schema/handed-projection) base))
     (is (= 1 @calls) "exactly one request was built, and so one was made")))
 
 ;;; ---------------------------------------------------------------------------
@@ -1212,7 +1200,7 @@
   (let [server (start-stub!)]
     (try
       (let [completion (with-redefs [ai/credential (constantly "test-key")]
-                         (ai/complete (stub-request server "/truncate")))
+                         (ai/complete (seon.schema/handed-projection) (stub-request server "/truncate")))
             truncation (:seon.ai/truncation completion)]
         (is (= "(+ 1 2) (+ 3" (:seon.ai/text completion))
             "a run built from this settles forms instead of closing with zero")
@@ -1234,8 +1222,7 @@
                        (mapv deref
                              (mapv (fn [_]
                                      (future
-                                       (ai/complete
-                                        (stub-request server "/stream"))))
+                                       (ai/complete (seon.schema/handed-projection) (stub-request server "/stream"))))
                                    (range 6))))]
         (is (= 6 (count (filter #(= "(+ 1 2)" (:seon.ai/text %)) outcomes)))
             (str "every concurrent stream completed: "
@@ -1246,15 +1233,13 @@
   (let [server (start-stub!)]
     (try
       (let [{:seon.ai/keys [primary backup]}
-            (ai/targets
-             (assoc @dials
+            (ai/targets (seon.schema/handed-projection) (assoc @dials
                     :seon.config.ai.backup/model "backup-probe"
                     :seon.config.ai.backup/endpoint
                     "https://backup.example.invalid/v1/chat/completions"))
             failure
             (with-redefs [ai/credential (constantly "test-key")]
-              (ai/complete
-               (assoc primary
+              (ai/complete (seon.schema/handed-projection) (assoc primary
                       :seon.ai/endpoint
                       (str "http://127.0.0.1:"
                            (.getPort (.getAddress server))
@@ -1447,7 +1432,7 @@
   ;; The fixture asks the OS for a free loopback port, closes its listener,
   ;; then calls the production boundary. The JDK raises ConnectException,
   ;; which PROVES nothing was transmitted.
-  (let [value (ai/complete {:seon.ai/endpoint (refused-loopback-endpoint)
+  (let [value (ai/complete (seon.schema/handed-projection) {:seon.ai/endpoint (refused-loopback-endpoint)
                             :seon.ai/model "probe"
                             ;; the declared call target carries its output
                             ;; bound like every assembled one
@@ -1473,7 +1458,7 @@
           "counterexample: without before-send evidence the proof is false"))))
 
 (deftest a-missing-credential-is-terminal-even-with-a-backup
-  (let [value (ai/complete {:seon.ai/endpoint "http://127.0.0.1:1/v1"
+  (let [value (ai/complete (seon.schema/handed-projection) {:seon.ai/endpoint "http://127.0.0.1:1/v1"
                             :seon.ai/model "probe"
                             :seon.ai/max-tokens 32
                             :seon.ai/api-key-variable "SEON_AI_ABSENT_KEY_PROBE"

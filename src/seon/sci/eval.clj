@@ -219,7 +219,7 @@
                                    sci-namespace)]))
                           symbols)])))
               (group-by (comp symbol namespace)
-                        (program/base-context-injected-symbols (:seon.schema.projection/forms projection))))
+                        (program/base-context-injected-symbols projection)))
         ctx
         (sci/init
         {:interrupt-fn (:interrupt-fn kernel-options)
@@ -315,7 +315,7 @@
 
 (defn- row
   "Return reader-owned rows; Var definitions are derived after evaluation."
-  [event _projection]
+  [event projection]
   (or
    (let [deletion (program/deletion-row event)]
      (when (deleted-schema-key deletion) deletion))
@@ -328,7 +328,7 @@
                                 :seon.schema/ns])
             :seon.schema.admission/source :agent))
    (when (:seon.ns/name event)
-     (program/declaration-row event :contracted :agent))))
+     (program/declaration-row projection event :contracted :agent))))
 
 (defn- removed-program-identities
   "Function and test identities removed from SCI's own intern tables."
@@ -427,7 +427,7 @@
                                (or (:seon.fn/sym %) (:seon.test/sym %))) %)
                      (seon.fn/source-rows
                       database
-                      (program/shapes-in (:seon.schema.projection/forms projection))
+                      (program/shapes-in projection)
                       namespace-row source
                       (set (keys (:seon.schema.projection/forms projection))))))
              event
@@ -609,7 +609,7 @@
               :seon.program/delete-identities)))
 
 (defn- namespace-context-row
-  [namespace-name source before after changed?]
+  [projection namespace-name source before after changed?]
   (when (or changed?
             (not= (select-keys before [:seon.sci.reader/aliases
                                       :seon.sci.reader/refers
@@ -618,6 +618,7 @@
                                      :seon.sci.reader/refers
                                      ::imports ::requires])))
     (program/declaration-row
+     projection
      (merge
       {:seon.ns/name namespace-name
        :seon.ns/source source}
@@ -819,9 +820,8 @@
             (:seon.program/source-attribute
              (program/shape
               (program/shapes-in
-               (:seon.schema.projection/forms
-                (or (db/carried-projection db)
-                    (schema/projection-from-database db))))
+               (or (db/carried-projection db)
+                   (schema/projection-from-database db)))
               identity-attribute))]
         (and (some? (:db/id committed))
              (same-declaration-source? (get row source-attribute)
@@ -866,7 +866,7 @@
                (let [source-attribute
                      (:seon.program/source-attribute
                       (program/shape
-                       (program/shapes-in (:seon.schema.projection/forms projection))
+                       (program/shapes-in projection)
                        identity-attribute))]
                  (not (same-declaration-source?
                        (get row source-attribute)
@@ -1053,7 +1053,7 @@
   [before after installations projection]
   (let [identities (set (map (comp program/row-identity :seon.program/row)
                              installations))
-        shapes (program/shapes-in (:seon.schema.projection/forms projection))
+        shapes (program/shapes-in projection)
         history (db/history after)
         changed-database (db/since history (db/basis-t before))
         components (into []
@@ -2503,6 +2503,7 @@
         context-row
         (when-not selected-row
           (namespace-context-row
+           (context-projection execution-ctx)
            namespace-name source before-reader-context
            (reader-context execution-ctx namespace-name)
            namespace-changed?))
@@ -3048,6 +3049,7 @@
               ;; declaration so the next form's entity ref resolves; this is
               ;; not a stub for an observed unresolved name.
               (program/declaration-row
+               projection
                (merge {:seon.ns/name @ending-namespace
                        :seon.ns/source source}
                       (binding-rows

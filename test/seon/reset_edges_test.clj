@@ -1,5 +1,6 @@
 (ns seon.reset-edges-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [malli.registry :as mr]
+            [seon.schema] [seon.schema.internal] [malli.core] [clojure.test :refer [deftest is]]
             [clojure.java.io :as io]
             [seon.cluster.source :as source]
             [seon.agent :as agent]
@@ -14,7 +15,6 @@
             [seon.sci.eval :as evaluation]
             [seon.fn :as functions]
             [seon.program :as program]
-            [seon.schema.form :as schema.form]
             [seon.test-support :as support]))
 
 (deftest named-edges-refuse-deletion-until-the-final-callers-are-repaired
@@ -115,14 +115,13 @@
      (let [database (db/db connection)
            forms (:seon.schema.projection/forms (db/carried-projection database))
            installed (:schema (db/schema-database database))
-           stored (filter (fn [[_ form]]
-                            (:seon.db/attributes (schema.form/schema-properties form))) forms)
+           stored (filter (fn [[schema-key _form]]
+                            (:seon.db/attributes (seon.schema.internal/entity-properties (mr/schema (:seon.schema.projection/registry (seon.schema/handed-projection)) schema-key)))) forms)
            violations
            (for [[schema-key form] stored
-                 [attribute options] (schema.form/map-entries form)
+                 [attribute options] (seon.schema.internal/entity-entries (mr/schema (:seon.schema.projection/registry (seon.schema/handed-projection)) schema-key))
                  :when (and (not (:optional (when (map? options) options)))
-                            (not (pos? (or (:min (schema.form/attr-form-properties
-                                                  (get forms attribute))) 0)))
+                            (not (pos? (or (:min (malli.core/properties (mr/schema (:seon.schema.projection/registry (seon.schema/handed-projection)) attribute))) 0)))
                             (= :db.cardinality/many
                                (get-in installed [attribute :db/cardinality])))]
              [schema-key attribute])]
@@ -202,10 +201,9 @@
                             {:seon.fn/manifest baseline})
                  _ (spit target-file "(ns reset.publication.target)")
                  after (artifact target-file)
-                 plan (functions/plan-file-change
-                       {:seon.fn.change/status :modified
+                 plan (functions/plan-file-change (assoc {:seon.fn.change/status :modified
                         :seon.fn.change/current-artifact before
-                        :seon.fn.change/desired-artifact after})
+                        :seon.fn.change/desired-artifact after} :seon.schema/projection (seon.schema/handed-projection)))
                  changed (functions/replace-manifest-artifacts baseline [after])
                  refusal (support/refusal-data
                           #(#'source-test/publish

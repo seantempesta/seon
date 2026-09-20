@@ -9,7 +9,7 @@
   absent — and it must decide from recorded facts (`:seon.fn/calls` edges
   and content digests), never from a modification time, a filename, or a
   maintained list."
-  (:require [babashka.process :as process]
+  (:require [seon.schema] [babashka.process :as process]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -40,7 +40,7 @@
   [connection source]
   (let [database (db/db connection)
         rows (functions/source-rows database
-               (program/shapes-in (:seon.schema.projection/forms (db/carried-projection database)))
+               (program/shapes-in (db/carried-projection database))
                {:seon.ns/name 'selection.fixture} source
                (set (keys (:seon.schema.projection/forms (db/carried-projection database)))))]
     (support/transacted! connection rows)
@@ -332,7 +332,7 @@
                         :seon.sci.admit/caps (config/result-caps (config/defaults))
                         :seon.sci.eval/time-limit-ms 10000
                         :seon.config/on-core-error :panic})
-           declaration (program/declaration-row (:seon.program/row evaluation) :all :agent)]
+           declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]
        (is (nil? (:seon.cluster.eval/error evaluation)))
        (support/transacted! connection [declaration])
        (is (not (:seon.fn/file declaration)))

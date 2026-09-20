@@ -726,7 +726,7 @@
         :seon.error/diagnostic-cause :seon.cluster.eval/source
         :seon.error/diagnostic-evidence source
         :seon.bootstrap/unmatched-source source
-        :seon.turn/id turn-id})))))
+        :seon.error/run [:seon.turn/id turn-id]})))))
                       {:seon.repl/key (:seon.repl/key candidate)
                        :seon.sci.admit/print-node (edn/read-string result)}))
                   rows)
@@ -755,7 +755,7 @@
         :seon.error/diagnostic-offending prior-sources
         :seon.error/diagnostic-cause :seon.bootstrap/expected-prefix-count
         :seon.error/diagnostic-evidence prior-sources
-        :seon.turn/id turn-id
+        :seon.error/run [:seon.turn/id turn-id]
         :seon.bootstrap/expected-prefix-count (count expected-sources)
         :seon.bootstrap/actual-prefix-count (count prior-sources)})))))
         (nth episode index nil)))))

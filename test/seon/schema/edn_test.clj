@@ -7,7 +7,7 @@
   through the one gate) ONLY — schemas and tests are byte-sealed.
   The valid fixture is a classpath resource. Negative EDN is written beneath
   `tmp/` during each test so malformed inputs never enter publication."
-  (:require [clojure.java.io :as io]
+  (:require [seon.schema.internal] [malli.core] [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -16,7 +16,6 @@
             [seon.config :as config]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support]))
 
 ;;; ---------------------------------------------------------------------------
@@ -27,7 +26,7 @@
   (let [forms (schema.edn/packaged-forms)
         declared? (fn [[_ definition]]
                     (true? (:seon.config/dial
-                            (schema.form/attr-form-properties definition))))
+                            (malli.core/properties (seon.schema/structural-schema definition)))))
         declared (into #{} (comp (filter declared?) (map key)) forms)
         old-population
         (into #{}
@@ -38,7 +37,7 @@
                     (map key))
               forms)
         entries #(into #{} (map first)
-                       (schema.form/map-entries (:seon.config/manifest %)))
+                       (seon.schema.internal/entity-entries (schema/structural-schema (:seon.config/manifest %))))
         synthetic (schema.edn/derive-config-forms
                    {:seon.config.synthetic/not-a-dial :boolean
                     :example/declared [:boolean {:seon.config/dial true}]})]
@@ -414,15 +413,15 @@
                    (schema/projection-from-database @connection))
             entries
             (fn [forms schema-key]
-              (into {} (map (juxt first identity))
-                    (schema.form/map-entries
-                     (get forms schema-key))))]
+              (into {} (map (fn [[k properties child]] [k [k properties (malli.core/form child)]]))
+                    (seon.schema.internal/entity-entries (schema/structural-schema (get forms schema-key)))))]
         (schema/call-with-registration-delta
          delta
          (fn []
            (schema/register!
             scratch
             [:boolean {:seon.config/dial true
+                       :seon.config/display-label "Scratch enabled"
                        :seon.config/default false
                        :seon.config/per-agent true}])))
         (let [forms @(:seon.schema.delta/candidate-forms delta)]
@@ -431,7 +430,7 @@
             (is (contains? (entries forms :seon.config/effective) scratch))
             (is (contains? (entries forms :seon.config/agent-overlay) scratch))
             (is (contains? (entries forms :seon.config/entity) scratch))
-            (is (contains? (set (schema/canonical-database-attributes forms)) scratch))
+            (is (contains? (set (schema/canonical-database-attributes (seon.schema/build-projection forms))) scratch))
             (is (= [scratch
                     {:optional true}
                     [:or scratch [:= :seon.config/absent]]]
@@ -442,8 +441,7 @@
                 "agent absence inherits through one derived optional entry")
             (is (= false
                    (:seon.config/default
-                    (schema.form/attr-form-properties
-                     (get forms scratch))))
+                    (malli.core/properties (seon.schema/structural-schema (get forms scratch)))))
                 "the same registration retains its declared default")
             (is (not (contains? (config/default-decisions) scratch))
                 "uncommitted scratch data never changes shipped decisions"))
@@ -461,21 +459,18 @@
         (into #{}
               (keep (fn [[identity definition]]
                       (when (true? (:seon.config/per-agent
-                                    (schema.form/attr-form-properties
-                                     definition)))
+                                    (malli.core/properties (seon.schema/structural-schema definition))))
                         identity)))
               forms)
         overlay-entries
-        (schema.form/map-entries
-         (schema/schema-definition :seon.config/agent-overlay))
+        (seon.schema.internal/entity-entries (malli.core/schema (schema/schema-definition :seon.config/agent-overlay) (:seon.schema.projection/compile-options (seon.schema/handed-projection))))
         overlay-identities (into #{} (map first) overlay-entries)
         ai-dial-identities
         (into #{}
               (filter #(str/starts-with? (namespace %)
                                          "seon.config.ai"))
               (map first
-                   (schema.form/map-entries
-                    (schema/schema-definition :seon.config/manifest))))]
+                   (seon.schema.internal/entity-entries (malli.core/schema (schema/schema-definition :seon.config/manifest) (:seon.schema.projection/compile-options (seon.schema/handed-projection))))))]
     (is (= per-agent-identities overlay-identities)
         "the overlay is derived from per-agent registrations without a list")
     (is (every? per-agent-identities ai-dial-identities)

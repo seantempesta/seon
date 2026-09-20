@@ -1052,7 +1052,7 @@
         base-request {:seon.fn.change/status :modified
                       :seon.fn.change/current-artifact current
                       :seon.fn.change/desired-artifact desired}
-        plan #(seon.fn/plan-file-change (merge base-request %))]
+        plan #(seon.fn/plan-file-change (assoc (merge base-request %) :seon.schema/projection (seon.schema/handed-projection)))]
     (testing "same identities with cardinality-one updates are upserts"
       (is (= {:seon.fn.change/action :incremental-upsert
               :seon.fn.change/relative-path path
@@ -1106,7 +1106,7 @@
                [(dissoc base-request :seon.fn.change/current-artifact) :missing-artifact]
                [(assoc base-request :seon.fn.change/uncertain? true) :uncertain-projection]]]
         (is (some #{reason}
-                  (:seon.fn.change/reasons (seon.fn/plan-file-change request)))
+                  (:seon.fn.change/reasons (seon.fn/plan-file-change (assoc request :seon.schema/projection (seon.schema/handed-projection)))))
             (str request))))))
 
 (deftest indexing-uses-a-prebuilt-manifest-without-analysis
@@ -1932,7 +1932,7 @@
                      (String. (java.util.Arrays/copyOfRange bytes (int start) (int end))
                               java.nio.charset.StandardCharsets/UTF_8))))
             (is (= (:seon.fn/file row)
-                   (:seon.fn/file (program/declaration-row row :all :core))))))
+                   (:seon.fn/file (program/declaration-row (seon.schema/handed-projection) row :all :core))))))
         (let [report (db/transact! connection (seon.fn/reconcile-tx (db/db connection) rows []))]
           (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message])))
           (when (:db-after report)
@@ -1972,7 +1972,7 @@
            row (test-support/program-fn-row
                 database 'sample.refused-index/read
                 "(defn read [] true)")
-           shapes (program/shapes-in (schema.edn/packaged-forms))
+           shapes (program/shapes-in (seon.schema/build-projection (schema.edn/packaged-forms)))
            query db/q
            pull db/pull
            transact! db/transact!
@@ -2041,7 +2041,7 @@
                    {:seon.ns/name owner-namespace
                     ::identity-value identity-pair
                     ::identity-ref identity-pair}]
-             tx-data (reconcile-in (program/shapes-in forms)
+             tx-data (reconcile-in (program/shapes-in (seon.schema/build-projection forms))
                                    database rows [])
              target-tempid
              (some (fn [[operation tempid attribute value]]
@@ -2126,21 +2126,21 @@
                (let [emitted (assoc file-row ::declared-after "carried")]
                  (is (nil? (::declared-after
                             (program/canonical-row
-                             (program/shapes-in packaged) emitted)))
+                             (program/shapes-in (seon.schema/build-projection packaged)) emitted)))
                      "an undeclared attribute is not a program row attribute")
                  (is (= "carried" (::declared-after
                                    (program/canonical-row
-                                    (program/shapes-in declared) emitted)))
+                                    (program/shapes-in (seon.schema/build-projection declared)) emitted)))
                      "declaring it on :seon.fn.file/file is the whole
                       requirement — no restart, no second list")
                  (testing "and the next index of the same file writes it"
                    (let [report (db/transact!
                                  connection
                                  (reconcile-in
-                                  (program/shapes-in declared)
+                                  (program/shapes-in (seon.schema/build-projection declared))
                                   (db/db connection)
                                   [(program/canonical-row
-                                    (program/shapes-in declared) emitted)]
+                                    (program/shapes-in (seon.schema/build-projection declared)) emitted)]
                                   []))]
                      (is (:db-after report)
                          (pr-str (select-keys report [:seon.error/kind
@@ -2506,7 +2506,8 @@
         first-party (#'seon.fn/first-party-function-symbols analysis)
         emitted (get (#'seon.fn/analysis-rows-by-file
                       analysis first-party contexts
-                      (set (keys (schema.edn/packaged-forms))))
+                      (set (keys (schema.edn/packaged-forms)))
+                      (schema/handed-projection))
                      path)
         artifact (seon.fn/build-artifact
                   {:seon.fn/source-path (.getPath file)

@@ -1,5 +1,5 @@
 (ns seon.test-failure-facts-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.schema] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [sci.core :as sci]
             [seon.blob :as blob]
@@ -353,13 +353,13 @@
           (is (vector? known))
           (is (nil? (:seon.test/reach-unknown (first known)))))))))
 
-(def ^:private reported-path-schema
-  (seon.schema.datahike/malli->datahike-schema [:seon.test.failure/reported-file]))
+(defn- reported-path-schema []
+  (seon.schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) [:seon.test.failure/reported-file]))
 
 (deftest recording-mints-an-absent-identity-instead-of-rejecting-the-completion
   (testing "reach evidence that outlived a declaration is recorded, never refused"
     (support/with-database
-      {:seon.test-support/extra-schema reported-path-schema}
+      {:seon.test-support/extra-schema (reported-path-schema)}
       (fn [connection]
         (let [s "absent.facts/check"
               present "absent.facts/present"

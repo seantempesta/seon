@@ -269,7 +269,7 @@
                [_ :seon.schema/key ?key]]
              database)]
         (is (every? installed
-                    (schema/canonical-database-attributes packaged-forms)))
+                    (schema/canonical-database-attributes (schema/handed-projection))))
         (is (not (contains? installed :seon.schema/created-at)))
         (is (every? #(not (contains? % :seon.schema/created-at))
                     (schema/canonical-schema-rows packaged-forms)))

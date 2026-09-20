@@ -23,8 +23,7 @@
     (try
       (test-support/transacted!
                    connection
-                   (schema.datahike/malli->datahike-schema
-                    (schema/canonical-database-attributes)))
+                   (schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) (schema/canonical-database-attributes (seon.schema/handed-projection))))
       (body connection)
       (finally
         (d/release connection)

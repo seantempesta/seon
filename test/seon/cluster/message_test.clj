@@ -533,7 +533,7 @@
                                    (wake/wake-attributes (db/db connection))))
             "a delivery writes a wake attribute — that IS the transport")
         (is (empty? (set/intersection written
-                                      (turn/committed-attributes)))
+                                      (turn/committed-attributes (seon.schema/handed-projection))))
             "and it shares nothing with the loop's routine bookkeeping,
              so an ordinary turn still cannot wake itself")))))
 
@@ -587,8 +587,7 @@
     (try
       (test-support/transacted!
                    connection
-                   (schema.datahike/malli->datahike-schema
-                    (schema/canonical-database-attributes)))
+                   (schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) (schema/canonical-database-attributes (seon.schema/handed-projection))))
       (test-support/transacted! connection [{:seon.agent/id "alice"}])
       (ask! connection "m-0" "alice" "hello")
       (let [report

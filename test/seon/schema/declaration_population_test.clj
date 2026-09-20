@@ -81,11 +81,12 @@
 
 (deftest a-supplied-population-is-not-resolved-again
   (testing "every question answered from a population in hand reads nothing"
-    (let [forms (schema.edn/packaged-forms)]
+    (let [forms (schema.edn/packaged-forms)
+          projection (schema/build-projection forms)]
       (is (zero?
            (resource-reads
             (fn []
-              (run! (fn [attribute] (schema/identity-attr? forms attribute))
+              (run! (fn [attribute] (schema/identity-attr? projection attribute))
                     (take 200 (keys forms))))))
           "the population-taking arities must not re-resolve"))))
 

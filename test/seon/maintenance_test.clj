@@ -1,10 +1,10 @@
 (ns seon.maintenance-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [malli.registry :as mr]
+            [seon.schema.internal] [malli.core] [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.maintenance :as maintenance]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support])
   (:import [java.time Instant]
            [java.util Date UUID]))
@@ -60,18 +60,14 @@
       (is (true? ((schema/projection-validator (schema/handed-projection) :seon.operator.process-census/result) public-result)))
       (is (= 'seon.maintenance/project-process-census-result
              (:seon.maintenance/result-projection
-              (schema.form/schema-properties
-               (schema/schema-definition
-                :seon.operator.process-census/result))))))
+              (malli.core/properties (mr/schema (:seon.schema.projection/registry (seon.schema/handed-projection)) :seon.operator.process-census/result))))))
     (testing "the declared producer yields component-ref attributes"
       (is (= :db.type/ref
              (:db/valueType
-              (schema.datahike/malli->datahike-attr
-               :seon.maintenance.result/process-census-processes))))
+              (schema.datahike/malli->datahike-attr-in (seon.schema/handed-projection) :seon.maintenance.result/process-census-processes))))
       (is (true?
            (:db/isComponent
-            (schema.datahike/malli->datahike-attr
-             :seon.maintenance.result/process-census-processes)))))
+            (schema.datahike/malli->datahike-attr-in (seon.schema/handed-projection) :seon.maintenance.result/process-census-processes)))))
     (test-support/with-database
       (fn [connection]
         (test-support/transacted!
@@ -309,8 +305,7 @@
             (seed-report! connection)]
         (testing "declared tasks with no receipts have the sealed empty face"
           (is (= "Maintenance: no task has run yet."
-                 (maintenance/render-report-ai
-                  (maintenance/report @connection)))))
+                 (maintenance/render-report-ai (maintenance/report @connection) @connection))))
         (test-support/transacted!
                      connection
                      (into [] cat
@@ -340,16 +335,15 @@
         (testing "all latest receipts render one green line"
           (let [report-value (maintenance/report @connection)]
             (is (= "Maintenance: 2 tasks succeeded; latest 2026-08-05T12:34:00Z; 0 errors."
-                   (maintenance/render-report-ai report-value)))
-            (is (= :article (first (maintenance/render-report-html
-                                    report-value))))))
+                   (maintenance/render-report-ai report-value @connection)))
+            (is (= :article (first (maintenance/render-report-html report-value @connection))))))
         (test-support/transacted!
                      connection
                      (receipt census-task census-handler "census/2" at-2
                               {:seon.maintenance.receipt/interrupted-at at-2}))
         (testing "only the latest receipt per task determines the red face"
           (let [report-value (maintenance/report @connection)
-                rendered (maintenance/render-report-ai report-value)]
+                rendered (maintenance/render-report-ai report-value @connection)]
             (is (= (str "Maintenance: 1 succeeded; 1 need attention.\n"
                         "census-processes!: receipt census/2 was interrupted.")
                    rendered))

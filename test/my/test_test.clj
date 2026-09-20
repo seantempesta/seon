@@ -1,6 +1,7 @@
 (ns my.test-test
   "Agent-authored tests resolve their admitted source with their cluster's custody."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [seon.schema]
+            [clojure.test :refer [deftest is]]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -43,7 +44,7 @@
                       :seon.sci.eval/time-limit-ms 120000
                       :seon.config/on-core-error :panic})
            row (when (:seon.program/row declared)
-                 (program/declaration-row (:seon.program/row declared) :all :agent))]
+                 (program/declaration-row (seon.schema/handed-projection) (:seon.program/row declared) :all :agent))]
        (is (nil? (:seon.cluster.eval/error declared)) (pr-str declared))
        (is (map? row) (pr-str declared))
        (support/transacted! connection [row])

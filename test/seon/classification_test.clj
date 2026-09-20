@@ -24,17 +24,17 @@
                             [:double {:seon.config/dial true
                                       :seon.ai/request-attribute :seon.ai/temperature}]
                             :seon.config.ai/impostor :double)
-            routes (ai/request-attributes extended)]
-        (is (seq (config/dial-attributes forms)))
-        (is (seq (ai/request-attributes forms)))
+            routes (ai/request-attributes (seon.schema/build-projection extended))]
+        (is (seq (config/dial-attributes (seon.schema/build-projection forms))))
+        (is (seq (ai/request-attributes (seon.schema/build-projection forms))))
         (is (= :seon.ai/temperature
                (db/q '[:find ?attribute .
                        :where [?schema :seon.schema/key :seon.config.ai/temperature]
                               [?schema :seon.ai/request-attribute ?attribute]]
                      @connection)))
-        (is (= (conj (config/dial-attributes forms) :sample/heat)
-               (config/dial-attributes extended)))
-        (is (= (assoc (ai/request-attributes forms)
+        (is (= (conj (config/dial-attributes (seon.schema/build-projection forms)) :sample/heat)
+               (config/dial-attributes (seon.schema/build-projection extended))))
+        (is (= (assoc (ai/request-attributes (seon.schema/build-projection forms))
                        :sample/heat :seon.ai/temperature)
                routes))
         (is (= {:seon.ai/temperature 0.5}
@@ -47,13 +47,12 @@
     (fn [connection]
       (let [forms (:seon.schema.projection/forms
                    (schema/projection-from-database @connection))
-            before (set (program/base-context-injected-symbols forms))
-            after (set (program/base-context-injected-symbols
-                        (assoc forms
+            before (set (program/base-context-injected-symbols (seon.schema/build-projection forms)))
+            after (set (program/base-context-injected-symbols (seon.schema/build-projection (assoc forms
                                :sample/binding
                                [:symbol {:seon.sci.binding/target 'clojure.core/inc
                                          :seon.sci.binding/reason "Synthetic interpreter integration."}]
-                               :seon.sci.binding/impostor :symbol)))]
+                               :seon.sci.binding/impostor :symbol))))]
         (is (seq before))
         (is (= (conj before 'clojure.core/inc) after))
         (is (not (contains? after 'seon.sci.binding/impostor)))))))
@@ -65,7 +64,7 @@
             acquired (sci.eval/acquire! {:seon.sci.eval/ctx ctx
                                         :seon.db/db @connection})]
         (is (not (:seon.error/kind acquired)) (pr-str acquired))
-        (is (not (contains? (set (program/base-context-injected-symbols))
+        (is (not (contains? (set (program/base-context-injected-symbols (seon.schema/handed-projection)))
                             'my.turn/complete)))
         (is (= {:my.turn/disposition :completed :my.turn/result "done"}
                (sci/eval-string* ctx "(my.turn/complete {:my.turn/result \"done\"})")))

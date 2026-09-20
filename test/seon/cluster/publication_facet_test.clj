@@ -22,7 +22,7 @@
             (is (uuid? (:seon.source/commit-id published)))
             (doseq [[facet members]
                     [[:seon.test.runner/invalid-marker-reason-error
-                      {:seon.test/sym 'example/check :seon.test.runner/marker-key :seon.test/long}]
+                      {:seon.test.runner/test-sym 'example/check :seon.test.runner/marker-key :seon.test/long}]
                      [:seon.test.runner/unknown-worker-command-error
                       {:seon.test.runner/worker-id "worker" :seon.test.runner/worker-command-key :unknown}]
                      [:seon.test.runner/worker-launch-failure-error

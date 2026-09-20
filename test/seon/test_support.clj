@@ -1061,7 +1061,7 @@
   (let [projection (db/carried-projection database)
         [attribute declaration-symbol] identity
         rows (seon.fn/source-rows
-              database (program/shapes-in (:seon.schema.projection/forms projection))
+              database (program/shapes-in projection)
               {:seon.ns/name (symbol (namespace declaration-symbol))}
               source (set (keys (:seon.schema.projection/forms projection))))]
     (or (some #(when (= declaration-symbol (get % attribute)) %) rows)

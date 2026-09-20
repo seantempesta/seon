@@ -7,8 +7,9 @@
             [seon.effect :as effect]
             [seon.error.refusal :as error]
             [seon.fs.jvm]
-            [seon.schema :as schema]
-            [seon.schema.form :as schema.form]
+            [malli.core :as m]
+            [malli.registry :as mr]
+            [seon.env :as env]
             [seon.sci.kernel :as kernel])
   (:import [java.io InputStream OutputStream]
            [java.lang ProcessHandle Thread$Builder$OfVirtual]
@@ -84,19 +85,16 @@
            (fs/path working-root candidate)))))))
 
 (defn- environment-overrides
-  [effective]
-  ;; ONE declaration population for the whole effective config. Asking
-  ;; `schema/schema-definition` per key read and merged all 152 schema
-  ;; resources per key — 65 complete classpath populations, ~1 s, to answer a
-  ;; question about one map (2026-08-07).
-  (let [forms (schema/declaration-population)]
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.config/effective]
+                  [:map-of :string :seon.schema/value]]}
+  [projection effective]
+  (let [registry (:seon.schema.projection/registry projection)]
     (into {}
           (keep
            (fn [[config-key value]]
              (when-let [environment-name
                         (:seon.shell/environment
-                         (schema.form/attr-form-properties
-                          (schema/schema-definition forms config-key)))]
+                         (some-> (mr/schema registry config-key) m/properties))]
                [environment-name value])))
           effective)))
 
@@ -399,14 +397,14 @@
            :seon.blob/staged-writes [stdout stderr]})))))
 
 (defn- execute
-  [request effective cwd]
+  [projection request effective cwd]
   (let [connection (:seon.db/connection effect/*request-context*)
         argv (:my.shell/argv request)
         process-record
         (process/process
          argv
          {:dir (str cwd)
-          :extra-env (environment-overrides effective)
+          :extra-env (environment-overrides projection effective)
           :shutdown process/destroy-tree})
         ^Process child (:proc process-record)
         stdout-task
@@ -491,7 +489,8 @@
     (if (:my.shell/refused-cwd cwd)
       cwd
       (try
-        (execute request effective cwd)
+        (execute (:seon.schema/projection (env/of effect/*request-context*))
+                 request effective cwd)
         (catch InterruptedException interrupted
           (throw interrupted))
         (catch Throwable error

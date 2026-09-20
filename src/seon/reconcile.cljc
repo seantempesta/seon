@@ -55,17 +55,10 @@
            data))))
 
 (defn- identity-attributes
-  ;; One resolution for the whole scan. `schema/identity-attr?`'s one-argument
-  ;; arity resolves the declaration population per call, which with no
-  ;; projection supplied re-reads and re-merges every schema resource per key
-  ;; — measured 2026-08-07 at 25,916 ms and 286,672 resource reads for this one
-  ;; function (issue packaged-forms-rereads-every-schema-resource-per-call).
-  ([] (throw (ex-info "Reconciliation requires explicit declaration forms."
-                      {:seon.error/kind ::missing-declarations :seon.reconcile/missing-declarations true})))
-  ([forms]
-   (into #{}
-         (filter #(schema/identity-attr? forms %))
-         (keys forms))))
+  [projection]
+  (into #{}
+        (filter #(schema/identity-attr? projection %))
+        (keys (:seon.schema.projection/forms projection))))
 
 (defn- desired-identity
   [identity-attrs desired]
@@ -323,13 +316,13 @@
                            (schema/projection-from-database db)))
         forms (:seon.schema.projection/forms projection)]
     (schema/call-with-projection
-     projection #(plan-transaction-data forms db request))))
+     projection #(plan-transaction-data projection db request))))
 
 (defn- plan-transaction-data
-  [forms db request]
+  [projection db request]
   (let [{::keys [desired process adopt-identities]} request
         adopt-identities (or adopt-identities #{})
-        identity-attrs (identity-attributes forms)
+        identity-attrs (identity-attributes projection)
         identities (desired-identities identity-attrs desired)
         installed-attrs
         (installed-identity-attributes db identity-attrs)

@@ -11,7 +11,6 @@
             [seon.render :as render]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
-            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support]))
 
 (def ^:private caps
@@ -23,7 +22,7 @@
 
 (defn- class-properties
   [form]
-  (schema.form/namespaced-properties form))
+  (malli.core/properties (seon.schema/structural-schema form)))
 
 (defn- error-class?
   [form]

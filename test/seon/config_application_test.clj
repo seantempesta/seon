@@ -8,7 +8,7 @@
 
   Computed request and environment routes are explicit schema properties;
   the application census is per attribute, never per namespace family."
-  (:require [clojure.java.io :as io]
+  (:require [malli.core] [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
             [seon.ai :as ai]
@@ -19,7 +19,6 @@
             [seon.fn :as seon.fn]
             [seon.render.web :as web]
             [seon.schema :as schema]
-            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support]))
 
 (def ^:private applied
@@ -105,11 +104,11 @@
   "Dials lacking a literal reader or a declared request/environment route."
   [rows forms attributes]
   (let [literal (set (keys (consumers-by-attribute rows attributes)))
-        request-routes (set (keys (ai/request-attributes forms)))
+        request-routes (set (keys (ai/request-attributes (seon.schema/build-projection forms))))
         environment-routes
         (into #{} (keep (fn [[attribute definition]]
                           (when (:seon.shell/environment
-                                 (schema.form/attr-form-properties definition))
+                                 (malli.core/properties (seon.schema/structural-schema definition)))
                             attribute))) forms)]
     (set/difference attributes literal request-routes environment-routes)))
 
@@ -125,7 +124,7 @@
     (fn [connection]
       (let [forms (:seon.schema.projection/forms
                    (schema/projection-from-database @connection))
-            registered (config/dial-attributes forms)
+            registered (config/dial-attributes (seon.schema/build-projection forms))
             rows (source-rows)]
         (is (seq registered) "The canonical dial population must be present.")
         (is (= #{} (unapplied-attributes rows forms registered))
@@ -192,11 +191,9 @@
                      :seon.config.message/max-chain]))))
           (testing "AI settings remain live facts rather than armed values"
             (is (= (select-keys applied
-                                (keys (ai/request-attributes
-                                       (schema/declaration-population))))
+                                (keys (ai/request-attributes (seon.schema/build-projection (schema/declaration-population)))))
                    (select-keys (config/effective @connection name)
-                                (keys (ai/request-attributes
-                                       (schema/declaration-population))))))
+                                (keys (ai/request-attributes (seon.schema/build-projection (schema/declaration-population)))))))
             (is (= name (:seon.cluster/name handle)))
             (is (empty? (select-keys handle
                                      [:seon.ai/primary
@@ -248,8 +245,9 @@
                        :seon.config.ai.backup/endpoint
                        :seon.config.ai.backup/api-key-variable
                        :seon.config.ai.backup/timeout-ms))})
-         (let [primary (-> (config/effective (db/db connection) "application-no-auth")
-                           ai/targets :seon.ai/primary)]
+         (let [primary (:seon.ai/primary
+                        (ai/targets (schema/handed-projection)
+                                    (config/effective (db/db connection) "application-no-auth")))]
            (is (true? (:seon.config.ai/no-auth primary)))
            (is (not (contains? primary :seon.ai/api-key-variable)))))))
     (is (zero? @starts)

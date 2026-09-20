@@ -127,7 +127,7 @@
            projection
            (schema.datahike/database-attributes-for-in
             projection selected-forms))
-          (schema/canonical-schema-rows selected-forms)))
+          (schema/canonical-schema-rows projection selected-forms)))
         _ (advance-fixture-projection! connection)]
     report))
 

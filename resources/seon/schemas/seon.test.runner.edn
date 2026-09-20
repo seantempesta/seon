@@ -83,10 +83,11 @@
  :worker-command-key [:keyword {:description "The command key observed before worker protocol dispatch."}]
  :worker-namespace [:and {:description "The namespace token in which the runner sought a test Var; a value that survives namespace deletion."} :seon.ns/name]
  :worker-error-log [:string {:min 1 :description "The worker error-log path observed when process launch failed."}]
+ :test-sym [:qualified-symbol {:description "The observed test name; a value, never an upsert identity."}]
  :invalid-marker-reason-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
   :seon.error/base
-  [:map [:seon.test/sym :seon.test/sym]
+  [:map [:seon.test.runner/test-sym :seon.test.runner/test-sym]
    [:seon.test.runner/marker-key :seon.test.runner/marker-key]
    [:seon.error/offending {:optional true} :seon.schema/value]]]
  :process-tree-exit-backstop-error
@@ -104,7 +105,7 @@
  :unresolved-test-var-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
   :seon.error/base
-  [:map [:seon.test/sym :seon.test/sym]
+  [:map [:seon.test.runner/test-sym :seon.test.runner/test-sym]
    [:seon.test.runner/worker-namespace :seon.test.runner/worker-namespace]]]
  :worker-launch-failure-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}

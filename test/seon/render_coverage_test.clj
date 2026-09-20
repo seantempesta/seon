@@ -1,6 +1,6 @@
 (ns seon.render-coverage-test
   "Focused coverage for important root-runtime and effect receipt faces."
-  (:require [clojure.string :as str]
+  (:require [seon.schema.internal] [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.ai.tokens :as tokens]
             [seon.cluster :as cluster]
@@ -16,7 +16,6 @@
             [seon.render.walk :as walk]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support]
             [sci.core :as sci])
@@ -47,7 +46,7 @@
   [schema-key]
   (-> (schema.edn/packaged-forms)
       (get schema-key)
-      schema.form/schema-properties))
+      (comp seon.schema.internal/entity-properties seon.schema/structural-schema)))
 
 (defn- card?
   [css-class value]

@@ -35,7 +35,7 @@
             :failure-identity
             [:string {:min 64, :max 64}],
             :failing-assertions
-            [:vector {:seon.db/cardinality :many}
+            [:vector
              :seon.test/failure-identity],
             :failure-message :string,
             :failures [:vector {:seon.db/component true :seon.db/component-schema :seon.test.failure/failure} :seon.db/ref],

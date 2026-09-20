@@ -53,9 +53,9 @@
    (schema/register! ::wide-id [:string {:seon.db/identity true}])
    (schema/register! ::wide-member-tag [:string {:seon.db/identity true}])
    (schema/register! ::wide-members
-                     [:vector {:seon.db/cardinality :many} :keyword])
+                     [:vector :keyword])
    (schema/register! ::wide-refs
-                     [:vector {:seon.db/cardinality :many} :seon.db/ref])))
+                     [:vector :seon.db/ref])))
 
 (def ^:private fixture-projection
   (schema/build-projection
@@ -2018,7 +2018,10 @@
      (let [renderer (symbol "sample.render" "ai")
            schema-key ::render-target
            definition [:map {:seon.render/ai renderer}]
-           row (first (schema/canonical-schema-rows {schema-key definition}))
+           projection (schema/build-projection
+                       (assoc (:seon.schema.projection/forms (db/carried-projection (db/db connection)))
+                              schema-key definition))
+           row (first (schema/canonical-schema-rows projection {schema-key definition}))
            basis (:max-tx @connection)
            refusal (db/transact! connection [row])
            expected [{:seon.schema/key schema-key
@@ -2290,31 +2293,11 @@
        (is (false? (@#'db/agent-provenance? database {}))
            "a write with no provenance user at all is a system write")))))
 
-(deftest an-identity-with-a-declared-row-schema-is-validated-as-that-schema-only
-  ;; Error facets observe identities as required members (`:seon.test/sym` on a
-  ;; runner's unresolved-test facet). Since 2026-09-21 the write validator
-  ;; registers, for an identity attribute that declares its row schema, only
-  ;; that schema — never every entity-shaped facet requiring the identity.
-  ;; Before this rule the canonical population could not be built: every test
-  ;; row was validated as a facet and refused for a missing `:seon.error/at`.
+(deftest turn-write-schema-does-not-include-error-observations
   (test-support/with-database
    (fn [connection]
-     (let [database (db/db connection)
-           projection (db/carried-projection database)
-           forms (:seon.schema.projection/forms projection)
-           schemas (#'db/write-entity-schemas projection)
-           for-tests (set (get schemas :seon.test/sym))
-           facets (into #{}
-                        (keep (fn [[k form]]
-                                (let [nodes (when (coll? form) (tree-seq coll? seq form))]
-                                  (when (and (vector? form) (= :and (first form))
-                                             (some #(= :seon.error/base %) nodes)
-                                             (some (fn [node] (and (vector? node) (= :seon.test/sym (first node))))
-                                                   nodes))
-                                    k))))
-                        forms)]
-       (is (= #{:seon.test/test} for-tests)
-           "the declared row schema is the only write schema for test rows")
-       (is (seq facets) "the fixture population still declares facets observing :seon.test/sym")
-       (is (empty? (clojure.set/intersection facets for-tests))
-           "no facet observing the identity validates the identity's rows")))))
+     (let [projection (db/carried-projection (db/db connection))
+           schemas (#'db/write-entity-schemas projection)]
+       (is (= #{:seon.turn/turn} (set (get schemas :seon.turn/id))))
+       (is (= #{:seon.test/test} (set (get schemas :seon.test/sym))))
+       (is (= #{:seon.fn/fn} (set (get schemas :seon.fn/sym))))))))

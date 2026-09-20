@@ -10,14 +10,31 @@
             [malli.core :as m]
             [malli.registry :as mr]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.internal :as internal]
             [seon.test-support :as support]))
 
-(deftest optional-unstorable-facet-members-remain-in-memory
+(deftest error-members-cannot-carry-another-entitys-upsert-identity
   (support/with-database
    (fn [_connection]
+     (let [projection (schema/handed-projection)]
+       (doseq [optional? [false true]]
+         (let [definition [:and :seon.error/base
+                           [:map [:seon.turn/id {:optional optional?} :seon.turn/id]]]
+               refusal (try
+                         (schema/projection-with-schema
+                          projection ::identity-observation definition
+                          {:seon.schema.admission/source :core})
+                         nil
+                         (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+           (is (= ::identity-observation (:seon.schema/identity refusal)))
+           (is (= :seon.turn/id (:seon.schema/member refusal)))))))))
+
+(deftest optional-unstorable-facet-members-remain-in-memory
+  (support/with-database
+   (fn [connection]
      (let [forms (:seon.schema.projection/forms (schema/handed-projection))
            facet (fn [optional?]
                    [:and {:seon.db/attributes true} :seon.error/base
@@ -31,8 +48,13 @@
                   ::subject "producer"
                   :seon.error/offending (Object.)}]
        (is ((schema/projection-validator projection ::observation) value))
-       (is (some #(= ::observation (:seon.schema/key %))
-                 (schema/canonical-schema-rows candidate)))
+       (support/transacted!
+        connection
+        (into [(schema.datahike/malli->datahike-attr-in projection ::subject)]
+              (schema/canonical-schema-rows projection
+                                            (select-keys candidate [::subject ::observation]))))
+       (is (some? (db/pull (db/db connection) [:seon.schema/key]
+                          [:seon.schema/key ::observation])))
        (is (not (some #{:seon.error/offending}
                       (schema.datahike/database-attributes-in projection))))
        (is (not (some #{:seon.error/offending}
@@ -53,9 +75,17 @@
            core (::schema.datahike/core selection)
            properties (::schema.datahike/properties selection)
            attributes (::schema.datahike/attributes selection)
-           native (mapv #(#'schema.datahike/compiled-attribute projection %) attributes)
+           native (mapv #(schema.datahike/malli->datahike-attr-in projection %) attributes)
            expected (edn/read-string
                      (slurp (io/resource "seon/schema/datahike_parity.edn")))
+           initial (:seon.bridge.parity/initial-baseline expected)
+           ;; This is the previously admitted historical population, including
+           ;; observations now refused at admission. Materialize its exact
+           ;; captured definitions to compare storage, without readmitting it.
+           initial-projection (schema/materialize-projection
+                               {:seon.schema.projection/forms
+                                (:seon.bridge.parity/forms initial)})
+           initial-attributes (schema.datahike/database-attributes-in initial-projection)
            expected-keys (set (:seon.bridge.parity/attributes expected))
            actual-keys (set attributes)
            expected-native (into {} (map (juxt :db/ident identity))
@@ -68,6 +98,11 @@
                                           :actual (get actual-native k)}])))
                             (set/union expected-keys actual-keys))]
        (is (seq forms))
+       (is (seq (:seon.bridge.parity/native initial)))
+       (is (true? (= (:seon.bridge.parity/attributes initial) initial-attributes)))
+       (is (true? (= (:seon.bridge.parity/native initial)
+                     (schema.datahike/malli->datahike-schema-in initial-projection initial-attributes)))
+           "The original 1,012-attribute population remains an independent oracle")
        (is (seq attributes))
        (is (= (count attributes) (count native)))
        (is (empty? (into (sorted-set)
@@ -205,7 +240,9 @@
                      :db/ident)
             [::direct ::wrapped ::aliased]))))
 
-(deftest supported-ast-wrappers-and-aliases-have-one-declaration
+(deftest ^{:seon.test/long "Eighty generated storage cases each admit direct, wrapped and aliased declarations against the canonical population."
+           :seon.test/long-ms 25000}
+  supported-ast-wrappers-and-aliases-have-one-declaration
   (support/assert-check!
    (tc/quick-check
     80
@@ -242,7 +279,8 @@
                [:map {:seon.error/class true
                       :gen/schema :string}
                 [:seon.error/message :seon.error/message]]}
-        projection {:seon.schema.projection/forms forms}
+        projection (schema/build-projection
+                    (merge (:seon.schema.projection/forms (schema/handed-projection)) forms))
         attributes (set (schema.datahike/database-attributes-in projection))]
     (is (schema.datahike/storable-attribute-in?
          projection :seon.error/class))
@@ -257,7 +295,7 @@
      (let [projection (schema/handed-projection)
            select-attributes #(#'schema.datahike/compiled-attribute-selection projection)
            attributes (::schema.datahike/attributes (select-attributes))
-           derive-native #(mapv (partial #'schema.datahike/compiled-attribute projection) attributes)
+           derive-native #(mapv (partial schema.datahike/malli->datahike-attr-in projection) attributes)
            expected (derive-native)
            schema-fn m/schema
            fast-registry mr/fast-registry
@@ -313,13 +351,15 @@
        [(schema.datahike/malli->datahike-attr-in projection ::title)]}
       (fn [connection]
         (testing "derive, install, transact, and read through the public call shape"
-          (support/transacted! connection [{::title "Alpha"}])
+          (support/transacted! connection [{:seon.ns/name 'seon.schema ::title "Alpha"}])
           (is (= "Alpha"
                  (db/q '[:find ?title .
                          :where [_ ::title ?title]]
                        (db/db connection)))))))))
 
-(deftest agent-authored-render-symbols-cross-the-transaction-function-codec
+(deftest ^{:seon.test/long "Acquire the canonical fixture and publish three analyzed renderer contracts and their schema through the real transaction codec."
+           :seon.test/long-ms 120000}
+  agent-authored-render-symbols-cross-the-transaction-function-codec
   ;; CLASS: transaction data returned by `:db.fn/call` used to bypass the one
   ;; logical-to-storage encoder. Agent-authored schema rows are built at that
   ;; seam, so coherent qualified render symbols reached Datahike's string-backed
@@ -342,8 +382,13 @@
            row-tx (ns-resolve 'seon.turn 'row-tx)
            transact-row!
            (fn [row]
-             (db/transact!
-              connection [[:db.fn/call row-tx {} row]]))
+             (support/transacted!
+              connection [[:db.fn/call row-tx {:seon.turn/declarations-preceding? true} row]])
+             (let [database (db/db connection)
+                   state (:seon.sci.eval/projection-state (meta database))]
+               (env/advance-projection!
+                state (db/basis-t database)
+                (schema/projection-from-database database))))
            attribute-form [:string {:seon.db/identity true}]
            argument-form [:map [attribute attribute]]]
        (support/transacted! connection
@@ -353,21 +398,18 @@
         {:seon.schema/key attribute
          :seon.schema/form (pr-str attribute-form)})
        (doseq [[property renderer] renderers]
-         (let [function-name (symbol (name renderer))]
-           (transact-row!
-            {:seon.fn/sym (str renderer)
-             :seon.fn/ns [:seon.ns/name namespace-name]
-             :seon.fn/source
+         (let [function-name (symbol (name renderer))
+               row (support/program-fn-row
+             (db/db connection) renderer
              (pr-str
               (list 'defn function-name
-                    {:malli/schema
-                     [:=> [:cat argument-form] (get outputs property)]}
-                    '[plan]
-                    nil))
-             :seon.fn/arglists "([plan])"
-             :seon.fn/private? false
-             :seon.fn/spec
-             (pr-str [:=> [:cat argument-form] (get outputs property)])})))
+                    {:malli/schema [:=> [:cat argument-form] (get outputs property)]}
+                    '[plan] nil)))]
+           (is (string? (:seon.fn/spec row)) (str "Analyzed renderer contract: " renderer))
+           (transact-row! row)
+           (is (string? (:seon.fn/spec
+                         (db/pull (db/db connection) [:seon.fn/spec] [:seon.fn/sym renderer])))
+               (str "Stored renderer contract: " renderer))))
        (transact-row!
         {:seon.schema/key shape
          :seon.schema/form
@@ -514,6 +556,8 @@
              receipt
              (fn [id read-request dependency-plan]
                {:db/id id
+                :seon.ns/name (symbol "codec" id)
+                :seon.ns/source (pr-str (list 'ns (symbol "codec" id)))
                 :seon.db/source-argument-position 0
                 :datahike.read/dependency-plan dependency-plan
                 :datahike.read/revision
@@ -522,10 +566,10 @@
                 :seon.db/read-request read-request})]
          (let [forward-tx
                (binding [*print-namespace-maps* false]
-                 (db/transact! connection [(receipt "codec-forward" request plan)]))
+                 (support/transacted! connection [(receipt "codec-forward" request plan)]))
                reversed-tx
                (binding [*print-namespace-maps* true]
-                 (db/transact! connection
+                 (support/transacted! connection
                                [(receipt "codec-reversed" reversed-request reversed-plan)]))
                selector '[*]
                forward-id (get-in forward-tx [:tempids "codec-forward"])

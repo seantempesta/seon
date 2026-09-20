@@ -15,7 +15,7 @@
      (schema/register! ::user-id   :uuid)
      (schema/register! ::user-name [:string {:min 1 :max 200}])
 
-   Reusable form inspection lives in `seon.schema.form`; register!-time gates
+   Compiled entity inspection and register!-time gates
    live in `seon.schema.internal`, outside agent context."
   (:require [malli.core :as m]
             [seon.id :as id]
@@ -28,7 +28,6 @@
             [datahike.pull-api :as pull-api]
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as db-utils]
-            [seon.schema.form :as form]
             [seon.schema.internal :as internal]
             [clojure.edn :as edn]
             [clojure.java.io :as io]))
@@ -43,18 +42,20 @@
   (delay (requiring-resolve 'seon.schema.datahike/storable-attribute-in?)))
 (defonce ^:private schema-datahike-storable-properties-in
   (delay (requiring-resolve 'seon.schema.datahike/storable-properties-in)))
+(defonce ^:private schema-datahike-assert-storable-schema!
+  (delay (requiring-resolve 'seon.schema.datahike/assert-storable-schema!)))
 (defonce ^:private schema-datahike-database-attributes-in
   (delay (requiring-resolve 'seon.schema.datahike/database-attributes-in)))
 (defonce ^:private schema-datahike-malli->datahike-attr-in
   (delay (requiring-resolve 'seon.schema.datahike/malli->datahike-attr-in)))
-(defonce ^:private schema-datahike-form->cardinality-in
+(defonce ^:private schema-datahike-storage-schema
   (delay
     (require 'seon.schema.datahike)
-    (ns-resolve 'seon.schema.datahike 'form->cardinality-in)))
-(defonce ^:private schema-datahike-form->child-form-in
+    (ns-resolve 'seon.schema.datahike 'storage-schema)))
+(defonce ^:private schema-datahike-value-schema
   (delay
     (require 'seon.schema.datahike)
-    (ns-resolve 'seon.schema.datahike 'form->child-form-in)))
+    (ns-resolve 'seon.schema.datahike 'value-schema)))
 
 (defn- direct-references*
   "Canonical registry keys directly referenced by one compiled schema.
@@ -373,8 +374,9 @@
    (assoc projection
           :seon.config.db/validation-node-limit
           (:seon.config/default
-           (form/attr-form-properties
-            (get (:seon.schema.projection/forms projection) :seon.config.db/validation-node-limit)))
+           (some-> (mr/schema (:seon.schema.projection/registry projection)
+                              :seon.config.db/validation-node-limit)
+                   m/properties))
           :seon.schema.projection/compiled
           (atom (into {}
                       (map (fn [[sym compiled]]
@@ -1206,7 +1208,7 @@
   {:malli/schema [:=> [:cat :map] :nil]}
   [forms]
   (doseq [[attribute definition] forms
-          :let [properties (form/attr-form-properties definition)]
+          :let [properties (m/properties (structural-schema definition))]
           :when (and (:seon.config/dial properties)
                      (:seon.config/per-agent properties)
                      (not (and (string? (:seon.config/display-label properties))
@@ -1268,12 +1270,10 @@
       mr/Registry
       (-schema [_ type]
         (or (mr/-schema defaults type)
-            ;; A REFERENCE is a keyword or a qualified symbol — the two
-            ;; shapes a declaration population is keyed by (unqualified keys
-            ;; are real: `resources/seon/schemas/malli.edn` declares `:inst`).
-            ;; Anything else — a string, a number, an unqualified symbol Malli
-            ;; itself does not know — is not a reference and stays a refusal.
-            (when (or (keyword? type) (qualified-symbol? type))
+            ;; Canonical names and loaded Var references remain opaque here.
+            ;; The armer's supplied var-registry resolves Vars later; syntax
+            ;; preparation must neither dereference them nor reject them.
+            (when (or (keyword? type) (qualified-symbol? type) (var? type))
               (m/-simple-schema {:type type :pred any? :min 0 :max nil}))))
       (-schemas [_] (mr/-schemas defaults)))))
 
@@ -1417,6 +1417,8 @@
                               {:seon.schema.admission/source :agent})]
     (letfn [(walk-schema [schema role row-identity row-definition row-admission
                           visited]
+              (when (keyword? row-identity)
+                (@schema-datahike-assert-storable-schema! row-identity schema))
               (let [advisories
                     (if (and (keyword? row-identity)
                              reference-advisories
@@ -1428,7 +1430,8 @@
                         :seon.schema/forms forms
                         :seon.schema/storable-attribute?
                         (fn [attribute] (@schema-datahike-storable-attribute-in?
-                                         {:seon.schema.projection/forms forms} attribute))
+                                         {:seon.schema.projection/forms forms
+                                          :seon.schema.projection/registry registry} attribute))
                         :seon.schema/definition row-definition
                         :seon.schema/compiled schema
                         :seon.schema/role role
@@ -1509,34 +1512,24 @@
      *contract-validation-fold-size* combine validate requests)))
 
 (defn identity-attr?
-  "True when the attr schema for `attr-key` carries `{:seon.db/identity true}`.
-
-   Covers the three identity shapes Seon uses
-   (plain `:string`/`:keyword` with the prop, and the `:and` id wrap).
-   PUBLIC: the single identity-attr predicate — callers reuse it rather than
-   re-deriving the props lookup. A caller asking about more than one key
-   supplies the population it already resolved (see [[declaration-population]]);
-   the one-argument arity resolves one per call, so asking it per key in a loop
-   costs one complete resource merge per key."
-  {:malli/schema
-   [:function
-    [:=> [:cat :keyword] :boolean]
-    [:=> [:cat :map :keyword] :boolean]]}
-  ([attr-key]
-   (internal/identity-attr? (candidate-forms) attr-key))
-  ([forms attr-key]
-   (internal/identity-attr? forms attr-key)))
+  "Whether the supplied generation declares this attribute as an identity."
+  {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
+  [projection attr-key]
+  (boolean (some-> (mr/schema (:seon.schema.projection/registry projection) attr-key)
+                   m/properties :seon.db/identity)))
 
 (defn enum-members
   "Members of a registered `:enum` attr schema, or an empty vector.
 
-   Empty when the attr is not an enum (absence = empty, never nil). Reads the schema
-   form directly — NO db query. PUBLIC: low-cardinality value surfaces reuse
-   it. Members are Malli-form contents
+   Reads the retained compiled root from the supplied generation.
+   Empty when the attr is not an enum. Members are literal values
    (keywords/strings/ints) — a third-party-structure boundary, hence `:any`."
-  {:malli/schema [:=> [:cat :keyword] [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli enum members are arbitrary literal values, not a homogeneous collection.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
-  [attr-key]
-  (form/enum-members (get (candidate-forms) attr-key)))
+  {:malli/schema [:=> [:cat ::projection :keyword] [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli enum members are arbitrary literal values, not a homogeneous collection.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
+  [projection attr-key]
+  (if-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr-key)]
+    (let [node (m/deref compiled)]
+      (if (= :enum (m/type node)) (vec (m/children node)) []))
+    []))
 
 (defn register!
   "Define a new attribute so facts using it can be saved and queried.
@@ -1566,7 +1559,7 @@
                          [::definition ::definition]]
                   ::registry-key]}
   [k v]
-  (internal/assert-non-nilable-value-schema! (candidate-forms) k v)
+  (internal/assert-non-nilable-value-schema! (candidate-forms) k (structural-schema v))
   (let [encoded (pr-str v)
         decoded (try
                   (edn/read-string encoded)
@@ -1649,13 +1642,13 @@
 
 (defn- render-declarations-in
   "Named render declarations carried by the selected schema forms."
-  [forms schema-keys]
+  [projection schema-keys]
   (into []
         (mapcat
          (fn [schema-key]
-           (let [definition (get forms schema-key)
+           (let [definition (get (:seon.schema.projection/forms projection) schema-key)
                  properties
-                 (some->> definition form/attr-form-properties)]
+                 (m/properties (mr/schema (:seon.schema.projection/registry projection) schema-key))]
              (keep (fn [property]
                      (let [renderer (get properties property)]
                        (when (qualified-symbol? renderer)
@@ -1740,24 +1733,13 @@
 
       :else false)))
 
-(defn- function-arities
-  [contract]
-  (case (first contract)
-    :=> [contract]
-    :function (vec (rest contract))
-    []))
-
-(defn- arity-render-input-form
+(defn- arity-render-input
   [arity]
-  (let [input (second arity)
-        arguments (rest input)
-        arguments (if (map? (first arguments)) (rest arguments) arguments)
-        arguments (if (= :catn (first input))
-                    (map (fn [[_ properties child]]
-                           (if child child properties))
-                         arguments)
-                    arguments)]
-    (first (remove #(= :seon.db/database-value %) arguments))))
+  (let [input (:input (m/-function-info arity))
+        arguments (m/children input)
+        arguments (if (= :catn (m/type input)) (map peek arguments) arguments)]
+    (first (remove #(and (m/-ref-schema? %)
+                         (= :seon.db/database-value (m/-ref %))) arguments))))
 
 (defn- render-contract-observation
   "Check a named render function against the declaration it serves.
@@ -1771,33 +1753,28 @@
   (if-let [contract
            (get (:seon.schema.projection/function-contracts projection)
                 renderer)]
-    (let [declaring
-          (m/schema schema-key
-                    (:seon.schema.projection/compile-options projection))
-          arities (function-arities contract)
+    (let [registry (:seon.schema.projection/registry projection)
+          declaring (mr/schema registry schema-key)
+          arities (m/-function-schema-arities (mr/schema registry renderer))
           accepted
           (some (fn [arity]
-                  (when-let [input-form (arity-render-input-form arity)]
-                    (let [input
-                          (m/schema
-                           (compilable-form
-                            input-form
-                            (predicate-functions-in projection))
-                           (:seon.schema.projection/compile-options projection))]
-                      (when (or (= input-form schema-key)
-                                (= input-form :seon.schema/value)
+                  (when-let [input (arity-render-input arity)]
+                    (let [reference (when (m/-ref-schema? input) (m/-ref input))]
+                      (when (or (= reference schema-key)
+                                (= reference :seon.schema/value)
                                 ;; A render unit carries any value under
                                 ;; :seon.render/value, including scalar refs.
-                                (= input-form :seon.render/unit)
-                                (and (vector? input-form)
-                                     (= :or (first input-form))
-                                     (some #{:seon.render/unit} (rest input-form)))
+                                (= reference :seon.render/unit)
+                                (and (= :or (m/type input))
+                                     (some #(and (m/-ref-schema? %)
+                                                 (= :seon.render/unit (m/-ref %)))
+                                           (m/children input)))
                                 (schema-accepts-schema? input declaring))
-                        input-form))))
+                        (m/form input)))))
                 arities)]
       {:seon.schema/render-contract contract
        :seon.schema/render-input
-       (or accepted (some arity-render-input-form arities))
+       (or accepted (some-> (some arity-render-input arities) m/form))
        :seon.schema/render-contract-coherent? (boolean accepted)
        :seon.schema/render-contract-cause
        (when-not accepted
@@ -1852,8 +1829,7 @@
   (doseq [{schema-key :seon.schema/key
            renderer :seon.render/function
            :as declaration}
-          (render-declarations-in
-           (:seon.schema.projection/forms projection) schema-keys)
+          (render-declarations-in projection schema-keys)
           :let [observation
                 (render-contract-observation projection schema-key renderer)]
           :when (not (:seon.schema/render-contract-coherent? observation))]
@@ -1867,7 +1843,7 @@
          (filter #(= renderer (:seon.render/function %)))
          (map :seon.schema/key))
         (render-declarations-in
-         (:seon.schema.projection/forms projection)
+         projection
          (keys (:seon.schema.projection/forms projection)))))
 
 (defn- shape-row-in
@@ -1961,7 +1937,7 @@
          options  {:registry registry}
          canonical-keys (set (keys forms))
          _ (doseq [[k form] (sort-by key forms)]
-             (internal/assert-non-nilable-value-schema! forms k form))
+             (internal/assert-non-nilable-value-schema! forms k (mr/schema registry k)))
          compiled-schemas
          (into (sorted-map)
                (map (fn [k]
@@ -1985,7 +1961,8 @@
                      :seon.schema/forms forms
                      :seon.schema/storable-attribute?
                      (fn [attribute] (@schema-datahike-storable-attribute-in?
-                                      {:seon.schema.projection/forms forms} attribute))
+                                      {:seon.schema.projection/forms forms
+                                          :seon.schema.projection/registry registry} attribute))
                      :seon.schema/definition (get forms reference)
                      :seon.schema/compiled (get compiled-schemas reference)
                      :seon.schema/role role
@@ -2920,10 +2897,9 @@
    [:=> [:cat ::projection [:or :nil ::registry-key]]
     [:map-of :qualified-keyword :seon.schema/value]]}
   [projection schema-key]
-  (if-let [entity-form
-           (get (:seon.schema.projection/forms projection) schema-key)]
+  (if-let [compiled (mr/schema (:seon.schema.projection/registry projection) schema-key)]
     (into {} (map (fn [entry] [(first entry) entry]))
-          (form/map-entries (:seon.schema.projection/forms projection) entity-form))
+          (internal/entity-entries compiled))
     {}))
 
 (defn- reverse-target-schema
@@ -2945,12 +2921,12 @@
    [:=> [:cat ::projection :seon.schema/parsed-pull-spec]
     [:or :nil ::registry-key]]}
   [projection pull-spec]
-  (let [forms (:seon.schema.projection/forms projection)
+  (let [registry (:seon.schema.projection/registry projection)
         candidates
         (into #{}
               (keep (fn [[_ options]]
-                      (some-> (get forms (:attr options))
-                              form/attr-form-properties
+                      (some-> (mr/schema registry (:attr options))
+                              m/properties
                               :seon.program/row-schema)))
               (:attrs pull-spec))]
     (when (= 1 (count candidates)) (first candidates))))
@@ -3010,13 +2986,14 @@
                                   (:db/valueType datahike-attribute))
                     component? (:db/isComponent datahike-attribute)
                     declared-many?
-                    (= :db.cardinality/many
-                       (@schema-datahike-form->cardinality-in
-                        projection attribute-form))
+                    (boolean (#{:set :vector :sequential}
+                              (m/type (@schema-datahike-storage-schema
+                                       (or (mr/schema (:seon.schema.projection/registry projection) attribute)
+                                           (structural-schema attribute-form))))))
                     many? (if forward? declared-many? (not component?))
                     component-schema
                     (:seon.db/component-schema
-                     (form/attr-form-properties attribute-form))
+                     (some-> (mr/schema (:seon.schema.projection/registry projection) attribute) m/properties))
                     nested-target
                     (or component-schema
                         (when-not forward?
@@ -3053,8 +3030,9 @@
                             " does not name a reference."))
 
                       :else
-                      (@schema-datahike-form->child-form-in
-                       projection attribute-form))]
+                      (m/form (@schema-datahike-value-schema
+                               (or (mr/schema (:seon.schema.projection/registry projection) attribute)
+                                   (structural-schema attribute-form)))))]
                 (if (map? child)
                   child
                   (let [limit (get options :limit 1000)
@@ -3475,79 +3453,40 @@
       (sort-by str schema-keys)))))
 
 (defn canonical-schema-rows
-  "Build canonical rows for a complete or database-extending population.
-
-  A database-extending population may reference an already persisted schema
-  whose definition is deliberately absent from `forms`. Malli's own walker
-  classifies those external references so the row still carries its durable
-  edge; the terminal transaction validates the candidate against the complete
-  database-derived projection before admitting it. Every other projection
-  error remains a refusal here."
+  "Build canonical rows from a complete construction generation.
+  The two-argument arity selects authored rows while reference and storage
+  decisions use the complete supplied projection. Missing targets still refuse."
   {:malli/schema
    [:function
     [:=> [:cat] [:vector :map]]
-    [:=> [:catn [::forms :map]] [:vector :map]]]}
-  ([]
-   (canonical-schema-rows (registered-schemas)))
-  ([forms]
-   (let [complete-projection
-         (try
-           (build-projection forms)
-           (catch clojure.lang.ExceptionInfo error
-             (if (:seon.schema/missing-reference (ex-data error))
-               nil
-               (throw error))))
-         projection
-         (or complete-projection
-             {:seon.schema.projection/forms forms})
-         materialized-keys
-         (into #{} (filter keyword?) (keys forms))
-         predicate-functions
-         (if-let [bound (not-empty (predicate-functions-in projection))]
-           bound
-           (predicate-functions-with {} (vals forms)))
-         reference-graph
-         (or (:seon.schema.projection/schema-dependencies projection)
-             (canonical-reference-graph
-              forms predicate-functions (reference-candidate-keys forms)))
-         ordering-graph
-         (update-vals reference-graph
-                      #(set/intersection materialized-keys %))
-         storable-properties-in
-         @schema-datahike-storable-properties-in]
-     (into
-      []
-      (map
-       (fn [[schema-key definition]]
-         (let [references (get reference-graph schema-key)]
-           (cond->
-            (merge (storable-properties-in projection definition)
-                   {:seon.schema/key schema-key
-                    :seon.schema/form
-                    (binding [*print-namespace-maps* false]
-                      (pr-str definition))
-                    :seon.schema.admission/source :core})
-             (seq references)
-             (assoc :seon.schema/references
-                    (set references))))))
-      (map (fn [schema-key] [schema-key (get forms schema-key)])
-           (dependency-first-schema-keys
-            ordering-graph materialized-keys))))))
+    [:=> [:cat :map] [:vector :map]]
+    [:=> [:cat ::projection :map] [:vector :map]]]}
+  ([] (canonical-schema-rows (registered-schemas)))
+  ([forms] (canonical-schema-rows (build-projection forms) forms))
+  ([projection forms]
+   (let [materialized-keys (into #{} (filter keyword?) (keys forms))
+         reference-graph (:seon.schema.projection/schema-dependencies projection)
+         ordering-graph (update-vals reference-graph #(set/intersection materialized-keys %))]
+     (mapv
+      (fn [schema-key]
+        (let [references (get reference-graph schema-key)]
+          (cond->
+           (merge (@schema-datahike-storable-properties-in projection schema-key)
+                  {:seon.schema/key schema-key
+                   :seon.schema/form
+                   (binding [*print-namespace-maps* false] (pr-str (get forms schema-key)))
+                   :seon.schema.admission/source :core})
+            (seq references) (assoc :seon.schema/references (set references)))))
+      (dependency-first-schema-keys ordering-graph materialized-keys)))))
 
 (defn canonical-database-attributes
   "Compute the complete production database-attribute population.
 
    Entity-map entries are attributes by construction. Standalone registered
    forms join that population only when they carry a persistence facet."
-  {:malli/schema
-   [:function
-    [:=> [:cat] [:vector :qualified-keyword]]
-    [:=> [:catn [::forms :map]] [:vector :qualified-keyword]]]}
-  ([]
-   (canonical-database-attributes (registered-schemas)))
-  ([forms]
-   (@schema-datahike-database-attributes-in
-    {:seon.schema.projection/forms forms})))
+  {:malli/schema [:=> [:cat ::projection] [:vector :qualified-keyword]]}
+  [projection]
+  (@schema-datahike-database-attributes-in projection))
 
 (defn registered?
   "Check if a schema keyword is registered."
@@ -3707,8 +3646,8 @@
   (into
    []
    (keep
-    (fn [[schema-key definition]]
-      (let [properties (form/attr-form-properties definition)]
+    (fn [[schema-key _definition]]
+      (let [properties (m/properties (mr/schema (:seon.schema.projection/registry projection) schema-key))]
         (when (true? (:seon.schema/identity-only properties))
           (let [projection-symbol
                 (:seon.schema/identity-projection properties)

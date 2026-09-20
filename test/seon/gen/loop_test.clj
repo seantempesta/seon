@@ -277,7 +277,7 @@
 
 (defn- staged-reply
   "One provider stub for the whole cast, keyed on WHOSE prompt it is."
-  [{prompt :seon.ai/prompt}]
+  [_projection {prompt :seon.ai/prompt}]
   {:seon.ai/text
    (case (prompt-agent-id prompt)
      "planner" planner-attempt
@@ -461,7 +461,7 @@
                                [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Count the primes."}])
        (let [run-id
              (with-redefs [ai/complete
-                           (fn [{prompt :seon.ai/prompt}]
+                           (fn [_projection {prompt :seon.ai/prompt}]
                              {:seon.ai/text
                               (if (= "planner" (prompt-agent-id prompt))
                                 (str "(in-ns 'my.gen.alpha)\n"
@@ -491,7 +491,7 @@
        ;; answers by claiming it is done
        (let [run-id
              (with-redefs [ai/complete
-                           (fn [{prompt :seon.ai/prompt}]
+                           (fn [_projection {prompt :seon.ai/prompt}]
                              {:seon.ai/text
                               (if (= "planner" (prompt-agent-id prompt))
                                 (str program

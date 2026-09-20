@@ -5,8 +5,8 @@
             [seon.ai :as ai]
             [seon.db :as db]
             [seon.config :as config]
-            [seon.schema :as schema]
-            [seon.schema.form :as schema.form]))
+            [malli.core :as m]
+            [malli.registry :as mr]))
 
 (defn identity
   "Read stable identity values without projecting a stored ref as a scalar."
@@ -161,6 +161,7 @@
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render/hiccup :seon.db/error-result
                        :seon.schema/unknown-shape-error
+                       :seon.schema/validation-refusal
                        :seon.config/missing-effective-error]]}
   [unit]
   (let [database (:seon.db/db unit)
@@ -174,10 +175,11 @@
         cluster-name (when database
                        (db/q '[:find ?name . :where [_ :seon.config/cluster ?name]] database))
         defaults (if cluster-name (config/effective database cluster-name) {})
-        declarations (or (some-> database db/carried-projection
-                                 :seon.schema.projection/forms)
-                         (schema/declaration-population))]
+        registry (:seon.schema.projection/registry
+                  (or (some-> database db/carried-projection)
+                      (:seon.schema/projection unit)))]
     (cond
+      (nil? registry) (db/projection-fallback 'seon.agent/render-settings-html)
       (or (:seon.error/at attributes) (:seon.schema/unknown-shape attributes)) attributes
       (or (:seon.error/at defaults) (:seon.config/missing-effective defaults)) defaults
       :else
@@ -186,11 +188,11 @@
             absent (remove #(or (find overrides %) (find inherited %)) attributes)
             label (fn [attribute]
                     (or (:seon.config/display-label
-                         (schema.form/attr-form-properties (get declarations attribute)))
+                         (some-> (mr/schema registry attribute) m/properties))
                         (str attribute)))
             display (fn [attribute value]
                       (let [{divisor :seon.config/display-divisor unit :seon.config/display-unit}
-                            (schema.form/attr-form-properties (get declarations attribute))
+                            (some-> (mr/schema registry attribute) m/properties)
                             value (if (and divisor (number? value)) (/ value divisor) value)]
                         (str (cond
                                (integer? value) (format "%,d" value)
@@ -200,8 +202,7 @@
                                :else value)
                              (when unit (str " " unit)))))
             title (fn [attribute]
-                    (or (:description (schema.form/attr-form-properties
-                                       (get declarations attribute)))
+                    (or (:description (some-> (mr/schema registry attribute) m/properties))
                         (str attribute)))]
         [:section {:class "seon-family-entry seon-agent-settings seon-agent-content"}
          [:h3 "Settings"]

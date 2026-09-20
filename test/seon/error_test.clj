@@ -46,7 +46,8 @@
             [seon.id]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
+            [seon.schema.internal :as schema.internal]
+            [malli.registry :as mr]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci.eval]
             [seon.sci.admit :as admit]
@@ -1299,11 +1300,11 @@
                             (get % [:seon.error/occurrences :limit nil]))
                          (error/observation-selector projection))
                    pulled-form (schema/pulled-form-in projection facet occurrence-selector)
-                   forms (:seon.schema.projection/forms projection)
+                   registry (:seon.schema.projection/registry projection)
                    scalar-attributes
-                   (remove #(-> (get forms %) schema.form/attr-form-properties
+                   (remove #(some-> (mr/schema registry %) malli.core/properties
                                 :seon.db/component)
-                           (map first (schema.form/map-entries forms (get forms facet))))]
+                           (map first (schema.internal/entity-entries (mr/schema registry facet))))]
                (is (true? (malli.core/validate pulled-form occurrence
                                                (:seon.schema.projection/compile-options projection)))
                    (pr-str {:facet facet :location-length

@@ -37,7 +37,7 @@
                                                  :seon.test/evaluation evaluation}))
                                    {:seon.test/source source
                                     :seon.test/evaluation evaluation})))
-               row (program/declaration-row (:seon.program/row evaluation) :all :agent)]
+               row (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]
            (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
            (is (string? (:seon.program/analyzed-source-digest row)) (pr-str row))
            (test-support/transacted! connection [row])
@@ -143,7 +143,7 @@
                         :seon.sci.admit/caps (config/result-caps (config/defaults))
                         :seon.sci.eval/time-limit-ms 10000
                         :seon.config/on-core-error :panic})
-           declaration (program/declaration-row (:seon.program/row evaluation) :all :agent)]
+           declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]
        (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
        (is (string? (:seon.program/analyzed-source-digest declaration)))
        (test-support/transacted! connection [declaration])

@@ -95,7 +95,7 @@
                    ; Replace only the external provider response, as the reply tests do.
                    ; The proc, attempt writer, SCI, prompt and work derivation stay real.
                    (with-redefs [ai/complete
-                                 (fn [request]
+                                 (fn [_projection request]
                                    (when (= scenario :slow-provider)
                                      (Thread/sleep 10000)
                                      (async/offer! @provider-progress true)

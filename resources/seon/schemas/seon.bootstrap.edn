@@ -2,10 +2,10 @@
  :acquired-member-count [:int {:min 0}]
  :root-acquisition-empty-error [:and :seon.error/base [:map [:seon.bootstrap/acquired-member-count :seon.bootstrap/acquired-member-count]]]
  :unmatched-source :string
- :unmatched-source-error [:and :seon.error/base [:map [:seon.bootstrap/unmatched-source :seon.bootstrap/unmatched-source] [:seon.turn/id :seon.turn/id]]]
+ :unmatched-source-error [:and :seon.error/base [:map [:seon.bootstrap/unmatched-source :seon.bootstrap/unmatched-source] [:seon.error/run :seon.error/run]]]
  :expected-prefix-count [:int {:min 0}]
  :actual-prefix-count [:int {:min 0}]
- :prefix-drift-error [:and :seon.error/base [:map [:seon.bootstrap/expected-prefix-count :seon.bootstrap/expected-prefix-count] [:seon.bootstrap/actual-prefix-count :seon.bootstrap/actual-prefix-count] [:seon.turn/id :seon.turn/id]]]
+ :prefix-drift-error [:and :seon.error/base [:map [:seon.bootstrap/expected-prefix-count :seon.bootstrap/expected-prefix-count] [:seon.bootstrap/actual-prefix-count :seon.bootstrap/actual-prefix-count] [:seon.error/run :seon.error/run]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.bootstrap/error
