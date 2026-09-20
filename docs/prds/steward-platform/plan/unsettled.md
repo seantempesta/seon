@@ -4905,3 +4905,18 @@ results-reuse, render). Hook publication stays PAUSED (test system first);
 every default start still needs `bin/seon init` while paused, and a
 publication cannot pass an admission rule stricter than the stored
 population (the 19:35 block) — a reset is the recovery.
+
+## 2026-09-20 ~20:40 UTC — step-3 research landed; issue index repaired
+
+`step3-carried-projection` landed `ea98f6b52` (note: 125 owner spans in 32
+files, 33 on publication/adoption paths; stamp survives transact/branch/
+temporal/restart with 3,228 schemas rebuilt to matching normalized digests;
+median carried lookup 15.2 μs; metadata-only selection FALSIFIED — `with`
+retains stale projection metadata; candidate replacement recompiles
+dependents; durable candidate-row probe exhausted 6 GiB, recorded as a
+limitation; scratch root removed). Bridge PRD §4 now points at it as
+step 3's edit specification and adoption proof. Lane done; session retained.
+`bin/issues-index --check` had refused one note whose `status` carried
+prose (`the-edit-hook-published-every-markdown-edit`); status is now the
+bare `resolved` with the prose on a `resolved:` line; check passes (355
+notes, zero refusals).

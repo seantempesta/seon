@@ -1,8 +1,9 @@
 ---
 type: issue
-status: resolved (2026-09-19: hook clause removed fb178cc7f; predicate redefined from declared gate inputs with a class regression)
+status: resolved
 severity: blocker
 created: 2026-09-19
+resolved: 2026-09-19 — hook clause removed fb178cc7f; predicate redefined from declared gate inputs with a class regression
 tags: [issue, hook, publication, operator, test-selection]
 ---
 
