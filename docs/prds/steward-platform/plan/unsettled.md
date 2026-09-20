@@ -5671,3 +5671,19 @@ are typed domain members. The publication lane makes that repair (the
 resource is free), commits the duplicate-publisher deletions, measures,
 and lands. Its earlier worktree is gone. `kind-sweep-sci-program` landed
 `603d2587c` (await expiry distinguished from completed failures).
+
+## 2026-09-21 ~15:00 UTC — ops-effects-2 six families landed; sci-program: returned-error recognition ruled (D12)
+
+`kind-sweep-ops-effects-2` landed six commits through `7721e5893` (ai,
+plan, schedule, maintenance, config, issue checkpoint; loads, lint
+clean) and stopped at `seon.fn/gate-sets` (two facets identical after
+marker retirement) in held fn.clj. Ruled: the substantive-members rule
+applies there once fn.clj is free (owed, listed with the members); the
+lane continues through effect, flow, env, shell/jvm, context, edit, blob,
+operator, operator/state, bootstrap. `kind-sweep-sci-program` landed
+`603d2587c` (await timeout + test expiry carry bound/elapsed) and stopped
+at `shown-result`'s legacy recognition of a malformed error map. Ruled
+option 1 = D12: only a value satisfying a declared facet is an error;
+malformed maps are ordinary data. `publication-dissolution` landed
+`6dae626e0` (raw runner offending observations optional) — fast admission
+admits again.
