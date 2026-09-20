@@ -7012,3 +7012,17 @@ it "database transaction latency"; RULED: split the write (printer, blob,
 bind, prepare, write-schema selection, whole-entity validator, recording's
 reads, Datahike commit) and fix what is O(program) in its files; if the
 residue is the file-backed store's commit, report the number and stop.
+
+## 2026-09-23 ~08:20 local — activation roster GONE (`3c0b47dfe`: config function requirements derived, not sealed); reach edges 3.56 s → 223 ms (uncommitted, shares fn.clj with the redesign lane); owner: "why aren't we caching the projection / reading Datahike's cache?"
+
+Owner's question answered in the law's own terms: a database value is
+immutable, so everything derived from it is computed once when the value
+is made and CARRIED on it (§2.1, `db.clj:141`); Datahike keeps its
+indexes hot. The 6 s projection acquisition and every other whole-program
+phase in the 49 s edit are seams that re-derive instead of reading what
+the value carries — the review question for every slice 4 diff. The
+test-system lane stopped correctly on a shared-file boundary (its
+`declared-reference-edges` fix sits in fn.clj beside the redesign lane's
+`unresolved-callers` hunk); it proceeds with the bare gate in its own
+files and commits the edge fix once the foreign hunk lands. Its own
+parity test exceeds 10 s — sent back under the law.
