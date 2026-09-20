@@ -7036,3 +7036,14 @@ redesign lane's hunk to land. Next for the test-system lane: the default
 5 s bound enforced as a test failure (producing the offender list as
 facts), then tests that publish the whole program get a small fixture
 program, then tests that pass by a bound firing await their event.
+
+## 2026-09-23 ~09:30 local — one error write: 1,646 → 329 ms (Datahike commit 81 ms) — `4078d04ee` "avoid full-population work when recording errors"; error lane parked until slice 4 frees issue.clj/cluster.clj for the legacy retirement
+
+The error recorder was doing full-population work on every write; removed.
+55 tests / 433 assertions green; slowest test 4.05 s under the 5 s bound.
+The remaining ~250 ms outside the commit is recorded in the lane's split;
+under the couple-of-seconds suspicion line, accepted for now (the value
+printer + blob + validator). The lane's only remaining item — retire the
+four legacy members and convert the 22 `issue.clj` producers + the fault
+committer — waits on the redesign lane's files; the lane is stopped with
+its session until then.
