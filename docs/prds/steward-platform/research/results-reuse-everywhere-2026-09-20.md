@@ -762,3 +762,26 @@ The cold command above additionally owes
 `resources/seon/schemas/seon.test.runner.edn`, `test/seon/test_runner_test.clj`
 and namespace `seon.test-runner-test`. Bare twice and platform remain the
 orchestrator's proofs. No two-run zero-execution CLI proof is claimed.
+
+Tally checkpoint: **baa0afca3**. The immediate post-commit shared-tree
+load exited 1 with a cyclic load dependency:
+
+```text
+seon.test -> seon.issue -> seon.plan -> seon.bootstrap -> seon.cluster.agent
+-> seon.render.web -> seon.render -> seon.sci.eval -> seon.test
+```
+
+`tally-head-load.log` is **510 bytes**; the full compiler report was copied
+to `shared-load-cycle.edn`. Concurrent edits were present in
+`src/seon/cluster.clj`, `src/seon/instrument.clj`, `src/seon/schema.clj`,
+and `src/seon/schema/internal.cljc`; no individual cause is attributed.
+This slice changed no namespace require edges.
+
+To distinguish committed HEAD from the shared edits, a plain `git archive
+HEAD` was extracted to the lane's disposable `tmp/` directory, with the
+vendored `reference-code` linked. No Git worktree was created. The exact
+required Clojure load command there returned **`:loads`, exit 0** for
+HEAD **baa0afca3** (`tally-committed-head-load.log`, **205 bytes**).
+The loader exited, then that archive was removed without following its
+vendored symlink. No test, lifecycle command or publication ran there.
+All lane-owned source paths are committed; unrelated edits remain intact.
