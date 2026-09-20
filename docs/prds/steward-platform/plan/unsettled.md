@@ -5207,3 +5207,18 @@ Order of work as slots free:
 7. Merge to main waits for the owner.
 Each landing: read the note, classify reds, rule from the PRDs, record
 here, push. Wakeups every 20 minutes as a fallback beside lane events.
+
+## 2026-09-21 ~03:10 UTC — results-reuse LANDED (final fast proof owed); render-2 sweep launched
+
+`results-reuse-everywhere` landed `7d27503b0` (admission fixture corrected;
+named exclusions scoped); its admission suite's 4 F / 1 E are classified
+foreign blob/database boundaries; 326 MB of oversized lane logs deleted;
+final fast verification unverified only because both test slots were held
+by the other two lanes' runs for 1,800 s (the slot cap doing its job; the
+bare×2 + platform proof stays owed to the orchestrator after the
+publication lane lands). Handoffs recorded: `fn.clj` legacy readers → the
+publication lane; `bootstrap.clj` readers → whoever holds bootstrap_test
+after step 1. Lane done; session retained. Third slot → `kind-sweep-render-2`
+(sol low; hiccup, lint, ns, test, value; hiccup_test.clj named held by
+step 1). 1a's facet slice, the turn/cluster sweep, sci-fn-program,
+ops-effects and my-protocol all wait on step 1's 46-file release.
