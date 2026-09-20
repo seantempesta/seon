@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: friction
 created: 2026-09-20
 tags: [issue, publication, wave/publication-velocity]
@@ -35,3 +35,15 @@ The same run also exposed a stale test expectation that an empty result request
 records nothing. `seon.test.runner/record-latest-tx` now emits its run event even
 with zero results; the updated test positively queries that event and checks the
 advanced basis. This does not permit a no-op publication to mint a new event.
+
+
+## Reopened by slice 2 verification — 2026-09-22
+
+The focused fast snapshot at `2b7819320` plus the analysis overlay reproduces
+both assertions: unchanged B moves the branch (`source_evidence_test.clj:153`)
+and recording makes four attempts instead of three (`:161`). The test ran
+322.147 s. Its prior toolchain-digest assertions were removed with that
+attribute; the identity-fact comparison in `upsert!` was unchanged. This
+reopens the behavior, not the original root-cause claim: the exact datom
+that moves the head still needs inspection. Slice 3's no-transaction
+requirement is the owning redesign boundary. Do not relax the assertion.

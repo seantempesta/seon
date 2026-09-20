@@ -266,6 +266,7 @@
   (let [options (merge {:lang :clj
            :config-dir config-directory
            :cache-dir cache-directory
+           :cache true
            :repro true
            :config analysis-config}
           options)

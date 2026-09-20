@@ -112,3 +112,13 @@ wait (exit 75; no JVM/test execution). These final corrections are not claimed
 green. The prior intermediate run was 8 tests / 65 assertions / 13 failures /
 1 error; the accepted durable host proof remains 1 / 25 / 0 / 0. Exact logs,
 hashes and the pending command are in the lane note.
+
+## 2026-09-22 — publication analysis fast snapshot
+
+`seon.fn-test/a-refused-reference-read-refuses-gate-set-derivation` in the
+slice 2 snapshot at `05c77ac1d` reaches
+`seon.fn/declared-reference-edges returned undeclared error facets
+#{:seon.schema/validation-refusal}`. The test's refused read is replaced by
+an instrumentation exception. This is an additional return-contract
+propagation sighting; the function and that test are unchanged by slice 2.
+The complete tally is in the one-JVM redesign landing note.

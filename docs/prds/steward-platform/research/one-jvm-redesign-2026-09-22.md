@@ -1,6 +1,6 @@
 ---
 type: research
-status: slice-1-awaiting-measurement
+status: slice-2-awaiting-orchestrator-proof
 created: 2026-09-22
 tags: [publication, adoption, one-jvm, measurement]
 ---
@@ -603,3 +603,170 @@ program rows and their contracts), issue indexing (2.190 s: whole issue
 inventory), activation seal (3.723 s: activation closure), and branch-head
 readback (3.872 s: unresolved-call report). Slices 3–4 own publication and
 adoption beyond analysis; those are findings, not accepted latency.
+
+### Replacement and verification boundary
+
+The replacement removes `publication-inputs`/`declaration-targets`,
+`producer-paths`, `toolchain-digest`, `resolution-digest`,
+`cached-analysis`, `cache-analysis!`, and `artifact-cache-key`.
+`build-manifest` compares the existing per-file digests and queries direct
+`:seon.fn/calls` referrers of declarations in those files in the published
+database. The changed files and caller files enter one clj-kondo call.
+There is no transitive graph walk.
+`replace-manifest-artifacts` retains the other artifacts; removed paths are
+excluded before replacement. No-change source performs zero lint, and only
+absence of a previous manifest selects every source file.
+
+The analyzer uses clj-kondo's own `.clj-kondo/.cache` with explicit
+`:cache true`. The existing `forget-namespaces!` removes superseded namespace
+entries for changed/deleted source, so a renamed or removed namespace cannot
+answer from stale definitions. No Seon per-file artifact cache remains.
+The cluster passes the previous manifest/database without an artifact-cache
+existence check and no longer widens publication on a producer digest.
+
+RESET NEEDED: `:seon.source/toolchain-digest` is removed from the schema,
+manifest declaration, and source seal. The parity update subtracts that
+attribute from the current oracle and updates the manifest form while
+preserving the historical baseline. No bridge implementation changes.
+`AGENTS.md` now states partial lint and the output-shape reset boundary.
+
+The broad fast request selected `seon.fn-test`, `seon.cluster.source-test`,
+and the three publication namespaces plus source evidence. Its errors in
+unchanged carried-projection/contract-finding code are recorded in
+[the program-graph projection issue](../../../seon/issues/program-graph-tests-do-not-carry-their-current-contract-projection.md)
+and [the refusal propagation issue](../../../seon/issues/test-refusal-observations-overflow-in-projection-acquisition.md).
+Those are explicit verification boundaries; no foreign source path or
+session was edited to get past them. The canonical fixture's initial
+population is O(program): a thread sample names `compile-index-transaction`
+from `test-support/create-base`. That setup is separate from partial lint.
+
+The broad run exited **143 by explicit lane termination**, not a harness
+verdict. It observed six errors: four missing carried-projection calls,
+one missing compiled function contract, and one undeclared refusal facet.
+The sampled source test finished in **100.779 s**; the stop reached the
+following complete-publication test, after an **18.326 s** contract
+projection. No complete tally is claimed. These timings extend
+[the existing commit-projection liveness issue](../../../seon/issues/full-publication-tests-exceed-liveness-while-compiling-the-commit-projection.md).
+The direct-caller query uses the published graph's indexed file, function,
+and call relations. The parity/load script passed: **3,358 schemas,
+1,201 attributes, zero mismatches**, historical baseline unchanged.
+
+Focused run `81ee2aeae0cc` executed **5 tests / 46 assertions / 2 failures /
+1 error**, exit 1. Both failures reopen
+[unchanged publication identity facts advancing the branch](../../../seon/issues/unchanged-publication-identity-facts-still-advance-the-branch.md):
+the third unchanged seal moves the head and forces a fourth recording
+attempt. That existing assertion remains intact for slice 3. Its test took
+322.147 s; the missing-activation regression passed in 104.565 s. Both
+already declare their complete-publication work and bounds. The error was
+the new regression's attempted unresolved-call fixture: clj-kondo correctly
+refuses it before publication. That speculative case and the unnecessary
+second lint pass were removed. Final selection is one lint batch over the
+published graph's direct caller files and the changed files.
+The selected-row indexing regression passed in 5.715 s; it now declares
+its two real indexed publications and a long bound. The analyzer-config
+input regression passed in 3.9 ms.
+
+### Slice 2 bytes and seams
+
+| Path | Before | After | Net deleted |
+|---|---:|---:|---:|
+| `src/seon/fn.clj` | 157,638 | 146,507 | 11,131 |
+| `src/seon/fn/analyzer.clj` | 30,350 | 30,373 | -23 |
+| `src/seon/cluster.clj` | 187,390 | 187,099 | 291 |
+| `src/seon/cluster/source.clj` | 32,330 | 32,014 | 316 |
+| `resources/seon/schemas/seon.source.edn` | 6,303 | 5,961 | 342 |
+| `resources/seon/schemas/seon.fn.manifest.edn` | 1,050 | 969 | 81 |
+| `test/seon/fn/publication_cache_test.clj` | 2,711 | 3,341 | -630 |
+| `test/seon/fn/publication_test.clj` | 11,016 | 3,497 | 7,519 |
+| `test/seon/fn/publication_toolchain_test.clj` | 5,171 | 1,655 | 3,516 |
+| `test/seon/cluster/source_evidence_test.clj` | 12,956 | 12,651 | 305 |
+| `test/seon/schema/datahike_parity.edn` | 1,577,169 | 1,576,598 | 571 |
+
+Net deletion: **12,138 production/schema bytes; 11,281 test/fixture bytes**.
+Documentation and executable evidence scripts are separate.
+`caller-files` calls `seon.db/q` against the existing indexed call/file
+relations; `build-manifest` calls `analyzed-artifacts` and the existing
+`replace-manifest-artifacts` once. `invoke-kondo` calls the dependency's
+`run!` with its existing namespace cache. The source seal simply stops
+asserting the retired attribute. No production reference to the removed
+cache functions, producer closure, or toolchain digest remains.
+
+### Final focused iteration
+
+Run `7878fbb649ae` passed **2 tests, 13 assertions, zero failures/errors**
+with program digest `0936404923ad965f7a30cc995e2fc6648ab43e2bec40db608d51f0b510555181`
+and basis `536870950`. The actual clj-kondo call proves cold/all files,
+changed/direct caller files, and no-change/zero lint; partial artifacts equal
+a separate complete analysis. The first test took 150.989 s including the
+canonical fixture's O(program) construction; selected-row indexing took
+7.219 s across two real publications and full database comparisons. Both
+declare their long reason and bound. This focused green does not erase the
+broader verification boundaries above.
+
+### Slice 2 live after measurement
+
+Fresh scratch publication used the final source bytes on `2b7819320` plus
+this diff. Cluster `s`, PID 67012, advertised prepl 54387, forked published
+commit `6ab045ed-599f-5899-915c-4f8871636265`. MCP runtime status answered
+for that explicit root/cluster. The same bounded `prepl-eval!` probe
+returned successfully and restored `src/my/note.clj` exactly.
+
+| Phase | Before ms | After ms |
+|---|---:|---:|
+| Manifest call, sum of recorded phases | 136,579.843 | **1,140.922** |
+| File digest walk | 25.617 | **42.798** |
+| Complete publication snapshot | 486.130 | 596.938 |
+| Input inventory | 507.279 | 129.131 |
+| Direct caller selection plus projection/cache preparation | — | 680.494 |
+| Selected file artifacts | 83.846 plus 14,991.566 additional | 207.736 |
+| Actual clj-kondo `run!` | not separately wrapped | **78.770** |
+| Manifest replacement | 162.219 | 91.220 |
+
+The only lint path was `/Users/sean/src/seon/src/my/note.clj`; the real
+regression above separately proves direct caller inclusion. The after
+prepl form took 6.282 s including loading the probe and preparation; its
+recorded phases sum to 5.909 s. Preparation alone took 4.127 s acquiring
+the immutable source database and its projection: the current acquisition
+derives schema from the complete publication, O(program), before supplying
+the instance projection. That is an unresolved acquisition cost, not lint.
+The complete snapshot still hashes source, schema, configuration and test
+inputs, so it is wider than the 43 ms source-only digest walk. Exact rows:
+[after evidence](one-jvm-slice2-after-2026-09-22.edn).
+
+Cold analysis of all **381 files** took **15.846 s**: 15.368 s selected
+artifacts, 123 ms inventory, 360 ms projection/cache preparation, 95 ms
+manifest construction. This is O(all source) only with no manifest. It is
+below this lane's earlier 17.445 s cold analysis, but above the owner's
+10.2 s comparison; different runs are not a controlled CPU benchmark.
+Cold publication wall time was **178.826 s**. Its phases above two seconds
+remain findings: preparation 7.760 s (loading/acquiring publication inputs),
+schema population 2.454 s (all declarations), program-row preparation
+4.613 s (all program rows), contract compilation batches 12.879/9.499/2.610 s
+(all function contracts), final population compilation 13.226 s (all
+entities and keyword facts), transaction 36.068 s (107,049 datoms), issue
+indexing 6.124 s (all findings), activation seal 3.440 s (complete activation
+closure), and branch-head readback 4.875 s (whole unresolved-call report).
+These O(program) publication operations remain for slices 3–4; no latency
+is accepted merely because this slice does not own it. Raw progress:
+[cold publication](one-jvm-slice2-cold-2026-09-22.txt).
+
+A cold-process thread sample also found `DestroyJavaVM` waiting 44.20 s
+with idle non-daemon Clojure agent executor threads. This is executor
+expiry, not analysis; the existing
+[idle-agent-thread issue](../../../seon/issues/archive/test-base-publication-waits-for-idle-agent-threads.md)
+records the operator recurrence. Cold fork took 20.465 s including JVM
+startup. Boot took 29.515 s plus preflight 11.589 s: dependency cache warming
+9.502 s and lint of 11 changed files 2.085 s; those are source/dependency
+input work at boot, not the live one-file call.
+
+The orchestrator must reset for the removed attribute, run the cold and
+platform gates, and repeat the publication-path script against this commit.
+Compare actual lint lists and the analysis phase first, then attribute the
+remaining publication/adoption time to the later slices. Do not interpret
+the focused green as a green broader suite.
+
+Final source load passed (`seon.fn`, `seon.fn.analyzer`, `seon.cluster`,
+`seon.cluster.source`). `down` stopped PID 67012 and confirmed the store
+lock free; after verifying no JVM referenced it, the lane deleted its own
+scratch root. No worktree was created and no default/foreign root was
+operated. Named authorities were read end to end as recorded above.

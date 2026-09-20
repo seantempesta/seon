@@ -1,5 +1,5 @@
-(require 'clojure.edn 'clojure.java.io 'clojure.string 'datahike.api
-         'seon.cluster 'seon.cluster.source 'seon.db 'seon.fn 'seon.operator.runtime)
+(require 'clj-kondo.core 'clojure.edn 'clojure.java.io 'clojure.string 'datahike.api
+         'seon.cluster 'seon.cluster.source 'seon.db 'seon.fn 'seon.fn.analyzer 'seon.operator.runtime)
 
 ; Call the returned function through the scratch host's prepl with its
 ; cluster-root (ROOT/data/clusters), cluster name, and evidence output path.
@@ -15,6 +15,8 @@
         changed (clojure.string/replace-first original "Read my current notes in identity order."
                                               "Read my current notes in identity order (measurement).")
         phases (atom [])
+        lint (atom [])
+        run-kondo! clj-kondo.core/run!
         clock (atom [(System/nanoTime) "probe preparation"])
         progress (fn [phase]
                    (let [now (System/nanoTime)
@@ -46,17 +48,26 @@
         (spit file changed)
         (progress "manifest entry")
         (let [manifest
+              (with-redefs [clj-kondo.core/run!
+                            (fn [options]
+                              (let [start (System/nanoTime)
+                                    result (run-kondo! options)]
+                                (swap! lint conj
+                                       {:seon.fn.analyzer/paths
+                                        (mapv @#'seon.fn.analyzer/analyzed-source-path (:lint options))
+                                        :seon.source/elapsed-ms (/ (- (System/nanoTime) start) 1000000.0)})
+                                result))]
               (with-bindings {#'seon.cluster/*source-progress!* progress}
                 (seon.fn/build-manifest
                  {:seon.fn/root directory
                   :seon.fn/roots (:seon.fn.manifest/relative-roots previous)
                   :seon.fn/previous-manifest previous
                   :seon.source/previous-database database
-                  :seon.fn.analyzer/cache-root (str (clojure.java.io/file root "build" "analysis"))
-                  :seon.source/progress! @#'seon.cluster/report-source-progress!}))]
+                  :seon.source/progress! @#'seon.cluster/report-source-progress!})))]
           (progress "probe complete")
           (let [result {:seon.source/commit-id (:seon.source/commit-id published)
                         :seon.fn.manifest/digest (:seon.fn.manifest/digest manifest)
+                        :seon.fn/analysis @lint
                         :seon.source/progress @phases}]
             (spit output (pr-str result))
             result)))

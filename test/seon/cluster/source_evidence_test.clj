@@ -44,10 +44,6 @@
             recorded-commit (:seon.source/commit-id (source/current opened))
             rebuilt (#'source-fixture/publish opened @#'source-fixture/digest-a population {:seon.fn/manifest manifest})
             rebuilt-db (source/database opened (:seon.source/commit-id rebuilt))]
-        (is (string? (:seon.source/toolchain-digest manifest)))
-        (is (= (:seon.source/toolchain-digest manifest)
-               (db/q '[:find ?digest . :where [_ :seon.source/toolchain-digest ?digest]] rebuilt-db))
-            "The published base records the actual manifest's producer identity.")
         (is (= [] empty-recording))
         (is (not= (:seon.source/commit-id first-publication)
                   (:seon.source/commit-id empty-head)))

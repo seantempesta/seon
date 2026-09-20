@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: friction
 created: 2026-09-16
 tags: [issue, testing, performance]
@@ -39,3 +39,20 @@ idle exit waiting), then ran **48 tests / 357 assertions / 0 failures / 0 errors
 The completed store and manifest were used by all three real worker JVMs.
 No bound changed. Exact command, phases and verification limits are in the
 landing note; the before/after wall difference is not a controlled CPU benchmark.
+
+## Recurrence in the cold operator (slice 2, 2026-09-22)
+
+The test runner fix remains. The separate cold `bin/seon --root
+tmp/one-jvm-redesign-root init` path still returns without terminating its
+agent executors. On the slice-2 tree based on `2b7819320`, PID 66427
+finished publication but stayed at 0% CPU. `jcmd 66427 Thread.print` showed
+`DestroyJavaVM` elapsed **44.20 s** and non-daemon
+`clojure-agent-send-off-pool-2` and `-3` parked in
+`SynchronousQueue.poll` → `ThreadPoolExecutor.getTask`. The command exited
+successfully at **178.826 s**, including idle executor expiry. This is
+process shutdown waiting, not an O(program) analysis algorithm.
+
+The operator owns termination of its cold child; it must not shut down
+agent executors in the running host. The existing acceptance above applies
+to the cold operator too. Live requests already use the advertised prepl.
+This recurrence is outside slice 2's analysis-cache deletion.

@@ -253,7 +253,9 @@ losable by construction.
 loaded behavior; file edits do not mutate the database's program facts. The
 edit hook and `bin/seon init` use one digest-driven publication: changed
 inputs plus affected declaration files reconcile on the current history.
-A changed producer toolchain requires complete analysis. Development adoption
+Changed files and their direct callers are linted with clj-kondo's namespace
+cache; complete analysis is the cold case only. An analysis output-shape
+change requires a reset. Development adoption
 reloads changed namespaces through Clojure `require :reload`; publication has
 no separate loaded-producer generation guard. `bin/seon init` reuses an
 unchanged publication; ordinary clusters are never synchronized. `bin/seon init --dev NAME` adopts

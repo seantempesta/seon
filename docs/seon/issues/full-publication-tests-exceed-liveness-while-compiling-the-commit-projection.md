@@ -53,3 +53,17 @@ blob/process observations remain intact. Their metadata now declares the
 publication work and its bound; no fixture cache or second publication path
 is added. Fixture implementation belongs to the concurrently assigned
 bridge lane and is unchanged by this slice.
+
+## Slice 2 observation — 2026-09-22 redesign assignment
+
+The `05c77ac1d` fast snapshot plus slice 2's initial overlay, PID 62270,
+spent **100.779 s** in
+`seon.cluster.source-test/an-activation-closure-with-empty-member-collections-seals`
+(20:23:04.693–20:24:45.472 UTC in the process log). Its thread sample shows
+`schema/canonical-value-string` / `canonical-coll-string`, reached from
+`source/database` → `db/carry-derived-projection`. The test did finish;
+it was slow, not shown deadlocked. The following complete-publication test
+was in contract projection (18.326 s) when the lane terminated this broad
+run after six independent function-suite errors had already been reported.
+Exit 143 is not a suite verdict. The focused publication regressions continue
+separately. Neither schema owner nor the source test fixture was changed.

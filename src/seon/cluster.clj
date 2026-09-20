@@ -2183,13 +2183,12 @@
       published
       (let [database (when published (source/database store (:seon.source/commit-id published)))]
         (try
-          (let [resolver (str (io/file root "build" "analysis"))
-                _ (report-source-progress! "analysis started")
+          (let [_ (report-source-progress! "analysis started")
                 manifest (seon.fn/build-manifest
                           (cond-> {:seon.fn/root (:seon.fn/root roots)
                                    :seon.fn/roots (:seon.fn/roots roots)
-                                   :seon.fn.analyzer/cache-root resolver}
-                            (and previous (.isDirectory (io/file resolver)))
+                                   :seon.source/progress! report-source-progress!}
+                            previous
                             (assoc :seon.fn/previous-manifest previous
                                             :seon.source/previous-database database)))
                 _ (report-source-progress! "analysis complete")
@@ -2199,9 +2198,7 @@
                               (:seon.source/relative-file-digests snapshot))
                 changed (into changed (remove #(contains? (:seon.source/relative-file-digests snapshot) %))
                               (keys (:seon.source/relative-file-digests cached)))
-                toolchain-changed? (not= (:seon.source/toolchain-digest previous)
-                                        (:seon.source/toolchain-digest manifest))
-                paths (when (and previous (not toolchain-changed?))
+                paths (when previous
                         (into changed
                               (keep (fn [artifact]
                                       (when (not= artifact (seon.fn/artifact-by-path previous (:seon.fn.file/relative-path artifact)))

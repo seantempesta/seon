@@ -66,7 +66,6 @@
 (def ^:private source-attributes
   [:seon.source/digest
    :seon.source/test-input-digest
-   :seon.source/toolchain-digest
    :seon.source/built-at
    :seon.source/activation-closure
    :seon.activation/source-digest
@@ -531,11 +530,8 @@
               (cond-> {:tx-data
                (conj (activation-seal-tx
                       connection source-digest #{populate activation} activation-fn)
-                     (cond-> {:seon.source/digest source-digest
-                              :seon.source/test-input-digest input-digest}
-                       (get-in populate-request [:seon.fn/manifest :seon.source/toolchain-digest])
-                       (assoc :seon.source/toolchain-digest
-                              (get-in populate-request [:seon.fn/manifest :seon.source/toolchain-digest]))))}
+                     {:seon.source/digest source-digest
+                      :seon.source/test-input-digest input-digest})}
                 process (assoc :tx-meta {:seon.db/process process})))
              ::source-seal-refused
              "the source seal transaction was refused"
