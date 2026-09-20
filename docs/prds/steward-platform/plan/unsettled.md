@@ -4937,3 +4937,16 @@ comes (order: step 1 → 2 → 3 (reset) → 4 → 5). Meanwhile
 recorded through the published authority) and 1a landed `ace176c50`
 (source test-evidence errors declared at pass-through boundaries); both
 still running. Load 15.
+
+## 2026-09-20 ~21:20 UTC — render family kind-free; turn/cluster sweep resumed
+
+`kind-sweep-render` landed `f5716e841` + `8d2b7048f`: zero `:seon.error/kind`
+in the 23 render files; loads pass; fast tally 130 tests / 1,029 assertions
+/ 60 F / 28 E at foreign boundaries (seon.turn, seon.fn.schema-shape,
+fixtures) — the seon.turn reds go to `kind-sweep-turn-cluster`, resumed now
+(sol low) with the MCP exception-projection blocker as its first, separately
+committed slice. Render paths are free; bridge step 1 launches when 1a
+releases `src/seon/schema.clj`. Editing lanes: 1a, results-reuse,
+turn-cluster. Cold gates owed by the orchestrator, in order: 1a's six
+suites; 1d's R1 and R2 commands; render (`bin/test --paths <23 files> --
+seon.render.*-test`); then `--platform`.
