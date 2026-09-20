@@ -139,11 +139,7 @@
        :seon.error/diagnostic-cause :seon.config/missing-result-cap
        :seon.error/diagnostic-evidence {:seon.config/key missing}
        :seon.error/message
-       (str "Value-admission caps require config key " missing
-            "; a partial caps map cannot be constructed."
-            (when cluster-less-refusal
-              (str " The configuration itself was refused: "
-                   (:seon.error/message cluster-less-refusal))))
+       "Value-admission caps require every declared configuration bound."
        :seon.error/data
        (cond-> {::key missing}
          (:seon.config/missing-effective effective)
@@ -201,14 +197,9 @@
           (dial-attributes forms)))))
 
 (defn- refuse!
-  [rule data cause]
-  (throw
-   (ex-info
-    (str "Configuration refused: " (name rule) ".")
-    (merge {:seon.error/kind ::refused
-            ::rule rule :seon.config/refused rule}
-           data)
-    cause)))
+  {:malli/schema [:=> [:cat :seon.config/rule-error [:maybe :seon.error/throwable]] :nil]}
+  [observation cause]
+  (throw (ex-info (:seon.error/message observation) observation cause)))
 
 (defn- read-edn-map
   [path]
@@ -225,7 +216,25 @@
             {::path path})))
         value))
     (catch Throwable error
-      (refuse! ::manifest-unreadable {::path path} error))))
+      (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/read-edn-map
+         :seon.error/message "Configuration requires exactly one readable EDN map."
+         :seon.config/error-key :seon.config/path
+         :seon.config/rule ::manifest-unreadable
+         :seon.error/expected-key :seon.config/path
+         :seon.error/offending path
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/read-edn-map
+         :seon.error/diagnostic-member :seon.config/path
+         :seon.error/diagnostic-expected "exactly one readable EDN map"
+         :seon.error/diagnostic-offending path
+         :seon.error/diagnostic-cause ::manifest-unreadable
+         :seon.error/diagnostic-evidence {::path path}
+         :seon.error/data {::path path}})
+       error))))
 
 (defn- validate-layer
   [projection layer]
@@ -233,17 +242,49 @@
         dials (set (dial-attributes forms))
         declared (select-keys layer dials)]
     (when (contains? layer initialization-key)
-      (refuse! ::initialization-not-allowed
-               {::key initialization-key}
-               nil))
-    (doseq [[key value] declared]
+      (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/validate-layer
+         :seon.error/message "Configuration requires an overlay containing only configuration dials."
+         :seon.config/error-key initialization-key
+         :seon.config/rule ::initialization-not-allowed
+         :seon.error/expected-key initialization-key
+         :seon.error/offending layer
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/validate-layer
+         :seon.error/diagnostic-member initialization-key
+         :seon.error/diagnostic-expected "an overlay containing only configuration dials"
+         :seon.error/diagnostic-offending layer
+         :seon.error/diagnostic-cause ::initialization-not-allowed
+         :seon.error/diagnostic-evidence {::key initialization-key}
+         :seon.error/data {::key initialization-key}})
+       nil))
+    (doseq [[config-key value] declared]
       (when-not (or (= absent value)
-                    ((schema/projection-validator projection key) value))
+                    ((schema/projection-validator projection config-key) value))
         (refuse!
-         ::invalid-value
-         {::key key
-          ::explanation ((schema/projection-explainer projection key) value)}
-         nil)))
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/validate-layer
+         :seon.error/message "Configuration requires values satisfying their declared configuration schemas."
+         :seon.config/error-key config-key
+         :seon.config/rule ::invalid-value
+         :seon.error/expected-key config-key
+         :seon.error/offending value
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/validate-layer
+         :seon.error/diagnostic-member config-key
+         :seon.error/diagnostic-expected "values satisfying their declared configuration schemas"
+         :seon.error/diagnostic-offending value
+         :seon.error/diagnostic-cause ::invalid-value
+         :seon.error/diagnostic-evidence {::key config-key
+          ::explanation ((schema/projection-explainer projection config-key) value)}
+         :seon.error/data {::key config-key
+          ::explanation ((schema/projection-explainer projection config-key) value)}})
+       nil)))
     declared))
 
 (defn- row-identity
@@ -264,42 +305,146 @@
     (mapv
      (fn [row]
        (when-not (map? row)
-         (refuse! ::invalid-initialization-row {} nil))
+         (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/admit-initialization-rows
+         :seon.error/message "Configuration requires an initialization entity map."
+         :seon.config/error-key :seon.config/initialization
+         :seon.config/rule ::invalid-initialization-row
+         :seon.error/expected-key :seon.config/initialization
+         :seon.error/offending row
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/admit-initialization-rows
+         :seon.error/diagnostic-member :seon.config/initialization
+         :seon.error/diagnostic-expected "an initialization entity map"
+         :seon.error/diagnostic-offending row
+         :seon.error/diagnostic-cause ::invalid-initialization-row
+         :seon.error/diagnostic-evidence {}
+         :seon.error/data {}})
+       nil))
        (doseq [[attribute value] row]
          (cond
            (not (qualified-keyword? attribute))
-           (refuse! ::invalid-initialization-attribute
-                    {::key attribute}
-                    nil)
+           (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/admit-initialization-rows
+         :seon.error/message "Configuration requires qualified attribute keys."
+         :seon.config/error-key :seon.config/initialization
+         :seon.config/rule ::invalid-initialization-attribute
+         :seon.error/expected-key :seon.config/initialization
+         :seon.error/offending attribute
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/admit-initialization-rows
+         :seon.error/diagnostic-member :seon.config/initialization
+         :seon.error/diagnostic-expected "qualified attribute keys"
+         :seon.error/diagnostic-offending attribute
+         :seon.error/diagnostic-cause ::invalid-initialization-attribute
+         :seon.error/diagnostic-evidence {::key attribute}
+         :seon.error/data {::key attribute}})
+       nil)
 
            (not (contains? database-attributes attribute))
-           (refuse! ::unknown-initialization-attribute
-                    {::key attribute}
-                    nil)
+           (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/admit-initialization-rows
+         :seon.error/message "Configuration requires declared database attributes."
+         :seon.config/error-key attribute
+         :seon.config/rule ::unknown-initialization-attribute
+         :seon.error/expected-key attribute
+         :seon.error/offending value
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/admit-initialization-rows
+         :seon.error/diagnostic-member attribute
+         :seon.error/diagnostic-expected "declared database attributes"
+         :seon.error/diagnostic-offending value
+         :seon.error/diagnostic-cause ::unknown-initialization-attribute
+         :seon.error/diagnostic-evidence {::key attribute}
+         :seon.error/data {::key attribute}})
+       nil)
 
            (not ((schema/projection-validator projection attribute) value))
-           (refuse! ::invalid-initialization-value
-                    {::key attribute
+           (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/admit-initialization-rows
+         :seon.error/message "Configuration requires values satisfying their declared attribute schemas."
+         :seon.config/error-key attribute
+         :seon.config/rule ::invalid-initialization-value
+         :seon.error/expected-key attribute
+         :seon.error/offending value
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/admit-initialization-rows
+         :seon.error/diagnostic-member attribute
+         :seon.error/diagnostic-expected "values satisfying their declared attribute schemas"
+         :seon.error/diagnostic-offending value
+         :seon.error/diagnostic-cause ::invalid-initialization-value
+         :seon.error/diagnostic-evidence {::key attribute
                      ::explanation
                      ((schema/projection-explainer projection attribute) value)}
-                    nil)))
+         :seon.error/data {::key attribute
+                     ::explanation
+                     ((schema/projection-explainer projection attribute) value)}})
+       nil)))
        (when-not (row-identity forms row)
-         (refuse! ::invalid-initialization-identity
-                  {::explanation
+         (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/admit-initialization-rows
+         :seon.error/message "Configuration requires an installed entity identity attribute."
+         :seon.config/error-key :seon.config/initialization
+         :seon.config/rule ::invalid-initialization-identity
+         :seon.error/expected-key :seon.config/initialization
+         :seon.error/offending row
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/admit-initialization-rows
+         :seon.error/diagnostic-member :seon.config/initialization
+         :seon.error/diagnostic-expected "an installed entity identity attribute"
+         :seon.error/diagnostic-offending row
+         :seon.error/diagnostic-cause ::invalid-initialization-identity
+         :seon.error/diagnostic-evidence {::explanation
                    {:seon.config/identity-attributes
                     (into []
                           (filter #(schema/identity-attr? forms %))
                           (keys row))}}
-                  nil))
+         :seon.error/data {::explanation
+                   {:seon.config/identity-attributes
+                    (into []
+                          (filter #(schema/identity-attr? forms %))
+                          (keys row))}}})
+       nil))
        row)
      population)))
 
 (defn- admit-initialization
   [projection population]
   (when-not (vector? population)
-    (refuse! ::invalid-initialization
-             {::explanation {:seon.config/expected :vector-of-maps}}
-             nil))
+    (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/admit-initialization
+         :seon.error/message "Configuration requires a vector of initialization entity maps."
+         :seon.config/error-key :seon.config/initialization
+         :seon.config/rule ::invalid-initialization
+         :seon.error/expected-key :seon.config/initialization
+         :seon.error/offending population
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/admit-initialization
+         :seon.error/diagnostic-member :seon.config/initialization
+         :seon.error/diagnostic-expected "a vector of initialization entity maps"
+         :seon.error/diagnostic-offending population
+         :seon.error/diagnostic-cause ::invalid-initialization
+         :seon.error/diagnostic-evidence {::explanation {:seon.config/expected :vector-of-maps}}
+         :seon.error/data {::explanation {:seon.config/expected :vector-of-maps}}})
+       nil))
   (admit-initialization-rows projection population))
 
 (defn- default-document
@@ -331,19 +476,50 @@
         missing (set/difference dials (set (keys decisions)))]
     (when (seq missing)
       (refuse!
-       ::missing-default
-       {::explanation {:seon.config/missing missing}}
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/validate-default-decisions
+         :seon.error/message "Configuration requires an explicit default decision for every dial."
+         :seon.config/error-key :seon.config/effective
+         :seon.config/rule ::missing-default
+         :seon.error/expected-key :seon.config/effective
+         :seon.error/offending missing
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/validate-default-decisions
+         :seon.error/diagnostic-member :seon.config/effective
+         :seon.error/diagnostic-expected "an explicit default decision for every dial"
+         :seon.error/diagnostic-offending missing
+         :seon.error/diagnostic-cause ::missing-default
+         :seon.error/diagnostic-evidence {::explanation {:seon.config/missing missing}}
+         :seon.error/data {::explanation {:seon.config/missing missing}}})
        nil))
-    (doseq [[key decision] decisions]
+    (doseq [[config-key decision] decisions]
       (when-not (or (= absent decision)
-                    (and (= key :seon.config.flow.compute/concurrency)
+                    (and (= config-key :seon.config.flow.compute/concurrency)
                          (= available-processors decision))
-                    ((schema/projection-validator projection key) decision))
+                    ((schema/projection-validator projection config-key) decision))
         (refuse!
-         ::invalid-value
-         {::key key
-          ::explanation ((schema/projection-explainer projection key) decision)}
-         nil)))
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/validate-default-decisions
+         :seon.error/message "Configuration requires values satisfying their declared configuration schemas."
+         :seon.config/error-key config-key
+         :seon.config/rule ::invalid-value
+         :seon.error/expected-key config-key
+         :seon.error/offending decision
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/validate-default-decisions
+         :seon.error/diagnostic-member config-key
+         :seon.error/diagnostic-expected "values satisfying their declared configuration schemas"
+         :seon.error/diagnostic-offending decision
+         :seon.error/diagnostic-cause ::invalid-value
+         :seon.error/diagnostic-evidence {::key config-key
+          ::explanation ((schema/projection-explainer projection config-key) decision)}
+         :seon.error/data {::key config-key
+          ::explanation ((schema/projection-explainer projection config-key) decision)}})
+       nil)))
     decisions))
 
 (defn default-decisions
@@ -369,8 +545,8 @@
                   (read-edn-map path)))
 
 (defn- resolve-smart-decision
-  [key decision]
-  (if (and (= key :seon.config.flow.compute/concurrency)
+  [config-key decision]
+  (if (and (= config-key :seon.config.flow.compute/concurrency)
            (= decision available-processors))
     (long (.availableProcessors (Runtime/getRuntime)))
     decision))
@@ -387,23 +563,57 @@
         defaults (validate-default-decisions projection decisions)
         decisions (merge defaults manifest environment)
         required (required-dial-attributes forms)]
-    (doseq [[key decision] decisions]
-      (when (and (= absent decision) (contains? required key))
-        (refuse! ::required-absent {::key key} nil)))
+    (doseq [[config-key decision] decisions]
+      (when (and (= absent decision) (contains? required config-key))
+        (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/compile-settings
+         :seon.error/message "Configuration requires a value for each required configuration key."
+         :seon.config/error-key config-key
+         :seon.config/rule ::required-absent
+         :seon.error/expected-key config-key
+         :seon.error/offending decision
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/compile-settings
+         :seon.error/diagnostic-member config-key
+         :seon.error/diagnostic-expected "a value for each required configuration key"
+         :seon.error/diagnostic-offending decision
+         :seon.error/diagnostic-cause ::required-absent
+         :seon.error/diagnostic-evidence {::key config-key}
+         :seon.error/data {::key config-key}})
+       nil)))
     (let [effective
           (into {}
                 (comp
                  (remove (comp #{absent} val))
                  (map
-                  (fn [[key decision]]
-                    [key (resolve-smart-decision key decision)])))
+                  (fn [[config-key decision]]
+                    [config-key (resolve-smart-decision config-key decision)])))
                 decisions)]
       (when-not ((schema/projection-validator projection :seon.config/effective) effective)
         (refuse!
-         ::invalid-value
-         {::explanation
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/compile-settings
+         :seon.error/message "Configuration requires values satisfying their declared configuration schemas."
+         :seon.config/error-key :seon.config/effective
+         :seon.config/rule ::invalid-value
+         :seon.error/expected-key :seon.config/effective
+         :seon.error/offending effective
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/compile-settings
+         :seon.error/diagnostic-member :seon.config/effective
+         :seon.error/diagnostic-expected "values satisfying their declared configuration schemas"
+         :seon.error/diagnostic-offending effective
+         :seon.error/diagnostic-cause ::invalid-value
+         :seon.error/diagnostic-evidence {::explanation
           ((schema/projection-explainer projection :seon.config/effective) effective)}
-         nil))
+         :seon.error/data {::explanation
+          ((schema/projection-explainer projection :seon.config/effective) effective)}})
+       nil))
       (let [digest
             (schema/sha-256
              [(.getBytes
@@ -424,10 +634,27 @@
   [request]
   (let [cluster-name (:seon.boot/cluster-name request)]
     (when-not (and (string? cluster-name) (seq cluster-name))
-      (refuse! ::required-absent
-               {::key :seon.boot/cluster-name
+      (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/compile-manifest
+         :seon.error/message "Configuration requires a value for each required configuration key."
+         :seon.config/error-key :seon.boot/cluster-name
+         :seon.config/rule ::required-absent
+         :seon.error/expected-key :seon.boot/cluster-name
+         :seon.error/offending request
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/compile-manifest
+         :seon.error/diagnostic-member :seon.boot/cluster-name
+         :seon.error/diagnostic-expected "a value for each required configuration key"
+         :seon.error/diagnostic-offending request
+         :seon.error/diagnostic-cause ::required-absent
+         :seon.error/diagnostic-evidence {::key :seon.boot/cluster-name
                 :seon.error/diagnostic-operation 'seon.config/compile-manifest}
-               nil))
+         :seon.error/data {::key :seon.boot/cluster-name
+                :seon.error/diagnostic-operation 'seon.config/compile-manifest}})
+       nil))
     (let [compiled (compile-settings request)]
       (assoc compiled :seon.config/desired-row
              (assoc (:seon.config/effective compiled)
@@ -442,8 +669,8 @@
   (:seon.config/effective (compile-settings {})))
 
 (defn- desired-tempid
-  [identity]
-  (str "seon.config.initialization/" (pr-str identity)))
+  [config-identity]
+  (str "seon.config.initialization/" (pr-str config-identity)))
 
 (defn- population-transaction-data
   [forms database desired]
@@ -451,17 +678,36 @@
         entity-ids
         (into {}
               (map
-               (fn [identity]
+               (fn [config-identity]
                  ;; A refused read is not "no such entity". Minting a tempid
                  ;; for an identity the database already holds produces a
                  ;; conflicting upsert; refuse with the read as the cause.
-                 (let [pulled (db/pull database [:db/id] identity)]
-                   (when (:seon.error/kind pulled)
-                     (refuse! ::read-refused
-                              {:seon.config/identity identity
+                 (let [pulled (db/pull database [:db/id] config-identity)]
+                   (when (and (map? pulled) (:seon.error/at pulled)
+                              (:seon.error/layer pulled) (:seon.error/operation pulled)) ; debt: seon.db/pull and transact! declare seon.db/error-result with :seon.error/value.
+
+                     (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/population-transaction-data
+         :seon.error/message "Configuration requires a successful population identity read."
+         :seon.config/error-key :seon.config/identity
+         :seon.config/rule ::read-refused
+         :seon.error/expected-key :seon.config/identity
+         :seon.error/offending pulled
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/population-transaction-data
+         :seon.error/diagnostic-member :seon.config/identity
+         :seon.error/diagnostic-expected "a successful population identity read"
+         :seon.error/diagnostic-offending pulled
+         :seon.error/diagnostic-cause ::read-refused
+         :seon.error/diagnostic-evidence {:seon.config/identity config-identity
                                ::read-error pulled}
-                              nil))
-                   [identity (or (:db/id pulled) (desired-tempid identity))])))
+         :seon.error/data {:seon.config/identity config-identity
+                               ::read-error pulled}})
+       nil))
+                   [config-identity (or (:db/id pulled) (desired-tempid config-identity))])))
               identities)
         ref-value
         (fn [value]
@@ -531,14 +777,34 @@
                   :tx-meta
                   {:seon.db/process
                    [:seon.db.process/id managing-process-identity]}})]
-            (if (:seon.error/kind transaction-result)
+            (if (and (map? transaction-result) (:seon.error/at transaction-result)
+                              (:seon.error/layer transaction-result) (:seon.error/operation transaction-result)) ; debt: seon.db/pull and transact! declare seon.db/error-result with :seon.error/value.
+
               transaction-result
               {::reconcile/converged? false
                ::reconcile/operations operations})))]
-    (when (:seon.error/kind result)
-      (refuse! ::reconcile-refused
-               {:seon.config/reconcile-result result}
-               nil))
+    (when (and (map? result) (:seon.error/at result)
+                              (:seon.error/layer result) (:seon.error/operation result)) ; debt: seon.db/pull and transact! declare seon.db/error-result with :seon.error/value.
+
+      (refuse!
+       (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.config/compile
+         :seon.error/operation 'seon.config/apply-compiled!
+         :seon.error/message "Configuration requires an admitted configuration transaction."
+         :seon.config/error-key :seon.config/desired-row
+         :seon.config/rule ::reconcile-refused
+         :seon.error/expected-key :seon.config/desired-row
+         :seon.error/offending result
+         :seon.error/diagnostic-layer :seon.config/compile
+         :seon.error/diagnostic-operation 'seon.config/apply-compiled!
+         :seon.error/diagnostic-member :seon.config/desired-row
+         :seon.error/diagnostic-expected "an admitted configuration transaction"
+         :seon.error/diagnostic-offending result
+         :seon.error/diagnostic-cause ::reconcile-refused
+         :seon.error/diagnostic-evidence {:seon.config/reconcile-result result}
+         :seon.error/data {:seon.config/reconcile-result result}})
+       nil))
     result))
 
 (defn apply!
@@ -597,14 +863,12 @@
             (:seon.db.availability/connection row)
             (:seon.schema/expected-value row))
       row
-      (let [effective (select-keys row (dial-attributes forms))
+      (let [config-effective (select-keys row (dial-attributes forms))
             missing (vec (sort (set/difference (required-dial-attributes forms)
-                                               (set (keys effective)))))]
+                                               (set (keys config-effective)))))]
         (if (and row (empty? missing))
-          effective
-          (let [shown (take 6 missing)
-                remaining (- (count missing) (count shown))
-                available
+          config-effective
+          (let [available
                 (vec
                  (sort
                   (db/q '[:find [?available ...]
@@ -625,13 +889,6 @@
              :seon.error/diagnostic-cause :seon.config/missing-effective
              :seon.error/diagnostic-evidence {:seon.config/missing missing}
              :seon.config/missing-effective cluster-name
-             :seon.error/data {::missing missing}
+             :seon.error/data {::missing missing ::available available}
              :seon.error/message
-             (if row
-               (str "Effective configuration for cluster " (pr-str cluster-name)
-                    " is missing required facts " (pr-str (vec shown))
-                    (when (pos? remaining)
-                      (str " and " remaining " more")) ".")
-               (str "No effective configuration facts match cluster "
-                    (pr-str cluster-name) "; available clusters "
-                    (pr-str available) "."))})))))))
+             "Effective configuration requires a matching cluster row with every required dial."})))))))

@@ -326,3 +326,24 @@ Cold proof owed (orchestrator only): `bin/test --paths src/seon/maintenance.clj
 resources/seon/schemas/seon.maintenance.edn test/seon/maintenance_test.clj
 test/seon/maintenance_schema_test.clj -- seon.maintenance-test
 seon.maintenance-schema-test`, then accumulated platform proof.
+
+### ops-effects-2: config checkpoint
+
+Changed src/seon/config.clj, resources/seon/schemas/seon.config.edn and
+test/seon/config_test.clj. Retirement census zero; config_application_test.clj
+also has no retirement sites. Compiler throws now use the existing complete
+seon.config/rule-error facet, naming the actual member and rule with raw
+offending evidence. Legacy facet names alias the canonical read/compiler
+facets; the unused missing-result-cap boolean declaration is removed.
+Read/compile messages describe the constraint; missing/available keys stay in
+diagnostic data. Database propagation checks retain explicit external debt.
+
+Final load printed `:loads`; lint 0 errors / 0 warnings. The single accumulated
+fast request for seon.config-test armed 1,438 contracts and stopped before
+tests at held seon.test.runner/invalid-marker-reason-error, offending member
+`:seon.error/offending`. Fast tally owed — admission held by the test-runner
+schema/recording family. No live adoption proof claimed.
+
+Cold command owed (orchestrator only): `bin/test --paths src/seon/config.clj
+resources/seon/schemas/seon.config.edn test/seon/config_test.clj --
+seon.config-test seon.config-application-test`, then accumulated platform proof.

@@ -336,7 +336,9 @@
 (deftest apply-converts-a-flat-reconcile-error-to-a-refusal
   (test-support/with-database
     (fn [connection]
-      (let [flat-error {:seon.error/kind :seon.db/rejected
+      (let [flat-error {:seon.error/at (java.util.Date.)
+                        :seon.error/layer :seon.db/write
+                        :seon.error/operation 'seon.db/transact!
                         :seon.error/message "injected config refusal"}
             result
             (with-redefs [reconcile/plan (fn [& _] [{}])
@@ -345,9 +347,9 @@
                #(config/apply-compiled!
                  connection
                  (config/compile-manifest {:seon.boot/cluster-name "default"}))))]
-        (is (= :seon.config/refused (:seon.error/kind result)))
+        (is (= :seon.config/desired-row (:seon.config/error-key result)))
         (is (= :seon.config/reconcile-refused (:seon.config/rule result)))
-        (is (= flat-error (:seon.config/reconcile-result result)))))))
+        (is (= flat-error (get-in result [:seon.error/data :seon.config/reconcile-result])))))))
 
 (deftest cluster-scoped-config-refuses-an-omitted-cluster
   (test-support/with-database
@@ -596,7 +598,7 @@
                      [[:db/retract
                        [:seon.config/cluster "default"]
                        :seon.config.eval.result/max-nodes]])]
-        (is (:seon.error/kind refused))
+        (is (string? (:seon.db.write.attempt/request-id refused)))
         (is (str/includes? (:seon.error/message refused)
                            ":seon.config.eval.result/max-nodes"))
         (is (= basis (:max-tx @connection))
