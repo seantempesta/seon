@@ -2717,3 +2717,50 @@ bin/test --paths \
   -- seon.error-test seon.instrument-test seon.schema-test \
   seon.db-test seon.cluster-test seon.sci.eval-test
 ```
+
+## 2026-09-22 resume — result storage retirement held at active readers
+
+Read both 10:30 and 10:40 local owner-ruling blocks in the steward-platform
+`plan/unsettled.md` end to end. Vocabulary from this resume is error map
+and error schema; existing stored names await their separately owned reset
+pass. Read the Clojure, data-modeling and testing skills. Compared restored
+files against HEAD, including staged edits: `src/seon/error.clj`,
+`src/seon/print.cljc`, `src/seon/sci/eval.clj`, `test/seon/error_test.clj`
+total 41 insertions / 32 deletions. These are preserved, not committed here.
+They convert compiled-schema callers and fixture configuration; they do not
+implement the newly ruled result storage.
+
+The mandatory same-slice retirement reaches held production readers and
+required declarations. Exact sites and conversions are recorded in
+[the one blocking issue](../../../seon/issues/error-result-retirement-crosses-held-readers.md).
+In particular DB line 3405 and runner line 4255 consume the raw member;
+the test-accretion schema at line 232 requires the retired projection.
+The raw-member declarations in the held runner resource also survive.
+Removing their declarations first would violate the owner requirement to
+convert every reader and retain complete valid error maps. Stopped before
+production edits under the assignment's explicit held-path rule. No
+alternative storage mechanism, compatibility key, or new intern path added.
+
+The existing symbol owner is `seon.sci.admit/result-handle`; the actual
+intern operation is `seon.sci.eval/bind-result!` at lines 534–550, not
+`admit.clj:704`. The future constructor must reuse this binding operation
+with explicitly supplied SCI context, storage and render inputs.
+
+Measured tally this resume: **no tests executed**. The requested result
+regressions remain unimplemented; no green claim is made. Only this note
+and its blocking issue are new changes. No default operation, worktree,
+cold gate, or foreign session operation was performed.
+
+**RESET NEEDED (pending implementation):** remove exactly
+`:seon.error/data-edn`, `:seon.error/data-size`,
+`:seon.error/offending-projection`, `:seon.error/offending`.
+Retain existing `:seon.error/data-blob`. New result identity and shown-text
+attribute names remain undeclared; record their exact names when the atomic
+slice can proceed. No attribute change landed in this resume.
+
+The exact accumulated cold command elsewhere in this note remains owed
+for prior landings. No executable cold command for the new result slice can
+yet claim complete inputs: its held readers must be included once converted.
+The orchestrator must release/coordinate the issue's paths before this lane
+can implement and measure that slice. All unrelated staged and unstaged edits
+are preserved.
