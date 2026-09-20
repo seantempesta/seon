@@ -50,12 +50,12 @@
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}])
 
-(defn- probe-schema-rows [forms probe-keys]
+(defn- probe-schema-rows [projection forms probe-keys]
   ;; Keep the canonical dependency closure of the synthetic declarations.
   ;; Unrelated render declarations require program definitions, not this
   ;; file-store fixture's schema-only population.
   (let [rows (into {} (map (juxt :seon.schema/key identity))
-                   (seon.schema/canonical-schema-rows forms))]
+                   (seon.schema/canonical-schema-rows projection forms))]
     (loop [needed (set probe-keys)]
       (let [expanded (into needed
                            (mapcat #(get-in rows [% :seon.schema/references]))
@@ -104,15 +104,15 @@
          (let [probe-forms {:seon.registry.test/payload-blob :seon.blob/digest
                             :seon.registry.test/archive-blob :seon.blob/digest}
                forms (merge (seon.schema/declaration-population) probe-forms)
-               projection {:seon.schema.projection/forms forms}
+               projection (seon.schema/build-projection forms)
                connection (:seon.store/connection-object opened)]
            (test-support/transacted!
             connection
             (into (schema-datahike/malli->datahike-schema-in
-                   projection (seon.schema/canonical-database-attributes (seon.schema/build-projection forms)))
+                   projection (seon.schema/canonical-database-attributes projection))
                   probe-schema))
            (test-support/transacted!
-            connection (probe-schema-rows forms (keys probe-forms))))
+            connection (probe-schema-rows projection forms (keys probe-forms))))
          (write-marker! (:seon.store/connection-object opened) "ancestral")
          (registry/branch! {:seon.store/store opened
                             :seon.cluster.registry/from :db

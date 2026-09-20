@@ -356,9 +356,12 @@
     (try
       (let [digest-attributes (blob-digest-attributes db)
             history-view (if include-history? (db/history db) db)
-            history-db (if (:seon.error/kind history-view)
-                         db
-                         history-view)]
+            history-db (cond
+                         (= :seon.config.db/keep-history?
+                            (:seon.config/error-key history-view)) db
+                         (db/database-value? history-view) history-view
+                         :else (throw (ex-info "Cannot determine retained blob references."
+                                               history-view)))]
         (into #{}
               (mapcat
                (fn [attribute]

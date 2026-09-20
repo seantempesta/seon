@@ -7,6 +7,43 @@ tags: [schema, malli, bridge, projection]
 
 # Bridge step 2: compiled walker
 
+## First platform gate repairs, 2026-09-22
+
+Read the one-JVM publication redesign end to end again for this bounded
+follow-up. Cold evidence is `tmp/orchestrator/gate-cd701afc2-platform.log`;
+its retained root is `tmp/test-runs/run.HIBgd6`. The gate had 97 platform
+tests, 6 failures and 12 errors. No default lifecycle action, worktree,
+foreign session action or cold gate is used by this lane. Redesign-owned
+source paths remain untouched. Every fast wall-clock below is measured by
+an outer monotonic timer, including snapshot, JVM acquisition and recording.
+
+### Class 1 — registry construction and retained blob reads
+
+Root cause: `with-source-store` passed a forms-only map to the retained-root
+bridge even though it separately constructed a complete projection for key
+selection. The fixture now builds one projection and supplies it to native
+declarations, attribute selection and canonical schema rows. Malli's
+`registry/schema` (`reference-code/malli/src/malli/registry.cljc:97`) requires
+an actual registry; the bridge remains strict, with no nil fallback.
+
+The first fast run exposed a previously masked production error: registry
+blob collection still recognized the non-temporal history error by the retired
+kind key, queried the error map as a database, and failed to retain a current
+blob. `seon.cluster.registry/branch-blobs` now recognizes the declared
+`:seon.config/error-key` for `:seon.config.db/keep-history?`. Any other
+unavailable history observation refuses collection before deletion. Datahike's
+history admission is at `reference-code/datahike/src/datahike/api/impl.cljc:185`.
+The existing non-temporal collection regression covers the correction.
+
+Fast commands select `seon.cluster.registry-test`, first with the test path,
+then with `src/seon/cluster/registry.clj` and
+`test/seon/cluster/registry_test.clj`. First: 12 tests, 73 assertions,
+1 failure, 0 errors, **118.135069333 s** (`tmp/bridge-platform-class1.log`).
+Final: **12 executed, 73 assertions, 0 failures, 0 errors**, exit 0,
+**114.314524375 s** (`tmp/bridge-platform-class1-fixed.log`). Maximum measured
+test body **4.823160 s**; no long allowance is needed. Source require of
+`seon.cluster.registry` and `seon.schema.datahike` brackets the commit.
+
 ## Final ruled slice and verification
 
 This section supersedes the historical checkpoints below. The orchestrator
