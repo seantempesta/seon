@@ -5657,3 +5657,17 @@ use complete rule observations). Read-only slot → `gate-restructure-design`
 (measured from tonight's 3,533 s gate: idle pool workers at full heap,
 ~33 s serial fixture priming per test, the honest cost model after
 results reuse; one lane's launch text).
+
+## 2026-09-21 ~14:35 UTC — publication: lineage reconciliation + producer guard + reuse regression landed; offending-member storage ruled
+
+`publication-dissolution` landed `3ac00fb8e` (population reconciles on the
+current lineage; loaded-producer mismatch refuses), `179f6c4bc` (recorded
+test reuse survives a one-file publication — 8 assertions), `974591456`
+(note). Stopped: three runner facets from the test-system sweep REQUIRE
+`:seon.error/offending`, which the bridge cannot store, so publication
+and fast admission refuse. Ruled option 1 = the standing ruling:
+`:seon.error/offending` is optional on every stored facet; required datoms
+are typed domain members. The publication lane makes that repair (the
+resource is free), commits the duplicate-publisher deletions, measures,
+and lands. Its earlier worktree is gone. `kind-sweep-sci-program` landed
+`603d2587c` (await expiry distinguished from completed failures).

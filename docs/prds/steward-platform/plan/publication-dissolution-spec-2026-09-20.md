@@ -114,6 +114,14 @@ publishes CHANGED files as same-identity upserts (`src/seon/cluster.clj`
    reload cannot replace them); a fresh JVM only when no live JVM exists, never
    on mismatch. The loaded-producer digest is a compared fact.
 
+   **Landed (2026-09-21 ~14:30 UTC):** `3ac00fb8e` population reconciled on the
+   current lineage + loaded-producer guard; `179f6c4bc` recorded reuse survives
+   a one-file publication (8 assertions). **Storage ruling:** `:seon.error/offending`
+   is optional on every stored facet (in-memory member; durable via the
+   occurrence projection); a facet's required datoms are its typed domain
+   members. Remaining: duplicate-publisher deletions, final per-phase
+   measurements, then landed.
+
 3. **Analysis cached by input digest.** clj-kondo analysis results per input
    are stored keyed by the input's content digest and reused; only changed
    inputs are analyzed. (Falls out of item 1's digest key; separate commit.)
