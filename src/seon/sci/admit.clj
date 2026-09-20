@@ -571,7 +571,7 @@
      :seon.test/not-runnable-error :seon.test/resolution-error
      :seon.test/selection-error :seon.test/unknown-error
      :seon.test.run/immutable-error :seon.test.run/unavailable-error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
   [print-node]

@@ -107,7 +107,7 @@
      :seon.test/not-runnable-error :seon.test/resolution-error
      :seon.test/selection-error :seon.test/unknown-error
      :seon.test.run/immutable-error :seon.test.run/unavailable-error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
   [throwable]
@@ -242,7 +242,7 @@
      :seon.test/not-runnable-error :seon.test/resolution-error
      :seon.test/selection-error :seon.test/unknown-error
      :seon.test.run/immutable-error :seon.test.run/unavailable-error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
   [projection observation]
@@ -341,7 +341,7 @@
      :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
   [source]
@@ -817,7 +817,7 @@
      :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
   [fact]
@@ -853,7 +853,7 @@
      :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
   [fact]
@@ -1718,7 +1718,7 @@
      :seon.test/not-runnable-error :seon.test/resolution-error
      :seon.test/selection-error :seon.test/unknown-error
      :seon.test.run/immutable-error :seon.test.run/unavailable-error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
   [error]
@@ -1769,7 +1769,7 @@
      :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
   [unit]
@@ -1944,7 +1944,7 @@
      :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
   [unit]

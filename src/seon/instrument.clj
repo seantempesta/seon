@@ -554,7 +554,7 @@
      :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
   [failure]
@@ -592,7 +592,7 @@
      :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
      :seon.sci.admit/error :seon.sci.eval/acquisition-error
      :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.test/error :seon.test.accretion/error
+     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
      :seon.test.run/error :seon.test.runner/error :seon.turn/error
      :seon.turn.loop/error]]}
   [value member]

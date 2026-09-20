@@ -2141,3 +2141,37 @@ actual refusal or successful row is the next decision input.
 | `raw-load-2.log` | 205 | `579c3de9fb226ffa47e63f1160596a1fe89089af30718e0a8855f4a369c28a18` |
 | `kernel-load.log` | 205 | `579c3de9fb226ffa47e63f1160596a1fe89089af30718e0a8855f4a369c28a18` |
 | `kernel-post-load.log` | 205 | `579c3de9fb226ffa47e63f1160596a1fe89089af30718e0a8855f4a369c28a18` |
+
+## Fresh-overlay continuation (2026-09-20)
+
+Read the error-conversion PRD end to end again. The accepted fresh overlay
+admits the six requested namespaces. The baseline snapshot at
+`78a1cd47e9044be008555b70afbde59d95037568` completed **272 tests / 5,109
+assertions / 34 failures / 31 errors** (`tmp/error-family-resume-fast-1.log`).
+
+| Namespace | Tests | Failures | Errors |
+|---|---:|---:|---:|
+| `seon.error-test` | 45 | 0 | 0 |
+| `seon.instrument-test` | 44 | 3 | 0 |
+| `seon.schema-test` | 34 | 0 | 0 |
+| `seon.db-test` | 63 | 4 | 23 |
+| `seon.cluster-test` | 12 | 2 | 0 |
+| `seon.sci.eval-test` | 74 | 25 | 8 |
+
+The committed writer read-back probe passes: the occurrence contains the
+projected attempt with its original request identity and observed basis;
+decoding yields the actual submitted transaction, and recording leaves the
+target datoms unchanged. The earlier missing-occurrence result is not
+reproduced. The corrected `pulled-selector-refusal` observer assertion passes,
+as do both canonical reference-grammar tests and render-contract coherence.
+
+The three instrumentation failures name only the newly landed
+`:seon.source/test-evidence-error`. Its declaration is in the snapshot's
+`seon.source.edn`, not a foreign draft. The pass-through unions now include it
+in `src/seon/error.clj`, `src/seon/error/refusal.clj`,
+`src/seon/instrument.clj`, `src/seon/sci/admit.clj`,
+`src/seon/sci/kernel.clj`, and `resources/seon/schemas/seon.db.edn`.
+The existing manifest regression is the before-change proof; candidate fast
+verification follows below. The required namespace load passed before this
+slice. No stored attributes change: **RESET NEEDED: no additions** to the
+earlier batch.
