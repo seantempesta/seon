@@ -6040,3 +6040,25 @@ its adoption proof + measurements after (a) and (b) land. Owner's point,
 recorded: the bridge refusing an unstorable declaration IS the
 compatibility guarantee working. Editing lanes: step 2, sci-program,
 gate-restructure.
+
+## 2026-09-22 ~10:30 local — OWNER RULING: the offending value is a blob + a capped printed form from the value printer
+
+Owner: "Why can't we store the offending value as a blob and just store
+the reference? Sure you can also print it to a string with a cap (don't
+store too much string data in a database entry). Use the value printer
+for that so we only have one mechanism." RULED accordingly: the error-map
+constructor (`seon.error.refusal`) (1) writes the offending value through
+`seon.blob` and puts the content-addressed reference on the error map
+(`:seon.error/data-blob`, existing attribute), and (2) puts the value
+printer's capped shown text (`seon.print` / `seon.render.value` under the
+render profile — the ONE clipping mechanism, AGENTS.md §2.4) on the map as
+the stored string; nothing else. Retired: the `pr-str` copy
+`:seon.error/data-edn` and its `data-size`, the separate
+`offending-projection`, and the raw in-memory `:seon.error/offending`
+member — the map the constructor returns is the map that is stored, with
+no key the writer drops. Consumers needing the raw value read the blob.
+Attribute changes join the RESET batch (new keys where a definition
+changes). Owner of the slice: the error-family lane (1a, session
+retained) at the next free editing slot, with a regression: an error map
+constructed with a large nested value stores a blob reference and a capped
+shown text, validates as stored, and renders through the same printer.
