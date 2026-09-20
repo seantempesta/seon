@@ -6540,3 +6540,19 @@ bare gate follow. Sighting for the redesign: a stored declaration the
 current bridge would refuse is reported as an exception from a child
 process with no schema name in the operator's line — the refusal should
 name the stored schema and say "reset" (issue to file with the gate).
+
+## 2026-09-22 ~18:30 local — RESET done (republish 194 s, refork 21 s, start 36 s); adopt REFUSED by the loaded-producer guard on the fresh host; redesign lane LAUNCHED with slice 0 = delete the guard
+
+`bin/seon reset --force` at `0f5f849bd`: down 0.4 s, destroy 0.4 s,
+republish 193.7 s, refork 20.6 s, start 35.6 s, adopt 7.7 s → REFUSED
+("The live host's loaded producers do not match the requested toolchain",
+the whole 36-namespace closure; `reset-adopt-29737.log`). Default is
+alive at HEAD; its boot log carries the same erased core fault
+(`:malli.core/invalid-schema`). The guard has no job under the redesign
+(a reload is the transition) and now blocks every adoption and the gate's
+base preparation, so it is slice 0. Launched `one-jvm-redesign` (astra
+HIGH, the one implementation lane): slice 0 deletes the guard (functions,
+boot recording, five `seon.source` declarations, tests), then slices 1–4
+in the plan's order, stopping after each for the orchestrator's
+measurement and diff review. The cold gate follows slice 0 and the next
+reset. No other lane runs.
