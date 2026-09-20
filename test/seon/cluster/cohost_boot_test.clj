@@ -10,7 +10,7 @@
   (`script/seon/fresh_operator.clj:1430`), under the FIRST cluster's
   projection state. So the co-hosted second boot is the first boot in the
   system's life to have its own contracts checked, and
-  `seon.cluster/require-activation!` refused there while booting cleanly in
+  the former activation check refused there while booting cleanly in
   its own root
   ([issue](../../../docs/seon/issues/a-cohosted-second-cluster-cannot-boot.md)).
 
@@ -18,7 +18,7 @@
   operator's instrumentation is applied under A's projection state, cluster B
   boots into the same JVM — and asserts what the issue's acceptance criteria
   name: both clusters reach a live boot, each holds its OWN projection state,
-  each validates its own activation closure, and ordinary evaluation completes
+  each acquires its own program facts, and ordinary evaluation completes
   in each cluster's own sci ctx.
 
   Filesystem fixtures live under the project-local `tmp/`, never a system
@@ -96,7 +96,9 @@
     :seon.sci.eval/time-limit-ms 5000
     :seon.config/on-core-error :panic}))
 
-(deftest ^{:seon.test/fixture-observation "The subject is a second complete boot under the first live cluster instrumentation, not an ordinary branch transaction."} a-second-cluster-boots-under-the-first-cluster-s-instrumentation
+(deftest ^{:seon.test/fixture-observation "The subject is a second complete boot under the first live cluster instrumentation, not an ordinary branch transaction."
+           :seon.test/long "Two real cold cluster boots verify independent instrumentation and SCI custody."
+           :seon.test/long-ms 180000} a-second-cluster-boots-under-the-first-cluster-s-instrumentation
   (let [root (published-root)
         instances (atom [])]
     (try
@@ -106,7 +108,7 @@
             applied (apply-instrumentation-under a)
             ;; The failure this regression exists for happened HERE: with
             ;; wrappers installed, cluster B's own boot refused at
-            ;; `require-activation!`. A throw out of `start!` is the
+            ;; boot admission. A throw out of `start!` is the
             ;; reproduction, so it is not caught — a red test names it.
             b (cluster/start! {:seon.boot/cluster-name "cohost-b"
                                :seon.boot/root root})
@@ -131,30 +133,7 @@
                                (projection-state-of b)))
               "a shared projection is the defect, not the design"))
 
-        (testing "each cluster's activation closure satisfies its declaration"
-          ;; The closure is the value the co-hosted boot refused. It is read
-          ;; back through a pull projection, which is where the declared sets
-          ;; were being lost, so it is asserted under EACH cluster's own
-          ;; projection state rather than whichever one happens to be current.
-          (doseq [[label instance] [["cohost-a" a] ["cohost-b" b]]]
-            (let [closure (cluster/require-activation!
-                           @(:seon.boot/cluster-connection instance))]
-              (is (schema/call-with-projection-state
-                   (projection-state-of instance)
-                   (fn []
-                     (schema/valid-candidate-value? (schema/handed-projection)
-                      :seon.activation/closure closure)))
-                  (str label "'s stored closure validates against "
-                       ":seon.activation/closure"))
-              (is (every? set?
-                          ((juxt :seon.activation/schema-keys
-                                 :seon.activation/required-attributes
-                                 :seon.activation/config-defaults
-                                 :seon.activation/config-required
-                                 :seon.activation/executable-symbols)
-                           closure))
-                  (str label "'s closure carries the declared SETS, not the "
-                       "vectors a pull projects")))))
+
 
         (testing "ordinary evaluation completes in each cluster's own ctx"
           (doseq [[label instance source expected]

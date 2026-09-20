@@ -646,7 +646,9 @@ listeners
 ↔ `src/seon/db.clj`).
 
 Config reconciles from an explicitly selected manifest into database facts;
-running code reads the database. Provenance is minimal transaction metadata
+its qualified function symbols must resolve to current `:seon.fn` rows, checked
+in one query with missing names reported alongside their config keys. No stored
+activation roster mirrors the program graph. Running code reads the database. Provenance is minimal transaction metadata
 (resolvable `:seon.db/user` and `:seon.db/process`) — never copied onto
 domain entities. Database vocabulary is the dependency's vocabulary:
 database value, basis transaction `:t`, commit ID, connection ID, store ID,

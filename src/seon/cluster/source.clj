@@ -32,52 +32,8 @@
   "The one branch that names the latest complete source database value."
   :current-src)
 
-(def ^:private activation-missing-sample-size 10)
-
-(defn activation-refusal
-  "Bound a missing activation set for an operator-facing refusal."
-  {:malli/schema [:=> [:cat :seon.activation/missing]
-                  :seon.activation/refusal]}
-  [missing]
-  (let [total (count missing)
-        sample (vec (take activation-missing-sample-size missing))
-        omitted (- total (count sample))
-        elision
-        (when (pos? omitted)
-          {:seon.print/face :seon.print/elided
-           :seon.print/omitted omitted
-           :seon.print/elision-unit :children
-           :seon.render.data/total total
-           :seon.render.data/path [:seon.activation/missing]
-           :seon.render.data/next-offset (count sample)
-           :seon.render.profile/id :seon.render.profile/operator
-           :seon.print/requery-refusal
-           "Activation refusal facts are available only at the refused database value."})]
-    (cond->
-     {:seon.error/message
-      (str "The source activation closure is missing " total
-           (if (= 1 total) " fact: " " facts: ")
-           (pr-str sample)
-           (when (pos? omitted) (str " … " omitted " more.")))
-      :seon.activation/missing-count total
-      :seon.activation/missing sample}
-      elision (assoc :seon.activation/missing-elision elision))))
-
 (def ^:private source-attributes
-  [:seon.source/digest
-   :seon.source/test-input-digest
-   :seon.source/built-at
-   :seon.source/activation-closure
-   :seon.activation/source-digest
-   :seon.activation/schema-keys
-   :seon.activation/required-attributes
-   :seon.activation/config-defaults
-   :seon.activation/config-required
-   :seon.activation/executable-symbols
-   :seon.activation/lookup-refs
-   :seon.activation.lookup/id
-   :seon.activation.lookup/attribute
-   :seon.activation.lookup/value])
+  [:seon.source/digest :seon.source/test-input-digest :seon.source/built-at])
 
 (defn- refuse!
   [rule message data]
@@ -259,85 +215,6 @@
                {:seon.source/populate populate
                 :seon.source/digest source-digest})))
 
-(defn- resolve-activation
-  [activation source-digest]
-  (or (try
-        (requiring-resolve activation)
-        (catch Throwable _ nil))
-      (refuse! ::activation-unresolvable
-               (str "the activation derivation " activation " does not resolve")
-               {:seon.source/activation activation
-                :seon.source/digest source-digest})))
-
-(defn- activation-seal-tx
-  [connection source-digest requested-symbols activation-fn]
-  (let [database-value (db/db connection)
-        prior-id (db/q '[:find ?entity . :where [?entity :seon.source/digest]] database-value)
-        prior (when prior-id
-                (db/pull database-value
-                         '[* {:seon.source/activation-closure [*]}] prior-id))
-        prior-closure (:seon.source/activation-closure prior)]
-    (if (and (:db/id prior-closure)
-             (= source-digest (:seon.source/digest prior)))
-      []
-      (let [{closure :seon.activation/closure
-             lookup-rows :seon.activation/lookup-rows
-             missing :seon.activation/missing}
-            (activation-fn
-             {:seon.db/connection connection
-              :seon.source/digest source-digest
-              :seon.activation/requested-symbols requested-symbols})
-            requirement-count
-            (+ (count (:seon.activation/schema-keys closure))
-               (count (:seon.activation/required-attributes closure))
-               (count (:seon.activation/config-defaults closure))
-               (count (:seon.activation/config-required closure))
-               (count (:seon.activation/executable-symbols closure))
-               (count (:seon.activation/lookup-refs closure)))
-            activation-tempid (or (:db/id prior-closure) (str "activation:" source-digest))
-            lookup-tempids
-            (into {}
-                  (map (fn [{id :seon.activation.lookup/id}]
-                         [id (str "activation-lookup:" id)]))
-                  lookup-rows)
-            closure
-            (assoc closure
-                   :db/id activation-tempid
-                   :seon.activation/lookup-refs
-                   (mapv (fn [[_ id]] (get lookup-tempids id))
-                         (:seon.activation/lookup-refs closure)))
-            lookup-rows
-            (mapv (fn [{id :seon.activation.lookup/id :as row}]
-                    (assoc row :db/id (get lookup-tempids id)))
-                  lookup-rows)]
-        (when (seq missing)
-          (let [refusal (activation-refusal missing)]
-            (refuse! ::activation-incomplete
-                     (:seon.error/message refusal)
-                     (assoc refusal :seon.source/digest source-digest))))
-        (when-not (pos? requirement-count)
-          (refuse! ::activation-empty
-                   "the source activation closure is empty"
-                   {:seon.source/digest source-digest}))
-        (into
-         (into
-          (into []
-                (mapcat (fn [[attribute desired]]
-                          (when (set? desired)
-                            (for [value (get prior-closure attribute)
-                                  :when (not (contains? desired value))]
-                              [:db/retract activation-tempid attribute value]))))
-                closure)
-          (map (fn [lookup] [:db/retractEntity (:db/id lookup)]))
-          (:seon.activation/lookup-refs prior-closure))
-         (concat
-          [(cond-> {:seon.source/digest source-digest
-                    :seon.source/built-at (java.util.Date.)
-                    :seon.source/activation-closure activation-tempid}
-             prior-id (assoc :db/id prior-id))
-           closure]
-          lookup-rows))))))
-
 (defn- retire-scratch!
   [store scratch]
   (try
@@ -507,7 +384,6 @@
     source-digest :seon.source/digest
     requested-commit :seon.source/expected-commit-id
     populate :seon.source/populate
-    activation :seon.source/activation
     populate-request :seon.source/populate-request
     progress! :seon.source/progress!
     :or {progress! (constantly nil)}}]
@@ -529,7 +405,6 @@
       (let [projection (schema/declaration-projection)
         input-digest (publication-input-digest! (or directory (fs/source-directory)))
           populate-fn (resolve-population populate source-digest)
-          activation-fn (resolve-activation activation source-digest)
           expected-commit (or requested-commit (:seon.source/commit-id published))
           scratch (scratch-branch)]
       (registry/branch! {:seon.store/store store
@@ -566,7 +441,7 @@
                       previous-database)))
                   _ (progress! "publication issue indexing")
                   issues (index-issues! connection source-digest (or directory (fs/source-directory)))
-                  _ (progress! "publication activation seal")]
+                  _ (progress! "publication source identity")]
             (require-committed! population-result ::source-population-refused
                                 "The source population was refused." {})
             ;; The source seal is the genesis boundary. Population must first
@@ -576,10 +451,12 @@
              (db/transact!
               connection
               (cond-> {:tx-data
-               (conj (activation-seal-tx
-                      connection source-digest #{populate activation} activation-fn)
-                     {:seon.source/digest source-digest
-                      :seon.source/test-input-digest input-digest})}
+               [(let [prior-id (db/q '[:find ?entity . :where [?entity :seon.source/digest]]
+                                      (db/db connection))]
+                  (cond-> {:seon.source/digest source-digest
+                           :seon.source/built-at (java.util.Date.)
+                           :seon.source/test-input-digest input-digest}
+                    prior-id (assoc :db/id prior-id)))]}
                 process (assoc :tx-meta {:seon.db/process process})))
              ::source-seal-refused
              "the source seal transaction was refused"
@@ -684,7 +561,7 @@
   nil)
 
 (defn upsert!
-  "Publish admitted scalar rows through the common lineage and activation owner."
+  "Publish admitted scalar rows through the common publication owner."
   {:malli/schema [:=> [:cat [:and :seon.source/upsert-request
                             [:map [:seon.fn/manifest {:optional true} :seon.fn.manifest/manifest]]]]
                   :seon.source/published]}

@@ -85,9 +85,9 @@ the foreign progress callback is excluded from the `cluster.clj` count.
 
 | Path | Before | After | Bytes deleted (net) |
 |---|---:|---:|---:|
-| `src/seon/cluster.clj` | 199,651 | 187,314 | 12,337 |
+| `src/seon/cluster.clj` | 187739 | 172013 | 15726 |
 | `script/seon/fresh_operator.clj` | 158,364 | 157,762 | 602 |
-| `resources/seon/schemas/seon.source.edn` | 8,529 | 6,303 | 2,226 |
+| `resources/seon/schemas/seon.source.edn` | 5961 | 5640 | 321 |
 | `test/seon/cluster/publication_test.clj` | 3,144 | 328 | 2,816 |
 | `test/seon/cluster/publication_host_test.clj` | 2,505 | 1,142 | 1,363 |
 | `test/seon/cluster/publication_adoption_test.clj` | 3,503 | 2,451 | 1,052 |
@@ -528,7 +528,7 @@ orchestrator still owns cold/platform proof.
 | Path | Before | After | Net deleted |
 |---|---:|---:|---:|
 | `script/seon/fresh_operator.clj` | 155,975 | 157,158 | -1,183 |
-| `src/seon/cluster.clj` | 187,314 | 187,390 | -76 |
+| `src/seon/cluster.clj` | 187739 | 172013 | 15726 |
 | `src/seon/cluster/registry.clj` | 29,575 | 31,482 | -1,907 |
 | `src/seon/operator.clj` | 52,873 | 52,963 | -90 |
 | `test/seon/cluster/publication_adoption_test.clj` | 2,647 | 4,350 | -1,703 |
@@ -672,14 +672,14 @@ input regression passed in 3.9 ms.
 |---|---:|---:|---:|
 | `src/seon/fn.clj` | 157,638 | 146,507 | 11,131 |
 | `src/seon/fn/analyzer.clj` | 30,350 | 30,373 | -23 |
-| `src/seon/cluster.clj` | 187,390 | 187,099 | 291 |
-| `src/seon/cluster/source.clj` | 32,330 | 32,014 | 316 |
-| `resources/seon/schemas/seon.source.edn` | 6,303 | 5,961 | 342 |
+| `src/seon/cluster.clj` | 187739 | 172013 | 15726 |
+| `src/seon/cluster/source.clj` | 35582 | 30240 | 5342 |
+| `resources/seon/schemas/seon.source.edn` | 5961 | 5640 | 321 |
 | `resources/seon/schemas/seon.fn.manifest.edn` | 1,050 | 969 | 81 |
 | `test/seon/fn/publication_cache_test.clj` | 2,711 | 3,341 | -630 |
 | `test/seon/fn/publication_test.clj` | 11,016 | 3,497 | 7,519 |
 | `test/seon/fn/publication_toolchain_test.clj` | 5,171 | 1,655 | 3,516 |
-| `test/seon/cluster/source_evidence_test.clj` | 12,956 | 12,651 | 305 |
+| `test/seon/cluster/source_evidence_test.clj` | 12657 | 11325 | 1332 |
 | `test/seon/schema/datahike_parity.edn` | 1,577,169 | 1,576,598 | 571 |
 
 Net deletion: **12,138 production/schema bytes; 11,281 test/fixture bytes**.
@@ -850,10 +850,10 @@ selection and indentation were removed from the tested production bytes.
 
 | Step-1 path | Before bytes | After bytes | Net deleted |
 |---|---:|---:|---:|
-| `src/seon/cluster.clj` | 187,099 | 186,507 | 592 |
-| `src/seon/cluster/source.clj` | 32,014 | 32,873 | -859 |
-| `test/seon/cluster/source_evidence_test.clj` | 12,651 | 12,657 | -6 |
-| `test/seon/cluster/source_nochange_test.clj` | 0 | 1,842 | -1,842 |
+| `src/seon/cluster.clj` | 187739 | 172013 | 15726 |
+| `src/seon/cluster/source.clj` | 35582 | 30240 | 5342 |
+| `test/seon/cluster/source_evidence_test.clj` | 12657 | 11325 | 1332 |
+| `test/seon/cluster/source_nochange_test.clj` | 1842 | 1545 | 297 |
 
 Step-1 after-commit live measurement (`8de7a8868`): the common unchanged
 publisher took **12.653 ms**, retained commit
@@ -914,8 +914,8 @@ run; the scratch host was down throughout both runs.
 | Step-2 production/test path | Before bytes | After bytes | Net deleted |
 |---|---:|---:|---:|
 | `src/seon/fn.clj` | 146,507 | 148,166 | -1,659 |
-| `src/seon/cluster.clj` | 186,507 | 187,567 | -1,060 |
-| `src/seon/cluster/source.clj` | 32,873 | 33,019 | -146 |
+| `src/seon/cluster.clj` | 187739 | 172013 | 15726 |
+| `src/seon/cluster/source.clj` | 35582 | 30240 | 5342 |
 | `test/seon/fn/publication_test.clj` | 3,497 | 5,380 | -1,883 |
 
 ### Final committed-code measurement and remaining boundary
@@ -1075,8 +1075,8 @@ Item 1 exact UTF-8 source bytes (diff payload, including line endings):
 
 | Path | Deleted | Added | Net |
 |---|---:|---:|---:|
-| `src/seon/cluster.clj` | 5934 | 6106 | +172 |
-| `src/seon/cluster/source.clj` | 663 | 3226 | +2563 |
+| `src/seon/cluster.clj` | 187739 | 172013 | 15726 |
+| `src/seon/cluster/source.clj` | 35582 | 30240 | 5342 |
 | `src/seon/fn.clj` | 4026 | 3051 | -975 |
 | `src/seon/issue.clj` | 1411 | 2372 | +961 |
 
@@ -1205,3 +1205,150 @@ preserved. No default operation, fast test or cold gate ran in this follow-up.
 Explicit require of `seon.cluster`, `seon.cluster.source`, `seon.fn` and
 `seon.issue` exited zero after the failed cold publication. The failure is
 projection construction during population, not namespace loading.
+
+## Slice 4 — activation dissolution, config owns the expectation (2026-09-23)
+
+The owner's clarification supersedes the preceding semantic stop: the expectation
+is the config manifest's qualified symbols, not a historical program roster.
+`seon.config/require-functions!` derives `[config-key symbol]` tuples from the
+compiled desired rows and performs one Datalog query against `:seon.fn/sym`.
+Missing rows refuse with every symbol and its config key. The config writer's
+existing `:db.fn/call` runs this check on its own database value; unchanged
+reconciliation checks that same immutable value without transacting. Initial
+publication checks its initialization rows at their existing population seam.
+
+The activation producer, stored closure, lookup rows, boot closure reads, and
+closure-specific regressions are deleted. The canonical config regression now
+proves the actual requirement: a missing function refuses without moving the
+basis; declaring it makes the same config reconcile. Armed fast run: 6
+assertions, zero failures/errors (`config-fast-3.log` in the lane's temporary
+work directory). The bootstrap compatibility check remains; current unresolved
+calls remain a separate report.
+
+RESET NEEDED: removed `:seon.source/activation`,
+`:seon.source/activation-closure`, `:seon.activation/closure`, the stored closure
+member attributes and `seon.activation.lookup` schema family. Transient lookup
+refusals used by initialization still have their existing shape. No migration.
+
+The foreign cold-publication failure is now corrected by the schema lane in
+`2d9984a50`; its introducing `(merge forms contracts)` came from `dc1efaf3c9`,
+verified with blame/show, not the later `30baf050a`. Evidence is recorded in
+[the issue](../../../seon/issues/archive/cold-publication-merges-mixed-identities-into-a-sorted-map.md).
+No schema-owner source file was edited by this lane.
+
+Live proof used only `tmp/one-jvm-redesign-root`, an archived HEAD plus the owned
+paths, through the existing operator `prepl-eval!` client and its existing
+silence bound. The complete cold publication succeeded in **308,610 ms**.
+The one-query config derivation took **4.704583 ms**, including deriving the
+manifest's symbol/key pairs, against that published database. Its
+[reproducible form](one-jvm-config-query-2026-09-23.clj) and
+[prepl reply](one-jvm-config-query-2026-09-23.txt) are retained.
+
+The one-file docstring publication plus adoption took **24,013.698 ms**
+([complete phase data](one-jvm-activation-docstring-2026-09-23.edn)); the prior
+item-1 measurement was **48,982 ms**, but the intervening schema-owner fix
+means the total improvement cannot be attributed solely to this deletion.
+Only `my.note` reloaded, in **12.411 ms**; only `my.note/add!`, `notes`, and
+`forget!` re-armed. The source-identity phase is now **1,347.131 ms**, including
+the still-present final deletion comparison, versus the earlier **4.4 s**
+activation seal. No activation facts are produced.
+
+No-change took **1,408.716 ms** across reported phases, with the same commit
+`6ab06ac2-03ca-5f89-b24b-2b81fdb6fdcf` before and after, zero re-armed wrappers,
+and no publication/adoption transaction
+([complete data](one-jvm-activation-nochange-2026-09-23.edn)). These numbers
+still miss the end-to-end targets; they are not acceptance claims.
+
+One-file phases above about two seconds: snapshot construction **2,120.521 ms**
+reads/digests the declared source inputs and compiles the merged schema
+declarations, O(files + schema declarations), instead of reusing the
+unchanged declaration projection. The publication reconciliation/report
+phase **3,410.276 ms** still invokes the database writer's program-wide arity
+comparison and then decodes identities per touched entity. The owned report
+extraction can use the report's identity datoms and an indexed query;
+`db.clj` is concurrently edited by the error lane and is excluded from this
+snapshot. Other measured phases: issue indexing **1,869.828 ms**, row
+preparation **1,041.511 ms**, adoption reconciliation **1,946.638 ms**, SCI
+acquisition **1,263.082 ms**. Their algorithms, not a wider bound, remain the
+next item.
+
+Cold work is recorded separately in the
+[operator output](one-jvm-activation-cold-2026-09-23.txt): lint all files
+**21,097 ms**; whole-program row construction and first transaction remain
+O(program), including **60,361 ms** committing the initial population. A
+thread sample reached `db/write-owned-values-error`'s per-entity component
+reverse-index seeks. Cold issue indexing was **12,421 ms**, scanning every
+note and constructing the citation index. Cold exit also waited for
+non-daemon Clojure agent threads, the already-recorded
+[operator recurrence](../../../seon/issues/archive/test-base-publication-waits-for-idle-agent-threads.md).
+
+Boot initially exposed two missed test callers of the deleted closure; both
+were converted, and every touched production/test namespace then loaded
+together. A later boot hit the existing **30,000 ms** config-labelled silence
+bound. Subsequent boots reached READY in **50,521 ms** and **66,442 ms**,
+without changing the bound. The
+[thread evidence](one-jvm-activation-boot-2026-09-23.txt) identifies Clojure
+`require` from `sci.eval/load-core-namespaces!`, which walks all indexed core
+namespaces before `cluster-ctx*` constructs the base. This is O(program)
+eager acquisition, not the config symbol query. First-use acquisition belongs
+to explicitly protected `src/seon/sci/eval.clj`; its ownership question was
+sent to the orchestrator while independent work continues.
+
+Dependency seams: Datahike `db/transaction.cljc:1153` supplies the writer's
+database to `:db.fn/call`; `query.cljc:2259` subtracts bound `not-join`
+matches. No function roster, cache, or timeout was introduced. The source
+identity transaction keeps the existing row by entity ID and calls the
+existing `db/transact!`. The orchestrator must reset, gate the removed
+attributes and config regression, and run its publication measurement script.
+
+Exact UTF-8 source/test/schema bytes (against HEAD before this commit):
+
+| Path | Before | After | Net deleted |
+|---|---:|---:|---:|
+| `src/seon/cluster.clj` | 187739 | 172013 | 15726 |
+| `src/seon/cluster/source.clj` | 35582 | 30240 | 5342 |
+| `src/seon/config.clj` | 41283 | 42586 | -1303 |
+| `src/seon/artifact.clj` | 4397 | 4336 | 61 |
+| `resources/seon/schemas/seon.source.edn` | 5961 | 5640 | 321 |
+| `resources/seon/schemas/seon.activation.edn` | 4919 | 347 | 4572 |
+| `test/seon/cluster/source_test.clj` | 26334 | 21791 | 4543 |
+| `test/seon/cluster/source_evidence_test.clj` | 12657 | 11325 | 1332 |
+| `test/seon/cluster/boot_test.clj` | 100108 | 96162 | 3946 |
+| `test/seon/cluster/cohost_boot_test.clj` | 8263 | 6890 | 1373 |
+| `test/seon/cluster/publication_reuse_test.clj` | 5658 | 5568 | 90 |
+| `test/seon/db_test.clj` | 115476 | 114681 | 795 |
+| `test/seon/predicate_publication_test.clj` | 5858 | 5865 | -7 |
+| `test/seon/schema/admission_test.clj` | 5709 | 5775 | -66 |
+| `test/seon/test/publication_test.clj` | 3258 | 3184 | 74 |
+| `test/seon/config_functions_test.clj` | 0 | 1776 | -1776 |
+| `resources/seon/schemas/seon.activation.lookup.edn` | 653 | 0 | 653 |
+| `test/seon/cluster_test.clj` | 25039 | 24502 | 537 |
+| `test/seon/cluster/source_nochange_test.clj` | 1842 | 1545 | 297 |
+
+Fast run `91133393e7b0`: 13 tests / 66 assertions / 0 failures / 2 errors.
+The existing schema-convergence test passed a projection to a forms-only
+private helper; its owned caller is corrected. The no-change regression hits
+the retained fixture-manifest boundary: `test-support/build-source-manifest`
+reads `cache/manifest` when `seon.test.published-base` is set. Every retained
+base inspected still includes `seon.cluster/derive-activation` with
+`[:=> [:cat :seon.activation/request] :seon.activation/result]`, whose schemas
+this reset cut removes. The failure enters Malli function-schema compilation
+in `schema/projection-registry:494`. This is the existing
+[retained canonical fixture issue](../../../seon/issues/canonical-fixture-retains-old-function-contracts-after-adoption.md);
+the protected fixture/test-system files were not changed, and no lane base
+preparation or cold gate was run. The own-root fresh publication, boot,
+one-file adoption and unchanged-head proof above do not use that retained
+manifest. The orchestrator must refresh its base at the reset and rerun this
+regression before claiming the gate green.
+
+Follow-up fast run `365be14cb295`: **12 executed, 66 assertions, zero
+failures/errors**, covering config and cluster regressions after the forms
+caller correction. Config's full regression measured **13.05 s** in this
+run versus about 3 s in the earlier isolated run; canonical schema convergence
+measured **19.57 s**, rebuilding complete projections twice. Both now carry
+explicit long bounds and reasons (20 s and 30 s). These bounds document
+measured work, not acceptable performance: the next owned cut must pass the
+existing projection to schema-row construction; the protected writer's
+whole-program work remains separately named. No timing assertion was added.
+Foreign dirty error/database/test-system paths stayed at HEAD in the snapshot.
+The scratch cluster was downed before either fast run.

@@ -23,7 +23,7 @@
               publication {:seon.store/store held
                            :seon.source/digest digest
                            :seon.source/populate 'seon.cluster/populate-source!
-                           :seon.source/activation `source-test/activation
+
                            :seon.source/populate-request
                            {:seon.fn/manifest @support/source-manifest}}
               first-publication (source/publish! publication)

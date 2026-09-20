@@ -1,0 +1,105 @@
+Scratch boot: 50,521 ms; one config symbol query: 4.704583 ms.
+Boot main thread during the config-labelled phase:
+java.base/java.io.UnixFileSystem.getBooleanAttributes0(Native Method)
+java.base/java.io.UnixFileSystem.hasBooleanAttributes(UnixFileSystem.java:180)
+java.base/java.io.File.exists(File.java:795)
+java.base/jdk.internal.loader.URLClassPath$FileLoader.getResource(URLClassPath.java:953)
+java.base/jdk.internal.loader.URLClassPath$FileLoader.findResource(URLClassPath.java:923)
+java.base/jdk.internal.loader.URLClassPath.findResource(URLClassPath.java:268)
+java.base/jdk.internal.loader.BuiltinClassLoader.findResourceOnClassPath(BuiltinClassLoader.java:487)
+java.base/jdk.internal.loader.BuiltinClassLoader.findResource(BuiltinClassLoader.java:348)
+java.base/java.lang.ClassLoader.getResource(ClassLoader.java:1382)
+java.base/java.lang.ClassLoader.getResource(ClassLoader.java:1377)
+java.base/java.lang.ClassLoader.getResource(ClassLoader.java:1377)
+java.base/java.net.URLClassLoader.getResourceAsStream(URLClassLoader.java:244)
+clojure.lang.RT.resourceAsStream(RT.java:2208)
+clojure.lang.RT.loadResourceScript(RT.java:398)
+clojure.lang.RT.loadResourceScript(RT.java:392)
+clojure.lang.RT.load(RT.java:479)
+clojure.lang.RT.load(RT.java:444)
+clojure.core$load$fn__6933.invoke(core.clj:6193)
+clojure.core$load.invokeStatic(core.clj:6192)
+clojure.core$load.doInvoke(core.clj:6176)
+clojure.lang.RestFn.invoke(RestFn.java:411)
+clojure.core$load_one.invokeStatic(core.clj:5965)
+clojure.core$load_one.invoke(core.clj:5960)
+clojure.core$load_lib$fn__6875.invoke(core.clj:6007)
+clojure.core$load_lib.invokeStatic(core.clj:6006)
+clojure.core$load_lib.doInvoke(core.clj:5985)
+clojure.lang.RestFn.applyTo(RestFn.java:145)
+clojure.core$apply.invokeStatic(core.clj:669)
+clojure.core$load_libs.invokeStatic(core.clj:6048)
+clojure.core$load_libs.doInvoke(core.clj:6032)
+clojure.lang.RestFn.applyTo(RestFn.java:140)
+clojure.core$apply.invokeStatic(core.clj:669)
+clojure.core$require.invokeStatic(core.clj:6070)
+clojure.core$require.doInvoke(core.clj:6070)
+clojure.lang.RestFn.invoke(RestFn.java:411)
+seon.sci.eval$host_namespace_BANG_$fn__13803.invoke(eval.clj:1236)
+seon.sci.eval$host_namespace_BANG_.invokeStatic(eval.clj:1235)
+seon.sci.eval$host_namespace_BANG_.invoke(eval.clj:1213)
+seon.sci.eval$load_core_namespaces_BANG_.invokeStatic(eval.clj:1325)
+seon.sci.eval$load_core_namespaces_BANG_.invoke(eval.clj:1311)
+seon.sci.eval$cluster_ctx_STAR_.invokeStatic(eval.clj:2301)
+seon.sci.eval$cluster_ctx_STAR_.invoke(eval.clj:2299)
+seon.sci.eval$cluster_ctx.invokeStatic(eval.clj:2297)
+seon.sci.eval$cluster_ctx.invoke(eval.clj:2272)
+seon.cluster$stand_cluster_runtime_BANG_$fn__22336.invoke(cluster.clj:3141)
+seon.schema$call_with_projection_state.invokeStatic(schema.clj:1148)
+seon.schema$call_with_projection_state.invoke(schema.clj:1141)
+seon.cluster$stand_cluster_runtime_BANG_.invokeStatic(cluster.clj:3111)
+seon.cluster$stand_cluster_runtime_BANG_.invoke(cluster.clj:3108)
+seon.cluster$stand_boot_layers_BANG_.invokeStatic(cluster.clj:3277)
+seon.cluster$stand_boot_layers_BANG_.invoke(cluster.clj:3192)
+seon.cluster$start_BANG_.invokeStatic(cluster.clj:3390)
+seon.cluster$start_BANG_.invoke(cluster.clj:3281)
+clojure.lang.Var.invoke(Var.java:386)
+user$eval134$fn__137.invoke(NO_SOURCE_FILE:1)
+clojure.lang.AFn.applyToHelper(AFn.java:152)
+clojure.lang.AFn.applyTo(AFn.java:144)
+clojure.core$apply.invokeStatic(core.clj:667)
+clojure.core$with_bindings_STAR_.invokeStatic(core.clj:1994)
+clojure.core$with_bindings_STAR_.doInvoke(core.clj:1994)
+clojure.lang.RestFn.invoke(RestFn.java:428)
+user$eval134.invokeStatic(NO_SOURCE_FILE:1)
+user$eval134.invoke(NO_SOURCE_FILE:1)
+clojure.lang.Compiler.eval(Compiler.java:7757)
+clojure.lang.Compiler.eval(Compiler.java:7746)
+clojure.lang.Compiler.eval(Compiler.java:7712)
+clojure.core$eval.invokeStatic(core.clj:3236)
+clojure.main$eval_opt.invokeStatic(main.clj:489)
+clojure.main$eval_opt.invoke(main.clj:483)
+clojure.main$initialize.invokeStatic(main.clj:509)
+clojure.main$null_opt.invokeStatic(main.clj:543)
+clojure.main$null_opt.invoke(main.clj:540)
+clojure.main$main.invokeStatic(main.clj:665)
+clojure.main$main.doInvoke(main.clj:617)
+clojure.lang.RestFn.applyTo(RestFn.java:140)
+clojure.lang.Var.applyTo(Var.java:707)
+clojure.main.main(main.java:40)
+
+● start phase=preflight log=/Users/sean/src/seon/tmp/one-jvm-redesign-root/data/operator/operations/start-preflight-22301.log
+● changed-source boot lint checked: 18 files in 2992 ms; dependency cache current in 46 ms
+● start phase=preflight elapsed-ms=3041 log=/Users/sean/src/seon/tmp/one-jvm-redesign-root/data/operator/operations/start-preflight-22301.log
+● start phase=lifecycle log=/Users/sean/src/seon/tmp/one-jvm-redesign-root/data/operator/operations/start-lifecycle-22301.log
+● start phase=preflight log=/Users/sean/src/seon/tmp/one-jvm-redesign-root/data/operator/operations/start-preflight-22301.log
+● changed-source boot lint checked: 0 files in 81 ms; dependency cache unchecked in 0 ms
+● start phase=preflight elapsed-ms=84 log=/Users/sean/src/seon/tmp/one-jvm-redesign-root/data/operator/operations/start-preflight-22301.log
+● start phase=start log=/Users/sean/src/seon/tmp/one-jvm-redesign-root/data/operator/operations/start-start-22301.log
+● boot dependency cache: checking inputs
+seon cache: reference lock wait-ms= 2 held-ms= 217
+● boot dependency cache: :current 373 namespaces
+● JVM output=/Users/sean/src/seon/tmp/one-jvm-redesign-root/data/operator/operations/jvm-ad732bdc-3bcc-4bd7-99e9-f6a4cc29bb96.log
+● s boot: namespaces
+● s boot: repl
+● s boot: store
+● s boot: branch
+● s boot: recovery
+● s boot: config
+● s boot: program
+● s boot: work-launcher
+● s boot: agents
+● s boot: web
+● s                    http://127.0.0.1:7962  prepl=63335  log=/Users/sean/src/seon/tmp/one-jvm-redesign-root/data/clusters/s/logs/seon.log
+● start phase=start elapsed-ms=50521 log=/Users/sean/src/seon/tmp/one-jvm-redesign-root/data/operator/operations/start-start-22301.log
+● start phase=lifecycle elapsed-ms=50634 log=/Users/sean/src/seon/tmp/one-jvm-redesign-root/data/operator/operations/start-lifecycle-22301.log

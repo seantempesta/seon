@@ -725,6 +725,54 @@
              row))
      desired)))
 
+(defn require-functions!
+  "Refuse every manifest symbol lacking a current program function, in one query."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map]] :nil]}
+  [database rows]
+  (letfn [(references [attribute value]
+            (cond
+              (qualified-symbol? value) [[attribute value]]
+              (map? value) (mapcat (fn [[key child]] (references (if (qualified-keyword? key) key attribute) child)) value)
+              (coll? value) (mapcat #(references attribute %) value)
+              :else []))]
+    (let [named (vec (distinct (mapcat #(references :seon.config/initialization %) rows)))
+          missing (db/q '[:find ?key ?symbol
+                          :in $ [[?key ?symbol]]
+                          :where (not-join [?symbol] [_ :seon.fn/sym ?symbol])]
+                        database named)]
+      (when (:seon.error/at missing)
+        (throw (ex-info (:seon.error/message missing) missing)))
+      (when (seq missing)
+        (let [missing (vec (sort-by pr-str missing))]
+          (refuse!
+           (error/diagnostic
+            {:seon.error/at (java.util.Date.)
+             :seon.error/layer :seon.config/compile
+             :seon.error/operation 'seon.config/require-functions!
+             :seon.error/message (str "Configuration names functions with no program row: " (pr-str missing))
+             :seon.config/error-key (ffirst missing)
+             :seon.config/rule ::missing-function
+             :seon.error/expected-key :seon.fn/sym
+             :seon.error/offending missing
+             :seon.error/diagnostic-layer :seon.config/compile
+             :seon.error/diagnostic-operation 'seon.config/require-functions!
+             :seon.error/diagnostic-member (ffirst missing)
+             :seon.error/diagnostic-expected :seon.fn/sym
+             :seon.error/diagnostic-offending missing
+             :seon.error/diagnostic-cause ::missing-function
+             :seon.error/diagnostic-evidence {:seon.config/missing-functions missing}})
+           nil)))))
+  nil)
+
+(defn- reconcile-call
+  "Validate the manifest's function names against the writer's database."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
+                       [:vector :map] :seon.reconcile/request] :seon.db/tx-data]}
+  [database projection desired request]
+  (require-functions! database desired)
+  (conj (population-transaction-data projection database desired)
+        [:db.fn/call #'reconcile/reconcile-call request]))
+
 (defn apply-compiled!
   "Exact-reconcile one already-compiled desired config row."
   {:malli/schema
@@ -760,15 +808,14 @@
         operations (count (reconcile/plan database request))
         result
         (if (zero? operations)
-          {::reconcile/converged? true
-           ::reconcile/operations 0}
+          (do (require-functions! database desired)
+              {::reconcile/converged? true
+               ::reconcile/operations 0})
           (let [transaction-result
                 (db/transact!
                  connection
                  {:tx-data
-                  (conj
-                   (population-transaction-data projection database desired)
-                   [:db.fn/call #'reconcile/reconcile-call request])
+                  [[:db.fn/call #'reconcile-call projection desired request]]
                   :tx-meta
                   {:seon.db/process
                    [:seon.db.process/id managing-process-identity]}})]
@@ -778,28 +825,8 @@
               transaction-result
               {::reconcile/converged? false
                ::reconcile/operations operations})))]
-    (when (and (map? result) (:seon.error/at result)
-                              (:seon.error/layer result) (:seon.error/operation result)) ; debt: seon.db/pull and transact! declare seon.db/error-result with :seon.error/value.
-
-      (refuse!
-       (error/diagnostic
-        {:seon.error/at (java.util.Date.)
-         :seon.error/layer :seon.config/compile
-         :seon.error/operation 'seon.config/apply-compiled!
-         :seon.error/message "Configuration requires an admitted configuration transaction."
-         :seon.config/error-key :seon.config/desired-row
-         :seon.config/rule ::reconcile-refused
-         :seon.error/expected-key :seon.config/desired-row
-         :seon.error/offending result
-         :seon.error/diagnostic-layer :seon.config/compile
-         :seon.error/diagnostic-operation 'seon.config/apply-compiled!
-         :seon.error/diagnostic-member :seon.config/desired-row
-         :seon.error/diagnostic-expected "an admitted configuration transaction"
-         :seon.error/diagnostic-offending result
-         :seon.error/diagnostic-cause ::reconcile-refused
-         :seon.error/diagnostic-evidence {:seon.config/reconcile-result result}
-         :seon.error/data {:seon.config/reconcile-result result}})
-       nil))
+    (when (:seon.error/at result)
+      (throw (ex-info (:seon.error/message result) result)))
     result))
 
 (defn apply!

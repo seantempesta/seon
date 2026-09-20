@@ -40,7 +40,7 @@
                              {:seon.store/store opened
                               :seon.source/digest (:seon.fn.manifest/digest manifest)
                               :seon.source/populate 'seon.cluster.publication-reuse-test/populate-input!
-                              :seon.source/activation 'seon.cluster.source-test/activation
+
                               :seon.source/populate-request
                               {:seon.fn/manifest manifest :seon.fn/previous-manifest previous
                                :seon.fn/changed-paths #{path}}}))]

@@ -165,25 +165,3 @@
                 (is (number? (db/q '[:find ?run . :in $ ?id :where [?run :seon.test.run/id ?id]]
                                    final-db (:seon.test.run/id next-run))))
                 (is (empty? (#'source-fixture/scratch-branches opened)))))))))))
-
-
-(deftest ^{:seon.test/long "One complete publication verifies the entire missing-activation report."
-           :seon.test/long-ms 600000}
-  publication-refuses-each-missing-activation-prerequisite-before-fork
-  (let [missing [{:seon.activation/schema-key :missing/schema}
-                 {:seon.activation/required-attribute :missing/attribute}
-                 {:seon.activation/config-dial :missing/default}
-                 {:seon.activation/lookup-attribute :missing/identity
-                  :seon.activation/lookup-value "absent"}
-                 {:seon.activation/executable-symbol 'missing/function}]]
-    (#'source-fixture/with-store
-     (fn [opened]
-       (let [data (with-bindings {#'source-fixture/*activation-missing* missing}
-                    (#'source-fixture/refusal
-                     #(#'source-fixture/publish opened @#'source-fixture/digest-a)))]
-         (is (= :seon.cluster.source/activation-incomplete (:seon.cluster.source/rule data)))
-         (is (= #{:db} (set (registry/roster opened)))
-             "No published source or cluster branch exists after refusal.")
-         (is (empty? (#'source-fixture/scratch-branches opened)))
-         (is (= missing (:seon.activation/missing data))
-             "One refusal retains every missing prerequisite, rather than stopping at the first."))))))

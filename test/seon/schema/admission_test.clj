@@ -57,7 +57,7 @@
                {:seon.store/store opened
                 :seon.source/digest seal-digest
                 :seon.source/populate 'seon.cluster/populate-source!
-                :seon.source/activation 'seon.cluster/derive-activation
+
                 :seon.source/populate-request
                 {:seon.fn/manifest @test-support/source-manifest}})
               connection
@@ -123,7 +123,9 @@
                  :seon.schema.admission/source])))
         (is (schema/projection-validator projection :seon.ai/usage))))))
 
-(deftest source-publication-records-core-on-every-row
+(deftest ^{:seon.test/long "Complete cold publication verifies admission on the full program population."
+           :seon.test/long-ms 300000}
+  source-publication-records-core-on-every-row
   (with-published-source
     (fn [connection]
       (let [database @connection

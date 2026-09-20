@@ -1,5 +1,5 @@
 (ns ^{:seon.test/platform
-       "Moving part: source publication and its activation closure."}
+       "Moving part: source publication and its commit identity."}
     seon.cluster.source-test
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
@@ -37,7 +37,7 @@
 
 (defonce ^:private blocked-entered (atom nil))
 (defonce ^:private blocked-release (atom nil))
-(def ^:dynamic *activation-missing* [])
+
 
 (defn- populate-schema!
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]]] :nil]}
@@ -73,18 +73,7 @@
   (populate! request)
   nil)
 
-(defn activation
-  [{source-digest :seon.source/digest}]
-  {:seon.activation/closure
-   {:seon.activation/source-digest source-digest
-    :seon.activation/schema-keys #{:seon.source/digest}
-    :seon.activation/required-attributes #{:seon.source/digest}
-    :seon.activation/config-defaults #{}
-    :seon.activation/config-required #{}
-    :seon.activation/executable-symbols #{}
-    :seon.activation/lookup-refs []}
-   :seon.activation/lookup-rows []
-   :seon.activation/missing *activation-missing*})
+
 
 (defn- with-store
   [body]
@@ -104,15 +93,11 @@
   ([opened digest populate]
    (source/publish! {:seon.store/store opened
                      :seon.source/digest digest
-                     :seon.source/populate populate
-                     :seon.source/activation
-                     'seon.cluster.source-test/activation}))
+                     :seon.source/populate populate}))
   ([opened digest populate populate-request]
    (source/publish! {:seon.store/store opened
                      :seon.source/digest digest
                      :seon.source/populate populate
-                     :seon.source/activation
-                     'seon.cluster.source-test/activation
                      :seon.source/populate-request populate-request
                      :seon.source/progress! @#'cluster/*source-progress!*})))
 
@@ -121,9 +106,7 @@
   (source/upsert! {:seon.store/store opened
                    :seon.source/expected-commit-id expected-commit
                    :seon.source/digest digest
-                   :seon.source/upsert-rows rows
-                   :seon.source/activation
-                   'seon.cluster.source-test/activation}))
+                   :seon.source/upsert-rows rows}))
 
 (defn- markers
   [connection]
@@ -218,20 +201,7 @@
                          (test-support/await-event!
                           first-refresh "first source refresh released"))))))))))))
 
-(deftest activation-refusal-bounds-the-operator-face
-  (let [missing
-        (mapv (fn [ordinal]
-                {:seon.activation/executable-symbol
-                 (symbol "missing" (str "function-" ordinal))})
-              (range 12))
-        face (source/activation-refusal missing)
-        elision (:seon.activation/missing-elision face)]
-    (is (= 12 (:seon.activation/missing-count face)))
-    (is (= (subvec missing 0 10) (:seon.activation/missing face)))
-    (is (= 2 (:seon.print/omitted elision)))
-    (is (= 12 (:seon.render.data/total elision)))
-    (is (= 10 (:seon.render.data/next-offset elision)))
-    (is (< (count (:seon.error/message face)) 1000))))
+
 
 (deftest flat-scratch-write-refusal-retires-the-candidate
   (with-store
@@ -250,7 +220,7 @@
         (is (= #{:db} (set (registry/roster opened))))
         (is (empty? (scratch-branches opened)))))))
 
-(deftest incremental-upsert-seals-one-activation-on-the-expected-commit
+(deftest incremental-upsert-records-source-identity-on-the-expected-commit
   (with-store
     (fn [opened]
       (let [a (publish opened digest-a)
@@ -268,7 +238,7 @@
                        [:schema :seon.source/digest :db/unique]))
             "the source seal has one physical identity")
         (is (= (+ 3 max-a) (:max-tx current-db))
-            "row application and issue indexing are followed by one activation seal")
+            "row application and issue indexing are followed by one source identity transaction")
         (is (= #{digest-b}
                (set (db/q '[:find [?digest ...]
                            :where [_ :seon.source/digest ?digest]]
@@ -474,34 +444,7 @@
         (is (nil? (sci/eval-string* ctx "(resolve 'source-deletion-probe/value)")))
         (is (nil? (db/pull @connection '[*] fn-identity)))))))
 
-(deftest activation-seal-preserves-unchanged-facts
-  (test-support/with-database
-    (fn [connection]
-      (test-support/transacted!
-       connection
-       (seon.schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) @#'source/source-attributes))
-      (let [seal #'source/activation-seal-tx
-            requested #{'seon.cluster/derive-activation}
-            initial-digest (or (db/q '[:find ?digest .
-                                      :where [_ :seon.source/digest ?digest]] @connection)
-                               digest-a)
-            initial (seal connection initial-digest requested cluster/derive-activation)]
-        (when (seq initial) (test-support/transacted! connection initial))
-        (let [before @connection
-              unchanged (seal connection initial-digest requested cluster/derive-activation)]
-          (is (= [] unchanged))
-          (is (= (:max-tx before) (:max-tx @connection))
-              "an unchanged seal needs no transaction")
-          (let [changed (seal connection digest-b requested cluster/derive-activation)
-                report (test-support/transacted! connection changed)
-                datoms (filter #(> (:tx %) (:max-tx before))
-                               (d/datoms (d/history @connection) :eavt))]
-            (is (seq (:tx-data report)))
-            (is (= (inc (:max-tx before)) (:max-tx @connection)))
-            (is (< (count datoms) 2000) (str "seal datoms: " (count datoms)))
-            (is (= #{digest-b}
-                   (set (db/q '[:find [?digest ...]
-                                :where [_ :seon.source/digest ?digest]] @connection))))))))))
+
 
 (deftest publication-input-digests-include-unreported-edits-and-deletions
   (let [before {"src/a.clj" "a1" "src/b.clj" "b1"}
@@ -509,27 +452,3 @@
     (is (= {:seon.test.cache/changed ["src/a.clj" "src/new.clj"]
             :seon.test.cache/removed ["src/b.clj"]}
            (seon.test.cache/changed-inputs before after)))))
-
-(deftest an-activation-closure-with-empty-member-collections-seals
-  ;; A cardinality-many attribute with NO members emits no datoms, so the
-  ;; resulting entity cannot carry the key at all. A closure whose config
-  ;; dials, executable symbols and lookup refs are honestly empty must seal;
-  ;; emptiness is decided at the authority that still sees the supplied
-  ;; value, never by a required key the medium cannot represent.
-  (with-store
-    (fn [opened]
-      (let [published (publish opened digest-a)
-            database (source/database opened (:seon.source/commit-id published))
-            closure (db/pull database
-                             '[* {:seon.source/activation-closure [*]}]
-                             [:seon.source/digest digest-a])
-            stored (:seon.source/activation-closure closure)]
-        (is (true? (:seon.source/built? published)))
-        (is (= digest-a (:seon.activation/source-digest stored)))
-        (is (= #{:seon.source/digest} (set (:seon.activation/schema-keys stored))))
-        (doseq [absent [:seon.activation/config-defaults
-                        :seon.activation/config-required
-                        :seon.activation/executable-symbols
-                        :seon.activation/lookup-refs]]
-          (is (= ::absent (get stored absent ::absent))
-              (str "an empty member collection stores no datom: " absent)))))))

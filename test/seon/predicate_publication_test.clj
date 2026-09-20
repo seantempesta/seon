@@ -13,7 +13,9 @@
             [seon.shell :as shell]
             [seon.test-support :as support]))
 
-(deftest ^{:seon.test/fixture-observation "A new cluster must boot from a published predicate rename while preserving the old identity tombstone."} a-published-predicate-rename-forks-and-boots-with-its-tombstone
+(deftest ^{:seon.test/fixture-observation "A new cluster must boot from a published predicate rename while preserving the old identity tombstone."
+           :seon.test/long "Two complete publications and a real cold boot exercise publication across a predicate rename."
+           :seon.test/long-ms 600000} a-published-predicate-rename-forks-and-boots-with-its-tombstone
   (support/preserving-instrumentation-state
    (fn []
      (let [root (str "tmp/predicate-publication/" (random-uuid))
@@ -58,7 +60,7 @@
                     {:seon.store/store @opened
                      :seon.source/expected-commit-id (:seon.source/commit-id published)
                      :seon.source/digest (apply str (repeat 64 "a"))
-                     :seon.source/activation 'seon.cluster/derive-activation
+
                      :seon.source/upsert-rows
                      [{:seon.ns/name namespace-name
                        :seon.ns/source (pr-str (list 'ns namespace-name))
@@ -78,7 +80,7 @@
                       {:seon.store/store @opened
                        :seon.source/expected-commit-id (:seon.source/commit-id first-publication)
                        :seon.source/digest (apply str (repeat 64 "b"))
-                       :seon.source/activation 'seon.cluster/derive-activation
+
                        :seon.source/upsert-rows []
                        :seon.fn/manifest (function/build-manifest
                                           {:seon.fn/roots function/source-roots})})

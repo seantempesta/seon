@@ -38,8 +38,7 @@
                        :seon.source/expected-commit-id (:seon.source/commit-id before)
                        :seon.source/digest (:seon.source/digest artifact)
                        :seon.source/upsert-rows []
-                       :seon.source/progress! progress
-                       :seon.source/activation 'seon.cluster/derive-activation}))
+                       :seon.source/progress! progress}))
                    :docstring
                    (let [file (io/file (fs/source-directory) "src/my/note.clj")
                          original (slurp file)

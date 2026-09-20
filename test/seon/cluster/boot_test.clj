@@ -155,11 +155,7 @@
     (spit file source)
     (.getCanonicalPath file)))
 
-(defn- activation-missing-member?
-  [missing]
-  (or (contains? missing :seon.activation/executable-symbol)
-      (and (contains? missing :seon.activation/lookup-attribute)
-           (contains? missing :seon.activation/lookup-value))))
+
 
 (defn- prepl-eval
   "Open a real socket to `host:port`, evaluate `form-string` through
@@ -209,21 +205,8 @@
           (let [source-digest (apply str (repeat 64 "a"))]
             (test-support/transacted!
                          connection
-                         [{:seon.source/digest source-digest
-                           ;; Even this deliberately old sovereign source represents a
-                           ;; publication. Its stored activation closure is complete for
-                           ;; the sparse legacy facts; boot may then reach the intended
-                           ;; incompatible-schema refusal instead of correctly refusing
-                           ;; an unsealed source first.
-                           :seon.source/activation-closure
-                           {:seon.activation/source-digest source-digest
-                            :seon.activation/schema-keys #{}
-                            :seon.activation/required-attributes #{}
-                            :seon.activation/config-defaults #{}
-                            :seon.activation/config-required #{}
-                            :seon.activation/executable-symbols #{"legacy.core/f"}
-                            :seon.activation/lookup-refs []}}
-            {:seon.ns/name 'legacy.core}
+                         [{:seon.source/digest source-digest}
+                          {:seon.ns/name 'legacy.core}
                           {:seon.fn/sym "legacy.core/f"
                            :seon.schema.admission/source :core
                            :seon.fn/ns [:seon.ns/name 'legacy.core]}]))
@@ -232,7 +215,8 @@
       (finally
         (store/release-store! opened)))))
 
-(deftest ^{:seon.test/long "Starts a degraded real cluster against an incompatible store."}
+(deftest ^{:seon.test/long "Starts a degraded real cluster against an incompatible store; cold boot is the subject."
+           :seon.test/long-ms 90000}
   incompatible-sovereign-schema-refusal-steers-the-operator
   (let [root (bare-root)
         cluster-name "legacy"
@@ -465,7 +449,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest ^{:seon.test/fixture-observation "The test connects to the actual advertised REPL after the complete published-root boot."} ^{:seon.test/long
-           "47.230 s pool: published-base clone, real ordered boot, live prepl call, and stop."}
+           "47.230 s pool: published-base clone, real ordered boot, live prepl call, and stop."
+           :seon.test/long-ms 90000}
   repl-is-live-after-ordered-boot
   (let [root (published-root)]
     (try
@@ -480,11 +465,10 @@
             (is (= "20260728" answer)))
           (testing "the completed boot records its measured duration"
             (is (nat-int? (:seon.boot/ready-ms instance))))
-          (testing "the READY fork owns the complete published activation"
+          (testing "the READY fork carries the published source digest"
             (is (= (:seon.source/digest (cluster/source-snapshot))
-                   (:seon.activation/source-digest
-                    (cluster/require-activation!
-                     @(:seon.boot/cluster-connection instance))))))
+                   (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
+                         @(:seon.boot/cluster-connection instance)))))
           (testing "the advertisement validates and is discoverable"
             (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                  :seon.boot/advertisement advertisement))
@@ -869,62 +853,7 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/fixture-observation "The assertions exercise real boot admission of incomplete versus freshly published cluster branches."} ^{:seon.test/long
-           "114.810 s pool: real boot, program-fact corruption/refusal, and fresh-cluster currentness proof."}
-  partial-clusters-refuse-and-fresh-clusters-are-current
-  (let [root (published-root)
-        cluster-name "partial-program"
-        request {:seon.boot/cluster-name cluster-name
-                 :seon.boot/root root}
-        current-digest
-        (:seon.source/digest (cluster/source-snapshot))]
-    (try
-      (let [instance (cluster/start! request)
-            connection (:seon.boot/cluster-connection instance)]
-        (await-bootstrap! connection "root")
-        (testing "a fresh fork is born at the current source digest"
-          (is (= current-digest
-                 (db/q '[:find ?digest .
-                        :where [_ :seon.source/digest ?digest]]
-                      @connection)))
-          (is (pos? (db/q '[:find (count ?function) .
-                           :where [?function :seon.fn/sym]]
-                         @connection))))
-        (test-support/transacted!
-                     connection
-                     (mapv (fn [eid] [:db.fn/retractEntity eid])
-                           (db/q '[:find [?function ...]
-                                  :where [?function :seon.fn/sym]]
-                                @connection)))
-        (cluster/stop! instance))
-      (let [failure (start-refusal request)
-            refused-instance (:seon.boot/instance (ex-data failure))
-            connection (:seon.boot/cluster-connection refused-instance)
-            activation-refusal
-            (some (fn [cause]
-                    (let [offense (:seon.boot/offense (ex-data cause))]
-                      (when (seq (:seon.activation/missing offense))
-                        offense)))
-                  (take-while some? (iterate ex-cause failure)))]
-        (try
-          (testing "namespaces without functions are denied despite a current digest"
-            (is (some? activation-refusal))
-            (is (every? activation-missing-member?
-                        (:seon.activation/missing activation-refusal)))
-            (is (pos? (:seon.activation/missing-count activation-refusal)))
-            (is (< (count (ex-message failure)) 2000))
-            (is (pos? (db/q '[:find (count ?namespace) .
-                             :where [?namespace :seon.ns/name]]
-                           @connection)))
-            (is (zero? (or
-                        (db/q '[:find (count ?function) .
-                               :where [?function :seon.fn/sym]]
-                             @connection)
-                        0))))
-          (finally
-            (stop-refused-instance! failure))))
-      (finally
-        (delete-recursively! root)))))
+
 
 (deftest ^{:seon.test/fixture-observation "The assertions compare real publication commit heads with existing and newly forked physical-store cluster branches."} ^{:seon.test/long
            "186.733 s pool: complete incremental publication dominates, followed by existing-cluster and later-fork agreement."}

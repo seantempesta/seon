@@ -1,0 +1,279 @@
+bin/test: snapshot differences from HEAD 0b43247eded663344c8566e47e8c901fb5fe7a05:
+bin/test:   M	AGENTS.md
+bin/test:   M	resources/seon/schemas/seon.activation.edn
+bin/test:   D	resources/seon/schemas/seon.activation.lookup.edn
+bin/test:   M	resources/seon/schemas/seon.source.edn
+bin/test:   M	src/seon/artifact.clj
+bin/test:   M	src/seon/cluster.clj
+bin/test:   M	src/seon/cluster/source.clj
+bin/test:   M	src/seon/config.clj
+bin/test:   M	test/seon/cluster/boot_test.clj
+bin/test:   M	test/seon/cluster/cohost_boot_test.clj
+bin/test:   M	test/seon/cluster/publication_reuse_test.clj
+bin/test:   M	test/seon/cluster/source_evidence_test.clj
+bin/test:   M	test/seon/cluster/source_nochange_test.clj
+bin/test:   M	test/seon/cluster/source_test.clj
+bin/test:   M	test/seon/cluster_test.clj
+bin/test:   M	test/seon/db_test.clj
+bin/test:   M	test/seon/predicate_publication_test.clj
+bin/test:   M	test/seon/schema/admission_test.clj
+bin/test:   M	test/seon/test/publication_test.clj
+bin/test:   A test/seon/config_functions_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=9
+bin/test: overlay graph 0e3ced090fbd53d22cbcb28b6c6d4f067f4b448a1d1247146f9e5149a832c1e3 age= 8 commits behind HEAD
+bin/test: caller src/seon/db.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: caller src/seon/error.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: caller src/seon/test.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: caller src/seon/test/runner.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: caller test/seon/test/runner_test.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: caller test/seon/test/selection_test.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: PHASE test-slot elapsed-seconds=0
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/test-runs/run.NzwWyh
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-20T23:24:30.843927Z pid= 24532 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-20T23:24:37.122815Z worker= test-fast mode= :panic namespaces= 3 program-namespaces= 109 registered= 1475 instrumented= 1475 program-armable= 1471
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-20T23:24:54.727763Z TIER named 13 tests
+bin/test: 2026-09-20T23:24:54.729635Z BEGIN namespace seon.config-functions-test
+
+Testing seon.config-functions-test
+bin/test: 2026-09-20T23:24:54.763471Z BEGIN test seon.config-functions-test/manifest-functions-must-exist-before-reconciliation
+2026-09-20T23:25:03.040246Z :error datahike.writer [158 41] :datahike/write-error 
+  data: {:args [{:tx-data [[:db.fn/call #object[seon.db$retain_transaction$fn__78484 0x161cfb86 "seon.db$retain_transaction$fn__78484@161cfb86"]]], :tx-meta {:seon.db/process [:seon.db.process/id "seon.db.process/config"], :datahike/validate-report #object[seon.db$write_report_validator$fn__78381$fn__78382 0x3289ff11 "seon.db$write_report_validator$fn__78381$fn__78382@3289ff11"]}}], :invocation {:op transact!, :args [{:tx-data [[:db.fn/call #object[seon.db$retain_transaction$fn__78484 0x161cfb86 "seon.db$retain_transaction$fn__78484@161cfb86"]]], :tx-meta {:seon.db/process [:seon.db.process/id "seon.db.process/config"], :datahike/validate-report #object[seon.db$write_report_validator$fn__78381$fn__78382 0x3289ff11 "seon.db$write_report_validator$fn__78381$fn__78382@3289ff11"]}}], :callback #object[clojure.core.async.impl.channels.ManyToManyChannel 0x4c0a2f64 "clojure.core.async.impl.channels.ManyToManyChannel@4c0a2f64"]}, :error #error {
+ :cause "Configuration names functions with no program row: [[:seon.config.web/search-result-projection my.note/config-supplier]]"
+ :data {:seon.error/operation seon.config/require-functions!, :seon.error/expected-key :seon.fn/sym, :seon.error/message "Configuration names functions with no program row: [[:seon.config.web/search-result-projection my.note/config-supplier]]", :seon.config/rule :seon.config/missing-function, :seon.error/offending [[:seon.config.web/search-result-projection my.note/config-supplier]], :seon.error/layer :seon.config/compile, :seon.error/data #:seon.error{:diagnostic-layer :seon.config/compile, :diagnostic-operation seon.config/require-functions!, :diagnostic-member :seon.config.web/search-result-projection, :diagnostic-expected :seon.fn/sym, :diagnostic-offending [[:seon.config.web/search-result-projection my.note/config-supplier]], :diagnostic-cause :seon.config/missing-function, :diagnostic-evidence-availability :seon.error/known, :diagnostic-evidence #:seon.config{:missing-functions [[:seon.config.web/search-result-projection my.note/config-supplier]]}}, :seon.config/error-key :seon.config.web/search-result-projection, :seon.error/at #inst "2026-09-20T23:25:03.018-00:00"}
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "Configuration names functions with no program row: [[:seon.config.web/search-result-projection my.note/config-supplier]]"
+   :data {:seon.error/operation seon.config/require-functions!, :seon.error/expected-key :seon.fn/sym, :seon.error/message "Configuration names functions with no program row: [[:seon.config.web/search-result-projection my.note/config-supplier]]", :seon.config/rule :seon.config/missing-function, :seon.error/offending [[:seon.config.web/search-result-projection my.note/config-supplier]], :seon.error/layer :seon.config/compile, :seon.error/data #:seon.error{:diagnostic-layer :seon.config/compile, :diagnostic-operation seon.config/require-functions!, :diagnostic-member :seon.config.web/search-result-projection, :diagnostic-expected :seon.fn/sym, :diagnostic-offending [[:seon.config.web/search-result-projection my.note/config-supplier]], :diagnostic-cause :seon.config/missing-function, :diagnostic-evidence-availability :seon.error/known, :diagnostic-evidence #:seon.config{:missing-functions [[:seon.config.web/search-result-projection my.note/config-supplier]]}}, :seon.config/error-key :seon.config.web/search-result-projection, :seon.error/at #inst "2026-09-20T23:25:03.018-00:00"}
+   :at [seon.config$refuse_BANG_ invokeStatic "config.clj" 197]}]
+ :trace
+ [[seon.config$refuse_BANG_ invokeStatic "config.clj" 197]
+  [seon.config$refuse_BANG_ invoke "config.clj" 194]
+  [clojure.lang.AFn applyToHelper "AFn.java" 156]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$compiled_wrapper$fn__107878$fn__107889 doInvoke "instrument.clj" 778]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [malli.core$__EQ__GT$reify$reify__67079$fn__67111 doInvoke "core.cljc" 2215]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$compiled_wrapper$fn__107878$fn__107901 doInvoke "instrument.clj" 813]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$arm_var_BANG_$fn__107923$fn__107926 doInvoke "instrument.clj" 891]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.AFunction$1 doInvoke "AFunction.java" 33]
+  [clojure.lang.RestFn invoke "RestFn.java" 424]
+  [seon.config$require_functions_BANG_ invokeStatic "config.clj" 747]
+  [seon.config$require_functions_BANG_ invoke "config.clj" 728]
+  [clojure.lang.AFn applyToHelper "AFn.java" 156]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$compiled_wrapper$fn__107878$fn__107889 doInvoke "instrument.clj" 778]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [malli.core$__EQ__GT$reify$reify__67079$fn__67111 doInvoke "core.cljc" 2215]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$compiled_wrapper$fn__107878$fn__107901 doInvoke "instrument.clj" 813]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$arm_var_BANG_$fn__107923$fn__107926 doInvoke "instrument.clj" 891]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.AFunction$1 doInvoke "AFunction.java" 33]
+  [clojure.lang.RestFn invoke "RestFn.java" 424]
+  [seon.config$reconcile_call invokeStatic "config.clj" 772]
+  [seon.config$reconcile_call invoke "config.clj" 767]
+  [clojure.lang.AFn applyToHelper "AFn.java" 165]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$compiled_wrapper$fn__107878$fn__107889 doInvoke "instrument.clj" 778]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [malli.core$__EQ__GT$reify$reify__67079$fn__67111 doInvoke "core.cljc" 2215]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$compiled_wrapper$fn__107878$fn__107901 doInvoke "instrument.clj" 813]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.instrument$arm_var_BANG_$fn__107923$fn__107926 doInvoke "instrument.clj" 891]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.AFunction$1 doInvoke "AFunction.java" 33]
+  [clojure.lang.RestFn applyTo "RestFn.java" 140]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.core$apply invoke "core.clj" 662]
+  [seon.schema.datahike$encode_call_output_in invokeStatic "datahike.clj" 409]
+  [seon.schema.datahike$encode_call_output_in doInvoke "datahike.clj" 404]
+  [clojure.lang.RestFn applyTo "RestFn.java" 149]
+  [clojure.lang.Var applyTo "Var.java" 707]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.core$apply invoke "core.clj" 662]
+  [datahike.db.transaction$apply_db_op invokeStatic "transaction.cljc" 1154]
+  [datahike.db.transaction$apply_db_op invoke "transaction.cljc" 1054]
+  [datahike.db.transaction$transact_tx_data invokeStatic "transaction.cljc" 1324]
+  [datahike.db.transaction$transact_tx_data invoke "transaction.cljc" 1218]
+  [datahike.core$with invokeStatic "core.cljc" 133]
+  [datahike.core$with invoke "core.cljc" 126]
+  [datahike.writing$transact_BANG_ invokeStatic "writing.cljc" 889]
+  [datahike.writing$transact_BANG_ invoke "writing.cljc" 872]
+  [clojure.lang.AFn applyToHelper "AFn.java" 156]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.core$apply invoke "core.clj" 662]
+  [datahike.writer$create_thread$fn__58000$state_machine__7148__auto____58025$fn__58029 invoke "writer.cljc" 126]
+  [datahike.writer$create_thread$fn__58000$state_machine__7148__auto____58025 invoke "writer.cljc" 126]
+  [clojure.core.async.impl.ioc_macros$run_state_machine invokeStatic "ioc_macros.clj" 58]
+  [clojure.core.async.impl.ioc_macros$run_state_machine invoke "ioc_macros.clj" 57]
+  [clojure.core.async.impl.ioc_macros$run_state_machine_wrapped invokeStatic "ioc_macros.clj" 62]
+  [clojure.core.async.impl.ioc_macros$run_state_machine_wrapped invoke "ioc_macros.clj" 60]
+  [clojure.core.async.impl.ioc_macros$take_BANG_$fn__1016 invoke "ioc_macros.clj" 71]
+  [clojure.core.async.impl.channels$appm$fn__778 invoke "channels.clj" 37]
+  [clojure.lang.AFn run "AFn.java" 22]
+  [java.util.concurrent.ThreadPoolExecutor runWorker "ThreadPoolExecutor.java" 1090]
+  [java.util.concurrent.ThreadPoolExecutor$Worker run "ThreadPoolExecutor.java" 614]
+  [java.lang.Thread run "Thread.java" 1516]]}}
+bin/test: 2026-09-20T23:25:07.743639Z END test seon.config-functions-test/manifest-functions-must-exist-before-reconciliation
+bin/test: 2026-09-20T23:25:07.744209Z END namespace seon.config-functions-test
+bin/test: 2026-09-20T23:25:07.744582Z BEGIN namespace seon.cluster-test
+
+Testing seon.cluster-test
+bin/test: 2026-09-20T23:25:07.781473Z BEGIN test seon.cluster-test/a-commit-tx-request-without-the-evidence-bound-names-the-key
+bin/test: 2026-09-20T23:25:08.508341Z END test seon.cluster-test/a-commit-tx-request-without-the-evidence-bound-names-the-key
+bin/test: 2026-09-20T23:25:08.508699Z BEGIN test seon.cluster-test/a-core-fault-commits-with-the-dial-its-cluster-config-carries
+bin/test: 2026-09-20T23:25:15.319806Z END test seon.cluster-test/a-core-fault-commits-with-the-dial-its-cluster-config-carries
+bin/test: 2026-09-20T23:25:15.320275Z BEGIN test seon.cluster-test/a-dropped-storage-facet-refuses-reopening-the-branch-in-place
+bin/test: 2026-09-20T23:25:15.906042Z END test seon.cluster-test/a-dropped-storage-facet-refuses-reopening-the-branch-in-place
+bin/test: 2026-09-20T23:25:15.906241Z BEGIN test seon.cluster-test/a-source-change-during-analysis-takes-the-one-publication-retry
+bin/test: 2026-09-20T23:25:15.913206Z END test seon.cluster-test/a-source-change-during-analysis-takes-the-one-publication-retry
+bin/test: 2026-09-20T23:25:15.913376Z BEGIN test seon.cluster-test/an-added-index-adopts-in-place-instead-of-forcing-a-refork
+bin/test: 2026-09-20T23:25:20.085452Z END test seon.cluster-test/an-added-index-adopts-in-place-instead-of-forcing-a-refork
+bin/test: 2026-09-20T23:25:20.086003Z BEGIN test seon.cluster-test/an-incompatible-declaration-refuses-naming-the-changed-property
+bin/test: 2026-09-20T23:25:20.369479Z END test seon.cluster-test/an-incompatible-declaration-refuses-naming-the-changed-property
+bin/test: 2026-09-20T23:25:20.369725Z BEGIN test seon.cluster-test/boot-recovery-refuses-an-unreadable-open-turn-query
+bin/test: 2026-09-20T23:25:20.466401Z END test seon.cluster-test/boot-recovery-refuses-an-unreadable-open-turn-query
+bin/test: 2026-09-20T23:25:20.468216Z BEGIN test seon.cluster-test/initialization-orders-provider-rows-before-the-models-naming-them
+bin/test: 2026-09-20T23:25:22.871138Z END test seon.cluster-test/initialization-orders-provider-rows-before-the-models-naming-them
+bin/test: 2026-09-20T23:25:22.871432Z BEGIN test seon.cluster-test/initialization-readiness-surfaces-a-refused-read-instead-of-absence
+bin/test: 2026-09-20T23:25:22.979251Z END test seon.cluster-test/initialization-readiness-surfaces-a-refused-read-instead-of-absence
+bin/test: 2026-09-20T23:25:22.979490Z BEGIN test seon.cluster-test/process-identity-set-building-refuses-an-unreadable-query
+bin/test: 2026-09-20T23:25:23.052337Z END test seon.cluster-test/process-identity-set-building-refuses-an-unreadable-query
+bin/test: 2026-09-20T23:25:23.052545Z BEGIN test seon.cluster-test/schema-row-convergence-uses-the-stores-own-semantics
+
+ERROR in (schema-row-convergence-uses-the-stores-own-semantics) (core.cljc:203)
+Uncaught exception, not in assertion.
+expected: nil
+actual: clojure.lang.ExceptionInfo: :malli.core/invalid-schema
+    at [malli.core$_exception invokeStatic core.cljc 203]
+    at [malli.core$_exception invoke core.cljc 203]
+    at [malli.core$_fail_BANG_ invokeStatic core.cljc 207]
+    at [malli.core$_fail_BANG_ invoke core.cljc 205]
+    at [malli.core$_lookup_BANG_ invokeStatic core.cljc 333]
+    at [malli.core$_lookup_BANG_ invoke core.cljc 329]
+    at [malli.core$schema invokeStatic core.cljc 2572]
+    at [malli.core$schema invoke core.cljc 2550]
+    at [malli.core$properties invokeStatic core.cljc 2586]
+    at [malli.core$properties invoke core.cljc 2581]
+    at [malli.core$properties invokeStatic core.cljc 2584]
+    at [malli.core$properties invoke core.cljc 2581]
+    at [seon.schema.datahike$storable_properties_in invokeStatic datahike.clj 262]
+    at [seon.schema.datahike$storable_properties_in invoke datahike.clj 254]
+    at [clojure.lang.AFn applyToHelper AFn.java 156]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$compiled_wrapper$fn__107878$fn__107889 doInvoke instrument.clj 778]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [malli.core$__EQ__GT$reify$reify__67079$fn__67111 doInvoke core.cljc 2215]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$compiled_wrapper$fn__107878$fn__107901 doInvoke instrument.clj 813]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+    at [clojure.core$apply invokeStatic core.clj 667]
+    at [clojure.core$apply invoke core.clj 662]
+    at [seon.instrument$arm_var_BANG_$fn__107923$fn__107926 doInvoke instrument.clj 891]
+    at [clojure.lang.RestFn applyTo RestFn.java 140]
+bin/test: 2026-09-20T23:25:25.379169Z END test seon.cluster-test/schema-row-convergence-uses-the-stores-own-semantics
+bin/test: 2026-09-20T23:25:25.379313Z END namespace seon.cluster-test
+bin/test: 2026-09-20T23:25:25.379502Z BEGIN namespace seon.cluster.source-nochange-test
+
+Testing seon.cluster.source-nochange-test
+bin/test: 2026-09-20T23:25:25.413775Z BEGIN test seon.cluster.source-nochange-test/unchanged-digest-keeps-the-published-commit-without-a-transaction
+2026-09-20T23:25:25.426Z seans-m5-macbook-pro WARN [seon.fs:156] - seon recursive deletion: #:seon.cluster.store{:root "/Users/sean/src/seon/tmp/test-runs/run.NzwWyh/tmp/source-test/ca8118c8-f848-489f-a169-5d6bb04e0c5b/store", :targets ["/Users/sean/src/seon/tmp/test-runs/run.NzwWyh/tmp/source-test/ca8118c8-f848-489f-a169-5d6bb04e0c5b/store"], :file-bytes 0, :operation "seon.cluster.store/create-store!", :caller "seon.cluster.source_test$with_store.invokeStatic(source_test.clj:83)", :pid 24532}
+
+ERROR in (unchanged-digest-keeps-the-published-commit-without-a-transaction) (core.cljc:203)
+Uncaught exception, not in assertion.
+expected: nil
+actual: clojure.lang.ExceptionInfo: :malli.core/invalid-schema
+    at [malli.core$_exception invokeStatic core.cljc 203]
+    at [malli.core$_exception invoke core.cljc 203]
+    at [malli.core$_fail_BANG_ invokeStatic core.cljc 207]
+    at [malli.core$_fail_BANG_ invoke core.cljc 205]
+    at [malli.core$_lookup_BANG_ invokeStatic core.cljc 333]
+    at [malli.core$_lookup_BANG_ invoke core.cljc 329]
+    at [malli.core$schema invokeStatic core.cljc 2572]
+    at [malli.core$schema invoke core.cljc 2550]
+    at [malli.core$__EQ__GT$reify__67065$fn__67072 invoke core.cljc 2149]
+    at [malli.impl.util$_vmap invokeStatic util.cljc 28]
+    at [malli.impl.util$_vmap invoke util.cljc 23]
+    at [malli.core$_vmap invokeStatic core.cljc 266]
+    at [malli.core$_vmap invoke core.cljc 266]
+    at [malli.core$__EQ__GT$reify__67065 _into_schema core.cljc 2149]
+    at [malli.core$into_schema invokeStatic core.cljc 2508]
+    at [malli.core$into_schema invoke core.cljc 2499]
+    at [malli.core$schema invokeStatic core.cljc 2569]
+    at [malli.core$schema invoke core.cljc 2550]
+    at [malli.core$function_schema invokeStatic core.cljc 3085]
+    at [malli.core$function_schema invoke core.cljc 3082]
+    at [seon.schema$projection_registry$fn__72821 invoke schema.clj 494]
+    at [malli.registry$lazy_registry$reify__64807 _schema registry.cljc 92]
+    at [malli.registry$composite_registry$reify__64793$fn__64794 invoke registry.cljc 58]
+    at [clojure.core$some invokeStatic core.clj 2722]
+    at [clojure.core$some invoke core.clj 2713]
+    at [malli.registry$composite_registry$reify__64793 _schema registry.cljc 58]
+    at [malli.registry$schema invokeStatic registry.cljc 100]
+    at [malli.registry$schema invoke registry.cljc 97]
+    at [seon.schema$projection_registry invokeStatic schema.clj 502]
+    at [seon.schema$projection_registry invoke schema.clj 454]
+    at [clojure.lang.AFn applyToHelper AFn.java 165]
+    at [clojure.lang.AFn applyTo AFn.java 144]
+bin/test: 2026-09-20T23:25:46.923034Z END test seon.cluster.source-nochange-test/unchanged-digest-keeps-the-published-commit-without-a-transaction
+bin/test: 2026-09-20T23:25:46.923195Z END namespace seon.cluster.source-nochange-test
+
+Ran 13 tests containing 66 assertions.
+0 failures, 2 errors.
+{:seon.test/sym seon.cluster-test/a-commit-tx-request-without-the-evidence-bound-names-the-key, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.cluster-test/a-core-fault-commits-with-the-dial-its-cluster-config-carries, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.cluster-test/a-dropped-storage-facet-refuses-reopening-the-branch-in-place, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.cluster-test/a-source-change-during-analysis-takes-the-one-publication-retry, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.cluster-test/an-added-index-adopts-in-place-instead-of-forcing-a-refork, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.cluster-test/an-incompatible-declaration-refuses-naming-the-changed-property, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.cluster-test/boot-recovery-refuses-an-unreadable-open-turn-query, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.cluster-test/initialization-orders-provider-rows-before-the-models-naming-them, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.cluster-test/initialization-readiness-surfaces-a-refused-read-instead-of-absence, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.cluster-test/process-identity-set-building-refuses-an-unreadable-query, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.cluster-test/schema-row-convergence-uses-the-stores-own-semantics, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.cluster.source-nochange-test/unchanged-digest-keeps-the-published-commit-without-a-transaction, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+{:seon.test/sym seon.config-functions-test/manifest-functions-must-exist-before-reconciliation, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "9789b4ce01b2919a6d850a840f2d3aeff7f2cfd4f7404d4877d46e74fdb783f0", :seon.test.run/input-digest "9e9cdb298c07f564509b6bc930c18bde8ab3829eaf96fc72ccff842243b89b3f"}
+
+Recorded 13 executed, 0 unchanged; 66 assertions.
+0 failures, 2 errors.
+bin/test-fast: 13 executed, 0 unchanged; run 91133393e7b0

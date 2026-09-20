@@ -42,9 +42,6 @@
               [:enum :program :schema-resource :config :no-program-facts],
               :change-classes [:set :seon.source/change-class],
               :previous-database :seon.db/database-value,
-              :activation :qualified-symbol,
-              :activation-closure
-              [:and {:seon.db/component true :seon.db/component-schema :seon.activation/closure} :seon.db/ref],
               :path [:string {:min 1}],
               :population
               [:map
@@ -67,7 +64,6 @@
                [:seon.source/digest :seon.source/digest]
                [:seon.source/populate :seon.source/populate]
                [:seon.source/progress! {:optional true} :seon.source/progress!]
-               [:seon.source/activation :seon.source/activation]
                [:seon.source/populate-request
                 {:optional true}
                 :seon.source/populate-request]],
@@ -99,5 +95,4 @@
                 :seon.source/expected-commit-id]
                [:seon.source/digest :seon.source/digest]
                [:seon.source/upsert-rows :seon.source/upsert-rows]
-               [:seon.source/activation :seon.source/activation]
                [:seon.db/process {:optional true} :seon.db/ref]]}

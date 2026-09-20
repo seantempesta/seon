@@ -52,3 +52,11 @@ exit 0, 254.81 s total, commit `6ab065e5-78f2-56c3-ad52-f69eaaf1eb01`.
 Its 3333-schema/1527-function contract projection took 357 ms.
 The root was downed (zero recorded JVMs, store lock free) and deleted.
 [Successful operator output](../../../prds/steward-platform/research/test-system-cold-publication-2026-09-23.txt).
+
+## Introducing change verified by publication lane
+
+`git blame` and `git show dc1efaf3c9 -- src/seon/schema.clj` identify
+`dc1efaf3c9` as the commit introducing `(merge forms contracts)` at this seam.
+`30baf050a` was the latest schema edit when the failure was reported, not the
+introducing change. The publication lane did not edit `src/seon/schema.clj`;
+the test-system lane corrected it in `2d9984a50`.
