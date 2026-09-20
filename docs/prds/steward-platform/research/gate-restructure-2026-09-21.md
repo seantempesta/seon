@@ -7,6 +7,27 @@ tags: [testing, performance, datahike]
 
 # Gate restructuring
 
+## Landed checkpoints and outstanding proof
+
+- `9d40d32b4`: symbol task identities and canonical-manifest classification.
+- `cdf517203`: demand-owned workers and eager process retirement before serial join.
+- `4028a8996`: `script/seon/dev/docstring.clj`, `src/seon/instrument.clj`,
+  `test/seon/cluster/publication_adoption_test.clj`, and the docstring-adoption
+  issue: expanded contract values and replacement-definition re-arming.
+- `5930edbb5`: `bin/test`, `src/seon/test/cache.clj`,
+  `src/seon/test/runner.clj`, `resources/seon/schemas/seon.test.runner.edn`,
+  `test/seon/error_test.clj`, `test/seon/test_preparation_test.clj`,
+  `test/seon/test_runner_test.clj`, `test/seon/test_runner_integration_test.clj`,
+  `test/seon/test_support_test.clj`, this note and its two sibling census and
+  measurement scripts, plus the error-observation component-walk issue.
+
+The implementation is committed; validation is **incomplete**. No successful
+owned-path fast tally, successful paired recurrence timing, or executed
+child-lifetime proof is claimed. The exact admission and body boundaries below
+must clear before those claims can be made. The orchestrator still owns the
+real child integration run, path-limited cold gate and platform gate. No cold
+gate, worktree, default operation, or other lane operation occurred here.
+
 The assignment spec was read end to end, together with AGENTS.md §5 and
 the data-oriented-clojure, clojure-testing and datahike skills. The current
 publication and results-reuse closeouts retain their admission and cold-proof
