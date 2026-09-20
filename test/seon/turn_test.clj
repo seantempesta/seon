@@ -26,6 +26,48 @@
             [seon.fn :as seon.fn]
             [seon.schema]))
 
+(deftest attempt-model-identity-survives-descriptor-retraction
+  (support/with-database
+    (fn [connection]
+      (support/seed-cluster! connection "attempt-identity")
+      (support/transacted!
+       connection
+       (into (agent/creation-tx
+              {:seon.agent/id "attempt-identity"
+               :seon.ns/name 'my.agents.attempt-identity
+               :seon.cluster/name "attempt-identity"})
+             (turn/open-tx
+              {:seon.turn/id "attempt-identity-turn"
+               :seon.turn/agent [:seon.agent/id "attempt-identity"]
+               :seon.turn/opened-tx "datomic.tx"})))
+      (let [model "deepseek-flash"
+            observed-at #inst "2026-09-19T00:00:00Z"
+            recorded (#'turn/record-attempt!
+                      {:seon.db/connection connection}
+                      {:seon.turn/id "attempt-identity-turn"
+                       :seon.agent/id "attempt-identity"
+                       :seon.ai.attempt/ordinal 0
+                       :seon.ai/target
+                       {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
+                        :seon.ai/model model}
+                       :seon.ai/settings (support/effective-config)}
+                      observed-at)
+            database (db/db connection)
+            descriptor (db/pull database [:seon.ai.model/id]
+                                [:seon.ai.model/id model])
+            attempt (db/q '[:find ?attempt .
+                            :where [?attempt :seon.ai.attempt/ordinal 0]]
+                          database)]
+        (is (nil? recorded) (pr-str recorded))
+        (is (= {:seon.ai.model/id model} descriptor))
+        (is (int? attempt))
+        (support/transacted! connection
+                             [[:db/retractEntity [:seon.ai.model/id model]]])
+        (let [row (db/pull (db/db connection)
+                           [:seon.ai/model :seon.ai.attempt/at]
+                           attempt)]
+          (is (= {:seon.ai/model model :seon.ai.attempt/at observed-at} row)))))))
+
 (defn- checked-transact! [connection transaction]
   (let [result (db/transact! connection transaction)]
     (when (:seon.error/kind result) (throw (ex-info (pr-str result) result)))

@@ -347,7 +347,7 @@
             :seon.ai/provider-server-failure]
            [:seon.error/message :seon.error/message]],
           :extra-body :boolean,
-          :model [:string {:min 1}],
+          :model [:string {:min 1 :description "The provider model identity observed by the request or attempt. It survives descriptor deletion; join a current descriptor through :seon.ai.model/id when needed."}],
           :backup? :boolean,
           :attempt
           [:map
@@ -361,7 +361,6 @@
            [:seon.ai/model :seon.ai/model]
            [:seon.ai.attempt/settings-edn
             :seon.ai.attempt/settings-edn]
-           [:seon.ai.attempt/model {:optional true} :seon.ai.attempt/model]
            [:seon.ai.attempt/settings {:optional true} :seon.ai.attempt/settings]
            [:seon.ai.usage/prompt-tokens {:optional true} :seon.ai.usage/prompt-tokens]
            [:seon.ai.usage/completion-tokens {:optional true} :seon.ai.usage/completion-tokens]

@@ -195,7 +195,6 @@
                   :seon.ai/endpoint
                   :seon.ai/model
                   {:seon.ai.attempt/settings [:db/id :seon.config/agent :seon.config/cluster]}
-                  {:seon.ai.attempt/model [:seon.ai.model/id]}
                   :seon.ai.usage/prompt-tokens
                   :seon.ai.usage/completion-tokens
                   :seon.ai.usage/total-tokens

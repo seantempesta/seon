@@ -57,6 +57,60 @@ these fixture observations do not claim default-cluster adoption.
 
 ## Decision boundary before production edits
 
+### R2 result and C14 handoff
+
+R3 landed in `c50625da4`; C7 landed in `5a0a805e4`. Both post-commit
+five-namespace load commands completed with exit 0 and `:loads`. R3's shared
+test file was committed by staging only its 22-line regression hunk, after
+checking that the index contained exactly the three owned paths; the foreign
+hunks remained unstaged and unchanged.
+
+R2 deletes the `:seon.ai.attempt/model` declaration and attempt entity entry,
+the recorder's descriptor lookup and ref assertion, and the evaluation-drive
+selector's ref expansion. `:seon.ai/model` remains the observed identity;
+its description names the descriptor join. `rg` finds no remaining uses of
+the retired key in `src/` or `resources/`.
+
+The attempt resource now explains the deliberate sweep of its optional
+settings-owner ref and the distinct historical meaning of required settings
+bytes and opaque provider usage bytes. These are retained, per the guide and
+the bounded R2 ruling, rather than discarding provider-specific evidence.
+Attempt time stays an instant because the observation predates recording.
+
+The canonical regression in `test/seon/turn_test.clj` uses the real recorder,
+asserts the descriptor exists, retracts it through the admitted writer, and
+pulls the surviving attempt's model identity and original observed instant.
+It passed. Fast command:
+`bin/test-fast --paths resources/seon/schemas/seon.ai.attempt.edn resources/seon/schemas/seon.ai.edn src/seon/turn.clj src/seon/eval/drive.clj test/seon/turn_test.clj -- seon.turn-test`.
+Tally: **34 tests, 195 assertions, 12 failures, 6 errors**; raw log
+`tmp/config-plan-1d-r2-fast.log`. Failures include existing wake, generated-read,
+settlement, fault-rendering, and schema-shape diagnostic paths; they were not
+silently assigned to R2 or repaired outside the released recorder region.
+The overlay printed that dirty render callers use HEAD bytes and **admitted**
+the snapshot; that notice was not an overlay refusal.
+
+**RESET NEEDED (R2): `:seon.ai.attempt/model`.** Unowned
+`test/seon/data_shapes_test.clj:314–318` must replace its old model-ref selector
+and assertion with `:seon.ai/model`; it was not part of the released test path.
+The first schema patch was refused before mutation because admission checked
+the removed declaration while its entity entry still existed. Applying the
+entity/caller removals before the declaration removal passed admission.
+
+C14 chosen dials: keep `:seon.ai.attempt/at` as the external observation
+instant (docstring now explicit); keep the model's `last-used-at` observation
+semantics, whose docstring remains with the unowned model resource. Defer
+`:seon.cluster.eval/at` to a recording-transaction ref. Its held render sites
+are `src/seon/render/transcript.clj:43` (selector), `:117` (ordering query),
+and `:262` (render timestamp); the query must follow the replacement ref to
+`:db/txInstant`. The same slice must convert `src/seon/eval/drive.clj:151,166`,
+`src/seon/bootstrap.clj:806`, `src/seon/cluster/status.clj:127,131`, and the
+creation/settlement sites in `src/seon/turn.clj` inventoried above. There is
+no second audit-named timestamp that warrants a non-render conversion.
+
+Cold R2 proof owed: the fast command above with `bin/test` replacing
+`bin/test-fast`, plus orchestrator `bin/test --platform`. Default was not
+adopted or reset by this lane.
+
 Assignment received against branch `steward-platform`; inspected HEAD
 `4b3c4b5f3`. No source, schema, or test edits made. This is a scope/design
 stop, not an attribution of foreign test failure. No worktree, lifecycle

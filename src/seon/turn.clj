@@ -3928,8 +3928,6 @@
                                db agent-id)
                          (db/q '[:find ?config .
                                  :where [?config :seon.config/cluster]] db))
-        model-ref (:db/id (db/pull db [:db/id]
-                                   [:seon.ai.model/id (:seon.ai/model target)]))
         reasoning-size (when (seq reasoning-content)
                          (long (count reasoning-content)))
         threshold (db/q '[:find ?threshold .
@@ -3974,7 +3972,6 @@
               (assoc :seon.ai.attempt/truncation
                      (:db/id (first (:seon.db/tx-data truncation-recording))))
               settings-ref (assoc :seon.ai.attempt/settings settings-ref)
-              model-ref (assoc :seon.ai.attempt/model model-ref)
               settings
               (assoc :seon.ai.attempt/settings-edn (pr-str settings))
               usage (merge (ai/normalize-usage usage)
