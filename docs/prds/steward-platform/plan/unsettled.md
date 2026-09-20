@@ -6833,3 +6833,21 @@ gates + measurement after each landing, and the task-family spec (wave
 3a) rewritten against today's seams for the evening build lane.
 Checkpoints: slice 3 → slice 4 (+ boot fault message, hook publication
 ON) → test-system cut → reset + platform + measurement → build lane.
+
+## 2026-09-23 ~02:50 local — MEASURED at `c402d3c1d` (slice 2): fork 0.96 s, first adoption 2.3 s, no change 1.6 s, non-core docstring 73 s (was 310), core docstring 97 s (was 237)
+
+| Case | `0c6be06f3` (slice 1) | `c402d3c1d` (slice 2) | target |
+|---|---:|---:|---:|
+| From zero (publish) | 266 s | 166.1 s | ≤ 60 s |
+| First cluster + start (once) | — | 10.9 s + 24.0 s | paid once |
+| Fork against the running cluster | 0.18 s | **0.96 s** | < 1 s |
+| First adoption after fork | 76.6 s | **2.3 s** | ≈ no change |
+| No change | 1.57 s | **1.6 s** | < 1 s |
+| Docstring, non-core | 326 s | **73.2 s** | ≤ 5 s |
+| Docstring, core | 289 s | **96.5 s** | ≤ 5 s |
+
+What is left inside a one-file edit, all O(program) and all slice 3/4:
+program reconciliation 17–25 s, changed-definition comparison 8–16 s,
+reconciliation transaction 9–12 s, issue reconciliation 6.5–7 s, and the
+lint "findings" delta 6–6.5 s (622 findings compared whole; the delta is
+per changed file). Platform tier at `c402d3c1d`: green (97, 0/0, 719 s).
