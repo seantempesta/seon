@@ -9,6 +9,7 @@
             [seon.error :as error]
             [seon.fn.analyzer :as analyzer]
             [seon.fn.schema-shape :as schema-shape]
+            [seon.fn.signature :as signature]
             [seon.id :as id]
             [seon.fs :as fs]
             [seon.program :as program]
@@ -18,7 +19,9 @@
             [seon.schema.form :as schema.form]
             [seon.schema.internal :as schema.internal]
             [clj-kondo.impl.utils :as kondo.utils]
-            [seon.test.accretion :as accretion])
+            [seon.test.accretion :as accretion]
+            [seon.test.selection :as selection]
+            [seon.test.cache :as test.cache])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files]
            [java.security MessageDigest]))
@@ -969,7 +972,10 @@
                (assoc request :namespace-name namespace-name
                               :form-source source)
                (error/diagnostic
-                {:seon.error/kind ::namespace-unresolvable
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :seon.fn/analysis
+                 :seon.error/operation 'seon.fn/analyze-forms
+                 :seon.error/kind ::namespace-unresolvable
                  :seon.error/message
                  (str "Cannot analyze the form because its namespace reference "
                       (pr-str namespace-ref)
@@ -1248,6 +1254,38 @@
   (or (:seon.schema.projection/forms request)
       (schema.edn/packaged-forms)))
 
+(defn- declaration-digests
+  {:malli/schema [:=> [:cat :seon.program/rows] :seon.fn.file/declaration-digests]}
+  [rows]
+  (let [namespaces (into {} (keep #(when (:seon.ns/name %) [(:seon.ns/name %) %])) rows)]
+    (into {}
+          (keep
+           (fn [row]
+             (let [identity (program/row-identity row)
+                   namespace-name (or (:seon.ns/name row)
+                                      (second (:seon.fn/ns row))
+                                      (second (:seon.test/ns row)))
+                   aliases (into {} (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns))
+                                 (:seon.ns/aliases (get namespaces namespace-name)))
+                   source (or (:seon.fn/source row) (:seon.test/source row) (:seon.ns/source row))]
+               (when (or source (:seon.schema/form row))
+                 [identity
+                  (id/digest
+                   64
+                   [(select-keys row [:seon.fn/sym :seon.test/sym :seon.ns/name
+                                      :seon.schema/key :seon.schema/form :seon.fn/spec
+                                      :seon.fn/doc :seon.ns/doc
+                                      :seon.fn/arglists :seon.fn/private? :seon.fn/macro?
+                                      :seon.fn/defined-by])
+                    (when source (signature/declaration-metadata source (or namespace-name 'user) aliases))
+                    (when (:seon.ns/name row)
+                      (into (sorted-set)
+                            (keep #(when (and (or (:seon.fn/sym %) (:seon.test/sym %))
+                                              (not (:seon.fn/private? %))
+                                              (= namespace-name (second (or (:seon.fn/ns %) (:seon.test/ns %)))))
+                                     (or (:seon.fn/sym %) (:seon.test/sym %)))) rows))])]))))
+          rows)))
+
 (defn- artifact
   [row-shapes directory file root context rows findings]
   (let [canonical-path (fs/relative-path directory (.getCanonicalPath ^java.io.File file))
@@ -1285,6 +1323,7 @@
      {:seon.fn.file/relative-path canonical-path
       :seon.fn.file/digest (:seon.fn.file/digest context)
       :seon.fn.file/rows canonical-rows
+      :seon.fn.file/declaration-digests (declaration-digests canonical-rows)
       :seon.fn.file/identities
       (->> canonical-rows
            (keep program/row-identity)
@@ -2099,6 +2138,71 @@
        sort
        vec))
 
+(defn- declaration-targets
+  {:malli/schema [:=> [:cat :map] [:set :seon.program/identity]]}
+  [row]
+  (let [nodes (tree-seq coll? seq row)
+        identities (set program/identity-attributes)]
+    (into
+     (into (if-let [[attribute] (program/row-identity row)]
+             #{[:seon.schema/key attribute]} #{})
+           (filter #(and (vector? %) (= 2 (count %)) (identities (first %)))) nodes)
+     (mapcat
+      (fn [node]
+        (when (map? node)
+          (concat
+           (map #(vector :seon.fn/sym %)
+                (concat (:seon.fn/calls node) (:seon.fn/references node)
+                        (:seon.fn/unresolved-references node) (:seon.test/reach node)
+                        (when-let [subject (:seon.test/subject node)] [subject])
+                        (when-let [target (:seon.ns.refer/target-name node)]
+                          [(symbol (str (:seon.ns.refer/target-ns node)) (str target))])))
+           (map #(vector :seon.ns/name %)
+                (concat (:seon.ns/requires node)
+                        (keep node [:seon.ns.alias/target-ns :seon.ns.refer/target-ns])))
+           (map #(vector :seon.schema/key %)
+                (concat (:seon.fn.arity/input-refs node) (:seon.fn.arity/output-refs node)
+                        (:seon.fn.arity/guard-refs node) (:seon.schema/references node)
+                        (:seon.fn/keywords node)
+                        (keep node [:seon.program/row-schema]))))))
+      nodes))))
+
+(defn publication-inputs
+  "Changed files plus the recorded referrer closure of changed declarations.
+  Extra published rows carry schema and recorded test-reach edges omitted by
+  the static manifest. Privacy does not alter the graph relation."
+  {:malli/schema [:=> [:cat :seon.fn.manifest/manifest :seon.fn.manifest/manifest
+                       [:set :string] :seon.program/rows] [:set :string]]}
+  [before after changed-paths published-rows]
+  (let [before-artifacts (:seon.fn.manifest/artifacts before)
+        after-artifacts (:seon.fn.manifest/artifacts after)
+        digests #(into {} (mapcat (fn [artifact]
+                                   (or (:seon.fn.file/declaration-digests artifact)
+                                       (declaration-digests (:seon.fn.file/rows artifact))))) %)
+        old (merge (digests before-artifacts) (:seon.fn.manifest/declaration-digests before))
+        current (merge (digests after-artifacts) (:seon.fn.manifest/declaration-digests after))
+        seeds (into #{} (filter #(not= (get old %) (get current %)))
+                    (concat (keys old) (keys current)))
+        artifacts (concat before-artifacts after-artifacts)
+        rows (concat published-rows (mapcat :seon.fn.file/rows artifacts))
+        symbol-identities (into {} (keep (fn [row]
+                                           (when-let [sym (or (:seon.fn/sym row) (:seon.test/sym row))]
+                                             [sym (program/row-identity row)]))) rows)
+        incoming (reduce (fn [index row]
+                           (if-let [caller (program/row-identity row)]
+                             (reduce #(update %1 %2 (fnil conj #{}) caller)
+                                     index (map (fn [[attribute value :as target]]
+                                                  (if (= :seon.fn/sym attribute)
+                                                    (get symbol-identities value target)
+                                                    target))
+                                                (declaration-targets row)))
+                             index)) {} rows)
+        reached (selection/declaration-closure incoming seeds)]
+    (into changed-paths
+          (keep (fn [artifact]
+                  (when (some reached (:seon.fn.file/identities artifact))
+                    (:seon.fn.file/relative-path artifact)))) artifacts)))
+
 (defn- manifest-data
   [directory roots artifacts]
   (let [artifacts (->> artifacts
@@ -2147,50 +2251,126 @@
                    (:seon.fn.manifest/relative-roots manifest)
                    (concat retained desired-artifacts))))
 
+(defn toolchain-digest
+  "Digest producer files through the graph's requires closure from indexing.
+  Namespace membership derives from the supplied graph, never a file roster.
+  Input digests describe the candidate tree, including removed producer files."
+  {:malli/schema [:=> [:cat :seon.fn.manifest/manifest
+                       [:map-of :string :string] [:map-of :string :string]]
+                  :seon.source/toolchain-digest]}
+  [manifest input-digests dependency-digests]
+  (let [artifacts (:seon.fn.manifest/artifacts manifest)
+        namespaces (into {} (comp (mapcat :seon.fn.file/rows)
+                                   (filter :seon.ns/name)
+                                   (map (juxt :seon.ns/name identity))) artifacts)
+        ; These are execution entry points, not a list of their dependencies.
+        entries ['seon.fn/build-manifest 'seon.fn/index!]
+        requires (into {} (map (fn [[name row]]
+                                 [[:seon.ns/name name]
+                                  (into #{} (comp (filter namespaces)
+                                                  (map #(vector :seon.ns/name %)))
+                                        (:seon.ns/requires row))])) namespaces)
+        reached (selection/declaration-closure
+                 requires (into #{} (map #(vector :seon.ns/name (symbol (namespace %)))) entries))
+        paths (into (sorted-set)
+                    (keep (fn [artifact]
+                            (when (some #(reached [:seon.ns/name (:seon.ns/name %)]) (:seon.fn.file/rows artifact))
+                              (:seon.fn.file/relative-path artifact)))) artifacts)]
+    (id/digest 64 [(into (sorted-map) (map #(vector % (get input-digests %))) paths)
+                   (into (sorted-map) dependency-digests)])))
+
+(defn- analyzed-artifacts
+  {:malli/schema [:=> [:cat :map :seon.fn/roots :string
+                       [:vector :string]
+                       [:set :qualified-symbol] [:or :nil :string]]
+                  [:vector :seon.fn.file/artifact]]}
+  [forms roots directory paths known-functions cache-root]
+  (if (empty? paths)
+    []
+    (let [files (mapv io/file paths)
+          contexts (source-contexts files)
+          analysis (analyzer/analyze
+                    (cond-> {::analyzer/sources (update-vals contexts :text)
+                             ::analyzer/config-root (str (io/file directory analyzer/config-directory))}
+                      cache-root (assoc ::analyzer/cache-root cache-root)))
+          functions (into known-functions (first-party-function-symbols analysis))
+          _ (assert-clean-analysis! analysis functions)
+          findings (group-by ::analyzer/filename (publication-findings analysis functions))
+          rows (analysis-rows-by-file analysis functions contexts (set (keys forms)) forms)
+          row-shapes (program/shapes-in forms)]
+      (mapv (fn [file]
+              (let [path (.getCanonicalPath ^java.io.File file)]
+                (artifact row-shapes directory file (containing-root directory roots file)
+                          (get contexts path) (get rows path []) (get findings path []))))
+            files))))
+
 (defn build-manifest
-  "Build deterministic artifacts for the complete first-party program."
+  "Build the complete manifest, analyzing only changed inputs and referrers.
+  Incremental requests carry the previous manifest, published graph rows and
+  an isolated clj-kondo resolver cache cloned from that publication."
   {:malli/schema
    [:=> [:cat [:map
               [:seon.fn/roots :seon.fn/roots]
               [:seon.fn/root {:optional true} :string]
+              [:seon.fn/previous-manifest {:optional true} :seon.fn.manifest/manifest]
+              [:seon.fn/published-rows {:optional true} :seon.program/rows]
+              [::analyzer/cache-root {:optional true} :string]
               [:seon.schema.projection/forms {:optional true} :map]]]
     :seon.fn.manifest/manifest]}
   [request]
   (let [forms (declaration-forms request)
-        row-shapes (program/shapes-in forms)
         directory (fs/absolute-path (fs/source-directory) (or (:seon.fn/root request) "."))
         roots (:seon.fn/roots request)
         files (source-files directory roots)
-        contexts (source-contexts files)
-        analysis (analyzer/analyze
-                  {::analyzer/sources (update-vals contexts :text)})
-        first-party-functions (first-party-function-symbols analysis)
-        _ (assert-clean-analysis! analysis first-party-functions)
-        findings-by-file
-        (group-by ::analyzer/filename
-                  (publication-findings analysis first-party-functions))
-        rows-by-file
-        (analysis-rows-by-file analysis first-party-functions contexts
-                               (set (keys forms)) forms)
-        artifacts
-        (mapv (fn [file]
-                (artifact row-shapes
-                          directory file
-                          (containing-root directory roots file)
-                          (get contexts (.getCanonicalPath ^java.io.File file))
-                          (get rows-by-file
-                               (.getCanonicalPath ^java.io.File file)
-                               [])
-                          (get findings-by-file
-                               (.getCanonicalPath ^java.io.File file)
-                               [])))
-              files)
-        manifest
-        (manifest-data
-         directory
-         (mapv (partial fs/relative-path directory) roots)
-         artifacts)]
-    manifest))
+        relative-roots (mapv (partial fs/relative-path directory) roots)
+        previous (:seon.fn/previous-manifest request)
+        dependencies (test.cache/toolchain-dependencies directory #{analyzer/config-directory})
+        schema-digests (into {} (map (fn [[key form]]
+                                      [[:seon.schema/key key] (id/digest 64 [form])])) forms)
+        cache-root (::analyzer/cache-root request)
+        files-by-path (into {} (map #(vector (fs/relative-path directory (.getCanonicalPath ^java.io.File %)) (.getCanonicalPath ^java.io.File %))) files)
+        input-digests (update-vals files-by-path current-file-digest)
+        reusable? (and previous
+                       (= (:seon.source/toolchain-digest previous)
+                          (toolchain-digest previous input-digests dependencies)))]
+    (if-not reusable?
+      (let [_ (when (and previous cache-root)
+                (analyzer/forget-namespaces!
+                 cache-root (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.ns/name))
+                                  (:seon.fn.manifest/artifacts previous))))
+            manifest (manifest-data directory relative-roots
+                       (analyzed-artifacts forms roots directory (vec (vals (into (sorted-map) files-by-path))) #{} cache-root))]
+        (assoc manifest :seon.source/toolchain-digest
+               (toolchain-digest manifest input-digests dependencies)
+               :seon.fn.manifest/declaration-digests schema-digests))
+      (do
+        (when-not cache-root
+          (throw (ex-info "Incremental analysis requires its publication's isolated resolver cache."
+                          {:seon.error/kind ::index-refused :seon.fn/index-refused true})))
+        (let [previous (assoc previous :seon.fn.manifest/root directory)
+              old-artifacts (:seon.fn.manifest/artifacts previous)
+              old-digests (into {} (map (juxt :seon.fn.file/relative-path :seon.fn.file/digest)) old-artifacts)
+              changed (into #{} (filter #(not= (get old-digests %)
+                                               (get input-digests %)))
+                            (concat (keys old-digests) (keys files-by-path)))
+              changed-artifacts (filter #(changed (:seon.fn.file/relative-path %)) old-artifacts)
+              changed-namespaces (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.ns/name)) changed-artifacts)
+              _ (analyzer/forget-namespaces! cache-root changed-namespaces)
+              known (set (manifest-function-symbols previous))
+              first-artifacts (analyzed-artifacts forms roots directory
+                                                  (vec (keep files-by-path (sort changed))) known cache-root)
+              retained (remove #(changed (:seon.fn.file/relative-path %)) old-artifacts)
+              candidate (assoc (manifest-data directory relative-roots (concat retained first-artifacts))
+                               :seon.fn.manifest/declaration-digests schema-digests)
+              affected (publication-inputs previous candidate changed (or (:seon.fn/published-rows request) []))
+              additional (set/difference affected changed)
+              additional-artifacts (analyzed-artifacts forms roots directory
+                                      (vec (keep files-by-path (sort additional)))
+                                      (into known (manifest-function-symbols candidate)) cache-root)
+              result (replace-manifest-artifacts candidate additional-artifacts)]
+          (assoc result :seon.source/toolchain-digest
+                 (toolchain-digest result input-digests dependencies)
+                 :seon.fn.manifest/declaration-digests schema-digests))))))
 
 (defn- row-by-identity
   [rows]
@@ -2333,13 +2513,15 @@
   [request]
   (into []
         (mapcat :seon.fn.file/rows)
-        (:seon.fn.manifest/artifacts
+        (cond->> (:seon.fn.manifest/artifacts
          (or (:seon.fn/manifest request)
              (when (seq (:seon.fn/roots request))
                (build-manifest request))
              (throw
               (ex-info "Program rows require a manifest or source roots."
-                       {:seon.error/kind ::index-refused :seon.fn/index-refused true}))))))
+                       {:seon.error/kind ::index-refused :seon.fn/index-refused true}))))
+          (:seon.fn/changed-paths request)
+          (filter #((:seon.fn/changed-paths request) (:seon.fn.file/relative-path %))))))
 
 (defn- assert-one-row-per-identity!
   [desired]
@@ -2365,14 +2547,16 @@
          ::missing-population identity-attr :seon.fn/index-refused true})))))
 
 (defn- add-contract-facts
-  [rows progress!]
+  ([rows progress!] (add-contract-facts rows progress! nil))
+  ([rows progress! supplied-projection]
   (let [schema-forms
+        (or (:seon.schema.projection/forms supplied-projection)
         (into (sorted-map)
               (keep (fn [{schema-key :seon.schema/key
                           form-string :seon.schema/form}]
                       (when schema-key
                         [schema-key (edn/read-string form-string)])))
-              rows)
+              rows))
         function-contracts
         (into (sorted-map)
               (keep (fn [{function-symbol :seon.fn/sym
@@ -2386,9 +2570,10 @@
                 (count schema-forms) " schemas, "
                 (count function-contracts) " functions"))
         projection
-        (schema/build-projection
-         schema-forms function-contracts
-         {:seon.schema/validate-render-contracts? true})
+        (or supplied-projection
+            (schema/build-projection
+             schema-forms function-contracts
+             {:seon.schema/validate-render-contracts? true}))
         _ (report-index-progress! progress! "contract projection complete")
         compile-options (:seon.schema.projection/compile-options projection)
         predicate-functions (schema/predicate-functions-in projection)
@@ -2430,7 +2615,7 @@
     (schema-shape/assert-consistent!
      (filter :seon.schema.shape/fingerprint
              (mapcat #(filter map? (tree-seq coll? seq %)) parsed-rows)))
-    parsed-rows))
+    parsed-rows)))
 
 (defn backfill-contract-facts!
   "Backfill every contracted function missing either parsed component root.
@@ -2530,13 +2715,54 @@
     {:seon.reconcile/converged? (empty? tx-data)
      :seon.reconcile/operations (count missing)}))
 
+(defn- changed-schema-keys
+  {:malli/schema [:=> [:cat :seon.fn/index-request] [:set :keyword]]}
+  [request]
+  (let [before (get-in request [:seon.fn/previous-manifest :seon.fn.manifest/declaration-digests])
+        after (get-in request [:seon.fn/manifest :seon.fn.manifest/declaration-digests])]
+    (into #{} (keep (fn [[attribute key :as identity]]
+                     (when (and (= attribute :seon.schema/key)
+                                (not= (get before identity) (get after identity)))
+                       key)))
+          (concat (keys before) (keys after)))))
+
+(defn- incremental-projection
+  "Reuse the prior declaration world for body edits; rebuild only when its
+  schema or contract population actually changes. The bridge owns compilation."
+  {:malli/schema [:=> [:cat :seon.fn/index-request :seon.program/rows] [:or :nil :map]]}
+  [request source-rows]
+  (when-let [database (:seon.source/previous-database request)]
+    (let [prior (or (db/carried-projection database) (schema/projection-from-database database))
+          paths (:seon.fn/changed-paths request)
+          old-rows (rows {:seon.fn/manifest (:seon.fn/previous-manifest request)
+                          :seon.fn/changed-paths paths})
+          forms (merge (apply dissoc (:seon.schema.projection/forms prior)
+                              (concat (keep :seon.schema/key old-rows)
+                                      (changed-schema-keys request)))
+                       (declaration-forms request)
+                       (into {} (keep #(when (:seon.schema/key %)
+                                         [(:seon.schema/key %) (edn/read-string (:seon.schema/form %))])) source-rows))
+          contracts (merge (apply dissoc (:seon.schema.projection/function-contracts prior)
+                                  (keep :seon.fn/sym old-rows))
+                           (into {} (keep #(when (:seon.fn/spec %)
+                                             [(:seon.fn/sym %) (edn/read-string (:seon.fn/spec %))])) source-rows))]
+      (if (and (= forms (:seon.schema.projection/forms prior))
+               (= contracts (:seon.schema.projection/function-contracts prior)))
+        prior
+        (schema/build-projection forms contracts
+          {:seon.schema/predicate-functions (schema/predicate-functions-in prior)
+           :seon.schema/validate-render-contracts? true})))))
+
 (defn- desired-rows
   [request progress!]
   (let [source-rows (rows request)
-        packaged-forms (schema.edn/packaged-forms)
+        packaged-forms (declaration-forms request)
+        partial? (some? (:seon.fn/changed-paths request))
+        selected-forms (if partial? (select-keys packaged-forms (changed-schema-keys request)) packaged-forms)
         canonical-schemas
-        (mapv (partial accretion/schema-row packaged-forms)
-              (schema/canonical-schema-rows packaged-forms))
+        (if (seq selected-forms)
+          (mapv (partial accretion/schema-row packaged-forms)
+                (schema/canonical-schema-rows selected-forms)) [])
         canonical-keys (into #{} (map :seon.schema/key) canonical-schemas)
         source-only
         (remove (fn [row]
@@ -2554,7 +2780,8 @@
     (add-contract-facts
      (mapv #(assoc % :seon.schema.admission/source :core)
            (into (vec source-only) canonical-schemas))
-     progress!)))
+     progress!
+     (when partial? (incremental-projection request source-rows)))))
 
 (defn- commit-index-phase!
   [connection process progress! phase tx-data]
@@ -2944,7 +3171,7 @@
        (let [_ (when source-database
                  (report-index-progress! progress! "development published rows read"))
              _ (assert-one-row-per-identity! rows)
-             _ (assert-populated! rows)
+             _ (when-not (:seon.fn/changed-paths request) (assert-populated! rows))
              existing (some (fn [identity-attribute]
                               (db/q '[:find ?entity .
                                      :in $ ?attribute
@@ -2957,6 +3184,15 @@
                         ::existing-program-entity existing :seon.fn/index-refused true})))
      (if previous-database
        (let [previous-identities
+             (if-let [paths (:seon.fn/changed-paths request)]
+               (do
+                 (when-not (and previous-database (:seon.fn/previous-manifest request))
+                   (throw (ex-info "Incremental indexing requires its published database and manifest."
+                                   {:seon.error/kind ::index-refused :seon.fn/index-refused true})))
+                 (into (vec (map #(vector :seon.schema/key %) (changed-schema-keys request)))
+                       (mapcat :seon.fn.file/identities)
+                       (filter #(paths (:seon.fn.file/relative-path %))
+                               (get-in request [:seon.fn/previous-manifest :seon.fn.manifest/artifacts]))))
              (into []
                    (mapcat
                     (fn [attribute]
@@ -2968,7 +3204,7 @@
                                    [?entity :seon.schema.admission/source :core]]
                                  previous-database attribute))))
                    (filter #(get (:schema previous-database) %)
-                           program/identity-attributes))
+                           program/identity-attributes)))
              projection (schema/handed-projection)
              _ (report-index-progress! progress! "development reconciliation transaction")
              report

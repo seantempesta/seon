@@ -64,6 +64,18 @@
           :when (qualified-symbol? called)]
       [caller [:seon.fn/sym called]])))
 
+(defn declaration-closure
+  "Walk supplied declaration adjacency, retaining removed seeds."
+  {:malli/schema [:=> [:cat [:map-of :seon.program/identity [:set :seon.program/identity]]
+                       [:set :seon.program/identity]] [:set :seon.program/identity]]}
+  [callers-of seeds]
+  (loop [reached seeds frontier seeds]
+    (if (empty? frontier)
+      reached
+      (let [next-frontier (into #{} (comp (mapcat #(get callers-of %))
+                                        (remove reached)) frontier)]
+        (recur (into reached next-frontier) next-frontier)))))
+
 (defn reaching-tests
   "Test symbols reaching any identity defined in `changed-paths`.
 
@@ -93,16 +105,7 @@
                       (update index called (fnil conj #{}) caller))
                     {}
                     (mapcat row-edges rows))
-        reached (loop [reached seeds
-                       frontier seeds]
-                  (if (empty? frontier)
-                    reached
-                    (let [next-frontier
-                          (into #{}
-                                (comp (mapcat #(get callers-of %))
-                                      (remove reached))
-                                frontier)]
-                      (recur (into reached next-frontier) next-frontier))))]
+        reached (declaration-closure callers-of seeds)]
     (let [by-file (mapcat
                    (fn [artifact]
                      (let [file-rows (:seon.fn.file/rows artifact)]

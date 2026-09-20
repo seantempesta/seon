@@ -136,7 +136,7 @@ Held paths at launch are named in the launch text; name, never edit.
 ## Rules
 
 One JVM at a time, foreground; never a worktree; iterate with
-`bin/test-fast --paths <owned files> -- seon.test.cache-test seon.cluster.source-test
+`bin/test-fast --paths <owned files> -- seon.test-cache-test seon.cluster.source-test
 seon.test-runner-test seon.fn-test` plus affected namespaces; never a cold
 gate; never touch `default` (verify item 2 on an owned scratch root:
 `bin/seon --root tmp/publication-root start`, downed and deleted before

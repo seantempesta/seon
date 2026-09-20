@@ -4,11 +4,14 @@
  :seon.fn.manifest/artifacts [:vector :seon.fn.file/artifact]
  :seon.fn.manifest/identities [:vector :seon.program/identity]
  :seon.fn.manifest/findings [:vector :map]
+ :seon.fn.manifest/declaration-digests :seon.fn.file/declaration-digests
  :seon.fn.manifest/manifest
  [:map
   [:seon.fn.manifest/root :seon.fn.manifest/root]
   [:seon.fn.manifest/relative-roots :seon.fn.manifest/relative-roots]
   [:seon.fn.manifest/digest :seon.fn.manifest/digest]
+  [:seon.source/toolchain-digest {:optional true} :seon.source/toolchain-digest]
+  [:seon.fn.manifest/declaration-digests {:optional true} :seon.fn.manifest/declaration-digests]
   [:seon.fn.manifest/artifacts :seon.fn.manifest/artifacts]
   [:seon.fn.manifest/findings {:optional true} :seon.fn.manifest/findings]
   [:seon.fn.manifest/identities :seon.fn.manifest/identities]]}

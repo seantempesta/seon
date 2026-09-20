@@ -10,7 +10,9 @@
             [cognitect.transit :as transit]
             [clojure.string :as str]))
 
-(def ^:private config-directory ".clj-kondo")
+(def config-directory
+  "The analyzer configuration input root, shared with publication identity."
+  ".clj-kondo")
 (def ^:private cache-directory ".clj-kondo/.cache")
 
 (def ^:private location-keys
@@ -259,7 +261,7 @@
   [options]
   ;; Complete source is authoritative. Old synthesized entries and entries
   ;; whose source was removed cannot answer for an unanalysed language arm.
-  (when-not (false? (:cache options))
+  (when-not (or (contains? options :cache-dir) (false? (:cache options)))
     (discard-obsolete-cache-entries! {}))
   (let [options (merge {:lang :clj
            :config-dir config-directory
@@ -276,10 +278,24 @@
                       (get-in result [:analysis :namespace-definitions]))]
     ;; A current namespace declaration outranks a retained copy in any other
     ;; language's cache, even when that old build artifact still exists.
-    (if (and (not (false? (:cache options)))
+    (if (and (= cache-directory (:cache-dir options))
+             (not (false? (:cache options)))
              (seq (discard-obsolete-cache-entries! sources)))
       (clj-kondo/run! options)
       result)))
+
+(defn forget-namespaces!
+  "Remove superseded declarations from one explicitly owned resolver cache."
+  {:malli/schema [:=> [:cat :string [:set :symbol]] :nil]}
+  [directory namespaces]
+  (let [root (kondo.core/resolve-cache-dir config-directory true directory)]
+    (kondo.cache/with-thread-lock
+      (kondo.cache/with-cache root 6
+        (doseq [language [:clj :cljc :cljs]
+                namespace-name namespaces]
+          (java.nio.file.Files/deleteIfExists
+           (.toPath (kondo.cache/cache-file root language namespace-name)))))))
+  nil)
 
 (defn- delete-tree!
   "Delete one directory this namespace created, never following a symlink."
@@ -397,6 +413,8 @@
     [:cat
      [:map
       [::paths {:optional true} [:vector {:min 1} [:string {:min 1}]]]
+      [::cache-root {:optional true} :string]
+      [::config-root {:optional true} :string]
       [::sources {:optional true}
        [:map-of {:min 1} [:string {:min 1}] :string]]]]
     [:map
@@ -407,7 +425,7 @@
      [::protocol-impls [:vector :map]]
      [::keywords [:vector :map]]
      [::findings [:vector :map]]]]}
-  [{::keys [paths sources]}]
+  [{::keys [paths sources cache-root config-root]}]
   (when-not (or (seq paths) (seq sources))
     (throw (ex-info "Analysis requires either captured sources or paths."
                     {:seon.error/kind ::analysis-refused})))
@@ -439,7 +457,9 @@
                   ;; carries the checkout file's own captured bytes, and
                   ;; `checkout-source?` reads the source path back out of it.
                   (cond-> {:lint lint-paths :config publication-config}
-                    (not (every? checkout-source? lint-paths))
+                    cache-root (assoc :cache-dir cache-root)
+                    config-root (assoc :config-dir config-root)
+                    (and (nil? cache-root) (not (every? checkout-source? lint-paths)))
                     (assoc :cache false))))
                  (finally
                    (when mirror-root (delete-tree! mirror-root))))

@@ -35,6 +35,29 @@
        (contains? #{"defn" "defn-"} (name operation))
        (contains? #{nil "clojure.core"} (namespace operation))))
 
+(defn declaration-metadata
+  "Read authored declaration metadata without evaluating or retaining its body."
+  {:malli/schema [:=> [:cat :string :symbol [:map-of :symbol :symbol]] :map]}
+  [source namespace-name aliases]
+  (let [form (read-source source namespace-name aliases)
+        operation (first form)
+        core-operation (when (and (symbol? operation)
+                                  (contains? #{nil "clojure.core"} (namespace operation)))
+                         (symbol (name operation)))
+        function-declaration? (contains? #{'defn 'defn- 'defmacro} core-operation)
+        attribute-map? (or function-declaration? (contains? #{'ns 'defmulti} core-operation))
+        after-name (drop 2 form)
+        after-doc (if (string? (first after-name)) (next after-name) after-name)
+        attributes (when (and attribute-map? (map? (first after-doc))) (first after-doc))
+        declarations (if attributes (next after-doc) after-doc)]
+    ;; core.clj:305-319: a trailing attribute map belongs to the multi-arity
+    ;; declaration only. A map in a single-arity body or def value is a body.
+    (merge {} (dissoc (meta form) :line :column :end-line :end-column)
+           (meta (first form)) (meta (second form)) attributes
+           (when (and function-declaration? (not (vector? (first declarations)))
+                      (map? (last declarations)))
+             (last declarations)))))
+
 (defn- declaration-parts
   [form]
   (when-not (and (seq? form)

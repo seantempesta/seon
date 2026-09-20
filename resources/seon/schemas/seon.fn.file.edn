@@ -17,11 +17,14 @@
  :seon.fn.file/rows :seon.program/rows
  :seon.fn.file/identities [:vector :seon.program/identity]
  :seon.fn.file/findings [:vector :map]
+ :seon.fn.file/declaration-digests
+ [:map-of :seon.program/identity :seon.source/digest]
  :seon.fn.file/first-party-functions [:vector :seon.fn/sym]
  :seon.fn.file/artifact
  [:map
   [:seon.fn.file/relative-path :seon.fn.file/relative-path]
   [:seon.fn.file/digest :seon.fn.file/digest]
   [:seon.fn.file/rows :seon.fn.file/rows]
+  [:seon.fn.file/declaration-digests {:optional true} :seon.fn.file/declaration-digests]
   [:seon.fn.file/findings {:optional true} :seon.fn.file/findings]
   [:seon.fn.file/identities :seon.fn.file/identities]]}

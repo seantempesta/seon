@@ -84,3 +84,16 @@ analysis. A canonical publication regression changes a callee declaration
 without editing its caller and compares the incremental findings and program
 facts with complete analysis. Repeated unchanged requests reuse the evidence;
 missing dependency evidence never reports a cache hit.
+
+
+## Ruled toolchain identity and implementation status
+
+The owner accepted `c4ffc428b` and ruled the producer requires closure plus
+vendored pins/dependency coordinates into publication identity. The continuation
+implements that comparison in `seon.fn/build-manifest`, carries its digest to
+the source seal, and extends the general declaration closure and selected-row
+index request. The historical indexer replay now invalidates all inputs and
+compares equal artifacts with complete analysis. The issue remains open until
+the held cluster population/refresh callers adopt the API and the lineage and
+publication-level parity regressions pass. Analysis-level parity is not a claim
+that the three publishers have dissolved or that their evidence history survives.

@@ -26,6 +26,8 @@
                [:seon.source/commit-id :seon.source/commit-id]],
               :digest
               [:re #:seon.db{:identity true} "^[0-9a-f]{64}$"],
+              :toolchain-digest
+              [:and {:seon.db/identity false :description "Content digest of analysis producer namespace files selected by their recorded requires closure, plus dependency coordinates and pins. Observed value survives producer replacement; a change invalidates every analysis artifact."} :seon.source/digest],
               :test-input-digest
               [:and {:seon.db/identity false :description "Digest of the sorted publication input inventory outside the program graph, including pinned gitlink identities. Observed value survives its input files."} :seon.source/digest],
               :digest-request

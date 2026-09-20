@@ -144,8 +144,8 @@
 
 (def gate-input-directories
   "Directories outside the classpath whose files the gate or its fixtures
-  read: the shipped config manifests."
-  #{"config"})
+  read: shipped config manifests and analyzer configuration/hooks."
+  #{"config" ".clj-kondo"})
 
 (declare gitlink-digests)
 
@@ -211,6 +211,21 @@
                       [(subs line (inc tab))
                        (sha-256 (.getBytes ^String (second tokens) "UTF-8"))]))))
           (str/split-lines text))))
+
+(defn toolchain-dependencies
+  "The gate's pinned dependencies plus the analyzer's declared configuration.
+  Inputs come from the same Git/snapshot inventory; ignored caches are absent."
+  {:malli/schema [:=> [:cat :string [:set :string]] [:map-of :string :string]]}
+  [root configuration-roots]
+  (let [root (.getCanonicalPath (io/file root))
+        roots (conj configuration-roots "deps.edn")]
+    (into (gitlink-digests root)
+          (comp (filter #(input-path? roots %))
+                (keep (fn [path]
+                        (let [file (io/file root path)]
+                          (when (.isFile file)
+                            [path (sha-256 (Files/readAllBytes (.toPath file)))])))))
+          (input-paths root))))
 
 (defn input-digests
   "Path/content digests of snapshot files and pinned gitlinks.

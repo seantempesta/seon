@@ -614,3 +614,308 @@ Pre-commit namespace load of `seon.fn.analyzer`, `seon.fn`, and
 `seon.cluster.source` returned `:loads`, exit 0, after removing the prototype.
 Log: `tmp/publication-dissolution/toolchain-precommit-load.log`. This used the
 shared checkout including foreign dirty bridge bytes, not a clean-HEAD gate.
+
+
+## Toolchain ruling implementation — 2026-09-20 continuation
+
+The owner accepted `c4ffc428b` and chose the shared toolchain identity. The
+prototype is now restored and extended in the existing analysis/index owners.
+The entry points are `seon.fn/build-manifest` and `seon.fn/index!`; producer
+membership follows namespace requires facts with the existing test-selection
+closure. The digest includes those files, the gate's recorded gitlinks and
+`deps.edn`, and the analyzer's declared `.clj-kondo` configuration/hooks.
+Configuration is resolved under the supplied source root. The published source
+seal can carry `:seon.source/toolchain-digest`; manifests retain declaration
+identities/digests. A changed producer forces complete analysis in the regression.
+
+Application invalidation follows stored declaration edges, including private
+references, namespace requires/alias/refer, schema contracts, test subjects/reach,
+and stored row-schema relationships. Selected-file indexing hands only those
+files' rows and changed schema declarations to the existing transaction owner.
+An unchanged contract population reuses its supplied projection. The canonical
+fixture verifies that indexing one function body leaves a stranger's row intact.
+
+This is preparation for item 1, not its completion. The three publication paths
+remain; no end-to-end speedup or lineage guarantee is claimed. The publisher
+must still own isolated resolver-cache generations, acquire the previous graph,
+and call these incremental APIs. Persistent analysis caching and the live-JVM
+and finding-delta items remain pending.
+
+Intermediate evidence: `fd647ef3a7e1` passed 2 tests / 27 assertions;
+`167249f3142b` passed 3 tests / 29 assertions. A previous schema fixture omitted
+canonical renderer contracts and failed; it was corrected to use the canonical
+previous database. A bare schema keyword supplied to `id/digest` also failed
+under arming and was corrected to a collection input. These are lane defects,
+not foreign failures. Logs are under `tmp/publication-dissolution/`.
+
+The required command in the spec named the nonexistent `seon.test.cache-test`;
+the actual namespace is `seon.test-cache-test` in `test/seon/test_cache_test.clj`.
+The spec spelling is corrected. The first broad invocation failed loading that
+namespace before test execution. One subsequent waiting snapshot was cancelled
+before JVM acquisition after a syntax error was caught; the source was repaired
+before retrying. No unchanged completed suite was rerun for either attempt.
+
+
+### Remaining coordinated conversion
+
+The held `src/seon/cluster.clj:1741` population currently hands `index!` its
+previous database only when `change-classes` is non-nil, and does not carry a
+previous manifest or selected paths. Its full/incremental refresh owners still
+choose separate builders. Changing the source publisher to branch the current
+lineage without this population conversion would hit the indexer's existing
+fresh-branch refusal. These callers must change in one coherent integration.
+The `result-preservation-tx` and `preserved-evidence-tx` copies in
+`src/seon/cluster/source.clj` then disappear; their test callers must convert
+in that same slice. `src/seon/test/runner.clj` and
+`test/seon/test_failure_facts_test.clj` are now clean following the other lane's
+landing, but the cluster population and both schema owners remain dirty/held.
+
+The pending lineage regression must retain `selection-tx` (including its as-of
+meaning), member `claim-tx`, `completed-tx`, `terminated-tx`, and `covered-by`.
+Their exact reader evidence is in the results-reuse note's "Publication-dissolution
+must retain these references" paragraph. It must record a result, publish one
+changed file, and select the recorded result for reuse.
+
+A source-reader review also corrected declaration metadata grammar: a map-valued
+`def` or a map expression in a function/test body is not an attribute map;
+a multi-arity function's trailing attribute map is metadata. Grounding:
+`reference-code/clojure/src/clj/clojure/core.clj:305–319`, `:452`, `:1762`,
+`:5921`. The focused regression checks both cases without another fixture build.
+
+
+Toolchain provenance alone does not verify the code loaded in a live JVM.
+The live publication entry must compare its executing producer generation with
+the requested toolchain identity before reuse; that admission remains part of
+the coordinated publisher conversion. A toolchain/pin change also requires a
+fresh dependency resolver generation, rather than retaining old external kondo
+cache entries. The current incremental request deliberately requires an explicit
+caller-owned cache root, but generation acquisition has not yet been connected.
+
+
+### Existing complete-publication baseline in the required fast pass
+
+The `incremental-first-party-publication-retains-complete-scalar-rows` test
+measured **77,697.430167 ms** for its complete publication. Its manifest was
+already prepared: this excludes analysis and JVM startup. This is the old
+publisher with the new prerequisite code, not an after measurement of the
+shared incremental path. The test passed. The existing progress callback
+prints the elapsed duration of the **previous** phase, so the labels below
+name the work measured (`test/seon/cluster/source_test.clj:423`).
+
+| Phase | Milliseconds |
+|---|---:|
+| publication start | 360 |
+| schema population started | 1060 |
+| schema population complete | 0 |
+| instruction rows | 36 |
+| program rows started | 2344 |
+| contract projection started: 3239 schemas, 1449 functions | 1351 |
+| contract projection complete | 7394 |
+| contract rows: 1884/11302 | 7746 |
+| contract rows: 3768/11302 | 836 |
+| contract rows: 5652/11302 | 150 |
+| contract rows: 7536/11302 | 632 |
+| contract rows: 9420/11302 | 2572 |
+| contract rows: 11302/11302 | 7840 |
+| program population compiled: 33272 entities, 25337 identities, 41173 keyword facts | 30982 |
+| population: 99782/99782 | 0 |
+| program rows complete | 0 |
+| initialization rows | 1279 |
+| publication issue indexing | 4469 |
+| publication test evidence | 0 |
+| publication activation seal | 552 |
+| publication branch head | 8084 |
+
+Raw log: `tmp/publication-dissolution/owned-regression-final-fast.log`.
+The controlled one-file commit measurement, analysis timing, and after figures
+remain owed until the common publisher and held callers are connected.
+
+
+The broad pass exposed four assertions in the existing evidence/race case.
+Two expected empty recording to leave the head/basis unchanged; the current
+writer deliberately records its run event, including zero results. The test now
+queries that event positively. The other two found a real no-op publication:
+`upsert!` appended unchanged source/input identity facts after the activation
+owner had correctly returned an empty change set. That map is now appended only
+when its facts differ on the privately owned scratch connection. The source-head
+CAS remains unchanged. Issue:
+`docs/seon/issues/unchanged-publication-identity-facts-still-advance-the-branch.md`.
+
+The evidence/race case is moved intact to `seon.cluster.source-evidence-test`
+(with its platform status and an explicit 600,000 ms bound), allowing its focused
+verification without repeating every full-publication fixture. Its previous
+public test name has no callers in `src/` or `test/`. The declaration-reader
+regression likewise has its own `seon.fn.publication-signature-test` namespace.
+
+
+The activation-refusal regression also repeated five complete publications for
+one refusal class. Its focused version supplies all five missing prerequisites
+at once and asserts that the report retains every one, that no source/cluster
+branch is published, and that scratch is retired. It uses the same `with-store`,
+real population, and activation boundary. Four redundant complete fixture builds
+are deleted from that test; the old measured duration and focused replacement's
+duration are reported with the final test evidence below.
+
+The remaining publisher integration must acquire graph edges without truncated
+wildcard pulls (cardinality-many pull defaults to 1,000). Static artifact rows
+already carry their recorded edges; current recorded test reach and canonical
+schema relationships must be handed completely or queried through the database's
+indexes. The prototype's `published-rows` argument is explicit data, not permission
+to rebuild a full database projection on every one-file publication.
+
+
+The source suite's `populate-schema!` helper now hands `populate-source!` the
+canonical `@test-support/source-manifest`, as the existing program-publication
+regression already does. Previously every synthetic publication asked `index!`
+to analyze the entire unchanged checkout again. This reuses the fixture's real
+complete analysis; population, armed contracts, database transactions, and
+activation still execute through the production owners. No row roster or mock
+population is introduced.
+
+
+### Discovered validation boundary in the required runner namespace
+
+The broad fast invocation was stopped, exit 143, at
+`seon.test-runner-test/concurrent-bin-test-invocations-both-reach-their-tallies`.
+That fixture launches two **real cold gates**, explicitly applying
+`as-orchestrator` to their environments. It cannot run inside the assignment's
+one-JVM/no-cold-gate constraint. A nested JVM (32918) had started beneath our
+JVM (15851) before the fixture's source was inspected. Both and all enumerated
+child gate processes were terminated; absence was verified and `run.O81Ldt`
+was removed by the launcher. This corrects any implication that this entire
+invocation remained within one JVM: it did not. No foreign process was touched.
+
+Issue: `docs/seon/issues/fast-runner-suite-can-launch-cold-gates-and-exceed-lane-jvm-budget.md`.
+The cache and source namespaces completed (four source assertions, corrected
+above); the runner namespace was partial and no final tally was reached.
+The function suites had not executed. They continue with the focused changed
+cases in a separate fast invocation, without repeating completed namespaces.
+The remaining runner validation is explicitly owed to the orchestrator.
+
+
+The first function pass also found two required-observation errors. The owned
+`seon.fn/analyze-forms` refusal lacked `:seon.error/at`, `/layer`, and `/operation`;
+these fields now name the observation at that boundary. The other error is the
+same omission in `test/seon/fn_test.clj`'s refusal fixture. That file is held and
+already has the matching uncommitted correction (plus a bridge API conversion)
+from its owner. Those bytes were inspected, preserved, and excluded from our
+snapshot. The lane fixes the owned production call; it neither copies nor edits
+the held fixture. The namespace is rerun only because this production input changed.
+
+
+### Recorded focused verification
+
+Run `f8e9a506d7fd` (`tmp/publication-dissolution/focused-final-fast.log`):
+**73 executed, 0 unchanged, 533 assertions, 1 failure, 2 errors**. The two
+errors are the diagnostic observations described above (one owned and repaired,
+one held fixture). The failure was our row-schema test editing the outer `:and`
+instead of its nested entity map, so it had changed nothing. The fixture now
+changes the actual map and positively checks that a real doc field is present
+before and absent afterwards. This is a fixture correction, not evidence that
+its previously asserted schema-change case was covered.
+
+The following members passed in that recorded request: all five application
+analysis parity cases, selected-file indexing, the historical toolchain replay,
+configuration-input identity, declaration metadata grammar, and both focused
+source-evidence tests. The no-op seal regression now reports three attempts,
+with no fourth retry for the unchanged B seal. The published toolchain fact and
+empty run event were also positively observed.
+
+The activation-refusal class measured **410.815949 s before** (five complete
+publications in the broad pass) and **72.739101 s after** (one complete
+publication retaining all five missing prerequisites). Four duplicate fixture
+builds were removed: **338.076848 s less, about 82%** in this comparison.
+This is a test-cost measurement, not the spec's unimplemented one-file landing
+latency claim. The evidence/race case took 307.945276 s in the focused pass.
+
+The remaining rerun selects only `seon.fn-test` and `seon.fn.publication-test`,
+whose inputs changed for the owned refusal and corrected schema fixture. Passed
+source-evidence, signature, and toolchain namespaces are not repeated.
+
+
+### Stop boundary and priced choices
+
+Item 1 is **not complete**. This slice supplies declaration/toolchain identity,
+selected analysis and row construction, and a verified no-op seal repair. It
+does not replace the three publisher paths. The required final conversion is
+`src/seon/cluster.clj` (`populate-source!`, `source-base!`, and both refresh
+functions), still dirty and explicitly HELD at launch. The assignment requires
+a stop/report before that conversion. `src/seon/turn.clj`, other cluster owners,
+and `src/seon/schema.clj` / `internal.cljc` remain untouched. The dirty
+`test/seon/fn_test.clj` fixture is also excluded. No worktree was created.
+
+The runner selection conflict additionally crosses the validation boundary.
+Three options (engineering estimates, not measured gate durations):
+
+1. **Recommended: move real child-gate fixtures to an orchestrator integration
+   namespace, preserving their platform coverage.** About 30–60 minutes for
+   the fixture move and selection audit, plus the orchestrator's gate. Lane
+   namespace selection then retains one-JVM semantics. Gives up the current
+   convenience of one namespace containing both pure runner and launcher proofs.
+2. **Keep the fixtures; reserve the whole runner namespace for the orchestrator.**
+   About 10–20 minutes to record the assignment/selection rule, plus each
+   orchestrator run. No runner implementation change. Gives up lane-local
+   runner-suite proof; it remains explicitly owed at every relevant landing.
+3. **Authorize child cold gates for this namespace explicitly.** No fixture
+   refactor; pays the complete child-gate work and overlapping JVMs each time.
+   Gives up the owner's one-JVM/no-cold lane guarantee. Not recommended.
+
+Separately, release the named cluster publication region after its owner lands
+before continuing item 1. Neither choice authorizes editing another lane's
+uncommitted bytes.
+
+Deleted production publisher paths: **none yet**. Four redundant complete
+publication executions were removed from the activation-refusal regression.
+Items 2–4, the actual recorded-result → changed publication → reuse lineage
+regression, full publication digest parity, one-file phase timings, and the
+live scratch-root proof remain owed. The 77.7-second complete baseline above
+excludes analysis/JVM startup and must not be compared as a complete end-to-end
+after measurement. No default operation was performed.
+
+I read the assignment and its named grounding end to end (the specified
+AGENTS sections, working-edge tail, research census sections, both issues,
+and the listed launcher/hook/cache/source/cluster/operator owners). Earlier
+rulings and the dependency finding census remain recorded above.
+
+Owned implementation/test paths in this slice:
+
+- `src/seon/fn.clj`
+- `src/seon/fn/analyzer.clj`
+- `src/seon/fn/signature.cljc`
+- `src/seon/test/selection.clj`
+- `src/seon/test/cache.clj`
+- `src/seon/cluster/source.clj`
+- `resources/seon/schemas/seon.fn.edn`
+- `resources/seon/schemas/seon.fn.file.edn`
+- `resources/seon/schemas/seon.fn.manifest.edn`
+- `resources/seon/schemas/seon.source.edn`
+- `test/seon/cluster/source_test.clj`
+- `test/seon/cluster/source_evidence_test.clj`
+- `test/seon/fn/publication_test.clj`
+- `test/seon/fn/publication_toolchain_test.clj`
+- `test/seon/fn/publication_signature_test.clj`
+
+Cold proof owed to the orchestrator after held-owner integration and the
+runner-selection decision (these commands were NOT run by the lane):
+
+```sh
+bin/test --paths src/seon/fn.clj src/seon/fn/analyzer.clj src/seon/fn/signature.cljc src/seon/test/selection.clj src/seon/test/cache.clj src/seon/cluster/source.clj resources/seon/schemas/seon.fn.edn resources/seon/schemas/seon.fn.file.edn resources/seon/schemas/seon.fn.manifest.edn resources/seon/schemas/seon.source.edn test/seon/cluster/source_test.clj test/seon/cluster/source_evidence_test.clj test/seon/fn/publication_test.clj test/seon/fn/publication_toolchain_test.clj test/seon/fn/publication_signature_test.clj -- seon.test-cache-test seon.cluster.source-test seon.cluster.source-evidence-test seon.test-runner-test seon.fn-test seon.fn.publication-test seon.fn.publication-toolchain-test seon.fn.publication-signature-test
+bin/test --platform
+```
+
+
+Final focused run `bc535b64249a`
+(`tmp/publication-dissolution/declaration-final-fast.log`): **68 executed,
+0 unchanged, 485 assertions, 0 failures, 1 error**. The only error is
+`seon.fn-test/a-refused-reference-read-refuses-gate-set-derivation`, whose
+held fixture lacks the observation fields. The owned production refusal
+and the corrected row-schema edge regression both pass. This is a qualified
+fast result, not a green complete namespace or a cold proof. No passing
+evidence/toolchain/signature suite was repeated after its inputs stabilized.
+
+Precommit namespace load exited 0, requiring `seon.fn`, `seon.fn.analyzer`,
+`seon.fn.signature`, `seon.test.selection`, `seon.test.cache`, and
+`seon.cluster.source` (`tmp/publication-dissolution/precommit-load.log`).
+That command used the shared tree, including foreign edits; the fast evidence
+above used HEAD plus the explicit owned paths. A committed-HEAD-only namespace
+load follows the commit; it is a source load, not another suite execution.

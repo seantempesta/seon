@@ -65,6 +65,7 @@
 (def ^:private source-attributes
   [:seon.source/digest
    :seon.source/test-input-digest
+   :seon.source/toolchain-digest
    :seon.source/built-at
    :seon.source/activation-closure
    :seon.activation/source-digest
@@ -648,8 +649,11 @@
               {:tx-data
                (conj (activation-seal-tx
                       connection source-digest #{populate activation} activation-fn)
-                     {:seon.source/digest source-digest
-                      :seon.source/test-input-digest input-digest})})
+                     (cond-> {:seon.source/digest source-digest
+                              :seon.source/test-input-digest input-digest}
+                       (get-in populate-request [:seon.fn/manifest :seon.source/toolchain-digest])
+                       (assoc :seon.source/toolchain-digest
+                              (get-in populate-request [:seon.fn/manifest :seon.source/toolchain-digest]))))})
              ::source-seal-refused
              "the source seal transaction was refused"
              {:seon.source/digest source-digest})
@@ -772,10 +776,17 @@
                {:seon.source/digest source-digest
                 :seon.source/expected-commit-id expected-commit}))
               (index-issues! connection source-digest (or directory (fs/source-directory)))
-              (let [seal (conj (activation-seal-tx
-                                connection source-digest #{activation} activation-fn)
-                               {:seon.source/digest source-digest
-                                :seon.source/test-input-digest input-digest})]
+              (let [identity-facts (cond-> {:seon.source/digest source-digest
+                                           :seon.source/test-input-digest input-digest}
+                                     (:seon.source/toolchain-digest manifest)
+                                     (assoc :seon.source/toolchain-digest
+                                            (:seon.source/toolchain-digest manifest)))
+                    prior (db/pull (db/db connection) (vec (keys identity-facts))
+                                   [:seon.source/digest source-digest])
+                    seal (cond-> (activation-seal-tx
+                                  connection source-digest #{activation} activation-fn)
+                           (not= identity-facts (select-keys prior (keys identity-facts)))
+                           (conj identity-facts))]
                 (when (seq seal)
                  (require-committed!
                   (db/transact!
