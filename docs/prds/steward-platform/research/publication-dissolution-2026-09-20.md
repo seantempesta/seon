@@ -67,7 +67,7 @@ python3 docs/prds/steward-platform/research/publication-analysis-input-probe-202
   prior history's datoms. `seon.fn/index!` currently refuses an existing
   program unless handed `:seon.source/previous-database`.
 
-## Three options for the owner
+## First decision — settled by the caller-invalidation ruling
 
 Estimates below are rough additional implementation effort, not measured
 runtime or delivery promises.
@@ -131,3 +131,111 @@ owned paths with `bin/test --paths … -- seon.test.cache-test
 seon.cluster.source-test seon.test-runner-test seon.fn-test`, plus affected
 namespaces and `bin/test --platform`. This is an owed command template;
 there is no implementation path set or green tally yet.
+
+## Resume: caller invalidation settled; body-dependent findings remain
+
+Resumed at `a962d75cd`. The owner accepted option 1: use published calls and
+references to invalidate the caller closure when public declaration interfaces
+change. That decision is settled. Read the revised specification end to end.
+`cache/compatible-changes` compares input digests; the reverse walk is
+`src/seon/test/selection.clj:91–105`, over calls, references and test subjects.
+Overlay admission at `:131` uses a narrower direct-call check. Publication
+should share the existing graph computation. The results-reuse note identifies
+selection-tx, claim-tx, completed-tx, terminated-tx and covered-by: their
+original temporal history and entity identities must survive publication.
+
+A second decision remains: clj-kondo infers return types from function bodies,
+and those types change findings in unchanged callers. The new probe keeps
+name, arity and an explicit Malli contract identical:
+
+```clojure
+(defn f {:malli/schema [:=> [:cat] [:or :int :string]]} [] 1)
+;; Only the last expression changes to "text".
+(defn g [] (inc (c/f)))
+```
+
+The caller's bytes and the callee's analyzed declaration metadata remain
+identical. Native clj-kondo returns:
+
+| Analysis | Type-mismatch findings | Elapsed |
+|---|---:|---:|
+| Original callee and caller | 0 | 43 ms |
+| Body-changed callee alone | 0 | 36 ms |
+| Body-changed callee and unchanged caller | 1 | 38 ms |
+
+The finding is `Expected: number, received: string.` There are no error-level
+findings. Reproduce with:
+
+```sh
+python3 docs/prds/steward-platform/research/publication-body-analysis-probe-2026-09-20.py
+```
+
+This is dependency evidence, not an armed publication regression. An initial
+exploratory probe also observed the warning but had namespace-path errors;
+the committed reproducer corrects those paths and asserts no errors. Neither
+probe launches a JVM. No test suite was rerun.
+
+Vendored `reference-code/clj-kondo/src/clj_kondo/impl/analyzer.clj:877–898`
+derives the return tag from the final body expression; `impl/types.clj:448–477`
+defers cross-file resolution; `impl/types.clj:951–969` emits the finding.
+Seon preserves type-mismatch as a warning (`src/seon/fn/analyzer.clj:22–26`).
+Thus the ruled pair of file digest and declared-interface digest remains
+unchanged for the caller while its complete-analysis finding changes.
+Program digest equality alone cannot prove finding equality.
+
+### Three options for this narrower decision
+
+Additional effort estimates, excluding the remaining implementation:
+
+1. **Recommended for the N-file priority: disable type-mismatch findings in
+   canonical publication analysis, complete and incremental.** Guarantee:
+   this body-dependent finding class cannot go stale; name, privacy and arity
+   admission remain. Cost: approximately half a lane-day for the policy change
+   and parity coverage. Give up: clj-kondo type-mismatch warnings, including
+   local ones. Other finding classes still require parity regressions; this
+   probe does not establish their independence.
+2. **Include analyzer-inferred interfaces in invalidation.** Treat a changed
+   inferred return type as an interface change and propagate through the
+   published caller/referrer graph. Guarantee: retain these warnings through
+   caller reanalysis. Cost: approximately 1–2 additional lane-days for analyzer
+   export fingerprints and propagation proofs. Give up: the N-file ceiling
+   for body edits that change inferred interfaces.
+3. **Recompute cross-file type findings on every publication.** Cache source
+   analysis but retain a complete type-resolution pass as the findings owner.
+   Guarantee: fresh type findings without declaration-only cache keys. Cost:
+   approximately 1–2 additional lane-days to separate analyzer phases, plus
+   recurring whole-program resolution work. Give up: N-file total work.
+
+AGENTS.md §2.5 says to stop before production edits when guarantees cannot
+be stated simply; the assignment requires a stop at the next genuine decision.
+This is that boundary, not a stop for foreign breakage. Items 1–4 remain
+unimplemented; no publisher paths were deleted.
+
+### Scratch observation, ownership and verification
+
+The authorized scratch start refused `seon.shell/stdin?` during namespace
+boot. This used the shared working tree; no individual foreign edit is blamed.
+Preflight: 22,213 ms (dependency warming 17,882 ms; 43 files linted in
+4,328 ms). Its second preflight: 102 ms, zero files. Start failed after
+20,034 ms. These are boot measurements, not publication before/after figures.
+The [scratch-boot issue](../../../seon/issues/scratch-boot-refuses-the-shell-stdin-predicate.md)
+records the boundary and retained logs.
+
+`bin/seon --root tmp/publication-root down` confirmed zero recorded JVMs and
+a free store flock. PID 74353 was absent. The root was deleted without
+following symlinks. The shared default root was never operated. No worktree
+or cold gate ran. A foreground load of `seon.fn` and `seon.cluster.source`
+returned `:loads`, exit 0 (`tmp/publication-dissolution/decision-load.log`).
+
+The launcher/cache slice subsequently landed as `a6fbf412b`, releasing those
+paths. Explicitly held cluster/turn/schema paths and dirty
+`test/seon/fn_test.clj` remain untouched. The specification, named cluster
+publication functions, launcher, hook, cache, source, operator, requested
+working edge, census and issues have been read; the results-reuse note was
+finished during this resume. Unrelated sections of the full cluster file
+remain unread; no production edit was made before finishing grounding.
+
+The spec's publication measurements, lineage/reuse regression, live-JVM proof
+and cold proof remain owed. The actual cache test namespace is
+`seon.test-cache-test`; the earlier cold-command template's dotted spelling
+does not match its declaration.

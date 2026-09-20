@@ -34,8 +34,12 @@ the same across stale and current analysis of the same final tree.
 ## Owner
 
 Publication dissolution, through the existing `seon.fn.analyzer` and
-`seon.fn` analysis owners. The checkpoint presents three priced options
-under AGENTS.md §2.5; production edits await that decision.
+`seon.fn` analysis owners. The owner settled declaration-change invalidation
+through published calls and references. A subsequent body-only probe keeps
+name, arity and an explicit Malli contract unchanged but changes an inferred
+return type; the unchanged caller gains a type-mismatch warning. The
+checkpoint records the reproducer, dependency source and three options for
+that narrower policy decision. No persistent cache has been implemented.
 
 ## Acceptance
 
