@@ -3,10 +3,18 @@
                 :id [:string {:min 1, :seon.db/identity true}],
                 :program-digest [:and {:seon.db/identity false} :seon.source/digest],
                 :basis-t :seon.db/basis-t,
+                :published-base-digest [:and {:seon.db/identity false :description "Digest of the published base resolved before overlay admission. This identifies the base, not the overlaid program."} :seon.source/digest],
+                :overlay-input-digest [:and {:seon.db/identity false :description "Digest of the complete declared input inventory of the tested HEAD-plus-paths snapshot. Checkout bytes omitted from the snapshot never contribute."} :seon.source/digest],
+                :snapshot
+                [:map
+                 [:seon.test.run/published-base-digest :seon.test.run/published-base-digest]
+                 [:seon.test.run/overlay-input-digest :seon.test.run/overlay-input-digest]
+                 [:seon.test.run/program-digest :seon.test.run/program-digest]
+                 [:seon.test.run/basis-t :seon.test.run/basis-t]],
                 :callers-at-head [:set {:description "Observed paths of dirty checkout callers omitted from the selected overlay. The tested snapshot contains their HEAD versions, not their dirty checkout bytes. Path values survive file deletion."} :seon.source/path],
                 :branch [:and {:description "Durable destination branch of the result commit, addressable in its store. A publication scratch branch is never the destination; tested-branch records execution provenance separately."} :seon.source/branch],
                 :tested-branch [:and {:description "Branch of the immutable database tested, when different from the result destination. basis-t belongs to this branch; it must not be interpreted as destination history."} :seon.source/branch],
-                :cluster [:and {:description "Explicit authority cluster that owns this run and its results. Required at admission; the optional stored ref sweeps on cluster deletion, leaving authority unavailable."} :seon.db/ref],
+                :cluster [:and {:description "Explicit authority cluster for an in-process run. A published snapshot instead carries its explicit source branch and snapshot provenance. The optional stored ref sweeps on cluster deletion, leaving cluster custody unavailable."} :seon.db/ref],
                 :change-basis-t [:and {:description "Earlier tested basis used to select changes in the same lineage; absent for first-run."} :seon.db/basis-t],
                 :members [:set {:seon.db/component true :seon.db/component-schema :seon.test.member/member :description "Selected memberships admitted atomically before execution; deleting the run cascades to these components."} :seon.db/ref],
                 :covered-by [:set {:description "Existing run members accepted instead of duplicate execution at admission. Optional refs sweep with their targets; a reader must report missing coverage as unknown."} :seon.db/ref],
@@ -20,7 +28,8 @@
                 :admission
                 [:map
                  [:seon.test.run/provenance :seon.test.run/provenance]
-                 [:seon.test.run/cluster :seon.test.run/cluster]
+                 [:seon.test.run/cluster {:optional true} :seon.test.run/cluster]
+                 [:seon.test.run/covered-by {:optional true} :seon.test.run/covered-by]
                  [:seon.test.run/input-digest :seon.test.run/input-digest]
                  [:seon.test.run/policy :seon.test.run/policy]
                  [:seon.test.run/include-long? :seon.test.run/include-long?]
@@ -62,6 +71,8 @@
                   [:seon.test.run/provenance-failure :seon.test.run/provenance-failure]]],
                 :provenance
                 [:map
+                 [:seon.test.run/published-base-digest {:optional true} :seon.test.run/published-base-digest]
+                 [:seon.test.run/overlay-input-digest {:optional true} :seon.test.run/overlay-input-digest]
                  [:seon.test.run/callers-at-head {:optional true} :seon.test.run/callers-at-head]
                  [:seon.test.run/id :seon.test.run/id]
                  [:seon.test.run/at :seon.test.run/at]
@@ -76,6 +87,8 @@
                 :run
                 [:map
                  #:seon.db{:attributes true}
+                 [:seon.test.run/published-base-digest {:optional true} :seon.test.run/published-base-digest]
+                 [:seon.test.run/overlay-input-digest {:optional true} :seon.test.run/overlay-input-digest]
                  [:seon.test.run/callers-at-head {:optional true} :seon.test.run/callers-at-head]
                  [:seon.test.run/id :seon.test.run/id]
                  [:seon.test.run/at :seon.test.run/at]

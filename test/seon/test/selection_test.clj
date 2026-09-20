@@ -17,6 +17,7 @@
             [seon.test.cache :as cache]
             [seon.test :as sut]
             [seon.test.runner :as runner]
+            [seon.test-runner-failure-fixture :as failure-fixture]
             [seon.id :as id]
             [seon.db :as db]
             [seon.error :as error]
@@ -193,7 +194,7 @@
        (complete-selection! connection (assoc request :seon.test/identities #{(fixture-symbol "unrelated")}))
        (install-selection-program! connection (str/replace source "leaf [] 1" "leaf [] 3"))
        (let [changed (select!)]
-         (is (= (into expected platform) (symbols changed)) (pr-str changed))
+         (is (= expected (symbols changed)) (pr-str changed))
          (is (= expected (set (sut/reaching {:seon.db/db (db/db connection)
                                              :seon.test/changed [(fixture-symbol "leaf")]}))))
          (is (every? #(get-in % [:seon.test.member/reasons]) (:seon.test.run/members changed)))
@@ -278,7 +279,9 @@
          (is (= :seon.test/analysis-unknown
                 (:seon.test/selection-refusal (select-request (assoc request :seon.db/db missing-analysis))))))))))
 
-(deftest selection-derives-bases-obligations-and-exact-symbol-reach
+(deftest ^{:seon.test/long "Canonical complete-population selection and recorded reach across multiple transaction bases."
+           :seon.test/long-ms 900000}
+  selection-derives-bases-obligations-and-exact-symbol-reach
   (exercise-selection! sut/select))
 
 (deftest definition-content-agrees-across-exploratory-branches
@@ -341,6 +344,64 @@
                    (:seon.test.run/members result)) (pr-str result))
          (is (some #{(symbol "seon.test.selection-test" "fileless-selection")}
                    (sut/reaching {:seon.db/db (db/db connection) :seon.test/changed ['seon.id/id]}))))))))
+
+(deftest snapshot-provenance-reuses-green-members-across-fresh-run-events
+  (support/with-database
+   (fn [connection]
+     (let [basis (db/basis-t (db/db connection))
+           executions (atom 0)
+           snapshot {:seon.test.run/published-base-digest (id/digest 64 [:fixture :base])
+                     :seon.test.run/overlay-input-digest (id/digest 64 [:fixture :overlay])
+                     :seon.test.run/program-digest (id/digest 64 [:fixture :program])
+                     :seon.test.run/basis-t basis :seon.test.run/branch :current-src}
+           request {:seon.test.run/input-digest (id/digest 64 [:fixture :inputs])
+                    :seon.test.run/policy :named
+                    :seon.test/namespaces #{'seon.test-runner-failure-fixture}
+                    :seon.test.run/members [{:seon.test.member/symbol 'seon.test-runner-failure-fixture/passing-example
+                                             :seon.test.member/reasons #{:named}}]}
+           execute! (fn [policy & [overlay]]
+                      (let [request (assoc request :seon.db/db (db/db connection)
+                                           :seon.test.run/policy policy
+                                           :seon.test.run/provenance
+                                           (assoc (cond-> snapshot overlay
+                                                    (assoc :seon.test.run/overlay-input-digest overlay))
+                                                  :seon.test.run/id (id/id)
+                                                           :seon.test.run/at (java.util.Date.)))
+                            admission (sut/selection-admission request)
+                            run (:seon.test.run/provenance admission)]
+                        (support/transacted! connection [[:db.fn/call sut/admit-run admission]])
+                        (let [results (mapv (fn [_]
+                                              (swap! executions inc)
+                                              (runner/run-var! #'failure-fixture/passing-example))
+                                            (:seon.test.run/members admission))
+                              recorded (runner/commit-results!
+                                        connection {:seon.test.run/provenance run
+                                                    :seon.test/run-basis-t basis
+                                                    :seon.test/run-at (:seon.test.run/at run)
+                                                    :seon.test.run/terminated? true
+                                                    :seon.test.runner/results results})]
+                          (is (vector? recorded) (pr-str recorded)))
+                        admission))
+           first-run (execute! :named)]
+       (is (= 1 @executions))
+       (doseq [policy [:named :all :full :platform :incremental]]
+         (let [next-run (execute! policy)
+               unchanged (:seon.test.selection/unchanged next-run)]
+           (is (not= (get-in first-run [:seon.test.run/provenance :seon.test.run/id])
+                     (get-in next-run [:seon.test.run/provenance :seon.test.run/id])))
+           (is (empty? (:seon.test.run/members next-run)))
+           (is (= 1 (count unchanged)))
+           (is (= (select-keys snapshot [:seon.test.run/published-base-digest
+                                         :seon.test.run/overlay-input-digest
+                                         :seon.test.run/program-digest :seon.test.run/basis-t])
+                  (select-keys (first unchanged) [:seon.test.run/published-base-digest
+                                                  :seon.test.run/overlay-input-digest
+                                                  :seon.test.run/program-digest :seon.test.run/basis-t])))))
+       (is (= 1 @executions) "A fresh request event never promises another execution.")
+       (let [changed (id/digest 64 [:fixture :changed-overlay])]
+         (is (= 1 (count (:seon.test.run/members (execute! :named changed)))))
+         (is (empty? (:seon.test.run/members (execute! :named changed))))
+         (is (= 2 @executions) "Changed snapshot inputs require fresh execution evidence."))))))
 
 (deftest gate-inputs-no-call-edge-can-reach-widen
   (is (cache/widening-path? "resources/seon/schemas/seon.db.edn"))

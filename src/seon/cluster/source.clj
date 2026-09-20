@@ -409,6 +409,8 @@
      surviving)))
 
 (defn- record-results-at-head!
+  {:malli/schema [:=> [:cat :seon.store/store :seon.source/test-recording-request]
+                  :seon.source/test-recording-result]}
   [held-store completion]
   (let [expected (:seon.source/commit-id (current held-store))
         scratch (scratch-branch)]
@@ -421,12 +423,61 @@
       (let [connection (store/open-branch! held-store scratch)]
         (try
           (let [projection (schema/projection-from-database @connection)
-                result (schema/call-with-projection
+                required (when (:seon.test.run/published-base-digest (:seon.test.run/provenance completion))
+                           [:seon.test.run/published-base-digest :seon.test.run/overlay-input-digest
+                            :seon.test.run/callers-at-head :seon.source/test-selection-request])
+                missing (vec (remove #(get-in projection [:seon.schema.projection/forms %]) required))
+                result (if (seq missing)
+                         (error/diagnostic
+                          {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/recording
+                           :seon.error/operation 'seon.cluster.source/record-results!
+                           :seon.error/message "The published recording authority predates snapshot result admission. The orchestrator must publish the converged schema before fast recording can be enabled."
+                           :seon.error/diagnostic-layer :test
+                           :seon.error/diagnostic-operation ::record-results!
+                           :seon.error/diagnostic-member current-branch
+                           :seon.error/diagnostic-expected required
+                           :seon.error/diagnostic-offending missing
+                           :seon.error/diagnostic-cause :recording-schema-unavailable
+                           :seon.error/diagnostic-evidence {:seon.source/commit-id expected}})
+                         (schema/call-with-projection
                         projection
-                        #((requiring-resolve 'seon.test.runner/commit-results!)
-                          connection (assoc completion :seon.test.run/branch current-branch)))]
-            (if (:seon.error/kind result)
-              result
+                        #(if (contains? completion :seon.test.runner/results)
+                           ((requiring-resolve 'seon.test.runner/commit-results!)
+                            connection (assoc completion :seon.test.run/branch current-branch))
+                           (let [admission ((requiring-resolve 'seon.test/selection-admission)
+                                            (assoc completion :seon.db/db (db/db connection)))
+                                 report (when-not (:seon.error/at admission)
+                                          (db/transact! connection
+                                                        [[:db.fn/call (requiring-resolve 'seon.test/admit-run)
+                                                          admission]]))]
+                             (cond
+                               (:seon.error/at admission) admission
+                               (:seon.error/at report) report
+                               :else
+                               (let [reserved (db/q '[:find [?symbol ...] :in $ ?id
+                                                      :where [?run :seon.test.run/id ?id]
+                                                             [?run :seon.test.run/members ?member]
+                                                             [?member :seon.test.member/symbol ?symbol]]
+                                                    (:db-after report)
+                                                    (get-in admission [:seon.test.run/provenance :seon.test.run/id]))
+                                     expected (set (map :seon.test.member/symbol
+                                                        (:seon.test.run/members admission)))]
+                                 (if (= expected (set reserved)) admission
+                                   (error/diagnostic
+                                    {:seon.error/at (java.util.Date.)
+                                     :seon.error/layer :seon.test/admission
+                                     :seon.error/operation 'seon.cluster.source/record-results!
+                                     :seon.error/message "Matching snapshot work is already admitted and has no recorded terminal result."
+                                     :seon.error/diagnostic-layer :test
+                                     :seon.error/diagnostic-operation ::record-results!
+                                     :seon.error/diagnostic-member (get-in admission [:seon.test.run/provenance :seon.test.run/id])
+                                     :seon.error/diagnostic-expected expected
+                                     :seon.error/diagnostic-offending reserved
+                                     :seon.error/diagnostic-cause :seon.test/claim-conflict
+                                     :seon.error/diagnostic-evidence {:seon.test.run/provenance (:seon.test.run/provenance admission)}}))))))))]
+            (if (:seon.error/at result)
+              (assoc result :seon.source/refused-test-run
+                     (get-in completion [:seon.test.run/provenance :seon.test.run/id]))
               (do (d/force-branch! @connection current-branch #{expected}
                                    {:expected-current-commit expected})
                   result)))
@@ -434,16 +485,14 @@
       (finally (retire-scratch! held-store scratch)))))
 
 (defn record-results!
-  "Publish test evidence through the result writer on a private source branch.
+  "Admit snapshot requests and publish completions through one source authority.
   Rebase a stale attempt on the latest head until the declared test allowance
   expires. Contention never changes the tested fingerprint; each attempt
   retires its scratch branch. Expiry reports the bound and last conflict."
   {:malli/schema
-   [:=> [:cat :seon.store/store :seon.test.run/completion]
-    [:or :seon.test/results :seon.error/value]]}
+   [:=> [:cat :seon.store/store :seon.source/test-recording-request]
+    :seon.source/test-recording-result]}
   [held-store completion]
-  (if (empty? (:seon.test.runner/results completion))
-    []
     (let [published (or (current held-store)
                       (refuse! ::source-absent "Test recording requires a published current-src." {}))
         head (database held-store (:seon.source/commit-id published))
@@ -463,8 +512,10 @@
         (if-let [conflict (::conflict outcome)]
           (if (< (System/nanoTime) deadline)
             (recur (inc attempt))
-            (error/diagnostic
-              {:seon.error/kind ::recording-expired
+            (assoc (error/diagnostic
+              {:seon.error/at (java.util.Date.)
+               :seon.error/layer :seon.test/recording
+               :seon.error/operation 'seon.cluster.source/record-results!
                :seon.error/message "Test evidence publication exhausted its declared allowance while the source head changed."
                :seon.error/diagnostic-layer :test
                :seon.error/diagnostic-operation ::record-results!
@@ -475,8 +526,10 @@
                :seon.error/diagnostic-evidence
                {:seon.await/config-attribute (if (:seon.test/remaining-ms completion)
                                                :seon.test/remaining-ms :seon.test/check-time-limit-ms)
-                :seon.await/config-value allowance :seon.test.runner/attempts attempt}}))
-          (::recorded outcome)))))))
+                :seon.await/config-value allowance :seon.test.runner/attempts attempt}})
+                   :seon.source/refused-test-run
+                   (get-in completion [:seon.test.run/provenance :seon.test.run/id])))
+          (::recorded outcome))))))
 
 (defn- index-issues!
   [connection source-digest directory]

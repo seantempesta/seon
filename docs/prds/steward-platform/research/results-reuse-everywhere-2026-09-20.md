@@ -367,3 +367,127 @@ twice and fast twice zero-execution obligations remain unchanged.
 Before committing, `clojure -M -e` requiring `seon.test`,
 `seon.test.runner`, `seon.test.selection` and `seon.test.fast` completed
 with `:loads`, exit 0 (`callers-head-precommit-load.log`).
+
+The urgent overlay slice landed as `db24035ee`. Its post-commit HEAD load
+also returned `:loads`, exit 0 (`callers-head-head-load.log`, 205 bytes).
+
+## Step 2 runtime checkpoint and recording-authority prerequisite
+
+The identity ruling is implemented for snapshot admissions: each request
+supplies a fresh event ID, while the published-base digest, overlay-input
+digest, program digest and tested basis are ordinary run facts. Snapshot
+selection queries matching run/member facts and positive, terminated green
+evidence as a set. Reused results retain the confidence values and original
+execution event. Completed red members do not reserve a later snapshot
+request forever; outstanding reservations remain exclusive. Immutable
+same-event replay and the source owner's bounded publication retry remain.
+
+`source/record-results!` now admits snapshot membership and records its
+completion through the same source branch owner. Empty completions no
+longer bypass recording. It refuses concurrent, unfinished reserved work
+instead of executing a duplicate. `runner/record-snapshot!` uses the cold
+recorder's existing staged-file/store-holder crossing; there is no second
+store or recording authority. `cache/newest-base` exposes the resolved base
+descriptor without changing declared input roots.
+
+The canonical fixture regression
+`snapshot-provenance-reuses-green-members-across-fresh-run-events` executed
+the real passing fixture Var once, recorded its captured result, and then
+reused it under five fresh request events without another body execution.
+The four provenance values were retained. This passed in
+`snapshot-selection-fast.log`. The subsequent candidate adds changed-overlay
+invalidation assertions; those added assertions have not run yet.
+
+That wider selector probe exited **124**, with no final tally: its liveness
+bound fired during `selection-derives-bases-obligations-and-exact-symbol-reach`.
+Before that bound it reported one stale expectation at
+`selection_test.clj:197` (green platform members were expected to rerun),
+and one error in the assertion headed **“A refused declared-reference read
+refuses selection.”** The exact error is:
+
+```text
+seon.fn/declared-reference-edges returned a base error without a complete declared facet. Declared facets: #{}.
+```
+
+The stale platform expectation is corrected. The complete-population
+regression now declares its long work and a 900,000 ms allowance; the
+watchdog remains enabled. Its measured selection calls for 1, 10 and 100
+seeds were 51,830.407, 56,705.330125 and 89,307.701875 ms. No cause for
+that cost is inferred. The declared-reference contract is outside this
+lane and remains a verification boundary. The earlier noncanonical-schema
+assertion did not fail in this probe.
+
+The mandatory fast-launcher candidate was probed serially with:
+
+```sh
+bin/test-fast --paths bin/test bin/test-fast src/seon/test.clj src/seon/test/runner.clj src/seon/test/selection.clj src/seon/test/fast.clj src/seon/test/cache.clj src/seon/cluster/source.clj resources/seon/schemas/seon.source.edn resources/seon/schemas/seon.test.run.edn resources/seon/schemas/seon.test.selection.edn test/seon/test/selection_test.clj -- seon.test.selection-test
+```
+
+It resolves the base once, hashes the snapshot's actual program and declared
+inputs, and requests admission before executing any member. The first
+probe exposed an exception with no message; its reporting is corrected.
+The next probes exposed the recording store's old projection, which still
+requires `:seon.error/kind`. The final probe returns a direct refusal from
+the source owner instead of querying undeclared snapshot attributes:
+
+```text
+The published recording authority predates snapshot result admission. The orchestrator must publish the converged schema before fast recording can be enabled.
+```
+
+The recorded authority is `:current-src`, source commit
+`6aaec9d7-55c6-59ac-905b-f46f93125704`. Its projection lacks all four
+required declarations: `:seon.test.run/published-base-digest`,
+`:seon.test.run/overlay-input-digest`, `:seon.test.run/callers-at-head`, and
+`:seon.source/test-selection-request`. The final probe exited **1 before
+test execution**. This is not an unchanged tally or a successful reuse
+proof. The lane did not publish, reset, adopt or operate `default`.
+
+| Log under `tmp/results-reuse-everywhere/` | Bytes | SHA-256 |
+|---|---:|---|
+| `snapshot-selection-fast.log` | 102,764 | `10e57da174ae6569577b6cefedc275a666b81ab0f4e64777c466042ccb22cfad` |
+| `fast-recording-live-1.log` | 15,632 | `54db5a2830b9bc6c9318ba809b01e8c3ed8bb6c8e36a3ef18399a2d334ac217e` |
+| `fast-recording-live-2.log` | 28,899 | `87775d2eef5fbd91a386cf7f4d52166950784d8d3fc7dfd1f287b46faf4e4055` |
+| `fast-recording-live-3.log` | 55,461 | `89f4eb8c3170c66cd595ad0a9d40d231f92c696b6565012f38bba28dc5dea686` |
+| `fast-recording-authority-boundary.log` | 5,909 | `caef8f9308a797151a91bbed0a80ada9cf43230ac4f1b809018df417fc1347e0` |
+
+The runtime checkpoint touches `src/seon/test.clj`,
+`src/seon/test/runner.clj`, `src/seon/test/cache.clj`, the admission/recording
+region of `src/seon/cluster/source.clj`, `resources/seon/schemas/seon.source.edn`,
+`resources/seon/schemas/seon.test.run.edn`,
+`resources/seon/schemas/seon.test.selection.edn`,
+`test/seon/test/selection_test.clj`, and this note. The mandatory launcher
+candidate remains uncommitted in `bin/test`, `bin/test-fast` and
+`src/seon/test/fast.clj`; the inherited `bin/test` inventory edits remain
+preserved there. This prevents the checkpoint from making every other
+lane's HEAD-based fast loop depend on a schema publication it cannot do.
+Bash lines deleted in landed slices: **0**. Neither launcher is thin yet.
+
+The source/identity decisions remain settled. The remaining gate is rollout
+of the schema at the existing authority. Three concrete choices:
+
+1. **Recommended: orchestrator refreshes that recording authority from a
+   compatible committed program, then the lane enables fast recording.**
+   Guarantee: one authority and honest snapshot evidence; no lane changes
+   the owner's window. Cost: one coordinated publication and the remaining
+   fast probes. Give up: enabling mandatory recording before publication.
+2. **Bundle this with the orchestrator's next schema reset and reseed.**
+   Guarantee: a fresh compatible authority under the same ruled model.
+   Cost: the planned reset plus reseed; prior disposable store data is lost.
+   Give up: immediate rollout and reuse of pre-reset evidence.
+3. **Retain the runtime checkpoint and defer the launcher switch.**
+   Guarantee: other lanes keep their existing iteration path. Cost: no
+   publication now, but unchanged fast work continues to execute.
+   Give up: the requested fast reuse proof and completion in this window.
+
+Step 2 is not complete; steps 3–5 remain pending in their requested order.
+The two consecutive successful fast runs, with the second executing zero,
+are still owed. The orchestrator also owes the selected cold gate using the
+complete command above with `bin/test` in place of `bin/test-fast`, then
+bare `bin/test` twice (second executes zero), and its isolated platform
+proof. A schema refusal before execution proves none of those outcomes.
+
+Pre-commit loading of `seon.test`, `seon.test.runner`, `seon.test.cache`,
+`seon.test.selection`, `seon.test.fast` and `seon.cluster.source` returned
+`:loads`, exit 0 (`step2-precommit-load.log`). Static lint of the changed
+Clojure owners reports no error-level findings. These checks do not replace
+the unavailable authority-backed fast proof.

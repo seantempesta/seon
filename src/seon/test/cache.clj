@@ -455,9 +455,11 @@
               "No published program graph matches the source snapshot; orchestrator must run: bin/test --prepare-head-base"
               {::source-inputs source-inputs}))))
 
-(defn newest-manifest
-  "Read the newest published graph and announce its digest and commit age."
-  {:malli/schema [:=> [:cat :string :string] :seon.fn.manifest/manifest]}
+(defn newest-base
+  "Resolve the published base shared by overlay admission and recording."
+  {:malli/schema [:=> [:cat :string :string]
+                  [:map [:seon.test.cache/base :string]
+                   [:seon.test.cache/digest :seon.source/digest]]]}
   [source git-sha]
   (let [candidate
         (->> (.listFiles (io/file source "target/test-published-bases"))
@@ -485,7 +487,13 @@
                     (finally (process/destroy-tree child))))
                 "unknown (legacy base has no Git provenance)")]
       (println "bin/test: overlay graph" (::digest ready) "age=" age "commits behind HEAD")
-      (manifest (str (io/file directory "base"))))))
+      {::base (str (io/file directory "base")) ::digest (::digest ready)})))
+
+(defn newest-manifest
+  "Read the newest published graph and announce its digest and commit age."
+  {:malli/schema [:=> [:cat :string :string] :seon.fn.manifest/manifest]}
+  [source git-sha]
+  (manifest (::base (newest-base source git-sha))))
 
 (defn -main
   "Prepare the selected snapshot's base; retain it while its launcher lives."

@@ -687,6 +687,87 @@
                                        "This changed declaration has no bounded graph selection." change))))))
    #{} changed))
 
+(defn- green-members
+  "Member identities with positive, terminated assertion evidence."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :int]] [:set :int]]}
+  [database members]
+  (set (selection-read!
+        (db/q '[:find [?member ...] :in $ [?member ...]
+                :where [?member :seon.test.member/completed-tx]
+                       [?member :seon.test.member/terminated-tx]
+                       [?member :seon.test.member/began? true]
+                       [?member :seon.test.member/ended? true]
+                       [?member :seon.test.member/pass-count ?pass]
+                       [(> ?pass 0)]
+                       [?member :seon.test.member/fail-count 0]
+                       [?member :seon.test.member/error-count 0]
+                       (not [?member :seon.test.member/error])]
+              database members))))
+
+(defn- select-snapshot
+  "Select supplied snapshot membership against this authority's recorded facts."
+  {:malli/schema [:=> [:cat :seon.test.selection/request] :seon.test.selection/result]}
+  [{database :seon.db/db run :seon.test.run/provenance
+    candidates :seon.test.run/members inputs :seon.test.run/input-digest :as request}]
+  (when-not (and (:seon.test.run/overlay-input-digest run) inputs (vector? candidates))
+    (let [refusal (selection-refusal database :seon.test/input-evidence-unavailable
+                                    "Snapshot selection requires its complete provenance and membership." run)]
+      (throw (ex-info (:seon.error/message refusal) refusal))))
+  (let [rows (selection-read!
+              (db/q '[:find ?run ?member ?symbol ?selected
+                      :in $ ?base ?overlay ?program ?basis ?branch
+                      :where [?run :seon.test.run/published-base-digest ?base]
+                             [?run :seon.test.run/overlay-input-digest ?overlay]
+                             [?run :seon.test.run/program-digest ?program]
+                             [?run :seon.test.run/basis-t ?basis]
+                             [?run :seon.test.run/branch ?branch]
+                             [?run :seon.test.run/selection-tx ?selected]
+                             [?run :seon.test.run/members ?member]
+                             [?member :seon.test.member/symbol ?symbol]]
+                    database (:seon.test.run/published-base-digest run)
+                    (:seon.test.run/overlay-input-digest run)
+                    (:seon.test.run/program-digest run) (:seon.test.run/basis-t run)
+                    (:seon.test.run/branch run)))
+        _ (when (map? rows)
+            (let [refusal (selection-refusal database :seon.test/input-evidence-unavailable
+                                            "The recording authority could not query snapshot evidence." rows)]
+              (throw (ex-info (:seon.error/message refusal) refusal))))
+        latest (into {} (map (fn [[run-eid member sym _]] [sym [run-eid member]]))
+                     (sort-by #(nth % 3) rows))
+        green (green-members database (map second (vals latest)))
+        reused (filterv #(green (second (get latest (:seon.test.member/symbol %)))) candidates)
+        executable (remove (set reused) candidates)
+        unchanged
+        (mapv (fn [member]
+                (let [sym (:seon.test.member/symbol member)
+                      [run-eid member-eid] (get latest sym)
+                      counts (selection-read! (db/pull database
+                                               [:seon.test.member/pass-count]
+                                               member-eid))
+                      old-run (selection-read! (db/pull database
+                                                [:seon.test.run/id :seon.test.run/at] run-eid))]
+                  (merge (select-keys run [:seon.test.run/published-base-digest
+                                          :seon.test.run/overlay-input-digest
+                                          :seon.test.run/basis-t :seon.test.run/program-digest])
+                         {:seon.test/sym sym :seon.test/unchanged true
+                          :seon.test/pass-count (:seon.test.member/pass-count counts)
+                          :seon.test/fail-count 0 :seon.test/error-count 0
+                          :seon.test/run-at (:seon.test.run/at old-run)
+                          :seon.test/run-basis-t (:seon.test.run/basis-t run)
+                          :seon.test/run [:seon.test.run/id (:seon.test.run/id old-run)]
+                          :seon.test.run/input-digest inputs}))) reused)]
+    {:seon.test.run/basis-t (:seon.test.run/basis-t run)
+     :seon.test.run/policy (get request :seon.test.run/policy :named)
+     :seon.test.run/include-long? (true? (:seon.test/include-long? request))
+     :seon.test.run/input-digest inputs
+     :seon.test.run/namespaces (set (:seon.test/namespaces request))
+     :seon.test.run/identities (set (:seon.test/identities request))
+     :seon.test.run/covered-by (into #{} (map #(second (get latest (:seon.test.member/symbol %)))) reused)
+     :seon.test.run/members (mapv (fn [member]
+                                  {:seon.test/sym (:seon.test.member/symbol member)
+                                   :seon.test.member/reasons (:seon.test.member/reasons member)}) executable)
+     :seon.test.selection/unchanged unchanged}))
+
 (defn select
   "Select complete test memberships for one explicit cluster and immutable database.
   Baselines and outstanding work derive from admitted run/member facts, ordered
@@ -702,6 +783,8 @@
     requested-namespaces :seon.test/namespaces requested-identities :seon.test/identities
     supplied-basis :seon.test.run/change-basis-t :as request}]
   (try
+    (if (:seon.test.run/published-base-digest (:seon.test.run/provenance request))
+      (select-snapshot request)
     (if-not cluster
       (selection-refusal database :seon.test/cluster-required "Selection requires explicit cluster custody." :absent)
       (let [cluster-row (selection-read! (db/pull database [:db/id :seon.cluster/name] cluster))
@@ -793,14 +876,7 @@
                              (number? (one member :seon.test.member/pass-count))
                              (number? (one member :seon.test.member/fail-count))
                              (number? (one member :seon.test.member/error-count))))
-            green? (fn [member]
-                     (and (complete? member)
-                          (true? (one member :seon.test.member/began?))
-                          (true? (one member :seon.test.member/ended?))
-                          (pos? (one member :seon.test.member/pass-count))
-                          (zero? (one member :seon.test.member/fail-count))
-                          (zero? (one member :seon.test.member/error-count))
-                          (not (one member :seon.test.member/error))))
+            green? (green-members database member-ids)
             completed (filter #(and (seq (members %)) (every? complete? (members %))) runs)
             last-green (last (filter #(every? green? (members %)) completed))
             comparison (or supplied-basis (some-> (last completed) (one :seon.test.run/basis-t)))
@@ -981,7 +1057,7 @@
           (seq removed-files) (assoc :seon.test.selection/removed (vec (sort removed-files)))
           comparison (assoc :seon.test.run/change-basis-t comparison)
           (seq namespaces) (assoc :seon.test.run/namespaces namespaces)
-          (seq identities) (assoc :seon.test.run/identities identities))))
+          (seq identities) (assoc :seon.test.run/identities identities)))))
     (catch clojure.lang.ExceptionInfo failure
       (let [refusal (ex-data failure)]
         (if (or (:seon.test/selection-refusal refusal)
@@ -1016,7 +1092,7 @@
              (contains? selected :seon.error/at)
              (contains? selected :seon.error/layer)
              (contains? selected :seon.error/operation)) selected
-      (let [provenance (runner/provenance database)]
+      (let [provenance (or (:seon.test.run/provenance request) (runner/provenance database))]
         (if (and (map? provenance)
                  (contains? provenance :seon.error/at)
                  (contains? provenance :seon.error/layer)
@@ -1089,6 +1165,7 @@
   {:malli/schema [:=> [:cat [:map-of :keyword :seon.schema/value]] [:map-of :keyword :seon.schema/value]]}
   [row]
   (cond-> (-> (select-keys row [:seon.test.run/cluster :seon.test.run/program-digest
+                       :seon.test.run/published-base-digest :seon.test.run/overlay-input-digest
                        :seon.test.run/input-digest :seon.test.run/branch
                        :seon.test.run/tested-branch :seon.test.run/change-basis-t
                        :seon.test.run/policy :seon.test.run/include-long?])
@@ -1114,18 +1191,19 @@
   Concurrent requests see earlier reservations in the transaction database.
   An identical replay emits no evidence datoms; a changed replay refuses.
 
-  This entry admits the primary host's own branch. Isolated snapshot custody
-  requires its separate immutable publication handoff before admission."
+  The primary host supplies its own cluster. Published snapshots carry the
+  source authority's immutable base, overlay, program and basis handoff."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/admission]
                   :seon.store/transaction-data]}
   [database {run :seon.test.run/provenance
              cluster :seon.test.run/cluster
              members :seon.test.run/members :as request}]
   (let [run-id (:seon.test.run/id run)
-        cluster-row (db/pull database [:db/id :seon.cluster/name] cluster)
+        snapshot? (some? (:seon.test.run/published-base-digest run))
+        cluster-row (when cluster (db/pull database [:db/id :seon.cluster/name] cluster))
         cluster-id (:db/id cluster-row)
         branch (get-in (db/schema-database database) [:config :branch])
-        digest (runner/program-digest database)
+        digest (if snapshot? (:seon.test.run/program-digest run) (runner/program-digest database))
         row (-> (merge (select-keys request
                                    [:seon.test.run/cluster :seon.test.run/input-digest
                                     :seon.test.run/policy :seon.test.run/include-long?
@@ -1135,10 +1213,11 @@
                                     :seon.test.run/identities])
                        (select-keys run
                                     [:seon.test.run/id :seon.test.run/at :seon.test.run/git-sha
+                                     :seon.test.run/published-base-digest :seon.test.run/overlay-input-digest
                                      :seon.test.run/program-digest :seon.test.run/basis-t
                                      :seon.test.run/callers-at-head
                                      :seon.test.run/branch :seon.test.run/tested-branch]))
-                (assoc :seon.test.run/cluster cluster-id))
+                (cond-> cluster-id (assoc :seon.test.run/cluster cluster-id)))
         selector (into [:db/id :seon.test.run/selection-tx
                         [:seon.test.run/callers-at-head :limit nil]
                         [:seon.test.run/namespaces :limit nil]
@@ -1155,14 +1234,19 @@
                  (contains? read-result :seon.error/layer)
                  (contains? read-result :seon.error/operation))
         (throw (ex-info (:seon.error/message read-result) read-result))))
-    (when-not (:seon.cluster/name cluster-row)
+    (when-not (or snapshot? (:seon.cluster/name cluster-row))
       (admission-refusal! :seon.test/cluster-unavailable run-id
                           :explicit-authority-cluster cluster))
-    (when (or (not= branch (:seon.test.run/branch run))
-              (:seon.test.run/tested-branch run))
+    (when (and (not snapshot?) (or (not= branch (:seon.test.run/branch run))
+                                  (:seon.test.run/tested-branch run)))
       (admission-refusal! :seon.test/cluster-mismatch run-id branch
                           (select-keys run [:seon.test.run/branch
                                             :seon.test.run/tested-branch])))
+    (when (and snapshot?
+               (or (not= :current-src (:seon.test.run/branch run))
+                   (not (:seon.test.run/overlay-input-digest run))))
+      (admission-refusal! :seon.test/cluster-mismatch run-id
+                          :published-source-snapshot run))
     (when (or (and (map? digest)
                    (contains? digest :seon.error/at)
                    (contains? digest :seon.error/layer)
@@ -1170,29 +1254,37 @@
               (not= digest (:seon.test.run/program-digest run)))
       (admission-refusal! :seon.test/program-mismatch run-id digest
                           (:seon.test.run/program-digest run)))
-    (when (or (> (:seon.test.run/basis-t run) (db/basis-t database))
+    (when (and (not snapshot?) (or (> (:seon.test.run/basis-t run) (db/basis-t database))
               (> (get request :seon.test.run/change-basis-t 0)
-                 (:seon.test.run/basis-t run)))
+                 (:seon.test.run/basis-t run))))
       (admission-refusal! :seon.test/invalid-basis run-id
                           (db/basis-t database)
                           (select-keys row [:seon.test.run/basis-t
                                             :seon.test.run/change-basis-t])))
-    (when (seq (changed-definition-symbols database (:seon.test.run/basis-t run)))
+    (when (and (not snapshot?) (seq (changed-definition-symbols database (:seon.test.run/basis-t run))))
       (admission-refusal! :seon.test/program-mismatch run-id
                           :unchanged-tested-program :program-changed-after-tested-basis))
+    (when-not snapshot?
     (let [inputs (selection-read!
                   (db/q '[:find [?digest ...] :where [_ :seon.source/test-input-digest ?digest]] database))]
       (when-not (= 1 (count inputs))
         (admission-refusal! :seon.test/input-evidence-unavailable run-id :one-publication-input-digest inputs))
       (when-not (= (first inputs) (:seon.test.run/input-digest request))
-        (admission-refusal! :seon.test/program-mismatch run-id (first inputs) (:seon.test.run/input-digest request))))
+        (admission-refusal! :seon.test/program-mismatch run-id (first inputs) (:seon.test.run/input-digest request)))))
     (when (not= (count members) (count (set (map :seon.test.member/symbol members))))
       (admission-refusal! :seon.test.run/immutable run-id
                           :one-membership-per-symbol members))
     (if (:db/id previous)
-      (let [prior (-> (dissoc previous :db/id :seon.test.run/selection-tx)
-                      (assoc :seon.test.run/cluster
-                             (get-in previous [:seon.test.run/cluster :db/id])))
+      (let [prior (cond-> (dissoc previous :db/id :seon.test.run/selection-tx)
+                    (:seon.test.run/cluster previous)
+                    (assoc :seon.test.run/cluster
+                           (get-in previous [:seon.test.run/cluster :db/id])))
+            requested-members
+            (into (vec members)
+                  (selection-read!
+                   (db/pull-many database
+                                 [:seon.test.member/symbol [:seon.test.member/reasons :limit nil]]
+                                 (vec (:seon.test.run/covered-by request)))))
             normalize #(-> %
                            (cond-> (:seon.test.run/callers-at-head %)
                              (update :seon.test.run/callers-at-head set))
@@ -1204,17 +1296,26 @@
                                                :seon.test.run/identities])))]
         (when (or (not (:seon.test.run/selection-tx previous))
                   (not= (normalize row) (normalize prior))
-                  (not= (admission-member-values members)
+                  (not= (admission-member-values requested-members)
                         (admission-member-values
                          (admission-members database (:db/id previous)))))
           (admission-refusal! :seon.test.run/immutable run-id row prior))
         [])
-      (let [runs (db/q '[:find [?run ...] :in $ ?cluster ?digest ?inputs
+      (let [runs (if snapshot?
+                   (db/q '[:find [?run ...] :in $ ?base ?overlay ?digest ?basis
+                           :where [?run :seon.test.run/published-base-digest ?base]
+                                  [?run :seon.test.run/overlay-input-digest ?overlay]
+                                  [?run :seon.test.run/program-digest ?digest]
+                                  [?run :seon.test.run/basis-t ?basis]
+                                  [?run :seon.test.run/selection-tx]]
+                         database (:seon.test.run/published-base-digest run)
+                         (:seon.test.run/overlay-input-digest run) digest (:seon.test.run/basis-t run))
+                   (db/q '[:find [?run ...] :in $ ?cluster ?digest ?inputs
                          :where [?run :seon.test.run/cluster ?cluster]
                                 [?run :seon.test.run/program-digest ?digest]
                                 [?run :seon.test.run/input-digest ?inputs]
                                 [?run :seon.test.run/selection-tx]]
-                       database cluster-id digest (:seon.test.run/input-digest row))
+                       database cluster-id digest (:seon.test.run/input-digest row)))
             _ (when (and (map? runs)
                          (contains? runs :seon.error/at)
                          (contains? runs :seon.error/layer)
@@ -1229,17 +1330,25 @@
                                                (contains? candidate :seon.error/layer)
                                                (contains? candidate :seon.error/operation))
                                       (throw (ex-info (:seon.error/message candidate) candidate)))
-                                  candidate (assoc candidate :seon.test.run/cluster
-                                                   (get-in candidate [:seon.test.run/cluster :db/id]))]
+                                  candidate (cond-> candidate
+                                              (:seon.test.run/cluster candidate)
+                                              (assoc :seon.test.run/cluster
+                                                     (get-in candidate [:seon.test.run/cluster :db/id])))]
                               (when (= (admission-scope row) (admission-scope candidate))
                                 (map (juxt :seon.test.member/symbol identity)
-                                     (admission-members database run-eid))))))
+                                     (cond->> (admission-members database run-eid)
+                                       snapshot?
+                                       (remove #(get (selection-read!
+                                                      (db/pull database [:seon.test.member/completed-tx]
+                                                               (:db/id %)))
+                                                     :seon.test.member/completed-tx))))))))
                   (sort > runs))
             covered (keep #(get existing (:seon.test.member/symbol %)) members)
+            coverage (into (set (:seon.test.run/covered-by request)) (map :db/id) covered)
             reserved (remove #(get existing (:seon.test.member/symbol %)) members)]
         [(cond-> (assoc row :seon.test.run/selection-tx "datomic.tx")
            (seq reserved) (assoc :seon.test.run/members (vec reserved))
-           (seq covered) (assoc :seon.test.run/covered-by (set (map :db/id covered))))]))))
+           (seq coverage) (assoc :seon.test.run/covered-by coverage))]))))
 
 (defn reach-digest
   "Digest this test's source, transitively reached definitions and named schemas."

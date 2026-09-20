@@ -1,4 +1,21 @@
 #:seon.source{:branch :keyword,
+              :refused-test-run [:and {:seon.db/identity false :description "Identity of the test request whose admission or completion the source authority refused."} :seon.test.run/id],
+              :test-evidence-error
+              [:and :seon.error/base
+               [:map [:seon.source/refused-test-run :seon.source/refused-test-run]]],
+              :test-selection-request
+              [:map
+               [:seon.test.run/provenance [:and :seon.test.run/provenance :seon.test.run/snapshot]]
+               [:seon.test.run/input-digest :seon.test.run/input-digest]
+               [:seon.test.run/members [:vector :seon.test.member/member]]
+               [:seon.test.run/policy :seon.test.run/policy]
+               [:seon.test/include-long? {:optional true} :boolean]
+               [:seon.test/namespaces {:optional true} [:set :symbol]]
+               [:seon.test/identities {:optional true} [:set :qualified-symbol]]
+               [:seon.test/remaining-ms {:optional true} [:int {:min 1}]]],
+              :test-recording-request [:or :seon.test.run/completion :seon.source/test-selection-request],
+              :test-recording-result
+              [:or :seon.test.run/admission :seon.test/results :seon.source/test-evidence-error],
               :built-at :inst,
               :built? :boolean,
               :commit-id :uuid,

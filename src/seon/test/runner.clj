@@ -2982,14 +2982,22 @@
                             :where [?member :seon.test.member/failures ?report]]
                           database (:db/id member)))
         reports (execution-read (db/pull-many database '[*] report-ids))]
-    (cond-> {:seon.test/sym test-symbol
+    (cond-> (merge (select-keys run [:seon.test.run/program-digest
+                                   :seon.test.run/basis-t
+                                   :seon.test.run/published-base-digest
+                                   :seon.test.run/overlay-input-digest])
+                   (select-keys (execution-read
+                                 (db/pull database [:seon.test.run/input-digest]
+                                          [:seon.test.run/id (:seon.test.run/id run)]))
+                                [:seon.test.run/input-digest])
+                   {:seon.test/sym test-symbol
              :seon.test/pass-count (:seon.test.member/pass-count member)
              :seon.test/fail-count (:seon.test.member/fail-count member)
              :seon.test/error-count (:seon.test.member/error-count member)
              :seon.test/run-basis-t (:seon.test.run/basis-t run)
              :seon.test/run-at (:seon.test.run/at run)
              :seon.test/run [:seon.test.run/id (:seon.test.run/id run)]
-             :seon.test.member/completed-tx (:seon.test.member/completed-tx member)}
+             :seon.test.member/completed-tx (:seon.test.member/completed-tx member)})
       (seq reports) (assoc :seon.test.failure/reports (mapv #(dissoc % :db/id) reports)
                           :seon.test/failure-message
                           (str/join "\n\n" (map (requiring-resolve 'seon.test/failure-text) reports))))))
@@ -3104,6 +3112,8 @@
 (defn- commit-persistent-results!
   "Commit one completion through the source publication owner."
   [held-store run-result]
+  (if (:seon.test.run/provenance run-result)
+    (source/record-results! held-store run-result)
   (source/record-results!
    held-store
    {:seon.test/reach-digests (:seon.test/reach-digests run-result)
@@ -3116,7 +3126,7 @@
     (select-keys run-result [:seon.test.run/id :seon.test.run/at
                             :seon.test.run/git-sha :seon.test.run/program-digest
                             :seon.test.run/callers-at-head
-                            :seon.test.run/basis-t :seon.test.run/branch])}))
+                            :seon.test.run/basis-t :seon.test.run/branch])})))
 
 (defn- staged-completion
   "The gate completion staged at `path`, or a typed refusal naming it.
@@ -3202,7 +3212,8 @@
 (defn- record-persistent-results!
   "Commit one bare-gate completion through the authoritative store holder."
   [operator-root run-result]
-  (let [run-result (completion-reach-digests run-result)
+  (let [run-result (if (:seon.test.run/provenance run-result)
+                     run-result (completion-reach-digests run-result))
         completion-file (stage-completion! run-result)]
     (try
       (let [{live? :seon.fresh-operator/live-process?
@@ -3222,6 +3233,33 @@
                 (store/release-store! held-store))))))
       (finally
         (io/delete-file completion-file true)))))
+
+(defn record-snapshot!
+  "Admit or complete a snapshot through the cold recorder's store holder."
+  {:malli/schema [:=> [:cat :string :seon.source/test-recording-request]
+                  :seon.source/test-recording-result]}
+  [operator-root request]
+  (try
+    (let [result (record-persistent-results! operator-root request)]
+      (if (or (vector? result) (:seon.test.run/provenance result)
+              (:seon.source/refused-test-run result)) result
+          (throw (ex-info "The recording authority returned no admission or result facts."
+                          {:seon.test/recording-result result}))))
+    (catch Exception failure
+      (assoc (error/diagnostic
+              {:seon.error/at (java.util.Date.)
+               :seon.error/layer :seon.test/recording
+               :seon.error/operation 'seon.test.runner/record-snapshot!
+               :seon.error/message (or (ex-message failure) (.getName (class failure)))
+               :seon.error/diagnostic-layer :test
+               :seon.error/diagnostic-operation 'seon.test.runner/record-snapshot!
+               :seon.error/diagnostic-member operator-root
+               :seon.error/diagnostic-expected :published-source-test-authority
+               :seon.error/diagnostic-offending (Throwable->map failure)
+               :seon.error/diagnostic-cause :recording-unavailable
+               :seon.error/diagnostic-evidence {:seon.test.run/provenance (:seon.test.run/provenance request)}})
+             :seon.source/refused-test-run
+             (get-in request [:seon.test.run/provenance :seon.test.run/id])))))
 
 (defn- configured-persistent-results-root
   [launcher-root explicit-root]
