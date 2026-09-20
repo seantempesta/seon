@@ -63,6 +63,14 @@ publishes CHANGED files as same-identity upserts (`src/seon/cluster.clj`
    rule stays "declaration digest changed → caller closure". The lane
    verifies no other body-dependent class exists and lists kept classes.
 
+   **Namespace-interface ruling (2026-09-21 ~00:20 UTC, lane decision after
+   `f62978613`):** a namespace-interface change (deprecation, ns metadata, the
+   public declaration name set) invalidates every file that requires that
+   namespace through the stored `:seon.ns/requires`/alias/refer facts. The
+   namespace-interface digest is derived from the ns form's metadata and its
+   public declaration names, never bodies. Seven inference-dependent kondo
+   finding classes are excluded (16 findings in the census).
+
 2. **Publish through the live JVM, never a fresh one.** When `default` (or
    any live cluster JVM of the root) is alive, the publication runs over its
    prepl (the same seam `init --dev` adoption uses), removing the 40–60 s

@@ -5102,3 +5102,15 @@ atomic slice; an agent's second identical request executes zero tests.
 Resumed. Still owed by the orchestrator, deferred until the publication
 dissolution lands (owner: no repeated rebuilds): bare `bin/test` twice,
 `--platform`, the 1a/1d/render cold gates.
+
+## 2026-09-21 ~00:20 UTC — MCP exception projection fixed (sweep slice); publication lane: requires-invalidation ruled
+
+`kind-sweep-turn-cluster` landed `510a9236d` (MCP JVM exception projection
+facets — the tooling blocker) as its own slice; adopt into default once
+`src/seon/cluster.clj` is clean (the sweep still holds it), via
+`bin/seon init --dev default --changed src/seon/cluster.clj`.
+`publication-dissolution` landed `f62978613` (publication kondo config
+excludes seven inference-dependent finding classes; 16 findings; 8 tests /
+41 assertions green) and stopped at namespace-interface invalidation;
+ruled option 1 — requiring files invalidate through `:seon.ns/requires`
+facts; recorded in the spec; resumed.
