@@ -6778,3 +6778,21 @@ system design), and unchanged publication seals still advance the branch
 `instrument.clj` (contract refusals at the wrapper) — classes triaged in
 the next block. Reset at `c402d3c1d` → platform tier → measurement
 running serially.
+
+## 2026-09-23 ~01:30 local — the 515 reds are ~15 classes; the top one is the boot fault: `seon.error/stored-observation` throws `:malli.core/invalid-schema` (51 tests + every boot); error lane resumed on four classes
+
+Triage of `gate-0c6be06f3-all.log` by exception shape: `:malli.core/invalid-schema`
+52 (51 at `seon.error/stored-observation` — the compiled-node projection
+since step 2 reaches `malli.core/properties` with a non-schema; this is
+also the erased core fault at every boot); NPE "s is null" 30 (all in
+`seon.run6-db-test`); fixture writes refused 29 + 12; `seon.turn/system-turn`
+returns nil where a vector is declared 21; `seon.db/transact-call` report
+lacks `:db-before` 21; `seon.blob/with-publication!` returns an undeclared
+error 20; NPE "x is null" 13; `seon.program/shapes-in` projection refused
+11; `seon.cluster.reply/sources` member refused 11; stale
+`:seon.instrument/contract-violated` kind expectations 34 FAILs; plus a
+tail of smaller ones. `error-family-1a` resumed (astra low) on classes 1–4
++ the kind expectations (its files: error, turn, db, blob, instrument).
+The rest are assigned after the next complete tier. Slice 3 (publication
+transacts the difference) is released to the redesign lane as soon as the
+platform gate at `c402d3c1d` has published its base.
