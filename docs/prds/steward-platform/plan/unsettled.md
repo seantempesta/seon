@@ -4601,3 +4601,15 @@ render/1a circular hold is gone. `config-plan-family-1d` landed
 `c50625da4` (agent-surface identities aliased to canonical formats, R3).
 Running: 1a, results-reuse, 1d (editing), bridge review (read-only).
 Render resumes at the next free editing slot.
+
+## 2026-09-20 ~10:15 UTC — bridge PRD decisions ruled
+
+Owner (question tool): (1) projection identity = the published population's
+digest stamped on the branch at publication/adoption, carried by every db
+value, refusal without it (next reset); (2) trust Datahike's write-time
+schema check for attribute type/cardinality/unknown; ours keeps required
+members, component ownership, deletion refusal, relational invariants —
+delta measured and parity proven before removal; (3) bridge steps 1–2
+(registry value, walker deletion) FIRST, then the remaining wave-1 families
+on the new bridge; config/plan finishes as is. Wave-1b/1c launches are
+therefore deferred behind steps 1–2 (≈2 lane-days after the astra review).

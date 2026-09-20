@@ -1,6 +1,6 @@
 ---
 type: prd
-status: DRAFT for astra review against Malli and Datahike source (owner ruling 2026-09-20: "stop fighting malli and use its internals to make everything fast and simple"); every claim marked [verify] must carry a file:line into reference-code/ before this becomes binding
+status: ruled direction (owner 2026-09-20: decisions 1–3 in section 6); DRAFT until the astra review links every [verify] claim to reference-code/ file:line
 created: 2026-09-20
 tags: [prd, schema, malli, datahike, bridge, projection, dissolution]
 ---
@@ -200,13 +200,20 @@ corrected in place, every "Malli already does X" is proven by a probe, and
 the migration order is re-costed. The review may reject a section; it may
 not add a second mechanism.
 
-## 6. Owner decisions expected
+## 6. Owner decisions — RULED 2026-09-20 ~10:15 UTC (question tool)
 
-1. The generation stamp on the branch (a `-tx`/digest attribute at the
-   cluster root) as the one identity of "which projection" — at the next
-   reset.
-2. Whether Datahike's `:schema-flexibility :write` validation is trusted for
-   per-attribute checks (removing ours) or kept as a second check until the
-   deletion regressions prove parity.
-3. The order: this dissolution before or interleaved with wave 1's remaining
-   schema families (it changes how every family's lane declares).
+1. **Projection identity:** the published population's digest is stamped
+   on the cluster branch at publication/adoption (one new attribute at the
+   next reset) and carried by every database value; a value without a
+   stamp is a typed refusal, never a rebuild from rows or files.
+2. **Validation split:** Datahike's write-time schema check
+   (`:schema-flexibility :write`) is trusted for attribute type,
+   cardinality and unknown-attribute refusals; our final-report validator
+   keeps only what Datahike has no notion of — required members, component
+   ownership as one value, the deletion refusal, relational invariants. The
+   astra review measures the delta and proves parity with the deletion
+   regressions before any check of ours is removed.
+3. **Order:** bridge steps 1–2 (registry value, walker deletion) land FIRST;
+   the remaining wave-1 schema families (test evidence, agent/namespace/
+   turn, deletion-dial sweep, relational validator) declare once on the new
+   bridge afterwards. The running config/plan lane finishes as is.
