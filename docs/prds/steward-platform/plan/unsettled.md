@@ -5464,3 +5464,15 @@ ai, problems, plan, background, schedule, maintenance, config, issue, … —
 the gate's remaining undeclared-refusal producers). Editing lanes:
 publication (closing), my-protocol, ops-effects; wave-2 design read-only;
 step 2 parked.
+
+## 2026-09-21 ~09:40 UTC — my-protocol family kind-free; test-system sweep launched
+
+`kind-sweep-my-protocol` landed `9875331d1`: zero kind/class/error?
+references in src/my and test/my; fs/edit symbolic capability lookups
+corrected; message/turn follow-up 16 / 300 / 0 F / 4 held-owner errors,
+plan 22 / 123 / 0 / 7 held-owner errors — the held owners are
+cluster.message/turn/plan producers (turn/cluster and ops-effects sweeps).
+Third slot → `kind-sweep-test-system` (sol low; runner 58, accretion 8,
+arm 7; cache.clj named held). Editing lanes: publication (closing),
+ops-effects, test-system; wave-2 design read-only; step 2 parked; the
+turn/cluster sweep waits on turn.clj/cluster.clj.
