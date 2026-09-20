@@ -6879,3 +6879,16 @@ reconciliation phases), those publication leftovers + the findings delta,
 and the erased-fault message. Error lane meanwhile landed `fb41a5244`,
 `39406b8cf`, `c5ce4ba3a` (reviewed at its stop). Measurement at
 `36785fa41` running on the worktree.
+
+## 2026-09-23 ~04:10 local — measurement at `36785fa41` (slice 3) ABORTED at boot under three lanes' load: the boot's `config` phase was silent for 30 s and the operator's event-silence backstop killed it (from zero 236 s, first cluster 25.5 s under the same load)
+
+`start head` on the worktree root: boot reached `config` and emitted no
+event for 30,000 ms (`:seon.config.operator/event-silence-backstop-ms`);
+the operator stopped it. Under slice 2's quiet run the whole boot was
+24.0 s, so this is load (three lanes' JVMs, load ~13) on a phase that is
+already over the ten-second law: the config phase reconciles the manifest
+into facts without progress events. Two findings for the redesign lane at
+its next stop: (1) the config phase's work is O(what?) and must be named
+and made proportional or authorized; (2) a bound firing is a bug report
+naming what never arrived — it fired correctly. The slice 3 table is
+re-measured in a quiet window (no lane JVMs) before slice 4 is judged.
