@@ -1,0 +1,78 @@
+log	completed-phase	elapsed-ms
+tmp/publication-dissolution/scratch-init.log	publication preparation	4794
+tmp/publication-dissolution/scratch-init.log	request accepted	4
+tmp/publication-dissolution/scratch-init.log	bootstrap configuration	411
+tmp/publication-dissolution/scratch-init.log	store acquisition	146
+tmp/publication-dissolution/scratch-init.log	source build	44
+tmp/publication-dissolution/scratch-init.log	source snapshot	69
+tmp/publication-dissolution/scratch-init.log	analysis started: 380 source inputs	9714
+tmp/publication-dissolution/scratch-init.log	analysis complete	0
+tmp/publication-dissolution/scratch-init.log	warning output	3173
+tmp/publication-dissolution/scratch-init.log	branch publication started	679
+tmp/publication-dissolution/scratch-init.log	schema population started	1110
+tmp/publication-dissolution/scratch-init.log	schema population complete	0
+tmp/publication-dissolution/scratch-init.log	instruction rows	57
+tmp/publication-dissolution/scratch-init.log	program rows started	2055
+tmp/publication-dissolution/scratch-init.log	contract projection started: 3241 schemas, 1449 functions	230
+tmp/publication-dissolution/scratch-init.log	contract projection complete	4881
+tmp/publication-dissolution/scratch-init.log	contract rows batches	15502
+tmp/publication-dissolution/scratch-init.log	population transaction	26494
+tmp/publication-dissolution/scratch-init.log	population completion	0
+tmp/publication-dissolution/scratch-init.log	program rows complete	0
+tmp/publication-dissolution/scratch-init.log	initialization rows	974
+tmp/publication-dissolution/scratch-init.log	publication issue indexing	4742
+tmp/publication-dissolution/scratch-init.log	publication test evidence	0
+tmp/publication-dissolution/scratch-init.log	publication activation seal	1875
+tmp/publication-dissolution/scratch-init.log	publication branch head	5174
+tmp/publication-dissolution/scratch-live-init.log	publication preparation	0
+tmp/publication-dissolution/scratch-live-init.log	request accepted	3
+tmp/publication-dissolution/scratch-live-init.log	bootstrap configuration	70
+tmp/publication-dissolution/scratch-live-init.log	store acquisition	0
+tmp/publication-dissolution/scratch-live-init.log	source build	72
+tmp/publication-dissolution/scratch-live-init.log	source snapshot	37
+tmp/publication-dissolution/scratch-live-init.log	analysis started: 380 source inputs	12609
+tmp/publication-dissolution/scratch-live-init.log	analysis complete	0
+tmp/publication-dissolution/scratch-live-init.log	warning output	2233
+tmp/publication-dissolution/scratch-live-init.log	branch publication started	1074
+tmp/publication-dissolution/scratch-live-init.log	schema population started	1194
+tmp/publication-dissolution/scratch-live-init.log	schema population complete	0
+tmp/publication-dissolution/scratch-live-init.log	instruction rows	57
+tmp/publication-dissolution/scratch-live-init.log	program rows started	2381
+tmp/publication-dissolution/scratch-live-init.log	contract projection started: 3241 schemas, 1449 functions	604
+tmp/publication-dissolution/scratch-live-init.log	contract projection complete	7918
+tmp/publication-dissolution/scratch-live-init.log	contract rows batches	19279
+tmp/publication-dissolution/scratch-live-init.log	population transaction	30932
+tmp/publication-dissolution/scratch-live-init.log	population completion	0
+tmp/publication-dissolution/scratch-live-init.log	program rows complete	0
+tmp/publication-dissolution/scratch-live-init.log	initialization rows	343
+tmp/publication-dissolution/scratch-live-init.log	publication issue indexing	4597
+tmp/publication-dissolution/scratch-live-init.log	publication test evidence	1771
+tmp/publication-dissolution/scratch-live-init.log	publication test evidence transaction	0
+tmp/publication-dissolution/scratch-live-init.log	publication activation seal	4193
+tmp/publication-dissolution/scratch-live-init.log	publication branch head	6688
+tmp/publication-dissolution/scratch-one-file-init.log	publication preparation	0
+tmp/publication-dissolution/scratch-one-file-init.log	request accepted	0
+tmp/publication-dissolution/scratch-one-file-init.log	bootstrap configuration	68
+tmp/publication-dissolution/scratch-one-file-init.log	store acquisition	0
+tmp/publication-dissolution/scratch-one-file-init.log	source build	68
+tmp/publication-dissolution/scratch-one-file-init.log	source snapshot	31
+tmp/publication-dissolution/scratch-one-file-init.log	analysis started: 380 source inputs	10171
+tmp/publication-dissolution/scratch-one-file-init.log	analysis complete	0
+tmp/publication-dissolution/scratch-one-file-init.log	warning output	967
+tmp/publication-dissolution/scratch-one-file-init.log	branch publication started	509
+tmp/publication-dissolution/scratch-one-file-init.log	schema population started	1109
+tmp/publication-dissolution/scratch-one-file-init.log	schema population complete	0
+tmp/publication-dissolution/scratch-one-file-init.log	instruction rows	59
+tmp/publication-dissolution/scratch-one-file-init.log	program rows started	2225
+tmp/publication-dissolution/scratch-one-file-init.log	contract projection started: 3241 schemas, 1449 functions	544
+tmp/publication-dissolution/scratch-one-file-init.log	contract projection complete	7727
+tmp/publication-dissolution/scratch-one-file-init.log	contract rows batches	18937
+tmp/publication-dissolution/scratch-one-file-init.log	population transaction	30784
+tmp/publication-dissolution/scratch-one-file-init.log	population completion	0
+tmp/publication-dissolution/scratch-one-file-init.log	program rows complete	0
+tmp/publication-dissolution/scratch-one-file-init.log	initialization rows	501
+tmp/publication-dissolution/scratch-one-file-init.log	publication issue indexing	4551
+tmp/publication-dissolution/scratch-one-file-init.log	publication test evidence	1842
+tmp/publication-dissolution/scratch-one-file-init.log	publication test evidence transaction	0
+tmp/publication-dissolution/scratch-one-file-init.log	publication activation seal	4062
+tmp/publication-dissolution/scratch-one-file-init.log	publication branch head	7235

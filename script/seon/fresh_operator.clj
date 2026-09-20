@@ -283,7 +283,10 @@
 
 (defn- phase!
   "Run a phase, preserving its complete failure and naming its output file."
-  [root command phase operation]
+  ([root command phase operation] (phase! root command phase {} operation))
+  ([root command phase request operation]
+  (when-let [progress (:seon.operator.lock/progress request)]
+    (reset! progress (str command " " (name phase))))
   (let [started (System/nanoTime)
         directory (io/file root "data/operator/operations")
         log (io/file directory
@@ -315,7 +318,7 @@
                         " elapsed-ms=" elapsed-ms " log=" log)]
           (println (str "● " line))
           (flush)
-          (spit log (str line "\n") :append true))))))
+          (spit log (str line "\n") :append true)))))))
 
 (defn- source-file-digest
   [source-root path]
@@ -538,14 +541,18 @@
     (flush)
     (try
       (let [result (operator.state/run-process!
-                    {:seon.operator.subprocess/argv (child-jvm-command request)
+                    (cond-> {:seon.operator.subprocess/argv (child-jvm-command request)
                      :seon.operator.subprocess/deadline-ms
                      (get request :seon.fresh-operator/deadline-ms
                           operator.state/lifecycle-lock-timeout-ms)
                      :seon.operator.subprocess/directory (str (repository-root))
                      :seon.operator.subprocess/extra-env (child-environment root)
                      :seon.operator.subprocess/output-file (str log)
-                     :seon.operator.subprocess/merge-error? true})]
+                     :seon.operator.subprocess/merge-error? true}
+                      (:seon.operator.subprocess/observe-output! request)
+                      (merge (select-keys request [:seon.operator.subprocess/observe-output!
+                                                   :seon.operator.subprocess/progress
+                                                   :seon.operator.subprocess/event-silence-ms]))))]
         (assoc result :seon.operator.subprocess/output (slurp log)))
       (catch Throwable failure
         (throw (ex-info (str (ex-message failure) "; child output=" log)
@@ -2759,6 +2766,8 @@
           (throw failure#))
         (finally
           (when ~publish?
+            (println "● current-src: {:seon.source/progress :instrumentation-restoration}")
+            (flush)
             (try
               ~(refresh-instrument-form)
               (catch Throwable restore-failure#
@@ -2777,18 +2786,38 @@
         ((deref (ns-resolve 'seon.test (symbol "with-test-loader")))
          loader# (fn [] ~(read-string form)))))))
 
+(defn- publication-output!
+  "Forward publication phase observations to the lifecycle owner."
+  [request text]
+  (doseq [line (str/split-lines text)
+          :let [prefix "● current-src: "]
+          :when (str/starts-with? line prefix)]
+    (when-let [progress (:seon.operator.lock/progress request)]
+      (let [value (subs line (count prefix))
+            evidence (try (edn/read-string value) (catch Exception _ nil))]
+        (reset! progress (or (:seon.source/progress evidence) (str/trim value)))))))
+
 (defn- source-process-value!
-  [root form]
+  ([root form] (source-process-value! root form {}))
+  ([root form request]
   (let [dependency-cache (ensure-dependency-cache!)
         {captured :seon.operator.subprocess/output
          exit :seon.operator.subprocess/exit}
         (run-child-jvm!
-         {:seon.fresh-operator/root root
+         (cond-> {:seon.fresh-operator/root root
           :seon.fresh-operator/dependency-cache-path
           (:seon.dev-cache/path dependency-cache)
           :seon.fresh-operator/test-classpath (:seon.dev-cache/test-classpath dependency-cache)
           :seon.fresh-operator/deadline-ms (publication-bound-ms)
-          :seon.fresh-operator/arguments ["-e" form]})
+          :seon.fresh-operator/arguments ["-e" form]}
+           (:seon.operator.lock/progress request)
+           (assoc :seon.operator.subprocess/progress (:seon.operator.lock/progress request)
+                  :seon.operator.subprocess/event-silence-ms (publication-bound-ms)
+                  :seon.operator.subprocess/observe-output!
+                  (fn [line]
+                    (publication-output! request line)
+                    (when-not (str/starts-with? line init-result-prefix)
+                      (println line) (flush))))))
         output (StringBuilder.)
         result (volatile! nil)]
     (doseq [line (str/split-lines captured)]
@@ -2798,7 +2827,7 @@
         (vreset!
          result
          (edn/read-string (subs line (count init-result-prefix))))
-        (do
+        (when-not (:seon.operator.lock/progress request)
           (println line)
           (flush))))
     (let [output (str output)]
@@ -2808,7 +2837,7 @@
                 :seon.fresh-operator/output output}))
       (or @result
           (fail! "The initialization JVM returned no result."
-                 {:seon.fresh-operator/output output})))))
+                 {:seon.fresh-operator/output output}))))))
 
 (declare stop-empty-jvm!)
 
@@ -2827,14 +2856,14 @@
                    (:seon.dev.clj-kondo/status dependency-cache))
             (fail! "The clj-kondo dependency cache could not be prepared."
                    dependency-cache))
-        incremental? (or development-cluster (seq changed-paths))
-        truth (if incremental?
+        publication? (or development-cluster (seq changed-paths) (nil? name) publish-before-fork?)
+        truth (if publication?
                 (cluster-truth root {:seon.fresh-operator/read-offline-roster? false
                                      :seon.fresh-operator/probe-jvms? false})
                 (reconciled-truth! root))
         ;; The publication operation observes its own completion. A separate
         ;; registry probe cannot decide whether that operation can run.
-        anchor (if incremental?
+        anchor (if publication?
                  (some #(when (and (:seon.fresh-operator/operator-root? %)
                                     (:seon.fresh-operator/process-alive? %)
                                     (:seon.fresh-operator/transport-advertisement %)
@@ -2867,15 +2896,7 @@
                  (publication-bound-ms))
              (fn [event]
                (when (= :out (:tag event))
-                 (let [text (:val event)
-                       prefix "● current-src: "]
-                   (when (str/starts-with? text prefix)
-                     (when-let [progress (:seon.operator.lock/progress request)]
-                       (let [value (subs text (count prefix))
-                             evidence (try (edn/read-string value)
-                                           (catch Exception _ nil))]
-                         (reset! progress (or (:seon.source/progress evidence)
-                                              (str/trim value)))))))
+                 (publication-output! request (:val event))
                  (print (:val event))
                  (flush)))
              request)))
@@ -2890,7 +2911,7 @@
           (let [outcome
                 (source-process-value!
                  root (init-form root name force? changed-paths true
-                                 publish-before-fork? development-cluster))]
+                                 publish-before-fork? development-cluster) request)]
             (if-let [message (:seon.fresh-operator/message outcome)]
               (fail! message (:seon.fresh-operator/data outcome))
               (:seon.fresh-operator/value outcome))))
@@ -3501,9 +3522,10 @@
 (defn- reset!
   ([root arguments]
    (reset! root arguments nil))
-  ([root arguments initial-source-snapshot]
+  ([root arguments initial-source-snapshot] (reset! root arguments initial-source-snapshot {}))
+  ([root arguments initial-source-snapshot request]
   (parse-reset-arguments arguments)
-  (phase! root "reset" :down
+  (phase! root "reset" :down request
           #(do
              (down-recorded-processes! root true false true)
              (let [reclaimed (operator.state/reclaim-invalid-claims! (repository-root))]
@@ -3513,24 +3535,24 @@
                          (reconcile-process-records! root)))
                (fail! "Recorded JVMs remain after forced down; reset refused."
                       {:seon.fresh-operator/root root}))))
-  (phase! root "reset" :destroy
+  (phase! root "reset" :destroy request
           #(let [cleanup (cleanup-managed-root! root)]
              (println (str "● cleanup complete; reclaimed "
                            (:seon.operator.cleanup/removed-file-bytes cleanup)
                            " bytes"))
              cleanup))
-  (phase! root "reset" :republish #(init! root []))
-  (phase! root "reset" :refork #(init! root ["default"]))
-  (phase! root "reset" :start
+  (phase! root "reset" :republish request #(init! root [] false request))
+  (phase! root "reset" :refork request #(init! root ["default"] false request))
+  (phase! root "reset" :start request
           #(do
              (when initial-source-snapshot
                (source-preflight! (repository-root) initial-source-snapshot))
              (start! root ["default"])))
-  (phase! root "reset" :adopt
+  (phase! root "reset" :adopt request
           #(do
              (when initial-source-snapshot
                (source-preflight! (repository-root) initial-source-snapshot))
-             (init! root ["--dev" "default"])))
+             (init! root ["--dev" "default"] false request)))
   (println "● reset republished current-src and reforked default; started and adopted default")))
 
 (defn- reset-continuation
@@ -3627,9 +3649,9 @@
         command (first arguments)
         command-arguments (vec (rest arguments))
         first-source-snapshot (volatile! nil)
-        request (if (and (= "init" command) (some #{"--dev"} command-arguments))
+        request (if (contains? #{"init" "reset"} command)
                   {:seon.config.operator/event-silence-backstop-ms
-                   (operator-silence-backstop-ms {})
+                   (publication-bound-ms)
                    :seon.operator.lock/progress (atom "init preparation")}
                   {})
         run-command
@@ -3643,7 +3665,7 @@
             "open" (open! root command-arguments)
             "stop" (stop! root command-arguments)
             "down" (down! root command-arguments)
-            "reset" (reset! root command-arguments @first-source-snapshot)
+            "reset" (reset! root command-arguments @first-source-snapshot request)
             "logs" (logs! root command-arguments)
             ("help" "--help" "-h" nil) (help!)
             (fail! "Unknown fresh Seon command."
@@ -3669,7 +3691,7 @@
       (if (contains? #{"start" "config" "export" "init"
                        "stop" "down" "reset"}
                      command)
-        (phase! root command :lifecycle
+        (phase! root command :lifecycle request
                 #(with-operator-lock root (str/join " " arguments) request
                    (fn []
                      ; The tree can change while another publication owns the lock.
@@ -3680,7 +3702,7 @@
                                   (repository-root) @first-source-snapshot))))
                      (if (= "reset" command)
                        (run-command)
-                       (phase! root command (keyword command) run-command)))))
+                       (phase! root command (keyword command) request run-command)))))
         (run-command))
       (catch Throwable error
         (when (and (= "init" command)

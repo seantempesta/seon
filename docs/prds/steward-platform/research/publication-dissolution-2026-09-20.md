@@ -981,3 +981,65 @@ writer, or selection policy was changed to satisfy them. A tentative local
 refusal-helper edit was removed before this commit, restoring the exact tested
 bytes. No suite rerun is warranted for unchanged bytes. The integration
 namespace compiled when the passing isolation regression loaded it.
+
+
+### Item 2 — live complete publication and phase-based lifecycle progress
+
+Bare complete `init` now selects the root's recorded live advertisement with
+the same no-census admission as `init --dev`. A failed send remains a typed
+refusal; it never falls through to a fresh publication JVM. Cold publication
+streams its existing output, and only its declared phase lines update the
+carried lifecycle progress atom. The subprocess owner accepts a distinct
+`event-silence-ms` bound; ordinary subprocesses retain their existing absolute
+deadline semantics. Ordinary output does not reset a publication's bound.
+Reset passes that same request through its phase and init calls. Final
+instrumentation restoration now names its phase rather than looking silent
+after branch publication. Dependency grounding: Babashka process returns the
+stdout stream unless a copying target is requested
+(`reference-code/babashka-process/src/babashka/process.cljc:392–409`); the
+existing lifecycle owner watches phase changes before starting its transition
+(`src/seon/operator/state.clj`, `await-lock-held-transition!`).
+
+Focused fast run `cce4c6eb4613`: **3 tests, 13 assertions, 0 failures/errors**.
+It proves advertised-JVM selection without census/fresh fallback, real
+subprocess phases outliving one lifecycle silence interval, and a noisy but
+phase-silent subprocess being reaped. No second JVM is used in those tests.
+The final bound-selection correction below is additionally covered by the
+real scratch publications; the unchanged subprocess tests were not repeated.
+
+Owned scratch root: `tmp/publication-root`. Its initial cold publication
+completed its branch but exposed my overly narrow main-request bound: the
+general 30-second operator silence bound expired during post-publication
+instrumentation. The subprocess completed and released its store; I changed
+complete init to use the already declared publication bound (600,000 ms),
+with progress renewal, and emitted the missing restoration phase. This is
+not claimed as a successful cold end-to-end timing. The first invocation
+also correctly required the scratch directory to exist; it launched no JVM.
+
+`bin/seon --root tmp/publication-root start` then succeeded in **16.6 s**.
+The root advertised PID **53063**, start-instant `2026-09-20T06:23:40.214Z`,
+prepl **61525**. Two subsequent complete publications used that same PID and
+started no publication JVM: **97,603 ms** and **93,153 ms** lifecycle time.
+For the second, comparison of the published file-digest maps establishes
+EXACTLY one changed input: `test/seon/dev/publication_test.clj` (a disposable
+comment restored afterwards). Before/after commits were
+`6aaf7c66-26b8-533f-b80c-ef595a7e8ee5` and
+`6aaf7d28-0ef7-5892-9755-b9d00cda8fa6`. This is a measured one-file edit, not
+yet the spec's final one-file Git-commit landing proof.
+
+[Per-phase measurements](publication-phase-measurements-2026-09-20.tsv) retain
+the cold initial attempt, complete live publication, and one-file live
+publication. [The extraction script](publication-phase-measurements-2026-09-20.clj)
+aggregates repeated warning and contract-row progress events. The one-file
+publication still analyzed **380 inputs in 10,171 ms** and spent **30,784 ms**
+in the population transaction: that is the held item's remaining defect, not
+an N-file performance claim. The complete live comparison analyzed 380 inputs
+in 12,609 ms and transacted in 30,932 ms. Publication through the gate's cached
+base still awaits the shared publisher conversion; its duplicate build path
+has not been deleted in this item-2 slice.
+
+`bin/seon --root tmp/publication-root down` exited 0; the root was then deleted.
+Main default was untouched. The shared `cluster.clj` became clean during this
+proof, so its final population/refresh conversion can proceed after items 3–4.
+The scratch proof read the shared tree; the focused fast run used HEAD plus
+only owned paths. Foreign source content is not claimed as this lane's change.

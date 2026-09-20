@@ -74,7 +74,8 @@
     (not-any? same-subprocess-handle identities)))
 
 (defn run-process!
-  "Run one foreign argv process under one declared monotonic deadline."
+  "Run one foreign argv under a deadline, or an explicitly declared event-silence bound.
+  A supplied progress atom names phase events; ordinary output is not progress."
   [{argv :seon.operator.subprocess/argv
     deadline-ms :seon.operator.subprocess/deadline-ms
     directory :seon.operator.subprocess/directory
@@ -82,6 +83,9 @@
     input :seon.operator.subprocess/input
     merge-error? :seon.operator.subprocess/merge-error?
     output-file :seon.operator.subprocess/output-file
+    silence-ms :seon.operator.subprocess/event-silence-ms
+    progress :seon.operator.subprocess/progress
+    observe-output! :seon.operator.subprocess/observe-output!
     :as request}]
   (when-not (and (vector? argv) (seq argv) (every? string? argv)
                  (integer? deadline-ms) (pos? deadline-ms))
@@ -90,7 +94,14 @@
               {:seon.error/kind
                :seon.operator.subprocess/deadline-undeclared
                :seon.operator.subprocess/request request})))
+  (when (and silence-ms (not (and (pos-int? silence-ms) progress observe-output!)))
+    (throw (ex-info "A subprocess silence bound requires its phase observation."
+                    {:seon.error/kind :seon.operator.subprocess/progress-undeclared})))
   (let [deadline-ns (+ (System/nanoTime) (* 1000000 (long deadline-ms)))
+        last-progress (atom (System/nanoTime))
+        watch-key (Object.)
+        _ (when silence-ms (add-watch progress watch-key
+                             (fn [_ _ _ _] (reset! last-progress (System/nanoTime)))))
         options (cond-> {:out (if output-file :write :string)
                          :err (if merge-error? :out :string)
                          :shutdown process/destroy-tree}
@@ -98,23 +109,43 @@
                   extra-env (assoc :extra-env extra-env)
                   (some? input) (assoc :in input)
                   output-file (assoc :out-file output-file))
-        process-record (process/process argv options)
+        options (if observe-output! (dissoc (assoc options :out :stream) :out-file) options)
+        process-record (try (process/process argv options)
+                            (catch Throwable failure
+                              (when silence-ms (remove-watch progress watch-key))
+                              (throw failure)))
+        streamed-output (when observe-output!
+                          (future
+                            (with-open [reader (io/reader (:out process-record))
+                                        writer (if output-file (io/writer output-file) (java.io.StringWriter.))]
+                              (doseq [line (line-seq reader)]
+                                (.write writer (str line "\n"))
+                                (.flush writer)
+                                (observe-output! line))
+                              (if output-file "" (str writer)))))
         ^Process child (:proc process-record)
         root (.toHandle child)
         identities (subprocess-tree-identities root)
         timeout-value (Object.)
-        completed? (.waitFor child (subprocess-remaining-ms deadline-ns)
-                             TimeUnit/MILLISECONDS)
+        completed? (try
+                     (loop []
+                       (let [deadline (if silence-ms
+                                        (+ @last-progress (* 1000000 (long silence-ms)))
+                                        deadline-ns)]
+                         (cond (.waitFor child (subprocess-remaining-ms deadline) TimeUnit/MILLISECONDS) true
+                               (and silence-ms (> @last-progress (- deadline (* 1000000 (long silence-ms))))) (recur)
+                               :else false)))
+                     (finally (when silence-ms (remove-watch progress watch-key))))
+        output-deadline (if silence-ms (+ @last-progress (* 1000000 (long silence-ms))) deadline-ns)
         output (when completed?
-                 (if output-file
-                   ""
-                   (await-subprocess-value (:out process-record)
-                                           deadline-ns timeout-value)))
+                 (cond streamed-output (await-subprocess-value streamed-output output-deadline timeout-value)
+                       output-file ""
+                       :else (await-subprocess-value (:out process-record) output-deadline timeout-value)))
         error-output (when completed?
                        (if merge-error?
                          ""
                          (await-subprocess-value (:err process-record)
-                                                 deadline-ns timeout-value)))
+                                                 output-deadline timeout-value)))
         phase (cond
                 (not completed?) :process-exit
                 (identical? timeout-value output) :stdout

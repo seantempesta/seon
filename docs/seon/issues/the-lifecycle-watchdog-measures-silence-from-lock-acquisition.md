@@ -29,3 +29,19 @@ emits its progress events (the publication progress lines already exist for
 should report the adopt failure as a partial result naming default's state,
 not as a failed reset. Related: tools item 2 (publication ~150 s, progress in
 eventless phases) in the working edge.
+
+
+## Publication progress implemented — 2026-09-20
+
+Publication init (including the complete path) now carries the phase atom into
+the existing lifecycle watcher. Cold output is streamed through that same
+phase decoder with an explicit subprocess silence bound; live prepl output
+uses it directly. Reset hands the request through its named phases and init
+operations. Instrumentation restoration emits its own phase. Focused real
+subprocess/lifecycle verification: 3 tests, 13 assertions, green
+(`cce4c6eb4613`). The same scratch JVM completed live publications in 97.6 s
+and 93.2 s without spawning another JVM. Full evidence and the initial
+30-second-bound correction are in the publication dissolution landing note.
+
+The separate requested reset partial-result presentation after an adoption
+failure is not implemented here; this issue remains open for that obligation.
