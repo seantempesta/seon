@@ -6630,3 +6630,16 @@ test expectations and one fixture, one contract declaration, one helper
 predicate — no new mechanism. `bin/test --platform` at `db704cd1e` then
 `--all` running (`tmp/orchestrator/gate-db704cd1e-{platform,all}.log`);
 the redesign lane continues slice 1 in parallel on disjoint files.
+
+## 2026-09-22 ~21:40 local — platform gate at `db704cd1e` cannot publish its base while the redesign lane edits the operator script: "Snapshot resources differ from the hosting JVM's source tree" (`script/seon/fresh_operator.clj`)
+
+The gate's base publication goes through the live default JVM, which
+requires the snapshot's declared inputs to match the hosting tree; the
+redesign lane's uncommitted `fresh_operator.clj` makes HEAD differ from
+the tree, so the base is refused before any test. Decision: the platform
+and `--all` gates run on the quiet tree the moment slice 1 lands (no
+`--paths` snapshot of half-edits, no stopping default). The bridge lane's
+five fixes therefore remain proven only by fast runs until then.
+Sighting for the redesign's slice 1: the refusal is right (the live JVM
+publishes its own tree), and once every request goes through the running
+JVM the gate's base is that JVM's publication by construction.
