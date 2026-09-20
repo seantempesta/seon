@@ -5,7 +5,8 @@
   Seon therefore identifies a process as `(pid, start-instant)` and
   compares both halves at millisecond precision, matching the platform
   projection stored in advertisements and ancestor scratch names."
-  (:require [seon.schema.edn :as schema.edn]))
+  (:require [seon.error.refusal :as refusal]
+            [seon.schema.edn :as schema.edn]))
 
 (schema.edn/load! {})
 
@@ -21,11 +22,22 @@
     (when-not (.isPresent start)
       (throw
        (ex-info
-        "The process start instant is unavailable."
-        {:seon.error/kind :seon.cluster.process/start-instant-unavailable
-         :seon.cluster.process/start-instant-unavailable (.pid handle)
-         :seon.error/message "The process start instant is unavailable."
-         :seon.boot/pid (.pid handle)})))
+        "current-identity refused the process start instant: expected the JVM generation timestamp, but ProcessHandle supplied none. Fix: run on a platform that exposes ProcessHandle startInstant."
+        (refusal/diagnostic
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer :seon.cluster/process
+          :seon.error/operation `current-identity
+          :seon.error/message
+          "current-identity refused the process start instant: expected the JVM generation timestamp, but ProcessHandle supplied none. Fix: run on a platform that exposes ProcessHandle startInstant."
+          :seon.error/diagnostic-layer :process
+          :seon.error/diagnostic-operation `current-identity
+          :seon.error/diagnostic-member :seon.boot/start-instant
+          :seon.error/diagnostic-expected :process-generation-timestamp
+          :seon.error/diagnostic-offending :seon.error/unknown
+          :seon.error/diagnostic-cause :start-instant-unavailable
+          :seon.error/diagnostic-evidence {:seon.boot/pid (.pid handle)}
+          :seon.cluster.process/start-instant-unavailable (.pid handle)
+          :seon.boot/pid (.pid handle)}))))
     {:seon.boot/pid (.pid handle)
      :seon.boot/start-instant (java.util.Date/from (.get start))}))
 
