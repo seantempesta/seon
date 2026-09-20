@@ -72,3 +72,31 @@ branch and releasing the base hold.
 deadlines and retirement; `stop-worker!` owns process-tree exit observation.
 The lifecycle change will use those owners after selection, reserve one first
 task per child, and close each drainer before joining serial work.
+
+## Lifetime slice
+
+Identity checkpoint: `9d40d32b4`. The next slice removes speculative worker
+startup from `run-coordinator!` and eager checkout copies from `bin/test`.
+Each stage derives `min(configured cap, resolved task count)` delays after
+classification. The queue receives only tasks not reserved as a child's first
+task. A fast child cannot consume another child's reservation. Each drainer
+stops and reaps its child in `finally`; pool results are eagerly collected
+before the serial join (the previous `mapcat` was lazy). Serial remains lazy
+and serves unresolved work and the existing one leftover wave, then closes.
+Startup failures and retired-worker leftovers produce terminal errors carrying
+symbol identities. Initialization failures close their partial child.
+
+Decision regressions cover zero demand, serial-only demand, demand below the
+cap, and one terminal error per task after startup refusal. The existing
+orchestrator integration namespace gains an event-based real-process exit
+regression: pool exit must be observed while serial work is still waiting for
+its release latch. It uses protocol children and injects bounded task bodies;
+it is not evidence of full JVM fixture isolation. Full cold gate/platform
+proof and the new child-process regression remain unexecuted in this lane.
+No before/after child RSS or creation/exit measurement is claimed yet.
+
+The final lifetime namespace load passed (exit 0), including both runner test
+namespaces and the integration namespace. `bash -n bin/test` and the owned
+diff whitespace check passed. Fast execution is still behind the unchanged
+recording-admission refusal above; no unarmed test invocation substituted for
+it. Existing checkout child preparation bounds remain in the cache owner.

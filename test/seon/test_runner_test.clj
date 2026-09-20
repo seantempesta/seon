@@ -55,6 +55,57 @@
     (is (= tasks (::runner/resolved classified)))
     (is (= [absent] (::runner/unresolved classified)))))
 
+(deftest worker-demand-is-derived-after-task-classification
+  (let [manifest (#'runner/program-manifest)
+        selected [#'coordinator-uses-the-prepared-worker-count]
+        tasks (#'runner/test-tasks selected selected {})
+        absent (assoc (first tasks) ::runner/task-symbols ['seon.absent-gate-fixture/missing])
+        launched (atom [])
+        stopped (atom [])
+        completed (atom [])]
+    (with-redefs-fn
+      {#'runner/worker-count (constantly 3)
+       #'runner/worker-checkout (fn [worker-id] (io/file "tmp" worker-id))
+       #'runner/start-worker! (fn [worker-id _ _]
+                               (swap! launched conj worker-id)
+                               {::runner/worker-id worker-id
+                                ::runner/worker-retired? (atom false)})
+       #'runner/initialize-worker! (fn [worker _] worker)
+       #'runner/stop-worker! (fn [worker] (swap! stopped conj (::runner/worker-id worker)))
+       #'runner/execute-worker-task!
+       (fn [_ worker task]
+         (swap! completed conj [::runner/worker-id (::runner/worker-id worker)
+                                (::runner/task-symbols task)])
+         (assoc task ::runner/task-results []
+                     ::runner/task-summary {::runner/test-count 1 ::runner/pass-count 1
+                                           ::runner/fail-count 0 ::runner/error-count 0}))}
+      (fn []
+        (#'runner/run-parallel-stage! [] nil manifest (atom []) [])
+        (is (empty? @launched))
+        (#'runner/run-parallel-stage! [] nil manifest (atom []) [absent])
+        (is (= ["serial"] @launched))
+        (is (= ["serial"] @stopped))
+        (reset! launched [])
+        (reset! stopped [])
+        (#'runner/run-parallel-stage! [] nil manifest (atom []) tasks)
+        (is (= ["pool-1"] @launched) "One runnable task cannot demand the configured three children.")
+        (is (= ["pool-1"] @stopped))
+        (is (= 2 (count @completed)))))))
+
+(deftest failed-startup-preserves-one-terminal-outcome-per-task
+  (let [tasks (mapv (fn [ordinal]
+                      {::runner/task-id (str ordinal)
+                       ::runner/task-symbols [(symbol "seon.startup-fixture" (str "test-" ordinal))]})
+                    (range 3))
+        unavailable (delay (throw (ex-info "bounded startup refused" {})))
+        results (#'runner/run-task-pool! nil [unavailable] unavailable tasks [])]
+    (is (= (frequencies (map ::runner/task-id tasks))
+           (frequencies (map ::runner/task-id results))))
+    (is (= 3 (count results)))
+    (is (every? ::runner/worker-pool-exhausted results))
+    (is (every? #(= 1 (get-in % [::runner/task-summary ::runner/error-count])) results))
+    (is (every? symbol? (mapcat #(map :seon.test/sym (::runner/task-results %)) results)))))
+
 (deftest ^{:seon.test/platform "Dependency cache identity excludes checkout locations."}
   dependency-source-digest-does-not-name-the-checkout
   (let [root (doto (io/file project-root "tmp" (str "digest-" (random-uuid))) .mkdirs)

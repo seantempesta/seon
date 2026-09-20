@@ -43,6 +43,62 @@
          (get-in result [::runner/worker-exchange-result
                          ::runner/task-symbols]))))
 
+(deftest ^{:seon.test/long "Orchestrator integration: observes real child exit while serial work awaits a bounded release event."
+           :seon.test/long-ms 1800000}
+  drained-pool-exits-before-serial-release
+  (let [serial-entered (CountDownLatch. 1)
+        release-serial (CountDownLatch. 1)
+        children (atom [])
+        launch (fn [worker-id]
+                 (let [worker
+                       ((deref (var fixture/start-injected-worker!))
+                        worker-id
+                        (str "import sys\n"
+                             "sys.stdin.readline()\n"
+                             "print('SEON_TEST_WORKER_EDN "
+                             (pr-str {::runner/worker-event :stopped
+                                      ::runner/worker-id worker-id
+                                      ::runner/exchange-id (str worker-id "/stop")})
+                             "', flush=True)\n"))]
+                   (swap! children conj worker)
+                   worker))
+        pool (delay (launch "pool-1"))
+        serial (delay (launch "serial"))
+        task (fn [n] {::runner/task-id (str n)
+                       ::runner/task-symbols [(symbol "seon.lifetime-fixture" (str "test-" n))]})
+        executor (java.util.concurrent.Executors/newSingleThreadExecutor)]
+    (try
+      (with-redefs-fn
+        {#'runner/execute-worker-task!
+         (fn [_ worker task]
+           (if (= "serial" (::runner/worker-id worker))
+             (do (.countDown serial-entered)
+                 (test-support/await-event! release-serial ::serial-release))
+             (test-support/await-event! serial-entered ::serial-entered))
+           (assoc task ::runner/task-summary
+                       {::runner/test-count 1 ::runner/pass-count 1
+                        ::runner/fail-count 0 ::runner/error-count 0}))}
+        (fn []
+          (let [completion (.submit executor ^java.util.concurrent.Callable
+                                    (#'runner/on-caller-loader
+                                     #(#'runner/run-task-pool! nil [pool] serial [(task 0)] [(task 1)])))]
+            (try
+              (test-support/await-event! serial-entered ::serial-entered)
+              (let [process ^Process (::runner/worker-process (force pool))]
+                (test-support/await-event! (.onExit process) ::pool-process-exit)
+                (is (not (.isAlive process)))
+                (is (not (.isDone completion)))
+                (is (.isAlive ^Process (::runner/worker-process (force serial)))))
+              (finally (.countDown release-serial)))
+            (let [results (test-support/await-event! completion ::stage-completion)]
+              (is (= {"0" 1 "1" 1} (frequencies (map ::runner/task-id results))))
+              (is (every? #(not (.isAlive ^Process (::runner/worker-process %))) @children))))))
+      (finally
+        (.countDown release-serial)
+        (.shutdownNow executor)
+        (doseq [worker @children]
+          ((deref (var fixture/stop-injected-worker!)) worker))))))
+
 (deftest ^{:seon.test/long "Orchestrator integration: owns child processes; excluded from ordinary lane runner selection.", :seon.test/long-ms 1800000} dependency-configuration-excludes-first-party-source
   (let [root (doto (io/file (deref (var fixture/project-root)) "tmp" (str "dependency-inputs-" (random-uuid))) .mkdirs)
         log (io/file root "git.log")

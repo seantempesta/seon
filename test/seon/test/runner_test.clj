@@ -705,7 +705,8 @@
       (is (not (.exists serial)))
       (is (not (.exists confirmation)))
       (with-redefs-fn
-        {#'runner/execute-worker-task! (fn [_ worker admitted-task]
+        {#'runner/stop-worker! (fn [_] nil)
+         #'runner/execute-worker-task! (fn [_ worker admitted-task]
                                         (assoc admitted-task ::runner/executed-by
                                                (::runner/worker-id worker)))}
         #(is (= [(assoc task ::runner/executed-by "serial")]
@@ -737,7 +738,7 @@
          #'runner/confirm-parallel-failure! (fn [& _] (swap! launches inc))}
         #(reset! outcome
                  (#'runner/run-parallel-stage!
-                  [] nil {:seon.fn.manifest/artifacts []} [] nil [task]))))
+                  [] nil {:seon.fn.manifest/artifacts []} (atom []) [task]))))
     (is (= 0 @launches))
     (is (= [red] (::runner/task-results @outcome)))
     (is (= 1 (get-in @outcome [::runner/task-summary ::runner/fail-count])))

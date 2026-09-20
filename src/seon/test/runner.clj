@@ -4085,25 +4085,65 @@
         (when (pos? allowance)
           (swap! progress update ::silence-allowances dissoc (::task-id task)))))))
 
+(defn- failed-worker-task
+  "Give every member of an uncompleted task one attributed terminal error."
+  {:malli/schema
+   [:=> [:cat [:map [::task-symbols [:vector :qualified-symbol]]] :string]
+    [:map [::task-symbols [:vector :qualified-symbol]]
+     [::task-results :seon.test.runner/captured-results]
+     [::task-summary :seon.test.runner/summary]
+     [::task-output :string]]]}
+  [task message]
+  (let [symbols (::task-symbols task)]
+    (assoc task
+           ::task-summary {::test-count (count symbols) ::pass-count 0
+                           ::fail-count 0 ::error-count (count symbols)}
+           ::task-results
+           (mapv (fn [test-symbol]
+                   {:seon.test/sym test-symbol
+                    :seon.test/pass-count 0 :seon.test/fail-count 0
+                    :seon.test/error-count 1
+                    :seon.test/failure-message message})
+                 symbols)
+           ::task-output (str message "\n"))))
+
 (defn- run-task-pool!
   [progress workers serial-worker resolved-tasks unresolved-tasks]
-  (let [queue (LinkedBlockingQueue.)
+  (let [workers (vec (take (count resolved-tasks) workers))
+        first-tasks (take (count workers) resolved-tasks)
+        queue (LinkedBlockingQueue.)
         finished (Object.)
-        executor (Executors/newVirtualThreadPerTaskExecutor)]
-    (doseq [task resolved-tasks]
+        executor (Executors/newVirtualThreadPerTaskExecutor)
+        execute (fn [worker task]
+                  (try
+                    (execute-worker-task! progress worker task)
+                    (catch Throwable failure
+                      (reset! (::worker-retired? worker) true)
+                      (assoc (failed-worker-task task
+                               (str "Worker execution failed: " (ex-message failure)))
+                             ::worker-pool-exhausted true))))]
+    (doseq [task (drop (count workers) resolved-tasks)]
       (.put queue task))
     (doseq [_ workers]
       (.put queue finished))
     (try
       (let [parallel-futures
             (mapv
-             (fn [worker]
+             (fn [pending-worker first-task]
                (.submit
                 executor
                 ^java.util.concurrent.Callable
                 (on-caller-loader
                  (fn []
-                   (drain-worker-tasks!
+                   (let [worker (try (force pending-worker)
+                                     (catch Throwable failure failure))]
+                    (if (instance? Throwable worker)
+                      [(assoc (failed-worker-task first-task
+                               (str "Worker startup failed: " (ex-message worker)))
+                              ::worker-pool-exhausted true)]
+                     (try
+                      (into [(execute worker first-task)]
+                       (drain-worker-tasks!
                     ;; a retired worker must stop TAKING: consuming the
                     ;; queue after retirement converted one bound firing
                     ;; into a cascade of attributed failures for every
@@ -4118,8 +4158,9 @@
                             @(::worker-retired? worker)
                             (do (.put queue task) nil)
                             :else task))))
-                    #(execute-worker-task! progress worker %))))))
-             workers)
+                        #(execute worker %)))
+                      (finally (stop-worker! worker)))))))))
+             workers first-tasks)
             ;; The serial remainder uses the same sequential worker loop,
             ;; without a second scheduler or concurrent command on its root.
             serial-future
@@ -4129,9 +4170,15 @@
                ^java.util.concurrent.Callable
                (on-caller-loader
                 (fn []
-                  (mapv #(execute-worker-task! progress (force serial-worker) %)
+                  (mapv (fn [task]
+                          (try
+                            (execute (force serial-worker) task)
+                            (catch Throwable failure
+                              (assoc (failed-worker-task task
+                                       (str "Serial worker unavailable: " (ex-message failure)))
+                                     ::worker-pool-exhausted true))))
                         unresolved-tasks)))))
-            parallel-results (mapcat #(.get %) parallel-futures)
+            parallel-results (into [] (mapcat #(.get %)) parallel-futures)
             serial-results (if serial-future (.get serial-future) [])
             ;; tasks left behind by retired workers: one bounded wave on
             ;; the serial worker when it is alive; otherwise a typed
@@ -4144,35 +4191,26 @@
                             :else (recur (conj tasks entry)))))
             leftover-results
             (when (seq leftovers)
-              (if (and (force serial-worker)
-                       (not @(::worker-retired? (force serial-worker))))
-                (mapv #(execute-worker-task! progress (force serial-worker) %)
-                      leftovers)
-                (mapv (fn [task]
-                        (let [test-symbols (::task-symbols task)
-                              message
-                              (str "Worker pool exhausted before this task"
-                                   " could run; every pool worker retired.")]
-                          (assoc task
-                                 ::task-summary
-                                 {::test-count (count test-symbols)
-                                  ::pass-count 0
-                                  ::fail-count 0
-                                  ::error-count (count test-symbols)}
-                                 ::task-results
-                                 (mapv (fn [test-symbol]
-                                         #:seon.test{:sym test-symbol
-                                                     :pass-count 0
-                                                     :fail-count 0
-                                                     :error-count 1
-                                                     :failure-message message})
-                                       test-symbols)
-                                 ::task-output (str message "\n")
-                                 ::worker-pool-exhausted true)))
-                      leftovers)))]
+              (mapv (fn [task]
+                      (try
+                        (let [worker (force serial-worker)]
+                          (if (and worker (not @(::worker-retired? worker)))
+                            (execute worker task)
+                            (assoc (failed-worker-task task
+                                     "Worker pool exhausted before this task could run; every worker retired.")
+                                   ::worker-pool-exhausted true)))
+                        (catch Throwable failure
+                          (assoc (failed-worker-task task
+                                   (str "Serial worker unavailable: " (ex-message failure)))
+                                 ::worker-pool-exhausted true))))
+                    leftovers))]
         (vec (concat parallel-results serial-results leftover-results)))
       (finally
-        (.shutdownNow executor)))))
+        (.shutdownNow executor)
+        (when (and serial-worker (realized? serial-worker))
+          ;; A failed delay owns no worker; startup cleans its partial child.
+          (when-let [worker (try (force serial-worker) (catch Throwable _ nil))]
+            (stop-worker! worker)))))))
 
 (defn- confirmation-root
   [task]
@@ -4547,14 +4585,26 @@
     (mapv by-symbol (sort symbols))))
 
 (defn- run-parallel-stage!
-  [namespaces progress manifest workers serial-worker tasks]
+  [namespaces progress manifest workers* tasks]
   (let [{::keys [resolved unresolved]} (split-resolved-tasks manifest tasks)]
     (when (seq unresolved)
       (println "bin/test:" (count unresolved)
                "task(s) lack complete :seon.test rows; running serially:")
       (doseq [task unresolved]
         (println " -" (str/join "," (::task-symbols task)))))
-    (let [results (if (seq (confirmation-symbols))
+    (let [launch (fn [worker-id]
+                   (let [checkout (worker-checkout worker-id)
+                         worker (start-worker! worker-id checkout checkout)]
+                     (swap! workers* conj worker)
+                     (try
+                       (initialize-worker! worker namespaces)
+                       (catch Throwable failure
+                         (stop-worker! worker)
+                         (throw failure)))))
+          workers (mapv (fn [ordinal] (delay (launch (str "pool-" ordinal))))
+                        (range 1 (inc (min (worker-count) (count resolved)))))
+          serial-worker (delay (launch "serial"))
+          results (if (seq (confirmation-symbols))
                     (confirm-task-results!
                      (worker-count) progress (set (map ::task-id tasks)) tasks
                      (partial confirm-parallel-failure! namespaces))
@@ -4626,13 +4676,10 @@
                   progress configured-silence-seconds suite-start)
         pool-size (worker-count)
         confirming (confirmation-symbols)
-        worker-ids (if (seq confirming) []
-                      (mapv #(str "pool-" %) (range 1 (inc pool-size))))
         workers* (atom [])
         shutdown-hook
         (Thread. (fn [] (doseq [worker @workers*] (stop-worker! worker)))
-                 "seon-test-worker-reaper")
-        launch-executor (Executors/newVirtualThreadPerTaskExecutor)]
+                 "seon-test-worker-reaper")]
     (.addShutdownHook (Runtime/getRuntime) shutdown-hook)
     (try
       (announce! progress
@@ -4641,21 +4688,7 @@
                       " namespaces=" (count namespaces)
                       " workers=" pool-size
                       " silence-backstop=" configured-silence-seconds "s"))
-      (let [worker-futures
-            (mapv
-             (fn [worker-id]
-               (.submit
-                launch-executor
-                ^java.util.concurrent.Callable
-                (on-caller-loader
-                 (fn []
-                   (let [checkout (worker-checkout worker-id)
-                         worker (start-worker! worker-id checkout checkout)]
-                     (swap! workers* conj worker)
-                     (initialize-worker! worker namespaces))))))
-             worker-ids)]
-        ;; Coordinator namespace loading and manifest construction overlap the
-        ;; workers' JVM startup and namespace loading.
+      (do
         (doseq [[index test-namespace] (map-indexed vector namespaces)]
           (announce! progress
                      (str "LOAD " (inc index) "/" (count namespaces)
@@ -4680,15 +4713,6 @@
                                     :seon.test.run/id (id/id)
                                     :seon.test.run/at (java.util.Date.)
                                     :seon.test.run/git-sha git-sha)
-              workers (mapv #(.get %) worker-futures)
-              pool-workers (filterv #(str/starts-with? (::worker-id %) "pool-")
-                                    workers)
-              serial-worker
-              (delay
-                (let [checkout (worker-checkout "serial")
-                      worker (start-worker! "serial" checkout checkout)]
-                  (swap! workers* conj worker)
-                  (initialize-worker! worker namespaces)))
               explicit? (= "explicit" selection-mode)
               bulk (case selection-mode
                      ("all" "full")
@@ -4728,8 +4752,8 @@
               _ (announce! progress
                            (str "TIER platform " (count platform) " tests"))
               platform-outcome
-              (run-parallel-stage! namespaces progress manifest pool-workers
-                                   serial-worker platform-tasks)
+              (run-parallel-stage! namespaces progress manifest workers*
+                                   platform-tasks)
               platform-red? (pos? (+ (get-in platform-outcome
                                               [::task-summary ::fail-count])
                                      (get-in platform-outcome
@@ -4743,8 +4767,7 @@
                   (announce! progress
                              (str "TIER bulk " (count selected) " tests"))
                   (run-parallel-stage! namespaces progress manifest
-                                       pool-workers serial-worker
-                                       selected-tasks)))
+                                       workers* selected-tasks)))
               task-results (->> (concat (::task-results platform-outcome)
                                         (::task-results bulk-outcome))
                                 (sort-by ::task-ordinal)
@@ -4789,7 +4812,6 @@
       (finally
         (doseq [worker @workers*]
           (stop-worker! worker))
-        (.shutdownNow launch-executor)
         (.shutdownNow backstop)
         (try
           (.removeShutdownHook (Runtime/getRuntime) shutdown-hook)

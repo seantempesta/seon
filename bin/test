@@ -990,8 +990,6 @@ worker_count=$(bb -e '
         n (if (= "1" prepare) 0
               (cache/worker-count (.availableProcessors (Runtime/getRuntime))
                                   override (parse-long namespaces)))]
-    (doseq [ordinal (range 1 (inc n))]
-      (cache/worker-checkout! snapshot (str snapshot "/workers/pool-" ordinal)))
     (println n))' "$run_root" "${SEON_TEST_WORKERS-}" "${#namespaces[@]}" "$prepare_head_base")
 if [ -n "$snapshot_digest" ]; then
   shared_published_base="$source_root/target/test-published-bases/$snapshot_digest/base"
