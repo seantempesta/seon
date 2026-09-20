@@ -172,7 +172,8 @@
   [store commit-id]
   (if-let [database
            (d/commit-as-db (:seon.store/connection-object store) commit-id)]
-    (db/carry-derived-projection database)
+    (vary-meta database assoc :seon.schema/projection
+               (schema/projection-from-database database))
     (refuse! ::source-absent "the adopted source commit is unavailable"
              {:seon.source/commit-id commit-id})))
 
@@ -575,7 +576,7 @@
                            "another publisher created current-src first"
                            {:seon.source/branch current-branch
                             :seon.source/commit-id scratch-commit}))))
-            (unresolved-report! (db/db connection)))
+            (when-not expected-commit (unresolved-report! (db/db connection))))
             (finally
               (d/release connection))))]
         (let [commit-id
@@ -588,12 +589,11 @@
                      {:seon.source/branch current-branch}))
           (registry/retire-branch! {:seon.store/store store
                                     :seon.store/branch scratch})
-          {:seon.source/branch current-branch
-           :seon.source/commit-id commit-id
-           :seon.source/digest source-digest
-           :seon.source/built? true
-           :seon.program/unresolved-report
-           unresolved-report}))
+          (cond-> {:seon.source/branch current-branch
+                   :seon.source/commit-id commit-id
+                   :seon.source/digest source-digest
+                   :seon.source/built? true}
+            unresolved-report (assoc :seon.program/unresolved-report unresolved-report))))
         (catch Throwable failure
           (retire-scratch! store scratch)
           (throw failure)))))))

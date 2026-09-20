@@ -1401,68 +1401,80 @@
 (defn activation-missing
   "Missing facts for one stored or candidate activation closure at `database`."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value
-         :seon.activation/closure
-         :seon.activation/lookup-rows]
-    :seon.activation/missing]}
-  [database closure lookup-rows]
-  (let [{expected-schemas :seon.activation/schema-keys
-         expected-attributes :seon.activation/required-attributes
-         expected-defaults :seon.activation/config-defaults
-         expected-required :seon.activation/config-required
-         expected-symbols :seon.activation/executable-symbols}
-        (activation-requirements database)
-        stored-schemas (set (:seon.activation/schema-keys closure))
-        stored-attributes (set (:seon.activation/required-attributes closure))
-        stored-defaults (set (:seon.activation/config-defaults closure))
-        stored-required (set (:seon.activation/config-required closure))
-        stored-symbols (set (:seon.activation/executable-symbols closure))
-        database-schemas
-        (into #{}
-              (db/q '[:find [?key ...]
-                      :where [?schema :seon.schema/key ?key]]
-                    database))
-        installed-attributes (set (keys (:schema database)))
-        database-symbols expected-symbols
-        missing-schemas
-        (set/union (set/difference expected-schemas stored-schemas)
-                   (set/difference stored-schemas database-schemas))
-        missing-attributes
-        (set/union (set/difference expected-attributes stored-attributes)
-                   (set/difference stored-attributes installed-attributes))
-        expected-dials (set/union expected-defaults expected-required)
-        stored-dials (set/union stored-defaults stored-required)
-        missing-dials
-        (set/union (set/difference expected-dials stored-dials)
-                   (set/intersection stored-defaults stored-required))
-        missing-symbols
-        (set/union (set/difference expected-symbols stored-symbols)
-                   (set/difference stored-symbols database-symbols))
-        missing-lookups
-        (into []
-              (keep
-               (fn [{attribute :seon.activation.lookup/attribute
-                     value :seon.activation.lookup/value}]
-                 (let [resolved (db/pull database [:db/id] [attribute value])]
-                   (when-not (:db/id resolved)
-                     {:seon.activation/lookup-attribute attribute
-                      :seon.activation/lookup-value value}))))
-              lookup-rows)]
-    (into []
-          cat
-          [(map (fn [schema-key]
-                  {:seon.activation/schema-key schema-key})
-                (sort missing-schemas))
-           (map (fn [attribute]
-                  {:seon.activation/required-attribute attribute})
-                (sort missing-attributes))
-           (map (fn [dial]
-                  {:seon.activation/config-dial dial})
-                (sort missing-dials))
-           (sort-by pr-str missing-lookups)
-           (map (fn [symbol]
-                  {:seon.activation/executable-symbol symbol})
-                (sort missing-symbols))])))
+   [:function
+    [:=> [:cat :seon.db/database-value
+          :seon.activation/closure :seon.activation/lookup-rows]
+     :seon.activation/missing]
+    [:=> [:cat :seon.db/database-value
+          :seon.activation/closure :seon.activation/lookup-rows
+          [:map
+           [:seon.activation/schema-keys [:set :keyword]]
+           [:seon.activation/required-attributes [:set :keyword]]
+           [:seon.activation/config-defaults [:set :keyword]]
+           [:seon.activation/config-required [:set :keyword]]
+           [:seon.activation/executable-symbols [:set :qualified-symbol]]]]
+     :seon.activation/missing]]}
+  ([database closure lookup-rows]
+   (activation-missing database closure lookup-rows
+                       (activation-requirements database)))
+  ([database closure lookup-rows requirements]
+   (let [{expected-schemas :seon.activation/schema-keys
+          expected-attributes :seon.activation/required-attributes
+          expected-defaults :seon.activation/config-defaults
+          expected-required :seon.activation/config-required
+          expected-symbols :seon.activation/executable-symbols}
+         requirements
+         stored-schemas (set (:seon.activation/schema-keys closure))
+         stored-attributes (set (:seon.activation/required-attributes closure))
+         stored-defaults (set (:seon.activation/config-defaults closure))
+         stored-required (set (:seon.activation/config-required closure))
+         stored-symbols (set (:seon.activation/executable-symbols closure))
+         database-schemas
+         (into #{}
+               (db/q '[:find [?key ...]
+                       :where [?schema :seon.schema/key ?key]]
+                     database))
+         installed-attributes (set (keys (:schema database)))
+         database-symbols expected-symbols
+         missing-schemas
+         (set/union (set/difference expected-schemas stored-schemas)
+                    (set/difference stored-schemas database-schemas))
+         missing-attributes
+         (set/union (set/difference expected-attributes stored-attributes)
+                    (set/difference stored-attributes installed-attributes))
+         expected-dials (set/union expected-defaults expected-required)
+         stored-dials (set/union stored-defaults stored-required)
+         missing-dials
+         (set/union (set/difference expected-dials stored-dials)
+                    (set/intersection stored-defaults stored-required))
+         missing-symbols
+         (set/union (set/difference expected-symbols stored-symbols)
+                    (set/difference stored-symbols database-symbols))
+         missing-lookups
+         (into []
+               (keep
+                (fn [{attribute :seon.activation.lookup/attribute
+                      value :seon.activation.lookup/value}]
+                  (let [resolved (db/pull database [:db/id] [attribute value])]
+                    (when-not (:db/id resolved)
+                      {:seon.activation/lookup-attribute attribute
+                       :seon.activation/lookup-value value}))))
+               lookup-rows)]
+     (into []
+           cat
+           [(map (fn [schema-key]
+                   {:seon.activation/schema-key schema-key})
+                 (sort missing-schemas))
+            (map (fn [attribute]
+                   {:seon.activation/required-attribute attribute})
+                 (sort missing-attributes))
+            (map (fn [dial]
+                   {:seon.activation/config-dial dial})
+                 (sort missing-dials))
+            (sort-by pr-str missing-lookups)
+            (map (fn [symbol]
+                   {:seon.activation/executable-symbol symbol})
+                 (sort missing-symbols))]))))
 
 (defn derive-activation
   "Derive and preflight the complete activation closure on one source scratch."
@@ -1507,7 +1519,7 @@
     {:seon.activation/closure closure
      :seon.activation/lookup-rows lookup-rows
      :seon.activation/missing
-     (into (activation-missing database closure lookup-rows)
+     (into (activation-missing database closure lookup-rows requirements)
            requested-missing)}))
 
 (def ^:private activation-closure-set-attributes
@@ -2168,12 +2180,15 @@
     (if (= digest (:seon.source/digest published))
       published
       (let [cached (read-source-artifact root)
+            _ (report-source-progress! "published manifest read")
             valid? (valid-source-manifest? (:seon.fn/manifest cached))
+            _ (report-source-progress! "published manifest validation")
             previous (when (and published
                                 (= (:seon.source/digest published) (:seon.source/digest cached))
                                 valid?)
                        (:seon.fn/manifest cached))
-            database (when published (source/database store (:seon.source/commit-id published)))]
+            database (when published (source/database store (:seon.source/commit-id published)))
+            _ (report-source-progress! "published database acquisition")]
         (try
           (let [_ (report-source-progress! "analysis started")
                 manifest (seon.fn/build-manifest
@@ -2190,10 +2205,12 @@
                               (:seon.source/relative-file-digests snapshot))
                 changed (into changed (remove #(contains? (:seon.source/relative-file-digests snapshot) %))
                               (keys (:seon.source/relative-file-digests cached)))
+                prior-artifacts (into {} (map (juxt :seon.fn.file/relative-path identity))
+                                      (:seon.fn.manifest/artifacts previous))
                 paths (when previous
                         (into changed
                               (keep (fn [artifact]
-                                      (when (not= artifact (seon.fn/artifact-by-path previous (:seon.fn.file/relative-path artifact)))
+                                      (when (not= artifact (get prior-artifacts (:seon.fn.file/relative-path artifact)))
                                         (:seon.fn.file/relative-path artifact))))
                               (:seon.fn.manifest/artifacts manifest)))
                 classes (when paths
@@ -2508,7 +2525,7 @@
 
   Content digests select changed inputs and declaration edges select affected
   files. Every entry point reuses the published manifest and the current
-  database history. A changed producer toolchain requires complete analysis.
+  database history. Complete analysis is only needed without a prior manifest.
   A final source-change refusal retries publication/adoption once immediately;
   the last adopted source database remains the reconciliation basis."
   {:malli/schema

@@ -40,3 +40,15 @@ retry was also ended. Using the normal publication classpath
 (`clojure -Spath`, with explicit dependency directories and jars) completed
 successfully. AGENTS.md now teaches that command and names the test-root
 exception; the original publication subprocess diagnostic still needs repair.
+
+## Slice 3 observation — 2026-09-22
+
+A scratch snapshot linked `.clj-kondo/.cache` to the existing checkout
+cache. Operator preflight refused after 10.405 s with the same generic
+message. The exact cause here is now verified: `cache-contents` returned
+zero files through the symlink, while `babashka.fs/glob` on its real path
+found **3,508** transit files. Its default traversal does not follow that
+root link. The dependency subprocess's result was again hidden by the
+outer catch. The lane removed only its scratch symlink and let the normal
+operator populate that root's own clj-kondo cache. No shared cache files
+were deleted and no production cache code changed in the publication slice.

@@ -67,3 +67,31 @@ was in contract projection (18.326 s) when the lane terminated this broad
 run after six independent function-suite errors had already been reported.
 Exit 143 is not a suite verdict. The focused publication regressions continue
 separately. Neither schema owner nor the source test fixture was changed.
+
+## Slice 3 observation — 2026-09-22 redesign assignment
+
+A one-file docstring publication on the lane's own running host, after
+removing repeated manifest searches and duplicate projection construction,
+still spent 6,608 ms acquiring its manifest/database, 2,548 ms in the
+reconciliation transaction and 4,355 ms in activation sealing. This is a
+development reload measurement, not the final armed-boot result. The landing
+note records the final run separately.
+
+The remaining algorithms are identifiable in source. `source/database`
+materializes an immutable published commit and calls
+`schema/projection-from-database`; that function queries all schema,
+contract and function-source rows, then parses and compiles their complete
+projection (`src/seon/schema.clj:2705`). Activation independently derives
+that projection to validate the complete activation closure. These are
+O(program), not O(the changed declaration). Carrying the existing immutable
+projection from its connection and updating it from the transaction report
+is the relevant existing seam; adding another publication cache is not.
+
+`db/write-report-error` also invokes `arity-mismatches-with` over the entire
+resulting database after every transaction with affected entities
+(`src/seon/db.clj:4061`). Its own `affected` set and the reverse call edges
+provide the input for O(change + callers) validation. The publication lane
+can reduce submitted datoms but cannot remove that whole-program query
+without changing the database writer owned by the concurrent error lane.
+Neither boundary is described as acceptable latency, and no timeout was
+raised to hide it.

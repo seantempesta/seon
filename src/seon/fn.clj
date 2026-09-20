@@ -2657,6 +2657,20 @@
   (let [source-rows (rows request)
         packaged-forms (declaration-forms request)
         partial? (some? (:seon.fn/changed-paths request))
+        prior-rows
+        (when partial?
+          (into {} (map (juxt program/row-identity identity))
+                (rows (assoc request :seon.fn/manifest
+                             (:seon.fn/previous-manifest request)))))
+        changed-rows
+        (if partial?
+          ;; File analysis records provenance on every declaration. A new file
+          ;; digest alone does not change an otherwise identical declaration.
+          (filterv #(not= (dissoc % :seon.program/analyzed-source-digest)
+                          (dissoc (get prior-rows (program/row-identity %))
+                                  :seon.program/analyzed-source-digest))
+                   source-rows)
+          source-rows)
         selected-forms (if partial? (select-keys packaged-forms (changed-schema-keys request)) packaged-forms)
         projection (or (when partial? (incremental-projection request source-rows))
                        (schema/build-projection packaged-forms))
@@ -2668,7 +2682,8 @@
         source-only
         (remove (fn [row]
                   (contains? canonical-keys (:seon.schema/key row)))
-                source-rows)]
+                changed-rows)
+        desired-identities (into #{} (map program/row-identity) (concat source-only canonical-schemas))]
     (doseq [{schema-key :seon.schema/key
              form-string :seon.schema/form}
             (filter :seon.schema/key source-only)]
@@ -2678,11 +2693,16 @@
          (ex-info "Source indexing refused a non-Malli schema declaration."
                   {:seon.error/kind ::index-refused
                    :seon.schema/key schema-key :seon.fn/index-refused true}))))
-    (add-contract-facts
-     (mapv #(assoc % :seon.schema.admission/source :core)
-           (into (vec source-only) canonical-schemas))
-     progress!
-     (when partial? projection))))
+    (filterv
+     #(desired-identities (program/row-identity %))
+     (add-contract-facts
+      (mapv #(assoc % :seon.schema.admission/source :core)
+            (into (into (vec source-only) canonical-schemas)
+                  (filter #(and (:seon.ns/name %)
+                                (not (desired-identities (program/row-identity %)))))
+                  source-rows))
+      progress!
+      (when partial? projection)))))
 
 (defn- commit-index-phase!
   [connection process progress! phase tx-data]
@@ -2914,7 +2934,12 @@
                 (recur
                  (next pending)
                  (conj changes
-                       {:seon.program/row row
+                       {:seon.program/row
+                        (if current
+                          (select-keys row
+                            (conj (program/changed-attributes row-shapes normalized-current normalized-desired)
+                                  (first (program/row-identity row))))
+                          row)
                         :seon.fn/retractions
                         (if-let [entity-id (:db/id current)]
                           (vec
@@ -3092,10 +3117,13 @@
                  (when-not (and previous-database (:seon.fn/previous-manifest request))
                    (throw (ex-info "Incremental indexing requires its published database and manifest."
                                    {:seon.error/kind ::index-refused :seon.fn/index-refused true})))
-                 (into (vec (map #(vector :seon.schema/key %) (changed-schema-keys request)))
-                       (mapcat :seon.fn.file/identities)
-                       (filter #(paths (:seon.fn.file/relative-path %))
-                               (get-in request [:seon.fn/previous-manifest :seon.fn.manifest/artifacts]))))
+                 (let [surviving (into #{} (mapcat :seon.fn.file/identities)
+                                       (filter #(paths (:seon.fn.file/relative-path %))
+                                               (get-in request [:seon.fn/manifest :seon.fn.manifest/artifacts])))]
+                   (into (vec (map #(vector :seon.schema/key %) (changed-schema-keys request)))
+                         (comp (mapcat :seon.fn.file/identities) (remove surviving))
+                         (filter #(paths (:seon.fn.file/relative-path %))
+                                 (get-in request [:seon.fn/previous-manifest :seon.fn.manifest/artifacts])))))
              (into []
                    (mapcat
                     (fn [attribute]

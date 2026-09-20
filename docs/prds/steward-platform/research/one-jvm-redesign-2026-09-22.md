@@ -854,3 +854,66 @@ selection and indentation were removed from the tested production bytes.
 | `src/seon/cluster/source.clj` | 32,014 | 32,873 | -859 |
 | `test/seon/cluster/source_evidence_test.clj` | 12,651 | 12,657 | -6 |
 | `test/seon/cluster/source_nochange_test.clj` | 0 | 1,842 | -1,842 |
+
+Step-1 after-commit live measurement (`8de7a8868`): the common unchanged
+publisher took **12.653 ms**, retained commit
+`6ab04a4b-d320-5bf6-af1c-d31214b05070`, and returned `built? false`.
+The before measurement was 21,567 ms and moved the head. Evidence:
+[step-1 after seal](one-jvm-slice3-step1-after-seal-2026-09-22.edn).
+
+### Step 2 — declaration and attribute differences (in progress)
+
+The first live development probe reduced the one-file publication from
+45,842 ms to 20,167 ms (sum of progress intervals). This is **not the 5-second target**
+and is not a final armed-boot measurement: the three edited namespaces
+were reloaded through the scratch host's prepl. Contract projection was
+1.713 ms and five contract rows took 40.9 ms. Analysis selected-file work
+was 64.706 ms; reconciliation 2,547.950 ms; activation sealing 4,355.498 ms;
+source acquisition before analysis 6,608.016 ms. Further progress labels
+separate manifest reading, manifest validation and database acquisition.
+
+The file digest selects the affected artifacts. Their previous/current
+rows then select changed declarations, excluding file-wide analysis
+provenance as the sole cause of a declaration update. The existing stored
+`:seon.program/analyzed-source-digest` is a **file** digest; the artifact's
+`declaration-digests` hashes declaration signatures, not function bodies.
+Neither alone may skip body edits. The regression therefore edits a body
+and checks an unchanged same-file function and unchanged arity components.
+`program/exact-replacement-tx-in` still owns retractions; the assertion map
+now contains changed owned attributes and identity, so unchanged component
+maps cannot allocate replacement children.
+
+A repeated `artifact-by-path` call previously validated and searched the
+whole manifest once per artifact. One local immutable map replaces that
+O(files²) traversal. No retained cache is added. The published database now
+gets its projection directly from `schema/projection-from-database`, rather
+than building a second runtime projection and composing a delta. Activation
+preflight receives the requirements already derived for that same database
+instead of deriving them a second time. The O(program) unresolved-call
+report remains a cold-publication result; changed publication retains the
+writer's deletion refusal and uses the changed-file analysis findings.
+
+Final focused fast run `d4462013e6c1`: **1 executed, 12 assertions, zero
+failures or errors**, basis `536870921`, program digest
+`6f24ffeb28a0c11b3dcd388ac9f22d853d95cdbf2149be89378022d99a098a72`.
+The test took 37.510 s including first canonical fixture acquisition; its
+existing long declaration names that initial construction. The preceding
+run `891843500f00` passed 11 assertions in 51.334 s. The final assertion
+identifies every changed entity carrying an installed identity attribute:
+exactly the changed file and function, with unchanged arity entity IDs.
+The existing cold regression remains
+`seon.fn-test/fresh-population-flattens-with-its-supplied-declarations`;
+it is not claimed rerun by this focused namespace invocation.
+
+Foreign boundary: the fast snapshot used HEAD bytes for dirty `db.clj`,
+`test/runner.clj`, `cluster/mcp_test.clj`, `test/runner_test.clj`, and both
+`test_support` files. None of those checkout edits entered this proof.
+The harness spent 137 seconds awaiting a repository JVM slot in the first
+run; the scratch host was down throughout both runs.
+
+| Step-2 production/test path | Before bytes | After bytes | Net deleted |
+|---|---:|---:|---:|
+| `src/seon/fn.clj` | 146,507 | 148,166 | -1,659 |
+| `src/seon/cluster.clj` | 186,507 | 187,567 | -1,060 |
+| `src/seon/cluster/source.clj` | 32,873 | 33,019 | -146 |
+| `test/seon/fn/publication_test.clj` | 3,497 | 5,380 | -1,883 |
