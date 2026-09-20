@@ -277,3 +277,9 @@ followed by `bin/test --platform`. This lane ran neither cold command. Held and
 foreign dirty paths remained untouched, including
 `script/seon/fresh_operator.clj`; the foreign boundary is the undeclared
 fresh-operator prepl/transport facet above.
+
+After this lane's source commits, the publication lane placed uncommitted
+`--prepare-base` transport edits in `src/seon/test/runner.clj` and matching
+fixture-copy edits in `test/seon/test_runner_test.clj`. They are not part of
+this sweep, were not staged or committed here, and remain that lane's shared-
+tree boundary.
