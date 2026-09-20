@@ -67,3 +67,23 @@ Done: current canonical schema acquisition admits these facets, a real
 refusal records and reads back its required domain facts and diagnostic
 value under the selected contract, then publication and fast admission
 proceed without weakening validation.
+
+
+## Ruling applied; bridge admission still pending
+
+The orchestrator selected option 1 with a precise declaration rule: raw
+`:seon.error/offending` is OPTIONAL on stored facets; typed domain members
+remain required and raw evidence uses the occurrence's existing durable
+projection/data path. `6dae626e0` makes the three runner members optional and
+adds the canonical-publication/producer-validation regression.
+
+This issue remains open because `owned-storage!` still rejects optional
+non-storable members in both HEAD and the held bridge draft; merely editing
+the facet declarations does not implement the storage distinction there.
+That owner is held and coordination is pending. The first fast check after
+the declaration commit reached a different earlier refusal at the live
+recording authority: the concurrently edited SCI install-mismatch facet's
+required `:seon.program/identity`. It ran zero tests, so it proves neither
+this regression nor a repaired publication. See the
+[publication landing note](../../prds/steward-platform/research/publication-dissolution-2026-09-20.md)
+for the exact current held paths and evidence.

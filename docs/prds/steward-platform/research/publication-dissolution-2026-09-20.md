@@ -1428,3 +1428,42 @@ reader. The orchestrator's requested integration checkpoint, after the final
 publication proof, is exactly `bin/test`, `bin/test` again (reuse), then
 `bin/test --platform`. The separately named long integration namespace still
 needs `bin/test seon.test-runner-integration-test`; it is outside platform.
+
+
+### Exact remaining runtime boundary after `fa1ff1dbe`
+
+`6dae626e0` and `fa1ff1dbe` both load. The first new fast invocation used
+HEAD `0501eeb0d` plus the named owned paths (the snapshot reported no byte
+differences). It acquired its packaged projection and armed 1,456 contracts
+(1,451 program-armable), then executed **zero tests**: the live recording
+authority refused `:seon.sci.eval/install-mismatch-error`, whose required
+`:seon.program/identity` member has the non-storable shape
+`[:tuple :seon.program/identity-attribute :seon.schema/value]`.
+The currently edited resource and consumers are held:
+`resources/seon/schemas/seon.sci.eval.edn`, `src/seon/sci/eval.clj`,
+`src/seon/sci/admit.clj`, and `src/seon/sci/kernel.clj`.
+Evidence: `tmp/publication-dissolution/optional-facet-adapters-fast.log`.
+The working-edge statement that fast admission admits again is therefore
+not established by this lane's check.
+
+Separately, the bridge's held `src/seon/schema/internal.cljc`
+`assert-error-declaration!` / `owned-storage!` (current draft lines 255–264)
+checks *every* facet member, including optional members, for a registered
+storable attribute. HEAD has the same check at lines 154–163. The optional
+runner declaration ruling therefore still needs its corresponding bridge
+admission change. `src/seon/schema/form.cljc:130-157` currently includes all
+entity-map members in its attribute inventory, and the error occurrence
+writer selects declared facet members (`src/seon/error.clj:1597-1606`);
+the ruled distinction must preserve raw optional evidence without making it
+a datom. The lane did not change those held bridge owners or substitute a
+publication-only schema filter.
+
+The upstream coordination question is pending with the orchestrator; no
+storage choice remains undecided. All publisher implementation paths are
+committed, with no owned source residue. Final runtime verification and
+one-file-commit/complete-publication timing are **not complete**. No new scratch
+root or worktree was created; all serial load/test JVMs exited. Another run
+with the same inputs would repeat admission failure rather than provide new
+publication evidence, so none was launched. Resume the fast check and shared
+tree `tmp/publication-root` measurement after the held schema/SCI owners land
+their corresponding admitted declarations.
