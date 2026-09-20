@@ -5171,3 +5171,39 @@ results-reuse once step 1 releases bootstrap_test.clj; admission suite
 is being deleted by the lane. Closing pass resumed; then the lane stops as
 landed and the orchestrator owes bare×2 + platform after the publication
 lane lands.
+
+## 2026-09-21 ~02:00 UTC — OVERNIGHT CHARTER (owner: "I'm done for the night. You have full control of the laptop. Schedule maximum work to be done at a high quality and don't stop until you hear from me")
+
+Standing rules for the night (all earlier rulings stay in force): three
+editing lanes beside default, one JVM each, two test JVMs per repository;
+no worktrees; every ruling written here in the same turn; commits
+path-limited and pushed at each checkpoint; a Codex usage-limit stop is
+reported to the owner by push notification and the lane waits for the
+go-ahead (never relaunched); no repeated rebuilds — ONE cold gate per
+major landing, and the bare×2 + platform proof once the publication lane
+lands; hook publication stays paused while three lanes cut source; default
+is never restarted by a lane; the orchestrator resets only for a schema
+batch, from a clean tree.
+
+Order of work as slots free:
+1. Running: `bridge-step1-registry` (final conversion + arity removal, one
+   commit), `publication-dissolution` (items 1–4 under six rulings),
+   `results-reuse-everywhere` (closing pass → landed).
+2. results-reuse lands → resume `error-family-1a` (row-acquisition facet,
+   option 2; green the six suites).
+3. step 1 lands → its cold gate (`bin/test --paths <its files> -- <its
+   namespaces>`); then `bridge-step2-walker` (astra low) from PRD §4 step 2
+   + the review note; then step 4 lane from the measurement note (after
+   step 2 per §6 order).
+4. publication lands → bare `bin/test` twice (second executes 0), then
+   `--platform`; record the numbers; then 1a/1d/render cold gates become
+   cheap and run once each.
+5. cluster.clj/turn.clj free → resume `kind-sweep-turn-cluster` (sol low);
+   then the remaining PRD sweeps on sol low, one at a time in the third
+   slot: sci-fn-program, ops-effects, my-protocol, tests, bin/script.
+6. After steps 1–2 + sweeps: C4 option 1 (config properties) on the new
+   bridge; then the RESET batch from a clean tree (1a's attributes, 1d's
+   three, the population stamp when step 3 lands), `--platform`, Juniper.
+7. Merge to main waits for the owner.
+Each landing: read the note, classify reds, rule from the PRDs, record
+here, push. Wakeups every 20 minutes as a fallback beside lane events.
