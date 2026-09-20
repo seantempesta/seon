@@ -2522,8 +2522,10 @@
         cluster-ref [:seon.cluster/name cluster-name]
         ctx (:seon.sci.eval/ctx instance)
         prior-commit (:seon.source/commit-id
-                      (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref))
-        previous-database (if prior-commit
+                      (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref))]
+    (if (and prior-commit (= prior-commit (:seon.source/commit-id published)))
+      (do (report-source-progress! "development cluster converged") nil)
+      (let [previous-database (if prior-commit
                             (try
                               (source/database held-store prior-commit)
                               (catch clojure.lang.ExceptionInfo failure
@@ -2679,7 +2681,7 @@
       (async/offer! channel :seon.render.web/runtime-eval))
     (record-loaded-producers! instance loaded-inputs)
     (report-source-progress! "development cluster converged")
-    nil))
+    nil))))
 
 (defn- require-publication-resources!
   "A snapshot may vary program inputs, but loaded resources must be identical."
