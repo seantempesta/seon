@@ -19,9 +19,12 @@ fi
 rm -rf "$ROOT"; mkdir -p "$ROOT"
 cd "$WT"
 run() { local name=$1; shift; { time "$@"; } > "$ROOT/$name.log" 2>&1; echo "exit=$?" >> "$ROOT/$name.log"; grep -h "init phase=lifecycle elapsed-ms=\|start phase=lifecycle elapsed-ms=\|exit=" "$ROOT/$name.log" | sed "s/^/$name: /"; }
+# Cold start, paid once: publish from zero, create the first cluster, start the JVM.
 run init-zero bin/seon --root "$ROOT" init --result-file "$ROOT/init-zero.edn"
-run fork      bin/seon --root "$ROOT" init head
+run first-cluster bin/seon --root "$ROOT" init head
 run start     bin/seon --root "$ROOT" start head
+# Fork against the RUNNING cluster: a Datahike branch; target < 1 s.
+run fork      bin/seon --root "$ROOT" init head2
 # Case A: the first adoption after the fork (nothing changed on disk; the cluster row has no adoption recorded yet).
 run adopt-first bin/seon --root "$ROOT" init --dev head --changed src/my/note.clj
 # Case A2: no change at all, cluster already at the published commit.

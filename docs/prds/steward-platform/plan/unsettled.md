@@ -6699,3 +6699,21 @@ fork should record that commit on the cluster row and the first adoption
 should be the no-op; handed to slice 4. The script now has two rows
 (`adopt-first`, `adopt-nochange`). Boot 64 s vs 38 s earlier: load from
 the concurrent platform tier; re-measured in a quiet window.
+
+## 2026-09-22 ~23:30 local — OWNER: "those lower numbers are the correct ones… It's an immutable database and we are just creating a branch. No change 115s is just fucked." RULED: fork records its commit; a fork never boots a JVM; the script starts first, forks second
+
+The orchestrator's 23:10 reading rationalized two bad numbers. Corrected:
+a fork is a Datahike branch — milliseconds in whatever process holds the
+store; 21.5 s was a JVM booted to move a pointer (wrong algorithm, not a
+"cold path"); a freshly forked cluster is at the published commit by
+construction, so 115.6 s on its first adoption is the no-change disease.
+Two items sent to the redesign lane ahead of slice 2: (a) `init NAME`
+records `:seon.source/commit-id` on the cluster row in the fork's own
+transaction, making the first adoption the existing no-op; (b) no fork
+ever boots a JVM — with no cluster running, creating the first cluster is
+part of the once-paid cold start; against a running cluster it is a
+branch inside it. The measurement script now runs cold start (publish +
+first cluster + start) as the once cost and measures `fork` against the
+running cluster (target < 1 s), then `adopt-first` (target ≈ no-change).
+Standing for the orchestrator: a number is never explained by which path
+it took; it is explained by what work the algorithm should do.
