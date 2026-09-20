@@ -14,6 +14,21 @@
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
+(defn- run-in-fixture
+  "Request the fixture's explicit cluster through the production host owner."
+  ([test-var connection] (run-in-fixture test-var connection {}))
+  ([test-var connection options]
+   (support/transacted!
+    connection
+    [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
+                                (db/db connection))
+      :seon.source/test-input-digest (id/digest 64 [::host-fixture-inputs])}])
+   (sut/run test-var connection
+            (merge {:seon.test.run/cluster [:seon.cluster/name "default"]
+                    :seon.test.run/provenance (runner/provenance (db/db connection))
+                    :seon.test/remaining-ms (* 1000 support/event-backstop-seconds)}
+                   options))))
+
 (deftest reach-digests-follow-only-changed-closures
  (support/with-database
   (fn [connection]
@@ -161,7 +176,7 @@
     (fn [connection]
       (with-test connection '(clojure.test/is true)
         (fn [s v]
-          (is (= 1 (:seon.test/pass-count (sut/run v connection))))
+          (is (= 1 (:seon.test/pass-count (run-in-fixture v connection))))
           (is (:db-after (db/transact! connection
                            [[:db/add [:seon.test/sym s] :seon.test/fixture-observation
                              "External fixture bytes must be observed."]])))
@@ -191,7 +206,7 @@
           (let [database (db/db connection)
                 observed (first (seon.db/datoms database :eavt))]
             (alter-meta! v assoc :test #(t/is (= [] observed) "Original Datom failure"))
-            (let [result (binding [t/report (constantly nil)] (sut/run v connection))]
+            (let [result (binding [t/report (constantly nil)] (run-in-fixture v connection))]
               (is (= 1 (:seon.test/fail-count result)) (pr-str result))
               (is (= 0 (:seon.test/error-count result)))
               (is (.contains (:seon.test/failure-message result "") "Original Datom failure"))
@@ -293,7 +308,7 @@
                     (is (.contains feedback (str "'bin/test-check' 'default' '--test' '" observed-symbol "'")) feedback)
                     (is (nil? (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
                                                        [:seon.test/sym observed-symbol]))))
-                    (let [explicit (sut/run observed-var connection)]
+                    (let [explicit (run-in-fixture observed-var connection)]
                       (is (= 1 (:seon.test/pass-count explicit)) (pr-str explicit))))
                   (finally (support/delete-recursively! root)))))))))))
 
@@ -361,7 +376,7 @@
         (fn [test-symbol test-var]
           (let [provenance (runner/provenance (db/db connection))
                 result (binding [t/report (constantly nil)]
-                         (sut/run test-var connection
+                         (run-in-fixture test-var connection
                                   {:seon.test.run/provenance provenance
                                    :seon.test/remaining-ms 50}))]
             (is (= 1 (:seon.test/error-count result)) (pr-str result))
@@ -397,7 +412,7 @@
         (fn [_ test-var]
           (let [completion (java.util.concurrent.FutureTask.
                              ^java.util.concurrent.Callable
-                             (fn [] (sut/run test-var connection)))
+                             (fn [] (run-in-fixture test-var connection)))
                 _ (.start (Thread/ofVirtual) ^Runnable completion)
                 result (support/await-event! completion ::run-completed)]
             (is (= 1 (:seon.test/pass-count result)) (pr-str result))
@@ -472,7 +487,7 @@
         (fn [test-symbol test-var marker]
           (let [database (db/db connection)
                 working (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
-                result (sut/run test-var connection
+                result (run-in-fixture test-var connection
                                 {:seon.db/db database
                                  :seon.test.run/provenance (runner/provenance database)
                                  :seon.test/remaining-ms 10000
@@ -508,7 +523,7 @@
         (fn [test-symbol test-var marker]
           (let [database (db/db connection)
                 isolated (.getCanonicalPath (clojure.java.io/file "tmp" (str "isolated-root-" (id/id))))
-                result (sut/run test-var connection
+                result (run-in-fixture test-var connection
                                 {:seon.db/db database
                                  :seon.test.run/provenance (runner/provenance database)
                                  :seon.test/remaining-ms 10000
@@ -602,7 +617,7 @@
             (is (nil? (:seon.test/host report))
                 "an unknown call graph never reads as in-process")
             (is (.contains (sut/host-text database test-symbol) "unknown")))
-          (let [result (sut/run test-var connection
+          (let [result (run-in-fixture test-var connection
                                 {:seon.db/db database
                                  :seon.test.run/provenance (runner/provenance database)
                                  :seon.test/remaining-ms 10000

@@ -15,6 +15,12 @@
             [seon.test-support :as support]))
 
 (defn- with-probe [connection check]
+  (support/seed-cluster! connection "default")
+  (support/transacted!
+   connection
+   [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
+                               (db/db connection))
+     :seon.source/test-input-digest (id/digest 64 [::failure-inputs])}])
   (let [namespace-name (symbol (str "failure.probe" (id/id)))
         namespace-object (create-ns namespace-name)
         test-symbol (str namespace-name "/probe")
@@ -48,6 +54,7 @@
 (defn- run-probe [connection test-var]
   (let [database (db/db connection)]
     (sut/run test-var connection {:seon.db/db database
+                                 :seon.test.run/cluster [:seon.cluster/name "default"]
                                  :seon.test.run/provenance (runner/provenance database)
                                  :seon.test/remaining-ms 100000})))
 

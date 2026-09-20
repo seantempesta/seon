@@ -66,3 +66,25 @@ error was the new test's own missing database request key, subsequently
 corrected; the whole tally is not attributed to this issue.
 Raw logs and the exact snapshot commands are in
 [the lane note](../../prds/steward-platform/research/results-reuse-everywhere-2026-09-20.md).
+
+The host/reader follow-up at HEAD `c79167f9e89782143772c9579ae55a20b2bf20c6`
+plus its owned overlay completed **10 tests / 64 assertions / 4 failures / 2
+errors** (`tmp/results-reuse-everywhere/host-callers-fast.log`, 62,619 bytes,
+SHA-256 `26849939cde139e8af0cea990ec110bbb13506abf1ee2eb05ca0ec5bafecad74`).
+The SCI owned-test reuse and expiry regressions passed. The broader admission
+suite still exposed these boundaries:
+
+- `test/seon/test_test.clj:31`: evaluation supplied no program row before
+  `seon.program/declaration-row`; its nil input refusal hides the earlier
+  evaluation result, so this log does not establish that earlier cause.
+- `:277`, `:284–288`: `seon.blob/with-publication!` replaces expected read and
+  immutable-run refusals with undeclared error facets
+  `:seon.db.write/validation-refusal` and `:seon.test.run/immutable-error`.
+- `recording-preserves-admission-and-refuses-a-deleted-definition`:
+  `seon.db/transact-call` rejects its refusal as a return missing `:db-before`.
+
+The outer run `e1d46131b83d` then failed durable recording at the published
+authority: `with-publication!` reported undeclared
+`#{:seon.db.write/validation-refusal :seon.test/execution-error}`. Its printed
+execution tally is not a recorded tally. The lane did not edit the blob,
+database, error, schema, or publication owners to bypass these refusals.

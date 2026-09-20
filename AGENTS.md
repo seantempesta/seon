@@ -883,14 +883,19 @@ The runner's drift detector remains the independent check; its automatic
 re-arm does not excuse a test leaving its worker unarmed.
 
 Running a test in process from the development JVM (`seon.test/run`,
-`src/seon/test.clj:306`, through `seon.test/resolve-test`) is the lane's
-iteration loop when no test JVM may be launched; its two-argument arity waits
-the declared `event-backstop-seconds`, which the shared fixture base's
+through `seon.test/resolve-test`) requires an explicit cluster in options or
+the supplied SCI environment. Its execution waits the declared
+`event-backstop-seconds`, which the shared fixture base's
 post-adoption construction consumes whole, so hand `:seon.test/remaining-ms`
 explicitly after an adoption and never read that first bound failure as a
 red. An agent's own test goes through `seon.test/run-owned` (`:380`), which
 binds exactly the connection on the request via `seon.db/call-with-custody`
-(`src/seon/db.clj:259`); a host run binds none. A namespace whose requires
+(`src/seon/db.clj:259`); a host run binds only the body custody explicitly
+supplied in options. Both paths admit a fresh run event and record immutable
+members through the shared recorder; covered requests execute nothing.
+Issue completion, failure discovery and test rendering query those members
+through `seon.test/recorded-result` / `seon.test.runner/latest-results`.
+A namespace whose requires
 need a `:test` alias dependency cannot load there yet
 (`the-in-process-test-loader-cannot-load-a-namespace-needing-a-test-alias-dependency`);
 its proof is the cold gate.
@@ -997,8 +1002,8 @@ member may also be reused when its reachable content and external inputs match;
 the returned confidence retains the original tested basis and program digest.
 Executable platform members run first. An unchanged green request can execute zero tests
 under any policy. `seon.test/select` owns set selection and reuse;
-`seon.test.runner/reusable-result` owns the single-test request used by
-`seon.test/run-owned`. `:seon.test/recorded-basis-t` distinguishes the result
+`seon.test/run-owned` uses that same selector and admission with the calling
+agent's explicit cluster custody. `:seon.test/recorded-basis-t` distinguishes the result
 recording transaction from the tested basis. Shell integration remains the
 post-reset Stage 1 work; this paragraph does not claim it has migrated.
 

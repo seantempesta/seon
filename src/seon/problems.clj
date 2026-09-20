@@ -66,6 +66,7 @@
             [seon.error :as error]
             [seon.render.test :as test-render]
             [seon.test :as test]
+            [seon.test.runner :as test.runner]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -345,18 +346,19 @@
        (mapv (fn [model]
                {:seon.config.ai/model model}))))
 
-(defn- failed-tests [database]
-  (let [ids (db/q '[:find [?t ...]
-                    :where [?t :seon.test/sym]
-                           (or-join [?t]
-                             (and [?t :seon.test/fail-count ?n] [(pos? ?n)])
-                             (and [?t :seon.test/error-count ?n] [(pos? ?n)]))] database)]
-    (if (:seon.error/kind ids) ids
-        (db/pull-many database
-          '[:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
-            :seon.test/failure-message
-            {:seon.test/failures [* {:seon.test.failure/file [:db/id :seon.fn.file/relative-path]}]}]
-          ids))))
+(defn- failed-tests
+  "Current failed executions from admitted member facts."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or :seon.test/results :seon.test/execution-error :seon.db/invalid-read-error
+                   :seon.schema/missing-projection-error]]}
+  [database]
+  (let [symbols (db/q '[:find [?symbol ...]
+                        :where [_ :seon.test.member/symbol ?symbol]] database)
+        results (if (:seon.error/at symbols) symbols
+                    (test.runner/latest-results database symbols))]
+    (if (:seon.error/at results) results
+        (filterv #(or (pos? (:seon.test/fail-count %))
+                      (pos? (:seon.test/error-count %))) results))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one derivation
@@ -403,7 +405,7 @@
                 (seq stale) (assoc :seon.problems/stale-vars stale)
                 (seq missing-model-rows)
                 (assoc :seon.problems/missing-models missing-model-rows))]
-    (if (:seon.error/kind tests) tests found))))
+    (if (:seon.error/at tests) tests found))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The html projection — the problems PAGE

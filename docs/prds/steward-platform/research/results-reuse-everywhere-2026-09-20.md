@@ -1124,3 +1124,166 @@ The next decision, sent as soon as this dependency was verified:
 Cold host proof remains owed after the complete slice:
 `bin/test --paths src/seon/test.clj resources/seon/schemas/seon.test.edn src/seon/plan.clj src/my/test.clj test/seon/test/host_test.clj -- seon.test.host-test my.test-test seon.test-test seon.test-failure-facts-test seon.test-expiry-test`.
 That command must include the eventual reader and fixture conversions too.
+
+## Host and reader migration, 2026-09-20
+
+The orchestrator accepted option 1: admitted members remain the only result
+authority. The host slice converts `seon.test/run`, `run-owned`, the operator
+single-test request, `my.test/run`, and `seon.plan/run-issue-tests!` together.
+Every host request is a fresh event; matching green evidence contributes
+`covered-by` membership without executing a body. The issue runner's deadline
+outcome also uses this admission/recording path rather than writing legacy rows.
+An explicit unmatched historical basis refuses before admission: execution
+cannot claim to have run historical code.
+
+Converted readers:
+
+- `src/seon/test/runner.clj:3338`, `latest-results`: query native admitted
+  members by branch and selection transaction; a newer incomplete execution
+  refuses instead of revealing an older green. Snapshot observations do not
+  certify a different branch's current program.
+- `src/seon/test.clj:1426`, `recorded-result`; `:1435`, `stale-in`; `:2086`,
+  `verified?`: read that authority and compare current reachable content and
+  publication input identity with the tested basis. `:61`,
+  `changed-since-green`, reads admitted green history.
+- `src/seon/issue.clj:642`, `status`, and `:843`, `done?`: recorded member
+  outcomes determine verification; issue membership is queried, not pulled.
+- `src/seon/issue/opening.clj:86`, `test-pull-form`, and `:213`, `context`:
+  generated reads and opening data use `recorded-result`.
+- `src/seon/problems.clj:349`, `failed-tests`: newest admitted outcomes
+  determine current failures while older red members remain history.
+- `src/seon/render/test.clj:15`, `evidence`, and `:35`, `failures`: render
+  admitted outcomes and their immutable failure reports, including confidence.
+
+The first reader probe executed **1 test / 22 assertions / 1 failure / 0
+errors**. Reuse, green/red/green history, failure discovery, status and rendering
+passed. `host_test.clj:52` falsified issue completion for a lookup reference:
+`status` said verified while `done?` returned false. The query now receives the
+resolved entity id rather than carrying a lookup vector through `identity`.
+Log `tmp/results-reuse-everywhere/host-readers-fast.log`: **5,929 bytes**.
+
+The next snapshot never reached assertions: this lane supplied boolean `true`
+for new `my.test-test` long-test metadata, whose contract requires a reason
+string. That declaration is corrected. Recovery then hit the existing fixture
+diagnostic defect at `test/seon/test_support.clj:515`, missing `:seon.error/at`,
+`/layer`, and `/operation`, before completing fixture construction. This lane
+terminated its own invalid JVM (92770); launcher exit **143**. Log
+`tmp/results-reuse-everywhere/host-readers-final-fast.log`: **286,514,790 bytes**.
+The diagnostic issue now carries that evidence; no fixture-owner edit was made.
+
+Remaining reader boundaries, not edited: the publication lane's held
+`src/seon/fn.clj:1376` and `:1379` Datalog `test-currently-failing` clauses still
+read legacy test-row counts (`currently-failing-functions` at `:1553`).
+`src/seon/bootstrap.clj:245`, `:412`, and `:460` select demonstration/usage
+evidence from legacy counts; its tests are concurrently edited. These readers
+need the same authority conversion by their owners. No new legacy row writes
+were introduced to accommodate them.
+
+Corrected snapshot `run.NVcS15`, run `8258d293443c`, reached **3 tests / 38
+assertions / 10 failures / 0 errors**. The host/reader regression passed its
+**24 assertions**, including lookup-reference completion and historical-basis
+refusal. Its body ran from `03:52:05.628343Z` to `03:56:18.240983Z` (252.613 s,
+including canonical fixture and SCI acquisition). The two other fixtures
+refused for `:seon.test/input-evidence-unavailable`: their canonical synthetic
+source seal lacked a test-input digest. They now supply explicit fixture input
+identities like the accepted host fixture. The follow-up runs only those
+changed fixture namespaces plus the affected `seon.test-test` admission suite;
+the green host namespace is not re-executed.
+
+Log `tmp/results-reuse-everywhere/host-readers-corrected-fast.log`: **11,614
+bytes**, SHA-256
+`d16a01af361abb79360340df84c5622c19c7e5a81ad628f7e0e0c53687079f1c`.
+One sample from the existing JVM (no second JVM) observed the second host
+request in `changed-definition-symbols` through shared selection. The sample
+is `tmp/results-reuse-everywhere/host-readers-corrected-threads.json`; no
+performance cause is inferred from that single observation.
+
+The clean issue-settlement fixture's evidence reader at
+`test/seon/issue_settlement_test.clj:74` also now calls `recorded-result` and
+checks the three confidence values. Its ordinary-turn integration proof is
+owed with the orchestrator's cold gate; this lane did not change held turn or
+cluster implementation/tests. Legacy `test_failure_facts_test.clj` and
+`test_reaching_test.clj` host callers now pass explicit fixture cluster/input
+identity, but their broader legacy-fact expectations are not claimed green by
+the focused host proof.
+
+This slice changes `AGENTS.md` §5, `resources/seon/schemas/seon.test.edn`,
+`src/seon/test.clj`, `src/seon/test/runner.clj`, `src/seon/plan.clj`,
+`src/my/test.clj`, `src/seon/issue.clj`, `src/seon/issue/opening.clj`,
+`src/seon/problems.clj`, `src/seon/render/test.clj`,
+`test/seon/test/host_test.clj`, `test/my/test_test.clj`,
+`test/seon/test_test.clj`, `test/seon/test_expiry_test.clj`,
+`test/seon/test_failure_facts_test.clj`, `test/seon/test_reaching_test.clj`,
+`test/seon/issue_settlement_test.clj`, this note and the diagnostic/reader issue
+notes named here. **Zero bash lines change in this slice**; the previously accepted
+82-line launcher deletion and 4→0 proof remain recorded above. Held launcher
+and publication files are unchanged by this lane.
+
+Cold proof owed (orchestrator only):
+
+```sh
+bin/test --paths src/seon/test.clj src/seon/test/runner.clj src/seon/plan.clj src/my/test.clj src/seon/issue.clj src/seon/issue/opening.clj src/seon/problems.clj src/seon/render/test.clj resources/seon/schemas/seon.test.edn test/seon/test/host_test.clj test/my/test_test.clj test/seon/test_test.clj test/seon/test_expiry_test.clj test/seon/test_failure_facts_test.clj test/seon/test_reaching_test.clj test/seon/issue_settlement_test.clj -- seon.test.host-test my.test-test seon.test-test seon.test-expiry-test seon.issue-settlement-test
+```
+
+The orchestrator additionally owes the platform proof and two bare `bin/test`
+requests on one unchanged lineage, with zero executions in the second. No cold
+gate, worktree, or default lifecycle operation was performed by this lane.
+
+Follow-up `run.UTw4ok` executed **10 tests / 64 assertions / 4 failures / 2
+errors**. `my.test-test` passed all **10 assertions** through real SCI, including
+two events / one member / one covered member and equal three-value confidence.
+`seon.test-expiry-test` passed **4 assertions**; the changed
+`resolution-follows-admitted-source-and-acquisition` regression also passed.
+Remaining admission-suite boundaries and the failed outer recording are named
+in [the existing refusal issue](../../../seon/issues/test-refusal-observations-overflow-in-projection-acquisition.md).
+The outer run `e1d46131b83d` has **no successful durable tally**: published
+recording refused error-facet propagation through `seon.blob/with-publication!`.
+Log `tmp/results-reuse-everywhere/host-callers-fast.log`: **62,619 bytes**,
+SHA-256 `26849939cde139e8af0cea990ec110bbb13506abf1ee2eb05ca0ec5bafecad74`.
+
+The final host probe adds one previously uncovered reader assertion:
+`seon.issue.opening/context` returns the same recorded confidence. Its linked
+test identities are now queried rather than pulled, avoiding the dependency's
+cardinality-many truncation. The host test's inputs changed for this additional
+coverage; the already-passing SCI and expiry namespaces are not rerun.
+
+Precommit shared-tree load passed, exit **0**, printing `:host-readers-load`:
+
+```sh
+clojure -M -e "(require 'seon.cluster.source 'seon.test 'seon.test.runner 'seon.plan 'my.test 'seon.issue 'seon.issue.opening 'seon.problems 'seon.render.test) (println :host-readers-load)"
+```
+
+The explicit held paths were preserved: `src/seon/cluster.clj`,
+`src/seon/cluster/prompt.clj`, `src/seon/turn.clj`, `src/seon/schema.clj`,
+`src/seon/schema/internal.cljc`, the dirty cluster/turn tests,
+`src/seon/cluster/source.clj`, `src/seon/test/cache.clj`, `src/seon/fn.clj`,
+`bin/test`, `bin/seon-hook`, and `script/seon/fresh_operator.clj`.
+The source admission namespace was loaded, never edited. No lane session or
+foreign process was operated.
+
+During the final probe, a repository hook reported in-flight syntax errors in
+the held `src/seon/fn.clj` at `:2509` and `:2718–2738`. This lane did not edit
+that file; the HEAD-plus-owned-paths probe was unaffected. The final shared-tree
+load must independently verify convergence. A final HTML anchor correction
+uses the existing `seon.id/id` owner when rendering a transient report without
+an admitted report id; it does not create a stored identity or a second result.
+
+Final probe `run.IPE6Qo`, durable run **`c6a8fc93128b`**, passed **1 test / 25
+assertions / 0 failures / 0 errors**, exit **0**. The queried durable tally is
+**1 executed / 0 unchanged / 25 assertions** for the outer regression. Inside
+that regression, the second identical host request executes zero and returns
+unchanged with all three confidence values; issue completion, status, opening
+context, failure discovery, and test rendering read the recorded members.
+The intentional nested red assertion remains immutable history and does not
+count as an outer failure. Log
+`tmp/results-reuse-everywhere/host-readers-opening-fast.log`: **5,231 bytes**,
+SHA-256 `4c91370818321cf2a2b4cedd27a11df44030b39fa91a4cb6f2a2fb09d4c0597a`.
+
+Outer confidence: basis **536870921**, program digest
+`3776edea352a2e10e110e8eefdf68b3621e4d8971ca7ee63e364dcda3602f6c9`,
+input digest `91fe0748d0a928349c8f0ed6ac02b46fee3d4fed37c89b59c808956854421488`.
+The small transient-report HTML anchor correction came after that snapshot;
+its namespace is included in the final load check, not claimed as an armed
+HTML regression. The issue runner's fresh per-member database capture and the
+issue-settlement reader conversion are in the final snapshot; the turn-level
+settlement regression remains a cold proof owed as named above.

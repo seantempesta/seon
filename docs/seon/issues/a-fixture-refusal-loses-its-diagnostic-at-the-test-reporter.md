@@ -28,3 +28,14 @@ error face renders that value through the error render pair (bounded by the
 declared print length like the frames), so the refusal names what was
 refused. The failure component stores it as `:seon.test.failure/throwable`
 data, not only its message.
+
+2026-09-20 results-reuse probe: a malformed `:seon.test/long true` declaration
+was correctly refused (the declaration requires a reason string). The fixture's
+recovery at `test/seon/test_support.clj:515` then called `seon.error/diagnostic`
+without `:seon.error/at`, `/layer`, or `/operation`, so the construction thread
+failed before delivering its completion. Evidence:
+`tmp/results-reuse-everywhere/host-readers-final-fast.log`, snapshot
+`run.KYcKCd`, HEAD `c79167f9e89782143772c9579ae55a20b2bf20c6`.
+The declaration was corrected by the results lane; fixture recovery remains
+outside that slice. Its diagnostic must preserve the original refusal and
+settle the completion even when construction fails.

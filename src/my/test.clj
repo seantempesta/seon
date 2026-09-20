@@ -19,7 +19,7 @@
   (let [environment (env/require-environment
                      (get-in request [:my.program/context :seon.sci.eval/ctx])
                      :my.test/check)]
-    (if (:seon.error/kind environment)
+    (if (:seon.error/at environment)
       environment
       (seon.test/check
        (cond-> request
@@ -39,9 +39,10 @@
   connection from call preparation and hands it to the test body, so a
   `seon.db` call my test elides inside reaches my cluster exactly as the rest
   of my evaluation does. Unchanged green requests return the recorded result
-  with :seon.test/unchanged and :seon.test/recorded-basis-t. An explicit
-  :seon.test/run-basis-t requests that basis; use the current database basis
-  to deliberately rerun an unchanged program.
+  with :seon.test/unchanged and the tested basis, program and input digests.
+  Every request records a fresh run event, including requests covered entirely
+  by existing green evidence. A policy selects eligibility; it does not promise
+  execution of an unchanged member.
 
   Example:
   (my.test/run)"
@@ -49,9 +50,9 @@
   ([request]
    `(let [request# ~request
           symbols# (seon.test/owned-symbols request#)]
-      (if (:seon.error/kind symbols#)
+      (if (:seon.error/at symbols#)
         symbols#
         (mapv (fn [test-symbol#]
                 (seon.test/run-owned
-                 (assoc request# :seon.test/var (resolve (symbol test-symbol#)))))
+                 (assoc request# :seon.test/var (resolve test-symbol#))))
               symbols#)))))

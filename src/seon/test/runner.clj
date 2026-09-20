@@ -3335,6 +3335,43 @@
   (try (results-from-facts run-id (run-result-facts database run-id))
        (catch Exception failure (result-read-error run-id failure))))
 
+(defn latest-results
+  "Read the latest native admitted execution of each requested test.
+  Missing executions are absent; incomplete latest executions refuse rather
+  than exposing an older green. Snapshot evidence never certifies this branch."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
+                  [:or :seon.test/results :seon.test/execution-error]]}
+  [database test-symbols]
+  (try
+    (let [rows (execution-read
+                (db/q '[:find ?symbol ?id ?selected
+                        :in $ [?symbol ...] ?branch
+                        :where [?member :seon.test.member/symbol ?symbol]
+                               [?run :seon.test.run/members ?member]
+                               [?run :seon.test.run/id ?id]
+                               [?run :seon.test.run/branch ?branch]
+                               [?run :seon.test.run/selection-tx ?selected]
+                               (not [?run :seon.test.run/published-base-digest])]
+                      database test-symbols
+                      (get-in (db/schema-database database) [:config :branch])))
+          latest (vals (reduce (fn [result [sym :as row]] (assoc result sym row))
+                               (sorted-map) (sort-by #(nth % 2) rows)))]
+      (mapv (fn [[sym run-id]]
+              (let [run (execution-read
+                         (db/pull database
+                                  [:seon.test.run/id :seon.test.run/at
+                                   :seon.test.run/basis-t :seon.test.run/program-digest]
+                                  [:seon.test.run/id run-id]))
+                    result (recorded-member-result database run sym)]
+                (when-not (and (:seon.test.member/completed-tx result)
+                               (every? integer? (map result [:seon.test/pass-count
+                                                            :seon.test/fail-count
+                                                            :seon.test/error-count])))
+                  (execution-refusal! 'seon.test.runner/latest-results run-id
+                                      :seon.test/population-unknown :completed-member sym))
+                result)) latest))
+    (catch Exception failure (result-read-error "latest-results" failure))))
+
 (defn recorded-run!
   "Read admitted results through the same store holder used by recording."
   {:malli/schema [:=> [:cat :string :seon.test.run/id]

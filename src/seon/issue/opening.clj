@@ -20,6 +20,7 @@
   (:require [clojure.string :as str]
             [seon.ai :as ai]
             [seon.db :as db]
+            [seon.test :as test]
             [seon.repl :as repl]))
 
 (def dial
@@ -41,7 +42,6 @@
                      '[:seon.issue/id :seon.issue/title :seon.issue/problem
                        {:seon.issue/agent [:seon.agent/id]}
                        {:seon.issue/detector [:seon.fn/sym]}
-                       {:seon.issue/tests [:seon.test/sym]}
                        {:seon.issue/functions
                         [:seon.fn/sym {:seon.fn/ns [:seon.ns/name]}
                          {:seon.fn/file [:seon.fn.file/relative-path]}]}]
@@ -51,7 +51,11 @@
        :seon.issue/title (:seon.issue/title row)
        :seon.issue/problem (:seon.issue/problem row)
        :seon.issue/detector (get-in row [:seon.issue/detector :seon.fn/sym])
-       :seon.test/syms (vec (sort (map :seon.test/sym (:seon.issue/tests row))))
+       :seon.test/syms (vec (sort (db/q '[:find [?symbol ...] :in $ ?issue-id
+                                         :where [?issue :seon.issue/id ?issue-id]
+                                                [?issue :seon.issue/tests ?test]
+                                                [?test :seon.test/sym ?symbol]]
+                                       database issue-id)))
        :seon.fn/syms (vec (sort (map :seon.fn/sym (:seon.issue/functions row))))
        :seon.ns/names (vec (sort (distinct (keep #(get-in % [:seon.fn/ns :seon.ns/name])
                                                  (:seon.issue/functions row)))))
@@ -80,12 +84,7 @@
   (list 'my.test/check {:seon.test/changed (vec function-symbols)}))
 
 (defn- test-pull-form [test-symbol]
-  (list 'seon.db/pull '(seon.db/db)
-        (list 'quote [:seon.test/sym :seon.test/source :seon.test/pass-count
-                      :seon.test/fail-count :seon.test/error-count
-                      {:seon.test/failures [:seon.test.failure/message
-                                            :seon.test.failure/actual]}])
-        [:seon.test/sym test-symbol]))
+  (list 'seon.test/recorded-result '(seon.db/db) (list 'quote test-symbol)))
 
 (defn- function-pull-form [function-symbol]
   (list 'seon.db/pull '(seon.db/db)
@@ -227,12 +226,7 @@
                      [:seon.fn/sym %])
            (:seon.fn/syms link-row))
      :seon.issue/tests
-     (mapv #(db/pull database
-                     '[:seon.test/sym :seon.test/source :seon.test/pass-count
-                       :seon.test/fail-count :seon.test/error-count
-                       {:seon.test/failures [:seon.test.failure/message
-                                             :seon.test.failure/actual]}]
-                     [:seon.test/sym %])
+     (mapv #(test/recorded-result database %)
            (:seon.test/syms link-row))}
     {:seon.error/kind :seon.issue/not-found
      :seon.error/message (str "No current issue " issue-id)}))

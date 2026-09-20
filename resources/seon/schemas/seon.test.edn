@@ -186,6 +186,9 @@
   [:seon.test/include-long? {:optional true} :boolean]]
  :seon.test/run-options
  [:map [:seon.test.run/provenance :seon.test.run/provenance]
+  [:seon.test.run/cluster {:optional true} :seon.test.run/cluster]
+  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
+  [:seon.test/run-basis-t {:optional true} :seon.test/run-basis-t]
   [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
   [:seon.db/db {:optional true} :seon.db/database-value]
   [:seon.db/connection {:optional true}
@@ -196,10 +199,21 @@
  :seon.test/run-owned-request
  [:map {:description "One of the calling agent's own declared tests, with the connection call preparation supplies from its environment."}
   [:seon.test/run-basis-t {:optional true} :seon.test/run-basis-t]
+  [:seon.test.run/cluster {:optional true} :seon.test.run/cluster]
+  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
   [:seon.db/connection :seon.db/connection]
   [:my.program/context :my.program/context]
   [:seon.test/class-loader {:optional true} :seon.test/class-loader]
   [:seon.test/var :seon.test/var]]
+ :seon.test/host-error
+ [:or :seon.test/selection-error :seon.test/admission-error
+  :seon.test/execution-error :seon.test/unknown-error
+  :seon.test/resolution-error :seon.test/not-runnable-error
+  :seon.test.run/unavailable-error :seon.test.run/immutable-error
+  :seon.db/invalid-read-error :seon.schema/missing-projection-error
+  :seon.db.write/error :seon.db.write/validation-refusal
+  :seon.instrument/contract-error]
+ :seon.test/host-result [:or :seon.test/result :seon.test/host-error]
  :seon.test/reuse-request
  [:map [:seon.db/db :seon.db/database-value]
   [:seon.test/identity :seon.test/identity]

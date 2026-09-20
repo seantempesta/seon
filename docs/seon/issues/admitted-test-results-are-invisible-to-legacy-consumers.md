@@ -43,3 +43,21 @@ records the passing draft host regression and the three scoped options.
 Acceptance: the same admitted green/red member facts drive host reuse, issue
 completion, failure discovery and rendering; no second latest-result fact family
 is introduced, and every changed reader has canonical fixture coverage.
+
+## 2026-09-20 authorized reader conversion
+
+The results lane now migrates the readers above with host admission in one
+slice. `seon.test.runner/latest-results` queries admitted native members;
+`seon.test/recorded-result` is the single-test reader. Issue status/completion,
+opening context, stale/verified checks, failure discovery and rendering consume
+those facts. No legacy latest-result rows are written by the new host path.
+The canonical host regression probes two requests/one execution and
+green/red/green history with retained immutable failures.
+
+This issue remains open for readers outside that authorized slice:
+`src/seon/fn.clj:1376` / `:1379` (`test-currently-failing`) is held by the
+publication lane; `src/seon/bootstrap.clj:245`, `:412`, and `:460` still select
+usage/demonstration evidence from legacy test-row counts. Bootstrap tests are
+concurrently edited. Their owners must convert those reads, without reviving
+the legacy write family. The landing note records the exact fixture tallies
+and the cold proof still owed.

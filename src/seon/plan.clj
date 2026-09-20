@@ -731,17 +731,15 @@
         pending (stale-issue-tests database agent-id)]
     (when (seq pending)
       (let [deadline (query-deadline database agent-id)
-            provenance (test.runner/provenance database)
             ctx (@cluster-agent-acquire-context! cluster agent-id)]
-        (when (and (map? provenance)
-                   (contains? provenance :seon.error/at)
-                   (contains? provenance :seon.error/layer)
-                   (contains? provenance :seon.error/operation))
-          (throw (ex-info (:seon.error/message provenance) provenance)))
         (doseq [[test-eid test-symbol] pending]
           (let [remaining-ms (quot (- deadline (System/nanoTime)) 1000000)
+                database (db/db connection)
+                provenance (test.runner/provenance database)
                 result
-                (if (and test-symbol (pos? remaining-ms))
+                (cond
+                  (:seon.error/at provenance) provenance
+                  test-symbol
                   (let [qualified (symbol test-symbol)
                         test-var (sci/resolve ctx qualified)
                         metadata (meta test-var)
@@ -770,22 +768,15 @@
                     (seon.test/run
                      runnable connection
                      {:seon.db/db database
+                      :seon.db/connection connection
+                      :seon.sci.eval/ctx ctx
+                      :seon.test.run/cluster [:seon.cluster/name (:seon.cluster/name cluster)]
                       :seon.test.run/provenance provenance
-                      :seon.test/remaining-ms remaining-ms}))
-                  (if-not test-symbol
-                    (refuse! :seon.issue/not-a-test
+                      :seon.test/remaining-ms (max 1 remaining-ms)}))
+                  :else
+                  (refuse! :seon.issue/not-a-test
                              "An issue success ref no longer identifies a test."
-                             {:seon.agent/id agent-id :seon.db/ref test-eid})
-                    (test.runner/commit-results!
-                     connection
-                     {:seon.db/db database :seon.test.run/provenance provenance
-                      :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
-                      :seon.test/run-at (:seon.test.run/at provenance)
-                      :seon.test.runner/results
-                      [{:seon.test/sym test-symbol :seon.test/pass-count 0
-                        :seon.test/fail-count 0 :seon.test/error-count 1
-                        :seon.test/failure-message
-                        "The issue test set exhausted its configured evaluation deadline before this test."}]})))]
+                             {:seon.agent/id agent-id :seon.db/ref test-eid}))]
             (when (and (map? result)
                        (contains? result :seon.error/at)
                        (contains? result :seon.error/layer)

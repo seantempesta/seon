@@ -114,6 +114,12 @@
 (deftest resolution-follows-admitted-source-and-acquisition
   (test-support/with-database
    (fn [connection]
+     (test-support/seed-cluster! connection "resolution")
+     (test-support/transacted!
+      connection
+      [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
+                                  (db/db connection))
+        :seon.source/test-input-digest (id/digest 64 [::resolution-inputs])}])
      (let [ctx (test-support/fork-cluster-ctx connection)
            before (db/db connection)
            stale (sci.eval/fork-cluster-ctx ctx before connection)
@@ -155,6 +161,7 @@
            (when (runner/var-reference? resolved)
              (let [result (sut/run-owned
                            {:seon.test/var resolved
+                            :seon.test.run/cluster [:seon.cluster/name "resolution"]
                             :seon.db/connection connection
                             :my.program/context
                             {:seon.sci.eval/ctx ctx :my.program/base-ctx ctx

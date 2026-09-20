@@ -658,9 +658,7 @@
                                   {:seon.issue/files [:db/id :seon.issue.citation/row :seon.issue.citation/end-row
                                                        {:seon.issue.citation/file [:seon.fn.file/relative-path]}]}
                                   {:seon.issue/members [:db/id :seon.issue/id]}
-                                  {:seon.issue/tests [:db/id :seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
-                                                       :seon.test/failure-message
-                                                       {:seon.test/run [:db/id :seon.test.run/id :seon.test.run/basis-t]}]}
+                                  {:seon.issue/tests [:db/id :seon.test/sym]}
                                   {:seon.issue/functions [:db/id :seon.fn/sym {:seon.fn/ns [:db/id :seon.ns/name]}]}
                                   {:seon.issue/errors [:db/id :seon.error/signature {:seon.error/occurrences [:seon.error.occurrence/count]}]}]
                      [:seon.issue/id issue-id])]
@@ -671,7 +669,11 @@
       :else
       (let [test-rows (mapv
                        (fn [test-value]
-                         (let [state (cond
+                         (let [recorded (seon.test/recorded-result database (:seon.test/sym test-value))
+                               test-value (if (:seon.error/at recorded)
+                                            (assoc test-value :seon.test/failure-message (:seon.error/message recorded))
+                                            (merge test-value recorded))
+                               state (cond
                                        (not (:seon.test/run test-value)) :unrun
                                        (or (pos? (get test-value :seon.test/fail-count 0))
                                            (pos? (get test-value :seon.test/error-count 0))) :red
@@ -679,7 +681,12 @@
                                                database (:seon.test/sym test-value))) :verified
                                        :else :unverified)]
                            (assoc test-value :seon.issue.test/state state)))
-                       (sort-by :seon.test/sym (:seon.issue/tests row)))]
+                       (map (fn [[eid sym]] {:db/id eid :seon.test/sym sym})
+                            (sort-by second
+                             (db/q '[:find ?test ?symbol :in $ ?issue
+                                     :where [?issue :seon.issue/tests ?test]
+                                            [?test :seon.test/sym ?symbol]]
+                                   database (:db/id row)))))]
         (cond-> (assoc row :seon.issue/tests test-rows
                            :seon.issue/turns-remaining
                            (if-let [agent-id (get-in row [:seon.issue/agent :seon.agent/id])]
@@ -829,10 +836,6 @@
     (not-join [?subject]
       [?subject :seon.issue/tests ?test]
       (not-join [?test]
-        [?test :seon.test/pass-count ?passes]
-        [(pos? ?passes)]
-        [?test :seon.test/fail-count 0]
-        [?test :seon.test/error-count 0]
         [?test :seon.test/sym ?symbol]
         [(seon.test/verified? $ ?symbol) ?verified]
         [(true? ?verified)]))])
@@ -842,12 +845,12 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/ref] :boolean]}
   [database reference]
   (let [row (db/pull database
-                     '[:seon.issue/id :seon.issue/tests :seon.issue/severity
+                     '[:db/id :seon.issue/id :seon.issue/tests :seon.issue/severity
                        {:seon.issue/detector [:seon.fn/sym]}] reference)]
     (cond
       (seq (:seon.issue/tests row))
-      (let [result (db/q tests-done-query database reference)]
-        (when (:seon.error/kind result)
+      (let [result (db/q tests-done-query database (:db/id row))]
+        (when (:seon.error/at result)
           (throw (ex-info (:seon.error/message result) result)))
         (boolean result))
 

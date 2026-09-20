@@ -49,13 +49,18 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "issue-settlement")
+     (support/transacted!
+      connection
+      [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
+                                  (db/db connection))
+        :seon.source/test-input-digest (seon.id/digest 64 [::settlement-inputs])}])
      (support/transacted! connection
                           (agent/creation-tx {:seon.agent/id "root" :seon.ns/name 'my.agents.root
                                               :seon.cluster/name "issue-settlement"}))
      (let [aid "issue-settlement-worker"
            namespace-name 'my.agents.issue-settlement
-           test-symbol "my.agents.issue-settlement/success-test"
-           steady-symbol "my.agents.issue-settlement/steady-test"
+           test-symbol 'my.agents.issue-settlement/success-test
+           steady-symbol 'my.agents.issue-settlement/steady-test
            _ (support/transacted! connection
                      (agent/creation-tx {:seon.agent/id aid :seon.ns/name namespace-name
                                          :seon.cluster/name "issue-settlement"}))
@@ -67,14 +72,9 @@
                    {:seon.db/connection connection :seon.cluster/name "issue-settlement"
                     :seon.sci.eval/ctx ctx :seon.db.process/id cluster/boot-process-identity})
            evidence (fn [test-symbol]
-                      (db/pull (db/db connection)
-                        '[:seon.test/pass-count :seon.test/fail-count :seon.test/error-count
-                          :seon.test/failure-message :seon.test/reach-digest
-                          {:seon.test/run [:seon.test.run/id :seon.test.run/basis-t
-                                           :seon.test.run/program-digest]}]
-                        [:seon.test/sym test-symbol]))
+                      (tests/recorded-result (db/db connection) test-symbol))
            run-id (fn [test-symbol]
-                    (get-in (evidence test-symbol) [:seon.test/run :seon.test.run/id]))
+                    (second (:seon.test/run (evidence test-symbol))))
            system-settle
            (fn []
              (let [report (turn/system-turn
@@ -166,17 +166,19 @@
                         (last (filter #(str/includes? (:seon.cluster.eval/source % "") "my.issue/status")
                                       (seon.eval/of-agent (db/db connection) aid))))]
              (println {:seon.test/issue-status :failed :seon.eval/shown shown})
-             (is (str/includes? shown test-symbol) shown)
+             (is (str/includes? shown (str test-symbol)) shown)
              (is (str/includes? shown (:seon.test/failure-message red)) shown))
            (is (= 1 (:seon.test/fail-count red)) (pr-str red))
            (is (string? red-run))
-           (is (string? (:seon.test/reach-digest red)))
+           (is (integer? (:seon.test.run/basis-t red)))
+           (is (string? (:seon.test.run/program-digest red)))
+           (is (string? (:seon.test.run/input-digest red)))
            (is (= 1 (:seon.test/pass-count steady)) (pr-str steady))
            (is (nil? (:my.plan.item/completed-tx (step))))
-           ;; A CLOSE THAT CHANGED NOTHING RUNS NOTHING. Both reach closures
-           ;; are unchanged, so both recorded results stand unaltered.
+           ;; Only matching green evidence suppresses execution. The failing
+           ;; member gets a fresh result; steady's green evidence is reused.
            (close-ordinary-turn!)
-           (is (= red-run (run-id test-symbol)))
+           (is (not= red-run (run-id test-symbol)))
            (is (= steady-run (run-id steady-symbol)))
            (is (nil? (:my.plan.item/completed-tx (step))))
            (is (some? (:seon.issue/budget-exhausted-tx
@@ -240,7 +242,7 @@
                  resolved (:seon.issue/resolved-tx (db/pull (db/db connection)
                                                   [:seon.issue/resolved-tx] issue-ref))]
              (is (= 1 (:seon.test/pass-count green)) (pr-str green))
-             (is (not= red-run (get-in green [:seon.test/run :seon.test.run/id])))
+             (is (not= red-run (second (:seon.test/run green))))
              (is (true? (tests/verified? (db/db connection) test-symbol)))
              ;; The step completes on RECORDED evidence: steady-test has not
              ;; re-run since its first green, and still answers the query.
