@@ -6903,3 +6903,24 @@ unexplained work — both are ours to name and remove (target ≤ 1 s). Then
 slice (2), bare `bin/test`. Error lane landed `b9d983b72` (contract
 refusals validated against declared error schemas). Redesign lane on
 slice 4 (dirty: cluster.clj, fn.clj, issue.clj).
+
+## 2026-09-23 ~05:00 local — OWNER: "87 minutes is ridiculous. 7 seconds per test?" — measured: it is not fixture teardown; it is ~60 tests that each run a complete publication or wait out a 270 s bound
+
+Per-test durations from the gate logs (`END worker … elapsed-ms`):
+platform tier at `c402d3c1d`: 96 tests, median 1.1 s, but the 23 tests
+over 5 s hold 94 % of the 29.6 min; ten are over 30 s and the slowest
+eight are `seon.cluster.source-test` / `source-lineage-test` incremental-
+publication tests at 150–202 s EACH — every one publishes the entire
+program inside the test. Complete tier at `0c6be06f3`: 1,982 tests,
+median 3.4 s, 495 over 5 s holding 67 % of 4.0 h of test time, 59 over
+30 s; the slowest are turn-backstop/turn-work tests at exactly 270,007 ms
+(they wait out a 270 s bound — a test that passes by a timeout firing is
+asserting absence of signal) plus more whole-program publications. Two
+classes, both algorithmic: (1) a test that exercises publication must
+publish a SMALL fixture program (a handful of namespaces), never `src/`;
+(2) a test never waits out a bound — it awaits the exact terminal event
+under a tight declared bound. Queued for the test-system lane after its
+slice (2): the default 5 s bound enforced as FAILURE (surfacing the
+list), then those two classes fixed at their fixtures. The median 3.4 s
+is the tests' own work, not fixture reuse (subsequent fixture use was
+already ~3 ms before today and is 37 ms after the fork).
