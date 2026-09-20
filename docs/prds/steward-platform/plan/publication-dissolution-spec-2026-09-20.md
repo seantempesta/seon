@@ -79,6 +79,14 @@ publishes CHANGED files as same-identity upserts (`src/seon/cluster.clj`
    edge covers is excluded and listed; the lane stops only at cross-owner or
    storage/validation decisions.
 
+   **Toolchain-identity ruling (2026-09-21 ~01:20 UTC, after `c4ffc428b`):** a
+   body-only change to the indexer alters stored edges of unchanged files, so
+   the analysis identity includes the toolchain digest: the producer
+   namespaces' content (derived as the graph's requires closure from the
+   analysis entry points) plus the vendored pins the gate inputs record. A
+   toolchain digest change forces one complete publication; the digest is a
+   fact on the published base; the equality regression gains the indexer case.
+
 2. **Publish through the live JVM, never a fresh one.** When `default` (or
    any live cluster JVM of the root) is alive, the publication runs over its
    prepl (the same seam `init --dev` adoption uses), removing the 40–60 s

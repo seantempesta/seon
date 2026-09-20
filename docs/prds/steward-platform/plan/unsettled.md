@@ -5142,3 +5142,14 @@ evaluation now projects message/class/frame/layer/operation. Issue
 the frame-site follow-up left to the sweep. Default's adopted source commit
 still predates `510a9236d` (loaded behaviour is current, program facts are
 not) until the publication lane's incremental path adopts it.
+
+## 2026-09-21 ~01:20 UTC — publication lane: toolchain identity ruled (option 1)
+
+`publication-dissolution` (`c4ffc428b`): a body-only indexer change alters
+unchanged files' stored call edges while the source digests still match.
+Ruled option 1 — the toolchain digest (producer namespaces via the graph's
+requires closure + vendored pins) is part of the analysis identity and a
+fact on the base; a toolchain change forces one complete publication. Its
+closure prototype passes 2 tests / 24 assertions. Resumed; six rulings now
+sit in the spec (lineage, caller closure, type findings, namespace
+interface, general closure, toolchain identity).
