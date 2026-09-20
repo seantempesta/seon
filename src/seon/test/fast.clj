@@ -102,14 +102,12 @@
                                    :seon.test.runner/results (:seon.test.runner/results result)})
                    _ (when-not (vector? recorded)
                        (throw (ex-info "Snapshot results were not recorded." {:seon.test/recording recorded})))
-                   summary (:seon.test.runner/summary result)]
-               (doseq [member (concat recorded (:seon.test.selection/unchanged admission))]
-                 (prn (select-keys member [:seon.test/sym :seon.test/unchanged
-                                           :seon.test.run/basis-t
-                                           :seon.test.run/program-digest
-                                           :seon.test.run/input-digest])))
+                   facts (runner/recorded-run! root (:seon.test.run/id provenance))
+                   _ (when-not (vector? facts)
+                       (throw (ex-info "Recorded run coverage is unavailable." facts)))
+                   summary (runner/print-recorded-tally! facts)]
                (println "bin/test-fast:" (:seon.test.runner/test-count summary) "executed,"
-                        (count (:seon.test.selection/unchanged admission)) "unchanged; run"
+                        (:seon.test.runner/unchanged-count summary) "unchanged; run"
                         (:seon.test.run/id provenance))
                (if (zero? (+ (:seon.test.runner/fail-count summary)
                              (:seon.test.runner/error-count summary))) 0 1)))))

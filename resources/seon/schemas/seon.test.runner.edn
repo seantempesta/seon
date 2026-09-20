@@ -56,6 +56,7 @@
                      :seon.test.runner/fail-count]
                     [:seon.test.runner/error-count
                      :seon.test.runner/error-count]],
+                   :unchanged-count [:int {:min 0}],
                    :test-count [:int {:min 0}],
                    :silence-seconds [:int {:min 0}],
                    :long-reason :string,

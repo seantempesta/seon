@@ -579,3 +579,186 @@ worktree, publication, reset, or adoption.
 The required pre-commit load of `seon.test`, `seon.test.fast`,
 `seon.test.runner`, `seon.test.cache`, and `seon.cluster.source` returned
 `:loads`, exit 0 (`launcher-precommit-load.log`).
+
+Launcher commit **48e3f80d6** is followed by the same required HEAD load:
+`:loads`, exit 0 (`launcher-head-load.log`).
+
+## Recorded tally candidate
+
+The candidate deletes `selection/read-basis`, `selection/write-basis!`,
+their private file helper, `runner/record-green-basis!`, and the file-basis
+round-trip test. No source, test or launcher caller of those Vars remains.
+`run-results` first checks complete admitted/covered membership with the
+existing `execution-members` query, then joins terminal member facts to
+their owning run's confidence. Missing completion refuses rather than
+disappearing from the tally. `recorded-run!` uses the existing bounded
+store-holder transport and a read-only query over already-published keys;
+it needs no reload of default or new stored attribute. The new result-row
+and result-facts schemas describe read values only.
+
+Both entry points use `print-recorded-tally!`. Fast reads the admitted run
+after completion; the cold coordinator's still-legacy recording path uses
+its queried returned results until the next launcher/admission slice.
+That remaining cold migration is not claimed complete here.
+
+One read-only MCP JVM probe of the same member/owner query verified run
+`eb10af2747d0`: expected **11**, recorded **11**, counts **[134 4 1]**.
+Every row carries basis **536870921**, program digest
+`f25cc201a05b150368c2faf99d02e46dc788802441f1d6a1fe24ac9920b75a67`,
+and input digest
+`5ff9288d4fedceee558ecbf25e85e93075aa3eb86c86b9ee8721a71401028afb`.
+The returned evaluation took **8,180 ms**. The query is maintained in
+`runner/run-result-query`; it used `execution-members` with this run ID,
+queried those member IDs, and summed row columns 1–3. No tests executed.
+The printer includes errors when totaling assertion events: 134 + 4 + 1 = 139.
+
+Two queued earlier candidate snapshots were terminated by this lane before
+any test JVM launched, to include the complete membership read. No foreign
+slot holder was operated. `tally-fast-3.log` is the current four-namespace
+verification and includes both new read schemas in its overlay. Its outcome
+is pending, not green evidence.
+
+## Publication preservation gate — independently reproduced
+
+Full publication uses `result-preservation-tx` at
+`src/seon/cluster/source.clj:326`, then `preserved-evidence-tx` at `:378`
+from `publish!` at `:606`. The run reader at `:350` is wildcard pull.
+The vendored dependency's default cardinality-many limit is **1,000**
+(`reference-code/datahike/src/datahike/pull_api.cljc:16`, `:315`).
+`force-branch!` changes the branch pointer to the supplied database value;
+its parent assignment is not a merge of result datoms
+(`reference-code/datahike/src/datahike/versioning.cljc:323–390`).
+The existing source regression `latest-test-evidence-survives-rebuilding-from-an-older-base`
+exercises legacy per-test evidence, not a large admitted member set.
+The archived branch-head contention issue remains resolved; this is a
+different, reproducible preservation defect in the new member model.
+
+One read-only MCP JVM probe used the real published database, queried test
+symbols, the real selection/admission owners, and Datahike's immutable
+`with`. It submitted **no transaction to a connection**, published nothing,
+and executed no test. Returned counts in **7,955 ms**:
+
+```clojure
+{:seon.test/requested 1001
+ :seon.test/admitted 1001
+ :seon.test/preserved 1000
+ :seon.test/database-mutated? false}
+```
+
+Exact probe:
+
+```clojure
+(let [held (some :seon.store/store
+                 (vals @(var-get (ns-resolve 'seon.cluster (symbol "running-instances")))))
+      database (seon.cluster.source/database
+                held (:seon.source/commit-id (seon.cluster.source/current held)))
+      prior (seon.db/pull database
+                          [:seon.test.run/published-base-digest
+                           :seon.test.run/overlay-input-digest
+                           :seon.test.run/program-digest :seon.test.run/basis-t
+                           :seon.test.run/input-digest :seon.test.run/branch]
+                          [:seon.test.run/id "eb10af2747d0"])
+      symbols (vec (take 1001 (sort (seon.db/q
+                                     '[:find [?symbol ...] :where [_ :seon.test/sym ?symbol]]
+                                     database))))
+      run (assoc (dissoc prior :db/id :seon.test.run/input-digest)
+                 :seon.test.run/id "results-reuse-read-only-preservation-probe"
+                 :seon.test.run/at (java.util.Date.))
+      admission (seon.test/selection-admission
+                  {:seon.db/db database :seon.test.run/provenance run
+                   :seon.test.run/input-digest (:seon.test.run/input-digest prior)
+                   :seon.test.run/policy :named
+                   :seon.test.run/members
+                   (mapv (fn [sym] {:seon.test.member/symbol sym
+                                    :seon.test.member/reasons #{:named}}) symbols)})
+      expanded (:db-after (datahike.api/with database (seon.test/admit-run database admission)))
+      preserved ((deref (ns-resolve 'seon.cluster.source (symbol "result-preservation-tx"))) expanded)
+      row (first (filter #(= "results-reuse-read-only-preservation-probe"
+                             (:seon.test.run/id %)) preserved))]
+  {:seon.test/requested (count symbols)
+   :seon.test/admitted (count (:seon.test.run/members admission))
+   :seon.test/preserved (count (:seon.test.run/members row))
+   :seon.test/database-mutated? false})
+```
+
+The authorized source region is admission/recording only. No production
+edit has been made to the preservation or publication region. The gate is
+ownership and the durable-evidence guarantee, not a foreign red. Options:
+
+1. **Recommended: extend this lane to the existing publication evidence
+   transfer and its canonical regression.** Keep one authority; enumerate
+   complete admitted evidence and verify membership, refs and confidence
+   after rebuilding. Cost: one additional publication slice and an
+   orchestrator-owned publication/cold proof. Give up: the current narrow
+   source-region boundary, not evidence or reuse.
+2. **Have the publication owner repair that transfer.** This lane retains
+   admission/recording ownership and resumes integration when the canonical
+   preservation proof lands. Same durability guarantee; cost: another
+   coordinated owner and checkpoint. Give up: single-lane completion.
+3. **Temporarily refuse full publication when it cannot preserve admitted
+   evidence completely.** Guarantee: no silent member loss. Cost: a small
+   fail-closed guard and deferred full publication until preservation is
+   repaired. Give up: full-publication availability, not the recorded facts.
+
+The current armed verification will be checkpointed before returning this
+decision. The source-preservation repair, launcher thinning, shared host
+admission and final two-run zero-execution proof remain owed.
+
+### Tally checkpoint verification
+
+```sh
+bin/test-fast --paths bin/test src/seon/test/runner.clj src/seon/test/fast.clj src/seon/test/selection.clj resources/seon/schemas/seon.test.runner.edn resources/seon/schemas/seon.test.run.edn test/seon/test/selection_test.clj test/seon/test_runner_test.clj -- seon.test.selection-test seon.test-test seon.test.runner-test seon.test-cache-test
+```
+
+Snapshot HEAD `0d50884382ce1fa87f0c05ba0ddbca14d5258369`; slot wait
+**368 seconds**, one test JVM PID **48713**. Run `86e6a9c3e1cc` completed
+and recorded **46 executed, 0 unchanged; 471 assertion events, 4 failures,
+6 errors**, exit 1. The post-recording member query returned all 46 members,
+each printed with basis **536870921**, program digest
+`d393eedc7b34293db0c36f4f0f33ef4e1aad9ebb3b7ef7be85dbc024c3ad048f`,
+and input digest
+`da012d953fc5ab86521297048bad47b391862262c8959c16e4c727a8855c6e86`.
+The new canonical snapshot/tally regression passed, including pending-member
+refusal and fresh-event reuse. The earlier four stale platform assertions
+also passed after correction.
+
+`tally-fast-3.log`: **152,367 bytes**, SHA-256
+`f6128e02d44b0666f83643f3e76577f3f22b1bf26be3ea01943840f753d578e4`.
+That snapshot's shared printer says **465 assertions** because it predates
+the one-line inclusion of six error events in the assertion total. The
+candidate adds errors to pass + fail; it does not claim that corrected line
+was in this log. The later read-schema alias naming is also outside this
+snapshot, with unchanged value shapes.
+
+Observed verification boundaries (not attributed beyond their returned evidence):
+
+- Selection's refused declared-reference assertion: the already-named
+  `seon.fn/declared-reference-edges` base error lacks a declared facet.
+- `check-records-only-execution-members-and-reuses-the-green-set`:
+  `seon.program/declaration-row` receives nil at `test_test.clj:31`.
+- `recording-distinguishes-run-replay-from-a-new-event`: four assertions
+  are blocked by `seon.blob/with-publication!` returning undeclared write
+  refusal facets, including the immutable-run refusal conversion.
+- `recording-preserves-admission-and-refuses-a-deleted-definition`:
+  `seon.fn.schema-shape/normalized-form` reports a compiled schema without
+  canonical EDN shape data.
+- `no-double-execution`: three assertions encounter undeclared facets at
+  `seon.blob/with-publication!`, including `:seon.test/execution-error`.
+
+The root `seon.test-runner-test` diagnostics expectations were updated for
+the new unavailable-tally behavior but are not the dotted
+`seon.test.runner-test` namespace in this iteration command. Its isolated
+cold proof is owed; no additional nested-worker JVM suite was launched.
+
+The required pre-commit load (including `seon.test.selection`) returned
+`:loads`, exit 0 (`tally-precommit-load.log`). Owned diff checks pass.
+This slice removes another **3 bash lines**, replacing the obsolete file
+basis description with 2 lines; cumulative replaced/deleted bash lines are
+**20**, and worker arithmetic/thinning remains pending. Files in this
+checkpoint are the eight overlay paths above, AGENTS.md section 5 and this
+note. No source-publication preservation function was edited.
+
+The cold command above additionally owes
+`resources/seon/schemas/seon.test.runner.edn`, `test/seon/test_runner_test.clj`
+and namespace `seon.test-runner-test`. Bare twice and platform remain the
+orchestrator's proofs. No two-run zero-execution CLI proof is claimed.

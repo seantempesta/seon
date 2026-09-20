@@ -594,8 +594,8 @@
     (is (= ["seon.example-test/unlaunchable"]
            (::runner/task-symbols failure))
         "the typed launch failure carries the task known before readiness")
-    (is (str/includes? output "Ran 2 tests containing 6 assertions."))
-    (is (str/includes? output "1 failures, 0 errors."))
+    (is (not (str/includes? output "Recorded"))
+        "Exchange diagnostics cannot claim a recorded tally before recording.")
     (is (str/includes? output "Unconfirmed tasks — 1 task(s)")
         "the tally counts unconfirmed work rather than listing it silently")
     (is (str/includes? output " - seon.example-test/unlaunchable")
@@ -855,16 +855,14 @@
                ::runner/recording-label "persistent results"})))]
       (is (= expected-exit @exit*)
           "a gate requires durable evidence as well as passing tests")
-      (is (str/includes? output "Ran 1 tests containing 1 assertions."))
+      (is (str/includes? output "recorded tally unavailable"))
       (is (= 1 (occurrences output
                             "bin/test: persistent results NOT recorded:")))
       (is (str/includes?
            output
            ":seon.test.runner/injected-persistent-recording-failure"))
-      (is (< (str/index-of output "Ran 1 tests")
-             (str/index-of output
-                           "bin/test: persistent results NOT recorded:"))
-          "the complete tally is visible before persistence is attempted"))))
+      (is (not (str/includes? output "Recorded 1 executed"))
+          "A recording refusal cannot print a successful recorded tally."))))
 
 (deftest explicit-result-root-directs-bare-gate-evidence
   (is (= "/tmp/isolated-operator-root"

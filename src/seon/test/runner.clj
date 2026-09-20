@@ -3265,6 +3265,101 @@
   [launcher-root explicit-root]
   (or (not-empty explicit-root) launcher-root))
 
+(def ^:private run-result-query
+  '[:find ?symbol ?pass ?fail ?error ?id ?at ?basis ?program ?inputs
+    :in $ [?member ...]
+    :where [?member :seon.test.member/symbol ?symbol]
+           [?member :seon.test.member/completed-tx]
+           [?member :seon.test.member/terminated-tx]
+           [?member :seon.test.member/pass-count ?pass]
+           [?member :seon.test.member/fail-count ?fail]
+           [?member :seon.test.member/error-count ?error]
+           [?owner :seon.test.run/members ?member]
+           [?owner :seon.test.run/id ?id]
+           [?owner :seon.test.run/at ?at]
+           [?owner :seon.test.run/basis-t ?basis]
+           [?owner :seon.test.run/program-digest ?program]
+           [?owner :seon.test.run/input-digest ?inputs]])
+
+(defn- run-result-facts
+  "Read complete admitted membership and terminal evidence from one database."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id]
+                  :seon.test.run/result-facts]}
+  [database run-id]
+  (let [members (execution-members database run-id)]
+    {:seon.test.run/expected (set (map :seon.test.member/symbol members))
+     :seon.test.run/rows (vec (execution-read
+                              (db/q run-result-query database (mapv :db/id members))))}))
+
+(defn- results-from-facts
+  "Refuse incomplete coverage; preserve the owning execution's confidence."
+  {:malli/schema [:=> [:cat :seon.test.run/id :seon.test.run/result-facts]
+                  :seon.test/results]}
+  [run-id {expected :seon.test.run/expected rows :seon.test.run/rows}]
+  (when-not (and (= expected (set (map first rows))) (= (count expected) (count rows)))
+    (execution-refusal! 'seon.test.runner/run-results run-id
+                        :seon.test/population-unknown expected rows))
+  (mapv (fn [[sym pass fail errors owner at basis program inputs]]
+          (cond-> {:seon.test/sym sym :seon.test/pass-count pass
+                   :seon.test/fail-count fail :seon.test/error-count errors
+                   :seon.test/run [:seon.test.run/id owner]
+                   :seon.test/run-at at :seon.test/run-basis-t basis
+                   :seon.test.run/basis-t basis :seon.test.run/program-digest program
+                   :seon.test.run/input-digest inputs}
+            (not= run-id owner) (assoc :seon.test/unchanged true))) rows))
+
+(defn- result-read-error
+  {:malli/schema [:=> [:cat :seon.test.run/id :seon.error/throwable]
+                  :seon.test/execution-error]}
+  [run-id failure]
+  (if (:seon.test/execution-refusal (ex-data failure))
+    (ex-data failure)
+    (assoc (error/diagnostic
+            {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/recording
+             :seon.error/operation 'seon.test.runner/run-results
+             :seon.error/message "Recorded run coverage is unavailable."
+             :seon.error/diagnostic-layer :test
+             :seon.error/diagnostic-operation 'seon.test.runner/run-results
+             :seon.error/diagnostic-member run-id
+             :seon.error/diagnostic-expected :complete-recorded-membership
+             :seon.error/diagnostic-offending (Throwable->map failure)
+             :seon.error/diagnostic-cause :unavailable-recorded-evidence
+             :seon.error/diagnostic-evidence {:seon.test.run/id run-id}})
+           :seon.test/execution-refusal :seon.test/population-unknown)))
+
+(defn run-results
+  "Query the total recorded results of an admitted run, including reused members."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id]
+                  [:or :seon.test/results :seon.test/execution-error]]}
+  [database run-id]
+  (try (results-from-facts run-id (run-result-facts database run-id))
+       (catch Exception failure (result-read-error run-id failure))))
+
+(defn recorded-run!
+  "Read admitted results through the same store holder used by recording."
+  {:malli/schema [:=> [:cat :string :seon.test.run/id]
+                  [:or :seon.test/results :seon.test/execution-error]]}
+  [operator-root run-id]
+  (try
+   (let [form
+        (pr-str
+         `(let [held# (some :seon.store/store
+                            (vals @(var-get (ns-resolve 'seon.cluster (symbol "running-instances")))))
+                database# (source/database held# (:seon.source/commit-id (source/current held#)))
+                members# ((deref (ns-resolve 'seon.test.runner (symbol "execution-members"))) database# ~run-id)]
+            {:seon.test.run/expected (set (map :seon.test.member/symbol members#))
+             :seon.test.run/rows
+             (vec (db/q '~run-result-query database# (mapv :db/id members#)))}))
+        {live? :seon.fresh-operator/live-process? facts :seon.fresh-operator/value}
+        ((requiring-resolve 'seon.fresh-operator/live-root-value!) operator-root form)]
+    (if live?
+      (results-from-facts run-id facts)
+      (let [held (store/open-store! {:seon.store/dir (str (io/file operator-root "data" "store"))})]
+        (try
+          (run-results (source/database held (:seon.source/commit-id (source/current held))) run-id)
+          (finally (store/release-store! held))))))
+   (catch Exception failure (result-read-error run-id failure))))
+
 (defn- recording-failure
   [record-fn]
   (try
@@ -3346,19 +3441,6 @@
      :seon.test.run/policy :incremental}})
     :seon.test/selection-refusal (if (= "-" cluster-name) :seon.test/cluster-required
                                    :seon.test/selection-authority-unavailable)))
-
-(defn- record-green-basis!
-  {:seon.fn/external-sink :codec-storage
-   :seon.fn/projection-boundary :none}
-  [selection-mode git-sha digests]
-  (selection/write-basis!
-   (source-root)
-   {:seon.test.basis/at (str (Instant/now))
-    :seon.test.basis/git-sha git-sha
-    :seon.test.basis/mode selection-mode
-    :seon.test.basis/digests digests})
-  (println "bin/test: recorded a new green basis over"
-           (count digests) "declared inputs"))
 
 (defn- worker-count
   ([]
@@ -4139,14 +4221,41 @@
              (str/join "," (::task-symbols result)))
     (print (::task-output result))))
 
-(defn- print-final-tally!
-  [summary task-results]
+(defn recorded-summary
+  "Count the immutable facts returned by the recorder and selector.
+  Reused members retain their assertion evidence but contribute no executions."
+  {:malli/schema [:=> [:cat :seon.test/results] :seon.test.runner/summary]}
+  [results]
+  (reduce (fn [summary result]
+            (-> summary
+                (update ::test-count + (if (:seon.test/unchanged result) 0 1))
+                (update ::unchanged-count + (if (:seon.test/unchanged result) 1 0))
+                (update ::pass-count + (:seon.test/pass-count result))
+                (update ::fail-count + (:seon.test/fail-count result))
+                (update ::error-count + (:seon.test/error-count result))))
+          {::test-count 0 ::unchanged-count 0 ::pass-count 0 ::fail-count 0 ::error-count 0}
+          results))
+
+(defn print-recorded-tally!
+  "Print queried result facts, including every member's confidence."
+  {:malli/schema [:=> [:cat :seon.test/results] :seon.test.runner/summary]}
+  [results]
+  (let [summary (recorded-summary results)]
+    (doseq [member (sort-by :seon.test/sym results)]
+      (prn (select-keys member [:seon.test/sym :seon.test/unchanged
+                                :seon.test.run/basis-t :seon.test.run/program-digest
+                                :seon.test.run/input-digest])))
   (println)
-  (println "Ran" (::test-count summary) "tests containing"
-           (+ (::pass-count summary) (::fail-count summary))
+  (println "Recorded" (::test-count summary) "executed," (::unchanged-count summary)
+           "unchanged;"
+           (+ (::pass-count summary) (::fail-count summary) (::error-count summary))
            "assertions.")
   (println (::fail-count summary) "failures,"
            (::error-count summary) "errors.")
+    summary))
+
+(defn- print-final-tally!
+  [_summary task-results]
   ;; EVERY TIER'S TALLY IS TOTAL. A worker that died, a bound that fired, a
   ;; pool that emptied and a task nobody could confirm are each their own
   ;; typed line naming the task — never a quiet per-namespace red that sends
@@ -4243,9 +4352,6 @@
     task-results ::task-results
     run-result ::run-result
     skipped ::skipped
-    selection-mode ::selection-mode
-    git-sha ::git-sha
-    bulk ::bulk
     record-results! ::record-results!
     recording-label ::recording-label}]
   (let [green? (zero? (+ (::fail-count summary) (::error-count summary)))
@@ -4267,13 +4373,17 @@
         (println " -" test-symbol)))
     (print-skipped! skipped)
     (flush)
-    (let [failure (when record-results! (recording-failure record-results!))]
+    (let [recorded (try (when record-results! (record-results!))
+                        (catch Throwable failure failure))
+          failure (recording-failure #(if (instance? Throwable recorded)
+                                        (throw recorded) recorded))
+          recorded-summary (when-not failure (print-recorded-tally! recorded))]
       (when failure
+        (println "bin/test: recorded tally unavailable; execution output above is not durable evidence.")
         (println (recording-failure-notice recording-label failure)))
-      (when (and green? (nil? failure) (::digests bulk))
-        (record-green-basis! selection-mode git-sha (::digests bulk)))
       (flush)
-      (if (and green? (nil? failure)) 0 1))))
+      (if (and green? (nil? failure)
+               (zero? (+ (::fail-count recorded-summary) (::error-count recorded-summary)))) 0 1))))
 
 (defn- confirmation-symbols
   []

@@ -979,6 +979,10 @@ through `seon.test.runner/commit-results!` (`src/seon/test/runner.clj:1435`);
 recording failure fails the gate. Fast iterations use the same recorder,
 carrying the resolved published base, actual snapshot program and overlay
 input digests, and tested basis. Every request is a fresh run event.
+The checkout green-basis file is retired; the basis derives from recorded
+facts. Both launchers print through `seon.test.runner/print-recorded-tally!`,
+using the queried facts returned by recording and selection. Recording failure
+reports an unavailable tally, never a successful durable verdict.
 
 **Shared request policy:** every policy is an eligibility scope, never an
 execution promise. Named/all/full/platform requests reuse each member whose

@@ -11,6 +11,17 @@
                  [:seon.test.run/overlay-input-digest :seon.test.run/overlay-input-digest]
                  [:seon.test.run/program-digest :seon.test.run/program-digest]
                  [:seon.test.run/basis-t :seon.test.run/basis-t]],
+                :result-row
+                [:tuple :seon.test/sym :seon.test/pass-count
+                 :seon.test/fail-count :seon.test/error-count
+                 :seon.test.run/id :seon.test.run/at :seon.test.run/basis-t
+                 :seon.test.run/program-digest :seon.test.run/input-digest],
+                :result-facts
+                [:map
+                 [:seon.test.run/expected :seon.test.run/expected]
+                 [:seon.test.run/rows :seon.test.run/rows]],
+                :expected [:set :seon.test/sym],
+                :rows [:vector :seon.test.run/result-row],
                 :callers-at-head [:set {:description "Observed paths of dirty checkout callers omitted from the selected overlay. The tested snapshot contains their HEAD versions, not their dirty checkout bytes. Path values survive file deletion."} :seon.source/path],
                 :branch [:and {:description "Durable destination branch of the result commit, addressable in its store. A publication scratch branch is never the destination; tested-branch records execution provenance separately."} :seon.source/branch],
                 :tested-branch [:and {:description "Branch of the immutable database tested, when different from the result destination. basis-t belongs to this branch; it must not be interpreted as destination history."} :seon.source/branch],

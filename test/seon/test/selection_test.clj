@@ -370,6 +370,11 @@
                             admission (sut/selection-admission request)
                             run (:seon.test.run/provenance admission)]
                         (support/transacted! connection [[:db.fn/call sut/admit-run admission]])
+                        (when (seq (:seon.test.run/members admission))
+                          (is (= :seon.test/population-unknown
+                                 (:seon.test/execution-refusal
+                                  (runner/run-results (db/db connection) (:seon.test.run/id run))))
+                              "An admitted member without completion never becomes a zero tally."))
                         (let [results (mapv (fn [_]
                                               (swap! executions inc)
                                               (runner/run-var! #'failure-fixture/passing-example))
@@ -380,7 +385,18 @@
                                                     :seon.test/run-at (:seon.test.run/at run)
                                                     :seon.test.run/terminated? true
                                                     :seon.test.runner/results results})]
-                          (is (vector? recorded) (pr-str recorded)))
+                          (is (vector? recorded) (pr-str recorded))
+                          (when (vector? recorded)
+                            (let [facts (runner/run-results (db/db connection) (:seon.test.run/id run))
+                                  _ (is (vector? facts) (pr-str facts))
+                                  summary (runner/recorded-summary facts)]
+                              (is (= (count (:seon.test.run/members admission))
+                                     (:seon.test.runner/test-count summary)))
+                              (is (= (count (:seon.test.selection/unchanged admission))
+                                     (:seon.test.runner/unchanged-count summary)))
+                              (is (= 1 (:seon.test.runner/pass-count summary)))
+                              (is (= 0 (:seon.test.runner/fail-count summary)
+                                     (:seon.test.runner/error-count summary))))))
                         admission))
            first-run (execute! :named)]
        (is (= 1 @executions))
@@ -566,34 +582,6 @@
           ((requiring-resolve 'seon.fs/delete-recursively!)
            (.getCanonicalPath (io/file "tmp"))
            (.getCanonicalPath root)))))))
-
-(deftest a-recorded-green-basis-round-trips
-  (let [root (.toFile (Files/createTempDirectory
-                       (.toPath (io/file "tmp")) "selection-basis"
-                       (into-array FileAttribute [])))]
-    (try
-      (is (nil? (selection/read-basis (.getPath root)))
-          "no basis is an honest nil, never an empty map that reads as green")
-      (selection/write-basis! (.getPath root)
-                              {:seon.test.basis/at "2026-08-07T00:00:00Z"
-                               :seon.test.basis/mode "all"
-                               :seon.test.basis/digests {"src/a.clj" "abc"}})
-      (is (= {:seon.test.basis/at "2026-08-07T00:00:00Z"
-              :seon.test.basis/mode "all"
-              :seon.test.basis/digests {"src/a.clj" "abc"}}
-             (selection/read-basis (.getPath root))))
-      (doseq [corrupt ["{" "nil" "[]" "{}"
-                       "{:seon.test.basis/digests {\"src/a.clj\" nil}}"]]
-        (spit (io/file root "tmp/test-basis/green-basis.edn") corrupt)
-        (let [refusal (try (selection/read-basis (.getPath root))
-                           (catch clojure.lang.ExceptionInfo failure
-                             (ex-data failure)))]
-          (is (= ::selection/invalid-basis (:seon.error/kind refusal)))
-          (is (string? (get-in refusal [:seon.error/data ::selection/cause])))))
-      (finally
-        ((requiring-resolve 'seon.fs/delete-recursively!)
-         (.getCanonicalPath (io/file "tmp"))
-         (.getCanonicalPath root))))))
 
 (deftest external-input-identity-includes-gitlinks-but-not-program-edits
   (let [root (.toFile (Files/createTempDirectory (.toPath (io/file "tmp"))

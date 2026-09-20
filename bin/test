@@ -15,9 +15,8 @@
 # in seconds instead of poisoning the bulk. The bare default then runs only the
 # tests that reach changed code, derived from `:seon.fn/calls` edges in the one
 # program-graph manifest — never a file modification time or a filename
-# convention. The checkout-local green-basis file remains the temporary
-# selection input; every completed canonical gate also replaces the
-# per-test facts of the tests it ran on the `:current-src` branch.
+# convention. Recorded run/member facts supply the green basis and tally;
+# every completed canonical gate records its evidence on `:current-src`.
 #
 # Each invocation owns one isolated operator root below `tmp/test-runs`, copies
 # the first-party checkout into it, and deletes it on success. Exit code is the
