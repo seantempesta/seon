@@ -39,7 +39,16 @@ through published calls and references. A subsequent body-only probe keeps
 name, arity and an explicit Malli contract unchanged but changes an inferred
 return type; the unchanged caller gains a type-mismatch warning. The
 checkpoint records the reproducer, dependency source and three options for
-that narrower policy decision. No persistent cache has been implemented.
+that narrower policy decision. The owner subsequently ruled exclusion of
+body-inferred type findings; the analyzer now declares seven such classes
+off for publication, with a real-analyzer regression. No persistent cache
+has been implemented.
+
+The remaining measured gap is namespace metadata: adding deprecation to a
+required namespace adds a warning to an unchanged require-only file, which
+has no function call/reference edge to that namespace. The landing note's
+third decision proposes using the already-recorded `:seon.ns/requires`
+relation. This is a declaration dependency, not another inferred-type class.
 
 ## Acceptance
 

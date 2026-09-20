@@ -39,6 +39,19 @@
   [:filename :row :col :end-row :end-col :level :message :type
    :lang :cljc :langs])
 
+(def ^:private publication-config
+  ;; Malli owns runtime type admission. Kondo's inferred return types depend
+  ;; on callee bodies, so they cannot identify declaration-keyed findings.
+  ;; Other linters consume the same inferred argument/condition tags
+  ;; (clj-kondo/impl/linters.clj, lint-arg-types! and
+  ;; lint-deferred-conditions!). Disable at admission,
+  ;; never by dropping findings from a completed analysis.
+  (reduce #(assoc-in %1 [:linters %2 :level] :off)
+          analysis-config
+          [:type-mismatch :redundant-str-call :is-message-not-string
+           :redundant-primitive-coercion :equals-float :not-empty?
+           :constant-condition]))
+
 (defn- present-values
   [entry selected-keys]
   (into {}
@@ -425,7 +438,7 @@
                   ;; later analysis in this JVM. A mirror is not a decoy: it
                   ;; carries the checkout file's own captured bytes, and
                   ;; `checkout-source?` reads the source path back out of it.
-                  (cond-> {:lint lint-paths}
+                  (cond-> {:lint lint-paths :config publication-config}
                     (not (every? checkout-source? lint-paths))
                     (assoc :cache false))))
                  (finally

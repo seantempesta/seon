@@ -17,6 +17,30 @@
     (spit file source)
     (.getCanonicalPath file)))
 
+(deftest publication-findings-depend-on-declarations-not-inferred-return-types
+  (let [directory (fixture-directory (str (random-uuid)))
+        callee (write-fixture! directory "callee.clj" "")
+        caller (write-fixture! directory "caller.clj" "")
+        caller-text (str "(ns caller (:require [callee :as c]))\n"
+                         "(defn g [] [(inc (c/f)) (str (c/f)) (c/f 1)])\n")
+        analyses
+        (try
+          (mapv (fn [body]
+                  (analyzer/analyze
+                   {::analyzer/sources
+                    {callee (str "(ns callee)\n"
+                                 "(defn f {:malli/schema [:=> [:cat] [:or :int :string]]} [] "
+                                 body ")\n")
+                     caller caller-text}}))
+                ["1" "\"text\""])
+          (finally (test-support/delete-recursively! directory)))
+        caller-findings (mapv #(filterv (fn [finding]
+                                         (= caller (::analyzer/filename finding)))
+                                       (::analyzer/findings %)) analyses)]
+    (is (= (first caller-findings) (second caller-findings)))
+    (is (= [:invalid-arity] (mapv ::analyzer/type (first caller-findings)))
+        "declaration arity admission remains active")))
+
 (deftest canonical-analysis-rejects-obsolete-cache-authorities
   (let [directory (fixture-directory (str (random-uuid)))
         cache-root (io/file directory "cache")
@@ -195,13 +219,13 @@
               :seon.ns.refer/target-ns 'clojure.edn
               :seon.ns.refer/target-name 'read-string}}}
           ::analyzer/available-functions
-          [{:seon.fn/sym "my.turn/complete"
+          [{:seon.fn/sym 'my.turn/complete
             :seon.fn/private? false
             :seon.fn/arglists "([message])"}
-           {:seon.fn/sym "seon.turn/open?"
+           {:seon.fn/sym 'seon.turn/open?
             :seon.fn/private? false
             :seon.fn/arglists "([turn])"}
-           {:seon.fn/sym "other/private-helper"
+           {:seon.fn/sym 'other/private-helper
             :seon.fn/private? true
             :seon.fn/arglists "([value])"}]
           ::analyzer/sources
@@ -261,11 +285,11 @@
               (analyzer/analyze-forms
                {::analyzer/namespace-name 'my.agents.cache-test
                 ::analyzer/available-functions
-                [{:seon.fn/sym "clojure.core/volatile!"
+                [{:seon.fn/sym 'clojure.core/volatile!
                   :seon.fn/arglists "([x])"}
-                 {:seon.fn/sym "clojure.core/vswap!"
+                 {:seon.fn/sym 'clojure.core/vswap!
                   :seon.fn/arglists "([_ _ vol f & args])"}
-                 {:seon.fn/sym "runtime.example/one"
+                 {:seon.fn/sym 'runtime.example/one
                   :seon.fn/arglists "([x])"}]
                 ::analyzer/sources
                 ["(let [value (clojure.core/volatile! 0)]\n   (clojure.core/vswap! value inc)\n   @value)"

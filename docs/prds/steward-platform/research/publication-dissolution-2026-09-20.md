@@ -7,10 +7,10 @@ tags: [publication, test-system, wave/publication-velocity]
 
 # Publication dissolution — decision checkpoint
 
-Items 1–4 are **not implemented**. No production path was changed, no
-publication was run, and no performance improvement is claimed. This
-checkpoint records a dependency probe before the binding specification's
-owner decision gate. Item 5 remains outside this assignment.
+Items 1–4 are **not complete**. The latest checkpoint implements the ruled
+publication-analysis exclusions; the publication/reconciliation and caching
+changes remain unimplemented. No publication speedup is claimed. The sections
+below retain the earlier decision evidence. Item 5 remains outside this assignment.
 
 ## Decision: what constitutes an analysis input?
 
@@ -183,7 +183,7 @@ Thus the ruled pair of file digest and declared-interface digest remains
 unchanged for the caller while its complete-analysis finding changes.
 Program digest equality alone cannot prove finding equality.
 
-### Three options for this narrower decision
+### Second decision — settled: exclude inferred type findings
 
 Additional effort estimates, excluding the remaining implementation:
 
@@ -239,3 +239,175 @@ The spec's publication measurements, lineage/reuse regression, live-JVM proof
 and cold proof remain owed. The actual cache test namespace is
 `seon.test-cache-test`; the earlier cold-command template's dotted spelling
 does not match its declaration.
+
+## Ruled publication-analysis policy implemented
+
+The owner accepted option 1 at `ad2fe8554`: exclude inferred type findings
+at the publication analyzer's configuration seam. `publication-config` in
+`src/seon/fn/analyzer.clj` derives from the existing analysis config and is
+passed to kondo by `analyze`. There is no output filter. The existing
+`analyze-forms` path retains its current policy; this change is specifically
+publication analysis.
+
+The source audit disproved the claim that type-mismatch is the only
+body-dependent finding class. The seven exclusions are:
+
+| Excluded class | Vendored clj-kondo source and input |
+|---|---|
+| `type-mismatch` | `impl/types.clj:951–969`, inferred argument types |
+| `redundant-str-call` | `impl/linters.clj:247–256`, resolved argument tag |
+| `is-message-not-string` | `impl/linters.clj:223–239`, resolved message tag |
+| `redundant-primitive-coercion` | `impl/linters.clj:258–272`, resolved argument tag |
+| `equals-float` | `impl/linters.clj:274–281`, resolved argument tags |
+| `not-empty?` | `impl/linters.clj:282–294`, resolved sequence tag |
+| `constant-condition` | `impl/linters.clj:387–399`, deferred call return type |
+
+All paths in this table are beneath `reference-code/clj-kondo/src/clj_kondo/`.
+These exclusions include local instances of the same classes; they are
+declared class policies, not a post-analysis attempt to guess provenance.
+
+One native census of the shared tree, before applying the exclusions, read
+**372 files in 12,778 ms**: **0 errors, 662 warnings, 12 info findings**.
+Exactly **16** findings belong to excluded classes: type-mismatch 9,
+redundant-primitive-coercion 4, redundant-str-call 1, constant-condition 2;
+the other three have zero. This is a dated observation, not a recurring
+whole-program census added to publication. The command was:
+
+```sh
+clj-kondo --cache false --lint src test --config '{:output {:format :json} :linters {:type-mismatch {:level :warning}}}'
+```
+
+Raw output is retained compressed at
+`tmp/publication-dissolution/finding-census.json.gz`. Its exit 2
+reports warnings; this was not a Seon gate or a database publication.
+
+### Findings retained and dependency audit
+
+Every configured class except the seven above remains enabled according to
+the existing config. The census's retained classes and their owners are:
+
+| Retained class (observed count) | Source beneath the vendored `clj_kondo/` directory |
+|---|---|
+| `aliased-referred-var` (1) | `impl/linters.clj:754–778`, namespace bindings and usage |
+| `duplicate-require` (4) | `impl/namespace.clj:18–28`, require declarations |
+| `redundant-declare` (1) | `impl/analyzer.clj:2147–2153`, declaration order |
+| `redundant-do` (1), `redundant-let` (17) | `impl/analyzer.clj:1354`, `:1422`, local forms |
+| `redundant-nested-call` (4) | `impl/linters.clj:346`, call nesting |
+| `shadowed-var` (530) | `impl/namespace.clj:571–608`, declared names and local bindings |
+| `unresolved-excluded-var` (1), `unused-excluded-var` (1) | `impl/linters.clj:887`, excluded core names and usage |
+| `unused-binding` (37) | `impl/linters.clj:953–984`, local usage |
+| `unused-import` (5) | `impl/linters.clj:1102–1119`, imports and class usage |
+| `unused-namespace` (27), `unused-referred-var` (2) | `impl/linters.clj:796–829`, namespace bindings and usage |
+| `unused-private-var` (27) | `impl/linters.clj:1018–1054`, same-namespace declarations and usage |
+
+Zero-count admission classes remain too: syntax (`impl/analyzer.clj:4386`),
+unresolved-symbol/var/namespace (`impl/linters.clj:1057–1139`), invalid-arity
+(`:604–649`), private-call (`:500–513`), protocol method presence/arities
+(`:1192–1275`). Declaration metadata checks remain, including deprecated-var
+(`:443–465`) and deprecated-namespace (`:780–794`). The latter exposes the
+additional graph dependency below; the audit does NOT claim the current
+function-edge-only invalidation rule covers all retained findings.
+
+### Third decision: namespace declarations have dependents without function edges
+
+With inferred-type classes disabled, changing only
+`(ns callee)` to `(ns ^{:deprecated "now"} callee)` produces a
+`deprecated-namespace` warning in this unchanged file:
+
+```clojure
+(ns caller (:require [callee :as c]))
+(defn g [] 1)
+```
+
+The callee function declaration and body also remain unchanged. There are
+**zero** caller var usages targeting callee, hence no corresponding published
+function calls or references to traverse. Before: 0 deprecation findings
+(38 ms); changed file alone: 0 (37 ms); complete analysis: 1 (37 ms).
+All three analyses have zero errors. The ordinary unused-namespace warning
+is present before and after and does not explain the new finding.
+
+Reproducer:
+
+```sh
+python3 docs/prds/steward-platform/research/publication-namespace-analysis-probe-2026-09-20.py
+```
+
+The dependency source explicitly iterates **required namespaces**, not called
+functions (`impl/linters.clj:780–794`, invoked at `:874`). Seon already stores
+that relation as `:seon.ns/requires` (`src/seon/fn.clj:291–300`); the needed
+relationship is not a proposed second dependency registry. A separate
+exploratory `:refer :all` probe did NOT demonstrate a changed function
+resolution; no program-fact mismatch is claimed from it. The proven mismatch
+here is retained findings, which the cache contract also promises to keep fresh.
+
+The ruled input set is explicitly changed files plus callers/referrers through
+function edges. Expanding it to namespace dependencies or excluding another
+non-type finding changes that contract. Three concrete choices:
+
+1. **Recommended: include namespace-declaration dependencies from the existing
+   `:seon.ns/requires` graph.** Namespace metadata/export declaration changes
+   invalidate requiring files; function changes retain the ruled calls/references
+   closure. Guarantee: the demonstrated finding stays current and ordinary
+   body edits retain the N-file ceiling. Additional cost: approximately half
+   to one lane-day for namespace fingerprints and parity coverage. Give up:
+   restricting interface invalidation to function edges alone.
+2. **Exclude `deprecated-namespace` from publication too.** Guarantee: the
+   demonstrated namespace-metadata warning cannot become stale. Additional
+   cost: a small config edit and regression, approximately one hour. Give up:
+   that declaration warning; this does not prove every namespace export or
+   resolution change independent of namespace dependencies.
+3. **Refuse namespace-interface edits on the incremental path.** Guarantee:
+   no reused finding is represented as current across an unsupported namespace
+   change. Additional cost: approximately half a lane-day for explicit admission
+   and refusal coverage. Give up: automatic publication of those edits until
+   namespace dependency invalidation lands.
+
+This stop follows the assignment's next-genuine-decision rule and AGENTS.md
+§2.5. It does not stop for the held cluster owner or the earlier scratch
+failure. The seven authorized exclusions are independently reviewable and
+can land without deciding this expansion.
+
+### Verification of the implemented policy
+
+The new real-analyzer regression changes only an inferred return type and
+asserts identical caller findings, with an invalid-arity error positively
+retained. It passed on the first armed run. That run executed 8 tests / 33
+assertions with 0 failures / 2 errors: two existing fixtures passed string
+identities to `program-prelude`'s qualified-symbol contract. The owned fixture
+file is corrected to symbols; no production contract was weakened.
+
+```sh
+bin/test-fast --paths src/seon/fn/analyzer.clj test/seon/fn/analyzer_test.clj -- seon.fn.analyzer-test
+```
+
+The follow-up after changing those inputs reports **8 tests / 41 assertions,
+0 failures / 0 errors**. Logs: `tmp/publication-dissolution/analysis-policy-fast.log`
+and `analysis-policy-fixed-fast.log`. No unchanged suite was rerun; no cold
+gate, scratch-root boot, or default lifecycle command ran in this resume.
+
+The corrected run's durable ID is `2f9d80822363`: **8 executed, 0 unchanged**,
+41 recorded assertions, exit 0. The first log is 11,491 bytes, SHA-256
+`21262925cf8e90aac0cd83bdeeee34c787d770ae9ecfa86fd12f3a20db1a72b0`;
+the corrected log is 6,118 bytes, SHA-256
+`1142ab534bca94a5f8d5e611a01cf1b6477f616a94e65df1f4a9edeb20fc5071`.
+The native census's uncompressed output is 104,710,084 bytes, SHA-256
+`7424f992e36f7c3e9613853ad8fd81c76e7851b263a976491f050796b3a766cd`;
+its large analysis payload is compressed rather than retained twice.
+
+At the final ownership check (`510a9236d`), `src/seon/cluster.clj` had become
+clean. The stop is the namespace-dependency decision, not that earlier held
+boundary. `src/seon/schema.clj`, `src/seon/schema/internal.cljc`,
+`src/seon/cluster/process.clj` and dirty test paths remain untouched.
+
+Pre-commit load of `seon.fn.analyzer`, `seon.fn` and `seon.cluster.source`
+returned `:loads`, exit 0 (`tmp/publication-dissolution/policy-precommit-load.log`).
+
+Cold command owed for this prerequisite only:
+
+```sh
+bin/test --paths src/seon/fn/analyzer.clj test/seon/fn/analyzer_test.clj -- seon.fn.analyzer-test
+```
+
+The orchestrator also owns platform proof. This is an item-1 prerequisite,
+not completion of item 1 or any later item. No publisher path is deleted and
+no one-file/complete-publication performance improvement is claimed.
