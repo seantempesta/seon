@@ -5644,3 +5644,16 @@ await_test) and declares the timeout facet at the producer (bound that
 fired + elapsed ms + awaited identity); completed failures branch through
 the evidence members. Resumed. `kind-sweep-ops-effects-2` landed
 `aae012129` (maintenance kinds retired; projection refusals declared).
+
+## 2026-09-21 ~14:20 UTC — wave-5 specs written (every wave has launch text); gate-restructure design lane launched
+
+`wave5-writeback-demo-design` landed `3c201b865`
+([wave-5-writeback-and-demonstration-spec-2026-09-21.md](wave-5-writeback-and-demonstration-spec-2026-09-21.md):
+shared write-back contract, 5a F2 pure projection + ordinary-indexer
+round trip, 5b F3 gate/settlement/publication/commit, 5c the runnable
+two-agent demonstration). README pointer lists every spec.
+`kind-sweep-ops-effects-2` landed `7449b5cd1` (config compiler refusals
+use complete rule observations). Read-only slot → `gate-restructure-design`
+(measured from tonight's 3,533 s gate: idle pool workers at full heap,
+~33 s serial fixture priming per test, the honest cost model after
+results reuse; one lane's launch text).
