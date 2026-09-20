@@ -4591,3 +4591,13 @@ writer validator diet, instrumentation on the registry; deletions as the
 success measure; five-step migration keeping HEAD loading; every [verify]
 claim owes a Malli/Datahike file:line from the astra review (the running
 `bridge-dissolution-review` reviews it at its next stop).
+
+## 2026-09-20 ~10:05 UTC — overlay admission fixed; 1d landing items
+
+`db24035ee` (results-reuse lane): `--paths` admits omitted dirty callers at
+their snapshot HEAD bytes and names them — tools item 3 RESOLVED; the
+render/1a circular hold is gone. `config-plan-family-1d` landed
+`5a0a805e4` (optional agent settings are true-only assertions, C7) and
+`c50625da4` (agent-surface identities aliased to canonical formats, R3).
+Running: 1a, results-reuse, 1d (editing), bridge review (read-only).
+Render resumes at the next free editing slot.
