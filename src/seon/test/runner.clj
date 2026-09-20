@@ -625,9 +625,19 @@
      :seon.test/not-runnable-error]]}
   [test-vars custody]
   (if-let [unrunnable (first (remove #(ifn? (:test (meta %))) test-vars))]
-    {:seon.error/kind ::not-runnable
-     :seon.test/not-runnable (str unrunnable)
-     :seon.error/message "The supplied Var has no clojure.test function."}
+    (error/diagnostic
+     {:seon.error/at (java.util.Date.)
+      :seon.error/layer :seon.test/execution
+      :seon.error/operation `run-vars!
+      :seon.error/message "The supplied Var has no clojure.test function."
+      :seon.error/diagnostic-layer :seon.test/execution
+      :seon.error/diagnostic-operation `run-vars!
+      :seon.error/diagnostic-member :seon.test/var
+      :seon.error/diagnostic-expected "a Var carrying a clojure.test function"
+      :seon.error/diagnostic-offending unrunnable
+      :seon.error/diagnostic-cause :seon.test/not-runnable
+      :seon.error/diagnostic-evidence {:seon.test/var (str unrunnable)}
+      :seon.test/not-runnable (str unrunnable)})
     (let [selected-namespaces (set (map (comp symbol namespace symbol var-symbol) test-vars))
           options (report-options)
           capture (atom {::order [] ::results {}})
@@ -691,7 +701,7 @@
   ([test-var] (run-var! test-var {}))
   ([test-var custody]
    (let [results (run-vars! [test-var] custody)]
-     (if (:seon.error/kind results) results (first results)))))
+     (if (contains? results :seon.test/not-runnable) results (first results)))))
 
 (defn- test-vars-in
   [namespaces]
@@ -1224,8 +1234,20 @@
             (throw
              (ex-info
               "A namespace test hook requires its complete admitted selection."
-              {:seon.error/kind :seon.test/namespace-hook-requires-complete-selection
-               :seon.ns/name namespace-name :seon.test.runner/long-test-ns-hook namespace-name})))
+              (error/diagnostic
+               {:seon.error/at (java.util.Date.)
+                :seon.error/layer :seon.test/execution
+                :seon.error/operation `run-selected-tests
+                :seon.error/message "A namespace test hook requires its complete admitted selection."
+                :seon.error/diagnostic-layer :seon.test/execution
+                :seon.error/diagnostic-operation `run-selected-tests
+                :seon.error/diagnostic-member :seon.test.runner/long-test-ns-hook
+                :seon.error/diagnostic-expected "the namespace's complete admitted test selection"
+                :seon.error/diagnostic-offending namespace-vars
+                :seon.error/diagnostic-cause :seon.test/namespace-hook-requires-complete-selection
+                :seon.error/diagnostic-evidence {:seon.ns/name namespace-name}
+                :seon.ns/name namespace-name
+                :seon.test.runner/long-test-ns-hook namespace-name}))))
           (test/test-vars namespace-vars))
         (when host? (test/do-report {:type :end-test-ns :ns namespace-object})))
       @test/*report-counters*))))
@@ -3109,9 +3131,20 @@
     (throw
      (ex-info
       "Test results may not be written into the default cluster."
-      {:seon.error/kind ::default-cluster-refused
-       ::default-cluster-refused cluster-name
-       :seon.boot/cluster-name cluster-name})))
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.test/recording
+        :seon.error/operation `record!
+        :seon.error/message "Test results may not be written into the default cluster."
+        :seon.error/diagnostic-layer :seon.test/recording
+        :seon.error/diagnostic-operation `record!
+        :seon.error/diagnostic-member :seon.boot/cluster-name
+        :seon.error/diagnostic-expected "an explicitly named non-default cluster"
+        :seon.error/diagnostic-offending cluster-name
+        :seon.error/diagnostic-cause :seon.test.runner/default-cluster-refused
+        :seon.error/diagnostic-evidence {:seon.boot/cluster-name cluster-name}
+        ::default-cluster-refused cluster-name
+        :seon.boot/cluster-name cluster-name}))))
   (let [run-result (completion-reach-digests run-result)
         instance (start-cluster! cluster-name root)]
     (try
@@ -4540,9 +4573,21 @@
     (throw
      (ex-info
       "The test selection mode is not one this runner knows."
-      {:seon.error/kind ::invalid-selection-mode
-       ::selection-mode selection-mode
-       ::known selection-modes :seon.test.runner/invalid-selection-mode selection-mode})))
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.test/selection
+        :seon.error/operation `run-coordinator!
+        :seon.error/message "The test selection mode is not one this runner knows."
+        :seon.error/diagnostic-layer :seon.test/selection
+        :seon.error/diagnostic-operation `run-coordinator!
+        :seon.error/diagnostic-member :seon.test.runner/selection-mode
+        :seon.error/diagnostic-expected selection-modes
+        :seon.error/diagnostic-offending selection-mode
+        :seon.error/diagnostic-cause :seon.test.runner/invalid-selection-mode
+        :seon.error/diagnostic-evidence {::known selection-modes}
+        ::selection-mode selection-mode
+        ::known selection-modes
+        :seon.test.runner/invalid-selection-mode selection-mode}))))
   (if (= "changed" selection-mode)
     (do (prn (bare-selection-refusal cluster-name)) 2)
   (let [manifest (program-manifest)
