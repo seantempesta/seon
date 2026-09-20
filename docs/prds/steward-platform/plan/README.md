@@ -7,6 +7,18 @@ tags: [plan, steward, roadmap]
 
 # Self-building Seon — the index of real tasks
 
+## State pointer — 2026-09-20
+
+The live schedule and every ruling since 2026-09-19 are in
+[namespace-agents-plan-2026-09-19.md](namespace-agents-plan-2026-09-19.md)
+(§7 Track A, §8 rulings D8–D13), the two binding PRDs
+[error-conversion-prd-2026-09-20.md](error-conversion-prd-2026-09-20.md) and
+[malli-native-bridge-prd-2026-09-20.md](malli-native-bridge-prd-2026-09-20.md),
+and the working edge's last "RESUME HERE" block in [unsettled.md](unsettled.md).
+The table below is the 2026-09-19 sequence; §7 of the namespace-agents plan
+supersedes its ordering (bridge steps 1–2 before the remaining wave-1
+families; test-result reuse first).
+
 ## Current proposed sequence — 2026-09-19
 
 The owner now explicitly requires multiple **namespace agents**, reusable

@@ -4663,3 +4663,71 @@ Consequence recorded: while hook publication is paused, every default start
 needs `bin/seon init` first. Running `bin/seon init` (complete publication)
 then `bin/seon start` in the background
 (`tmp/orchestrator/default-republish-2026-09-20.log`).
+
+## RESUME HERE (2026-09-20 ~11:45 UTC — written while the orchestrator's context is finite)
+
+**Read first:** this block; [namespace-agents-plan-2026-09-19.md](namespace-agents-plan-2026-09-19.md)
+§3/§6/§8 (rulings D1–D13) and §5 (the two-session turns; there is now ONE
+orchestrator); [error-conversion-prd-2026-09-20.md](error-conversion-prd-2026-09-20.md)
+(the sweep lanes' binding text, sol low); [malli-native-bridge-prd-2026-09-20.md](malli-native-bridge-prd-2026-09-20.md)
+(ruled §6; draft until astra links every [verify]); AGENTS.md lane rules
+11–16. Then `bin/codex-agent status`, `git status --short -- src test`,
+`bin/seon status`, `uptime`.
+
+**Owner rulings today (all recorded in the plan/PRDs):** D1 names
+(`:seon.ns/agents`, `seon.task`, derived conversation); D2 trigger → task
+identity at the writer; D3 error data model first, kinds deleted; D4 finish
+sound inherited slices; D5 first proof = schema + missing tests; D6/D8 root
+resolves conflicts, fingerprinted conflict tasks; D7 ONE orchestrator runs
+the tests, test system first; D9 record changed functions by content digest,
+full runs a last resort; D10 astra freely, sol 5.6 for mechanical; D11
+parallelism my call; D12 NO general error predicate — contracts name exact
+facets; D13 fault identity = layer/operation/facet set/throwable+frame/
+violated schema/path; bridge §6: stamped population digest carried by db
+values, Datahike write-time checks trusted for attributes, bridge steps 1–2
+before the remaining wave-1 families; "stop fighting Malli"; no lane
+worktrees; one JVM per lane; docs never publish/widen; keep improving tools;
+hook test check and schema-admission JVM OFF until the new test system.
+
+**Machine:** was swapping (8.1/9.2 GB swap, load 25–55): causes = default's
+10 GB heap after the day's adoptions, lanes' fast JVMs (7–13 GB each), the
+hook's per-edit JVMs, the republish. Fixed: slot cap per repository
+(`2cdb7ef8a`), no worktrees, hook publication/test-check/schema-admission
+off, research lanes paused. Default restart REFUSED (stale publication →
+"activation closure missing 5 facts"); `bin/seon init` + `start` running
+(`tmp/orchestrator/default-republish-2026-09-20.log`) — while publication
+is paused, EVERY default start needs `bin/seon init` first.
+
+**Lanes (sessions preserved; resume with `bin/codex-agent resume <name>`):**
+running — `error-family-1a` (astra high; greening instrument/schema suites
+at 24F/4E → owed green + cold gate), `results-reuse-everywhere` (astra
+medium; steps 2–5; owes the manifest-dump fix in bin/test's `bb -e` and the
+two-run zero-execution proof), `config-plan-family-1d` (astra low; items
+R1/C4/needs/C7/R3 + R2 with turn.clj's recorder), `bridge-dissolution-review`
+(astra high, read-only; reviewing the bridge PRD line by line against
+Malli/Datahike source; writes step-1's lane spec). Paused — `kind-sweep-render`
+(23 drafts uncommitted in the tree, HELD; 18 refs left in render-2 files),
+`kind-sweep-turn-cluster` (sol; blocked earlier by the cycle + stall, both
+fixed; resume from the PRD template), `step3-carried-projection`,
+`step4-validator-measurement` (research; resume when load allows, one JVM
+each). Stopped/done — A0, A1, db-contracts, drill, preflight, readiness,
+predicate sweep, kind-schema, stall fix, composition review.
+
+**Owed by the orchestrator, in order:** (1) default up (republish+start);
+(2) 1a lands green → cold gate `bin/test --paths <its files> -- seon.error-test
+seon.instrument-test seon.schema-test seon.db-test seon.cluster-test`; (3)
+results-reuse lands → cold gate + bare `bin/test` twice (second executes 0);
+(4) resume render and turn-cluster sweeps; sol lanes for sci-fn-program,
+ops-effects, my-protocol, render-2, tests, bin/script from the PRD template;
+(5) bridge PRD reviewed → launch step 1 (astra low) then step 2; (6) reset
+from a clean tree with RESET NEEDED attributes (1a's list + the stamp),
+Juniper, `--platform`, merge to main, RE-ENABLE hook publication; (7) wave
+1b/1c/1e families on the new bridge; A4/A5/A6; the two-agent demonstration.
+
+**Tools queue (open):** 2 complete publication ~150 s + progress events in
+eventless phases (issue an-aborted-publication-leaves-no-record); 4 thin
+launchers (results-reuse); 5 gate source warnings actionable; 6 run-root
+holder record; 9 schema admission through the live JVM/bb; manifest dump
+(19 MB line) in --paths gate logs (results-reuse). Resolved today: 3 overlay
+admission, 7 report-all, 8 slot cap, docs never publish/widen, pin linter
+scoped to living docs, hook JVMs off.
