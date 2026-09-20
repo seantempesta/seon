@@ -11,7 +11,9 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
-(deftest source-publication-restores-contracts-after-early-reload-failure
+(deftest ^{:seon.test/long "Acquire the canonical database fixture before observing instrumentation restoration."
+           :seon.test/long-ms 600000}
+  source-publication-restores-contracts-after-early-reload-failure
   (support/with-database
    (fn [connection]
      (let [projection (schema/handed-projection)
@@ -29,7 +31,7 @@
                    :seon.sci.eval/ctx
                    {:seon.sci.eval/projection-state state}}})
            source ((ns-resolve 'seon.fresh-operator 'init-form)
-                   "tmp/source-instrumentation-test" nil false [] false false
+                   "tmp/source-instrumentation-test" nil false [] false
                    "instrumentation-test")]
        (doseq [failure-point [:reload :publication :none]]
          (let [events (atom [])
@@ -46,7 +48,7 @@
                   (fn [& _]
                     (swap! events conj :publication)
                     (when (= :publication failure-point) (throw failure))
-                    :published)
+                    {:seon.source/branch :current-src})
                   #'config/effective
                   (fn [_ _]
                     (is (identical? projection (schema/handed-projection)))
@@ -68,21 +70,24 @@
            (is (= :restore (last @events))
                "the same restoration owns both reload and publication failures")
            (is (= 1 (count (filter #{:restore} @events))))
-           (if (= :none failure-point)
-             (is (= :published actual))
-             (is (identical? failure actual)))))))))
+           (case failure-point
+             :none (is (= :current-src (:seon.source/branch actual)))
+             :reload (is (identical? failure actual))
+             :publication (is (= (ex-data failure)
+                                 (:seon.fresh-operator/exception-data actual))))))))))
 
 
-(deftest generated-init-compiles-before-runtime-owners-are-loaded
+(deftest ^{:seon.test/long "Start a cold Clojure JVM to compile operator forms before runtime namespaces load."
+           :seon.test/long-ms 60000}
+  generated-init-compiles-before-runtime-owners-are-loaded
   (let [init-form (ns-resolve 'seon.fresh-operator 'init-form)
         forms (mapv (fn [arguments]
                       (apply init-form "tmp/source-instrumentation-test" arguments))
-                    [[nil false [] true false nil]
-                     ["scratch" false [] true false nil]
-                     ["scratch" true [] true false nil]
-                     ["scratch" false [] true true nil]
-                     [nil false ["src/seon/cluster.clj"] false false "development"]
-                     ["scratch" false [] false false nil]])
+                    [[nil false [] true nil]
+                     ["scratch" false [] true nil]
+                     ["scratch" true [] true nil]
+                     [nil false ["src/seon/cluster.clj"] false "development"]
+                     ["scratch" false [] false nil]])
         code
         (pr-str
          `(do

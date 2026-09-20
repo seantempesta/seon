@@ -3,7 +3,6 @@
             [clojure.test :refer [deftest is]]
             [seon.fresh-operator :as operator]
             [seon.operator.state :as state]
-            [seon.dev.clj-kondo :as kondo]
             [seon.test-support :as support]))
 
 (deftest complete-publication-uses-the-advertised-jvm-without-a-census
@@ -19,7 +18,6 @@
          [{:seon.fresh-operator/operator-root? true
            :seon.fresh-operator/process-alive? true
            :seon.fresh-operator/transport-advertisement ad}])
-       #'kondo/ensure-dependency-cache! (fn [_] {:seon.dev.clj-kondo/status :ready})
        #'state/claim-root-under-lock! (fn [& _])
        #'state/mark-root-created-under-lock! (fn [& _])
        #'operator/prepl-eval!
@@ -30,7 +28,7 @@
          (observe! {:tag :out :val "● current-src: {:seon.source/progress :population}\n"})
          [{:tag :ret :val (pr-str result)}])
        #'operator/source-process-value! (fn [& _] (throw (ex-info "Unexpected fresh JVM" {})))}
-      #(is (= result (#'operator/init! "tmp/publication-root" [] false
+      #(is (= result (#'operator/init! "tmp/publication-root" []
                                      {:seon.operator.lock/progress progress}))))
     (is (= {:seon.fresh-operator/read-offline-roster? false
             :seon.fresh-operator/probe-jvms? false} @observed))

@@ -1082,26 +1082,20 @@
 
 (defn- test-status-observation!
   [root rows]
-  (try
-    (if-let [advertisement
-             (some (fn [row]
-                     (when (:seon.fresh-operator/process-alive? row)
-                       (:seon.fresh-operator/transport-advertisement row)))
-                   rows)]
-      (prepl-value!
-       advertisement
-       (test-status-form
-        `(some :seon.store/store
-               (vals @(var-get
-                       (ns-resolve 'seon.cluster
-                                   (symbol "running-instances")))))
-        false))
-      (offline-test-status root))
-    (catch Throwable failure
-      {:seon.error/kind :seon.error/unknown
-       :seon.error/message
-       (str "the persistent test evidence is unavailable: "
-            (ex-message failure))})))
+  (if-let [advertisement
+           (some (fn [row]
+                   (when (:seon.fresh-operator/process-alive? row)
+                     (:seon.fresh-operator/transport-advertisement row)))
+                 rows)]
+    (prepl-value!
+     advertisement
+     (test-status-form
+      `(some :seon.store/store
+             (vals @(var-get
+                     (ns-resolve 'seon.cluster
+                                 (symbol "running-instances")))))
+      false))
+    (offline-test-status root)))
 
 (defn- days-ago
   [now run-at]
@@ -1189,9 +1183,12 @@
   ([advertisement form]
    (prepl-value! advertisement form (operator-silence-backstop-ms {})))
   ([advertisement form timeout-ms]
-   (read-prepl-reply
-    advertisement
-    (terminal-value (prepl-eval! advertisement form timeout-ms)))))
+   (let [value (read-prepl-reply
+                advertisement
+                (terminal-value (prepl-eval! advertisement form timeout-ms)))]
+     (when (or (:seon.error/at value) (:seon.error/kind value))
+       (fail! (:seon.error/message value) value))
+     value)))
 
 (defn- process-matches-advertisement?
   [process advertisement]
@@ -1616,9 +1613,9 @@
   transport to address; nothing pre-reads the very socket this send exercises,
   so an unrelated census payload or an unrelated load spike can never decide
   that a live process is unreachable. A refused or silent send raises its own
-  typed diagnostic naming the advertisement and the cause. Only a root with no
-  live advertised transport at all answers `:live-process? false`, which is the
-  caller's signal to take the held-store path."
+  typed diagnostic naming the advertisement and the cause. A live recorded
+  process without an advertisement refuses. With neither a live advertisement
+  nor a live process record, `:live-process? false` selects the held-store path."
   ([root form] (live-root-value! root form {}))
   ([root form request]
   (let [truth (cluster-truth
@@ -1639,7 +1636,11 @@
              (prepl-eval! advertisement form (publication-bound-ms)
                           (fn [event] (when (= :out (:tag event)) (observe! (:val event)))))))
          (prepl-value! advertisement form))}
-      {:seon.fresh-operator/live-process? false}))))
+      (if (some record-alive? (:seon.fresh-operator/process-records (meta truth)))
+        (fail! "A recorded JVM is alive but has no live operator advertisement."
+               {:seon.fresh-operator/process-records
+                (:seon.fresh-operator/process-records (meta truth))})
+        {:seon.fresh-operator/live-process? false})))))
 
 (defn- named-cluster-row
   [truth name]
@@ -2125,6 +2126,8 @@
         (run-child-jvm!
          {:seon.fresh-operator/root root
           :seon.fresh-operator/dependency-cache-path dependency-cache-path
+          :seon.fresh-operator/test-classpath
+          (dissoc (:seon.dev-cache/test-classpath dependency-cache) :seon.test/jvm-options)
           :seon.fresh-operator/jvm-options
           [(str "-J-Dseon.operator.generation=" generation)
            (str "-J-Dseon.operator.repository-root=" (.getCanonicalPath (repository-root)))
@@ -2540,10 +2543,8 @@
         (or (:seon.fresh-operator/transport-advertisement row)
             (fail! "The live cluster has no reachable JVM."
                    {:seon.fresh-operator/name name}))
-        result (terminal-value
-                (prepl-eval! advertisement
-                             (config-apply-form name path)))]
-    (println (str "● " name " config applied " result))))
+        result (prepl-value! advertisement (config-apply-form name path))]
+    (println (str "● " name " config applied " (pr-str result)))))
 
 (defn- export-destination
   [arguments]
@@ -2609,7 +2610,6 @@
   [root name force?]
   (let [store (gensym "store")
         source (gensym "source")
-        instance (gensym "instance")
         branch (gensym "branch")
         request (gensym "request")
         operation
@@ -2621,7 +2621,7 @@
                    :seon.operator/managed-root ~root))
           `((ns-resolve 'seon.cluster.registry (symbol "ensure-cluster!"))
             ~request))]
-    `(fn [~store ~source ~instance]
+    `(fn [~store ~source]
        (when-not ~source
          (throw
           (ex-info
@@ -2649,14 +2649,12 @@
                 ~operation)))))
 
 (defn- init-form
-  [root name force? changed-paths source-process? publish-before-fork?
-   development-cluster]
+  [root name force? changed-paths source-process? development-cluster]
   (let [cluster-root (str (cluster-root root))
         changed-paths (mapv #(str (if (fs/absolute? (fs/path %))
                                     (fs/path %)
                                     (fs/path (repository-root) %)))
                             changed-paths)
-        cold-source (gensym "source")
         cold-store (gensym "store")
         progress (gensym "progress")
         phase-clock (gensym "phase-clock")
@@ -2664,8 +2662,7 @@
         ;; `publish?` is spliced into syntax-quoted `(when ~publish? ...)`
         ;; templates below, so it must be a literal-safe boolean: a retained
         ;; path seq would generate `(when ("path" ...))` and call the string.
-        publish? (boolean (or (seq changed-paths) (not name)
-                              publish-before-fork?))
+        publish? (boolean (or (seq changed-paths) (not name)))
         operation
         (cond
           development-cluster
@@ -2680,19 +2677,13 @@
           `((ns-resolve 'seon.cluster (symbol "refresh-source!")) ~cluster-root)
 
           source-process?
-          `(let [~cold-source
-                 ~(when publish-before-fork?
-                    `((ns-resolve 'seon.cluster (symbol "refresh-source!")) ~cluster-root))
-                 ~cold-store
+          `(let [~cold-store
                  ((ns-resolve 'seon.cluster.store (symbol "open-store!"))
                   {:seon.store/dir ~(str (store-directory root))})]
              (try
                (~(named-init-form root name force?)
                 ~cold-store
-                ~(if publish-before-fork?
-                   cold-source
-                   `((ns-resolve 'seon.cluster.source (symbol "current")) ~cold-store))
-                nil)
+                ((ns-resolve 'seon.cluster.source (symbol "current")) ~cold-store))
                (finally
                  ((ns-resolve 'seon.cluster.store (symbol "release-store!")) ~cold-store))))
 
@@ -2705,8 +2696,7 @@
                 (ex-info "The live JVM has no process-root store." {})))
              (~(named-init-form root name force?)
               store#
-              ((ns-resolve 'seon.cluster.source (symbol "current")) store#)
-              (get instances# ~name))))
+              ((ns-resolve 'seon.cluster.source (symbol "current")) store#))))
         operation `(try
                      (let [value# ~operation]
                        (assoc value# :seon.fresh-operator/progress @~progress))
@@ -2782,17 +2772,6 @@
                   (.addSuppressed failure# restore-failure#)
                   (throw restore-failure#)))))))))))
 
-(defn- with-test-classpath-form
-  "Carry the resolved loader through publication and the acquired program."
-  [form basis-file]
-  (pr-str
-   `(let [basis# (clojure.edn/read-string (slurp ~basis-file))
-          loader# ((requiring-resolve 'seon.test/test-loader) basis#)]
-      (if (:seon.error/kind loader#)
-        loader#
-        ((deref (ns-resolve 'seon.test (symbol "with-test-loader")))
-         loader# (fn [] ~(read-string form)))))))
-
 (defn- publication-output!
   "Forward publication phase observations to the lifecycle owner."
   [request text]
@@ -2850,39 +2829,28 @@
 
 (defn- init!
   ([root arguments]
-   (init! root arguments false))
-  ([root arguments publish-before-fork?]
-   (init! root arguments publish-before-fork? {}))
-  ([root arguments publish-before-fork? request]
+   (init! root arguments {}))
+  ([root arguments request]
   (let [{:seon.fresh-operator/keys [name force? changed-paths development-cluster]}
         (parse-init-arguments arguments)
         _ (operator.state/claim-root-under-lock!
            (repository-root) root (ephemeral-owner root) name)
-        dependency-cache (dev.kondo/ensure-dependency-cache! (str (repository-root)))
-        _ (when (= :unavailable
-                   (:seon.dev.clj-kondo/status dependency-cache))
-            (fail! "The clj-kondo dependency cache could not be prepared."
-                   dependency-cache))
-        publication? (or development-cluster (seq changed-paths) (nil? name) publish-before-fork?)
-        truth (if publication?
-                (cluster-truth root {:seon.fresh-operator/read-offline-roster? false
-                                     :seon.fresh-operator/probe-jvms? false})
-                (reconciled-truth! root))
-        ;; The publication operation observes its own completion. A separate
-        ;; registry probe cannot decide whether that operation can run.
-        anchor (if publication?
-                 (some #(when (and (:seon.fresh-operator/operator-root? %)
-                                    (:seon.fresh-operator/process-alive? %)
-                                    (:seon.fresh-operator/transport-advertisement %)
-                                    (or (nil? development-cluster)
-                                        (= development-cluster (:seon.fresh-operator/name %)))) %)
-                       truth)
-                 (select-anchor truth))
+        truth (cluster-truth root {:seon.fresh-operator/read-offline-roster? false
+                                   :seon.fresh-operator/probe-jvms? false})
+        anchor (some #(when (and (:seon.fresh-operator/operator-root? %)
+                                (:seon.fresh-operator/process-alive? %)
+                                (:seon.fresh-operator/transport-advertisement %)) %)
+                     truth)
+        _ (when (and (nil? anchor)
+                     (some record-alive? (:seon.fresh-operator/process-records (meta truth))))
+            (fail! "A recorded JVM is alive but has no live operator advertisement."
+                   {:seon.fresh-operator/process-records
+                    (:seon.fresh-operator/process-records (meta truth))}))
         live-target
         (when name
           (some #(when (and (:seon.fresh-operator/operator-root? %)
                             (= name (:seon.fresh-operator/name %))
-                            (:seon.fresh-operator/registered? %))
+                            (:seon.fresh-operator/process-alive? %))
                    %)
                 truth))
         result
@@ -2893,12 +2861,7 @@
            (terminal-value
             (prepl-eval!
              (:seon.fresh-operator/transport-advertisement anchor)
-             (let [form (init-form root name force? changed-paths false
-                                   publish-before-fork? development-cluster)]
-               (if development-cluster
-                 (with-test-classpath-form
-                  form (:seon.dev-cache/test-basis-file (ensure-dependency-cache!)))
-                 form))
+             (init-form root name force? changed-paths false development-cluster)
              (or (:seon.config.operator/event-silence-backstop-ms request)
                  (publication-bound-ms))
              (fn [event]
@@ -2917,12 +2880,11 @@
           :else
           (let [outcome
                 (source-process-value!
-                 root (init-form root name force? changed-paths true
-                                 publish-before-fork? development-cluster) request)]
+                 root (init-form root name force? changed-paths true development-cluster) request)]
             (if-let [message (:seon.fresh-operator/message outcome)]
               (fail! message (:seon.fresh-operator/data outcome))
               (:seon.fresh-operator/value outcome))))
-        _ (when (:seon.error/kind result)
+        _ (when (or (:seon.error/at result) (:seon.error/kind result))
             (fail! (:seon.error/message result) result))
         source-branch (:seon.source/branch result)
         source-commit (:seon.source/commit-id result)
@@ -2935,8 +2897,7 @@
                             [:seon.fresh-operator/cluster
                              :seon.store/branch])
                     " from " source-branch
-                    " commit " source-commit
-                    " digest " digest))
+                    " commit " source-commit))
       (println (str "● " source-branch
                     " commit " source-commit
                     " digest " digest)))
@@ -2965,7 +2926,7 @@
         (fail! "Use `init --result-file PATH [init arguments]`." {}))
       (io/make-parents path)
       (try
-        (let [result (init! root (vec (drop 2 arguments)) false request)]
+        (let [result (init! root (vec (drop 2 arguments)) request)]
           (spit path (str (pr-str result) "\n"))
           result)
         (catch Throwable error
@@ -2977,7 +2938,7 @@
                                     :seon.error/message (ex-message error)}))
                      "\n"))
           (throw error))))
-    (init! root arguments false request))))
+    (init! root arguments request))))
 
 (defn- row-state
   [row]
@@ -3548,8 +3509,8 @@
                            (:seon.operator.cleanup/removed-file-bytes cleanup)
                            " bytes"))
              cleanup))
-  (phase! root "reset" :republish request #(init! root [] false request))
-  (phase! root "reset" :refork request #(init! root ["default"] false request))
+  (phase! root "reset" :republish request #(init! root [] request))
+  (phase! root "reset" :refork request #(init! root ["default"] request))
   (phase! root "reset" :start request
           #(do
              (when initial-source-snapshot
@@ -3559,7 +3520,7 @@
           #(do
              (when initial-source-snapshot
                (source-preflight! (repository-root) initial-source-snapshot))
-             (init! root ["--dev" "default"] false request)))
+             (init! root ["--dev" "default"] request)))
   (println "● reset republished current-src and reforked default; started and adopted default")))
 
 (defn- reset-continuation
@@ -3679,17 +3640,14 @@
                    {:seon.fresh-operator/command command
                     :seon.fresh-operator/usage? true})))]
     (try
-      (when (contains? #{"start" "init" "reset"} command)
+      (when (contains? #{"start" "reset"} command)
         (phase! root command :preflight
                 #(do
                    (case command
                      "start" (let [options (parse-start-arguments command-arguments)]
                                (when-let [path (:seon.fresh-operator/config-path options)]
                                  (sparse-manifest path)))
-                     "reset" (parse-reset-arguments command-arguments)
-                     "init" (parse-init-arguments
-                              (if (= "--result-file" (first command-arguments))
-                                (vec (drop 2 command-arguments)) command-arguments)))
+                     "reset" (parse-reset-arguments command-arguments))
                    (let [preflight (source-preflight! (repository-root))]
                      (vreset! first-source-snapshot
                               (:seon.fresh-operator/source-snapshot preflight)))
@@ -3702,7 +3660,7 @@
                 #(with-operator-lock root (str/join " " arguments) request
                    (fn []
                      ; The tree can change while another publication owns the lock.
-                     (when (contains? #{"start" "init" "reset"} command)
+                     (when (contains? #{"start" "reset"} command)
                        (phase! root command :preflight
                                (fn []
                                  (source-preflight!

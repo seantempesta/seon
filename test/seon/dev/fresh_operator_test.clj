@@ -489,7 +489,7 @@
   (let [form (edn/read-string
               (operator-private-value
                'init-form project-root nil false ["src/my/plan.clj"]
-               false false "development"))
+               false "development"))
         forms (filter seq? (tree-seq coll? seq form))
         requires (filter #(= 'clojure.core/require (first %)) forms)]
     (is (seq requires) "the publication owners are still loaded")
@@ -973,23 +973,6 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest publication-carries-and-restores-the-resolved-loader
-  (let [root (fresh-root)
-        basis-file (io/file root "basis.edn")
-        _ (spit basis-file
-                (pr-str {:seon.test/classpath-root (.getCanonicalPath project-root)
-                         :seon.test/classpath-roots ["src" "test" "resources"]}))
-        thread (Thread/currentThread)
-        before (.getContextClassLoader thread)
-        form (operator-private-value
-              'with-test-classpath-form
-              "(identical? (clojure.lang.RT/baseLoader) (.getContextClassLoader (Thread/currentThread)))"
-              (.getCanonicalPath basis-file))]
-    (try
-      (is (true? (eval (read-string form))))
-      (is (identical? before (.getContextClassLoader thread)))
-      (finally (delete-recursively! root)))))
-
 (deftest isolated-root-launch-keeps-repository-classpath-and-root-property
   (let [root (fresh-root)]
     (try
@@ -1001,8 +984,8 @@
                          (.getCanonicalPath root))}
                   child-command))
         (is (some #{"-M:dev:seon-cache"} child-command))
-        (is (not-any? #{"-Scp"} child-command)
-            "cluster boot carries no resolved test classpath")
+        (is (some #{"-Scp"} child-command)
+            "cluster boot carries the resolved test classpath once")
         (is (not-any? #{"-J-Dstage2.classpath=resolved"} child-command)
             "test-only JVM options do not enter cluster boot")
         (is (some #(str/starts-with?

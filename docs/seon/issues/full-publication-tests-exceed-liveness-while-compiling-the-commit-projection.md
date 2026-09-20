@@ -38,3 +38,18 @@ publication cost and its repeated phases before choosing between fixing
 redundant work and declaring the integration test's intended duration.
 Acceptance is an armed complete run with a declared bound and a positive
 publication verdict, not a larger silent wait.
+
+## Slice 1 observation — 2026-09-22 redesign assignment
+
+The armed `--paths` fast snapshot at `f08558cb5` ran
+`seon.shell.jvm-test/an-evaluations-deadline-reaps-the-child-it-admitted`
+in 177.3 s (2026-09-20T18:26:17.187Z–18:29:14.504Z, PID 41038).
+The test passed. A sample at process elapsed 947.15 s had the main thread in
+`seon.issue/index-tx`, reached during its fixture's complete publication.
+`seon.test-support/populate-published-root!` publishes afresh when
+`seon.test.published-base` is absent (`test/seon/test_support.clj:102–129`);
+that is the fast harness's declared behavior. The shell tests' physical
+blob/process observations remain intact. Their metadata now declares the
+publication work and its bound; no fixture cache or second publication path
+is added. Fixture implementation belongs to the concurrently assigned
+bridge lane and is unchanged by this slice.

@@ -897,10 +897,10 @@ supplied in options. Both paths admit a fresh run event and record immutable
 members through the shared recorder; covered requests execute nothing.
 Issue completion, failure discovery and test rendering query those members
 through `seon.test/recorded-result` / `seon.test.runner/latest-results`.
-A namespace whose requires
-need a `:test` alias dependency cannot load there yet
-(`the-in-process-test-loader-cannot-load-a-namespace-needing-a-test-alias-dependency`);
-its proof is the cold gate.
+Fresh operator boot supplies the resolved `:test` classpath once
+(`script/seon/fresh_operator.clj`, `launch!`); development adoption uses that
+JVM's loader without preparing another classpath or starting another JVM.
+A host started before this change still has its original classpath.
 
 Acquire resources inside `with-open` scopes; use
 `seon.test-support/closeable` when release is a separate function. Setup failure

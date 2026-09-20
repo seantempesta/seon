@@ -26,7 +26,9 @@
   [function-name]
   (deref (ns-resolve 'seon.shell.jvm function-name)))
 
-(deftest environment-overrides-use-the-supplied-generation
+(deftest ^{:seon.test/long "Acquire the canonical database fixture before checking carried config projections."
+           :seon.test/long-ms 600000}
+  environment-overrides-use-the-supplied-generation
   (support/with-database
    (fn [_connection]
      (let [base (seon.schema/handed-projection)
@@ -175,7 +177,9 @@
                            :seon.error/diagnostic-member])))
     (is (= true (deref interrupted 1000 ::not-interrupted)))))
 
-(deftest ^{:seon.test/fixture-observation "The test verifies byte-exact output on the inline and physical blob paths, including content-addressed retrieval."} binary-output-is-byte-exact-on-both-sides-of-the-inline-ceiling
+(deftest ^{:seon.test/long "Publish the canonical program into a physical store before observing shell output or process teardown."
+           :seon.test/long-ms 600000
+           :seon.test/fixture-observation "The test verifies byte-exact output on the inline and physical blob paths, including content-addressed retrieval."} binary-output-is-byte-exact-on-both-sides-of-the-inline-ceiling
   (with-temp-tree
     (fn [root]
       (with-handler
@@ -207,7 +211,9 @@
                   (is (false? (:my.shell.output/preview-complete?
                                stdout))))))))))))
 
-(deftest ^{:seon.test/fixture-observation "The complete NUL-delimited child environment can exceed the inline ceiling and must remain retrievable from the physical blob backend."} child-environment-is-complete-and-declared-overrides-win
+(deftest ^{:seon.test/long "Publish the canonical program into a physical store before observing shell output or process teardown."
+           :seon.test/long-ms 600000
+           :seon.test/fixture-observation "The complete NUL-delimited child environment can exceed the inline ceiling and must remain retrievable from the physical blob backend."} child-environment-is-complete-and-declared-overrides-win
   (with-temp-tree
     (fn [root]
       (let [override-path "/seon/declared/override"]
@@ -228,7 +234,9 @@
                                   "PATH" override-path)]
               (is (= expected child-environment)))))))))
 
-(deftest ^{:seon.test/fixture-observation "Both multi-megabyte streams are retrieved from physical blobs and compared byte-for-byte after concurrent drainage."} stdout-and-stderr-drain-concurrently-without-loss
+(deftest ^{:seon.test/long "Publish the canonical program into a physical store before observing shell output or process teardown."
+           :seon.test/long-ms 600000
+           :seon.test/fixture-observation "Both multi-megabyte streams are retrieved from physical blobs and compared byte-for-byte after concurrent drainage."} stdout-and-stderr-drain-concurrently-without-loss
   (with-temp-tree
     (fn [root]
       (with-handler
@@ -260,7 +268,9 @@
               (is (= (seq expected)
                      (seq (descriptor-octets connection descriptor)))))))))))
 
-(deftest ^{:seon.test/fixture-observation "The real shell effect publishes binary stdout and stderr through the physical blob backend before settling process evidence."} argv-stdin-and-nonzero-exit-remain-process-evidence
+(deftest ^{:seon.test/long "Publish the canonical program into a physical store before observing shell output or process teardown."
+           :seon.test/long-ms 600000
+           :seon.test/fixture-observation "The real shell effect publishes binary stdout and stderr through the physical blob backend before settling process evidence."} argv-stdin-and-nonzero-exit-remain-process-evidence
   (with-temp-tree
     (fn [root]
       (with-handler
@@ -291,7 +301,9 @@
                                        (:my.shell/stderr result)))))
             (is (integer? (:my.shell/exit result)))))))))
 
-(deftest ^{:seon.test/fixture-observation "The refusal must precede process admission within a real file-backed shell effect fixture and leave its filesystem marker absent."} cwd-outside-roots-refuses-before-process-start
+(deftest ^{:seon.test/long "Publish the canonical program into a physical store before observing shell output or process teardown."
+           :seon.test/long-ms 600000
+           :seon.test/fixture-observation "The refusal must precede process admission within a real file-backed shell effect fixture and leave its filesystem marker absent."} cwd-outside-roots-refuses-before-process-start
   (with-temp-tree
     (fn [root]
       (with-handler
@@ -306,7 +318,9 @@
             (is (not (Files/exists marker
                                    (make-array java.nio.file.LinkOption 0))))))))))
 
-(deftest ^{:seon.test/fixture-observation "The real effect owns a child process tree and file-backed settlement resources that must be released on timeout."} time-limit-reaps-the-process-tree-and-marks-the-effect-interrupted
+(deftest ^{:seon.test/long "Publish the canonical program into a physical store before observing shell output or process teardown."
+           :seon.test/long-ms 600000
+           :seon.test/fixture-observation "The real effect owns a child process tree and file-backed settlement resources that must be released on timeout."} time-limit-reaps-the-process-tree-and-marks-the-effect-interrupted
   (with-temp-tree
     (fn [root]
       (with-file-database
@@ -370,7 +384,9 @@
               (is (or (.isEmpty child-handle)
                       (not (.isAlive ^ProcessHandle (.get child-handle))))))))))))
 
-(deftest ^{:seon.test/fixture-observation "The evaluation admits a real shell child under a file-backed effect context and must release its process before fixture-store teardown."} an-evaluations-deadline-reaps-the-child-it-admitted
+(deftest ^{:seon.test/long "Publish the canonical program into a physical store before observing shell output or process teardown."
+           :seon.test/long-ms 600000
+           :seon.test/fixture-observation "The evaluation admits a real shell child under a file-backed effect context and must release its process before fixture-store teardown."} an-evaluations-deadline-reaps-the-child-it-admitted
   ;; The class: a child process outliving the evaluation that admitted it.
   ;; Two limits govern a foreground child — the shell's and the evaluation's —
   ;; and only the shell's was observed. When an eval time limit fired while

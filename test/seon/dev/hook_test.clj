@@ -26,7 +26,7 @@
                 #(binding [*out* (java.io.StringWriter.)]
                    (eval (read-string
                           (#'operator/init-form "." nil false ["probe.clj"]
-                                                false false "default"))))))
+                                                false "default"))))))
             result (publish false)
             failure (publish true)
             _ (spit result-file (pr-str result))

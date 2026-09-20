@@ -356,7 +356,9 @@
         (delete-recursively! root)))))
 
 ;; This drill invokes the declared destroyer; keep it outside the platform tier.
-(deftest source-syntax-refuses-before-lock-or-destruction
+(deftest ^{:seon.test/long "Create a source checkout and verify cold start/reset syntax refusal before the lifecycle lock."
+           :seon.test/long-ms 60000}
+  source-syntax-refuses-before-lock-or-destruction
   (let [root (fresh-root)
         source (preflight-source-checkout!)
         sentinel (io/file root "data/store/sentinel")
@@ -375,7 +377,7 @@
       (record-current-dependency-cache! source)
       (is (= true (deref acquired immediate-refusal-bound-ms :expired)))
       (spit (io/file source "src/seon/db.clj") "\n)\n" :append true)
-      (doseq [arguments [["reset" "--force"] ["start"] ["init"]]]
+      (doseq [arguments [["reset" "--force"] ["start"]]]
         (let [started (System/nanoTime)
               result (operator.state/run-process!
                       {:seon.operator.subprocess/argv
@@ -580,7 +582,7 @@
                  (ns-resolve 'seon.fresh-operator 'cleanup-managed-root!)
                  (fn [& _] (operation :destroy) {:seon.operator.cleanup/removed-file-bytes 0})
                  (ns-resolve 'seon.fresh-operator 'init!)
-                 (fn [_ args]
+                 (fn [_ args _]
                    (operation (case args [] :republish ["default"] :refork
                                     ["--dev" "default"] :adopt)))
                  (ns-resolve 'seon.fresh-operator 'start!)

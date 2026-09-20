@@ -9,7 +9,9 @@
             [seon.operator.runtime :as runtime]
             [seon.test-support :as support]))
 
-(deftest failed-loaded-definition-scope-restores-arming
+(deftest ^{:seon.test/long "Acquire the canonical fixture before checking loaded-definition restoration; 121.3 s with fixture construction in the slice 1 fast run."
+           :seon.test/long-ms 600000}
+  failed-loaded-definition-scope-restores-arming
   (support/with-database
    (fn [_]
      (let [before (instrument/instrumented)

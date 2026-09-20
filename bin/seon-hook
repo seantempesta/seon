@@ -40,7 +40,9 @@
  (str (root-file "script") java.io.File/pathSeparator
       (root-file "src") java.io.File/pathSeparator
       (root-file "resources")))
-(require '[seon.dev.clj-kondo :as dev.kondo])
+(require '[seon.dev.clj-kondo :as dev.kondo]
+         '[seon.fresh-operator :as operator]
+         '[seon.operator.state :as operator.state])
 
 (def config-path
   (or (System/getenv "SEON_HOOK_CONFIG")
@@ -479,13 +481,7 @@
            (= schema-directory (.getCanonicalFile (.getParentFile file)))))))
 
 (defn- run-schema-admission
-  "Run the JVM admission owner for split schema paths or prospective source.
-
-  Owner, 2026-09-20: this launches a complete `clojure -M:dev` JVM per schema
-  resource edit; with several lanes editing it was a second hidden JVM
-  source on a swapping machine. `:schema-admission {:enabled false}` in the
-  hook config skips it (no findings, no block) until admission runs through
-  the live JVM or Babashka."
+  "Run schema admission in the live JVM, or a bounded child when no host runs."
   [{:seon.hook/keys [file-paths prospective-content]}]
   (if-not (get-in (load-config) [:schema-admission :enabled] true)
     {:seon.hook.analysis/findings []
@@ -497,30 +493,36 @@
             prospective-content
             (assoc :seon.schema.admission/sources
                    {(first absolute-paths) prospective-content}))
+          live (operator/live-root-value!
+                (str (root-file (get-in (load-config) [:current-source :root] ".")))
+                (pr-str `((requiring-resolve 'seon.schema.admission/admit) ~request)))
           result
-          (process/sh
-           {:cmd ["clojure" "-M:dev" "-m" "seon.schema.admission"]
-            :dir repo-root
-            :in (pr-str request)
-            :out :string
-            :err :string
-            :continue true})
+          (when-not (:seon.fresh-operator/live-process? live)
+            (operator.state/run-process!
+             {:seon.operator.subprocess/argv
+              ["clojure" "-M:dev" "-m" "seon.schema.admission"]
+              :seon.operator.subprocess/directory repo-root
+              :seon.operator.subprocess/input (pr-str request)
+              :seon.operator.subprocess/deadline-ms
+              (operator.state/event-silence-backstop-ms repo-root {})}))
           findings
-          (when (zero? (:exit result))
-            (try (some->> (:out result)
-                          str/split-lines
-                          (remove str/blank?)
-                          last
-                          edn/read-string)
-                 (catch Exception _ nil)))]
+          (if (:seon.fresh-operator/live-process? live)
+            (:seon.fresh-operator/value live)
+            (when (zero? (:seon.operator.subprocess/exit result))
+              (try (some->> (:seon.operator.subprocess/output result)
+                            str/split-lines
+                            (remove str/blank?)
+                            last
+                            edn/read-string)
+                   (catch Exception _ nil))))]
       (if (vector? findings)
         {:seon.hook.analysis/status :available
          :seon.hook.analysis/findings findings}
         {:seon.hook.analysis/status :unavailable
          :seon.hook.analysis/reason
          (str "schema admission returned no findings result"
-              (when-not (str/blank? (:err result))
-                (str ": " (str/trim (:err result)))))}))
+              (when-not (str/blank? (:seon.operator.subprocess/error-output result))
+                (str ": " (str/trim (:seon.operator.subprocess/error-output result)))))}))
     (catch Exception error
       {:seon.hook.analysis/status :unavailable
        :seon.hook.analysis/reason (.getMessage error)}))))
