@@ -5623,3 +5623,14 @@ proof owed to the orchestrator. Third slot → `kind-sweep-sci-program`
 schema/* named held). Editing lanes: publication (closing), ops-effects-2,
 sci-program; wave-5 design read-only; step 2 parked; turn/cluster and
 bin/script sweeps wait on held files.
+
+## 2026-09-21 ~13:40 UTC — sci-program: expiry facet ruled distinct (option 2); ops-effects-2 landing plan and schedule
+
+`kind-sweep-sci-program` stopped (`48e377e5a`): `:seon.test/expired` and
+`:seon.test/unknown-error` had identical required members. Ruled option 2
+— expiry gains the bound that fired and the elapsed ms (reusing existing
+attribute names); the lane owns seon.test.edn and src/seon/test.clj for
+that facet since the test-system family is landed. Resumed.
+`kind-sweep-ops-effects-2` landed `86c3a73d4` (plan kinds retired; refusal
+evidence declared — the gate's `seon.plan/plan!` class) and `547d3c60a`
+(schedule kinds retired; transaction refusals preserved).
