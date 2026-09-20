@@ -6863,3 +6863,19 @@ task → an agent, i.e. the wave-5 demonstration on real debt instead of a
 staged one. Priority order for the machine: slice 3 → slice 4 (one-file
 edit in seconds, hook publication on) → test-system fork (agents' test
 loop) → reset + platform + measurement → the build lane (wave 3a) tonight.
+
+## 2026-09-23 ~03:40 local — SLICE 3 LANDED (`8de7a8868`, `e71e0e4b6`): unchanged digest 13.5 ms, head unmoved; one-file publication 45.8 → 17.5 s (target 5 s unmet, remaining whole-program phases named); SLICE 4 released
+
+Reviewed: no-change publication returns the stored commit without a
+transaction (closes the "unchanged identity facts advance the branch"
+issue with its regression); population replaces only changed declaration
+rows without touching unchanged components (+130/−85 in cluster/source/fn,
+the delta writer). Left above 2 s and explained by the lane as O(program)
+work still to remove: source acquisition before analysis 6.6 s, activation
+sealing 4.4 s, reconciliation 2.5 s, `db/deletion-error`'s identity
+comparison, the unresolved-call report. Slice 4 (astra low) released:
+adoption from the transaction report (delete the whole-program
+reconciliation phases), those publication leftovers + the findings delta,
+and the erased-fault message. Error lane meanwhile landed `fb41a5244`,
+`39406b8cf`, `c5ce4ba3a` (reviewed at its stop). Measurement at
+`36785fa41` running on the worktree.
