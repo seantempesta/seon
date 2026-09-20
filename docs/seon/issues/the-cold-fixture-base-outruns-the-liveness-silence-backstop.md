@@ -170,3 +170,16 @@ splits into Datahike row queries 2871.858250 ms, Malli compilation calls
 decision; no compilation optimization or cache was added. The 2000 ms
 first-use assertion still fails (1 test / 16 assertions / 1 failure /
 0 errors), while the subsequent p50 is 39.888417 ms.
+
+The orchestrator rejected that cost as an authorization case and required
+indexed reads and removal of repeated projection work. Recorded armed run
+`a642f8d78e9f` now passes **5 tests / 39 assertions / 0 failures / 0 errors**:
+projection acquisition **809.586 ms**, first fixture **1604.175917 ms**,
+subsequent p50 **45.936584 ms**. All 3358 schema roots match and retain the
+armer's explicitly supplied declaration projection; 1521 function contracts
+compile once. Declaration joins use AVET identities and AEVT values rather
+than repeated whole-population queries. Every fixture carries the same
+projection object. The landing note records the complete split and prior
+failed measurements. Plain database fixture acquisition now meets all three
+targets; this issue remains open for the separate cold SCI readiness and
+obsolete liveness allowances, now owned by `src/seon/test/bounds.clj`.

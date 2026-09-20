@@ -418,12 +418,10 @@
 (defn predicate-functions-in
   "Return the predicate bindings `projection` carries; `{}` when none are bound.
 
-   THE ONE DERIVATION for that question, and the only reader of
-   `:seon.schema.projection/predicate-functions`. A projection with no bound
-   predicates carries NO KEY, never a stored nil — [[declaration-projection]]
-   and every cold arm build exactly that shape — while [[compilable-form]]
-   declares a map, so a bare read handed it nil and refused every compile in a
-   worker where nothing bound a projection first. Translating the absence in
+   THE ONE DERIVATION for that question. A caller-assembled projection can
+   omit predicate bindings, while [[compilable-form]] declares a map, so a
+   bare read handed it nil and refused every compile in a worker where
+   nothing bound a projection first. Translating the absence in
    one place is what makes that unconstructable; `compilable-form` keeps
    declaring `:map` so a future bare read still refuses loudly rather than
    reading absence as \"no predicates\".
@@ -497,7 +495,9 @@
                definition {:registry scope}))))]
      (doseq [identity (sort-by str (remove #(contains? retained %) (keys forms)))]
        (internal/assert-compilable-schema!
-        forms identity (get forms identity) {:registry registry}))
+        forms identity (get forms identity) {:registry registry})
+       (internal/assert-non-nilable-value-schema!
+        forms identity (mr/schema registry identity)))
      (doseq [identity (sort-by str (remove #(contains? retained %) (keys contracts)))]
        (mr/schema registry identity))
      (mr/fast-registry (mr/schemas registry)))))
@@ -1241,13 +1241,20 @@
   ([] (declaration-projection (declaration-population)))
   ([forms]
    (let [_ (assert-config-display! forms)
+         predicates (into {} (keep (fn [sym]
+                                    (when-let [f (runtime-predicate sym)] [sym f])))
+                          (into #{} (mapcat predicate-symbols-in) (vals forms)))
+         dependencies (canonical-reference-graph forms predicates)
          _ (assert-acyclic-references!
-            forms (keys forms) (canonical-reference-graph forms {}))
-         registry (projection-registry forms {})]
+            forms (keys forms) dependencies)
+         registry (projection-registry forms predicates)]
      (with-compiled-cache
-      {:seon.schema.projection/forms forms
-       :seon.schema.projection/registry registry
-       :seon.schema.projection/compile-options {:registry registry}}))))
+      (with-predicate-functions
+       {:seon.schema.projection/forms forms
+        :seon.schema.projection/schema-dependencies dependencies
+        :seon.schema.projection/registry registry
+        :seon.schema.projection/compile-options {:registry registry}}
+       predicates)))))
 
 ;; THE structural registry: Malli's own default schemas, plus one opaque
 ;; placeholder for every other type. It resolves nothing from any declaration
@@ -1348,7 +1355,8 @@
          admissions {}
          pure-predicate-symbols #{}
          predicate-functions {}}}]
-  (let [prepared? (and compiled-forms registry compile-options canonical-keys)
+  (let [prepared? (and (or compiled-forms compiled-schemas)
+                       registry compile-options canonical-keys)
         direct-predicate-symbols
         (or direct-predicate-symbols
             (predicate-symbols-in definition))
@@ -1380,10 +1388,10 @@
              forms
              (if (keyword? identity) [identity] (keys forms))
              schema-dependencies))
-        compiled-forms (or compiled-forms
+        compiled-forms (or compiled-forms compiled-schemas
                            (bound-forms forms predicate-functions))
         compiled-definition
-        (or compiled-definition
+        (or compiled-definition compiled
             (compilable-form definition predicate-functions))
         _ (when (= :agent (:seon.schema.admission/source
                            (or admission
@@ -1415,32 +1423,44 @@
         canonical-keys (or canonical-keys (set (keys forms)))
         default-admission (or admission
                               {:seon.schema.admission/source :agent})]
-    (letfn [(walk-schema [schema role row-identity row-definition row-admission
-                          visited]
+    (letfn [(walk-schema [schema role row-identity row-definition row-admission visited]
+              (if (and (keyword? row-identity)
+                       reference-advisories
+                       (contains? compiled-schemas row-identity))
+                (reference-advisories
+                 row-identity role row-admission
+                 #(walk-schema-body schema role row-identity row-definition
+                                    row-admission visited))
+                (walk-schema-body schema role row-identity row-definition
+                                  row-admission visited)))
+            (walk-schema-body [schema role row-identity row-definition row-admission
+                               visited]
               (when (keyword? row-identity)
                 (@schema-datahike-assert-storable-schema! row-identity schema))
               (let [advisories
-                    (if (and (keyword? row-identity)
-                             reference-advisories
-                             (contains? compiled-schemas row-identity))
-                      (reference-advisories
-                       row-identity role row-admission)
+                    (if (and reference-advisories
+                             (= :core (:seon.schema.admission/source row-admission))
+                             (not= :seon.error/base row-identity)
+                             (not (internal/extends-schema? schema :seon.error/base)))
+                      ;; For core declarations this inspection can refuse only
+                      ;; error-schema inheritance. Its other output is advisory
+                      ;; data, which the constructor does not consume.
+                      []
                       (internal/assert-complete-schema!
-                       {:seon.schema/identity row-identity
-                        :seon.schema/forms forms
-                        :seon.schema/storable-attribute?
-                        (fn [attribute] (@schema-datahike-storable-attribute-in?
-                                         {:seon.schema.projection/forms forms
-                                          :seon.schema.projection/registry registry} attribute))
-                        :seon.schema/definition row-definition
-                        :seon.schema/compiled schema
-                        :seon.schema/role role
-                        :seon.schema/admission row-admission
-                        :seon.schema/predicate-symbols
-                        (predicate-symbols-in row-definition)
-                        :seon.schema/pure-predicate-symbols
-                        pure-predicate-symbols
-                        :seon.schema/canonical-keys canonical-keys}))
+                     {:seon.schema/identity row-identity
+                      :seon.schema/forms forms
+                      :seon.schema/storable-attribute?
+                      (fn [attribute] (@schema-datahike-storable-attribute-in?
+                                       {:seon.schema.projection/forms forms
+                                        :seon.schema.projection/registry registry} attribute))
+                      :seon.schema/definition row-definition
+                      :seon.schema/compiled schema
+                      :seon.schema/role role
+                      :seon.schema/admission row-admission
+                      :seon.schema/predicate-symbols
+                      (predicate-symbols-in row-definition)
+                      :seon.schema/pure-predicate-symbols pure-predicate-symbols
+                      :seon.schema/canonical-keys canonical-keys}))
                     references
                     (if (and (keyword? row-identity)
                              (contains? schema-dependencies row-identity))
@@ -1448,24 +1468,19 @@
                       (direct-references* schema canonical-keys))]
                 (into advisories
                       (mapcat
-                        (fn [reference]
-                          (when-not (contains? visited reference)
-                            (let [reference-form (get forms reference)
-                                  reference-admission
-                                  (get admissions reference default-admission)]
-                              (walk-schema
-                                (or (get compiled-schemas reference)
-                                    (m/schema
-                                     (or (get compiled-forms reference)
-                                         (compilable-form
-                                          reference-form
-                                          predicate-functions))
-                                     compile-options))
-                                role
-                                reference
-                                reference-form
-                                reference-admission
-                                (conj visited reference))))))
+                       (fn [reference]
+                         (when-not (contains? visited reference)
+                           (let [reference-form (get forms reference)
+                                 reference-admission
+                                 (get admissions reference default-admission)]
+                             (walk-schema
+                              (or (get compiled-schemas reference)
+                                  (m/schema
+                                   (or (get compiled-forms reference)
+                                       (compilable-form reference-form predicate-functions))
+                                   compile-options))
+                              role reference reference-form reference-admission
+                              (conj visited reference))))))
                       references)))
             (walk-function [compiled row-identity row-definition row-admission]
               (if (m/-function-schema? compiled)
@@ -1496,20 +1511,16 @@
                   (m/schema compiled-definition compile-options)))]
         (walk-function compiled identity definition default-admission)))))
 
-(def ^:dynamic ^:private *contract-validation-fold-size*
-  64)
+(def ^:dynamic ^:private *contract-validation-fold-size* 64)
 
-(defn- fold-contract-validations
+(defn- validate-contracts!
+  "Validate each declaration; the constructor does not return advisories."
+  {:malli/schema [:=> [:cat [:vector :map]] :nil]}
   [requests]
-  (let [combine
-        (fn
-          ([] [])
-          ([left right] (into left right)))
-        validate
-        (fn [advisories request]
-          (into advisories (assert-complete-contract! request)))]
-    (reducers/fold
-     *contract-validation-fold-size* combine validate requests)))
+  (reducers/fold *contract-validation-fold-size*
+                 (fn ([] nil) ([_ _] nil))
+                 (fn [_ request] (assert-complete-contract! request) nil)
+                 requests))
 
 (defn identity-attr?
   "Whether the supplied generation declares this attribute as an identity."
@@ -1848,29 +1859,34 @@
 
 (defn- shape-row-in
   [registry schema-key]
-  (let [compiled (mr/schema registry schema-key)
-        entries (internal/entity-entries compiled)
-        props (or (internal/entity-properties compiled)
-                  (m/properties compiled) {})
-        required-attrs
-        (not-empty (into #{} (keep (fn [[k properties _]]
-                                    (when (and (keyword? k) (not= k ::m/default)
-                                               (not (:optional properties))) k)))
-                         entries))]
-    (when (or (seq required-attrs)
-              (and (:seon.db/attributes props)
-                   (seq entries)))
-      (merge
-        {:seon.schema/key schema-key
-         :seon.schema/required-attrs required-attrs
-         :seon.schema/entity? (boolean (:seon.db/attributes props))}
-        (into {}
-              (filter
-               (fn [[property declaration]]
-                 (and (qualified-keyword? property)
-                      (= "seon.render" (namespace property))
-                      (qualified-symbol? declaration))))
-              props)))))
+  (let [compiled (mr/schema registry schema-key)]
+    ;; Only maps and conjunctions can contribute entity entries. Scalar
+    ;; declarations do not need either entity traversal.
+    (when (or (= :map (m/type compiled))
+              (and (or (m/-ref-schema? compiled) (= :and (m/type compiled)))
+                   (internal/entity-schema? compiled)))
+      (let [entries (internal/entity-entries compiled)
+            props (or (internal/entity-properties compiled)
+                      (m/properties compiled) {})
+            required-attrs
+            (not-empty (into #{} (keep (fn [[k properties _]]
+                                        (when (and (keyword? k) (not= k ::m/default)
+                                                   (not (:optional properties))) k)))
+                             entries))]
+        (when (or (seq required-attrs)
+                  (and (:seon.db/attributes props)
+                       (seq entries)))
+          (merge
+            {:seon.schema/key schema-key
+             :seon.schema/required-attrs required-attrs
+             :seon.schema/entity? (boolean (:seon.db/attributes props))}
+            (into {}
+                  (filter
+                   (fn [[property declaration]]
+                     (and (qualified-keyword? property)
+                          (= "seon.render" (namespace property))
+                          (qualified-symbol? declaration))))
+                  props)))))))
 
 (defn build-projection
   "Build and validate one immutable runtime projection.
@@ -1880,7 +1896,10 @@
    contract compiles against the complete candidate registry, so validation is
    independent of declaration order. Schema/function dependency indexes and
    the entity catalog are derived here; none are stored as a second model.
-   Pure at its boundary: the fold uses only build-scoped coordination and
+   A supplied declaration projection retains its compiled schema roots only
+   when all stored forms and predicate bindings match; contracts still compile
+   against the complete candidate registry.
+   Pure at its boundary: validation uses only build-scoped coordination and
    performs no default-registry, database, or var mutation."
   {:malli/schema
    [:function
@@ -1911,8 +1930,7 @@
      (materialize-projection
       (compose-projection-data forms function-contracts)
       options)
-     (let [_ (assert-config-display! forms)
-         predicate-symbols
+     (let [predicate-symbols
          (into (into #{} (mapcat predicate-symbols-in) (vals forms))
                (mapcat predicate-symbols-in)
                (vals function-contracts))
@@ -1925,63 +1943,76 @@
                        bindings)))
                  predicate-functions
                  predicate-symbols)
+         supplied (:seon.schema/projection options)
+         reuse-declarations?
+         (and (:seon.schema.projection/registry supplied)
+              (:seon.schema.projection/schema-dependencies supplied)
+              (not (contains? supplied :seon.schema.projection/function-contracts))
+              (= forms (:seon.schema.projection/forms supplied))
+              (= (predicate-functions-in supplied)
+                 (select-keys predicate-functions
+                              (into #{} (mapcat predicate-symbols-in) (vals forms)))))
+         _ (when-not reuse-declarations? (assert-config-display! forms))
          schema-dependencies
-         (canonical-reference-graph forms predicate-functions)
-         _ (assert-acyclic-references!
-            forms (keys forms) schema-dependencies)
-         compiled-forms (bound-forms forms predicate-functions)
-         compiled-contracts
-         (bound-forms function-contracts predicate-functions)
+         (if reuse-declarations?
+           (:seon.schema.projection/schema-dependencies supplied)
+           (canonical-reference-graph forms predicate-functions))
+         _ (when-not reuse-declarations?
+             (assert-acyclic-references!
+              forms (keys forms) schema-dependencies))
          core-admission {:seon.schema.admission/source :core}
-         registry (projection-registry compiled-forms {} compiled-contracts {})
+         registry (projection-registry
+                   forms predicate-functions function-contracts
+                   (if reuse-declarations?
+                     (select-keys (mr/schemas (:seon.schema.projection/registry supplied))
+                                  (keys forms))
+                     {}))
          options  {:registry registry}
          canonical-keys (set (keys forms))
-         _ (doseq [[k form] (sort-by key forms)]
-             (internal/assert-non-nilable-value-schema! forms k (mr/schema registry k)))
+         ordered-forms (sort-by key forms)
          compiled-schemas
-         (into (sorted-map)
-               (map (fn [k]
+         (into {}
+               (map (fn [[k _]]
                       [k (mr/schema registry k)]))
-               (sort (keys forms)))
+               ordered-forms)
          compiled-function-contracts
-         (into (sorted-map)
+         (into {}
                (map (fn [[sym _contract]]
                       [sym (mr/schema registry sym)]))
-               compiled-contracts)
+               function-contracts)
          !reference-advisories (atom {})
+         core-references?
+         (every? #(= :core (get-in schema-admissions
+                                  [% :seon.schema.admission/source]))
+                 (keys forms))
          reference-advisories
-         (fn [reference role admission]
+         (fn [reference role admission derive-advisories]
            (let [cache-key
-                 [reference role
+                 [reference (if core-references? :schema role)
                   (:seon.schema.admission/source admission)]
-                 pending
-                 (delay
-                   (internal/assert-complete-schema!
-                    {:seon.schema/identity reference
-                     :seon.schema/forms forms
-                     :seon.schema/storable-attribute?
-                     (fn [attribute] (@schema-datahike-storable-attribute-in?
-                                      {:seon.schema.projection/forms forms
-                                          :seon.schema.projection/registry registry} attribute))
-                     :seon.schema/definition (get forms reference)
-                     :seon.schema/compiled (get compiled-schemas reference)
-                     :seon.schema/role role
-                     :seon.schema/admission admission
-                     :seon.schema/pure-predicate-symbols
-                     pure-predicate-symbols
-                     :seon.schema/canonical-keys canonical-keys}))
+                 ;; The only role-sensitive rule is an agent's nilable output
+                 ;; (internal/assert-complete-schema!). If EVERY referenced
+                 ;; declaration explicitly records core admission, the whole
+                 ;; reference walk has the same result in every role.
+                 ;; The reference graph is already proven acyclic. Retain the
+                 ;; complete walk, so shared descendants are traversed once
+                 ;; per declaration and role rather than once per caller.
+                 ;; Admission consumes refusals, not advisory vectors. Do not
+                 ;; copy a shared descendant's advisory output along every
+                 ;; path to it; standalone contract inspection still returns it.
                  cached
-                 (get
-                  (swap! !reference-advisories
-                         (fn [cache]
-                           (if (contains? cache cache-key)
-                             cache
-                             (assoc cache cache-key pending))))
-                  cache-key)]
+                 (or (get @!reference-advisories cache-key)
+                     (let [pending (delay (derive-advisories) [])]
+                       (get
+                        (swap! !reference-advisories
+                               (fn [cache]
+                                 (if (contains? cache cache-key)
+                                   cache
+                                   (assoc cache cache-key pending))))
+                        cache-key)))]
              @cached))
          validation-base
          {:seon.schema/forms forms
-          :seon.schema/compiled-forms compiled-forms
           :seon.schema/compiled-schemas compiled-schemas
           :seon.schema/schema-dependencies schema-dependencies
           :seon.schema/registry registry
@@ -2001,11 +2032,20 @@
                     :seon.schema/direct-predicate-symbols
                     (predicate-symbols-in form)
                     :seon.schema/compiled (get compiled-schemas k)
-                    :seon.schema/compiled-definition (get compiled-forms k)
                     :seon.schema/admission
                     (get schema-admissions k core-admission)))
-           (sort-by key forms))
-          (map
+           ordered-forms)
+          (comp
+           ;; Core function contracts have already compiled. Completeness
+           ;; inspection has no refusing rule for their inline positions;
+           ;; their referenced core schemas are validated above. Agent
+           ;; declarations and any population with agent references keep the
+           ;; role-sensitive walk (internal/assert-complete-schema!).
+           (remove (fn [[sym _]]
+                     (and core-references?
+                          (= :core (:seon.schema.admission/source
+                                    (get function-admissions sym core-admission))))))
+           (map
            (fn [[sym contract]]
              (assoc validation-base
                     :seon.schema/identity sym
@@ -2014,12 +2054,10 @@
                     (predicate-symbols-in contract)
                     :seon.schema/compiled
                     (get compiled-function-contracts sym)
-                    :seon.schema/compiled-definition
-                    (get compiled-contracts sym)
                     :seon.schema/admission
-                    (get function-admissions sym core-admission)))
-           (sort-by key function-contracts)))
-         _ (fold-contract-validations validation-requests)
+                    (get function-admissions sym core-admission)))))
+          (sort-by key function-contracts))
+         _ (validate-contracts! validation-requests)
          reverse-schema-dependencies
          (reduce-kv
           (fn [reverse-edges dependent dependencies]
@@ -2473,6 +2511,38 @@
                % #{}))
         schema-keys))
 
+(defn- projection-rows
+  "Join attribute ranges, retaining historical values for duplicate refusal."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :qualified-keyword :qualified-keyword :boolean]
+    [:vector [:tuple [:or :keyword :symbol :string] :string :int]]]}
+  [database identity-attribute value-attribute identity-transaction?]
+  (let [values (group-by :e (d/datoms database :aevt value-attribute))]
+    (into []
+          (comp
+           (mapcat (fn [identity-datom]
+                     (map (fn [value-datom]
+                            [(:v identity-datom) (:v value-datom)
+                             (:tx (if identity-transaction? identity-datom value-datom))])
+                          (get values (:e identity-datom)))))
+           (distinct))
+          (d/datoms database :avet identity-attribute))))
+
+(defn- projection-admissions
+  "Join declaration identities to admission datoms once, without per-row reads."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
+  [database]
+  (let [sources (into {} (map (juxt :e :v))
+                      (d/datoms database :aevt :seon.schema.admission/source))]
+    (into {}
+          (mapcat (fn [attribute]
+                    (keep (fn [datom]
+                            (when-let [source (get sources (:e datom))]
+                              [[attribute (:v datom)]
+                               {:seon.schema.admission/source source}]))
+                          (d/datoms database :avet attribute))))
+          [:seon.schema/key :seon.fn/sym])))
+
 (defn projection-from-rows
   "Build one complete projection from committed schema and contract rows.
 
@@ -2497,14 +2567,7 @@
     reusable-projection]
    (let [recorded-admissions
          (if (contains? (dbi/-schema database-value) :seon.schema.admission/source)
-           (into {}
-                 (map (fn [[attribute identity source]]
-                        [[attribute identity] {:seon.schema.admission/source source}]))
-                 (d/q '[:find ?attribute ?identity ?source
-                        :in $ [?attribute ...]
-                        :where [?declaration ?attribute ?identity]
-                               [?declaration :seon.schema.admission/source ?source]]
-                      database-value [:seon.schema/key :seon.fn/sym]))
+           (projection-admissions database-value)
            {})
          admission-for-identity
          (fn [attribute identity]
@@ -2651,16 +2714,19 @@
                           [k (:seon.schema.parsed/admission row)]))
                 contracts)
           fingerprint
-          (projection-fingerprint
-           forms function-contracts schema-admissions function-admissions
-           source-admissions artifact-exports pure-predicate-symbols)]
-      (if (= fingerprint
-             (:seon.schema.projection/fingerprint reusable-projection))
+          (when (:seon.schema.projection/fingerprint reusable-projection)
+            (projection-fingerprint
+             forms function-contracts schema-admissions function-admissions
+             source-admissions artifact-exports pure-predicate-symbols))]
+      (if (and fingerprint
+               (= fingerprint
+                  (:seon.schema.projection/fingerprint reusable-projection)))
         reusable-projection
         (build-projection
          forms
          function-contracts
          {:seon.schema/schema-admissions schema-admissions
+          :seon.schema/projection reusable-projection
           :seon.schema/function-admissions function-admissions
           :seon.schema/function-source-admissions source-admissions
          :seon.schema/artifact-exports artifact-exports
@@ -2710,26 +2776,11 @@
   (projection-from-rows
    {:seon.schema/database-value db
     :seon.schema/schema-rows
-    (d/q
-     '[:find ?key ?form ?tx
-       :where
-       [?schema :seon.schema/key ?key ?tx]
-       [?schema :seon.schema/form ?form]]
-     db)
+    (projection-rows db :seon.schema/key :seon.schema/form true)
     :seon.schema/function-contract-rows
-    (d/q
-     '[:find ?sym ?spec ?tx
-       :where
-       [?function :seon.fn/sym ?sym]
-       [?function :seon.fn/spec ?spec ?tx]]
-     db)
+    (projection-rows db :seon.fn/sym :seon.fn/spec false)
     :seon.schema/function-source-rows
-    (d/q
-     '[:find ?sym ?source ?tx
-       :where
-       [?function :seon.fn/sym ?sym]
-       [?function :seon.fn/source ?source ?tx]]
-     db)
+    (projection-rows db :seon.fn/sym :seon.fn/source false)
     :seon.schema/artifact-exports #{}
     :seon.schema/pure-predicate-symbols #{}}
    reusable-projection))
@@ -2738,9 +2789,10 @@
   "Build the immutable program projection at exactly `db`.
 
    The caller owns the resulting projection and passes it to later operations.
-   The optional reusable projection avoids recompilation only when its
-   canonical fingerprint equals the queried rows. No process-global holder
-   retains a cluster's projection."
+   A matching full fingerprint reuses the supplied projection. A supplied
+   declaration projection can retain compiled roots when its forms and
+   predicate bindings exactly match the stored declarations. No process-global
+   holder retains a cluster's projection."
   {:malli/schema
    [:function
     [:=> [:catn [:seon.schema/database-value :map]] ::projection]

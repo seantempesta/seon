@@ -386,7 +386,8 @@
         (try
           (let [database @connection
                 projection (or (db/carried-projection database)
-                               (schema/projection-from-database database))
+                               (schema/projection-from-database
+                                database (or (schema/handed-projection) {})))
                 state (sci.eval/projection-state database projection)]
             (db/carry-connection-projection-state! connection state)
             {::configuration configuration

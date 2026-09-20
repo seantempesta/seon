@@ -227,3 +227,186 @@ decision. The owner must authorize that acquisition cost or choose an
 algorithmic change. Compilation was not optimized; no cache was added.
 Slice (2) remains unimplemented, and the liveness allowance remains
 unchanged pending the independent SCI readiness proof.
+
+## Indexed acquisition and bounded reference validation
+
+The orchestrator rejected the preceding stop: the measured Malli compilation
+and seal already prove that the remaining acquisition work is ours. The
+once-per-worker target is 1000 ms; first fixture remains 2000 ms.
+
+The three declaration joins now read identity ranges through Datahike AVET
+and value ranges through AEVT, joining by entity id in Clojure. Identities
+are indexed; form/spec/source strings are not. This is the dependency's
+bound-attribute lookup at
+`reference-code/datahike/src/datahike/db/search.cljc:140–157`.
+`projection-rows` retains every historical value and removes duplicate
+tuples, preserving the original query's duplicate-identity refusal.
+`projection-admissions` joins the two identity attributes to the admission
+attribute once. There are no per-entity pulls or queries.
+
+Run `a5f4a52b05ce`: row acquisition fell from 2871.858250 to
+204.554375 ms. The additional phase observations exposed 2153.318042 ms
+in `fold-contract-validations`: the existing build-scoped delayed results
+retained leaf validation but repeated the full descendant walk for every
+caller. Retaining the complete walk with the existing key (reference,
+input/output/schema role, admission source) reduced that phase to
+348.953958 ms in `fa233a3841be`. The acyclic graph is checked before the
+fold; different roles retain distinct validation results.
+
+Run `03e0dd8d60a8` additionally removed the fingerprint calculation when
+there is no reusable projection to compare, and handed validation the
+compiled Malli schemas rather than binding all forms a second time:
+
+| Work | Milliseconds |
+|---|---:|
+| Complete acquisition | 1457.945792 |
+| Three indexed row joins | 184.112167 |
+| Admission join | 50.272625 |
+| Registry construction, including form preparation | 273.600666 |
+| Complete contract validation | 310.515417 |
+| Canonical reference graph (nested arity totals) | 216.739083 |
+| Acyclic check | 12.035959 |
+| Shape rows | 119.790711 |
+| Fingerprint, one invocation | 108.557167 |
+| Config display declarations | 54.610625 |
+| Render contracts | 21.741334 |
+
+The registry contains 79.903666 ms of observed Malli compilation and
+2.432584 ms of sealing. Nested phase totals are not additive. First
+fixture was 2402.177541 ms, subsequent p50 48.799709 ms. The armed run
+recorded 3 tests / 27 assertions / 2 failures / 0 errors: only the timing
+targets failed; indexed-row equivalence and shared-descendant validation
+passed. The next timing observation removes the per-call Malli wrappers
+used for the compilation split, retaining the projection-phase reporter.
+
+This run's admission waited in `seon.test.runner/record-snapshot!` →
+`seon.fresh-operator/live-root-value!` → the existing prepl response read,
+before any test began (worker PID 94446 thread sample). No foreign process
+was operated. The overlay explicitly used HEAD for dirty
+`src/seon/cluster.clj`, `src/seon/cluster/source.clj`, `src/seon/fn.clj`, and
+`test/seon/fn_test.clj`. A transient shared-tree hook syntax refusal at
+`src/seon/cluster/source.clj:612:31` was not repaired by this lane.
+
+Correction to the preceding note: fast snapshot requests explicitly include
+declared long tests (`src/seon/test/fast.clj`, `snapshot-request`). No
+orchestrator long-test selection was needed for these measurements.
+
+Subsequent observations, without per-call Malli instrumentation:
+
+| Recorded run | Acquisition ms | First fixture ms | Subsequent p50 ms | Result |
+|---|---:|---:|---:|---|
+| `a2f7fabf25ac` | 1394.270666 | 2257.230000 | 46.079875 | 3 tests, 27 assertions, 2 timing failures |
+| `b714d06ac813` | 2018.158333 | 2799.871417 | 43.147792 | Serial validation was slower; parallel fold restored |
+| `69f94b475fdd` | 1142.835708 | 1981.302375 | 46.504709 | 3 tests, 29 assertions, acquisition target failed |
+| `981d6edf81d5` | 1056.777042 | 2002.302208 | 46.034000 | 4 tests, 32 assertions, 2 timing failures |
+| `36267da33e7c` | 1671.789667 | 2735.116833 | 45.211666 | 4 tests, 33 assertions, 2 timing failures |
+| `ae264c8ac38e` | 1041.672458 | 2110.440334 | 53.211083 | 5 tests, 39 assertions, 2 timing failures |
+
+Run `a909255da291` had four fixture errors from an incorrectly closed
+transducer in this lane's edit. That was corrected before `981d6edf81d5`.
+All correctness regressions in the other rows passed. No timing limit was
+widened. `36267da33e7c` specifically measured 542.398792 ms reading rows
+and admissions, compared with 220.225208 ms in `981d6edf81d5`; it is not
+silently replaced by the smaller observation.
+
+The remaining construction now avoids collecting advisory vectors that
+its result never returns. Core completeness inspection has no refusing
+inline rule; its refusing error-schema inheritance checks remain. Agent
+declarations retain their completeness and output checks. Only when every
+referenced declaration explicitly records core admission can one completed
+reference walk serve every role. The governing code is
+`src/seon/schema/internal.cljc:290–378`. Regressions assert refusal for an
+agent nilable return, an unresolved contract reference, and a malformed core
+error schema, as well as equal entity shape rows.
+
+The armer already owns a compiled declaration projection. The fixture now
+hands that value to the existing second argument of
+`schema/projection-from-database`. `declaration-projection` carries the
+dependency graph it already derives and the predicate bindings used to
+compile its roots. The builder retains those roots through the existing
+`projection-registry` retained-entry argument only when all stored forms
+and predicate bindings match exactly and the supplied declaration registry
+has no function-contract population. Changed forms take ordinary complete
+construction. Run `ae264c8ac38e` retained all 3358 schema roots and compiled
+only the 1521 contracts: registry construction was 65.652166 ms, including
+36.204208 ms preparing those contract forms. No cache was added.
+
+Carrying the reference graph also removes repeated reference derivation by
+`seon.instrument/contract-definitions` (`src/seon/instrument.clj:832`),
+which reads the supplied graph before its per-reference fallback. In that
+run, the armer's projection-acquired and contracts-armed announcements were
+5.984 seconds apart, versus 43.524 seconds in `981d6edf81d5`. Instrumentation
+source was not edited.
+
+The timing test is explicitly a fixture observation: cold worker readiness
+has already acquired its base before any test body, so a test asserting the
+first acquisition cannot honestly run after readiness or another fixture.
+Its declared command starts a fresh armed fast JVM. Its aggregate long-test
+allowance is removed; the 1000 ms acquisition, 2000 ms first fixture, and
+100 ms subsequent p50 assertions remain. Subsequent correctness tests use
+the same canonical branched fixture.
+
+Additional foreign boundaries observed: the shared hook reported an
+unclosed form in `src/seon/cluster.clj:1765`; later snapshots also excluded
+dirty `src/seon/error.clj` and `src/seon/sci/eval.clj`. None was edited by
+this lane. The liveness constants now reside in `src/seon/test/bounds.clj`,
+not the runner line in the original assignment; their SCI/startup allowance
+is still independent of plain database fixture acquisition.
+
+### Passing acquisition measurement
+
+Recorded run **`a642f8d78e9f`**, fresh worker PID 6521, HEAD-plus-owned-paths
+snapshot of `d998358224`: **5 tests / 39 assertions / 0 failures / 0 errors**.
+Every test completed under 5 seconds; the legacy query comparison took
+3.689 seconds. The exact command was:
+
+```sh
+bin/test-fast --paths src/seon/schema.clj test/seon/test_support.clj test/seon/test/fixture_timing_test.clj test/seon/schema/projection_acquisition_test.clj -- seon.test.fixture-timing-test seon.schema.projection-acquisition-test
+```
+
+| Fixture measurement | Before | After |
+|---|---:|---:|
+| First `with-database`, fresh JVM | 188907.588458 ms | **1604.175917 ms** |
+| Subsequent p50 | 5.007625 ms (memory fixture) | **45.936584 ms** (isolated file-store branch) |
+| Once-per-worker projection acquisition | 5458.935792 ms | **809.586000 ms** |
+
+The intermediate branch landing was first use 4647.819208 ms / p50
+37.035500 ms. These are distinct observations, not overwritten baselines.
+
+The final acquisition's non-overlapping work is:
+
+| Work | Milliseconds |
+|---|---:|
+| Three indexed declaration joins | 210.706041 |
+| Admission join | 56.471750 |
+| EDN parsing and identity/admission maps (rows minus join and builder) | 65.567625 |
+| Registry construction over retained roots and new contracts | 51.288167 |
+| Completeness and error-schema validation | 99.399125 |
+| Entity shape rows | 83.918018 |
+| One fingerprint | 91.941959 |
+| Render contract validation | 18.992417 |
+| Predicate bindings, root lookups, validation requests, forward/reverse references, shape indexes and projection/arity assembly | 130.249814 |
+| Database acquisition dispatch and input-map construction | 1.051084 |
+| **Total** | **809.586000** |
+
+Registry construction includes 30.256500 ms preparing the 1521 contract
+forms. All **3358 schema roots** were retained from the explicitly supplied
+declaration projection. Canonical reference derivation, acyclic checking,
+and config-display checks did not repeat. The unconditional non-nilable
+check now belongs to `projection-registry` when each new root is compiled;
+retained roots do not repeat it. Reference validation uses the existing
+build-scoped delayed results, reads an already installed immutable result
+without another atomic update, and never collects unused advisory vectors.
+No new cache or execution mechanism was introduced.
+
+The immediately preceding run `0c0b08e9f15f` still failed both targets
+(1409.224834 ms acquisition, 2318.914208 ms first fixture, 47.710000 ms p50;
+5 tests / 39 assertions / 2 failures / 0 errors). The final change moved
+the non-nilable check to compilation and selected entity shapes through
+the existing bounded entity-schema traversal, preserving local-cycle
+refusal rather than using unbounded alias dereference.
+
+Pre-commit loading passed in the shared tree:
+`clojure -M:test -e "(require 'seon.schema 'seon.test-support 'seon.test 'seon.test.runner 'seon.schema.projection-acquisition-test 'seon.test.fixture-timing-test)"`.
+No worktree or additional gate was needed. The full cold gate and platform
+proof remain the orchestrator's responsibility.
