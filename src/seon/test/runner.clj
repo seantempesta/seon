@@ -3443,17 +3443,15 @@
                                    :seon.test/selection-authority-unavailable)))
 
 (defn- worker-count
+  {:malli/schema [:function
+                  [:=> [:cat] [:int {:min 1}]]
+                  [:=> [:cat :int [:or :nil :string]] [:int {:min 1}]]]}
   ([]
    (worker-count (.availableProcessors (Runtime/getRuntime))
-                 (System/getProperty "seon.test.worker-count")))
+                 (or (System/getProperty "seon.test.worker-count")
+                     (System/getenv "SEON_TEST_WORKERS"))))
   ([processors prepared]
-   (if prepared
-     (let [n (Long/parseLong prepared)]
-       (when-not (pos? n)
-         (throw (ex-info "Prepared worker count must be positive."
-                         {::worker-count n})))
-       n)
-     (max 1 (quot processors 2)))))
+   (cache/worker-count processors prepared 0)))
 
 (defn- worker-parent
   []

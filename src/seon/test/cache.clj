@@ -16,6 +16,20 @@
   "Roots whose files are represented in the program-graph manifest."
   ["src" "test"])
 
+(defn worker-count
+  "Size the existing isolated pool once, with the launcher's explicit override."
+  {:malli/schema [:=> [:cat :int [:or :nil :string] [:int {:min 0}]]
+                  [:int {:min 1}]]}
+  [processors override namespace-count]
+  (if (seq override)
+    (let [n (parse-long override)]
+      (when-not (and n (pos? n))
+        (throw (ex-info "Prepared worker count must be positive."
+                        {:seon.test.runner/worker-count-input override})))
+      n)
+    (cond-> (max 1 (min 3 (quot processors 2)))
+      (pos? namespace-count) (min namespace-count))))
+
 (def ^:private inventory-bound-ms
   "Bound for Git's local file inventory, matching the existing issue-history
   Git read allowance. Expiry refuses selection rather than omitting inputs."

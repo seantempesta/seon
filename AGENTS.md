@@ -952,6 +952,9 @@ fixture priming; the fast reporter carries long-test allowances too.
 `SEON_TEST_SLOT_WAIT_SECONDS` bounds the wait.
 A slot bounds invocations,
 not the number of worker JVMs inside one gate.
+`seon.test.cache/worker-count` owns pool sizing for launcher and coordinator;
+`worker-checkout!` owns every isolated worker copy. The shell keeps the
+worker-checkout preparation phase and its bound, calling those runtime owners.
 Slot waits and the `bin/test` preamble announce orphaned gates with their
 PID, run root, elapsed time and last recorded phase. A dead launcher with
 a live recorded runner remains for the orchestrator to reclaim. When both

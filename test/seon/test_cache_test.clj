@@ -5,6 +5,14 @@
             [seon.test.cache :as cache]
             [seon.test.selection :as selection]))
 
+(deftest isolated-worker-count-obeys-the-declared-pool-and-selection-bounds
+  (is (= 3 (cache/worker-count 32 nil 0)))
+  (is (= 1 (cache/worker-count 32 nil 1)))
+  (is (= 1 (cache/worker-count 1 nil 0)))
+  (is (= 5 (cache/worker-count 32 "5" 1)))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be positive"
+                        (cache/worker-count 32 "0" 0))))
+
 (deftest resolved-classpath-preserves-order-and-rebases-only-checkout-roots
   (let [basis {:seon.test/classpath-root "/original"
                :seon.test/classpath-roots ["/cache/classes" "src" "." "/deps/library.jar"]}]

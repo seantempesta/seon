@@ -24,11 +24,12 @@
            [java.lang ProcessHandle]
            [java.util.concurrent CountDownLatch TimeUnit]))
 
-(deftest ^{:seon.test/platform "Coordinator consumes the prepared worker count."}
+(deftest ^{:seon.test/platform "Coordinator owns bounded worker sizing and explicit overrides."}
   coordinator-uses-the-prepared-worker-count
   (is (= 2 (#'runner/worker-count 16 "2")))
   (is (= 1 (#'runner/worker-count 16 "1")))
-  (is (= 8 (#'runner/worker-count 16 nil)))
+  (is (= 3 (#'runner/worker-count 16 nil)))
+  (is (= 1 (#'runner/worker-count 1 nil)))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be positive"
                         (#'runner/worker-count 16 "0"))))
 

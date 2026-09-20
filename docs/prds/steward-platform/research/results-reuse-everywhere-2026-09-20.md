@@ -918,3 +918,77 @@ Cold proof additionally owed:
 `bin/test --paths src/seon/cluster/source.clj test/seon/test/publication_test.clj -- seon.test.publication-test`.
 No bash lines changed in this truncation slice. Files: source owner, new
 regression, and this note. Earlier thin-launcher and host obligations remain.
+
+## Two identical fast requests: recorded zero-execution proof
+
+Truncation commit **44b51bab0** loaded after commit: `:loads`, exit 0,
+`publication-members-head-load.log`. The loader required source, runner and
+cache in that order; no running system was reloaded.
+
+Two consecutive commands, with HEAD remaining **44b51bab0**, used the same
+published base and HEAD-plus-paths snapshot. No full publication occurred:
+
+```sh
+bin/test-fast --paths bin/test src/seon/test/cache.clj src/seon/test/runner.clj test/seon/test_cache_test.clj test/seon/test_runner_test.clj -- seon.test-cache-test
+```
+
+First (`cache-reuse-first.log`, **4,207 bytes**, SHA-256
+`68475a29bbe67b7114ec5c6ae77c48db26f92018c435d215a6dbdb9d515172f6`):
+
+```text
+Ran 4 tests containing 51 assertions.
+0 failures, 0 errors.
+Recorded 4 executed, 0 unchanged; 51 assertions.
+0 failures, 0 errors.
+bin/test-fast: 4 executed, 0 unchanged; run a9a52dedca74
+```
+
+Second (`cache-reuse-second.log`, **2,853 bytes**, SHA-256
+`3bc8fc0ed7ab6a141386c25b6884375c0772de266994e2c6864df8a7db86a62f`):
+
+```text
+Ran 0 tests containing 0 assertions.
+0 failures, 0 errors.
+Recorded 0 executed, 4 unchanged; 51 assertions.
+0 failures, 0 errors.
+bin/test-fast: 0 executed, 4 unchanged; run a595eb0bf4f9
+```
+
+Both exit 0. All four second-run member lines have `:seon.test/unchanged true`
+and these three confidence values:
+
+```edn
+{:seon.test.run/basis-t 536870921
+ :seon.test.run/program-digest "d55f3f5d2d3b2f02f46895f8b692c7a87ad948b3ec1f4fdc79912485b08c499b"
+ :seon.test.run/input-digest "edc7dca723bdaef7caeca417577f5279830a70aff4f39d6723322cd678c026df"}
+```
+
+The recorded 51 assertions belong to the first execution; the second executed
+none. Fresh run IDs distinguish the requests without changing their snapshot
+identity. The second snapshot also reported dirty `src/seon/test.clj` and
+`test/seon/program_test.clj` callers as HEAD bytes; those working edits were
+excluded and did not change the tested snapshot.
+
+### Launcher duplication removed
+
+`bin/test` no longer implements its own worker-copy function or worker arithmetic.
+`seon.test.cache/worker-count` owns processor/namespace bounds and explicit
+overrides; `worker-checkout!`, already used by every `start-worker!`, now
+owns preparation too. The shell's worker-checkout phase and 300-second default
+bound stay in place, as do silence, exchange, watchdog and isolated platform
+worker paths. Bash syntax passes. This slice replaces/deletes **82 bash lines**,
+adds 11, and leaves `bin/test` at 1,105 lines; cumulative replaced/deleted lines
+are **102**. Snapshot/preparation shell remains; this is not a claim that the
+entire cold coordinator admission migration is finished.
+
+The two-run command verifies `seon.test-cache-test`, including the pool sizing
+regression: 4 tests / 51 assertions / 0 failures / 0 errors, then 0 execution.
+The root `seon.test-runner-test` expectation update still owes the isolated gate.
+Files: `bin/test`, `src/seon/test/cache.clj`, `src/seon/test/runner.clj`,
+`test/seon/test_cache_test.clj`, `test/seon/test_runner_test.clj`, AGENTS.md §5,
+and this note. Host work is a separate slice.
+
+Cold command owed:
+`bin/test --paths bin/test src/seon/test/cache.clj src/seon/test/runner.clj test/seon/test_cache_test.clj test/seon/test_runner_test.clj -- seon.test-cache-test seon.test-runner-test`.
+The orchestrator still owes bare twice (second zero) and platform. No cold
+gate or lifecycle command was run by this lane.

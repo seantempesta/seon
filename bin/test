@@ -92,8 +92,8 @@ Usage: bin/test [--all|--full|--platform|--changed PATH]...
   --changed PATH  platform tier, then the tests reaching PATH (repeatable)
   --confirm       diagnostic isolation of named failing tests (ns/test ...)
 
-An explicit namespace selection always runs every test in those namespaces
-and records no green basis.
+An explicit namespace selection defines its eligibility scope; matching
+recorded green members are reported unchanged without execution.
 USAGE
 }
 
@@ -689,50 +689,6 @@ announce_phase_failure() {
   printf 'phase=%s failed=true\n' "$phase" >>"$run_root/test-run.txt" 2>/dev/null || true
 }
 
-populate_checkout_root() {
-  local target_root=$1 entry entries
-  local -a sources=()
-  mkdir -p "$target_root/data" "$target_root/logs" \
-    "$target_root/target" "$target_root/tmp"
-  entries=$({
-    git -C "$source_root" ls-files
-    if [ ${#overlay_paths[@]} -gt 0 ]; then
-      printf '%s\n' "${overlay_paths[@]}"
-    fi
-  } | awk -F/ 'NF {print $1}' | sort -u)
-  while IFS= read -r entry; do
-    if [ ! -e "$source_root/$entry" ] && [ ! -L "$source_root/$entry" ]; then
-      continue
-    fi
-    case "$entry" in
-      data|logs|target|tmp|workers) ;;
-      reference-code) ln -s "$source_root/$entry" "$target_root/$entry" ;;
-      *) sources+=("$source_root/$entry") ;;
-    esac
-  done <<< "$entries"
-  if [ ${#sources[@]} -gt 0 ]; then
-    case "$(uname -s)" in
-      Darwin) cp -cRP "${sources[@]}" "$target_root/" ;;
-      Linux) cp -a --reflink=auto "${sources[@]}" "$target_root/" ;;
-      *) cp -pRP "${sources[@]}" "$target_root/" ;;
-    esac
-  fi
-
-  # `git ls-files` never names this recorded file, and a worker checkout keys
-  # the same dependency-class cache as the root it was copied from.
-  if [ -f "$source_root/test-input-paths.txt" ]; then
-    cp -p "$source_root/test-input-paths.txt" "$target_root/test-input-paths.txt"
-  fi
-  if [ -f "$source_root/dependency-pins.txt" ]; then
-    cp -p "$source_root/dependency-pins.txt" "$target_root/dependency-pins.txt"
-  fi
-
-  ln -s "$source_root/.git" "$target_root/.git"
-  if [ -e "$source_root/.env" ]; then
-    ln -s "$source_root/.env" "$target_root/.env"
-  fi
-}
-
 begin_phase snapshot
 
 # One snapshot mechanism: HEAD plus only explicitly selected working bytes.
@@ -1026,44 +982,17 @@ fi
 record_phase dependency-cache-and-classpath
 
 begin_phase worker-checkouts
-logical_processors=$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)
-if ! [[ "$logical_processors" =~ ^[1-9][0-9]*$ ]]; then
-  logical_processors=2
-fi
-worker_count=$((logical_processors / 2))
-# Never more than three worker JVMs per gate: each loads the whole program
-# (about a gigabyte, 100%+ CPU while running), the confirmation phase reruns
-# failures in fresh JVMs up to this same count in parallel, and the owner's
-# cluster shares the machine (2026-09-15: one gate at cores/2 reached load
-# average 75 on 18 cores). Set SEON_TEST_WORKERS to override deliberately.
-if [ "$worker_count" -gt 3 ]; then
-  worker_count=3
-fi
-if [ "$worker_count" -lt 1 ]; then
-  worker_count=1
-fi
-# A pool no larger than the selection: an explicit one-namespace gate boots
-# one worker, not half the machine. Several lanes gate at once (2026-09-08:
-# five lanes, 45 JVMs); the pool is sized to the work, never to the host.
-if [ "$explicit_selection" -eq 1 ] && [ ${#namespaces[@]} -lt "$worker_count" ]; then
-  worker_count=${#namespaces[@]}
-fi
-if [ -n "${SEON_TEST_WORKERS-}" ] && [[ "$SEON_TEST_WORKERS" =~ ^[1-9][0-9]*$ ]]; then
-  worker_count=$SEON_TEST_WORKERS
-fi
-original_source_root=$source_root
-if [ "$prepare_head_base" -eq 1 ]; then worker_count=0; fi
-source_root=$run_root
 worker_parent="$run_root/workers"
 mkdir -p "$worker_parent"
-for worker_number in $(seq 1 "$worker_count"); do
-  populate_checkout_root "$worker_parent/pool-$worker_number"
-done
-source_root=$original_source_root
-for worker_root in "$worker_parent/"*; do
-  [ -d "$worker_root" ] || continue
-  populate_cache_links "$worker_root"
-done
+worker_count=$(bb -e '
+  (require (quote [seon.test.cache :as cache]))
+  (let [[snapshot override namespaces prepare] *command-line-args*
+        n (if (= "1" prepare) 0
+              (cache/worker-count (.availableProcessors (Runtime/getRuntime))
+                                  override (parse-long namespaces)))]
+    (doseq [ordinal (range 1 (inc n))]
+      (cache/worker-checkout! snapshot (str snapshot "/workers/pool-" ordinal)))
+    (println n))' "$run_root" "${SEON_TEST_WORKERS-}" "${#namespaces[@]}" "$prepare_head_base")
 if [ -n "$snapshot_digest" ]; then
   shared_published_base="$source_root/target/test-published-bases/$snapshot_digest/base"
 else
