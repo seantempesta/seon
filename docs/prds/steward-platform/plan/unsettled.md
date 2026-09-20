@@ -6083,3 +6083,50 @@ text; regression on the canonical fixture: a contract refusal in an agent
 turn yields `result/e<id>` bound to the offending value, the stored
 entity carries the blob reference and the shown text, and the walk renders
 it through the same printer.
+
+## RESUME HERE (2026-09-22 ~10:50 local — written before an orchestrator compaction)
+
+**Read first:** this block; the "OVERNIGHT CHARTER" and "STATE FOR THE
+MORNING" blocks above; the three morning blocks (offending value = a normal
+`result/<id>` + blob + value-printer text; "facet" retired; library terms
+only); [namespace-agents-plan-2026-09-19.md](namespace-agents-plan-2026-09-19.md)
+§3/§6/§8; [publication-dissolution-spec-2026-09-20.md](publication-dissolution-spec-2026-09-20.md)
+(its six rulings); [gate-restructure-spec-2026-09-21.md](gate-restructure-spec-2026-09-21.md);
+AGENTS.md lane rules 11–16. Then `bin/codex-agent status`,
+`git status --short -- src test`, `bin/seon status`, `uptime`.
+
+**Vocabulary (owner, this morning):** no "facet" — say "error map" /
+"error schema" (`[:and :seon.error/base [:map …]]`); explain only in
+Clojure/Malli/Datahike/SCI/core.async terms; ten stored keys carrying the
+word become new `error-schema` keys in the RESET batch; a docs/comments
+retirement pass runs on sol low after the current lanes land.
+
+**Running (editing, one JVM each):** `bridge-step2-walker` (landing:
+raw walker deleted in one commit, 1,012-attribute parity), `kind-sweep-sci-program`
+(my.program option 1; `seon.call-preparation` — its `:candidates` member
+must be declared storably: tuple or component rows with ordinal), `gate-restructure`
+(per-test preparation, worker lifetimes, + the docstring Var-contract
+issue). **Paused, sessions retained:** `publication-dissolution` (resumes
+for its adoption proof + measurements once the candidates declaration and
+the docstring contract land), `error-family-1a` (NEXT SLOT: the
+offending-value slice — result id + `result/e<id>` intern + blob + value
+printer text; retire `data-edn`/`offending-projection`/raw member),
+`kind-sweep-turn-cluster` (98 refs; after step 2 frees turn/cluster),
+`kind-sweep-ops-effects-2` (done; three deferrals), `bin/script` sweep
+(unlaunched; fresh-operator error schema; 11 test-system sites).
+
+**Default:** STOPPED deliberately (the loaded-producer guard; issue
+`the-loaded-producer-guard-refuses-a-freshly-booted-host`); `bin/seon start`
+once the publication lane's proof passes. Hook publication paused.
+
+**Owed proofs, in order once publication's proof passes:** bare `bin/test`
+twice (second executes 0), `--platform`, cold gates for 1a/1d/render/
+my-protocol/test-system/sci-program from their notes; then the RESET from
+a clean tree (1a's + 1d's attributes, error-schema keys, the stamp when
+step 3 lands); then step 3 (spec ready), 4, 5, wave-1 families, wave 2,
+3a, 3b/3c, 4, 5 — every one has a verbatim launch spec in this directory.
+
+**Standing:** three editing lanes; report a Codex usage-limit stop by push
+and wait; never relaunch under a new name; a stalled sol session is
+continued under a fresh astra-low session from its note; the owner rules
+by priced options; every ruling lands here in the same turn.
