@@ -5436,3 +5436,17 @@ test/my free); the turn/cluster sweep waits on turn.clj/cluster.clj
 (dirty from step 2 / publication); ops-effects next when a slot frees.
 Editing lanes with JVMs: publication, 1a, my-protocol; step 2 parked
 holding 39 files; `wave1-families-design` read-only.
+
+## 2026-09-21 ~09:05 UTC — wave-1 family specs written; 1a's producer facets landed; wave-2 design lane launched
+
+`wave1-families-design` landed `6fea138b1`
+([wave-1-families-on-the-bridge-spec-2026-09-21.md](wave-1-families-on-the-bridge-spec-2026-09-21.md):
+common launch contract; 1b, 1c (sole owner of `:seon.ns/agents`; 3a owns
+routing), C4 option 1, 1e deletion-dial sweep with its deletion inventory
+and reset requirements). `error-family-1a` landed `59e51e221` (database and
+interpreter refusal facets completed at their producers — the gate's
+class-2 reds for `seon.db/transact-call`, `history`, `index-page`).
+Read-only slot → `wave2-contracts-design` (2a enforcement seam as finding
+facts; 2b W4 leaves; 2c W1 db consumers listing the gate's undeclared
+returned refusals first; what 2a records so an uncontracted function is a
+namespace-agent task).
