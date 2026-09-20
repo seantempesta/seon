@@ -6473,3 +6473,25 @@ changed file costs as much as the whole codebase — has a sharper answer:
 it costs 27× MORE (277 s vs 10.2 s), and the cost is entirely our layer
 around clj-kondo, not clj-kondo. One-file target ≤ 2 s analysis, ≤ 5 s
 end to end.
+
+## 2026-09-22 ~17:10 local — STEP 2 LANDED (`0f5f849bd`, one commit, 96 files, +1,732/−1,772): diff reviewed; zero tests executed at landing → the orchestrator runs the cold gate now
+
+Reviewed the diff, not the summary: `src/seon/schema/form.cljc` (the 216-line
+raw walker) deleted; callers converted to Malli's own nodes
+(`malli.core/properties`, `children`, `deref`); the five error schemas now
+observe values (`:seon.error/run` lookup ref; `…/test-sym`,
+`…/function-sym` `:qualified-symbol`), the bridge refuses an error schema
+carrying another entity's identity attribute
+(`error-members-cannot-carry-another-entitys-upsert-identity`), and the
+orchestrator's `declared-row-schema` / `:seon.program/row-schema` patch is
+DELETED with its regression (dissolution). Parity: 1,209 attributes exact.
+Scratch boot on the lane's root reached ready in 29.1 s. The publication
+lane's `657b0b522` (adoption short-circuit when the cluster's stored
+commit equals the published commit — 8 lines, derives from the stored
+fact) also reviewed and accepted. RESET NEEDED: the five members above.
+Honest gap: the lane's final fast run executed ZERO tests (published-base
+admission still carried the old error schema), so the 12 failures / 2
+errors it triaged are fixed-by-reasoning until the cold gate runs. The
+orchestrator runs `bin/test --prepare-head-base` and step 2's named cold
+command now (machine otherwise idle), and the measurement script on
+`0f5f849bd` is running on `tmp/head-wt` / `tmp/head-root2`.
