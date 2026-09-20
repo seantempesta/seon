@@ -2304,6 +2304,57 @@
                           (get contexts path) (get rows path []) (get findings path []))))
             files))))
 
+(defn- cached-analysis
+  "Read an immutable memoized file artifact; absence is a cache miss."
+  {:malli/schema [:=> [:cat :string :string]
+                  [:maybe :seon.fn.file/artifact]]}
+  [directory key]
+  (let [file (io/file directory (str key ".edn"))]
+    (when (.isFile file)
+      (try
+        (edn/read-string (slurp file))
+        (catch Exception failure
+          (throw (ex-info "Publication analysis cache is unreadable."
+                          {:seon.error/kind ::analysis-cache-unreadable
+                           :seon.fn/cache-path (str file)} failure)))))))
+
+(defn- cache-analysis!
+  "Publish pure analysis by content identity, never a mutable latest pointer."
+  {:malli/schema [:=> [:cat :string :string
+                       :seon.fn.file/artifact] :nil]}
+  [directory key value]
+  (let [target (.toPath (io/file directory (str key ".edn")))
+        parent (.getParent target)]
+    (when-not (Files/exists target (make-array java.nio.file.LinkOption 0))
+      (Files/createDirectories parent (make-array java.nio.file.attribute.FileAttribute 0))
+      (let [temporary (Files/createTempFile parent "analysis-" ".edn"
+                                            (make-array java.nio.file.attribute.FileAttribute 0))]
+        (try
+          (Files/writeString temporary (pr-str value) StandardCharsets/UTF_8
+                             (make-array java.nio.file.OpenOption 0))
+          (Files/move temporary target
+                      (into-array java.nio.file.CopyOption
+                                  [java.nio.file.StandardCopyOption/ATOMIC_MOVE
+                                   java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+          (finally (Files/deleteIfExists temporary))))))
+  nil)
+
+(defn- resolution-digest
+  "Conservatively identify the complete declaration world supplied to analysis.
+  Bodies are absent. Retained files are not reanalyzed when this key changes;
+  the existing graph closure alone decides which inputs enter the cache."
+  {:malli/schema [:=> [:cat :seon.fn.manifest/manifest] :string]}
+  [manifest]
+  (id/digest 64 [(into (sorted-map)
+                       (mapcat :seon.fn.file/declaration-digests)
+                       (:seon.fn.manifest/artifacts manifest))
+                 (:seon.fn.manifest/declaration-digests manifest)]))
+
+(defn- artifact-cache-key
+  {:malli/schema [:=> [:cat :string :string :string :string] :string]}
+  [toolchain resolution path input-digest]
+  (id/digest 64 [:artifact toolchain resolution path input-digest]))
+
 (defn build-manifest
   "Build the complete manifest, analyzing only changed inputs and referrers.
   Incremental requests carry the previous manifest, published graph rows and
@@ -2330,9 +2381,11 @@
         cache-root (::analyzer/cache-root request)
         files-by-path (into {} (map #(vector (fs/relative-path directory (.getCanonicalPath ^java.io.File %)) (.getCanonicalPath ^java.io.File %))) files)
         input-digests (update-vals files-by-path current-file-digest)
+        analysis-cache (str (io/file (or cache-root (str (io/file directory "target/publication-analysis"))) "artifacts"))
         reusable? (and previous
                        (= (:seon.source/toolchain-digest previous)
                           (toolchain-digest previous input-digests dependencies)))]
+      (let [result
     (if-not reusable?
       (let [_ (when (and previous cache-root)
                 (analyzer/forget-namespaces!
@@ -2364,13 +2417,31 @@
                                :seon.fn.manifest/declaration-digests schema-digests)
               affected (publication-inputs previous candidate changed (or (:seon.fn/published-rows request) []))
               additional (set/difference affected changed)
-              additional-artifacts (analyzed-artifacts forms roots directory
-                                      (vec (keep files-by-path (sort additional)))
-                                      (into known (manifest-function-symbols candidate)) cache-root)
+              resolution (resolution-digest candidate)
+              toolchain (id/digest 64 [(:seon.source/toolchain-digest previous) schema-digests])
+              cached-artifacts (into {} (keep (fn [path]
+                                         (when-let [artifact (cached-analysis analysis-cache
+                                                               (artifact-cache-key toolchain resolution path (get input-digests path)))]
+                                           [path artifact]))) additional)
+              additional-artifacts (into (vec (vals cached-artifacts))
+                                    (analyzed-artifacts forms roots directory
+                                      (vec (keep files-by-path (sort (remove (set (keys cached-artifacts)) additional))))
+                                      (into known (manifest-function-symbols candidate)) cache-root))
               result (replace-manifest-artifacts candidate additional-artifacts)]
           (assoc result :seon.source/toolchain-digest
                  (toolchain-digest result input-digests dependencies)
-                 :seon.fn.manifest/declaration-digests schema-digests))))))
+                 :seon.fn.manifest/declaration-digests schema-digests))))
+            resolution (resolution-digest result)
+            toolchain (id/digest 64 [(:seon.source/toolchain-digest result) schema-digests])
+            previous-artifacts (into {} (map (juxt :seon.fn.file/relative-path identity))
+                                     (:seon.fn.manifest/artifacts previous))]
+        (doseq [artifact (:seon.fn.manifest/artifacts result)
+                :when (or (not reusable?)
+                          (not= artifact (get previous-artifacts (:seon.fn.file/relative-path artifact))))]
+          (cache-analysis! analysis-cache
+                           (artifact-cache-key toolchain resolution (:seon.fn.file/relative-path artifact)
+                                               (:seon.fn.file/digest artifact)) artifact))
+        result)))
 
 (defn- row-by-identity
   [rows]

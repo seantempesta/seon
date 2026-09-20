@@ -1043,3 +1043,49 @@ Main default was untouched. The shared `cluster.clj` became clean during this
 proof, so its final population/refresh conversion can proceed after items 3–4.
 The scratch proof read the shared tree; the focused fast run used HEAD plus
 only owned paths. Foreign source content is not claimed as this lane's change.
+
+## Analysis artifact memoization and finding summaries (in progress)
+
+The artifact memo is immutable EDN under the publication's isolated resolver
+cache (`artifacts/<digest>.edn`). Its identity includes the file content,
+relative path, toolchain, supplied schema forms, and declaration-resolution
+world. The resolution digest conservatively includes all declarations in the
+supplied manifest; bodies are excluded. This can miss a reusable artifact
+after an unrelated interface change, but cannot widen the existing declared
+edge closure or reuse stale analysis. Toolchain changes still force complete
+analysis once. There is no mutable latest-manifest pointer.
+
+Changed inputs are analyzed first to update clj-kondo's own namespace cache;
+additional unchanged referrers can reuse their matching immutable artifact.
+A whole-manifest memo hit without restoring that namespace cache would be
+incorrect after A → B → A interfaces, so no such shortcut is installed.
+Dependency ownership: `reference-code/clj-kondo/src/clj_kondo/impl/cache.clj:149`
+updates definitions and `:210` serializes cache synchronization; Seon's
+existing `forget-namespaces!` supplies invalidation. The new regression
+returns a callee to A while independently changing another function's body:
+the unchanged caller should reuse A and match fresh complete analysis.
+
+Findings already have one stored owner: `seon.lint/finding`, with optional
+`:seon.lint/fn` to the containing declaration and required `:seon.lint/file`.
+`src/seon/fn.clj` `lint-rows` produces those rows, and
+`test/seon/fn_test.clj` `static-findings-are-replaced-with-their-program-rows`
+already proves stored attribution and retraction. Adding a parallel
+`:seon.fn/finding` family would violate the one-mechanism law. The publication
+summary therefore counts these existing rows and computes added/resolved
+sets. Missing corresponding prior manifests report unavailable delta rather
+than treating missing evidence as an empty baseline. The individual warning
+roster is removed; complete findings remain queryable.
+
+The cluster path was clean immediately before this reporting-only edit.
+Population conversion and duplicate-publisher removal remain later work.
+
+Cache validation: fast run `d8f254b963e4`, **6 executed, 50 assertions,
+0 failures, 0 errors**. Selected `seon.fn.publication-cache-test`,
+`seon.fn.publication-toolchain-test`, and `seon.fn.publication-test` exactly
+once for the changed indexer inputs. The cache case took 953 ms; toolchain
+replay 1,565 ms; declaration cases 2,451 ms; incremental index fixture
+83,069 ms; schema declaration fixture 135,407 ms. Slot wait was 156 seconds,
+not publication work. Foreign dirty callers `src/seon/sci/eval.clj` and
+`test/seon/test_support.clj` used HEAD bytes, as announced by admission.
+The common population owner's adoption of this API is still owed; this
+commit does not claim the final one-file publication ceiling.
