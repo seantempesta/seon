@@ -529,12 +529,19 @@ bin/test --paths \
   test/seon/issue_test.clj test/seon/issue_generate_test.clj \
   test/seon/issue_settlement_test.clj test/seon/issue_deletion_test.clj \
   test/seon/issue/detect_test.clj \
+  src/seon/flow.clj resources/seon/schemas/seon.flow.edn \
+  test/seon/flow_test.clj test/seon/flow_configuration_test.clj \
+  src/seon/env.clj resources/seon/schemas/seon.env.edn \
+  test/seon/env_test.clj \
+  src/seon/shell/jvm.clj resources/seon/schemas/my.shell.edn \
+  test/seon/shell/jvm_test.clj \
   -- seon.ai-test seon.ai-stream-fold-test \
   seon.plan-test seon.plan-completion-test my.plan-test \
   seon.schedule-test seon.maintenance-test seon.maintenance-schema-test \
   seon.config-test seon.config-application-test \
   seon.issue-test seon.issue-generate-test seon.issue-settlement-test \
-  seon.issue-deletion-test seon.issue.detect-test
+  seon.issue-deletion-test seon.issue.detect-test \
+  seon.flow-test seon.flow-configuration-test seon.env-test seon.shell.jvm-test
 bin/test --platform
 ```
 
@@ -666,3 +673,53 @@ and warnings; `require seon.shell.jvm` exited zero. Fast tally owed at the
 unchanged runner boundary. Append `src/seon/shell/jvm.clj`,
 `resources/seon/schemas/my.shell.edn`, `test/seon/shell/jvm_test.clj` and
 namespace `seon.shell.jvm-test` to the accumulated fast/cold commands.
+
+### Context durable projection decision and accumulated verification
+
+Landed this continuation: flow `cade2f346`, env `192742aea`, shell JVM
+`1b5d19c0e`. The cold command above now includes their complete paths and
+namespaces. Each namespace loaded before its path-limited commit; each
+changed source/test pair had clean clj-kondo. No live adoption is claimed.
+
+The next family exposes a new PRD §6 consumer boundary at
+`src/seon/context.clj:487` and `:533`: capture-owned rows receive raw base
+errors, but their contract has no occurrence reference or recording inputs.
+The held turn caller (`src/seon/turn.clj:4335`) records the top-level error
+later through settlement, after capture commits. Copying arbitrary facet
+members to capture rows does not implement the ruled occurrence ownership;
+inventing recorder process identity or bounds would fetch missing authority.
+No context files changed. Exact contracts, ownership evidence, acceptance,
+and three priced options are in
+[the context capture issue](../../../seon/issues/context-capture-does-not-carry-error-recording-custody.md).
+
+Recommended: prepare recording in the existing turn/error owner and hand
+capture its occurrence reference/transaction (2–4 hours, one evidence owner,
+requires the held caller). Alternative: supply recorder inputs to capture
+and compose the recording there (3–5 hours, atomic capture/occurrence, changes
+callers and requires coordination with later settlement). Third: explicitly
+defer the two durable projections (15 minutes bookkeeping, retains kind debt).
+This is independent of the previously ruled fn and effect deferrals.
+
+One accumulated fast pass was attempted after the optional-member admission
+change `22a1a0567` landed and these inputs changed. At 09:16 UTC on
+2026-09-20 it armed 1479 contracts for 19 requested namespaces, then refused
+snapshot recording before executing tests. Run `9ddc984524c3`, tested HEAD
+`1b5d19c0ee4e9ec934ea855cc1440857a35059cc`, graph
+`e8cb1a8c76cfe6b393cf4b1a167ff815b1dbd56ef90d15c2373fa7fa53635411`
+(95 commits behind HEAD). The recording authority still refused the optional
+`:seon.error/offending` in `:seon.test.runner/invalid-marker-reason-error`:
+"A stored error member must have a storable registered attribute."
+Fast tally owed — admission held by
+`resources/seon/schemas/seon.test.runner.edn` at the recording authority.
+No dirty-overlay attribution or passing test tally is claimed. No unchanged
+namespace reran; prior attempts also executed no tests. The launcher exited
+and removed `tmp/test-runs/run.n3qcbi`; no scratch root/worktree remains.
+
+Remaining source census: context 9, edit 9, blob 5, operator 12,
+operator/state 16, bootstrap 12, effect 12; detector 1 explicitly owed to
+fn.clj's release. Operator/state has not been edited; its status must be
+rechecked before starting that family. Effect settlement at `effect.clj:557`
+remains untouched and owed under option 2. Other effect sites remain unconverted.
+`src/seon/store.clj` remains absent. Other sweeps still own seon.db,
+seon.cluster.message, seon.turn and seon.cluster.reply; error pass-through
+contract owners must add the new complete facets to their manifests.
