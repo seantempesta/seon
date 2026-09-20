@@ -327,7 +327,7 @@
     ;; callers' honest shape (2026-09-08 verification, P2's class).
     [:cat :seon.db/connection [:sequential :seon.blob/staged-write]
      [:fn clojure.core/fn?]]
-    :seon.schema/value]}
+    [:or :seon.schema/value :seon.db/error-result]]}
   [connection staged-writes commit-roots!]
   (if (seq staged-writes)
     (let [permit (gc-guard/acquire-reachability-permit!

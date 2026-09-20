@@ -3075,6 +3075,26 @@ union. No publication, GC permit or transaction behavior changes.
 `seon.blob-error-test` verifies that the armed wrapper returns the exact
 same complete turn-refusal object, validated against its declared schema.
 
+```sh
+bin/test-fast --paths src/seon/blob.clj test/seon/blob_error_test.clj -- seon.blob-error-test
+```
+
+Verification is blocked by a measured stale-fixture contract, not green:
+the loaded Var and captured wrapper output are
+`[:or :seon.schema/value :seon.db/error-result]`, while the fixture projection
+still carries `:seon.schema/value` for `seon.blob/with-publication!`.
+Instrumentation correctly follows that supplied projection and refuses
+the returned turn error. The held paths are `test/seon/test_support.clj`,
+`src/seon/test/runner.clj`, `bin/test`, and `bin/test-fast`; none was edited.
+The existing [fixture contract issue](../../../seon/issues/canonical-fixture-retains-old-function-contracts-after-adoption.md)
+now carries the exact evidence. No instrumentation behavior was weakened.
+
+First run `b65f09f1c738`: **1 executed / 1 assertion / 0 failures / 1 error**,
+wall-clock **259.31 s**, including **116 s** waiting for a test slot.
+The diagnostic repeat `3ea0258ab500` recorded the same tally in **139.46 s**.
+Its temporary contract print was removed after recording the three-way
+comparison. The canonical regression remains for a fresh authoritative base.
+
 ### Stale contract-refusal expectations
 
 Converted nine assertion sites in `test/seon/run6_db_test.clj`,

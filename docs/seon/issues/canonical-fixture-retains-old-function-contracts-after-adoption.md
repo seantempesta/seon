@@ -7,6 +7,32 @@ tags: [issue, test, schema, wave/test-fixture]
 
 # Refresh canonical fixture contracts after development adoption
 
+## Fast snapshot observation — 2026-09-23
+
+The same mismatch is now verified in a newly launched `--paths` fast JVM,
+not only a retained development JVM. `seon.blob/with-publication!` has this
+loaded output and captured wrapper contract:
+
+```clojure
+[:or :seon.schema/value :seon.db/error-result]
+```
+
+Inside `with-database`, the supplied projection's function-contracts entry
+for that same symbol still ends with `:seon.schema/value`. A callback's
+complete `:seon.turn/refused-error` is consequently refused by the armed
+wrapper. The snapshot contains the edited source and announces its overlay
+base as 11 commits behind HEAD. The exact three-way observation (loaded
+Var / fixture projection / captured wrapper) is in
+`tmp/error-class4-contract-probe.log`, run `3ea0258ab500`: 1 test / 1 assertion
+/ 0 failures / 1 error, 139.46 s. This establishes stale supplied program
+facts; it does not establish which acquisition/cache operation retained them.
+
+The regression is `test/seon/blob_error_test.clj`. Do not repair this by
+preferring host metadata over the caller's projection or by bypassing the
+canonical fixture. `test/seon/test_support.clj`, `src/seon/test/runner.clj`,
+`bin/test`, and `bin/test-fast` were held by the test-system lane at this
+observation and were not edited by the error lane.
+
 ## Problem
 
 In-process regressions execute the newly loaded function against the old
