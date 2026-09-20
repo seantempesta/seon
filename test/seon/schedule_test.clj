@@ -1,5 +1,6 @@
 (ns seon.schedule-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.repl :as repl]
+            [clojure.test :refer [deftest is testing]]
             [malli.core :as m]
             [seon.cluster.agent :as agent]
             [seon.cluster :as cluster]
@@ -23,7 +24,6 @@
      (let [basis (:max-tx @connection)
            refusal (test-support/refusal-data
                     #(apply schedule/fire-due! [connection "root" (Date.)]))]
-       (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
        (is (= (quote seon.schedule/fire-due!) (:seon.instrument/contract-violated refusal)))
        (is (= basis (:max-tx @connection)))))))
 
@@ -49,7 +49,7 @@
            expected (into #{} (map (juxt :seon.schedule.task/id :seon.fn/sym
                                           :seon.schedule/expression :seon.schedule/zone-id))
                           declarations)]
-       (is (not (:seon.error/kind result)) (pr-str result))
+       (is (seq (:tx-data result)) (pr-str result))
        (is (seq expected))
        (is (= expected (set rows)))
        (is (every? #(not= "* * * * *" (nth % 2)) rows))
@@ -86,14 +86,19 @@
 (defn flat-error-handler
   [request]
   (swap! handler-calls conj request)
-  {:seon.error/kind :seon.schedule-test/returned-error
+  {:seon.error/at (Date.)
+   :seon.error/layer :seon.schedule-test/handler
+   :seon.error/operation 'seon.schedule-test/flat-error-handler
    :seon.error/message "The scheduled test handler returned an error."})
 
 (defn throwing-handler
   [request]
   (swap! handler-calls conj request)
   (throw (ex-info "The scheduled test handler threw."
-                  {:seon.error/kind :seon.schedule-test/thrown-failure})))
+                  {:seon.error/at (Date.)
+                   :seon.error/layer :seon.schedule-test/handler
+                   :seon.error/operation 'seon.schedule-test/throwing-handler
+                   :seon.error/message "The scheduled test handler threw."})))
 
 (def ^:private result-caps
   (assoc (config/result-caps (test-support/effective-config))
@@ -127,9 +132,7 @@
    connection
    [{:seon.agent/id "root"}
     {:seon.ns/name handler-ns}
-    {:seon.fn/sym handler
-     :seon.fn/ns [:seon.ns/name handler-ns]
-     :seon.schema.admission/source :core}
+    (test-support/program-fn-row @connection handler (repl/source-fn handler))
     {:seon.schedule/id (str task-id "/schedule")
      :seon.schedule/expression "* * * * *"
      :seon.schedule/zone-id "UTC"}
@@ -138,7 +141,7 @@
      :seon.schedule.task/function [:seon.fn/sym handler]
      :seon.schedule.task/schedule
      [:seon.schedule/id (str task-id "/schedule")]}])]
-    (is (not (:seon.error/kind result)) (pr-str result))
+    (is (seq (:tx-data result)) (pr-str result))
     result))
 
 (defn- count-with
@@ -180,7 +183,7 @@
        (is (= 2 (count-with @connection :seon.schedule.fire/id)))
        (is (= 2 (count-with @connection :seon.maintenance.request/id)))
        (is (= 2 (count-with @connection :seon.maintenance.receipt/completed-at)))
-       (is (not (:seon.error/kind
+       (is (seq (:tx-data
                  (db/transact! connection
                                [{:seon.message/id "schedule-test/inbox"
                                  :seon.message/content "A declared concern changed."
@@ -344,11 +347,11 @@
                              :seon.maintenance.receipt/completed-at)))))))
 
 (deftest returned-and-thrown-handler-errors-use-the-existing-root-wake
-  (doseq [[task-id handler expected-kind]
+  (doseq [[task-id handler expected-operation]
           [["schedule-test/returned" (quote seon.schedule-test/flat-error-handler)
-            :seon.schedule-test/returned-error]
+            'seon.schedule-test/flat-error-handler]
            ["schedule-test/thrown" (quote seon.schedule-test/throwing-handler)
-            :seon.schedule-test/thrown-failure]]]
+            'seon.schedule-test/throwing-handler]]]
     (testing handler
       (test-support/with-database
         (fn [connection]
@@ -380,9 +383,9 @@
                               [?occurrence :seon.error.occurrence/count ?count]] (db/db connection))))
             (is (= task-id task))
             (is (inst? nominal)))
-          (is (= expected-kind
-                 (db/q '[:find ?kind .
-                         :where [_ :seon.error/kind ?kind]]
+          (is (= expected-operation
+                 (db/q '[:find ?operation .
+                         :where [_ :seon.error/operation ?operation]]
                        @connection))))))))
 
 (deftest schedule-remains-the-third-proc-in-the-agent-graph

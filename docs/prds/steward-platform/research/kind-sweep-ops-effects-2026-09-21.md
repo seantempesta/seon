@@ -269,3 +269,31 @@ bin/test --paths src/seon/plan.clj resources/seon/schemas/my.plan.edn \
 
 No live adoption or browser proof claimed. The new observation attributes and
 retired marker attributes join the publication/reset boundary.
+
+### ops-effects-2: schedule checkpoint
+
+Changed src/seon/schedule.clj, resources/seon/schemas/seon.schedule.edn,
+test/seon/schedule_test.clj. Retirement census: source 10 → 0, resource
+7 → 0, test 7 → 0. Seven thrown observations now carry complete diagnostics
+and substantive members: undated task entity, unexpected fire identity,
+incomplete task identity, changed task identity, missing receipt identity,
+invalid terminal member, unresolved handler symbol. Deleted the unused
+missing-execution-handle marker declaration. The transaction wrapper preserves
+the database refusal unchanged; no second error classification is introduced.
+Handler regressions assert recorded operation plus the existing wake,
+occurrence count and receipt relations; fixture function declarations use the
+canonical analyzed helper.
+
+Namespace load printed `:loads`; lint: 0 errors / 0 warnings.
+The single accumulated fast request for seon.schedule-test stopped before
+tests at the same held invalid-marker-reason-error declaration as plan.
+Fast tally owed — admission held by resources/seon/schemas/seon.test*.edn
+and src/seon/test/*.clj. No green or live adoption proof claimed.
+Base-check debt: seon.db/transact! and maintenance/result-entity-response
+still declare generic error outputs. Maintenance is next in this lane.
+
+Cold proof owed (orchestrator only): `bin/test --paths src/seon/schedule.clj
+resources/seon/schemas/seon.schedule.edn test/seon/schedule_test.clj --
+seon.schedule-test`, followed by platform proof with the accumulated slices.
+Skill drift is recorded in
+`docs/seon/issues/flow-skill-forbids-current-turn-acquisition.md`.
