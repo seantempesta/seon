@@ -6556,3 +6556,19 @@ boot recording, five `seon.source` declarations, tests), then slices 1–4
 in the plan's order, stopping after each for the orchestrator's
 measurement and diff review. The cold gate follows slice 0 and the next
 reset. No other lane runs.
+
+## 2026-09-22 ~19:20 local — SLICE 0 ACCEPTED (`cd701afc2`, guard deleted: −196 lines cluster.clj, 5 declarations, tests); RESET at that commit CONVERGED end to end
+
+Diff reviewed: pure deletion in src/script (the only added lines are
+let-binding restructuring), the AGENTS.md claim corrected in the same
+commit, five `seon.source` declarations removed, three publication tests
+trimmed. `bin/seon reset --force` at `cd701afc2`: republish 233.5 s,
+refork 29.3 s, start 37.7 s, **adopt 122.8 s → converged**, lifecycle
+425.0 s, exit 0. First fully converged default since last night. The
+adopt's cost is the whole-program adoption slice 4 deletes (program
+reconciliation 37.4 s, reconciliation transaction 21.1 s, changed
+definition comparison 19.6 s, issue reconciliation 13.4 s, source build
+11.8 s). Boot fault with the erased message still present (slice 4).
+Running serially now: `bin/test --prepare-head-base`, bare `bin/test`
+(first cold gate since the redesign), then the measurement script at
+`cd701afc2`. Slice 1 (one JVM) is released after those three.
