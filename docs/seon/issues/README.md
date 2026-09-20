@@ -30,9 +30,9 @@ adoption copies those exact published facts by identity. Issue notes are NOT
 part of the source digest: a note owns no program facts, so editing one
 never re-identifies `current-src` and never rebuilds the program graph
 (`src/seon/cluster.clj:1685`, `src/seon/cluster/source.clj:94`). The
-publication's issue owner indexes the folder as it stands at every
-publication, and an explicit `bin/seon init --dev default --changed
-docs/seon/issues/<note>.md` indexes an edit now.
+publication's issue owner indexes the folder when the source digest changes.
+An unchanged source digest returns the existing commit without any writes;
+issue-only indexing is an explicit `seon.issue/index!` operation.
 Ordinary older clusters retain their chosen publication.
 
 Query directly with:

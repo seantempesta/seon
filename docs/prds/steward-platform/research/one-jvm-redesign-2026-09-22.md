@@ -653,7 +653,7 @@ and call relations. The parity/load script passed: **3,358 schemas,
 
 Focused run `81ee2aeae0cc` executed **5 tests / 46 assertions / 2 failures /
 1 error**, exit 1. Both failures reopen
-[unchanged publication identity facts advancing the branch](../../../seon/issues/unchanged-publication-identity-facts-still-advance-the-branch.md):
+[unchanged publication identity facts advancing the branch](../../../seon/issues/archive/unchanged-publication-identity-facts-still-advance-the-branch.md):
 the third unchanged seal moves the head and forces a fourth recording
 attempt. That existing assertion remains intact for slice 3. Its test took
 322.147 s; the missing-activation regression passed in 104.565 s. Both
@@ -770,3 +770,87 @@ Final source load passed (`seon.fn`, `seon.fn.analyzer`, `seon.cluster`,
 lock free; after verifying no JVM referenced it, the lane deleted its own
 scratch root. No worktree was created and no default/foreign root was
 operated. Named authorities were read end to end as recorded above.
+
+## Slice 3 — publication transactions, measured before editing
+
+Read the new AGENTS.md **SECONDS, NOT MINUTES** owner law, the redesign
+plan end to end, the unchanged-publication issue end to end, and the new
+working-edge blocks through the reset/complete-tier report. The existing
+data-oriented Clojure, Datahike, REPL and testing skills remain applied.
+
+At `d5648c1da`, own root `tmp/one-jvm-redesign-root`, cluster `s`, PID
+71495, prepl 54881: the common publisher's unchanged empty upsert took
+**21.567 s** and moved `6ab048ea-651e-5aba-95f3-769b84445672` to
+`6ab049e9-8f7a-5eae-b7fe-cbd3b857aee2`. Phases: preparation 516.8 ms;
+unchanged seal setup 7,465.2 ms; issue indexing 4,033.7 ms; activation
+seal 423.3 ms; branch publication/readback 9,116.4 ms. It did O(program)
+projection acquisition, issue inventory and unresolved-call reporting for
+an unchanged digest. The existing cluster shortcut instead took **1.854 s**
+and kept the head. It still read and validated the entire manifest.
+
+The actual one-file docstring publication took **45.842 s**, excluding
+adoption. It processed **one input, five rows, three function contracts**;
+the prior attribution of whole-program contract compilation to every
+publication does not hold for this measured path. Larger intervals: source
+build before analysis 7.894 s; after findings/before branch publication
+12.428 s; reconciliation transaction 2.619 s; activation seal 7.283 s;
+branch publication/readback 9.004 s. Contract projection was **0.335 ms**.
+Step 2 must remove the measured whole-program work, not optimize that
+already-small projection.
+
+Reproducer: [publication probe](one-jvm-slice3-publication-2026-09-22.clj),
+called through the existing bounded `prepl-eval!`. Evidence:
+[unchanged seal](one-jvm-slice3-before-seal-2026-09-22.edn),
+[cluster no change](one-jvm-slice3-before-nochange-2026-09-22.edn),
+[one file](one-jvm-slice3-before-docstring-2026-09-22.edn).
+The first probe omitted the supplied projection and was refused before
+publication; the corrected call carries the instance projection. Two
+probe reader mistakes were corrected before the docstring call executed.
+The docstring was restored in `finally`.
+
+Foreign boundary: the error lane began editing `error.clj`, `db.clj`,
+`blob.clj`, `turn.clj` and their tests during setup. Live measurements use
+a HEAD archive inside the own root, constructed like `bin/test:694–753`,
+with existing dependency/cache links and no Git worktree. No foreign
+source bytes enter that snapshot. Tests use the required HEAD-plus-owned
+paths snapshot. The initial complete publication cost 198.873 s; snapshot
+boot also rebuilt its dependency classes once (44.385 s). Those are the
+explicitly authorized initial-index/boot operations, not edit latency.
+
+Dependency ledger: Datahike `commit-as-db` loads an immutable commit and
+retains the connection's cache identity (`reference-code/datahike/src/
+datahike/versioning.cljc:469–492`); no transaction is needed to inspect
+its source digest. `force-branch!` checks `:expected-current-commit` before
+mutating (`:323–388`), preserving changed-publication conflict semantics.
+`program/exact-replacement-tx-in` already computes changed owned attributes
+and calls Datahike attribute retraction (`src/seon/program.cljc:1007–1040`);
+step 2 will hand it only the changed declaration rows.
+
+### Step 1 — unchanged means no population or seal
+
+The common `source/publish!` compares the stored source digest before
+opening any scratch branch, resolving population, computing an input
+inventory or sealing. A match returns the current stored commit with
+`:seon.source/built? false`. The cluster shortcut now precedes full
+manifest reading/validation. An issue-only change cannot override the
+no-transaction invariant; the issue documentation names `seon.issue/index!`
+for explicit issue-only indexing. No new state or cache is introduced.
+
+Step-1 fast run `5b4e2c650ac6`: **1 executed, 5 assertions, zero failures
+or errors**, basis `536870921`; program digest
+`832a410414d9ce7e5f3ab4dcf4ebfd7a06b20fa495ec3c1a89049095f9d4ad72`.
+The complete initial publication took 136.688 s inside the explicitly long
+fixture; its thread sample named schema-shape fingerprinting during full
+contract population. The repeated publication called population, activation
+and `db/transact!` **zero times** and retained its head. The existing
+evidence/race test's unchanged-rebuild assertion now expects that same
+recorded commit, not a new descendant; the broader race test has not been
+rerun in this step. After the snapshot ran, only dead issue-note path
+selection and indentation were removed from the tested production bytes.
+
+| Step-1 path | Before bytes | After bytes | Net deleted |
+|---|---:|---:|---:|
+| `src/seon/cluster.clj` | 187,099 | 186,507 | 592 |
+| `src/seon/cluster/source.clj` | 32,014 | 32,873 | -859 |
+| `test/seon/cluster/source_evidence_test.clj` | 12,651 | 12,657 | -6 |
+| `test/seon/cluster/source_nochange_test.clj` | 0 | 1,842 | -1,842 |

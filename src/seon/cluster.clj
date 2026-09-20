@@ -1931,13 +1931,6 @@
                        (when-not (identical? token (::holder-token current))
                          current))))))))))
 
-(def ^:private issue-note-path
-  "The one repository path whose Markdown the publication indexes but does
-  NOT digest. An issue note owns no program facts, so it never re-identifies
-  `current-src`; `seon.issue/notes` reads this same folder at every
-  publication (`src/seon/issue.clj:121`)."
-  "docs/seon/issues")
-
 (def ^:private schema-declaration-path
   "The one repository path whose content IS the merged schema declaration set.
 
@@ -2171,17 +2164,16 @@
   [root store roots]
   (let [snapshot (current-source-snapshot roots)
         digest (:seon.source/digest snapshot)
-        published (current-publication store nil)
-        cached (read-source-artifact root)
-        valid? (valid-source-manifest? (:seon.fn/manifest cached))
-        previous (when (and published
-                            (= (:seon.source/digest published) (:seon.source/digest cached))
-                            valid?)
-                   (:seon.fn/manifest cached))]
-    (if (and (= digest (:seon.source/digest published))
-             (not (:seon.source/issue-notes? roots)))
+        published (current-publication store nil)]
+    (if (= digest (:seon.source/digest published))
       published
-      (let [database (when published (source/database store (:seon.source/commit-id published)))]
+      (let [cached (read-source-artifact root)
+            valid? (valid-source-manifest? (:seon.fn/manifest cached))
+            previous (when (and published
+                                (= (:seon.source/digest published) (:seon.source/digest cached))
+                                valid?)
+                       (:seon.fn/manifest cached))
+            database (when published (source/database store (:seon.source/commit-id published)))]
         (try
           (let [_ (report-source-progress! "analysis started")
                 manifest (seon.fn/build-manifest
@@ -2550,10 +2542,7 @@
            held-store (acquire-root-store! store-dir)
            ;; The publication's own roots, read before any adoption reload can
            ;; re-evaluate the vars that declare them.
-           roots (cond-> (assoc (publication-roots) :seon.fn/root directory)
-                   (some #(str/starts-with? (fs/relative-path (fs/source-directory) %)
-                                            (str issue-note-path "/")) changed-paths)
-                   (assoc :seon.source/issue-notes? true))]
+           roots (assoc (publication-roots) :seon.fn/root directory)]
        (try
          (retrying-source-change
           (fn []

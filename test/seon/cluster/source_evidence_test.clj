@@ -84,8 +84,8 @@
           (is (string? (:seon.test/reach-unknown before)))
           (is (= 1 (count (:seon.test/failures before))))
           (is (= before after) "rebuilding carries membership diagnostics and component evidence"))
-        (is (= #{recorded-commit} (d/parent-commit-ids rebuilt-db))
-            "the latest published evidence is the parent, not the older :db base")
+        (is (= recorded-commit (:seon.source/commit-id rebuilt))
+            "The unchanged digest returns the latest commit, including its test evidence.")
         (let [changed (#'source-fixture/upsert opened (:seon.source/commit-id rebuilt) @#'source-fixture/digest-b [])
               changed-db (source/database opened (:seon.source/commit-id changed))]
           (is (= (:seon.test.run/id run)

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-20
 tags: [issue, publication, wave/publication-velocity]
@@ -47,3 +47,16 @@ attribute; the identity-fact comparison in `upsert!` was unchanged. This
 reopens the behavior, not the original root-cause claim: the exact datom
 that moves the head still needs inspection. Slice 3's no-transaction
 requirement is the owning redesign boundary. Do not relax the assertion.
+
+## Slice 3 resolution — 2026-09-22
+
+The before probe reproduced an unchanged seal taking 21.567 s and moving
+the branch. The common publisher now compares the stored digest before any
+scratch branch, population, activation or transaction. It returns the
+current commit unchanged, including test records published since the prior
+source build. Real-store regression
+`seon.cluster.source-nochange-test/unchanged-digest-keeps-the-published-commit-without-a-transaction`
+passed five assertions in recorded fast run `5b4e2c650ac6`; delegated spies
+observed zero population, activation and transaction calls. Cold/platform
+gates remain the orchestrator's proof. Full evidence is in
+[the redesign note](../../../prds/steward-platform/research/one-jvm-redesign-2026-09-22.md).

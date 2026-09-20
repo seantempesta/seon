@@ -480,11 +480,26 @@
     populate-request :seon.source/populate-request
     progress! :seon.source/progress!
     :or {progress! (constantly nil)}}]
-  (let [projection (schema/declaration-projection)
+  (let [published (current store)
+        committed (when published
+                    (d/commit-as-db (:seon.store/connection-object store)
+                                    (:seon.source/commit-id published)))
+        unchanged? (when committed
+                     (try
+                       (let [digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
+                                          committed)]
+                         (when (map? digest)
+                           (refuse! ::publish-readback-failed
+                                    "The published source digest could not be read." digest))
+                         (= source-digest digest))
+                       (finally (d/release-materialized-db committed))))]
+    (if unchanged?
+      (assoc published :seon.source/digest source-digest :seon.source/built? false)
+      (let [projection (schema/declaration-projection)
         input-digest (publication-input-digest! (or directory (fs/source-directory)))
           populate-fn (resolve-population populate source-digest)
           activation-fn (resolve-activation activation source-digest)
-          expected-commit (or requested-commit (:seon.source/commit-id (current store)))
+          expected-commit (or requested-commit (:seon.source/commit-id published))
           scratch (scratch-branch)]
       (registry/branch! {:seon.store/store store
                          :seon.cluster.registry/from (or expected-commit :db)
@@ -581,7 +596,7 @@
            unresolved-report}))
         (catch Throwable failure
           (retire-scratch! store scratch)
-          (throw failure)))))
+          (throw failure)))))))
 
 (defn- assert-scalar-rows!
   [db rows]
