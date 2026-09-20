@@ -6017,3 +6017,26 @@ recommendation put to the owner: the error-map constructor in
 construction so the in-memory map and the stored entity are the same map;
 retire the optional in-memory key and the writer's skip rule. Awaiting the
 owner's word before changing the constructor.
+
+## 2026-09-22 ~10:15 local — publication lane: export fixed, boot form bounded; two foreign declarations block its proof; gate-restructure resumed
+
+`publication-dissolution` landed `ef6dee041`, `4b0347f20`, `9cf20817f`,
+`94ec20414`, `8eb7726d3` (producer-observation fixes; projected export
+reads — issue `the-publication-export-does-not-identify-the-exported-program`
+addressed; the boot form bounded with a regression; the booted projection
+carried with recorded producer observations). Stopped (option 1): its
+same-tree adoption proof is blocked by two foreign declarations — (a)
+`fd93f709a` (sci-program's call-preparation commit) declares
+`:seon.call-preparation/candidates` as a vector of vectors of ints, which
+has no Datahike value type, so canonical admission refuses the error
+schema (issue `a-call-preparation-facet-requires-unstorable-candidates`;
+the fix is a storable declaration: a tuple for a bounded ordered list or
+component rows with an ordinal — never a bypass); (b)
+`seon.dev.docstring/check-file`'s contract references a Var that does not
+resolve to a Malli schema at arming, and a failed adoption leaves the
+worker half-armed (issue `development-adoption-cannot-compile-docstring-var-contracts`
+→ gate-restructure). Publication paused, session retained; it resumes for
+its adoption proof + measurements after (a) and (b) land. Owner's point,
+recorded: the bridge refusing an unstorable declaration IS the
+compatibility guarantee working. Editing lanes: step 2, sci-program,
+gate-restructure.
