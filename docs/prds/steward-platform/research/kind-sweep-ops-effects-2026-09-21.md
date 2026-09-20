@@ -1,6 +1,6 @@
 ---
 type: research
-status: blocked
+status: active
 created: 2026-09-21
 tags: [error-model, kind-retirement, ops-effects]
 ---
@@ -77,3 +77,37 @@ pair is repaired.
 The orchestrator ultimately owes the cold command over every changed
 ops/effects source, schema, and test namespace, followed by
 `bin/test --platform`. No cold or platform proof was run here.
+
+## Resumed background slice — `5a42b6f2f`
+
+The orchestrator released `src/my/background.clj` and its test after
+`9875331d1` and ruled that marker-only facets gain substantive required
+observations. The resumed slice converted all three background facets and
+their producers:
+
+- invalid macro calls carry `:my.background/call-source`, the refused forms as
+  a value observation;
+- invalid poll arguments carry `:my.background/result-observation`;
+- absent receipts carry `:my.background/missing-result-ref`, the valid lookup
+  ref that found no entity.
+
+Each new attribute is declared in `my.background.edn` with its scalar shape,
+value deletion semantics, and description. The boolean markers and class
+metadata were deleted. `seon.background/poll` now constructs the diagnostic
+base through `seon.error.refusal/diagnostic`; `poll` and `await` declare the
+exact local and pass-through facets. The R8 tests validate complete facets and
+their distinguishing evidence. The fixture's effect-owner lookup now carries
+the required qualified symbol rather than a string.
+
+The ordered kind/class/predicate, inline-base, and generic-output searches
+returned zero lines for the four committed paths. The HEAD load probe printed
+`:loads` for `my.background` and `seon.background` before the commit.
+
+The foreground fast command over `my.background-test` and
+`seon.background-test` launched one JVM but executed no tests: snapshot
+admission refused the concurrent dirty
+`:seon.test.runner/invalid-marker-reason-error` because it used non-storable
+`:seon.error/data` as a stored facet member. That resource is held by the
+test-system sweep and was neither edited nor added to this overlay. Run
+`cce3e98cf786` therefore has no tally. The background namespaces must be
+included in the final foreground rerun after the runner schema lands.
