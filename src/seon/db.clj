@@ -3356,11 +3356,28 @@
        :tx-meta {::receipt *receipt*}})))
 
 (defn- write-entity-schemas
+  "Identity attribute -> the entity schemas a row carrying it is validated as.
+
+   An identity attribute that DECLARES its row schema (`:seon.program/row-schema`
+   on the attribute, e.g. `:seon.test/sym` -> `:seon.test/test`) registers that
+   one schema only. Error facets (`[:and :seon.error/base [:map …]]`) may
+   observe such an identity as a required member — the test a runner could
+   not resolve, the turn a bootstrap refused — and are entity-shaped through
+   the base; before this rule every test row was validated as every facet
+   that observed `:seon.test/sym` and refused for a missing `:seon.error/at`
+   (2026-09-21, the canonical population could not be built at HEAD). An
+   identity without a declared row schema keeps the previous rule: every
+   entity schema requiring it."
   [projection]
   (schema/projection-cache-value
    projection ::write-required-identity-schemas
    (fn []
-     (let [forms (:seon.schema.projection/forms projection)]
+     (let [forms (:seon.schema.projection/forms projection)
+           declared-row-schema
+           (fn [attribute]
+             (:seon.program/row-schema
+              (schema.form/attr-form-properties
+               (schema.datahike/resolve-malli-form-in projection (get forms attribute)))))]
        (reduce-kv
         (fn [by-identity schema-key authored]
           (let [form (schema.datahike/resolve-malli-form-in projection authored)]
@@ -3369,7 +3386,9 @@
               (reduce
                (fn [result [attribute options]]
                  (if (and (not (and (map? options) (:optional options)))
-                          (schema/identity-attr? forms attribute))
+                          (schema/identity-attr? forms attribute)
+                          (let [row (declared-row-schema attribute)]
+                            (or (nil? row) (= row schema-key))))
                    (update result attribute (fnil conj []) schema-key)
                    result))
                by-identity (schema.form/map-entries form))

@@ -15,6 +15,7 @@
             [seon.config :as config]
             [seon.turn :as turn]
             [seon.db :as db]
+            [clojure.set]
             [seon.env :as env]
             [seon.fn :as seon.fn]
             [seon.id :as id]
@@ -2288,3 +2289,31 @@
            "a system process write carries no agent user and no per-write bound")
        (is (false? (@#'db/agent-provenance? database {}))
            "a write with no provenance user at all is a system write")))))
+
+(deftest an-identity-with-a-declared-row-schema-is-validated-as-that-schema-only
+  ;; Error facets observe identities as required members (`:seon.test/sym` on a
+  ;; runner's unresolved-test facet). Since 2026-09-21 the write validator
+  ;; registers, for an identity attribute that declares its row schema, only
+  ;; that schema — never every entity-shaped facet requiring the identity.
+  ;; Before this rule the canonical population could not be built: every test
+  ;; row was validated as a facet and refused for a missing `:seon.error/at`.
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           projection (db/carried-projection database)
+           forms (:seon.schema.projection/forms projection)
+           schemas (#'db/write-entity-schemas projection)
+           for-tests (set (get schemas :seon.test/sym))
+           facets (into #{}
+                        (keep (fn [[k form]]
+                                (when (and (vector? form) (= :and (first form))
+                                           (= :seon.error/base (second form))
+                                           (some (fn [entry] (and (vector? entry) (= :seon.test/sym (first entry))))
+                                                 (drop 1 (nth form 2))))
+                                  k)))
+                        forms)]
+       (is (= #{:seon.test/test} for-tests)
+           "the declared row schema is the only write schema for test rows")
+       (is (seq facets) "the fixture population still declares facets observing :seon.test/sym")
+       (is (empty? (clojure.set/intersection facets for-tests))
+           "no facet observing the identity validates the identity's rows")))))
