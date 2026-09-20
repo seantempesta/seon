@@ -4977,3 +4977,25 @@ Ruled option 1 (native Malli paths; `:in` for value location; behaviour
 assertions, never literal path vectors) — recorded in the bridge PRD above
 §7; lane resumed with the constraints. Editing lanes unchanged: step 1,
 turn-cluster, results-reuse; 1a waits for a slot with its option-2 facet.
+
+## 2026-09-20 ~22:20 UTC — publication dissolution (tools item 2, re-specified from measurement)
+
+Measured on tonight's gates: a full base publication ≈ 200 s of JVM work
+per cold gate after HEAD moves, in a fresh JVM: population commit 64 s
+(98,850 datoms; our writer validator, not Datahike), kondo analysis of all
+372 files 27 s, branch head 18 s, contract rows 17 s, preparation 13 s, JVM
+boot/load 40–60 s; 645 kondo warnings printed per gate; tonight 353 s slot
+wait before any of it. Three publishers build the same thing from scratch:
+the hook (into current-src), `bin/seon init`, `bin/test`'s base.
+
+**Plan (owner asked 2026-09-20 "how do we speed up the base publication"):**
+ONE publication per source digest, INCREMENTAL by file content digest (the
+hook's same-identity upserts, generalized), performed by the LIVE JVM (never
+a fresh one), consumed by default and every gate: base(HEAD) = newest base +
+publication of the files whose digest changed. Analysis is cached by the
+same file digest. The population commit halves with bridge step 4's diet
+(36 → 16 s application; 24 → 4 s owner discovery). Warnings become findings
+(tools item 5), not log lines. Delete the two other publishers. Prerequisite:
+bridge step 1 (the contract projection compiles inside publication and step
+1 rewrites that owner). Lane spec written when step 1 lands; owner: astra
+low from a spec; ~2 lane-days.
