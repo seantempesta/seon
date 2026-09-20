@@ -5939,3 +5939,19 @@ family 1a; render, render-2, my-protocol, test-system (11 owed), sci
 core, background/problems/ai/plan/schedule/maintenance/config/issue/
 flow/env/shell/edit/operator/bootstrap kinds; MCP fix; gate symbol fix
 + demand-started workers; nine launch specs.
+
+## 2026-09-21 ~23:10 UTC — fast runs record again; the db suite's seven reds are ONE unswept family (`seon.call-preparation`)
+
+With current-src published, `bin/test-fast --paths src/seon/db.clj
+test/seon/db_test.clj -- seon.db-test` executed and RECORDED 64 tests /
+466 assertions (3 F / 4 E). Six of the seven reds trace to
+`seon.call-preparation/snapshot refused return value at
+[:seon.call-preparation/refusals 0 :seon.error/at]`: `seon.call-preparation`
+was in no sweep's family — its `error-value` still builds `{kind true
+:seon.error/kind …}` and `error-value?` is a general predicate
+(call_preparation.clj:110-121), while its output contract's
+`:seon.error/value` now requires the base. Owed to the sci-program lane
+(it is SCI's hook seam) as its next item; the arity test's
+`(:seon.error/kind refusal)` expectation is that family's R8. The seventh
+was my regression's facet detection (fixed; one rerun in flight). No
+duplicate fixes tonight.
