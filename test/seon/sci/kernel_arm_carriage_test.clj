@@ -141,7 +141,9 @@
                       (kernel/arm (crossing-ctx) 1000)
                       (catch Throwable throwable throwable))
             data (ex-data failure)]
-        (is (= :seon.sci.kernel/already-armed (:seon.error/kind data)))
+        (is (= :seon.sci.kernel/arm-id
+               (get-in data [:seon.sci.kernel/guard-observation :seon.error.evidence/attribute])))
+        (is (= 'seon.sci.kernel/acquire-arm (:seon.error/operation data)))
         (is (int? (get-in data
                           [:seon.sci.kernel/existing-arm
                            :seon.sci.kernel/arm-id])))

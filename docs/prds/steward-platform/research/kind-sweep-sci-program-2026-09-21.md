@@ -421,3 +421,21 @@ test/seon/sci/documentation_test.clj test/seon/sci/shown_text_test.clj
 test/seon/sci/eval_instrumentation_test.clj -- seon.sci.eval-test
 seon.sci.documentation-test seon.sci.shown-text-test
 seon.sci.eval-instrumentation-test`, plus the orchestrator's platform proof.
+
+## Kernel conversion
+
+Kernel source kinds 2 → 0, resource class markers 7 → 0, kernel arm test 1 → 0.
+Invocation and failure-admission observations reuse the existing guard facet;
+foreign-arm assertions inspect the observed arm id and operation. The pure
+cause-chain reader still exposes the generic base alongside its facet union;
+its existing structural pass-through check is explicitly named as debt to
+`seon.error.refusal/refusal`, whose base is the target of `:seon.error/value`.
+This is thrown-failure normalization, not D12 recognition of returned data.
+
+The one kernel fast request (`tmp/sci-program-kernel-fast.log`, run.gtUEep)
+refused snapshot admission at the same optional raw runner offending member.
+**0 executed; tally owed.** Source/resource/test lint has zero errors;
+existing style warnings are excluded from the clean conversion lint. The
+required four namespaces load. Cold scope owed: `bin/test --paths
+src/seon/sci/kernel.clj resources/seon/schemas/seon.sci.kernel.edn
+test/seon/sci/kernel_arm_carriage_test.clj -- seon.sci.kernel-arm-carriage-test`.

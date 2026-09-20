@@ -581,9 +581,7 @@
                           :seon.sci.admit/record diagnostic-record}
                    subject (assoc :seon.fn/sym subject))
         existing (error.refusal/refusal throwable)]
-    (if (and (:seon.error/at existing)
-             (:seon.error/layer existing)
-             (:seon.error/operation existing))
+    (if (and (map? existing) (contains? existing :seon.error/at) (contains? existing :seon.error/layer) (contains? existing :seon.error/operation)) ;; debt: seon.error.refusal/refusal declares the generic :seon.error/base output (:seon.error/value's target) alongside its facets.
       ;; The refusal is already the boundary value. Wrapping it copied its
       ;; data, its ex-data (the whole refusal), and its throw-site message into
       ;; a `:nested-refusal` envelope, so the terminal renderer fitted six
@@ -671,8 +669,22 @@
             (when-not (sci.utils/var? sci-var)
               (throw
                (ex-info (str function-symbol " is not an installed SCI Var.")
-                        {:seon.error/kind ::unresolved-invocation
-                         :seon.fn/sym function-symbol :seon.sci.kernel/unresolved-invocation function-symbol})))
+                        (error/diagnostic
+ {:seon.error/at (java.util.Date.)
+  :seon.error/layer :seon.sci.kernel/evaluation
+  :seon.error/operation 'seon.sci.kernel/invoke
+  :seon.error/message "Requested function has no installed SCI Var; acquire the function before invocation."
+  :seon.sci.kernel/guard-observation
+  {:seon.error.evidence/attribute :seon.fn/sym
+   :seon.error.evidence/value function-symbol}
+  :seon.error/diagnostic-layer :seon.sci.kernel/evaluation
+  :seon.error/diagnostic-operation 'seon.sci.kernel/invoke
+  :seon.error/diagnostic-member :seon.fn/sym
+  :seon.error/diagnostic-expected :seon.sci.eval/invocation-result
+  :seon.error/diagnostic-offending function-symbol
+  :seon.error/diagnostic-cause :seon.error/unknown
+  :seon.error/diagnostic-evidence function-symbol
+  :seon.fn/sym function-symbol}))))
             (let [;; The SECOND of the two ruled call-preparation
                   ;; entrances. SCI's analyzed call path hooks itself; a
                   ;; named invocation applies the Var directly, so it
@@ -719,13 +731,20 @@
               :seon.sci.admit/record record-value})
             (catch Throwable admission-failure
               {:seon.sci.admit/value
-               {:seon.error/kind ::failure-admission-failed
-                :seon.error/message
-                (str (:seon.error/message failure)
-                     " Failure admission also failed: "
-                     (or (ex-message admission-failure)
-                         (.getName (class admission-failure))))
-                :seon.error/data
-                {:seon.sci.eval/throwable
-                 (.getName (class admission-failure))} :seon.sci.kernel/failure-admission-failed true}
+               (error/diagnostic
+ {:seon.error/at (java.util.Date.)
+  :seon.error/layer :seon.sci.kernel/evaluation
+  :seon.error/operation 'seon.sci.kernel/invoke
+  :seon.error/message "The invocation failure could not be admitted; inspect its admission evidence."
+  :seon.sci.kernel/guard-observation
+  {:seon.error.evidence/attribute :seon.error/message
+   :seon.error.evidence/value (or (ex-message admission-failure) "Failure admission failed.")}
+  :seon.error/diagnostic-layer :seon.sci.kernel/evaluation
+  :seon.error/diagnostic-operation 'seon.sci.kernel/invoke
+  :seon.error/diagnostic-member :seon.error/message
+  :seon.error/diagnostic-expected :seon.sci.eval/invocation-result
+  :seon.error/diagnostic-offending (or (ex-message admission-failure) "Failure admission failed.")
+  :seon.error/diagnostic-cause :seon.error/unknown
+  :seon.error/diagnostic-evidence (or (ex-message admission-failure) "Failure admission failed.")
+  :seon.error/offending failure :seon.error/data {:seon.error/exception-class (symbol (.getName (class admission-failure)))}})
                :seon.sci.admit/record record-value})))))))
