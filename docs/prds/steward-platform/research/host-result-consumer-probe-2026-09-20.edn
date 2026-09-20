@@ -1,0 +1,24 @@
+;; Read-only JVM form against the existing published authority.
+(let [held (some :seon.store/store
+                 (vals @(var-get (ns-resolve 'seon.cluster 'running-instances))))
+      database (seon.cluster.source/database
+                held (:seon.source/commit-id (seon.cluster.source/current held)))
+      run-id "a9a52dedca74"
+      members (seon.db/q
+               '[:find ?symbol ?passes ?fails ?errors
+                 :in $ ?id
+                 :where [?run :seon.test.run/id ?id]
+                        [?run :seon.test.run/members ?member]
+                        [?member :seon.test.member/symbol ?symbol]
+                        [?member :seon.test.member/pass-count ?passes]
+                        [?member :seon.test.member/fail-count ?fails]
+                        [?member :seon.test.member/error-count ?errors]]
+               database run-id)]
+  {:probe/run run-id
+   :probe/members members
+   :probe/legacy
+   (mapv (fn [[sym]]
+           (seon.db/pull database
+                        [:seon.test/sym :seon.test/run :seon.test/pass-count
+                         :seon.test/fail-count :seon.test/error-count]
+                        [:seon.test/sym sym])) members)})

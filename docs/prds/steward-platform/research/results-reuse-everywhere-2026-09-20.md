@@ -1059,3 +1059,68 @@ Final pre-commit require of `seon.cluster.source`, `seon.test`, `seon.test.fast`
 `seon.test.runner`, and `seon.test.cache` exited 0 (`final-load.log`, `:loads`).
 This checkpoint changes only the publication test's alias-qualified activation
 symbol, this note, and the existing publication-history issue's ownership/ruling.
+
+### Host admission probe and downstream reader decision
+
+The orchestrator extended ownership to `src/seon/plan.clj`, `src/my/test.clj`
+and affected tests. Those source paths and the direct test callers were clean.
+`test/my/plan_test.clj` and `test/seon/problems_test.clj` had foreign edits and
+were not changed. The publication lane's source/cache/launcher owners were
+not changed.
+
+The host draft now retains native selection's covered-member refs, reads actual
+reservations after admission, and prevents completed red members from being
+treated as pending coverage. The canonical `run-owned` probe passed:
+
+```sh
+bin/test-fast --paths src/seon/test.clj resources/seon/schemas/seon.test.edn test/seon/test/host_test.clj -- seon.test.host-test
+```
+
+HEAD snapshot `510a9236d9b800a5856b74b71ab4b4ba4d027f2c`, published base
+`98b0449d90652e72969190ce279ca6cac9bf67c23c6cc4a06c7eeb7ed228928a`.
+Run `e92996f7d9d3`: **1 executed, 0 unchanged, 8 assertions, 0 failures,
+0 errors**, exit 0. This outer regression called `run-owned` twice against
+one canonical cluster: two fresh run events, one execution member and one
+covered member. The second host result was unchanged and retained basis,
+program digest and input digest. This is fixture evidence, not a live agent
+turn or the orchestrator's cold gate.
+
+`tmp/results-reuse-everywhere/host-admission-probe.log`: **2,045 bytes**, SHA-256
+`1ab1cbd86c4e8b1e70024448f0a204573da19d51db9ddf113183fdda95482f8e`.
+Later draft changes forwarding requested basis, checking existing admission
+before repeated execution, and converting plan/my.test callers were not in
+this snapshot and are not claimed tested. The host implementation is uncommitted
+pending the reader decision below; the old caller fixtures are not yet converted.
+
+The audit found a larger atomic migration dependency. The admitted recorder
+stores member outcomes, while issue completion and failure discovery read the
+legacy test-row result family. A read-only MCP probe of the real recorded run
+`a9a52dedca74` confirmed four green members (pass counts 16, 29, 5, 1) and **zero
+legacy result attributes** on their corresponding test declarations. Three
+declarations existed with only symbols; the fourth was snapshot-only. The probe
+completed in 7,035 ms with no elision. Its reproducible form is
+[host-result-consumer-probe-2026-09-20.edn](host-result-consumer-probe-2026-09-20.edn).
+
+Exact consumers and acceptance criteria are in
+[the issue](../../../seon/issues/admitted-test-results-are-invisible-to-legacy-consumers.md).
+In particular `src/seon/issue.clj:822` requires legacy counts for done,
+`src/seon/problems.clj:348` discovers failures from them, and
+`src/seon/render/test.clj:11` pulls them for presentation. No held reader was
+edited. Switching host recording alone would make its new evidence invisible
+to those consumers.
+
+The next decision, sent as soon as this dependency was verified:
+
+1. **Recommended:** extend the slice to migrate these readers and affected
+   tests to queries over admitted member facts. Guarantee one fact authority
+   and working settlement/reporting; cost is broader reader conversion and
+   canonical regressions, with coordination for the held problem test.
+2. Have a separate lane migrate readers first. Same guarantee with an extra
+   handoff; host landing waits for that dependency.
+3. Temporarily write legacy latest-result projections too. Smaller consumer
+   change, but duplicates stored state and needs an explicit exception to the
+   one-mechanism ruling; it is not implemented.
+
+Cold host proof remains owed after the complete slice:
+`bin/test --paths src/seon/test.clj resources/seon/schemas/seon.test.edn src/seon/plan.clj src/my/test.clj test/seon/test/host_test.clj -- seon.test.host-test my.test-test seon.test-test seon.test-failure-facts-test seon.test-expiry-test`.
+That command must include the eventual reader and fixture conversions too.
