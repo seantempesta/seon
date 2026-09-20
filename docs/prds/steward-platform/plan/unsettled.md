@@ -6735,3 +6735,23 @@ reconciliation 29–38 s per adoption, changed-definition comparison
 21 s, reconciliation transaction 17 s (slice 4), contract projection
 22 s and contract rows 16 s per publication (slice 3). Rows measured
 under the platform tier's load; the quiet-window rerun follows slice 2.
+
+## 2026-09-23 ~00:30 local — the lane measured the incremental-analysis branch step by step: clj-kondo's own work on the changed file is 84 ms; OUR caller-closure computation is 105 s
+
+`05c77ac1d` (measured through the lane's scratch cluster's prepl, before
+any deletion; one-file `my.note` docstring change, 138.9 s total): input
+inventory 507 ms; toolchain comparison 29 ms; forget-namespaces 0.7 ms;
+known symbols 24 ms; **changed-file analysis by clj-kondo 83.8 ms**;
+candidate manifest 52 ms; `published-index-rows` **15.6 s**;
+`publication-inputs` caller closure **105.0 s**; cache-key/cached-analysis
+reads 48 ms; additional analyzed-artifacts (the callers re-linted)
+**15.0 s**; replace-manifest-artifacts 162 ms; cache writes 69 ms. The
+owner's thesis exactly: the library does the job in milliseconds and a
+bad algorithm of ours around it costs two minutes (the caller closure
+walks the whole program instead of following reverse `:seon.fn/calls`
+edges from the changed symbols — Datahike's AVET index answers that in
+milliseconds, `reference-code/datahike/src/datahike/db/search.cljc:140–157`).
+`5cf44da20` also landed: the fork records the published commit on the
+cluster row (the first adoption becomes the no-op). The lane is deleting
+the layer now (dirty: fn.clj, analyzer.clj, cluster.clj, source.clj and
+four tests). Complete tier at 1,431/1,967 tests.
