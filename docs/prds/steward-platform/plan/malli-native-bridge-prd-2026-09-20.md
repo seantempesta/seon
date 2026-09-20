@@ -471,6 +471,8 @@ once on the new bridge afterwards. The running config/plan lane finishes
 as is. The orchestrator coordinates overlapping paths before launch;
 this PRD does not authorize overwriting foreign edits.
 
+**Ruling 2026-09-20 ~22:00 UTC (orchestrator, step-1 lane's decision at `55076261e`): native Malli explanation paths govern.** Retained-root explanation changes a schema `:path` from `[0 :probe/x]` to `[0 0 :probe/x 0]`; section 7's parity clause guards against losing explanation information, not Malli's own path shape. Both `:in` and `:path` are carried unchanged; message grammar and value location use `:in` plus the schema's name/properties; regressions assert the offending value, violated key and `:in`, never a literal `:path` vector; every converted `:path` consumer is listed in the step-1 landing note. No translation layer, no derived explanation schemas.
+
 ## 7. First lane — launch verbatim on astra low
 
 > Implement **step 1 only: registry value, compile once, seal, carry** in

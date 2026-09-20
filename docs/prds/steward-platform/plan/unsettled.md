@@ -4968,3 +4968,12 @@ frees (three hold: results-reuse, turn-cluster, and `bridge-step1-registry`,
 LAUNCHED now on astra low from PRD §7 with held paths named). Cold gate
 running on 1a's three green suites (`tmp/orchestrator/gate-1a-three-suites-2026-09-20.log`);
 the six-suite gate follows the acquisition slice.
+
+## 2026-09-20 ~22:00 UTC — step 1 ruled: native Malli explanation paths
+
+`bridge-step1-registry` stopped at its first decision (`55076261e`, no
+production edits): retained-root explanations change `:path` shapes.
+Ruled option 1 (native Malli paths; `:in` for value location; behaviour
+assertions, never literal path vectors) — recorded in the bridge PRD above
+§7; lane resumed with the constraints. Editing lanes unchanged: step 1,
+turn-cluster, results-reuse; 1a waits for a slot with its option-2 facet.
