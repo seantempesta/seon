@@ -9,8 +9,7 @@
                           :seon.operator.collect/dry-run?]]
                         :dry-run? :boolean
                         :option-key :keyword
-                        :unrecognized-option [:= true]
-                        :unrecognized-option-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must name the unrecognized collection option key"} [:seon.operator.collect/unrecognized-option :seon.operator.collect/unrecognized-option] [:seon.operator.collect/option-key :seon.operator.collect/option-key] [:seon.error/message :seon.error/message]]
+                        :unrecognized-option-error [:and :seon.error/base [:map [:seon.operator.collect/option-key :seon.operator.collect/option-key]]]
                         :store-id :seon.store/id
                         :managed-root :seon.operator/managed-root
                         :branch

@@ -198,7 +198,7 @@
                        #(operator/start!
                          {:seon.boot/cluster-name cluster-name
                           :seon.boot/root cluster-root}))]
-          (is (= :seon.instrument/contract-violated (:seon.error/kind refusal))
+          (is (= :input (:seon.instrument/check refusal))
               cluster-name)
           (is (= 'seon.operator/start!
                  (:seon.error/diagnostic-operation (:seon.error/data refusal)))
@@ -214,7 +214,7 @@
         (let [result (operator/start!
                       {:seon.boot/cluster-name "occupied"
                        :seon.boot/root cluster-root})]
-          (is (= :seon.boot/refused (:seon.error/kind result)))
+          (is (= 'clojure.lang.ExceptionInfo (:seon.operator/exception-class result)))
           (is (= :seon.cluster/non-cluster-target
                  (get-in result [:seon.boot/offense :seon.boot/rule])))
           (is (= (.toString (.toPath collision))
@@ -245,8 +245,8 @@
                    (atom {"beta" (custody-instance "beta" connection)
                           "alpha" (custody-instance "alpha" connection)})]
        (let [result (operator/connection)]
-         (is (= :seon.operator/ambiguous-cluster-custody
-                (:seon.error/kind result)))
+         (is (= 2
+                (:seon.operator/candidate-count result)))
          (is (= ["alpha" "beta"]
                 (get-in result
                         [:seon.error/data
@@ -301,8 +301,8 @@
                       :seon.operator/roots first)]
         (is (= owner (:seon.operator.claim/creator claim)))
         (is (true? (:seon.operator.claim/ephemeral? claim))))
-      (is (= :seon.operator/ephemeral-owner-not-alive
-             (:seon.error/kind
+      (is (= 'clojure.lang.ExceptionInfo
+             (:seon.operator/exception-class
               (operator/claim-root!
                {:seon.operator/repository-root repository-root
                 :seon.operator/managed-root (str managed-root "-dead")
@@ -374,8 +374,8 @@
                    {:seon.operator/repository-root repository-root
                     :seon.operator/managed-root managed-root
                     :seon.operator/ephemeral-owner owner-identity})))
-        (is (= :seon.operator/root-creator-mismatch
-               (:seon.error/kind
+        (is (= 'clojure.lang.ExceptionInfo
+               (:seon.operator/exception-class
                 (operator/claim-root!
                  {:seon.operator/repository-root repository-root
                   :seon.operator/managed-root managed-root}))))
@@ -486,7 +486,7 @@
                               "operator-test" "logs"))
                 :seon.config.operator/event-silence-backstop-ms 1000})
               refusal (first (:seon.operator.reap/refused result))]
-          (is (nil? (:seon.error/kind result))
+          (is (boolean? (:seon.operator.reap/complete? result))
               "a readable incomplete reap is a maintenance result")
           (is (false? (:seon.operator.reap/complete? result)))
           (is (false?
@@ -511,9 +511,9 @@
 
 (deftest exact-stop-refuses-a-changed-generation-without-signaling-the-pid
   (let [repository-root (owned-root)
-        identity (operator.state/current-process-identity)
+        process-identity (operator.state/current-process-identity)
         generation (random-uuid)
-        record (merge identity
+        record (merge process-identity
                       {:seon.operator.process-record/generation generation
                        :seon.operator.process-record/root repository-root})]
     (try
@@ -526,7 +526,7 @@
                [] 10))]
         (is (= :seon.operator/process-claim-mismatch
                (:seon.error/kind (ex-data failure))))
-        (is (operator.state/process-identity-alive? identity)))
+        (is (operator.state/process-identity-alive? process-identity)))
       (finally
         (test-support/delete-recursively! repository-root)))))
 
@@ -560,8 +560,8 @@
                         {:seon.operator/repository-root repository-root
                          :seon.operator/managed-root caller-root
                          :seon.config.operator/event-silence-backstop-ms 1000})]
-            (is (= :seon.operator/reap-incomplete
-                   (:seon.error/kind result)))
+            (is (= 'clojure.lang.ExceptionInfo
+                   (:seon.operator/exception-class result)))
             (is (= :seon.operator.reap/unclaimed-process
                    (-> result :seon.error/data
                        :seon.operator.reap/result
@@ -586,7 +586,7 @@
      {:seon.operator/repository-root repository-root
       :seon.operator/managed-root managed-root})
     (catch Throwable error
-      (or (ex-data error) {:seon.error/kind ::threw}))))
+      (or (ex-data error) {::thrown-class (class error)}))))
 
 (deftest a-destructive-root-is-declared-never-inferred-from-the-working-directory
   ;; The class: a delete-and-recreate reachable with a root that is nil,
@@ -625,9 +625,8 @@
       (testing "an undeclared root refuses before anything is deleted"
         (doseq [root [nil "" "." "data/clusters" "tmp/operator-test"]]
           (let [outcome (cleanup-outcome repository-root root)]
-            (is (contains? #{:seon.operator/undeclared-managed-root
-                             :seon.instrument/contract-violated}
-                           (:seon.error/kind outcome))
+            (is (or (= 'clojure.lang.ExceptionInfo (:seon.operator/exception-class outcome))
+                    (= :input (:seon.instrument/check outcome)))
                 (str "root " (pr-str root) " must refuse with a typed value"))))
         (is (.exists store-dir))
         (is (= before (checkout-store-bytes))))
@@ -871,7 +870,7 @@
 
 (deftest process-census-refuses-unreadable-external-claims-as-data
   (let [claim-error
-        {:seon.error/kind :seon.operator/unreadable-claim
+        {:seon.operator.claim/path "claim.edn"
          :seon.error/message "Unreadable claim."
          :seon.error/data {:seon.operator.claim/path "claim.edn"}}
         observations
@@ -885,8 +884,8 @@
             (operator/census-processes!
              {:seon.operator/repository-root "."
               :seon.operator/managed-root "tmp/operator-census"})]
-        (is (= :seon.operator/process-census-incomplete
-               (:seon.error/kind result)))
+        (is (= 'clojure.lang.ExceptionInfo
+               (:seon.operator/exception-class result)))
         (is (= [claim-error]
                (get-in result
                        [:seon.error/data
@@ -897,8 +896,7 @@
   (let [stop-calls (atom [])
         existing {:seon.boot/config
                   {:seon.boot/cluster-name "already-running"}}
-        failure-data {:seon.error/kind :seon.boot/refused
-                      :seon.boot/offense
+        failure-data {:seon.boot/offense
                       {:seon.boot/cluster-name "already-running"}
                       :seon.boot/instance existing}]
     (with-redefs [cluster/start!
@@ -908,7 +906,7 @@
                   cluster/stop! (fn [instance] (swap! stop-calls conj instance))]
       (let [result (operator/start!
                     {:seon.boot/cluster-name "already-running"})]
-        (is (= :seon.boot/refused (:seon.error/kind result)))
+        (is (= 'clojure.lang.ExceptionInfo (:seon.operator/exception-class result)))
         (is (= "The cluster already has an instance."
                (:seon.error/message result)))
         (is (identical? existing
@@ -1290,7 +1288,7 @@
               (operator/collect!
                {:seon.operator/repository-root repository-root
                 :seon.operator/managed-root managed-root})]
-          (is (nil? (:seon.error/kind result))
+          (is (true? (:seon.operator.collect/roots-verified? result))
               "a live second pass is not a refusal")
           (is (= 2 (:seon.operator.collect/swept-objects result)))
           (is (= 1 (:seon.operator.collect/verification-pass-swept result)))
@@ -1334,8 +1332,8 @@
          (let [partial-result
                (get-in result
                        [:seon.error/data :seon.operator.collect/result])]
-           (is (= :seon.operator/collection-incomplete
-                  (:seon.error/kind result)))
+           (is (= 'clojure.lang.ExceptionInfo
+                  (:seon.operator/exception-class result)))
            (is (= digest
                   (:seon.operator.collect/unverified-digest partial-result))
                "the refusal names the digest that did not read")
@@ -1350,7 +1348,7 @@
         (collecting
          #{}
          (fn [result]
-           (is (nil? (:seon.error/kind result)))
+           (is (true? (:seon.operator.collect/roots-verified? result)))
            (is (true? (:seon.operator.collect/roots-verified? result)))
            (is (= 1 (:seon.operator.collect/unstored-digests result))))))
       (finally
@@ -1386,8 +1384,8 @@
                {:seon.operator/repository-root repository-root
                 :seon.operator/managed-root managed-root
                 :dry-run? true})]
-          (is (= :seon.operator.collect/unrecognized-option
-                 (:seon.error/kind result)))
+          (is (= 'clojure.lang.ExceptionInfo
+                 (:seon.operator/exception-class result)))
           (is (= :dry-run? (:seon.operator.collect/option-key result)))
           (is (str/includes?
                (:seon.error/message result)
@@ -1409,7 +1407,7 @@
                {:seon.operator/repository-root repository-root
                 :seon.operator/managed-root managed-root
                 :seon.config.maintenance/log-retained-files 1})]
-          (is (nil? (:seon.error/kind result)))
+          (is (true? (:seon.operator.collect/roots-verified? result)))
           (is (true? (:seon.operator.collect/complete? result)))))
       (finally
         (test-support/delete-recursively! repository-root)))))
@@ -1434,12 +1432,12 @@
       (testing "invalid input is refused before delegation"
         (let [failure (caught #(operator/start!
                                 {:seon.boot/cluster-name 42}))]
-          (is (= :seon.instrument/contract-violated
-                 (:seon.error/kind (ex-data failure))))
+          (is (= :input
+                 (:seon.instrument/check (ex-data failure))))
           (is (= 0 @delegate-calls))))
       (testing "invalid delegate output is refused at the public boundary"
         (let [failure (caught #(operator/start!
                                 {:seon.boot/cluster-name "valid"}))]
-          (is (= :seon.instrument/contract-violated
-                 (:seon.error/kind (ex-data failure))))
+          (is (= :output
+                 (:seon.instrument/check (ex-data failure))))
           (is (= 1 @delegate-calls)))))))

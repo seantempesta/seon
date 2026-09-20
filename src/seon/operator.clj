@@ -24,6 +24,7 @@
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.error.refusal :as error]
             [seon.fs :as fs]
             [seon.operator.runtime :as runtime]
             [seon.operator.state :as state]
@@ -33,29 +34,33 @@
 
 (schema.edn/load! {})
 
-(defn- flat-error
-  [error]
-  (let [data (ex-data error)
-        kind (or (:seon.error/kind data) ::failed)]
-    (merge (or data {})
-           {kind true
-            :seon.error/kind kind
-            :seon.error/message (or (ex-message error)
-                                    "The operator call failed.")
-            :seon.error/data (or data {})})))
+(defn- exception-value
+  {:malli/schema [:=> [:cat :seon.error/throwable] :seon.operator/failed-error]}
+  [failure]
+  (let [data (ex-data failure)]
+    (error/diagnostic
+     (merge data
+            {:seon.error/at (java.util.Date.)
+             :seon.error/layer ::operation
+             :seon.error/operation 'seon.operator/exception-value
+             ::exception-class (symbol (.getName (class failure)))
+             :seon.error/message (or (ex-message failure) "The operator call failed.")
+             :seon.error/offending failure
+             :seon.error/diagnostic-layer ::operation
+             :seon.error/diagnostic-operation 'seon.operator/exception-value
+             :seon.error/diagnostic-member ::request
+             :seon.error/diagnostic-expected "an operation completing without an exception"
+             :seon.error/diagnostic-offending data
+             :seon.error/diagnostic-cause failure
+             :seon.error/diagnostic-evidence data
+             :seon.error/data (or data {})}))))
 
 (defn- attempt
   [f]
   (try
     (f)
     (catch Throwable error
-      (flat-error error))))
-
-(defn- error-value?
-  [value]
-  (and (map? value)
-       (keyword? (:seon.error/kind value))
-       (string? (:seon.error/message value))))
+      (exception-value error))))
 
 (defn- lifecycle-lock-bound-ms
   [request]
@@ -66,7 +71,7 @@
   "Start one named cluster in this JVM."
   {:malli/schema
    [:=> [:cat :seon.boot/start-request]
-    [:or :seon.boot/instance :seon.error/value]]}
+    [:or :seon.boot/instance :seon.operator/failed-error]]}
   [request]
   (attempt #(cluster/start! request)))
 
@@ -74,7 +79,7 @@
   "Stop one addressed cluster instance."
   {:malli/schema
    [:=> [:cat :seon.boot/instance]
-    [:or :nil :seon.error/value]]}
+    [:or :nil :seon.operator/failed-error]]}
   [instance]
   (attempt #(cluster/stop! instance)))
 
@@ -82,10 +87,10 @@
   "Stop and start one addressed cluster instance."
   {:malli/schema
    [:=> [:cat :seon.boot/instance]
-    [:or :seon.boot/instance :seon.error/value]]}
+    [:or :seon.boot/instance :seon.operator/failed-error]]}
   [instance]
   (let [stopped (stop! instance)]
-    (if (error-value? stopped)
+    (if (::exception-class stopped)
       stopped
       (start! (:seon.boot/config instance)))))
 
@@ -101,13 +106,27 @@
         @runtime/running-instances))
 
 (defn- custody-selection-error
-  [kind message cluster-names requested-cluster]
-  (cond-> {kind true
-           :seon.error/kind kind
-           :seon.error/message message
-           :seon.error/data {::candidate-clusters cluster-names}}
-    requested-cluster
-    (assoc-in [:seon.error/data ::requested-cluster] requested-cluster)))
+  {:malli/schema [:=> [:cat :qualified-keyword :string
+                       [:vector :seon.boot/cluster-name] [:maybe :seon.boot/cluster-name]]
+                  :seon.operator/custody-selection-error]}
+  [cause message cluster-names requested-cluster]
+  (error/diagnostic
+   (cond-> {:seon.error/at (java.util.Date.)
+            :seon.error/layer ::custody
+            :seon.error/operation 'seon.operator/custody-selection-error
+            :seon.error/message message
+            ::candidate-count (count cluster-names)
+            :seon.error/offending requested-cluster
+            :seon.error/diagnostic-layer ::custody
+            :seon.error/diagnostic-operation 'seon.operator/custody-selection-error
+            :seon.error/diagnostic-member :seon.boot/cluster-name
+            :seon.error/diagnostic-expected "one live cluster with custody"
+            :seon.error/diagnostic-offending requested-cluster
+            :seon.error/diagnostic-cause cause
+            :seon.error/diagnostic-evidence cluster-names
+            :seon.error/data {::candidate-clusters cluster-names}}
+     requested-cluster
+     (assoc-in [:seon.error/data ::requested-cluster] requested-cluster))))
 
 (defn- selected-environment
   [requested-cluster]
@@ -118,9 +137,7 @@
       (or (get environments requested-cluster)
           (custody-selection-error
            ::cluster-custody-unavailable
-           (str "Cluster " (pr-str requested-cluster)
-                " supplies no live custody at this development REPL; "
-                "live clusters with custody are " (pr-str cluster-names) ".")
+           "The requested cluster supplies no live custody; select an available cluster."
            cluster-names
            requested-cluster))
 
@@ -130,24 +147,21 @@
       (empty? environments)
       (custody-selection-error
        ::cluster-custody-unavailable
-       (str "No live cluster supplies custody at this development REPL; "
-            "live clusters with custody are [].")
+       "No live cluster supplies custody; start a cluster before requesting its connection."
        cluster-names
        nil)
 
       :else
       (custody-selection-error
        ::ambiguous-cluster-custody
-       (str "Cluster custody is ambiguous at this development REPL; "
-            "live clusters with custody are " (pr-str cluster-names)
-            ". Pass one name to seon.operator/connection.")
+       "Several clusters supply custody; pass one cluster name to connection."
        cluster-names
        nil))))
 
 (defn- selected-connection
   [cluster-name]
   (let [environment (selected-environment cluster-name)]
-    (if (error-value? environment)
+    (if (::candidate-count environment)
       environment
       (db/supplied-connection environment))))
 
@@ -155,9 +169,9 @@
   "Return one selected live cluster's connection for development."
   {:malli/schema
    [:function
-    [:=> [:cat] [:or :seon.db/connection :seon.error/value]]
+    [:=> [:cat] [:or :seon.db/connection :seon.operator/custody-selection-error :seon.db/error-result]]
     [:=> [:cat :seon.boot/cluster-name]
-     [:or :seon.db/connection :seon.error/value]]]}
+     [:or :seon.db/connection :seon.operator/custody-selection-error :seon.db/error-result]]]}
   ([]
    (selected-connection nil))
   ([cluster-name]
@@ -165,7 +179,7 @@
 
 (defn status
   "Derived readiness and Flow observations for this JVM's clusters."
-  {:malli/schema [:=> [:cat] [:or :seon.operator/status :seon.error/value]]}
+  {:malli/schema [:=> [:cat] [:or :seon.operator/status :seon.operator/failed-error]]}
   []
   (attempt
    #(let [cluster-names (sort (keys @runtime/running-instances))]
@@ -184,10 +198,10 @@
 
 (defn banner
   "Human-readable readiness for this JVM's clusters."
-  {:malli/schema [:=> [:cat] [:or :string :seon.error/value]]}
+  {:malli/schema [:=> [:cat] [:or :string :seon.operator/failed-error]]}
   []
   (let [current (status)]
-    (if (error-value? current)
+    (if (::exception-class current)
       current
       (attempt
        #(str/join
@@ -198,7 +212,7 @@
 
 (defn clusters
   "The held branch roster and live advertisements for this JVM."
-  {:malli/schema [:=> [:cat] [:or :seon.operator/census :seon.error/value]]}
+  {:malli/schema [:=> [:cat] [:or :seon.operator/census :seon.operator/failed-error]]}
   []
   (attempt
    #(let [instances (vals @runtime/running-instances)
@@ -217,7 +231,7 @@
   "Publish an external root claim before any managed path is created."
   {:malli/schema
    [:=> [:cat :seon.operator/root-request]
-    [:or :map :seon.error/value]]}
+    [:or :map :seon.operator/failed-error]]}
   [{repository-root :seon.operator/repository-root
     managed-root :seon.operator/managed-root
     ephemeral-owner :seon.operator/ephemeral-owner
@@ -229,7 +243,7 @@
   "Return the claim-first root/store/cluster census without opening Datahike."
   {:malli/schema
    [:=> [:cat :seon.operator/existence-request]
-    [:or :seon.operator/existence :seon.error/value]]}
+    [:or :seon.operator/existence :seon.operator/failed-error]]}
   [{repository-root :seon.operator/repository-root}]
   (attempt #(state/existence repository-root)))
 
@@ -237,7 +251,7 @@
   "Observe external claims, exact OS identities, and advertisements."
   {:malli/schema
    [:=> [:cat :seon.operator/process-census-request]
-    [:or :seon.operator.process-census/result :seon.error/value]]}
+    [:or :seon.operator.process-census/result :seon.operator/failed-error]]}
   [request]
   (attempt
    #(let [result (state/process-census request)]
@@ -246,8 +260,21 @@
         (throw
          (ex-info
           "The process census could not read every external claim."
-          {:seon.error/kind :seon.operator/process-census-incomplete
-           :seon.operator.process-census/result result :seon.operator/process-census-incomplete true}))))))
+          (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer ::operation
+         :seon.error/operation 'seon.operator/census-processes!
+         :seon.error/message "The process census must read every external claim."
+         :seon.error/offending result
+         :seon.error/diagnostic-layer ::operation
+         :seon.error/diagnostic-operation 'seon.operator/census-processes!
+         :seon.error/diagnostic-member :seon.operator.process-census/result
+         :seon.error/diagnostic-expected :seon.operator.process-census/complete?
+         :seon.error/diagnostic-offending result
+         :seon.error/diagnostic-cause :seon.operator/process-census-incomplete
+         :seon.error/diagnostic-evidence result
+
+           :seon.operator.process-census/result result })))))))
 
 (defn- low-space?
   [footprint request]
@@ -260,7 +287,7 @@
   "Record and return one managed root's current disk footprint."
   {:malli/schema
    [:=> [:cat :seon.operator/footprint-request]
-    [:or :seon.operator/footprint-observation :seon.error/value]]}
+    [:or :seon.operator/footprint-observation :seon.operator/failed-error]]}
   [{repository-root :seon.operator/repository-root
     managed-root :seon.operator/managed-root
     :as request}]
@@ -284,7 +311,7 @@
   "Unconditionally remove a managed root after exact processes are gone."
   {:malli/schema
    [:=> [:cat :seon.operator/cleanup-request]
-    [:or :seon.operator/cleanup-result :seon.error/value]]}
+    [:or :seon.operator/cleanup-result :seon.operator/failed-error]]}
   [{repository-root :seon.operator/repository-root
     managed-root :seon.operator/managed-root
     :as request}]
@@ -347,7 +374,7 @@
   "Stop and remove explicitly ephemeral roots whose exact creator is dead."
   {:malli/schema
    [:=> [:cat :seon.operator.reap/request]
-    [:or :seon.operator.reap/result :seon.error/value]]}
+    [:or :seon.operator.reap/result :seon.operator/failed-error]]}
   [{repository-root :seon.operator/repository-root
     caller-root :seon.operator/managed-root
     :as request}]
@@ -463,8 +490,21 @@
          (when (seq blocking-refused)
            (throw
             (ex-info "One or more ephemeral roots were refused."
-                     {:seon.error/kind :seon.operator/reap-incomplete
-                      :seon.operator.reap/result result :seon.operator/reap-incomplete true})))
+                     (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer ::operation
+         :seon.error/operation 'seon.operator/reap-dead-roots!
+         :seon.error/message "Ephemeral root reaping left refused roots."
+         :seon.error/offending result
+         :seon.error/diagnostic-layer ::operation
+         :seon.error/diagnostic-operation 'seon.operator/reap-dead-roots!
+         :seon.error/diagnostic-member :seon.operator.reap/result
+         :seon.error/diagnostic-expected :seon.operator.reap/complete?
+         :seon.error/diagnostic-offending result
+         :seon.error/diagnostic-cause :seon.operator/reap-incomplete
+         :seon.error/diagnostic-evidence result
+
+                      :seon.operator.reap/result result }))))
          result)))))))
 
 (defn- archive-path
@@ -475,7 +515,7 @@
   "Bound one live log while preserving its inode for the detached JVM."
   {:malli/schema
    [:=> [:cat :seon.operator/log-request]
-    [:or :seon.operator/log-result :seon.error/value]]}
+    [:or :seon.operator/log-result :seon.operator/failed-error]]}
   [{log-dir :seon.boot/log-dir
     max-bytes :seon.config.maintenance/log-max-bytes
     retained :seon.config.maintenance/log-retained-files}]
@@ -512,7 +552,7 @@
   "Publish the current source tree onto `current-src`."
   {:malli/schema
    [:=> [:cat :seon.operator/publish-request]
-    [:or :seon.source/published :seon.error/value]]}
+    [:or :seon.source/published :seon.operator/failed-error]]}
   [{root :seon.boot/root changed-paths :seon.operator/changed-paths}]
   (attempt
    #(if changed-paths
@@ -553,10 +593,22 @@
                               cluster-name))
       (throw
        (ex-info "The cluster has no exact external root claim."
-                {:seon.error/kind
-                 :seon.operator/cluster-cleanup-incomplete
-                 :seon.operator.claim/root managed-root
-                 :seon.boot/cluster-name cluster-name :seon.operator/cluster-cleanup-incomplete true})))
+                (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer ::operation
+         :seon.error/operation 'seon.operator/quiesce-cluster-under-lock!
+         :seon.error/message "The cluster requires an exact external root claim."
+         :seon.error/offending managed-root
+         :seon.error/diagnostic-layer ::operation
+         :seon.error/diagnostic-operation 'seon.operator/quiesce-cluster-under-lock!
+         :seon.error/diagnostic-member :seon.operator.claim/root
+         :seon.error/diagnostic-expected :seon.operator.claim/clusters
+         :seon.error/diagnostic-offending managed-root
+         :seon.error/diagnostic-cause :seon.operator/cluster-cleanup-incomplete
+         :seon.error/diagnostic-evidence managed-root
+
+                 :seon.operator/unclaimed-root managed-root
+                 :seon.boot/cluster-name cluster-name }))))
     (let [cluster-root (.getCanonicalPath
                         (io/file managed-root "data" "clusters"))
           paths (cluster/cluster-paths cluster-root cluster-name)
@@ -619,10 +671,22 @@
         (when-not complete?
           (throw
            (ex-info "Cluster cleanup left claimed state."
-                    {:seon.error/kind
-                     :seon.operator/cluster-cleanup-incomplete
+                    (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer ::operation
+         :seon.error/operation 'seon.operator/finish-cluster-cleanup!
+         :seon.error/message "Cluster cleanup left claimed state."
+         :seon.error/offending result
+         :seon.error/diagnostic-layer ::operation
+         :seon.error/diagnostic-operation 'seon.operator/finish-cluster-cleanup!
+         :seon.error/diagnostic-member :seon.operator.cluster-cleanup/result
+         :seon.error/diagnostic-expected :seon.operator.cluster-cleanup/complete?
+         :seon.error/diagnostic-offending result
+         :seon.error/diagnostic-cause :seon.operator/cluster-cleanup-incomplete
+         :seon.error/diagnostic-evidence result
+
                      :seon.operator.cluster-cleanup/result result
-                     :seon.operator/cluster-cleanup-incomplete true})))
+                     }))))
         result)
       (finally
         (when release? (store/release-store! operation-store))))))
@@ -631,19 +695,19 @@
   "Stop, retire, delete, and collect one exactly claimed cluster."
   {:malli/schema
    [:=> [:cat :seon.operator.cluster-cleanup/request]
-    [:or :seon.operator.cluster-cleanup/result :seon.error/value]]}
+    [:or :seon.operator.cluster-cleanup/result :seon.operator/failed-error]]}
   [{repository-root :seon.operator/repository-root :as request}]
   ;; Deliberate keep-serial exception, matching cleanup-root!. Only quiesce and
   ;; branch retirement stay under control custody; writer GC runs afterward.
   (attempt
-   #(let [bound-ms (lifecycle-lock-bound-ms request)]
-      (let [quiesced (state/with-control-lock!
+   #(let [bound-ms (lifecycle-lock-bound-ms request)
+           quiesced (state/with-control-lock!
                       repository-root
                       {:seon.operator.lock/command "quiesce claimed cluster"
                        :seon.operator.lock/acquisition-timeout-ms bound-ms
                        :seon.operator.lock/hold-timeout-ms bound-ms}
                       (fn [] (cleanup-cluster-under-lock! request)))]
-        (finish-cluster-cleanup! request quiesced)))))
+        (finish-cluster-cleanup! request quiesced))))
 
 (defn- operation-konserve
   [operation-store]
@@ -691,7 +755,10 @@
                   (:seon.store/connection-object operation-store) branch)]
     (try
       (let [history-value (db/history database)
-            searchable (if (error-value? history-value)
+            searchable (if ;; PRD 1.3 debt: seon.db/history's :seon.db/error-result includes :seon.error/value.
+                           (and (:seon.error/at history-value)
+                                (:seon.error/layer history-value)
+                                (:seon.error/operation history-value))
                          database
                          history-value)]
         (into #{}
@@ -815,8 +882,21 @@
            (ex-message failure))
       (str "Collection did not preserve and verify every recorded root."
            (unverified-root-clause result)))
-    {:seon.error/kind :seon.operator/collection-incomplete
-     :seon.operator.collect/result result :seon.operator/collection-incomplete true}
+    (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer ::operation
+         :seon.error/operation 'seon.operator/incomplete-collection!
+         :seon.error/message "Collection must preserve and verify every recorded root."
+         :seon.error/offending result
+         :seon.error/diagnostic-layer ::operation
+         :seon.error/diagnostic-operation 'seon.operator/incomplete-collection!
+         :seon.error/diagnostic-member :seon.operator.collect/result
+         :seon.error/diagnostic-expected :seon.operator.collect/roots-verified?
+         :seon.error/diagnostic-offending result
+         :seon.error/diagnostic-cause :seon.operator/collection-incomplete
+         :seon.error/diagnostic-evidence result
+
+     :seon.operator.collect/result result })
     failure)))
 
 (defn- inventory-facts
@@ -960,13 +1040,11 @@
               result
               (incomplete-collection! result nil)))
           (catch Throwable failure
-            (if (= :seon.operator/collection-incomplete
-                   (:seon.error/kind (ex-data failure)))
+            (if (:seon.operator.collect/result (ex-data failure))
               (throw failure)
               (incomplete-collection! first-result failure)))))
       (catch Throwable failure
-        (if (= :seon.operator/collection-incomplete
-               (:seon.error/kind (ex-data failure)))
+        (if (:seon.operator.collect/result (ex-data failure))
           (throw failure)
           (incomplete-collection! base-result failure))))))
 
@@ -1013,9 +1091,22 @@
        (ex-info
         (str "Collection option " supplied " is not a request key. "
              "Did you mean " declared "?")
-        {:seon.error/kind :seon.operator.collect/unrecognized-option
+        (error/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer ::operation
+         :seon.error/operation 'seon.operator/refuse-misspelled-options!
+         :seon.error/message "The supplied option uses the wrong namespace; use its declared key."
+         :seon.error/offending supplied
+         :seon.error/diagnostic-layer ::operation
+         :seon.error/diagnostic-operation 'seon.operator/refuse-misspelled-options!
+         :seon.error/diagnostic-member :seon.operator.collect/option-key
+         :seon.error/diagnostic-expected declared
+         :seon.error/diagnostic-offending supplied
+         :seon.error/diagnostic-cause :seon.operator.collect/unrecognized-option
+         :seon.error/diagnostic-evidence supplied
+
          :seon.operator.collect/option-key supplied
-         :seon.operator.collect/unrecognized-option true}))))
+         })))))
   request)
 
 (defn collect!
@@ -1049,7 +1140,7 @@
   refused by name; other keys are ignored, because maps are open."
   {:malli/schema
    [:=> [:cat :seon.operator.collect/request]
-    [:or :seon.operator.collect/result :seon.error/value]]}
+    [:or :seon.operator.collect/result :seon.operator/failed-error]]}
   [{managed-root :seon.operator/managed-root
     dry-run? :seon.operator.collect/dry-run?
     :as request}]
@@ -1113,7 +1204,7 @@
   "Compose the one cluster cleanup with an exact source refork."
   {:malli/schema
    [:=> [:cat :seon.operator/refork-request]
-    [:or :seon.cluster.registry/branch-result :seon.error/value]]}
+    [:or :seon.cluster.registry/branch-result :seon.operator/failed-error]]}
   [{repository-root :seon.operator/repository-root :as request}]
   ;; Deliberate keep-serial exception: fresh_operator's child invokes
   ;; refork-under-lock! while its parent owns the root lifecycle lock.

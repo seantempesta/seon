@@ -758,3 +758,14 @@ parse size, refused paths, successful digests, and the program owner's
 declared position member. Source/test lint is clean and `require seon.edit`
 exits zero. Append `src/seon/edit.clj`, `resources/seon/schemas/my.edit.edn`,
 `test/seon/edit_test.clj` and `seon.edit-test` to the accumulated commands.
+
+Operator: source kind sites 12 → 0. Exception conversion names the actual
+exception class, custody refusal the candidate count, and incomplete operations
+their actual census/reap/cleanup/collection reports. Public contracts name the
+operator exception facet; connection retains the named `seon.db/error-result`
+callee debt. The history consumer's inline base recognition likewise remains
+owed to `seon.db/history`'s generic return contract. Operator tests now assert
+concrete fields; five state-owned assertions await the next slice. Load passed;
+source/test lint is clean. Fast tally is reserved for the accumulated end pass.
+Add operator source, both `seon.operator.edn` and `seon.operator.collect.edn`,
+`test/seon/operator_test.clj`, and `seon.operator-test` to the commands.

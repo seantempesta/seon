@@ -115,16 +115,16 @@
                  :status
                  [:map
                   [:seon.operator/clusters :seon.operator/clusters]],
-                 :failed [:= true]
-                 :failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an operator command that failed"} [:seon.operator/failed :seon.operator/failed] [:seon.error/message :seon.error/message]]
- :seon.operator/cluster-cleanup-incomplete [:= true]
- :seon.operator/cluster-cleanup-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/cluster-cleanup-incomplete class marker"} [:seon.operator/cluster-cleanup-incomplete :seon.operator/cluster-cleanup-incomplete] [:seon.error/message :seon.error/message]]
- :seon.operator/collection-incomplete [:= true]
- :seon.operator/collection-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/collection-incomplete class marker"} [:seon.operator/collection-incomplete :seon.operator/collection-incomplete] [:seon.error/message :seon.error/message]]
- :seon.operator/process-census-incomplete [:= true]
- :seon.operator/process-census-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/process-census-incomplete class marker"} [:seon.operator/process-census-incomplete :seon.operator/process-census-incomplete] [:seon.error/message :seon.error/message]]
- :seon.operator/reap-incomplete [:= true]
- :seon.operator/reap-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/reap-incomplete class marker"} [:seon.operator/reap-incomplete :seon.operator/reap-incomplete] [:seon.error/message :seon.error/message]]
+                 :exception-class :symbol
+                 :failed-error [:and :seon.error/base [:map [:seon.operator/exception-class :seon.operator/exception-class]]]
+                 :candidate-count [:int {:min 0}]
+                 :custody-selection-error [:and :seon.error/base [:map [:seon.operator/candidate-count :seon.operator/candidate-count]]]
+                 :unclaimed-root :seon.operator/managed-root
+                 :unclaimed-root-error [:and :seon.error/base [:map [:seon.operator/unclaimed-root :seon.operator/unclaimed-root] [:seon.boot/cluster-name :seon.boot/cluster-name]]]
+ :seon.operator/cluster-cleanup-incomplete-error [:and {:seon.db/attributes false} :seon.error/base [:map [:seon.operator.cluster-cleanup/result :seon.operator.cluster-cleanup/result]]]
+ :seon.operator/collection-incomplete-error [:and {:seon.db/attributes false} :seon.error/base [:map [:seon.operator.collect/result :seon.operator.collect/result]]]
+ :seon.operator/process-census-incomplete-error [:and {:seon.db/attributes false} :seon.error/base [:map [:seon.operator.process-census/result :seon.operator.process-census/result]]]
+ :seon.operator/reap-incomplete-error [:and {:seon.db/attributes false} :seon.error/base [:map [:seon.operator.reap/result :seon.operator.reap/result]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.operator/error
