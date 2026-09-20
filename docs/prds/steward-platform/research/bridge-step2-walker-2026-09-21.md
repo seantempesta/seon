@@ -63,6 +63,25 @@ exit 0, **108.026006375 s** (`tmp/bridge-platform-class2-fixed.log`). Child
 tests took 14.595908 and 14.725255 s; all other bodies were under 0.7 s.
 Source require of `seon.cluster.store` and `seon.db` brackets the commit.
 
+### Class 3 — missing projection assertions
+
+Root cause: the read-carriage regression expected retired kind/data members;
+`seon.db/projection-fallback` already declares and produces
+`:seon.schema/validation-refusal`. The regression now validates that schema,
+`:seon.schema/expected-value` and the operation in `:seon.schema/refused-value`.
+The actual namespace is `seon.db.declaration-population-test`.
+
+Fast command: `bin/test-fast --paths test/seon/db/declaration_population_test.clj -- seon.db.declaration-population-test`.
+First: **1 executed, 32 assertions, 0 failures, 0 errors**, **226.073580125 s**
+(`tmp/bridge-platform-class3.log`). The 148.414058-second body includes first
+canonical fixture construction; a thread sample located the wait at
+`retrying-base/acquire-base!`, with the builder indexing canonical program
+facts (`tmp/bridge-platform-class3-threads.txt`). The test now declares
+180,000 ms with that reason. Updated-bound run: **1 executed, 32 assertions,
+0 failures, 0 errors**, exit 0, **216.796402125 s**
+(`tmp/bridge-platform-class3-bounded.log`). Source require of `seon.db`
+brackets the commit. No fixture implementation or publication owner changed.
+
 ## Final ruled slice and verification
 
 This section supersedes the historical checkpoints below. The orchestrator

@@ -13,7 +13,10 @@
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]))
 
-(deftest reads-require-their-carried-projection-including-transaction-results
+(deftest ^{:seon.test/long
+           "First canonical fixture acquisition indexes the complete program before testing carried database views and missing-projection refusals."
+           :seon.test/long-ms 180000}
+  reads-require-their-carried-projection-including-transaction-results
   (test-support/with-database
    (fn [connection]
      (let [projection (schema/handed-projection)
@@ -119,8 +122,11 @@
            (let [failure (binding [*err* warnings]
                            (schema/call-with-projection-state
                             (atom {}) #(db/pull raw [:seon.agent/id] lookup)))]
-             (is (= :seon.schema/missing-projection (:seon.error/kind failure)))
-             (is (= 'seon.db/pull (get-in failure [:seon.error/data :seon.db/operation])))
+             (is ((schema/projection-validator projection :seon.schema/validation-refusal)
+                  failure))
+             (is (= :seon.schema/projection (:seon.schema/expected-value failure)))
+             (is (= {:seon.db/operation 'seon.db/pull}
+                    (:seon.schema/refused-value failure)))
              (is (= 1 (count (str/split-lines (str warnings)))))
              (is (str/includes? (str warnings) "projection-fallback"))))
          (testing "fixture connection carriage survives a fresh worker thread"
