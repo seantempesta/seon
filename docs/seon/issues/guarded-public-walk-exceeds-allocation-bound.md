@@ -45,3 +45,40 @@ and pull-plan behavior assertions, and prove the selected-render failure
 without printing an unbounded runtime object. The owner ruled this an open measurement, not a step-1 landing condition.
 The registry construction and call-site cut lands independently; see
 [the step-1 note](../../prds/steward-platform/research/bridge-step1-registry-2026-09-20.md).
+
+## Error-family follow-up — 2026-09-20
+
+Commit `59e51e221` plus its canonical SCI fixture corrections durably recorded
+74 tests / 406 assertions / 2 failures / 0 errors, request `4a3ec3f506af`.
+Both failures are this walk's unchanged assertions. The selected-render
+failure is resolved: a redundant identity wrapper excluded the typed unknown
+from its input. Removing that wrapper and asserting the declared unknown
+facet passed both the six-suite and focused SCI runs.
+
+The scoped plan observation now falsifies the inference that the walk
+owner's cache failed: all seven acquisitions returned plan identity
+2144200547, selector identity 1133950800, and fingerprint 750175967. There
+was one distinct selector. The broader compiler spy counted 16 calls.
+Same-JVM JFR samples locate additional calls in `seon.schema/pull-selector?`
+and `seon.schema/projection-with-pulled-form-in`, reached through
+`seon.db/validate-pulled-value`. Those schema owners are held by bridge step 2.
+This is a broader selector-validation/derivation reuse boundary; do not
+replace the working root-plan cache or suppress input validation.
+
+The guarded evaluation measured **4,453,384,176 bytes**. Deeper JFR stacks
+separate projection-from-rows samples during `seon.sci.eval/cluster-ctx`
+setup from the later guarded walk. No sampled projection-from-rows stack
+contains `seon.render/walk`; this is not proof of absence from every
+execution. Walk-stack samples include config dial scanning, instrumented
+calls, pulled-value validation, render program-evidence pulls and identity
+attribute reads. Their sampled weights do not establish a complete causal
+allocation budget or justify raising the assertion's limit.
+
+Evidence: `tmp/error-family-sci-fixtures.log`, `tmp/error-family-walk.jfr`,
+and `tmp/error-family-walk-allocations.txt`. The test interval is
+07:41:03.545729–07:41:06.501444 UTC. The recording was attached to the one
+foreground test JVM (95807), with stack depth 256; that JVM exited.
+[The extraction script](../../prds/steward-platform/research/error-family-walk-evidence-2026-09-20.py)
+reproduces the bounded report. The error-family landing note brings the
+remaining cross-owner performance scope to the owner; neither assertion was
+changed and no held schema file was edited.

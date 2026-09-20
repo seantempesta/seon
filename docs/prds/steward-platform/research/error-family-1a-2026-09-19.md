@@ -2598,3 +2598,122 @@ Completion again refused at `seon.blob/with-publication!`: zero declared
 facets versus raw write and test-execution facets. Its nested projection
 measured 16,451 against 16,384 bytes. No cap or assertion was weakened;
 this tally is execution evidence, not a durable green result.
+
+### Final focused evidence and the remaining scope decision
+
+`59e51e221` landed the complete producer slice. Required namespace loads
+returned `:loads` before and after it
+(`tmp/error-family-boundary-load-before.log`,
+`tmp/error-family-boundary-load-after.log`). The subsequent SCI-only run
+durably recorded **74 executed / 0 unchanged / 406 assertions / 2 failures /
+0 errors**, request `4a3ec3f506af` (`tmp/error-family-sci-fixtures.log`).
+The binding and override fixture corrections passed. No unchanged namespace
+was rerun. The last six-suite execution tally remains **276 / 6,183 / 3F /
+1E**, with the later focused evidence above; these are not combined into an
+invented six-suite green tally. The earlier completion-recording refusal did
+not recur in this focused request; that does not prove the publication
+boundary repaired for every request.
+
+Both remaining failures are
+`seon.sci.eval-test/public-walk-is-callable-through-an-agent-sci-eval`:
+
+| Assertion | Verified boundary / classification |
+|---|---|
+| At most one selector compilation | Seven root acquisitions share exactly one plan identity (2144200547), selector identity (1133950800), and fingerprint (750175967), but the broad spy counts 16 compiler calls. Same-JVM samples show additional compilation in held `src/seon/schema.clj`, `pull-selector?` and `projection-with-pulled-form-in`, reached by `src/seon/db.clj` pulled-value validation. Foreign held schema boundary; the root owner's plan reuse is verified. The assertion remains red. |
+| Guarded allocation below 1 GiB | Actual 4,453,384,176 bytes. Open cross-owner performance measurement in `src/seon/render.clj`, `src/seon/config.clj`, `src/seon/db.clj`, `src/seon/instrument.clj` and the held pulled-schema owner. Samples locate work but do not establish each owner's causal share. No error-conversion cause or schema-registry cause is asserted without that evidence. |
+
+The JFR recording used this same test JVM (95807), never a second test
+process. Deeper stacks place sampled projection-from-rows work in context
+setup, not in the guarded walk; the earlier broad test-interval attribution
+is therefore insufficient. The exact observation and reproducible extraction
+are in [the existing allocation issue](../../../seon/issues/guarded-public-walk-exceeds-allocation-bound.md)
+and [the evidence script](error-family-walk-evidence-2026-09-20.py).
+No allocation or compiler-count assertion was weakened. No general error
+predicate or kind was introduced. The schema path is still dirty/held at
+this stop; its drafts were tested at HEAD bytes, not overlaid.
+
+The error-conversion fixes are complete at the measured boundaries. A
+six-suite green landing now requires the broader acquisition/performance
+cut, involving a held owner and several non-error owners. Under the
+assignment's owner-design stop rule, exactly three options follow. Costs
+are estimates, not measured completion times.
+
+1. **Land this error slice and route the unchanged walk red to the existing
+   acquisition-performance work (recommended).** Guarantee: complete error
+   facets, raw writer evidence, recorder admission and exact contracts retain
+   their passing canonical regressions; the performance defect stays visible.
+   Cost: a focused follow-up after the bridge owner lands, estimated 2–4 hours.
+   Given up: claiming all six suites green in this error lane now.
+2. **Keep this lane open for a coordinated schema/DB/render performance cut
+   after the held schema paths are released.** Guarantee: the existing
+   allocation and compiler-count gates stay closed until a canonical run
+   meets both without reduced validation. Cost: estimated 4–8 hours across
+   selector derivation, carried projections and instrumented render inputs,
+   plus owner coordination. Given up: the bounded error-only landing scope
+   and independent completion while the bridge lane is editing.
+3. **Require prepared acquisition inputs at the guarded public-walk boundary.**
+   Guarantee: configuration/profile/selector preparation is explicit and
+   occurs before the guarded rendering operation; errors and instrumentation
+   remain complete at both boundaries. Cost: approximately one day to specify
+   and convert the prompt, web and bare SCI callers with their owners.
+   Given up: the present convenience of an unprepared bare walk performing
+   all acquisition inside that same guarded call. This is an API decision,
+   not an assertion change made by this lane.
+
+### Files and RESET NEEDED for this resume
+
+Committed implementation paths in `2a59e5e11`, `d6867a306`, `59e51e221`:
+`resources/seon/schemas/seon.db.edn`, `seon.db.write.edn`, `seon.sci.eval.edn`,
+`seon.turn.edn` (all under that same schema directory);
+`src/seon/db.clj`, `src/seon/error.clj`, `src/seon/error/refusal.clj`,
+`src/seon/instrument.clj`, `src/seon/render.clj`, `src/seon/render/value.clj`,
+`src/seon/sci/admit.clj`, `src/seon/sci/eval.clj`, `src/seon/sci/kernel.clj`,
+`src/seon/turn.clj`, `test/seon/error_test.clj`, `test/seon/db_test.clj`,
+`test/seon/sci/eval_test.clj`, `test/seon/test_support.clj`, this note and
+`docs/seon/issues/expected-refusal-logs-raw-datom-error-twice.md`.
+Final evidence adds the script and allocation issue linked above.
+The later foreign changes to `test/seon/test_support.clj` were preserved
+and excluded from this lane's subsequent overlays and commits.
+
+**RESET NEEDED:** no existing attribute type changes in this resume. The
+only new stored attribute is `:seon.sci.eval/row-member`; its occurrence
+ownership uses the existing relation. `:seon.sci.eval/reader-event-count`
+and `:seon.turn/rule` already exist; the changed facet schemas require those
+actual observations. The old marker-only DB descriptor was removed. No
+identity was minted on a facet. No reset, default operation, lifecycle
+command, worktree, or foreign session operation was performed. Both test
+JVMs used in the final evidence have exited.
+
+### Exact accumulated cold command owed
+
+The orchestrator owns this command, the platform gate, and any reset-boundary
+live proof. The lane did not run them. This includes earlier accepted paths
+as well as this resume's paths; foreign checkout drafts must remain excluded.
+
+```sh
+bin/test --paths \
+  docs/prds/steward-platform/research/error-family-1a-2026-09-19.md \
+  docs/prds/steward-platform/research/error-kind-retirement-inventory-2026-09-19.md \
+  docs/prds/steward-platform/research/error-family-walk-evidence-2026-09-20.py \
+  docs/seon/issues/expected-refusal-logs-raw-datom-error-twice.md \
+  docs/seon/issues/guarded-public-walk-exceeds-allocation-bound.md \
+  resources/seon/schemas/seon.db.edn \
+  resources/seon/schemas/seon.db.write.edn \
+  resources/seon/schemas/seon.db.write.attempt.edn \
+  resources/seon/schemas/seon.error.edn \
+  resources/seon/schemas/seon.instrument.edn \
+  resources/seon/schemas/seon.schema.edn \
+  resources/seon/schemas/seon.sci.eval.edn \
+  resources/seon/schemas/seon.turn.edn \
+  src/seon/db.clj src/seon/error.clj src/seon/error/refusal.clj \
+  src/seon/instrument.clj src/seon/schema.clj src/seon/schema/internal.cljc \
+  src/seon/cluster/status.clj src/seon/render.clj src/seon/render/value.clj \
+  src/seon/sci/admit.clj src/seon/sci/eval.clj src/seon/sci/kernel.clj \
+  src/seon/turn.clj \
+  test/seon/error_test.clj test/seon/instrument_test.clj \
+  test/seon/schema_test.clj test/seon/db_test.clj \
+  test/seon/cluster_test.clj test/seon/sci/eval_test.clj \
+  test/seon/test_support.clj \
+  -- seon.error-test seon.instrument-test seon.schema-test \
+  seon.db-test seon.cluster-test seon.sci.eval-test
+```
