@@ -2164,6 +2164,20 @@
           :seon.fn.manifest/manifest manifest)
          (catch Throwable _ false))))
 
+(defn- loaded-producer-digest
+  "ONE derivation for both sides of the loaded-producer guard.
+
+   `record-loaded-producers!` stamps it at boot and `require-loaded-producers!`
+   recomputes it before a publication through the live host; on 2026-09-21
+   the two sides passed different dependency maps (the recorder restricted
+   the pins to paths that were also inputs) and every freshly booted host
+   was refused as a producer mismatch."
+  {:malli/schema [:=> [:cat :seon.fn.manifest/manifest
+                       [:map-of :string :string] [:map-of :string :string]]
+                  :seon.source/toolchain-digest]}
+  [manifest inputs dependencies]
+  (seon.fn/toolchain-digest manifest inputs dependencies))
+
 (defn record-loaded-producers!
   "Record a completed host load, checking the inputs captured before loading.
   Callable objects remain with the instance; their observed content identity is durable."
@@ -2187,7 +2201,7 @@
         _ (when-not (= (select-keys before observed) (select-keys after observed))
             (refused! "Producer source changed while the host loaded; restart the host."
                       {:seon.source/producer-mismatch (set (keys paths))}))
-        digest (seon.fn/toolchain-digest manifest before (select-keys before (keys dependencies)))
+        digest (loaded-producer-digest manifest before dependencies)
         host (id/id)
         roots (into {} (for [name (keys paths)
                              :let [namespace (find-ns name)]
@@ -2235,8 +2249,8 @@
                               [:seon.source/loaded-host host]))
           loaded (:seon.source/loaded-producer-digest observed)
           inputs (test.cache/input-digests directory)
-          requested (seon.fn/toolchain-digest manifest inputs
-                      (test.cache/toolchain-dependencies directory #{".clj-kondo"}))
+          requested (loaded-producer-digest
+                     manifest inputs (test.cache/toolchain-dependencies directory #{".clj-kondo"}))
           replaced (when-let [state (:seon.source/loaded-state instance)]
                      (instrument/replaced-definitions state))
           mismatched (into (into #{} (map #(ns-name (:ns (meta %)))) replaced)
