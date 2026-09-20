@@ -1,2 +1,2 @@
 #:seon.config.flow{:ping-timeout-ms
-                   [:int {:min 1, :seon.config/dial true}]}
+                   [:int {:seon.config/display-label "Ping timeout" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1, :seon.config/dial true}]}

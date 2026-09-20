@@ -1,6 +1,6 @@
 #:seon.config.ai{:api-key-variable
                  [:string
-                  {:min 1,
+                  {:seon.config/display-label "API key environment variable" :min 1,
                    :seon.config/optional true,
                    :seon.config/per-agent true,
                    :seon.config/dial true,
@@ -8,20 +8,20 @@
                    :seon.ai/api-key-variable}],
                  :chars-per-token-prior
                  [:double
-                  {:min 0.1,
+                  {:seon.config/display-label "Chars per token prior" :min 0.1,
                    :seon.config/per-agent true,
                    :seon.config/dial true,
                    :seon.ai/request-attribute
                    :seon.ai/chars-per-token-prior}],
                  :endpoint
                  [:string
-                  {:min 1,
+                  {:seon.config/display-label "Endpoint" :min 1,
                    :seon.config/per-agent true,
                    :seon.config/dial true,
                    :seon.ai/request-attribute :seon.ai/endpoint}],
                  :extra-body-edn
                  [:string
-                  {:min 1,
+                  {:seon.config/display-label "Extra request body (EDN)" :min 1,
                    :seon.config/optional true,
                    :seon.config/per-agent true,
                    :seon.ai/extra-body true,
@@ -30,7 +30,7 @@
                    :seon.ai/extra-body-edn}],
                  :frequency-penalty
                  [:double
-                  {:min -2.0,
+                  {:seon.config/display-label "Frequency penalty" :min -2.0,
                    :max 2.0,
                    :seon.config/optional true,
                    :seon.config/per-agent true,
@@ -42,7 +42,7 @@
                    :seon.ai/inert-when-thinking true}],
                  :max-tokens
                  [:and
-                  {:seon.config/per-agent true,
+                  {:seon.config/display-label "Max tokens" :seon.config/per-agent true,
                    :seon.ai/wire
                    [["max_tokens" clojure.core/identity]],
                    :seon.config/dial true,
@@ -50,20 +50,20 @@
                   :seon.ai/max-tokens],
                  :model
                  [:string
-                  {:min 1,
+                  {:seon.config/display-label "Model" :min 1,
                    :seon.config/per-agent true,
                    :seon.config/dial true,
                    :seon.ai/request-attribute :seon.ai/model}],
                  :no-auth
                  [:=
-                  {:seon.config/optional true,
+                  {:seon.config/display-label "No auth" :seon.config/optional true,
                    :seon.config/per-agent true,
                    :seon.config/dial true,
                    :seon.ai/request-attribute :seon.config.ai/no-auth}
                   true],
                  :no-provider
                  [:=
-                  {:seon.config/optional true,
+                  {:seon.config/display-label "No provider" :seon.config/optional true,
                    :seon.config/per-agent true,
                    :description
                    "Use virtual turns with a no-op reply instead of provider attempts. This per-agent setting lives on the settings component; no credential lookup, provider request, or token usage occurs.",
@@ -72,7 +72,7 @@
                   true],
                  :presence-penalty
                  [:double
-                  {:min -2.0,
+                  {:seon.config/display-label "Presence penalty" :min -2.0,
                    :max 2.0,
                    :seon.config/optional true,
                    :seon.config/per-agent true,
@@ -84,14 +84,14 @@
                    :seon.ai/inert-when-thinking true}],
                  :prompt-token-budget
                  [:int
-                  {:min 1,
+                  {:seon.config/display-label "Prompt token budget" :min 1,
                    :seon.config/per-agent true,
                    :seon.config/dial true,
                    :seon.ai/request-attribute
                    :seon.ai/prompt-token-budget}],
                  :response-format
                  [:enum
-                  {:seon.config/optional true,
+                  {:seon.config/display-label "Response format" :seon.config/optional true,
                    :seon.config/per-agent true,
                    :seon.ai/wire
                    [["response_format"
@@ -101,7 +101,7 @@
                   :json-object],
                  :retain-reasoning
                  [:=
-                  {:seon.config/optional true,
+                  {:seon.config/display-label "Retain reasoning" :seon.config/optional true,
                    :seon.config/per-agent true,
                    :description
                    "Presence asserts retention of provider reasoning in attempt evidence; absence disables retention. Clear this setting by retracting it. The provider output bound limits its size.",
@@ -110,7 +110,7 @@
                    :seon.ai/retain-reasoning} true],
                  :stop
                  [:vector
-                  {:min 1,
+                  {:seon.config/display-label "Stop" :min 1,
                    :max 4,
                    :seon.config/optional true,
                    :seon.config/per-agent true,
@@ -120,7 +120,7 @@
                   [:string {:min 1}]],
                  :temperature
                  [:double
-                  {:min 0.0,
+                  {:seon.config/display-label "Temperature" :min 0.0,
                    :max 2.0,
                    :seon.config/optional true,
                    :seon.config/per-agent true,
@@ -131,7 +131,7 @@
                    :seon.ai/inert-when-thinking true}],
                  :thinking
                  [:and
-                  {:seon.config/optional true,
+                  {:seon.config/display-label "Thinking" :seon.config/optional true,
                    :seon.config/per-agent true,
                    :seon.ai/wire
                    [["thinking" seon.ai/thinking-wire-value]
@@ -142,13 +142,13 @@
                   :seon.ai/thinking],
                  :timeout-ms
                  [:int
-                  {:min 1,
+                  {:seon.config/display-label "Provider timeout" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1,
                    :seon.config/per-agent true,
                    :seon.config/dial true,
                    :seon.ai/request-attribute :seon.ai/timeout-ms}],
                  :top-p
                  [:double
-                  {:min 0.0,
+                  {:seon.config/display-label "Top p" :min 0.0,
                    :max 1.0,
                    :seon.config/optional true,
                    :seon.config/per-agent true,

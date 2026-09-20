@@ -1,5 +1,5 @@
 #:seon.config.eval{:time-limit-ms
                    [:int
-                    {:min 1,
+                    {:seon.config/display-label "Evaluation deadline" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1,
                      :seon.config/per-agent true,
                      :seon.config/dial true}]}

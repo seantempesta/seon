@@ -62,3 +62,14 @@ and in-process regression execution remain unavailable at this observation.
 `runtime_status` with the hook's `:current-source` root lists that cluster
 with its advertisement; a root with no advertisements returns a typed
 "no advertisements under ROOT" value; one regression covers both.
+
+## Config/plan lane observation, 2026-09-20
+
+Wave 1d initially reached default PID 41822. A later read-only `eval_clj`
+request with explicit root `/Users/sean/src/seon`, cluster `default`, and
+JVM mode returned `repl-unavailable`, advertisement state `missing`, naming
+`data/clusters/default/prepl.edn`. The request only inspected proposed C4
+schema-property storage and did not execute. This observes unavailable MCP
+access during shared-tree work; it does not establish the earlier live-root
+status/evaluation disagreement or attribute a cause. No lifecycle operation,
+replacement transport, or mutation of default was attempted.

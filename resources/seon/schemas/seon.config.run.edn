@@ -1,6 +1,6 @@
 #:seon.config.run{:max-episode-runs
                   [:int
-                   {:min 1,
+                   {:seon.config/display-label "Max episode runs" :min 1,
                     :seon.config/optional true,
                     :seon.config/per-agent true,
                     :seon.config/dial true}]}

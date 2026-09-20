@@ -159,7 +159,9 @@
 (defn render-settings-html
   "Show every declared agent dial, its effective value, and where it comes from."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :seon.render/hiccup :seon.error/value]]}
+                  [:or :seon.render/hiccup :seon.db/error-result
+                       :seon.schema/unknown-shape-error
+                       :seon.config/missing-effective-error]]}
   [unit]
   (let [database (:seon.db/db unit)
         component (if (and database (:seon.agent/id unit))
@@ -172,23 +174,23 @@
         cluster-name (when database
                        (db/q '[:find ?name . :where [_ :seon.config/cluster ?name]] database))
         defaults (if cluster-name (config/effective database cluster-name) {})
-        declarations (schema/declaration-population)
-        display-metadata (:seon.config/display
-                          (schema.form/attr-form-properties
-                           (get declarations :seon.config/settings)))]
+        declarations (or (some-> database db/carried-projection
+                                 :seon.schema.projection/forms)
+                         (schema/declaration-population))]
     (cond
-      (:seon.error/kind attributes) attributes
-      (:seon.error/kind defaults) defaults
+      (or (:seon.error/at attributes) (:seon.schema/unknown-shape attributes)) attributes
+      (or (:seon.error/at defaults) (:seon.config/missing-effective defaults)) defaults
       :else
       (let [overrides (select-keys component attributes)
             inherited (apply dissoc (select-keys defaults attributes) (keys overrides))
-            absent (- (count attributes) (count overrides) (count inherited))
+            absent (remove #(or (find overrides %) (find inherited %)) attributes)
             label (fn [attribute]
-                    (or (get-in display-metadata [attribute :seon.config/display-label])
+                    (or (:seon.config/display-label
+                         (schema.form/attr-form-properties (get declarations attribute)))
                         (str attribute)))
             display (fn [attribute value]
                       (let [{divisor :seon.config/display-divisor unit :seon.config/display-unit}
-                            (get display-metadata attribute)
+                            (schema.form/attr-form-properties (get declarations attribute))
                             value (if (and divisor (number? value)) (/ value divisor) value)]
                         (str (cond
                                (integer? value) (format "%,d" value)
@@ -221,5 +223,11 @@
                                       [:div [:dt {:title (title attribute)} (label attribute)]
                                        [:dd (display attribute value)]]))
                                (sort-by key inherited))]]]]]
-         (when (pos? absent)
-           [:p {:class "seon-settings-absent"} (str absent " unset settings omitted")])]))))
+         (when (seq absent)
+           [:details {:class "seon-settings-absent"}
+            [:summary (str "Unset settings (" (count absent) ")")]
+            (into [:dl]
+                  (map (fn [attribute]
+                         [:div [:dt {:title (title attribute)} (label attribute)]
+                          [:dd "Unset"]]))
+                  (sort absent))])]))))

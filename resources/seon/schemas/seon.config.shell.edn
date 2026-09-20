@@ -23,6 +23,6 @@
                     :stdin-max-bytes
                     [:int {:min 1, :seon.config/dial true}]
                     :termination-grace-ms
-                    [:int {:min 1, :seon.config/dial true}]
+                    [:int {:seon.config/display-label "Shell termination grace" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1, :seon.config/dial true}]
                     :time-limit-ms
-                    [:int {:min 1, :seon.config/dial true}]}
+                    [:int {:seon.config/display-label "Shell deadline" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1, :seon.config/dial true}]}

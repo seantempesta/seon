@@ -18,4 +18,4 @@
                   [:and #:seon.config{:dial true} :my.web/url],
                   :search-result-projection
                   [:and #:seon.config{:dial true} :qualified-symbol],
-                  :timeout-ms [:int {:min 1, :seon.config/dial true}]}
+                  :timeout-ms [:int {:seon.config/display-label "Web timeout" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1, :seon.config/dial true}]}

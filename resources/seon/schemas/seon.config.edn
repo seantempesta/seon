@@ -1,28 +1,8 @@
 #:seon.config{:agent [:and {:seon.db/identity true
-                           :description "The agent owning this addressable settings component."} :seon.db/ref],
-              :settings [:map {:seon.db/attributes true
-                               :seon.render/ai seon.agent/render-settings-ai
-                               :seon.render/html seon.agent/render-settings-html
-                               :seon.config/display
-                               {:seon.config.eval/time-limit-ms #:seon.config{:display-label "Evaluation deadline" :display-divisor 1000 :display-unit "s"}
-                                :seon.config.ai/timeout-ms #:seon.config{:display-label "Provider timeout" :display-divisor 1000 :display-unit "s"}
-                                :seon.config.ai.backup/timeout-ms #:seon.config{:display-label "Backup provider timeout" :display-divisor 1000 :display-unit "s"}
-                                :seon.config.ai.retry/base-delay-ms #:seon.config{:display-label "Initial retry delay" :display-divisor 1000 :display-unit "s"}
-                                :seon.config.ai.retry/maximum-delay-ms #:seon.config{:display-label "Maximum retry delay" :display-divisor 1000 :display-unit "s"}
-                                :seon.config.ai.retry/maximum-total-delay-ms #:seon.config{:display-label "Total retry delay" :display-divisor 1000 :display-unit "s"}
-                                :seon.config.agent/turn-completion-backstop-ms #:seon.config{:display-label "Turn completion allowance" :display-divisor 1000 :display-unit "s"}
-                                :seon.config.web/timeout-ms #:seon.config{:display-label "Web timeout" :display-divisor 1000 :display-unit "s"}
-                                :seon.config.shell/time-limit-ms #:seon.config{:display-label "Shell deadline" :display-divisor 1000 :display-unit "s"}
-                                :seon.config.shell/termination-grace-ms #:seon.config{:display-label "Shell termination grace" :display-divisor 1000 :display-unit "s"}}}
-                         [:seon.config/agent :seon.config/agent]],
-              :display-label :string,
+                           :description "The agent owning this addressable settings component. Parent deletion cascades through :seon.agent/settings and sweeps this identity backlink."} :seon.db/ref],
+              :display-label [:string {:min 1 :description "Human-readable label declared on each per-agent dial."}],
               :display-divisor [:int {:min 1}],
               :display-unit :string,
-              :display [:map-of :qualified-keyword
-                        [:map
-                         [:seon.config/display-label {:optional true} :seon.config/display-label]
-                         [:seon.config/display-divisor {:optional true} :seon.config/display-divisor]
-                         [:seon.config/display-unit {:optional true} :seon.config/display-unit]]],
               :dial :boolean,
               :optional :boolean,
               :per-agent :boolean,

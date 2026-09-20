@@ -1,20 +1,20 @@
 #:seon.config.agent{:show-all-settings
                     [:=
-                     {:seon.config/per-agent true,
+                     {:seon.config/display-label "Show all settings" :seon.config/per-agent true,
                       :seon.config/optional true,
                       :description
                       "Show every effective agent setting in the settings read. Presence asserts true; absence shows model, no-provider, evaluation deadline, turn budget, and retry. Clear this setting by retracting it.",
                       :seon.config/dial true} true],
                     :write-refusal-bound
                     [:int
-                     {:min 1,
+                     {:seon.config/display-label "Write refusal bound" :min 1,
                       :seon.config/per-agent true,
                       :description
                       "Consecutive REFUSED durable turn writes for one agent before its turn proc parks. A refused write still flushes dirty index leaves, so re-firing one fills the store without ever committing: at this bound the proc commits ONE fault naming the refusal, the agent, the consecutive count and this bound, and stops re-firing. A committed write resets the count to zero. Firing is a bug report, never a retry or a backoff.",
                       :seon.config/dial true}],
                     :turn-completion-backstop-ms
                     [:int
-                     {:min 1,
+                     {:seon.config/display-label "Turn completion allowance" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1,
                       :seon.config/per-agent true,
                       :description
                       "Milliseconds allowed for turn lifecycle completion, including permit acquisition and orderly disarm. Active work adds its resolved provider attempt timeouts and retry delays, or each admitted form's evaluation limit. Expiry names the missing part and held turn.",

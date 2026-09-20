@@ -43,6 +43,129 @@ tags: [schema, config, plan, data-model]
   The held `src/seon/render/value.clj:333–336` old ref-map specialization is
   now unnecessary; string values already follow its ordinary value path.
 
+## R1 implementation and C4 boundary
+
+R1 removes the `:seon.config/settings` entity mirror and `:seon.config/display`
+roster; `:seon.agent/settings` now names `:seon.config/agent-overlay` as its
+component schema. Display properties live on the dial declarations. A native
+EDN inventory on 2026-09-20 counted **34 per-agent dials** and **15 millisecond
+dials**, with zero missing per-agent labels or millisecond display divisors.
+The settings renderer reads each dial's properties and shows unset dials
+explicitly. Its output contract names database read, unknown-shape, and
+missing-effective facets; its edited branches do not read `:seon.error/kind`.
+A minimal schema admission check refuses a per-agent dial missing its label
+as `:seon.schema/validation-refusal`, naming the attribute and expected property.
+
+The four-namespace iteration completed with **80 tests, 3,849 assertions,
+9 failures, 10 errors** (`tmp/config-plan-1d-r1-fast.log`). R1's new regression
+passed its live declaration pulls, coverage of every per-agent dial, and typed
+missing-display refusal. C7, R3, and the prerequisite deletion regressions also
+passed. The remaining schema assertion expects operation `seon.schema/pulled-form-in`
+where the current diagnostic names `seon.schema/pulled-selector-refusal`;
+config and plan failures are the refusal classes already recorded above.
+The slot wait was **545 seconds**; no competing JVM or slot override was
+launched by this lane. The final config-only run verified the renderer's reuse
+of the carried projection and the finalized labels: **23 tests, 178 assertions,
+8 failures, 3 errors**, with the new R1 regression passing again
+(`tmp/config-plan-1d-r1-final-fast.log`).
+
+R1 has no data reset: the two retired keys are schema declarations and the
+new metadata is additive. The unowned `test/seon/html_views_test.clj:198`
+synthetic test still edits the retired table and must move its metadata to
+its synthetic attributes. C13's three backup string copies remain listed:
+`resources/seon/schemas/seon.config.ai.backup.edn` api-key-variable, endpoint,
+and model; aliasing their shapes while retaining independent dial properties
+is a follow-up beyond the requested one-line cleanup.
+
+Cold R1 proof owed (the brace expansion lists only this item's schema files):
+
+```sh
+bin/test --paths \
+  resources/seon/schemas/seon.config{,.agent,.ai,.ai.backup,.ai.retry,.db,.effect.background,.eval,.flow,.operator,.render,.run,.shell,.web}.edn \
+  resources/seon/schemas/seon.agent.edn \
+  src/seon/agent.clj src/seon/schema.clj test/seon/config_test.clj \
+  -- seon.config-test seon.plan-test my.plan-test seon.schema-test
+```
+
+The separate R2 command below includes `seon.turn-test`; the orchestrator owns
+both cold gates and `bin/test --platform`. This lane ran neither.
+
+C4 investigation found that a strict check of all top-level qualified Seon
+properties would additionally reach undeclared `:seon.db/cardinality`,
+`:seon.error/class`, `:seon.error/refusal`, `:seon.issue/cites`, and
+`:seon.schema.admission/exemption` / `:seon.schema.admission/reason`.
+These belong to resources outside this lane's allowed edits, including held
+error/schema owners. Silently exempting these names would defeat the requested
+class-level refusal. The existing regression
+`canonical-rows-carry-arbitrary-namespaced-properties` also explicitly expects
+an undeclared property to be silently omitted, so its rule must change with
+the owning declaration seam rather than introducing a parallel registry.
+
+The proposed `:seon.config/default :seon.schema/value` resolves to `:any`.
+The current bridge maps native scalars and mixed unions, but not `:any`
+(`src/seon/schema/datahike.clj:123–184`); `storable-properties-in` drops a
+property that is not storable (`:311–318`). The foreground probe falsified the audit's storage premise:
+`:seon.config/default-storable? false`, persisted default properties `{}`;
+the proposed shell and render properties both returned storable `true`.
+It also confirmed exactly the six additional undeclared properties listed
+above. The probe's global millisecond count is 16: the 15 config-family dials
+plus unowned `:seon.test/check-time-limit-ms`. Reproduce with
+`clojure -M docs/prds/steward-platform/research/config-plan-family-1d-property-probe-2026-09-20.clj`.
+Raw output: `tmp/config-plan-1d-r1-load-and-property-probe.log`.
+The requested five-namespace load printed `:loads`, and the combined JVM
+exited 0. No C4 production change has been made.
+
+The later read-only default MCP attempt returned `repl-unavailable` with
+advertisement state `missing`; it did not execute. The observation was appended
+to the existing issue `mcp-runtime-status-lists-no-clusters-for-an-explicit-root`.
+No default lifecycle operation, substitute transport, or foreign session action
+was attempted. Fast snapshots continue to admit dirty foreign callers at HEAD
+bytes; no overlay refusal has been observed.
+
+## C4 owner design gate — remaining work
+
+C4 cannot honestly claim the requested queryability or recurrence guarantee
+inside the current ownership. The audit's exact default alias stays unstored,
+and six additional properties belong to unowned resources. A scope question
+with these three options has been submitted; no answer has been assumed.
+
+1. **Recommended: extend the declaration cut.** Release
+   `seon.db.edn`, `seon.error.edn`, `seon.issue.edn`, and
+   `seon.schema.admission.edn` for their missing properties, and choose a
+   storable, non-nil default shape instead of `:any`. Add the strict admission
+   check in the existing schema owner. Guarantee: all current Seon property
+   declarations are explicit and new undeclared ones refuse. Cost: four more
+   schema owners and their canonical regressions. Give up: an arbitrary
+   in-memory value as a persisted default.
+2. **Check reads and migrate their owners.** Add one supplied-registry property
+   reader and convert every relevant source reader, including the held render,
+   database, source-publication, shell, and schema-EDN readers. Guarantee:
+   consumer property reads name declared keys. Cost: cross-owner source work;
+   leaves compile-time annotations distinct from runtime property reads.
+3. **Declare the three properties only, with a storable default shape.**
+   Guarantee: those observations become queryable. Cost: the smallest bounded
+   slice. Give up: the universal undeclared-property refusal; keep that work
+   explicitly open rather than claiming the class cannot recur.
+
+The scope boundary comes from the assignment's owned paths and AGENTS.md's
+owner design gate. No foreign owner file or session was changed to pass it.
+
+## Final reset and deferred accounting
+
+- **RESET NEEDED:** `:my.plan.item/needs` (many refs → identity strings),
+  `:seon.ai.attempt/model` (retired), and false values previously stored under
+  `:seon.config.agent/show-all-settings` / `:seon.config.ai/retain-reasoning`.
+- C14: `:seon.cluster.eval/at` → recording-transaction ref remains deferred
+  with every writer and render consumer; exact handoff sites appear below.
+  Attempt observation time remains an instant by the audit's own ruling.
+- C4: untouched pending the gate above. Its live probe made no database write.
+- R1 retires declaration keys, not stored value types. A pre-R1 schema
+  population without dial labels will refuse the new admission rule; the
+  orchestrator owns publication/reset and live boot verification.
+- Default adoption, browser observation, cold gates, and platform proof are
+  not claimed. The lane's evidence is instrumented canonical fixtures,
+  their pulls, and foreground namespace loads.
+
 ## Resumed ruling and C7 result
 
 The orchestrator approved option 1 plus the bounded R2 extension in
@@ -91,7 +214,7 @@ Cold proof owed for C7:
 then orchestrator `bin/test --platform`. Hook publication is configured off;
 these fixture observations do not claim default-cluster adoption.
 
-## Decision boundary before production edits
+## Historical decision boundary before production edits
 
 ### R2 result and C14 handoff
 
@@ -207,7 +330,7 @@ The following conflicts need the owner design gate before deleting facts:
    expanded gates, and delayed implementation. Give up: immediate bounded
    delivery from this lane.
 
-## Item status and reset accounting
+## Historical item status at the original scope stop
 
 | Item | Schema diff / consumers touched | Verification | Reset |
 |---|---|---|---|
@@ -223,7 +346,7 @@ not applied: `:seon.ai.attempt/model`, `:my.plan.item/needs`,
 `:seon.config.agent/show-all-settings`, `:seon.config.ai/retain-reasoning`.
 No second timestamp conversion is invented.
 
-## Evidence and verification boundary
+## Historical evidence at the original scope stop
 
 The MCP runtime-status call succeeded: `default` PID **41822**, all returned
 proc observations answered `reply`; reported problem counts were **1** error
@@ -259,6 +382,6 @@ The existing open issue
 already records related settings/plan owning-value concerns; this note does
 not claim to reproduce or fix those writer defects.
 
-Leftovers: all implementation items remain pending. Audit C3/C8/C13 cleanup
+Historical leftovers at that original stop: all implementation items remained pending. Audit C3/C8/C13 cleanup
 has not been applied; the guide's stale archived-tx TARGET row remains outside
 this lane's owned paths. No findings are represented as completed fixes.

@@ -1,24 +1,24 @@
 #:seon.config.ai.retry{:base-delay-ms
                        [:and
-                        #:seon.config{:per-agent true, :dial true}
+                        #:seon.config{:display-label "Initial retry delay" :display-divisor 1000 :display-unit "s" :per-agent true, :dial true}
                         :seon.ai.retry/base-delay-ms],
                        :jitter-fraction
                        [:and
-                        #:seon.config{:per-agent true, :dial true}
+                        #:seon.config{:display-label "Jitter fraction" :per-agent true, :dial true}
                         :seon.ai.retry/jitter-fraction],
                        :maximum-delay-ms
                        [:and
-                        #:seon.config{:per-agent true, :dial true}
+                        #:seon.config{:display-label "Maximum retry delay" :display-divisor 1000 :display-unit "s" :per-agent true, :dial true}
                         :seon.ai.retry/maximum-delay-ms],
                        :maximum-retries
                        [:and
-                        #:seon.config{:per-agent true, :dial true}
+                        #:seon.config{:display-label "Maximum retries" :per-agent true, :dial true}
                         :seon.ai.retry/maximum-retries],
                        :maximum-total-delay-ms
                        [:and
-                        #:seon.config{:per-agent true, :dial true}
+                        #:seon.config{:display-label "Total retry delay" :display-divisor 1000 :display-unit "s" :per-agent true, :dial true}
                         :seon.ai.retry/maximum-total-delay-ms],
                        :multiplier
                        [:and
-                        #:seon.config{:per-agent true, :dial true}
+                        #:seon.config{:display-label "Multiplier" :per-agent true, :dial true}
                         :seon.ai.retry/multiplier]}

@@ -44,3 +44,16 @@ after a valid creation. Test valid empty, skipped and partially executed
 failure cases so strengthening does not erase real states. Prove or refute
 backlink/current-step/result-completeness candidates using the same fixture.
 Do not add another writer or submission-only validator.
+
+## Config/plan family follow-up, 2026-09-20
+
+Wave 1d's C4 inventory finds six additional undeclared top-level Seon
+properties beyond the audit's three: `:seon.db/cardinality`,
+`:seon.error/class`, `:seon.error/refusal`, `:seon.issue/cites`, and
+`:seon.schema.admission/exemption` / `:seon.schema.admission/reason`.
+A universal property declaration checker cannot silently exempt these.
+The proposed config default alias also resolves to the unstorable `:any`;
+the read-only foreground probe returned storable `false` and persisted
+default properties `{}`. The probe is recorded in the
+[config/plan landing](../../prds/steward-platform/research/config-plan-family-1d-2026-09-20.md).
+This is an ownership/design boundary, not a claim that C4 is fixed.

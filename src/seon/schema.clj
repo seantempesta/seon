@@ -1130,9 +1130,31 @@
                :seon.schema/registration-outside-delta true
                :seon.error/kind :user-input}))))
 
+(defn- assert-config-display!
+  "Refuse a per-agent dial whose declaration cannot name its settings row."
+  {:malli/schema [:=> [:cat :map] :nil]}
+  [forms]
+  (doseq [[attribute definition] forms
+          :let [properties (form/attr-form-properties definition)]
+          :when (and (:seon.config/dial properties)
+                     (:seon.config/per-agent properties)
+                     (not (and (string? (:seon.config/display-label properties))
+                               (seq (:seon.config/display-label properties)))))]
+    (let [refusal {:seon.error/at (java.util.Date.)
+                   :seon.error/layer :seon.schema/admission
+                   :seon.error/operation 'seon.schema/assert-config-display!
+                   :seon.schema/refused-value definition
+                   :seon.schema/expected-value :seon.config/display-label
+                   :seon.schema/key attribute
+                   :seon.error/message
+                   (str "Per-agent dial " attribute
+                        " must declare a nonempty :seon.config/display-label.")}]
+      (throw (ex-info (:seon.error/message refusal) refusal)))))
+
 (defn- candidate-registry
   ([] (candidate-registry (declaration-population)))
   ([forms]
+   (assert-config-display! forms)
    (let [defaults (mr/fast-registry (m/default-schemas))]
      (reify
        mr/Registry
@@ -1842,7 +1864,8 @@
      (materialize-projection
       (compose-projection-data forms function-contracts)
       options)
-     (let [predicate-symbols
+     (let [_ (assert-config-display! forms)
+         predicate-symbols
          (into (into #{} (mapcat predicate-symbols-in) (vals forms))
                (mapcat predicate-symbols-in)
                (vals function-contracts))

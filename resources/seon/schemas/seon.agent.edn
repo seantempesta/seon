@@ -156,7 +156,7 @@
 :plan [:and {:seon.db/component true :seon.db/component-schema :my.plan/entity
              :seon.render/ai seon.plan/render-plan-ai
              :seon.render/html seon.plan/render-plan-html} :seon.db/ref]
-             :settings [:and {:seon.db/component true :seon.db/component-schema :seon.config/settings
+             :settings [:and {:seon.db/component true :seon.db/component-schema :seon.config/agent-overlay
                               :seon.render/ai seon.agent/render-settings-ai
                               :seon.render/html seon.agent/render-settings-html} :seon.db/ref]
  ; Additive error declaration manifest, 2026-09-18.

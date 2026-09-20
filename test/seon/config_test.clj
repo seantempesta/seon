@@ -5,6 +5,9 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
+            [seon.agent :as agent]
+            [seon.cluster.agent :as cluster-agent]
+            [seon.schema.form :as schema.form]
             [seon.config :as config]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
@@ -22,6 +25,50 @@
   (into #{}
         (comp (filter vector?) (map first))
         (schema/schema-definition :seon.config/manifest)))
+
+(deftest every-agent-dial-has-a-declared-settings-row
+  (test-support/with-database
+    (fn [connection]
+      (test-support/seed-cluster! connection "settings-display")
+      (test-support/transacted!
+       connection
+       (cluster-agent/creation-tx
+        {:seon.agent/id "settings-display"
+         :seon.ns/name 'my.agents.settings-display
+         :seon.cluster/name "settings-display"}))
+      (let [database (db/db connection)
+            projection (schema/projection-from-database database)
+            forms (:seon.schema.projection/forms projection)
+            dials (into {}
+                        (keep (fn [[attribute definition]]
+                                (let [properties (schema.form/attr-form-properties definition)]
+                                  (when (and (:seon.config/dial properties)
+                                             (:seon.config/per-agent properties))
+                                    [attribute properties]))))
+                        forms)
+            rendered (schema/call-with-projection
+                      projection
+                      #(agent/render-settings-html
+                        {:seon.db/db database :seon.agent/id "settings-display"}))
+            strings (set (filter string? (tree-seq coll? seq rendered)))]
+        (is (seq dials))
+        (is (= :section (first rendered)))
+        (doseq [[attribute properties] dials]
+          (let [label (:seon.config/display-label properties)
+                declaration (db/pull database
+                                     [:seon.schema/key :seon.config/display-label]
+                                     [:seon.schema/key attribute])]
+            (is (= label (:seon.config/display-label declaration)) (str attribute))
+            (is (contains? strings label) (str attribute))))
+        (let [attribute (first (sort (keys dials)))
+              incomplete (update-in forms [attribute 1] dissoc :seon.config/display-label)
+              refusal (try (schema/build-projection incomplete)
+                           nil
+                           (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+          (is ((schema/projection-validator projection :seon.schema/validation-refusal)
+               refusal))
+          (is (= :seon.config/display-label (:seon.schema/expected-value refusal)))
+          (is (= attribute (:seon.schema/key refusal))))))))
 
 (deftest optional-setting-flags-assert-only-true
   (test-support/with-database
