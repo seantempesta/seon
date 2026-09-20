@@ -56,6 +56,23 @@
 
 (declare commit-request)
 
+(deftest recording-ignores-transient-inline-members-when-finding-components
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/handed-projection)
+           value {:seon.error/at (java.util.Date.)
+                  :seon.error/layer :seon.error-test/recording
+                  :seon.error/operation 'seon.error-test/recording
+                  :seon.error/message "An observation with an in-flight object."
+                  :seon.error/offending (Object.)}
+           restored (#'error/stored-observation projection value)
+           recording (error/recording (db/db connection) (commit-request value {}))
+           report (test-support/transacted! connection (:seon.db/tx-data recording))]
+       (is (identical? (:seon.error/offending value) (:seon.error/offending restored)))
+       (is (:db-after report))
+       (is (:seon.error/signature
+            (db/pull (:db-after report) '[*] (:seon.error/ref recording))))))))
+
 (deftest row-acquisition-observations-have-no-program-digest-promise
   (test-support/with-database
    (fn [connection]

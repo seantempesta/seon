@@ -120,3 +120,22 @@ This observation establishes fixture population during the interval, not
 that the test body itself took 187 s. No backstop fired and no timeout was
 raised. Reducing that cost and enforcing the owner's per-test bounds remain
 outside the guard-deletion slice.
+
+## Error-contract iteration — 2026-09-23
+
+The class-1 fast snapshot started its first `seon.error-test` member at
+`2026-09-20T20:58:00.971776Z`. A sample at JVM elapsed 185.06 s found main
+in `retrying-base/acquire-base!`, and the fixture thread in
+`populate-database!` waiting on the Datahike transaction. This repeats the
+whole-program population observation above; no timeout override was used.
+The permitted initial indexing cost must be reported separately from test
+body work, rather than hidden by a per-test exception.
+
+After fixture acquisition, existing error tests also exceeded five seconds:
+`a-prepared-message-keeps-its-id-when-the-transaction-repeats` measured
+8.610 s, `recurrence-counting-does-not-require-a-notification-threshold`
+11.878 s, and `recurrence-identity-is-the-complete-observations-stable-evidence`
+38.107 s (reporter begin/end timestamps). The new focused recording
+regression took 4.964 s. Those observations do not identify the slow
+transaction algorithm; they establish that the existing suite does not yet
+meet the new bound. No test metadata was widened to conceal these costs.

@@ -2923,3 +2923,58 @@ Before the documentation-only commit, the required shared-tree namespace
 load command exited 0 and printed `:loads`. It includes the held schema
 edits, so it does not supersede the selected-overlay refusal above. Files
 touched in this resume: this landing note and the linked existing issue.
+
+## 2026-09-23 four error-contract classes — class 1
+
+The offending-result implementation remains parked. Read the replacement
+AGENTS rules 11–16 and “SECONDS, NOT MINUTES”, and the one-JVM publication
+redesign plan end to end. No publication-owner code is changed.
+
+Root cause: `stored-observation` treated every inline error member as a
+separately registered attribute, then handed the absent declaration to
+`malli.core/properties`. The canonical fixture probe found exactly these
+unregistered members:
+
+```text
+:seon.test.runner/invalid-marker-reason-error :seon.error/offending
+:seon.test.runner/unknown-worker-command-error :seon.error/offending
+:seon.test.runner/worker-launch-failure-error :seon.error/offending
+```
+
+Each compiled member is `:seon.schema/value`; its standalone registry lookup
+is nil. Calling the pre-change normalizer produced:
+
+```clojure
+{:type :malli.core/invalid-schema
+ :message :malli.core/invalid-schema
+ :data {:schema nil :form nil}}
+```
+
+Seam: the projection's compiled registry and
+`seon.schema.datahike/database-attributes-core-in` determine which members
+can participate in persistence. Component discovery now filters to that
+set and reads only an existing declaration. Raw in-flight members remain
+on the observation. The canonical armed regression verifies object identity
+through restoration and successful recording through the real writer.
+
+Command:
+
+```sh
+bin/test-fast --paths src/seon/error.clj test/seon/error_test.clj -- seon.error-test
+```
+
+The new regression passed in **4.964 s** (reporter begin/end timestamps).
+The class-1-only snapshot also reproduced class 3 in
+`complete-error-children-validate-through-the-writer`; that snapshot excludes
+the separate database fix. Final tally and scratch boot evidence follow.
+
+RESET NEEDED: none; no attributes changed. Files for this class:
+`src/seon/error.clj`, `test/seon/error_test.clj`, this note, and the existing
+fixture timing issue updated with the observed verification cost.
+
+Recorded fast tally: **47 executed, 0 unchanged / 366 assertions / 0 failures
+/ 1 error**, run `946c747f2227`, wall-clock **510.91 s**. The one error is
+the class-3 transaction fallback named above. There are no remaining
+`invalid-schema` test errors in this snapshot. Namespace load of
+`seon.error`, `seon.turn`, `seon.db`, and `seon.blob` exited 0 before commit.
+Scratch boot verification remains to run serially after the fast iterations.

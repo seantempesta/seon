@@ -275,7 +275,7 @@
         (schema/projection-cache-value
          projection ::observation-attributes
          (fn []
-           (let [forms (:seon.schema.projection/forms projection)
+           (let [registry (:seon.schema.projection/registry projection)
                  stored-attributes (set (schema.datahike/database-attributes-core-in projection))
                  attributes
                  (loop [pending (vec (conj (facet-keys projection) :seon.error/base))
@@ -283,9 +283,10 @@
                    (if-let [entity (peek pending)]
                      (if (seen entity)
                        (recur (pop pending) seen result)
-                       (let [members (map first (internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) entity)))
-                             children (keep #(-> (mr/schema (:seon.schema.projection/registry projection) %) m/properties
-                                                  :seon.db/component-schema) members)]
+                       (let [members (map first (internal/entity-entries (mr/schema registry entity)))
+                             children (keep #(some-> (mr/schema registry %) m/properties
+                                                      :seon.db/component-schema)
+                                            (filter stored-attributes members))]
                          (recur (into (pop pending) children) (conj seen entity)
                                 (into result members))))
                      result))]
