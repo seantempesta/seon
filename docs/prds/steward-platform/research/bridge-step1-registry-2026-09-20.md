@@ -13,6 +13,16 @@ required six namespaces are not green, so the orchestrator's landing
 condition is not satisfied. No step-2 change, storage guarantee change,
 worktree, cold gate, default adoption, restart, or stop occurred.
 
+Checkpoint commit: `2cbb2cdad`. During its post-commit load, publication commit
+`8edfae1b7` landed and the four inspected publication paths (`src/seon/fn.clj`,
+`src/seon/cluster/source.clj`, `src/seon/test/cache.clj`,
+`src/seon/test/selection.clj`) became clean. The load exited 0. The fast
+tallies below precede that commit: the fn errors are observations of their
+tested HEAD bytes, not claims that the newly landed fixes still fail.
+Current-HEAD integration remains owed, together with the separate 1a/facet
+repairs and the unproved walk-allocation attribution. No released publication
+file was edited by this lane.
+
 ## Latest checkpoint — 2026-09-20
 
 **Committed `667f6519e`, recorder producer only:** the live recording form's
