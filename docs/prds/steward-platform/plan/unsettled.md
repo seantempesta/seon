@@ -5967,3 +5967,26 @@ proven to the extent a fast run can: write-schema rule (`2d0e9b17e` +
 regression), boot form size (operator), guard derivation (`d8921fbd4`).
 Blocking issues for the publication lane stand as filed. Waiting on the
 owner's credits; wakeups continue every 20 minutes.
+
+## 2026-09-22 morning (~09:10 local) — credits restored; lanes resumed; OPS-EFFECTS FAMILY KIND-FREE
+
+Owner reset the credits. `git stash pop` restored the three parked lanes'
+edits with one conflict in `src/seon/db.clj` (my write-schema rule vs step
+2's registry-API change) — resolved keeping both, reading properties
+through `mr/schema` + `m/properties` as step 2's tree does; the merged
+tree loads; the stash entry dropped (patch retained in
+`tmp/orchestrator/parked-2026-09-21/`). Resumed: publication (issues 1–2
+first, then measurements), step 2 (landing), ops-effects-2.
+`kind-sweep-ops-effects-2` then LANDED `9ac158640` (context selection
+refusals; turn-owned recording deferred), `27aad863c` (operator low-space
+facets), `ea9758cd3` (effect kinds retired; settlement validates against
+the loaded handler's declared facets — option 2 as ruled): the family is
+kind-free except the three ruled deferrals (fn.clj gate-set facets;
+context :494/:540 → turn/cluster sweep). Its fast pass executed zero tests
+because `data/store.lock` blocked recording (another lane's run held the
+root store) — tools item: fast recording serializes on the root store
+lock; a held lock must wait or record through the live host, never report
+zero. Third slot → `kind-sweep-sci-program` resumed (my.program option 1;
+`seon.call-preparation` assigned — the six db reds). Editing lanes:
+publication, step 2, sci-program; gate-restructure resumes at the next
+free slot; the ScheduleWakeup loop stopped (owner present).
