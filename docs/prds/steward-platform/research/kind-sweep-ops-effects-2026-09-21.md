@@ -297,3 +297,32 @@ resources/seon/schemas/seon.schedule.edn test/seon/schedule_test.clj --
 seon.schedule-test`, followed by platform proof with the accumulated slices.
 Skill drift is recorded in
 `docs/seon/issues/flow-skill-forbids-current-turn-acquisition.md`.
+
+### ops-effects-2: maintenance checkpoint
+
+Changed src/seon/maintenance.clj, resources/seon/schemas/seon.maintenance.edn,
+test/seon/maintenance_test.clj, test/seon/maintenance_schema_test.clj.
+Retirement census is zero in all four. Projection refusals require the
+matching producer count, unresolved producer symbol or failed producer symbol;
+the no-collection observation requires the uncollected root. Returned
+contracts name these facets. Tests query the recorded operation and concrete
+collection/root evidence. The stored summary components carry base evidence
+instead of a kind.
+
+Load printed `:loads`; lint: 0 errors / 0 warnings. One accumulated fast run
+selected seon.maintenance-test and seon.maintenance-schema-test, armed 1,437
+contracts, then refused snapshot admission at the same held
+invalid-marker-reason-error declaration. Fast tally owed — admission held by
+resources/seon/schemas/seon.test*.edn and src/seon/test/*.clj.
+
+Remaining local follow-through: schedule's polymorphic handler result check
+and maintenance's nested collection/claim-error projections must be reviewed
+with the operator producer conversion. The operator cleanup slot still
+declares :seon.error/value; seon.db/db also declares that generic output.
+No durable diagnostic evidence beyond the existing component summaries is
+claimed for nested operator refusals yet.
+
+Cold proof owed (orchestrator only): `bin/test --paths src/seon/maintenance.clj
+resources/seon/schemas/seon.maintenance.edn test/seon/maintenance_test.clj
+test/seon/maintenance_schema_test.clj -- seon.maintenance-test
+seon.maintenance-schema-test`, then accumulated platform proof.

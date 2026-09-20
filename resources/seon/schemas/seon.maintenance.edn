@@ -59,4 +59,23 @@
                      :seon.operator.collect/complete?]]
                    :result-entity-request :seon.maintenance.result/value
                    :result-entity-response
-                   [:or :seon.maintenance.result/value :seon.error/value]}
+                   [:or :seon.maintenance.result/value
+                    :seon.maintenance/ambiguous-result-projection-error
+                    :seon.maintenance/result-projection-unresolved-error
+                    :seon.maintenance/result-projection-failed-error] :seon.maintenance/matching-producer-count [:int {:min 2}]
+ :seon.maintenance/ambiguous-result-projection-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.maintenance/matching-producer-count :seon.maintenance/matching-producer-count]]]
+ :seon.maintenance/unresolved-producer :qualified-symbol
+ :seon.maintenance/result-projection-unresolved-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.maintenance/unresolved-producer :seon.maintenance/unresolved-producer]]]
+ :seon.maintenance/failed-producer :qualified-symbol
+ :seon.maintenance/result-projection-failed-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.maintenance/failed-producer :seon.maintenance/failed-producer]]]
+ :seon.maintenance/uncollected-root :string
+ :seon.maintenance/root-never-collected-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.maintenance/uncollected-root :seon.maintenance/uncollected-root]]]
+}

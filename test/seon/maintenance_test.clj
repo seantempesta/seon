@@ -46,7 +46,9 @@
      :seon.operator.process-census/unclaimed
      [(process-identity 42 generation)]
      :seon.operator.process-census/claim-errors
-     [{:seon.error/kind :seon.operator/unreadable-claim
+     [{:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.operator/collection
+         :seon.error/operation 'seon.operator/collect!
        :seon.error/message "Unreadable claim."
        :seon.error/data {:seon.operator.claim/path "claim.edn"}}]
      :seon.operator.process-census/complete? false}))
@@ -201,7 +203,9 @@
          :seon.operator.cluster-cleanup/removed
          ["/repo/operator/data/clusters/retired"]
          :seon.operator.cluster-cleanup/collection
-         {:seon.error/kind :seon.error/not-yet
+         {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.operator/collection
+         :seon.error/operation 'seon.operator/collect!
           :seon.error/message "Public collection evidence lands in Unit 6."
           :seon.error/data {:seon.cluster.registry/swept :opaque}}
          :seon.operator.cluster-cleanup/remaining []
@@ -225,16 +229,16 @@
                    :seon.operator.cluster-cleanup/reclaimed-bytes ?bytes]
                   [?result :seon.operator.cluster-cleanup/complete? ?complete]]
                 @connection)))
-        (is (= #{[:seon.error/not-yet
+        (is (= #{['seon.operator/collect!
                   "Public collection evidence lands in Unit 6."]}
                (db/q
-                '[:find ?kind ?message
+                '[:find ?operation ?message
                   :where
                   [?result :seon.maintenance.result/id "cleanup-result/1"]
                   [?result
                    :seon.maintenance.result/cluster-cleanup-collection
                    ?collection]
-                  [?collection :seon.error/kind ?kind]
+                  [?collection :seon.error/operation ?operation]
                   [?collection :seon.error/message ?message]]
                 @connection)))))))
 
@@ -439,7 +443,9 @@
                   @connection))))))))
 
 (deftest a-refused-collection-keeps-its-typed-error-on-the-same-slot
-  (let [refusal {:seon.error/kind :seon.operator/collection-incomplete
+  (let [refusal {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.operator/collection
+         :seon.error/operation 'seon.operator/collect!
                  :seon.error/message "Collection did not verify every root."
                  :seon.error/data {:seon.cluster.registry/swept :opaque}}
         projected (maintenance/result-entity (schema/handed-projection) (cleanup-result refusal))]
@@ -449,17 +455,17 @@
          connection
          [(assoc projected
                  :seon.maintenance.result/id "cleanup-result/refused")])
-        (is (= #{[:seon.operator/collection-incomplete
+        (is (= #{['seon.operator/collect!
                   "Collection did not verify every root."]}
                (db/q
-                '[:find ?kind ?message
+                '[:find ?operation ?message
                   :where
                   [?result :seon.maintenance.result/id
                    "cleanup-result/refused"]
                   [?result
                    :seon.maintenance.result/cluster-cleanup-collection
                    ?collection]
-                  [?collection :seon.error/kind ?kind]
+                  [?collection :seon.error/operation ?operation]
                   [?collection :seon.error/message ?message]]
                 @connection))
             "one projection writes both arms; the error arm is unchanged")
@@ -523,10 +529,9 @@
                 (task-transaction cleanup-task cleanup-handler)]))
         (testing "an uncollected root is the typed unknown, never absence"
           ;; `seon.error/diagnostic` moves every diagnostic-* field into
-          ;; `:seon.error/data`; the top level carries kind and message.
+          ;; `:seon.error/data`; the top level carries the observed root and base evidence.
           (let [answer (maintenance/last-collection @connection collected-root)]
-            (is (= :seon.maintenance/root-never-collected
-                   (:seon.error/kind answer)))
+            (is (= collected-root (:seon.maintenance/uncollected-root answer)))
             (is (= collected-root
                    (get-in answer [:seon.error/data
                                    :seon.error/diagnostic-offending])))

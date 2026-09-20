@@ -231,7 +231,7 @@
       (let [first-result
             (db/transact!
              connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])]
-        (is (nil? (:seon.error/kind first-result)))
+        (is (seq (:tx-data first-result)))
         (is (= (set (map (fn [row]
                            [(:seon.schedule.task/id row)
                             (:seon.schedule/id row)
@@ -292,7 +292,9 @@
           :seon.operator.collect/roots-verified? true
           :seon.operator.collect/complete? true})
         error-component
-        {:seon.error/kind :seon.operator/collection-incomplete
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.operator/collection
+         :seon.error/operation 'seon.operator/collect!
          :seon.error/message "Collection did not verify every root."}]
     (testing "the maintenance mirror admits what the public slot admits"
       (doseq [[public-key component-key value]
@@ -346,7 +348,7 @@
                     :seon.operator.cluster-cleanup/collection collect
                     :seon.operator.cluster-cleanup/reclaimed-bytes 0
                     :seon.operator.cluster-cleanup/complete? true}]
-       (doseq [[name producer value positive membership]
+       (doseq [[operation-name producer value positive membership]
                [["census" maintenance/project-process-census-result census
                  :seon.operator.process-census/observed-at :seon.maintenance.result/process-census-roots]
                 ["reap" maintenance/project-reap-result reap
@@ -355,26 +357,28 @@
                  :seon.operator.collect/store-id :seon.maintenance.result/collect-branches]
                 ["cleanup" maintenance/project-cluster-cleanup-result cleanup
                  :seon.operator.cluster-cleanup/managed-root :seon.operator.cluster-cleanup/removed]]]
-         (let [identity (str "empty-maintenance/" name)
-               row (assoc (producer value) :seon.maintenance.result/id identity)]
+         (let [result-id (str "empty-maintenance/" operation-name)
+               row (assoc (producer value) :seon.maintenance.result/id result-id)]
            (test-support/transacted! connection [row])
-           (let [stored (db/pull @connection '[*] [:seon.maintenance.result/id identity])]
+           (let [stored (db/pull @connection '[*] [:seon.maintenance.result/id result-id])]
              (is (= (get value positive) (get stored positive)))
              (is (not (contains? stored membership)))
              (is (nil? (db/pull @connection [:db/id]
-                                [:seon.maintenance.result/id (str identity "/not-observed")]))))))
-       (let [partial (assoc cleanup
+                                [:seon.maintenance.result/id (str result-id "/not-observed")]))))))
+       (let [partial-result (assoc cleanup
                             :seon.operator.cluster-cleanup/complete? false
                             :seon.operator.cluster-cleanup/collection
-                            {:seon.error/kind :seon.operator/collection-incomplete
+                            {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.operator/collection
+         :seon.error/operation 'seon.operator/collect!
                              :seon.error/message "Collection did not finish."})
-             row (assoc (maintenance/project-cluster-cleanup-result partial)
+             row (assoc (maintenance/project-cluster-cleanup-result partial-result)
                         :seon.maintenance.result/id "empty-maintenance/partial")]
          (test-support/transacted! connection [row])
          (let [stored (db/pull @connection '[*]
                               [:seon.maintenance.result/id "empty-maintenance/partial"])]
            (is (false? (:seon.operator.cluster-cleanup/complete? stored)))
-           (is (= :seon.operator/collection-incomplete
-                  (get-in stored [:seon.maintenance.result/cluster-cleanup-collection :seon.error/kind])))
+           (is (= 'seon.operator/collect!
+                  (get-in stored [:seon.maintenance.result/cluster-cleanup-collection :seon.error/operation])))
            (is (nil? (get-in stored [:seon.maintenance.result/cluster-cleanup-collection
                                     :seon.operator.collect/store-id])))))))))

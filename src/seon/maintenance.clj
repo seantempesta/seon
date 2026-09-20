@@ -9,12 +9,7 @@
 
 (schema.edn/load! {})
 
-(defn- error-value
-  [kind message data]
-  {kind true
-   :seon.error/kind kind
-   :seon.error/message message
-   :seon.error/data data})
+
 
 (defn- result-projections
   [schema-projection result]
@@ -40,30 +35,55 @@
       (empty? projections) result
 
       (< 1 (count projections))
-      (error-value
-       ::ambiguous-result-projection
-       "The maintenance result matches several persistence producers."
-       {:seon.maintenance/result-projections projections})
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.maintenance/projection
+        :seon.error/operation 'seon.maintenance/result-entity
+        :seon.error/message "Maintenance requires one matching persistence producer."
+        :seon.error/diagnostic-layer :seon.maintenance/projection
+        :seon.error/diagnostic-operation 'seon.maintenance/result-entity
+        :seon.error/diagnostic-member :seon.maintenance/matching-producer-count
+        :seon.error/diagnostic-expected "one matching persistence producer"
+        :seon.error/diagnostic-offending projections
+        :seon.error/offending projections
+        :seon.error/diagnostic-cause :seon.maintenance/projection-refused
+        :seon.error/diagnostic-evidence {}
+        :seon.maintenance/matching-producer-count (count projections)})
 
       :else
       (let [[schema-key projection] (first projections)]
         (try
           (if-let [producer (requiring-resolve projection)]
             (producer result)
-            (error-value
-             ::result-projection-unresolved
-             "The declared maintenance result producer does not resolve."
-             {:seon.schema/key schema-key
-              :seon.maintenance/result-projection projection}))
+            (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.maintenance/projection
+        :seon.error/operation 'seon.maintenance/result-entity
+        :seon.error/message "Maintenance requires a resolving persistence producer."
+        :seon.error/diagnostic-layer :seon.maintenance/projection
+        :seon.error/diagnostic-operation 'seon.maintenance/result-entity
+        :seon.error/diagnostic-member :seon.maintenance/unresolved-producer
+        :seon.error/diagnostic-expected "a resolving persistence producer"
+        :seon.error/diagnostic-offending {:seon.schema/key schema-key :seon.maintenance/result-projection projection}
+        :seon.error/offending {:seon.schema/key schema-key :seon.maintenance/result-projection projection}
+        :seon.error/diagnostic-cause :seon.maintenance/projection-refused
+        :seon.error/diagnostic-evidence {}
+        :seon.maintenance/unresolved-producer projection}))
           (catch Throwable cause
-            (error-value
-             ::result-projection-failed
-             (or (ex-message cause)
-                 "The maintenance result producer failed.")
-             {:seon.schema/key schema-key
-              :seon.maintenance/result-projection projection
-              :seon.maintenance/exception-class
-              (.getName (class cause))})))))))
+            (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.maintenance/projection
+        :seon.error/operation 'seon.maintenance/result-entity
+        :seon.error/message "Maintenance requires a successful persistence projection."
+        :seon.error/diagnostic-layer :seon.maintenance/projection
+        :seon.error/diagnostic-operation 'seon.maintenance/result-entity
+        :seon.error/diagnostic-member :seon.maintenance/failed-producer
+        :seon.error/diagnostic-expected "a successful persistence projection"
+        :seon.error/diagnostic-offending {:seon.schema/key schema-key :seon.maintenance/result-projection projection :seon.error/exception cause}
+        :seon.error/offending {:seon.schema/key schema-key :seon.maintenance/result-projection projection :seon.error/exception cause}
+        :seon.error/diagnostic-cause :seon.maintenance/projection-refused
+        :seon.error/diagnostic-evidence {}
+        :seon.maintenance/failed-producer projection})))))))
 
 (defn- process-identity
   [process]
@@ -100,9 +120,8 @@
 
 (defn- claim-error
   [error]
-  (cond-> {:seon.error/message (:seon.error/message error)}
-    (:seon.error/kind error)
-    (assoc :seon.error/kind (:seon.error/kind error))
+  (cond-> (select-keys error [:seon.error/at :seon.error/layer
+                             :seon.error/operation :seon.error/message])
     (get-in error [:seon.error/data :seon.operator.claim/path])
     (assoc :seon.operator.claim/path
            (get-in error [:seon.error/data :seon.operator.claim/path]))))
@@ -201,8 +220,11 @@
   error value stays admitted for a cleanup whose collection refused. Absence
   of the error keys is not health: the success arm carries its own facts."
   [collection]
-  (if (:seon.error/kind collection)
-    (select-keys collection [:seon.error/kind :seon.error/message])
+  ;; Debt: seon.operator.cluster-cleanup/collection declares :seon.error/value.
+  (if (and (:seon.error/at collection) (:seon.error/layer collection)
+           (:seon.error/operation collection))
+    (select-keys collection [:seon.error/at :seon.error/layer
+                             :seon.error/operation :seon.error/message])
     (project-collect-result collection)))
 
 (defn project-cluster-cleanup-result
@@ -284,11 +306,13 @@
   "Derive root's latest maintenance receipt for every declared task."
   {:malli/schema
    [:function
-    [:=> [:cat] [:or :seon.maintenance/report :seon.error/value]]
+    [:=> [:cat] [:or :seon.maintenance/report :seon.db/error-result]]
     [:=> [:cat :seon.db/database-value] :seon.maintenance/report]]}
   ([]
    (let [database (db/db)]
-     (if (:seon.error/kind database)
+     ;; Debt: seon.db/db declares seon.db/error-result, including :seon.error/value.
+     (if (and (map? database) (:seon.error/at database)
+              (:seon.error/layer database) (:seon.error/operation database))
        database
        (report-in database))))
   ([database]
@@ -306,6 +330,9 @@
    :seon.operator.collect/complete?])
 
 (defn- last-collection-in
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.operator/managed-root]
+                  [:or :seon.maintenance/collection-record
+                   :seon.maintenance/root-never-collected-error]]}
   [database managed-root]
   (let [rows
         (db/q '[:find ?completed-at ?receipt-id ?collection
@@ -333,11 +360,15 @@
               :seon.maintenance.receipt/completed-at completed-at}
              (db/pull database collection-facts collection))
       (error/diagnostic
-       {:seon.error/kind ::root-never-collected
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.maintenance/collection
+        :seon.error/operation 'seon.maintenance/last-collection-in
+        :seon.maintenance/uncollected-root managed-root
+        :seon.error/offending managed-root
         :seon.error/message
         "No completed maintenance receipt records a collection of this root."
         :seon.error/diagnostic-layer :seon.maintenance
-        :seon.error/diagnostic-operation 'seon.maintenance/last-collection
+        :seon.error/diagnostic-operation 'seon.maintenance/last-collection-in
         :seon.error/diagnostic-member :seon.operator/managed-root
         :seon.error/diagnostic-expected :seon.operator.collect/managed-root
         :seon.error/diagnostic-offending managed-root
@@ -355,12 +386,14 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.operator/managed-root]
-     [:or :seon.maintenance/collection-record :seon.error/value]]
+     [:or :seon.maintenance/collection-record :seon.maintenance/root-never-collected-error :seon.db/error-result]]
     [:=> [:cat :seon.db/database-value :seon.operator/managed-root]
-     [:or :seon.maintenance/collection-record :seon.error/value]]]}
+     [:or :seon.maintenance/collection-record :seon.maintenance/root-never-collected-error :seon.db/error-result]]]}
   ([managed-root]
    (let [database (db/db)]
-     (if (:seon.error/kind database)
+     ;; Debt: seon.db/db declares seon.db/error-result, including :seon.error/value.
+     (if (and (map? database) (:seon.error/at database)
+              (:seon.error/layer database) (:seon.error/operation database))
        database
        (last-collection-in database managed-root))))
   ([database managed-root]
