@@ -167,6 +167,8 @@
   (test-support/with-database
    (fn [connection]
      (let [database @connection
+           validate-refusal (schema/projection-validator
+                             (schema/handed-projection) :seon.schema/validation-refusal)
            ids (d/q '[:find [?function ...]
                       :where [?function :seon.fn/sym my.message/send]]
                     database)]
@@ -179,7 +181,10 @@
                          (db/pull-many database
                                        @#'sci.eval/program-documentation-selector ids))
                   lines (str/split-lines (str warnings))]
-              (is (= :seon.schema/missing-projection (:seon.error/kind rows)))
+              (is (validate-refusal rows))
+              (is (= :seon.schema/projection (:seon.schema/expected-value rows)))
+              (is (= {:seon.db/operation 'seon.db/pull-many}
+                     (:seon.schema/refused-value rows)))
               (is (= 1 (count lines)))
               (is (str/includes? (first lines)
                                  "seon.db/projection-fallback caller= seon.db/pull-many"))
@@ -1543,7 +1548,8 @@
      ;; (`my.turn-test`, `my.message-test` prove that boundary).
      (let [refusal (test-support/refusal-data
                     #(db/pull-many @connection schema-pattern ["not-an-eid"]))]
-       (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+       (is (schema/valid-candidate-value? :seon.instrument/contract-error refusal))
+       (is (= :input (:seon.instrument/check refusal)))
        (is (= 'seon.db/pull-many
               (:seon.error/diagnostic-operation (:seon.error/data refusal))))
        (is (string? (:seon.error/message refusal)))))))
@@ -1722,8 +1728,8 @@
                 [#(db/transact! connection {:not-tx-data []})
                  'seon.db/transact! [:tx-data]]]]
          (let [refusal (test-support/refusal-data thunk)]
-           (is (= :seon.instrument/contract-violated
-                  (:seon.error/kind refusal)))
+           (is (schema/valid-candidate-value? :seon.instrument/contract-error refusal))
+           (is (= :input (:seon.instrument/check refusal)))
            (is (= operation
                   (get-in refusal [:seon.error/data
                                    :seon.error/diagnostic-operation])))
@@ -2156,10 +2162,13 @@
        (is (= :seon.db/installed-schema
               (:seon.error/diagnostic-member data)))
        (is (= 'seon.db/pull (:seon.error/diagnostic-operation data)))
-       (is (= refusal
-              (@#'db/with-declarations
-               {:not :a-database} 'seon.db/pull
-               (fn [_] (reset! decoded? true) ::decoded))))
+       (let [observed (@#'db/with-declarations
+                       {:not :a-database} 'seon.db/pull
+                       (fn [_] (reset! decoded? true) ::decoded))]
+         (is (inst? (:seon.error/at observed)))
+         (is (= (dissoc refusal :seon.error/at)
+                (dissoc observed :seon.error/at))
+             "Separate observations preserve the refusal evidence with their own timestamps."))
        (is (false? @decoded?)
            "no decode continuation may run on a refused declarations read")
        (is (= ::decoded

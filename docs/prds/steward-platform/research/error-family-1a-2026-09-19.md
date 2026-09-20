@@ -2397,3 +2397,23 @@ There is no newer combined six-suite tally: 273 / 5,134 / 10F / 30E remains
 the last complete combined measurement, with the focused 46 / 3,635 / 0 / 0
 as subsequent evidence. Acquisition remains at the three-option decision
 above. No pending producer is made green by accepting incomplete error data.
+
+### Landing checkpoints for this resume
+
+- `ace176c50`: explicit pass-through unions include the newly landed source
+  test-evidence facet. The manifest is green in the second combined run.
+- `8704e5ed5`: generator symbols survive compilation for canonical refusal
+  evidence; stored schema form bytes are independent of namespace-map
+  printing; canonical and armed regressions pass as measured above.
+  Namespace loads before and after this commit both returned `:loads`
+  (`tmp/error-family-resume-final-load-1.log` and `-2.log`).
+- The following producer/assertion slice contains `src/seon/db.clj`,
+  `test/seon/db_test.clj`, and `test/seon/sci/eval_test.clj`: complete raw
+  missing-projection refusals, specific raw-facet propagation, and the
+  successful declared-facet assertions measured by the second combined run.
+  It adds no schema or stored attribute.
+
+The lane stops at the **acquisition model decision**, with the exact three
+priced options above and recommendation 2. The required whole-program digest
+cannot truthfully be fabricated from a failed row. Outstanding red tests and
+the cold command remain explicit; this is not a six-suite green landing.

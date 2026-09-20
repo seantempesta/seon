@@ -181,7 +181,7 @@
 
 (defn- dependency-error
   [operation error]
-  (if (= :seon.schema/missing-projection (:seon.error/kind (ex-data error)))
+  (if (:seon.schema/expected-value (ex-data error))
     (ex-data error)
     (error-value
      ::invalid-read
@@ -1155,15 +1155,25 @@
 
   Each refused operation emits one occurrence at this shared seam. Callers
   retain the returned flat error, including the operation that lacked input."
-  {:malli/schema [:=> [:cat :qualified-symbol] :seon.error/value]}
+  {:malli/schema [:=> [:cat :qualified-symbol] :seon.schema/validation-refusal]}
   [operation]
   (binding [*out* *err*]
     (println "WARN seon.db/projection-fallback caller=" operation
              "missing-projection count=1; supply the operation's projection."))
-  {:seon.error/kind :seon.schema/missing-projection
-   :seon.error/message "This operation requires a carried schema projection."
-   :seon.error/data {:seon.db/operation operation
-                     :seon.schema/missing-projection true}})
+  (error.refusal/diagnostic
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.schema/projection
+    :seon.error/operation 'seon.db/projection-fallback
+    :seon.error/message "This operation requires a carried schema projection."
+    :seon.schema/expected-value :seon.schema/projection
+    :seon.schema/refused-value {:seon.db/operation operation}
+    :seon.error/diagnostic-layer :seon.schema/projection
+    :seon.error/diagnostic-operation 'seon.db/projection-fallback
+    :seon.error/diagnostic-member :seon.schema/projection
+    :seon.error/diagnostic-expected :seon.schema/projection
+    :seon.error/diagnostic-offending {:seon.db/operation operation}
+    :seon.error/diagnostic-cause :seon.schema/missing-projection
+    :seon.error/diagnostic-evidence {:seon.db/operation operation}}))
 
 (defn carried-projection
   "The schema origin's immutable carried projection, or nil when absent."

@@ -435,8 +435,8 @@
   (let [evaluation (run "leaked")]
     (is (failed? evaluation)
         "one evaluation's def cannot reach the next")
-    (is (= :seon.sci.eval/evaluation-failed
-           (:seon.error/kind (:seon.sci.admit/value evaluation))))))
+    (is (schema/valid-candidate-value? :seon.sci.kernel/error
+                                      (:seon.sci.admit/value evaluation)))))
 
 (deftest a-live-context-preserves-definition-value-class-and-metadata
   (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
@@ -600,8 +600,7 @@
                {:fn-name 'seon.sci.eval-test/compiled-runtime-victim
                 :arity 9})]
           (is (failed? evaluation) source)
-          (is (= :seon.sci.eval/evaluation-failed
-                 (:seon.error/kind refusal))
+          (is (schema/valid-candidate-value? :seon.sci.kernel/error refusal)
               source)
           (is (str/includes? (:seon.error/message refusal)
                              "metadata is read-only from SCI")
@@ -1174,7 +1173,10 @@
             (is (empty? @missing))
             (let [refusal (test-support/refusal-data
                            #(#'eval/evaluation-projection {}))]
-              (is (= :seon.schema/missing-projection (:seon.error/kind refusal)))
+              (is (schema/valid-candidate-value? :seon.schema/validation-refusal refusal))
+              (is (= :seon.schema/projection (:seon.schema/expected-value refusal)))
+              (is (= {:seon.db/operation 'seon.sci.eval/evaluate}
+                     (:seon.schema/refused-value refusal)))
               (is (= ['seon.sci.eval/evaluate] @missing)))))))))
 
 (deftest
@@ -1334,7 +1336,7 @@
         ;; read as a message drift.
         (is (identical? @#'db/as-of (sci/eval-string* ctx "seon.db/as-of"))
             "the fork calls the armed root, not a pre-arming copy")
-        (is (= :seon.instrument/contract-violated (:seon.error/kind failure)))
+        (is (schema/valid-candidate-value? :seon.instrument/arity-error failure))
         (is (= 0 (get-in failure [:seon.error/data :seon.instrument/arity])))
         (is (= arglists (get-in failure [:seon.error/data :seon.instrument/arglists])))
         (is (= (:seon.error/message failure) (:seon.cluster.eval/error evaluation)))
@@ -1436,8 +1438,8 @@
         "the cut instant is the one fact — presence is the state")
     (is (= :time (:seon.eval/outcome (:seon.sci.admit/record evaluation))))
     (testing "and the agent is told what happened, as a value"
-      (is (= :seon.sci.eval/time-limit
-             (:seon.error/kind (:seon.sci.admit/value evaluation))))
+      (is (schema/valid-candidate-value? :seon.sci.kernel/error
+                                        (:seon.sci.admit/value evaluation)))
       (is (re-find #"(?i)time"
                    (:seon.cluster.eval/error evaluation))))))
 
@@ -1463,8 +1465,8 @@
     (is (cut? evaluation))
     (is (= :time
            (:seon.eval/outcome (:seon.sci.admit/record evaluation))))
-    (is (= :seon.sci.eval/time-limit
-           (:seon.error/kind (:seon.sci.admit/value evaluation)))
+    (is (schema/valid-candidate-value? :seon.sci.kernel/error
+                                      (:seon.sci.admit/value evaluation))
         "the wrapped sci interrupt remains a flat time-limit value")))
 
 (deftest a-base-created-function-uses-the-invoking-threads-arm
@@ -1619,9 +1621,7 @@
          failure
          (:seon.sci.admit/value evaluation)]
         (is
-         (=
-          :seon.instrument/contract-violated
-          (:seon.error/kind failure))
+         (schema/valid-candidate-value? :seon.instrument/contract-error failure)
          moment)
         (is
          (=
@@ -2244,11 +2244,9 @@
                           (deadlined-in nil "(loop [i 0] (recur (inc i)))" 50))
            invoked-cut (invoked-value ctx database 'user/probe-spin [0] 50)]
        (testing "an agent mistake"
-         (is (= :seon.sci.eval/evaluation-failed
-                (:seon.error/kind evaluated-throw)))
-         (is (= :seon.sci.kernel/invocation-failed
-                (:seon.error/kind invoked-throw))
-             "only the subject differs — the kind names which entrance ran")
+         (is (schema/valid-candidate-value? :seon.sci.kernel/error evaluated-throw))
+         (is (schema/valid-candidate-value? :seon.sci.kernel/error invoked-throw))
+         (is (= 'user/probe-throw (get-in invoked-throw [:seon.error/data :seon.fn/sym])))
          (is (= "boom" (:seon.error/message evaluated-throw)))
          (is (= "Invocation of user/probe-throw failed: boom"
                 (:seon.error/message invoked-throw)))
@@ -2267,8 +2265,8 @@
            (is (not-any? #(and (map? %) (contains? % :sci.impl/interrupt))
                          (tree-seq coll? seq failure))
                "SCI's private interrupt marker never becomes outward evidence"))
-         (is (= :seon.sci.eval/time-limit (:seon.error/kind evaluated-cut)))
-         (is (= :seon.sci.kernel/time-limit (:seon.error/kind invoked-cut)))
+         (is (schema/valid-candidate-value? :seon.sci.kernel/error evaluated-cut))
+         (is (schema/valid-candidate-value? :seon.sci.kernel/error invoked-cut))
          (is (str/starts-with? (:seon.error/message evaluated-cut)
                                "Ran out of time after"))
          (is (str/starts-with?
@@ -2283,12 +2281,17 @@
                         (:seon.error/data invoked-cut))))))))))
 
 (deftest an-existing-refusal-is-not-wrapped-or-duplicated
-  (let [failure
+  (test-support/with-database
+   (fn [_]
+    (let [failure
         (kernel/failure-value
          {::kernel/time-limit-kind :probe/time-limit
           ::kernel/failure-kind :probe/failure}
          (ex-info "result renderer exploded"
-                  {:seon.error/kind :probe/inner
+                  {:seon.error/at #inst "2026-09-20T00:00:00Z"
+                   :seon.error/layer :seon.agent/lifecycle
+                   :seon.error/operation 'seon.agent/by-id
+                   :seon.agent/error-agent-id "inner-observed"
                    :seon.error/message "inner failure"})
          {:seon.eval/fn-entries 1
           :seon.eval/host-interop-count 0
@@ -2296,7 +2299,8 @@
           :seon.eval/allocated-bytes 0
           :seon.eval/outcome :error})]
     (is (= "inner failure" (:seon.error/message failure)))
-    (is (= :probe/inner (:seon.error/kind failure)))
+    (is (schema/valid-candidate-value? :seon.agent/error failure))
+    (is (= "inner-observed" (:seon.agent/error-agent-id failure)))
     (is (= :error
            (get-in failure [:seon.error/data
                             :seon.sci.admit/record
@@ -2304,7 +2308,7 @@
     (is (not (contains? (:seon.error/data failure) :seon.sci.eval/data))
         "the refusal is not copied back into itself as throwable ex-data")
     (is (not= :nested-refusal
-              (:seon.error/diagnostic-member (:seon.error/data failure))))))
+              (:seon.error/diagnostic-member (:seon.error/data failure))))))))
 
 (deftest analysis-failure-exposes-scis-unresolved-symbol-as-data
   (let [failure (:seon.sci.admit/value
