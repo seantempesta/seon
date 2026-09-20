@@ -6796,3 +6796,13 @@ tail of smaller ones. `error-family-1a` resumed (astra low) on classes 1–4
 The rest are assigned after the next complete tier. Slice 3 (publication
 transacts the difference) is released to the redesign lane as soon as the
 platform gate at `c402d3c1d` has published its base.
+
+## 2026-09-23 ~01:50 local — RESET at `c402d3c1d`: adopt 2.7 s (was 122.8 s at slice 0) — the fork-records-its-commit fix proven; republish 143 s (was 234 s); lifecycle 189 s (was 425 s)
+
+`bin/seon reset --force` at slice 2: republish 143.4 s, refork 13.5 s,
+start 28.1 s, **adopt 2.7 s**, lifecycle 189.0 s, exit 0. The adopt
+number is the first-adoption-after-fork case the owner called out: the
+fork now records the published commit, so the adoption is the short-circuit.
+The boot log still carries the one erased core fault (error lane, class 1,
+in progress). Platform tier at `c402d3c1d` running; slice 3 released to
+the redesign lane (astra low) after the gate published its base.
