@@ -5068,3 +5068,14 @@ owners (source.clj, test/cache.clj, launchers, hook, operator, fn.clj) in
 the spec's order by win, with `cluster.clj`'s population owner named held
 and converted last. Editing lanes: publication, turn-cluster, results-reuse;
 step 1 paused with its uncommitted free-path bytes until the sweep lands.
+
+## 2026-09-20 ~23:45 UTC — publication lane: caller invalidation ruled (option 1)
+
+`publication-dissolution` stopped at its first decision (`5348a1107`, probe:
+caching analysis by the caller's own digest retains stale findings after a
+callee's arity change). Ruled option 1 — invalidate the caller closure of
+changed public declarations through the published calls/references edges
+(the overlay admission's same computation); body-only edits stay N-file;
+cache key = (input digest, resolved-declarations digest); digest-equality
+regression against a complete publication. Recorded in the spec; lane
+resumed.

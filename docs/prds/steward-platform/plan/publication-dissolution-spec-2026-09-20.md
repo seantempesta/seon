@@ -43,6 +43,18 @@ publishes CHANGED files as same-identity upserts (`src/seon/cluster.clj`
    with file:line) must resolve after a publication; a regression records a
    result, publishes one changed file, and reuses the result.
 
+   **Invalidation ruling (2026-09-20 ~23:45 UTC, lane decision `5348a1107`):**
+   a callee's interface change invalidates analysis in unchanged callers, so
+   the incremental input set = inputs whose content digest changed PLUS the
+   files of every caller/referrer of a public declaration whose DECLARATION
+   digest changed (arity, contract, name), through the published
+   `:seon.fn/calls`/`:seon.fn/references` edges the overlay admission already
+   follows. A body-only change invalidates no caller. Analysis is cached by
+   (input digest, digest of the declarations it resolves against). The
+   regression: an incremental publication's program digest equals a complete
+   publication's for a body-only edit, an arity change with callers, and a
+   deleted public declaration. This is D9 applied to publication.
+
 2. **Publish through the live JVM, never a fresh one.** When `default` (or
    any live cluster JVM of the root) is alive, the publication runs over its
    prepl (the same seam `init --dev` adoption uses), removing the 40–60 s
