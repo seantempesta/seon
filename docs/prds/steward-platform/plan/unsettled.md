@@ -5573,3 +5573,13 @@ launch regression), `b671525e9` (accretion family kind-free), `e03781c89`
 (note). Its runner resource is committed with its consumer, so every
 lane's snapshot admission is clear. 89 references remain (runner 50, arm
 7, runner tests, older runner schemas); resumed for the rest in one pass.
+
+## 2026-09-21 ~12:25 UTC — stale worktrees swept; the publication lane made one (rule 12)
+
+Sweep found six `tmp/*-wt` worktrees: five stale from earlier days
+(acquisition-digest, arm-exchange, db-contracts, gate, test-system-stage1
+— removed, no JVM referenced them) and `tmp/publication-wt` created by the
+publication lane today against lane rule 12, holding one live fast-run
+JVM. Left until that run ends; removed and the lane corrected at its next
+stop (its remaining items run in the shared tree with --paths). `tmp/` is
+12 GB — the run-root sweep runs at the next quiet point under rule 14.
