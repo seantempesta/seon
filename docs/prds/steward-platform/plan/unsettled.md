@@ -5892,3 +5892,22 @@ Three orchestrator fixes tonight while lanes are down (write-schema rule
 `2d0e9b17e`, boot form `2d0e9b17e`→operator `…`, guard `d8921fbd4`) are
 the publication/error lanes' review items at resume; each is small and
 has its evidence here.
+
+## 2026-09-21 ~22:30 UTC — guard still refuses a fresh host (aggregate digest only); default stopped for the night so gates publish in a fresh JVM
+
+Fourth reset: republish, refork, start OK (default alive, current code);
+adopt refused again with EVERY producer in the mismatch set although each
+recorded producer digest equals the current input — i.e. the aggregate
+`toolchain-digest` differs while per-producer evidence says nothing
+changed: the two callers feed different manifests/roots
+(`require-loaded-producers!` at `cluster.clj:2308` passes the cached
+prospective manifest + `(:seon.fn/root roots)`; the recorder used the boot
+artifact's manifest + `fs/source-directory`), or the "all producers when
+the digests differ" fallback converts an unexplained aggregate into a
+refusal — the publication lane's review item (`3ac00fb8e`), with this
+evidence: `data/operator/operations/reset-adopt-56195.log`. Not guessed
+further tonight. Default STOPPED so the gate's base publishes on the
+fresh-JVM path (the reset's republish proved it); restart with
+`bin/seon start` once the guard is fixed (`bin/seon init` not needed —
+the store holds the fresh complete publication). The 1a six-suite gate
+runs now on HEAD.
