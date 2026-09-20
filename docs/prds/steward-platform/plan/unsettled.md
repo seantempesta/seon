@@ -6572,3 +6572,26 @@ definition comparison 19.6 s, issue reconciliation 13.4 s, source build
 Running serially now: `bin/test --prepare-head-base`, bare `bin/test`
 (first cold gate since the redesign), then the measurement script at
 `cd701afc2`. Slice 1 (one JVM) is released after those three.
+
+## 2026-09-22 ~19:50 local — MEASURED at `cd701afc2` (guard gone): every case runs; still minutes each. Bare `bin/test` is REFUSED by selection; platform + `--all` running
+
+| Case | `7924f4dae` | `0f5f849bd` | `cd701afc2` (slice 0) |
+|---|---:|---:|---:|
+| From zero | 175.0 s | 233.6 s | 206.3 s |
+| Fork | 29.0 s | 26.1 s | 27.5 s |
+| Boot to ready | 43.0 s | 39.5 s | 38.3 s |
+| No change | 149.4 s | refused | **128.4 s** |
+| Docstring, non-core | 482.9 s | — | **350.4 s** (analysis 224.5 s) |
+| Docstring, core | 419.0 s | — | **211.7 s** |
+
+The guard's deletion made every case run; the costs are the ones slices
+1–4 delete (incremental analysis 225 s; program reconciliation 24–36 s
+per adoption; reconciliation transaction 13–23 s; changed definition
+comparison 11–22 s; issue reconciliation 11–16 s; source build 12 s).
+Bare `bin/test` at HEAD exits 2 before any test: `seon.test/select`
+refuses "Bare bin/test requires an explicitly named cluster and its
+immutable published database" — the gate-restructure landing left the
+bare (changed-tier) path unsupported; `--platform` then `--all` are
+running instead (`tmp/orchestrator/gate-cd701afc2-{platform,all}.log`).
+The bare path is a redesign sighting for the test system (an owed proof
+in the plan is "bare bin/test twice, the second executes 0").
