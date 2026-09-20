@@ -6242,3 +6242,14 @@ end; the fault committer's conversion (supply the keys, drop the size-gated
 `blob/stage!`, lines ~3216–3233) is filed as the follow-up and lands when
 publication releases the file. The transitional "when supplied" is
 one held hunk wide and dated here — not a permanent optional storage path.
+
+## 2026-09-22 ~12:20 local — error lane PAUSED on a real dependency: its restored edits call a Var that exists only in step 2's uncommitted tree
+
+`312be9dbc`: the error lane's restored `src/seon/error.clj` (line 279)
+calls `schema.datahike/database-attributes-core-in`, which is defined only
+in bridge step 2's uncommitted `src/seon/schema/datahike.clj` — the fast
+overlay (HEAD + the lane's paths) cannot compile. The overnight shelving
+mixed cross-dependent edits from two lanes into one stash; that is the
+cause, and the cure is step 2 landing. The lane is paused with its session;
+it resumes on the open-request accretion the moment step 2 lands. The
+fault-committer conversion follow-up is recorded in its note. Slot freed.
