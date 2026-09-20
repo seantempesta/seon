@@ -5610,3 +5610,16 @@ gate's `seon.ai/complete` class). Read-only slot → `wave5-writeback-demo-desig
 (F2/F3 byte-identical write-back, the stricter disk gate, the two-agent
 demonstration narrative). Every wave now has or is getting a verbatim
 launch text.
+
+## 2026-09-21 ~13:20 UTC — TEST-SYSTEM FAMILY KIND-FREE (11 sites owed to bin/script); sci-program sweep launched
+
+`kind-sweep-test-system` completed: `1fbba3fd3` (accretion refusal facet
+storable), `a740b93ee` (test bound override kinds), `6b4833529` (note),
+`e4ff89b55` (publication-lane boundary recorded). Zero convertible sites
+remain; eleven sites branch on the undeclared fresh-operator transport
+facet and are listed for the bin/script sweep. Cold gate and platform
+proof owed to the orchestrator. Third slot → `kind-sweep-sci-program`
+(astra low: sci/eval 39, kernel 8, admit, program.cljc 11; fn.clj and
+schema/* named held). Editing lanes: publication (closing), ops-effects-2,
+sci-program; wave-5 design read-only; step 2 parked; turn/cluster and
+bin/script sweeps wait on held files.
