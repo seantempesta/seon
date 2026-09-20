@@ -6395,3 +6395,28 @@ toolchain — the analyzer's genuine dependencies are a handful of
 namespaces. Also at boot: one core fault printed with NO message because
 its record was refused on the raw `:seon.error/offending` member
 ([issue](../../../seon/issues/a-core-fault-whose-record-is-refused-loses-its-own-message.md)).
+
+## 2026-09-22 ~15:10 local — MEASURED: docstring edit in a core namespace = 419 s; NO change at all = 149 s
+
+| Case (isolated root `tmp/head-root`, cluster `head` live, hook command `init --dev head --changed PATH`) | Lifecycle |
+|---|---:|
+| From zero, complete publication (`init`) | 175.0 s |
+| Fork `init head` | 29.0 s |
+| Start `head` (boot to ready) | 43.0 s |
+| Docstring-only edit in `src/seon/id.clj` (core: 36-namespace toolchain closure) | **419.0 s** |
+| No change at all (the edit had not applied; same digest) | **149.4 s** |
+
+The no-change run is the sharper finding: with the published digest
+unchanged, `full-source-refresh!` returned the existing publication (after
+a 31 s "source build" that is mostly `prepare-development-producers!`),
+and `development-source-refresh!` then ran the ENTIRE adoption anyway —
+reload `seon.schema` 9.3 s, published rows read 38.4 s, changed-definition
+comparison 24.3 s, issue reconciliation 24.5 s, loaded definitions
+11.6 s — for a cluster already at that commit. Nothing checks "the
+cluster's recorded adoption commit equals the publication" before
+re-deriving everything; the per-phase costs are also re-reads of the
+whole program (published rows: 38–47 s) rather than the changed rows. The
+core-edit run additionally reloaded 113 namespaces (the dependents of
+`seon.id`, ~10–140 ms each — cheap; the reconciliation reads are the cost).
+Third run (a real docstring edit in the non-core `src/my/note.clj`) in
+progress.
