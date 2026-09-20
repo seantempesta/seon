@@ -235,3 +235,37 @@ bin/test --paths src/seon/ai.clj resources/seon/schemas/seon.ai.edn \
 Then `bin/test --platform`, plus the earlier background/problems obligations.
 New scalar observations require publication; removed marker attributes join
 the wave reset. No existing attribute's type was changed in this slice.
+
+### ops-effects-2: plan checkpoint
+
+Converted plan producers to complete diagnostics and required substantive
+facet members, including previously undeclared query-bound/query-failure
+refusals. Returned contracts name the concrete facets. Completion regressions
+assert the failed or unsatisfied item's identity and retain their result/state
+assertions. Removed the unreachable older-completions branch; stored-comparables
+now propagates a refused database read instead of interpreting it as no rows.
+Database propagation retains documented base checks pending the database sweep.
+
+Changed: src/seon/plan.clj, resources/seon/schemas/my.plan.edn,
+resources/seon/schemas/seon.plan.edn, test/seon/plan_completion_test.clj.
+Retirement census is zero in those paths and test/seon/plan_test.clj.
+The namespace load printed `:loads`; lint reported 0 errors / 0 warnings.
+The single accumulated fast invocation selected seon.plan-test,
+seon.plan-completion-test and my.plan-test, armed 1,435 contracts, and exited
+before test execution. Recording refused
+`:seon.test.runner/invalid-marker-reason-error` at `:seon.error/offending`:
+"A stored error member must have a storable registered attribute."
+Fast tally owed — admission held by the seon.test.runner schema family and
+recording authority (held resources/seon/schemas/seon.test*.edn and
+src/seon/test/*.clj). This is not a test failure or a green verdict.
+
+Cold command owed (orchestrator only), in addition to the AI command above:
+
+```sh
+bin/test --paths src/seon/plan.clj resources/seon/schemas/my.plan.edn \
+  resources/seon/schemas/seon.plan.edn test/seon/plan_completion_test.clj \
+  -- seon.plan-test seon.plan-completion-test my.plan-test
+```
+
+No live adoption or browser proof claimed. The new observation attributes and
+retired marker attributes join the publication/reset boundary.

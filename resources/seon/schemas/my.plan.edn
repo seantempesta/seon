@@ -219,32 +219,32 @@
            {:description
             "A ready-work selection carried as its own renderable unit."}
            :my.plan/render-step],
-          :agent-not-found [:= true],
-          :agent-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan request whose agent does not exist"} [:my.plan/agent-not-found :my.plan/agent-not-found] [:seon.error/message :seon.error/message]],
-          :dependency-cycle [:= true],
-          :dependency-cycle-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark plan dependencies that form a cycle"} [:my.plan/dependency-cycle :my.plan/dependency-cycle] [:seon.error/message :seon.error/message]],
-          :dependency-not-found [:= true],
-          :dependency-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan dependency that does not exist"} [:my.plan/dependency-not-found :my.plan/dependency-not-found] [:seon.error/message :seon.error/message]],
-          :duplicate-identity [:= true],
-          :duplicate-identity-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark an identity repeated in one authored plan"} [:my.plan/duplicate-identity :my.plan/duplicate-identity] [:seon.error/message :seon.error/message]],
-          :duplicate-position [:= true],
-          :duplicate-position-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark two sibling steps claiming one position"} [:my.plan/duplicate-position :my.plan/duplicate-position] [:seon.error/message :seon.error/message]],
-          :foreign-identity [:= true],
-          :foreign-identity-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark an authored identity owned by another agent"} [:my.plan/foreign-identity :my.plan/foreign-identity] [:seon.error/message :seon.error/message]],
-          :identity-exists [:= true],
-          :identity-exists-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a new plan step identity that already exists"} [:my.plan/identity-exists :my.plan/identity-exists] [:seon.error/message :seon.error/message]],
-          :item-reference-not-found [:= true],
-          :item-reference-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a referenced plan step that does not exist"} [:my.plan/item-reference-not-found :my.plan/item-reference-not-found] [:seon.error/message :seon.error/message]],
-          :item-reference-not-owned [:= true],
-          :item-reference-not-owned-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a referenced plan step outside this agent's plan"} [:my.plan/item-reference-not-owned :my.plan/item-reference-not-owned] [:seon.error/message :seon.error/message]],
-          :not-found [:= true],
-          :not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan step that does not exist"} [:my.plan/not-found :my.plan/not-found] [:seon.error/message :seon.error/message]],
-          :not-owned [:= true],
-          :not-owned-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan step outside this agent's plan"} [:my.plan/not-owned :my.plan/not-owned] [:seon.error/message :seon.error/message]],
-          :subject-not-found [:= true],
-          :subject-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan subject that does not exist"} [:my.plan/subject-not-found :my.plan/subject-not-found] [:seon.error/message :seon.error/message]],
-          :unusable-current-step [:= true],
-          :unusable-current-step-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a current step that is not an open step of this plan"} [:my.plan/unusable-current-step :my.plan/unusable-current-step] [:seon.error/message :seon.error/message]]
+          :missing-agent-id [:and {:description "Observed missing agent id; a value retained independently of the plan entity."} :string],
+          :agent-not-found-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/missing-agent-id :my.plan/missing-agent-id]]],
+          :cycle-item-id [:and {:description "Observed cycle item id; a value retained independently of the plan entity."} :string],
+          :dependency-cycle-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/cycle-item-id :my.plan/cycle-item-id]]],
+          :missing-dependency-id [:and {:description "Observed missing dependency id; a value retained independently of the plan entity."} :string],
+          :dependency-not-found-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/missing-dependency-id :my.plan/missing-dependency-id]]],
+          :duplicate-item-id [:and {:description "Observed duplicate item id; a value retained independently of the plan entity."} :string],
+          :duplicate-identity-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/duplicate-item-id :my.plan/duplicate-item-id]]],
+          :duplicate-sibling-position [:and {:description "Observed duplicate sibling position; a value retained independently of the plan entity."} :int],
+          :duplicate-position-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/duplicate-sibling-position :my.plan/duplicate-sibling-position]]],
+          :foreign-item-id [:and {:description "Observed foreign item id; a value retained independently of the plan entity."} :string],
+          :foreign-identity-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/foreign-item-id :my.plan/foreign-item-id]]],
+          :existing-item-id [:and {:description "Observed existing item id; a value retained independently of the plan entity."} :string],
+          :identity-exists-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/existing-item-id :my.plan/existing-item-id]]],
+          :missing-reference-member [:and {:description "Observed missing reference member; a value retained independently of the plan entity."} :qualified-keyword],
+          :item-reference-not-found-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/missing-reference-member :my.plan/missing-reference-member]]],
+          :unowned-reference-member [:and {:description "Observed unowned reference member; a value retained independently of the plan entity."} :qualified-keyword],
+          :item-reference-not-owned-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/unowned-reference-member :my.plan/unowned-reference-member]]],
+          :missing-item-id [:and {:description "Observed missing item id; a value retained independently of the plan entity."} :string],
+          :not-found-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/missing-item-id :my.plan/missing-item-id]]],
+          :unowned-item-id [:and {:description "Observed unowned item id; a value retained independently of the plan entity."} :string],
+          :not-owned-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/unowned-item-id :my.plan/unowned-item-id]]],
+          :missing-subject-attribute [:and {:description "Observed missing subject attribute; a value retained independently of the plan entity."} :qualified-keyword],
+          :subject-not-found-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/missing-subject-attribute :my.plan/missing-subject-attribute]]],
+          :unusable-current-id [:and {:description "Observed unusable current id; a value retained independently of the plan entity."} :string],
+          :unusable-current-step-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/unusable-current-id :my.plan/unusable-current-id]]]
  :add-request [:map [:my.plan.item/id {:optional true} :my.plan.item/id] [:my.plan.item/done-when {:optional true} :my.plan.item/done-when]
                 [:my.plan.item/done-query {:optional true} :my.plan.item/done-query]
                 [:my.plan.item/subject {:optional true} :my.plan.item/subject] [:my.plan.item/title :my.plan.item/title] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
@@ -287,4 +287,10 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.projection/entity}
  :seon.db/ref]
+ :my.plan/unbounded-query-agent [:and {:description "Observed unbounded query agent; a value retained independently of the plan entity."} :string]
+ :my.plan/missing-query-bound-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/unbounded-query-agent :my.plan/unbounded-query-agent]]]
+ :my.plan/failed-query-item-id [:and {:description "Observed failed query item id; a value retained independently of the plan entity."} :string]
+ :my.plan/done-query-failed-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/failed-query-item-id :my.plan/failed-query-item-id]]]
+ :my.plan/unsatisfied-query-item-id [:and {:description "Observed unsatisfied query item id; a value retained independently of the plan entity."} :string]
+ :my.plan/done-query-unsatisfied-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:my.plan/unsatisfied-query-item-id :my.plan/unsatisfied-query-item-id]]]
 }

@@ -31,7 +31,7 @@
                              connection "worker")
             failure (plan/complete! "report" connection "worker")]
         (is (= message-query (:my.plan.item/done-query added)))
-        (is (= :my.plan/done-query-unsatisfied (:seon.error/kind failure)) (pr-str failure))
+        (is (= "report" (:my.plan/unsatisfied-query-item-id failure)) (pr-str failure))
         (is (= message-query (get-in failure [:seon.error/data :my.plan.item/done-query])))
         (is (= #{} (get-in failure [:seon.error/data :seon.db/result])))
         (is (nil? (:my.plan.item/completed-tx
@@ -67,6 +67,6 @@
                     :my.plan.item/done-query '[:find ?unbound :where [?a :seon.agent/id "worker"]]}
                    connection "worker")
         (let [failure (plan/complete! "invalid" connection "worker")]
-          (is (= :my.plan/done-query-failed (:seon.error/kind failure)) (pr-str failure))
+          (is (= "invalid" (:my.plan/failed-query-item-id failure)) (pr-str failure))
           (is (nil? (:my.plan.item/completed-tx
                      (db/pull @connection '[*] [:my.plan.item/id "invalid"])))))))))

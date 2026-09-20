@@ -3,4 +3,11 @@
  :seon.plan/step-lines
  [:map-of :my.plan.item/id :string]
  :seon.plan/update-example
- [:string {:description "One executable plan update example shown with the opening plan."}]}
+ [:string {:description "One executable plan update example shown with the opening plan."}]
+ :seon.plan/non-test-entity
+ [:int {:description "The entity id read from an issue test relation that no longer identified a test at the observed basis. This is a value, not a reference that protects the entity."}]
+ :seon.plan/non-test-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.plan/non-test-entity :seon.plan/non-test-entity]]]
+ :seon.plan/refusal
+ [:or :seon.db/error-result :my.plan/agent-not-found-error :my.plan/not-found-error :my.plan/not-owned-error :my.plan/identity-exists-error :my.plan/foreign-identity-error :my.plan/duplicate-identity-error :my.plan/duplicate-position-error :my.plan/dependency-cycle-error :my.plan/dependency-not-found-error :my.plan/unusable-current-step-error :my.plan/item-reference-not-found-error :my.plan/item-reference-not-owned-error :my.plan/subject-not-found-error :my.plan/missing-query-bound-error :my.plan/done-query-failed-error :my.plan/done-query-unsatisfied-error :seon.plan/non-test-error]}

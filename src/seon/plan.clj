@@ -83,26 +83,26 @@
     {:my.plan.item/steps 8}])
 
 (defn- refuse!
-  [kind message data]
-  (throw
-   (ex-info message
-            {kind true
-             :seon.error/kind kind
-             :seon.error/message message
-             :seon.error/data data})))
+  {:malli/schema [:=> [:cat :seon.plan/refusal] :nil]}
+  [observation]
+  (throw (ex-info (:seon.error/message observation) observation)))
 
 (defn- flat-refusal
+  {:malli/schema [:=> [:cat :seon.error/throwable] :seon.plan/refusal]}
   [throwable]
   (let [data (ex-data throwable)]
-    (if (:seon.error/kind data)
+    (if (and (map? data) (contains? data :seon.error/at) ;; debt: seon.db/transact! declares :seon.error/value through :seon.db/error-result.
+             (contains? data :seon.error/layer)
+             (contains? data :seon.error/operation))
       data
       (throw throwable))))
 
 (defn- read-result!
   "Return an ordinary database-read result or refuse with its error value."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
   [result]
   (if (and (map? result)
-           (contains? result :seon.error/at)
+           (contains? result :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
            (contains? result :seon.error/layer)
            (contains? result :seon.error/operation))
     (throw (ex-info (:seon.error/message result) result))
@@ -111,8 +111,7 @@
 (defn- agent-eid
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.agent/id]
-    [:or :int :nil :seon.db/invalid-read-error
-     :seon.schema/missing-projection-error]]}
+    [:or :int :nil :seon.db/error-result]]}
   [database agent-id]
   (db/q '[:find ?agent .
           :in $ ?agent-id
@@ -122,8 +121,7 @@
 (defn- plan-eid
   {:malli/schema
    [:=> [:cat :seon.db/database-value [:or :int :nil]]
-    [:or :int :nil :seon.db/invalid-read-error
-     :seon.schema/missing-projection-error]]}
+    [:or :int :nil :seon.db/error-result]]}
   [database agent-entity]
   (db/q '[:find ?plan . :in $ ?agent
           :where [?agent :seon.agent/plan ?plan]]
@@ -132,8 +130,7 @@
 (defn- step-eid
   {:malli/schema
    [:=> [:cat :seon.db/database-value :my.plan.item/id]
-    [:or :int :nil :seon.db/invalid-read-error
-     :seon.schema/missing-projection-error]]}
+    [:or :int :nil :seon.db/error-result]]}
   [database item-id]
   (db/q '[:find ?step .
           :in $ ?item-id
@@ -143,16 +140,16 @@
 (defn- ref-eid
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.schema/value]
-    [:or :int :nil :seon.db/invalid-read-error
-     :seon.schema/missing-projection-error]]}
+    [:or :int :nil :seon.db/error-result]]}
   [database reference]
   (let [entity (db/entity database reference)]
     (if (and (map? entity)
-             (contains? entity :seon.error/at)
+             (contains? entity :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? entity :seon.error/layer)
              (contains? entity :seon.error/operation)) entity (:db/id entity))))
 
 (defn- subject-eid
+  {:malli/schema [:=> [:cat :seon.db/database-value :my.plan.item/about-token] [:or :int :nil :seon.db/error-result]]}
   [database token]
   (cond
     (keyword? token)
@@ -178,14 +175,26 @@
   (let [subject (subject-eid database token)]
     (cond
       (and (map? subject)
-           (contains? subject :seon.error/at)
+           (contains? subject :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
            (contains? subject :seon.error/layer)
            (contains? subject :seon.error/operation)) (read-result! subject)
       subject subject
       :else
-      (refuse! :my.plan/subject-not-found
-               (str "Plan subject " (pr-str token) " does not exist.")
-               {:my.plan.item/about token}))))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/resolve-subject!
+                 :seon.error/message "Plan request refused; an installed subject identity is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/resolve-subject!
+                 :seon.error/diagnostic-member :my.plan.item/about
+                 :seon.error/diagnostic-expected "an installed subject identity"
+                 :seon.error/diagnostic-offending {:my.plan.item/about token}
+                 :seon.error/offending {:my.plan.item/about token}
+                 :seon.error/diagnostic-cause :my.plan/subject-not-found
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/about token}
+                 :my.plan/missing-subject-attribute (cond (keyword? token) :seon.schema/key (namespace token) :seon.fn/sym :else :seon.ns/name)})))))
 
 (def ^:private owned-ids-query
   '[:find [?id ...]
@@ -196,10 +205,11 @@
     [?step :my.plan.item/id ?id]])
 
 (defn- owned-ids
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:set :my.plan.item/id] :seon.db/error-result]]}
   [database agent-id]
   (let [ids (db/q owned-ids-query database rules agent-id)]
     (if (and (map? ids)
-             (contains? ids :seon.error/at)
+             (contains? ids :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? ids :seon.error/layer)
              (contains? ids :seon.error/operation)) ids (set ids))))
 
@@ -232,18 +242,19 @@
 
   Dependencies name step identities, including steps in another agent's plan.
   A missing prerequisite remains open work until its dependency is removed."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :my.plan.item/id]] [:or [:map-of :my.plan.item/id :boolean] :seon.db/error-result]]}
   [database item-ids]
   (reduce (fn [result item-id]
             (let [entity (step-eid database item-id)]
               (cond
                 (and (map? entity)
-                     (contains? entity :seon.error/at)
+                     (contains? entity :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                      (contains? entity :seon.error/layer)
                      (contains? entity :seon.error/operation)) (reduced entity)
                 (nil? entity) (assoc result item-id true)
                 :else (let [row (db/pull database step-selector entity)]
                         (if (and (map? row)
-                                 (contains? row :seon.error/at)
+                                 (contains? row :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                                  (contains? row :seon.error/layer)
                                  (contains? row :seon.error/operation))
                           (reduced row)
@@ -257,6 +268,7 @@
   A step is blocked while any dependency it needs still carries open work,
   and ready while it is incomplete, unblocked, and either a leaf or a parent
   whose own steps are all complete."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.db/pulled-entity]] [:or [:map [:my.plan/ready [:set :my.plan.item/id]] [:my.plan/blocked [:set :my.plan.item/id]]] :seon.db/error-result]]}
   [database nodes]
   (let [open-by-id (into {} (map (juxt :my.plan.item/id open-work?)) nodes)
         foreign-ids (into #{}
@@ -267,7 +279,7 @@
                   (foreign-open-work database foreign-ids)
                   {})]
     (if (and (map? foreign)
-             (contains? foreign :seon.error/at)
+             (contains? foreign :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? foreign :seon.error/layer)
              (contains? foreign :seon.error/operation))
       foreign
@@ -350,6 +362,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- agent-plan-pull
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :seon.db/pulled-entity :seon.db/error-result]]}
   [database agent-id]
   (let [row (db/pull database
                      [{:seon.agent/plan
@@ -358,7 +371,7 @@
                         {:my.plan/steps step-selector}]}]
                      [:seon.agent/id agent-id])]
     (if (and (map? row)
-             (contains? row :seon.error/at)
+             (contains? row :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? row :seon.error/layer)
              (contains? row :seon.error/operation)) row (:seon.agent/plan row))))
 
@@ -370,25 +383,36 @@
   and completion collections are queries over the same facts, not attributes."
   {:malli/schema
    [:=> [:catn [:request :my.plan/request]]
-    [:or :my.plan/component-view :seon.error/value]]}
+    [:or :my.plan/component-view :seon.db/error-result :my.plan/agent-not-found-error]]}
   [{database :seon.db/db agent-id :seon.agent/id}]
   (let [agent-entity (agent-eid database agent-id)]
     (cond
       (and (map? agent-entity)
-           (contains? agent-entity :seon.error/at)
+           (contains? agent-entity :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
            (contains? agent-entity :seon.error/layer)
            (contains? agent-entity :seon.error/operation)) agent-entity
 
       (nil? agent-entity)
-      {:my.plan/agent-not-found true
-       :seon.error/kind :my.plan/agent-not-found
-       :seon.error/message (str "There is no agent named " (pr-str agent-id) ".")
-       :seon.error/data {:seon.agent/id agent-id}}
+      (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/plan
+                 :seon.error/message "Plan request refused; an existing agent is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/plan
+                 :seon.error/diagnostic-member :seon.agent/id
+                 :seon.error/diagnostic-expected "an existing agent"
+                 :seon.error/diagnostic-offending {:seon.agent/id agent-id}
+                 :seon.error/offending {:seon.agent/id agent-id}
+                 :seon.error/diagnostic-cause :my.plan/agent-not-found
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:seon.agent/id agent-id}
+                 :my.plan/missing-agent-id (get {:seon.agent/id agent-id} :seon.agent/id)})
 
       :else
       (let [pulled (agent-plan-pull database agent-id)
             frontier (when-not (and (map? pulled)
-                                    (contains? pulled :seon.error/at)
+                                    (contains? pulled :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                                     (contains? pulled :seon.error/layer)
                                     (contains? pulled :seon.error/operation))
                        (derived-frontier database
@@ -397,7 +421,7 @@
             blocked-ids (:my.plan/blocked frontier)
             values [pulled frontier]]
         (if-let [error (some #(when (and (map? %)
-                                         (contains? % :seon.error/at)
+                                         (contains? % :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                                          (contains? % :seon.error/layer)
                                          (contains? % :seon.error/operation)) %) values)]
           (update error :seon.error/data
@@ -418,29 +442,37 @@
               (assoc :my.plan/objective (:my.plan/objective pulled))
               current-id (assoc :my.plan/current-step
                                 {:my.plan.item/id current-id})
-              (:my.plan/older-completions completions)
-              (assoc :my.plan/older-completions
-                     (:my.plan/older-completions completions)))))))))
+)))))))
 
 (defn item
   "Read one plan step, with its derived dependencies, by its stable identity."
   {:malli/schema
    [:=> [:catn [:request :my.plan/item-request]]
-    [:or :my.plan/render-step :seon.error/value]]}
+    [:or :my.plan/render-step :seon.db/error-result :my.plan/agent-not-found-error :my.plan/not-found-error]]}
   [{database :seon.db/db item-id :my.plan.item/id}]
   (let [entity (step-eid database item-id)]
     (cond
       (and (map? entity)
-           (contains? entity :seon.error/at)
+           (contains? entity :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
            (contains? entity :seon.error/layer)
            (contains? entity :seon.error/operation)) entity
 
       (nil? entity)
-      {:my.plan/not-found true
-       :seon.error/kind :my.plan/not-found
-       :seon.error/message (str "There is no plan step named "
-                                (pr-str item-id) ".")
-       :seon.error/data {:my.plan.item/id item-id}}
+      (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/item
+                 :seon.error/message "Plan request refused; an existing plan step is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/item
+                 :seon.error/diagnostic-member :my.plan.item/id
+                 :seon.error/diagnostic-expected "an existing plan step"
+                 :seon.error/diagnostic-offending {:my.plan.item/id item-id}
+                 :seon.error/offending {:my.plan.item/id item-id}
+                 :seon.error/diagnostic-cause :my.plan/not-found
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id item-id}
+                 :my.plan/missing-item-id (get {:my.plan.item/id item-id} :my.plan.item/id)})
 
       :else
       (let [agent-id (db/q '[:find ?id . :in $ % ?step
@@ -449,13 +481,13 @@
                            database rules entity)]
         (cond
           (and (map? agent-id)
-               (contains? agent-id :seon.error/at)
+               (contains? agent-id :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                (contains? agent-id :seon.error/layer)
                (contains? agent-id :seon.error/operation)) agent-id
           agent-id
           (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
             (if (and (map? view)
-                     (contains? view :seon.error/at)
+                     (contains? view :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                      (contains? view :seon.error/layer)
                      (contains? view :seon.error/operation))
               view
@@ -464,7 +496,7 @@
           :else
           (let [pulled (db/pull database step-selector entity)]
             (if (and (map? pulled)
-                     (contains? pulled :seon.error/at)
+                     (contains? pulled :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                      (contains? pulled :seon.error/layer)
                      (contains? pulled :seon.error/operation))
               pulled
@@ -474,12 +506,12 @@
   "Read plan steps in the exact supplied identity order."
   {:malli/schema
    [:=> [:catn [:request :my.plan/items-request]]
-    [:or :my.plan/render-steps :seon.error/value]]}
+    [:or :my.plan/render-steps :seon.db/error-result :my.plan/agent-not-found-error :my.plan/not-found-error]]}
   [{database :seon.db/db item-ids :my.plan/item-ids}]
   (reduce (fn [result item-id]
             (let [step (item {:seon.db/db database :my.plan.item/id item-id})]
               (if (and (map? step)
-                       (contains? step :seon.error/at)
+                       (contains? step :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                        (contains? step :seon.error/layer)
                        (contains? step :seon.error/operation))
                 (reduced step)
@@ -487,9 +519,10 @@
           [] item-ids))
 
 (defn- step-summary
+  {:malli/schema [:=> [:cat [:or :my.plan/render-step :seon.db/error-result :my.plan/agent-not-found-error :my.plan/not-found-error]] [:or :my.plan/step-summary :seon.db/error-result :my.plan/agent-not-found-error :my.plan/not-found-error]]}
   [step]
   (if (and (map? step)
-           (contains? step :seon.error/at)
+           (contains? step :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
            (contains? step :seon.error/layer)
            (contains? step :seon.error/operation))
     step
@@ -503,12 +536,12 @@
 (defn current
   "Read your current step; an empty map means none is selected."
   {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
-                  [:or :my.plan/current-value :seon.error/value]]}
+                  [:or :my.plan/current-value :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})
         current-id (get-in view [:my.plan/current-step :my.plan.item/id])]
     (if (and (map? view)
-             (contains? view :seon.error/at)
+             (contains? view :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? view :seon.error/layer)
              (contains? view :seon.error/operation))
       view
@@ -519,22 +552,22 @@
 (defn blocked
   "Read your blocked steps and the step identities they need."
   {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
-                  [:or [:vector :my.plan/step-summary] :seon.error/value]]}
+                  [:or [:vector :my.plan/step-summary] :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
     (if (and (map? view)
-             (contains? view :seon.error/at)
+             (contains? view :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? view :seon.error/layer)
              (contains? view :seon.error/operation)) view (mapv step-summary (:my.plan/blocked view)))))
 
 (defn steps
   "Read your plan steps in their authored tree order."
   {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
-                  [:or [:vector :my.plan/step-summary] :seon.error/value]]}
+                  [:or [:vector :my.plan/step-summary] :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
     (if (and (map? view)
-             (contains? view :seon.error/at)
+             (contains? view :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? view :seon.error/layer)
              (contains? view :seon.error/operation)) view (mapv step-summary (:my.plan/steps view)))))
 
@@ -542,11 +575,11 @@
   "Read your ready steps; complete one with my.plan/complete!."
   {:malli/schema
    [:=> [:cat :seon.db/db :seon.agent/id]
-    [:or [:vector :my.plan/step-summary] :seon.error/value]]}
+    [:or [:vector :my.plan/step-summary] :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
     (if (and (map? view)
-             (contains? view :seon.error/at)
+             (contains? view :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? view :seon.error/layer)
              (contains? view :seon.error/operation)) view (mapv step-summary (:my.plan/ready view)))))
 
@@ -557,21 +590,21 @@
   Repeated resolved rows collapse at their first occurrence."
   {:malli/schema
    [:=> [:cat :seon.db/db :seon.agent/id]
-    [:or :my.plan/intent-subjects :seon.error/value]]}
+    [:or :my.plan/intent-subjects :seon.db/error-result :my.plan/agent-not-found-error :my.plan/subject-not-found-error]]}
   [database agent-id]
-  (let [steps (ready database agent-id)]
-    (if (and (map? steps)
-             (contains? steps :seon.error/at)
-             (contains? steps :seon.error/layer)
-             (contains? steps :seon.error/operation))
-      steps
+  (let [plan-steps (ready database agent-id)]
+    (if (and (map? plan-steps)
+             (contains? plan-steps :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
+             (contains? plan-steps :seon.error/layer)
+             (contains? plan-steps :seon.error/operation))
+      plan-steps
       (try
         (into []
               (comp
                (mapcat :my.plan.item/about)
                (map #(resolve-subject! database %))
                (distinct))
-              steps)
+              plan-steps)
         (catch clojure.lang.ExceptionInfo failure
           (flat-refusal failure))))))
 
@@ -580,6 +613,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- transact-plan!
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.store/transaction-data] [:or :seon.db/transaction-report :seon.plan/refusal]]}
   [connection agent-id tx-data]
   (db/transact!
    connection
@@ -590,20 +624,42 @@
   [database agent-entity reference member]
   (let [step (read-result! (ref-eid database reference))]
     (when-not step
-      (refuse! :my.plan/item-reference-not-found
-               (str "Plan step reference " (pr-str reference)
-                    " does not exist.")
-               {member reference}))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/owned-step-eid!
+                 :seon.error/message "Plan request refused; an existing referenced plan step is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/owned-step-eid!
+                 :seon.error/diagnostic-member member
+                 :seon.error/diagnostic-expected "an existing referenced plan step"
+                 :seon.error/diagnostic-offending {member reference}
+                 :seon.error/offending {member reference}
+                 :seon.error/diagnostic-cause :my.plan/item-reference-not-found
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {member reference}
+                 :my.plan/missing-reference-member member})))
     (let [owned? (read-result!
                   (db/q '[:find ?step .
                           :in $ % ?agent ?step
                           :where (owned ?agent ?step)]
                         database rules agent-entity step))]
       (when-not owned?
-        (refuse! :my.plan/item-reference-not-owned
-                 (str "Plan step reference " (pr-str reference)
-                      " is not in this agent's plan.")
-                 {member reference})))
+        (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/owned-step-eid!
+                 :seon.error/message "Plan request refused; a referenced step owned by this agent is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/owned-step-eid!
+                 :seon.error/diagnostic-member member
+                 :seon.error/diagnostic-expected "a referenced step owned by this agent"
+                 :seon.error/diagnostic-offending {member reference}
+                 :seon.error/offending {member reference}
+                 :seon.error/diagnostic-cause :my.plan/item-reference-not-owned
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {member reference}
+                 :my.plan/unowned-reference-member member}))))
     step))
 
 (defn- next-position
@@ -622,13 +678,37 @@
         agent-id (:seon.agent/id request)
         agent-entity (read-result! (agent-eid database agent-id))]
     (when-not agent-entity
-      (refuse! :my.plan/agent-not-found
-               (str "There is no agent named " (pr-str agent-id) ".")
-               {:seon.agent/id agent-id}))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/add-step-call
+                 :seon.error/message "Plan request refused; an existing agent is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/add-step-call
+                 :seon.error/diagnostic-member :seon.agent/id
+                 :seon.error/diagnostic-expected "an existing agent"
+                 :seon.error/diagnostic-offending {:seon.agent/id agent-id}
+                 :seon.error/offending {:seon.agent/id agent-id}
+                 :seon.error/diagnostic-cause :my.plan/agent-not-found
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:seon.agent/id agent-id}
+                 :my.plan/missing-agent-id (get {:seon.agent/id agent-id} :seon.agent/id)})))
     (when (read-result! (step-eid database item-id))
-      (refuse! :my.plan/identity-exists
-               (str "Plan step " (pr-str item-id) " already exists.")
-               {:my.plan.item/id item-id}))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/add-step-call
+                 :seon.error/message "Plan request refused; a new plan step identity is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/add-step-call
+                 :seon.error/diagnostic-member :my.plan.item/id
+                 :seon.error/diagnostic-expected "a new plan step identity"
+                 :seon.error/diagnostic-offending {:my.plan.item/id item-id}
+                 :seon.error/offending {:my.plan.item/id item-id}
+                 :seon.error/diagnostic-cause :my.plan/identity-exists
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id item-id}
+                 :my.plan/existing-item-id (get {:my.plan.item/id item-id} :my.plan.item/id)})))
     (let [parent (when-some [reference (:my.plan/parent-step request)]
                    (owned-step-eid! database agent-entity reference
                                     :my.plan/parent-step))
@@ -636,11 +716,21 @@
                       (map (fn [reference]
                              (if (read-result! (step-eid database reference))
                                reference
-                               (refuse! :my.plan/dependency-not-found
-                                          (str "Plan dependency "
-                                               (pr-str reference)
-                                               " does not exist.")
-                                          {:my.plan.item/needs reference}))))
+                               (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/add-step-call
+                 :seon.error/message "Plan request refused; an existing or authored prerequisite step is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/add-step-call
+                 :seon.error/diagnostic-member :my.plan.item/needs
+                 :seon.error/diagnostic-expected "an existing or authored prerequisite step"
+                 :seon.error/diagnostic-offending {:my.plan.item/needs reference}
+                 :seon.error/offending {:my.plan.item/needs reference}
+                 :seon.error/diagnostic-cause :my.plan/dependency-not-found
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/needs reference}
+                 :my.plan/missing-dependency-id (get {:my.plan.item/needs reference} :my.plan.item/needs)})))))
                       (:my.plan.item/needs request))
           _ (doseq [token (:my.plan.item/about request)]
               (resolve-subject! database token))
@@ -677,9 +767,21 @@
                           :where [?cluster :seon.cluster/config ?config]
                                  [?config :seon.config.eval/time-limit-ms ?limit]] database))]
     (when-not (pos-int? limit)
-      (refuse! :my.plan/missing-query-bound
-               "Plan completion queries require the configured evaluation time limit."
-               {:seon.agent/id agent-id}))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/query-deadline
+                 :seon.error/message "Plan request refused; a positive configured query deadline is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/query-deadline
+                 :seon.error/diagnostic-member :seon.config.eval/time-limit-ms
+                 :seon.error/diagnostic-expected "a positive configured query deadline"
+                 :seon.error/diagnostic-offending {:seon.agent/id agent-id}
+                 :seon.error/offending {:seon.agent/id agent-id}
+                 :seon.error/diagnostic-cause :my.plan/missing-query-bound
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:seon.agent/id agent-id}
+                 :my.plan/unbounded-query-agent (get {:seon.agent/id agent-id} :seon.agent/id)})))
     (+ (System/nanoTime) (* 1000000 limit))))
 
 (def issue-done-query
@@ -698,7 +800,7 @@
                       (not [?i :seon.issue/resolved-tx])
                       [?i :seon.issue/tests ?test]] database agent-id)]
     (when (and (map? tests)
-               (contains? tests :seon.error/at)
+               (contains? tests :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                (contains? tests :seon.error/layer)
                (contains? tests :seon.error/operation))
       (throw (ex-info (:seon.error/message tests) tests)))
@@ -709,7 +811,7 @@
           stale (seon.test/stale
                  database (into [] (keep second) named))]
       (when (and (map? stale)
-                 (contains? stale :seon.error/at)
+                 (contains? stale :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                  (contains? stale :seon.error/layer)
                  (contains? stale :seon.error/operation))
         (throw (ex-info (:seon.error/message stale) stale)))
@@ -774,11 +876,23 @@
                       :seon.test.run/provenance provenance
                       :seon.test/remaining-ms (max 1 remaining-ms)}))
                   :else
-                  (refuse! :seon.issue/not-a-test
-                             "An issue success ref no longer identifies a test."
-                             {:seon.agent/id agent-id :seon.db/ref test-eid}))]
+                  (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/run-issue-tests!
+                 :seon.error/message "Plan request refused; a test entity named by the issue is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/run-issue-tests!
+                 :seon.error/diagnostic-member :seon.issue/tests
+                 :seon.error/diagnostic-expected "a test entity named by the issue"
+                 :seon.error/diagnostic-offending {:seon.agent/id agent-id :seon.db/ref test-eid}
+                 :seon.error/offending {:seon.agent/id agent-id :seon.db/ref test-eid}
+                 :seon.error/diagnostic-cause :my.plan/not-a-test
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:seon.agent/id agent-id :seon.db/ref test-eid}
+                 :seon.plan/non-test-entity (get {:seon.agent/id agent-id :seon.db/ref test-eid} :seon.db/ref)})))]
             (when (and (map? result)
-                       (contains? result :seon.error/at)
+                       (contains? result :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                        (contains? result :seon.error/layer)
                        (contains? result :seon.error/operation))
               (throw (ex-info (:seon.error/message result) result)))))))
@@ -796,13 +910,28 @@
                            :cancel (reify clojure.lang.IDeref
                                      (deref [_] (> (System/nanoTime) deadline)))))]
     (when (and (map? result)
-               (contains? result :seon.error/at)
+               (contains? result :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                (contains? result :seon.error/layer)
                (contains? result :seon.error/operation))
-      (refuse! :my.plan/done-query-failed
-               (str "Completion query failed: " (pr-str query) "; found " (pr-str result))
-               {:my.plan.item/id (:my.plan.item/id step)
-                :my.plan.item/done-query query :seon.db/result result}))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/done-query-result
+                 :seon.error/message "Plan request refused; a successful completion-query evaluation is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/done-query-result
+                 :seon.error/diagnostic-member :my.plan.item/done-query
+                 :seon.error/diagnostic-expected "a successful completion-query evaluation"
+                 :seon.error/diagnostic-offending {:my.plan.item/id (:my.plan.item/id step)
+                :my.plan.item/done-query query :seon.db/result result}
+                 :seon.error/offending {:my.plan.item/id (:my.plan.item/id step)
+                :my.plan.item/done-query query :seon.db/result result}
+                 :seon.error/diagnostic-cause :my.plan/done-query-failed
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id (:my.plan.item/id step)
+                :my.plan.item/done-query query :seon.db/result result}
+                 :my.plan/failed-query-item-id (get {:my.plan.item/id (:my.plan.item/id step)
+                :my.plan.item/done-query query :seon.db/result result} :my.plan.item/id)})))
     result))
 
 (defn- query-satisfied?
@@ -825,13 +954,13 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   :seon.db/tx-data]}
   [database agent-id]
-  (let [steps (db/q '[:find [?step ...] :in $ % ?agent-id
+  (let [plan-steps (db/q '[:find [?step ...] :in $ % ?agent-id
                       :where [?agent :seon.agent/id ?agent-id]
                              (owned ?agent ?step)
                              [?step :my.plan.item/done-query _]
                              (not [?step :my.plan.item/completed-tx _])]
                     database rules agent-id)]
-    (if (empty? steps)
+    (if (empty? plan-steps)
       []
       (let [deadline (query-deadline database agent-id)
             plan-entity (plan-eid database (agent-eid database agent-id))]
@@ -840,7 +969,7 @@
                         (let [step (db/pull database step-selector eid)]
                           (when (query-satisfied? (done-query-result database step deadline))
                             (completion-tx database plan-entity eid)))))
-              steps)
+              plan-steps)
               [:db.fn/call #'issue/exhaust-tx agent-id])))))
 
 (defn- complete-step-call
@@ -851,28 +980,68 @@
         plan-entity (read-result! (plan-eid database agent-entity))
         step (read-result! (step-eid database item-id))]
     (when-not step
-      (refuse! :my.plan/not-found
-               (str "There is no plan step named " (pr-str item-id) ".")
-               {:my.plan.item/id item-id}))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/complete-step-call
+                 :seon.error/message "Plan request refused; an existing plan step is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/complete-step-call
+                 :seon.error/diagnostic-member :my.plan.item/id
+                 :seon.error/diagnostic-expected "an existing plan step"
+                 :seon.error/diagnostic-offending {:my.plan.item/id item-id}
+                 :seon.error/offending {:my.plan.item/id item-id}
+                 :seon.error/diagnostic-cause :my.plan/not-found
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id item-id}
+                 :my.plan/missing-item-id (get {:my.plan.item/id item-id} :my.plan.item/id)})))
     (when-not (read-result!
                (db/q '[:find ?step .
                        :in $ % ?agent ?step
                        :where (owned ?agent ?step)]
                      database rules agent-entity step))
-      (refuse! :my.plan/not-owned
-               (str "Plan step " (pr-str item-id)
-                    " is not in this agent's plan.")
-               {:my.plan.item/id item-id
-                :seon.agent/id agent-id}))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/complete-step-call
+                 :seon.error/message "Plan request refused; a step owned by the requesting agent is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/complete-step-call
+                 :seon.error/diagnostic-member :my.plan.item/id
+                 :seon.error/diagnostic-expected "a step owned by the requesting agent"
+                 :seon.error/diagnostic-offending {:my.plan.item/id item-id
+                :seon.agent/id agent-id}
+                 :seon.error/offending {:my.plan.item/id item-id
+                :seon.agent/id agent-id}
+                 :seon.error/diagnostic-cause :my.plan/not-owned
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id item-id
+                :seon.agent/id agent-id}
+                 :my.plan/unowned-item-id (get {:my.plan.item/id item-id
+                :seon.agent/id agent-id} :my.plan.item/id)})))
     (let [row (db/pull database step-selector step)]
       (when-let [query (:my.plan.item/done-query row)]
         (let [result (done-query-result database row (query-deadline database agent-id))]
           (when-not (query-satisfied? result)
-            (refuse! :my.plan/done-query-unsatisfied
-                     (str "Plan step " (pr-str item-id) " is not complete: done-query "
-                          (pr-str query) " found " (pr-str result) ".")
-                     {:my.plan.item/id item-id :my.plan.item/done-query query
-                      :seon.db/result result})))))
+            (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/complete-step-call
+                 :seon.error/message "Plan request refused; a nonempty or true completion-query result is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/complete-step-call
+                 :seon.error/diagnostic-member :my.plan.item/done-query
+                 :seon.error/diagnostic-expected "a nonempty or true completion-query result"
+                 :seon.error/diagnostic-offending {:my.plan.item/id item-id :my.plan.item/done-query query
+                      :seon.db/result result}
+                 :seon.error/offending {:my.plan.item/id item-id :my.plan.item/done-query query
+                      :seon.db/result result}
+                 :seon.error/diagnostic-cause :my.plan/done-query-unsatisfied
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id item-id :my.plan.item/done-query query
+                      :seon.db/result result}
+                 :my.plan/unsatisfied-query-item-id (get {:my.plan.item/id item-id :my.plan.item/done-query query
+                      :seon.db/result result} :my.plan.item/id)}))))))
     (if (db/q '[:find ?completed-at .
                 :in $ ?step
                 :where [?step :my.plan.item/completed-tx ?completed-at]]
@@ -881,10 +1050,11 @@
       (completion-tx database plan-entity step))))
 
 (defn- changed-item
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :my.plan.item/id] [:or :nil :my.plan/step-summary :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id item-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
     (if (and (map? view)
-             (contains? view :seon.error/at)
+             (contains? view :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? view :seon.error/layer)
              (contains? view :seon.error/operation)) view
         (step-summary (first (filter #(= item-id (:my.plan.item/id %))
@@ -895,7 +1065,7 @@
   {:malli/schema
    [:=> [:cat :my.plan.item/add-request
          :seon.db/connection :seon.agent/id]
-    [:or :my.plan/step-summary :seon.error/value]]}
+    [:or :my.plan/step-summary :seon.db/error-result :my.plan/agent-not-found-error :my.plan/identity-exists-error :my.plan/item-reference-not-found-error :my.plan/item-reference-not-owned-error :my.plan/dependency-not-found-error :my.plan/subject-not-found-error]]}
   [step connection agent-id]
   (let [step (cond-> step
                (not (:my.plan.item/id step))
@@ -904,7 +1074,7 @@
         result (transact-plan! connection agent-id
                                [[:db.fn/call #'add-step-call request]])]
     (if (and (map? result)
-             (contains? result :seon.error/at)
+             (contains? result :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? result :seon.error/layer)
              (contains? result :seon.error/operation))
       result
@@ -914,7 +1084,7 @@
   "Complete one owned step and clear it when it is this agent's current step."
   {:malli/schema
    [:=> [:cat :my.plan.item/id :seon.db/connection :seon.agent/id]
-    [:or :my.plan/step-summary :seon.error/value]]}
+    [:or :my.plan/step-summary :seon.db/error-result :my.plan/agent-not-found-error :my.plan/not-found-error :my.plan/not-owned-error :my.plan/done-query-failed-error :my.plan/done-query-unsatisfied-error :my.plan/missing-query-bound-error]]}
   [item-id connection agent-id]
   (let [result
         (transact-plan! connection agent-id
@@ -922,7 +1092,7 @@
                           {:my.plan.item/id item-id
                            :seon.agent/id agent-id}]])]
     (if (and (map? result)
-             (contains? result :seon.error/at)
+             (contains? result :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? result :seon.error/layer)
              (contains? result :seon.error/operation))
       result
@@ -934,13 +1104,39 @@
         step (read-result! (step-eid database item-id))
         ids (read-result! (owned-ids database agent-id))]
     (when-not (and step (contains? ids item-id))
-      (refuse! :my.plan/not-owned "Select a step owned by this agent."
-               {:my.plan.item/id item-id :seon.agent/id agent-id}))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/start-step-call
+                 :seon.error/message "Plan request refused; a step owned by the requesting agent is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/start-step-call
+                 :seon.error/diagnostic-member :my.plan.item/id
+                 :seon.error/diagnostic-expected "a step owned by the requesting agent"
+                 :seon.error/diagnostic-offending {:my.plan.item/id item-id :seon.agent/id agent-id}
+                 :seon.error/offending {:my.plan.item/id item-id :seon.agent/id agent-id}
+                 :seon.error/diagnostic-cause :my.plan/not-owned
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id item-id :seon.agent/id agent-id}
+                 :my.plan/unowned-item-id (get {:my.plan.item/id item-id :seon.agent/id agent-id} :my.plan.item/id)})))
     (when (db/q '[:find ?completed . :in $ ?step
                   :where [?step :my.plan.item/completed-tx ?completed]]
                 database step)
-      (refuse! :my.plan/unusable-current-step "Select an open step."
-               {:my.plan.item/id item-id}))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/start-step-call
+                 :seon.error/message "Plan request refused; an open step in this plan is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/start-step-call
+                 :seon.error/diagnostic-member :my.plan/current-step
+                 :seon.error/diagnostic-expected "an open step in this plan"
+                 :seon.error/diagnostic-offending {:my.plan.item/id item-id}
+                 :seon.error/offending {:my.plan.item/id item-id}
+                 :seon.error/diagnostic-cause :my.plan/unusable-current-step
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id item-id}
+                 :my.plan/unusable-current-id (or (:my.plan/current-step {:my.plan.item/id item-id}) (:my.plan.item/id {:my.plan.item/id item-id}))})))
     [[:db/add (read-result! (plan-eid database agent-entity))
       :my.plan/current-step step]]))
 
@@ -948,12 +1144,12 @@
   "Select one of your steps as current and return that step."
   {:malli/schema [:=> [:cat :my.plan.item/id :seon.db/connection
                        :seon.agent/id]
-                  [:or :my.plan/step-summary :seon.error/value]]}
+                  [:or :my.plan/step-summary :seon.db/error-result :my.plan/agent-not-found-error :my.plan/not-owned-error :my.plan/unusable-current-step-error]]}
   [item-id connection agent-id]
   (let [result (transact-plan! connection agent-id
                                [[:db.fn/call #'start-step-call agent-id item-id]])]
     (if (and (map? result)
-             (contains? result :seon.error/at)
+             (contains? result :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? result :seon.error/layer)
              (contains? result :seon.error/operation))
       result
@@ -965,8 +1161,21 @@
         step (read-result! (step-eid database item-id))
         ids (read-result! (owned-ids database agent-id))]
     (when-not (and step (contains? ids item-id))
-      (refuse! :my.plan/not-owned "Update a step owned by this agent."
-               {:my.plan.item/id item-id :seon.agent/id agent-id}))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/update-step-call
+                 :seon.error/message "Plan request refused; a step owned by the requesting agent is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/update-step-call
+                 :seon.error/diagnostic-member :my.plan.item/id
+                 :seon.error/diagnostic-expected "a step owned by the requesting agent"
+                 :seon.error/diagnostic-offending {:my.plan.item/id item-id :seon.agent/id agent-id}
+                 :seon.error/offending {:my.plan.item/id item-id :seon.agent/id agent-id}
+                 :seon.error/diagnostic-cause :my.plan/not-owned
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id item-id :seon.agent/id agent-id}
+                 :my.plan/unowned-item-id (get {:my.plan.item/id item-id :seon.agent/id agent-id} :my.plan.item/id)})))
     (let [attributes (select-keys changes [:my.plan.item/title
                                           :my.plan.item/description
                                           :my.plan.item/done-when
@@ -976,12 +1185,12 @@
 (defn update!
   "Update an owned item's title, description, or done-when; return the changed item."
   {:malli/schema [:=> [:cat :my.plan/update-fields :seon.db/connection :seon.agent/id]
-                  [:or :my.plan/step-summary :seon.error/value]]}
+                  [:or :my.plan/step-summary :seon.db/error-result :my.plan/agent-not-found-error :my.plan/not-owned-error]]}
   [changes connection agent-id]
   (let [result (transact-plan! connection agent-id
                                [[:db.fn/call #'update-step-call agent-id changes]])]
     (if (and (map? result)
-             (contains? result :seon.error/at)
+             (contains? result :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? result :seon.error/layer)
              (contains? result :seon.error/operation)) result
         (changed-item (:db-after result) agent-id (:my.plan.item/id changes)))))
@@ -1014,23 +1223,46 @@
   [entries]
   (doseq [[id occurrences] (frequencies (map :my.plan.item/id entries))]
     (when (> occurrences 1)
-      (refuse! :my.plan/duplicate-identity
-               (str "Plan step " (pr-str id)
-                    " appears more than once in this plan.")
-               {:my.plan.item/id id}))))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/refuse-duplicate-identities!
+                 :seon.error/message "Plan request refused; one occurrence of each step identity is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/refuse-duplicate-identities!
+                 :seon.error/diagnostic-member :my.plan.item/id
+                 :seon.error/diagnostic-expected "one occurrence of each step identity"
+                 :seon.error/diagnostic-offending {:my.plan.item/id id}
+                 :seon.error/offending {:my.plan.item/id id}
+                 :seon.error/diagnostic-cause :my.plan/duplicate-identity
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id id}
+                 :my.plan/duplicate-item-id (get {:my.plan.item/id id} :my.plan.item/id)})))))
 
 (defn- refuse-duplicate-positions!
   [entries]
   (doseq [[[parent-id position] occurrences]
           (frequencies (map (juxt :my.plan/parent-id :my.plan.item/position) entries))]
     (when (> occurrences 1)
-      (refuse! :my.plan/duplicate-position
-               (str "Two sibling steps claim position " position
-                    (if parent-id
-                      (str " under " (pr-str parent-id) ".")
-                      " at the plan root."))
-               {:my.plan.item/position position
-                :my.plan/parent-step parent-id}))))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/refuse-duplicate-positions!
+                 :seon.error/message "Plan request refused; distinct positions among siblings is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/refuse-duplicate-positions!
+                 :seon.error/diagnostic-member :my.plan.item/position
+                 :seon.error/diagnostic-expected "distinct positions among siblings"
+                 :seon.error/diagnostic-offending {:my.plan.item/position position
+                :my.plan/parent-step parent-id}
+                 :seon.error/offending {:my.plan.item/position position
+                :my.plan/parent-step parent-id}
+                 :seon.error/diagnostic-cause :my.plan/duplicate-position
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/position position
+                :my.plan/parent-step parent-id}
+                 :my.plan/duplicate-sibling-position (get {:my.plan.item/position position
+                :my.plan/parent-step parent-id} :my.plan.item/position)})))))
 
 (defn- refuse-dependency-cycle!
   [needs-by-id]
@@ -1038,10 +1270,21 @@
         (fn visit [id trail seen]
           (cond
             (contains? trail id)
-            (refuse! :my.plan/dependency-cycle
-                     (str "Plan dependencies form a cycle through "
-                          (pr-str id) ".")
-                     {:my.plan.item/id id})
+            (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/refuse-dependency-cycle!
+                 :seon.error/message "Plan request refused; acyclic step dependencies is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/refuse-dependency-cycle!
+                 :seon.error/diagnostic-member :my.plan.item/needs
+                 :seon.error/diagnostic-expected "acyclic step dependencies"
+                 :seon.error/diagnostic-offending {:my.plan.item/id id}
+                 :seon.error/offending {:my.plan.item/id id}
+                 :seon.error/diagnostic-cause :my.plan/dependency-cycle
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id id}
+                 :my.plan/cycle-item-id (get {:my.plan.item/id id} :my.plan.item/id)}))
 
             (contains? seen id) seen
 
@@ -1119,11 +1362,8 @@
   [database ids]
   (let [rows (db/pull-many database comparable-selector
                            (mapv (fn [id] [:my.plan.item/id id]) (sort ids)))
-        rows (if (and (map? rows)
-                      (contains? rows :seon.error/at)
-                      (contains? rows :seon.error/layer)
-                      (contains? rows :seon.error/operation)) [] rows)
-        parents (into {}
+        rows (read-result! rows)
+        plan-parents (into {}
                       (mapcat (fn [row]
                                 (map (fn [child]
                                        [(:my.plan.item/id child)
@@ -1139,7 +1379,7 @@
                               (:my.plan.item/done-when row)
                               (:my.plan.item/completed-tx row)
                               (:my.plan.item/about row)
-                              (get parents (:my.plan.item/id row))
+                              (get plan-parents (:my.plan.item/id row))
                               (set (:my.plan.item/needs row))
                               (:my.plan.item/done-query row)
                               (get-in row [:my.plan.item/subject :db/id]))]))
@@ -1163,9 +1403,21 @@
   [database agent-id input]
   (let [agent-entity (read-result! (agent-eid database agent-id))]
     (when-not agent-entity
-      (refuse! :my.plan/agent-not-found
-               (str "There is no agent named " (pr-str agent-id) ".")
-               {:seon.agent/id agent-id}))
+      (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/compile-tree
+                 :seon.error/message "Plan request refused; an existing agent is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/compile-tree
+                 :seon.error/diagnostic-member :seon.agent/id
+                 :seon.error/diagnostic-expected "an existing agent"
+                 :seon.error/diagnostic-offending {:seon.agent/id agent-id}
+                 :seon.error/offending {:seon.agent/id agent-id}
+                 :seon.error/diagnostic-cause :my.plan/agent-not-found
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:seon.agent/id agent-id}
+                 :my.plan/missing-agent-id (get {:seon.agent/id agent-id} :seon.agent/id)})))
     (let [existing-plan (read-result! (plan-eid database agent-entity))
           plan-entity (or existing-plan "new-agent-plan")
           stored-objective (:my.plan/objective
@@ -1180,19 +1432,41 @@
               :let [id (:my.plan.item/id entry)]]
         (when (and (read-result! (step-eid database id))
                    (not (contains? existing id)))
-          (refuse! :my.plan/foreign-identity
-                   (str "Plan step " (pr-str id)
-                        " belongs to another agent's plan.")
-                   {:my.plan.item/id id}))
+          (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/compile-tree
+                 :seon.error/message "Plan request refused; an identity available to this agent is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/compile-tree
+                 :seon.error/diagnostic-member :my.plan.item/id
+                 :seon.error/diagnostic-expected "an identity available to this agent"
+                 :seon.error/diagnostic-offending {:my.plan.item/id id}
+                 :seon.error/offending {:my.plan.item/id id}
+                 :seon.error/diagnostic-cause :my.plan/foreign-identity
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/id id}
+                 :my.plan/foreign-item-id (get {:my.plan.item/id id} :my.plan.item/id)})))
         (doseq [token (:my.plan.item/about entry)]
           (resolve-subject! database token))
         (doseq [reference (:my.plan.item/needs entry)]
           (when-not (or (contains? wanted-ids reference)
                         (read-result! (step-eid database reference)))
-            (refuse! :my.plan/dependency-not-found
-                     (str "Plan dependency " (pr-str reference)
-                          " does not exist.")
-                     {:my.plan.item/needs reference}))))
+            (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/compile-tree
+                 :seon.error/message "Plan request refused; an existing or authored prerequisite step is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/compile-tree
+                 :seon.error/diagnostic-member :my.plan.item/needs
+                 :seon.error/diagnostic-expected "an existing or authored prerequisite step"
+                 :seon.error/diagnostic-offending {:my.plan.item/needs reference}
+                 :seon.error/offending {:my.plan.item/needs reference}
+                 :seon.error/diagnostic-cause :my.plan/dependency-not-found
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan.item/needs reference}
+                 :my.plan/missing-dependency-id (get {:my.plan.item/needs reference} :my.plan.item/needs)})))))
       (let [needs-by-id
             (into {}
                   (map (fn [entry]
@@ -1200,15 +1474,26 @@
                           (vec (sort (:my.plan.item/needs entry)))]))
                   entries)
             _ (refuse-dependency-cycle! needs-by-id)
-            current (get-in input [:my.plan/current-step :my.plan.item/id])
-            _ (when current
-                (let [entry (some #(when (= current (:my.plan.item/id %)) %)
+            plan-current (get-in input [:my.plan/current-step :my.plan.item/id])
+            _ (when plan-current
+                (let [entry (some #(when (= plan-current (:my.plan.item/id %)) %)
                                   entries)]
                   (when (or (nil? entry) (:my.plan.item/completed-tx entry))
-                    (refuse! :my.plan/unusable-current-step
-                             (str "Current step " (pr-str current)
-                                  " is not an open step of this plan.")
-                             {:my.plan/current-step current}))))
+                    (refuse! (error/diagnostic
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :my.plan/constraint
+                 :seon.error/operation 'seon.plan/compile-tree
+                 :seon.error/message "Plan request refused; an open step in this plan is required."
+                 :seon.error/diagnostic-layer :my.plan/constraint
+                 :seon.error/diagnostic-operation 'seon.plan/compile-tree
+                 :seon.error/diagnostic-member :my.plan/current-step
+                 :seon.error/diagnostic-expected "an open step in this plan"
+                 :seon.error/diagnostic-offending {:my.plan/current-step plan-current}
+                 :seon.error/offending {:my.plan/current-step plan-current}
+                 :seon.error/diagnostic-cause :my.plan/unusable-current-step
+                 :seon.error/diagnostic-evidence {}
+                 :seon.error/data {:my.plan/current-step plan-current}
+                 :my.plan/unusable-current-id (or (:my.plan/current-step {:my.plan/current-step plan-current}) (:my.plan.item/id {:my.plan/current-step plan-current}))})))))
             tempids (into {}
                           (map-indexed (fn [index entry]
                                          [(:my.plan.item/id entry)
@@ -1246,9 +1531,9 @@
               objective (assoc :my.plan/objective objective)
               (seq (get children nil))
               (assoc :my.plan/steps (set (get children nil)))
-              current (assoc :my.plan/current-step (step-ref current)))
+              plan-current (assoc :my.plan/current-step (step-ref plan-current)))
             clear-current
-            (when (and existing-plan (not current)
+            (when (and existing-plan (not plan-current)
                        (db/q '[:find ?current .
                                :in $ ?agent
                                :where [?agent :my.plan/current-step ?current]]
@@ -1277,7 +1562,7 @@
                            (zero? (count retractions))
                            (empty? scalars)
                            (nil? clear-current)
-                           (= current
+                           (= plan-current
                               (when existing-plan (db/q '[:find ?id .
                                       :in $ ?agent
                                       :where
@@ -1301,7 +1586,7 @@
   {:malli/schema
    [:=> [:cat :my.plan/component-input :seon.db/database-value
          :seon.db/connection :seon.agent/id]
-    [:or :my.plan/plan-result :seon.error/value]]}
+    [:or :my.plan/plan-result :seon.db/error-result :my.plan/agent-not-found-error :my.plan/duplicate-identity-error :my.plan/duplicate-position-error :my.plan/foreign-identity-error :my.plan/subject-not-found-error :my.plan/dependency-not-found-error :my.plan/dependency-cycle-error :my.plan/unusable-current-step-error]]}
   [input database connection agent-id]
   (try
     (let [compiled (compile-tree database agent-id input)
@@ -1317,7 +1602,7 @@
                 :datahike/expected-basis-t basis
                 :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
           (if (and (map? result)
-                   (contains? result :seon.error/at)
+                   (contains? result :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
                    (contains? result :seon.error/layer)
                    (contains? result :seon.error/operation))
             result
@@ -1333,7 +1618,7 @@
 
 (defn- outline-numbers
   "Outline numbers for depth-first steps, e.g. 1, 1.1, 1.2, 2."
-  [steps]
+  [plan-steps]
   (first
    (reduce
     (fn [[numbers counters] step]
@@ -1344,7 +1629,7 @@
                          (zero? depth) (str ".")))
          counters]))
     [[] []]
-    steps)))
+    plan-steps)))
 
 (defn- state-word
   [state]
@@ -1374,20 +1659,21 @@
   A refusal is data, so it is READ here and said plainly: what was asked
   for, whose it is, which refusal, and its message. A projection never
   hands an agent a bare exception message where its instructions belong."
+  {:malli/schema [:=> [:cat :string :seon.error/value] :string]}
   [subject value]
   (str subject " unavailable"
        (when-let [agent-id (get-in value [:seon.error/data :seon.agent/id])]
          (str " for " (pr-str agent-id)))
-       " — " (pr-str (:seon.error/kind value)) ": "
+       " — " (:seon.error/operation value) ": "
        (:seon.error/message value)))
 
 (defn format-item-ai
   "Format one plan step as terminal text."
   {:malli/schema [:=> [:cat [:or :my.plan/render-step :seon.error/value]]
-                  [:or :string :seon.error/value]]}
+                  :string]}
   [step]
   (if (and (map? step)
-           (contains? step :seon.error/at)
+           (contains? step :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
            (contains? step :seon.error/layer)
            (contains? step :seon.error/operation))
     (refusal-line "Plan step" step)
@@ -1439,43 +1725,43 @@
 (defn format-ready-items-ai
   "Format a supplied ready plan frontier as terminal text."
   {:malli/schema [:=> [:cat [:or :my.plan/ready-items :seon.error/value]]
-                  [:or :string :seon.error/value]]}
-  [steps]
-  (if (and (map? steps)
-           (contains? steps :seon.error/at)
-           (contains? steps :seon.error/layer)
-           (contains? steps :seon.error/operation))
-    (refusal-line "Ready work" steps)
-    (if (seq steps)
-      (str "Ready work (" (count steps) "):\n"
+                  :string]}
+  [plan-steps]
+  (if (and (map? plan-steps)
+           (contains? plan-steps :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
+           (contains? plan-steps :seon.error/layer)
+           (contains? plan-steps :seon.error/operation))
+    (refusal-line "Ready work" plan-steps)
+    (if (seq plan-steps)
+      (str "Ready work (" (count plan-steps) "):\n"
            (str/join "\n" (map #(str "- " (:my.plan.item/title %)
                                      " [" (:my.plan.item/id %) "]")
-                               steps)))
+                               plan-steps)))
       "No plan step is ready.")))
 
 (defn render-ready-items-ai
   "Render source which reads and formats the supplied ready step selection."
   {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/source]}
-  [steps]
+  [plan-steps]
   (pr-str
    (list `format-ready-items-ai
-         (list `items {:my.plan/item-ids (mapv :my.plan.item/id steps)}))))
+         (list `items {:my.plan/item-ids (mapv :my.plan.item/id plan-steps)}))))
 
 (defn render-ready-items-html
   "Render the ready plan frontier as Hiccup."
   {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/hiccup]}
-  [steps]
+  [plan-steps]
   (into [:section {:class "seon-family-entry my-plan-ready"}
-         [:h3 (str "Ready work (" (count steps) ")")]]
+         [:h3 (str "Ready work (" (count plan-steps) ")")]]
         (map render-item-html)
-        steps))
+        plan-steps))
 
 (defn- update-example
   "One executable form updating this plan, using real stable identities."
   [view]
   (let [agent-id (:seon.agent/id view)
-        current (get-in view [:my.plan/current-step :my.plan.item/id])
-        other? #(not= current (:my.plan.item/id %))
+        plan-current (get-in view [:my.plan/current-step :my.plan.item/id])
+        other? #(not= plan-current (:my.plan.item/id %))
         next-step (or (some :my.plan.item/id
                             (filter other? (:my.plan/ready view)))
                       (some :my.plan.item/id
@@ -1491,33 +1777,33 @@
 
 (defn- current-title
   [view]
-  (when-let [current (get-in view [:my.plan/current-step :my.plan.item/id])]
-    (or (some #(when (= current (:my.plan.item/id %)) (:my.plan.item/title %))
+  (when-let [plan-current (get-in view [:my.plan/current-step :my.plan.item/id])]
+    (or (some #(when (= plan-current (:my.plan.item/id %)) (:my.plan.item/title %))
               (:my.plan/steps view))
-        current)))
+        plan-current)))
 
 (defn format-plan-ai
   "Show the current criterion and one line per other step as readable data."
   {:malli/schema [:=> [:cat [:or :my.plan/component-view :seon.error/value]]
-                  [:or :string :seon.error/value]]}
+                  :string]}
   [view]
   (if (and (map? view)
-           (contains? view :seon.error/at)
+           (contains? view :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
            (contains? view :seon.error/layer)
            (contains? view :seon.error/operation))
     (refusal-line "Plan" view)
-    (let [steps (:my.plan/steps view)
+    (let [plan-steps (:my.plan/steps view)
           current-id (get-in view [:my.plan/current-step :my.plan.item/id])
           lines (mapv (fn [number step]
                         [(:my.plan.item/id step) (step-line number step)])
-                      (outline-numbers steps) steps)
-          current (some #(when (= current-id (first %)) (second %)) lines)]
+                      (outline-numbers plan-steps) plan-steps)
+          plan-current (some #(when (= current-id (first %)) (second %)) lines)]
       (str "{:seon.agent/id " (pr-str (:seon.agent/id view))
            (when-let [objective (:my.plan/objective view)]
              (str "\n :my.plan/objective " (pr-str objective)))
-           (when current
+           (when plan-current
              (str "\n :seon.plan/current-line "
-                  (pr-str (str "[" current-id "] " current))))
+                  (pr-str (str "[" current-id "] " plan-current))))
            "\n :seon.plan/step-lines {"
            (str/join "\n                   "
                      (map (fn [[id line]] (str (pr-str id) " " (pr-str line)))
@@ -1542,7 +1828,7 @@
                        (get-in derivation [:my.plan/current-step
                                            :my.plan.item/id]))]
     (if (and (map? derivation)
-             (contains? derivation :seon.error/at)
+             (contains? derivation :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? derivation :seon.error/layer)
              (contains? derivation :seon.error/operation))
       ;; The derivation refused. The agent still reads a typed line through
@@ -1563,7 +1849,7 @@
 (defn render-plan-html
   "Show the objective, current focus, progress, and every step with its state."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :seon.render/hiccup :seon.error/value]]}
+                  :seon.render/hiccup]}
   [unit]
   (let [database (:seon.db/db unit)
         component (or (:seon.render/value unit) unit)
@@ -1577,25 +1863,25 @@
                (plan {:seon.db/db database :seon.agent/id agent-id})
                component)]
     (if (and (map? view)
-             (contains? view :seon.error/at)
+             (contains? view :seon.error/at) ;; debt: seon.db/q, seon.db/pull and seon.db/transact! declare :seon.error/value through :seon.db/error-result.
              (contains? view :seon.error/layer)
              (contains? view :seon.error/operation))
       view
-      (let [steps (:my.plan/steps view)
-            done (count (filter :my.plan.item/completed-tx steps))]
+      (let [plan-steps (:my.plan/steps view)
+            done (count (filter :my.plan.item/completed-tx plan-steps))]
         [:section {:class "seon-family-entry my-plan"}
          [:header [:p {:class "seon-kicker"} "Plan"]
           [:h3 (get view :my.plan/objective "No objective set")]]
          [:p {:class "my-plan-progress"} [:strong "Current step: "]
           (or (current-title view) "None selected")]
-         [:p {:class "my-plan-progress"} (str done " of " (count steps) " steps completed")]
-         [:progress {:value done :max (max 1 (count steps))
+         [:p {:class "my-plan-progress"} (str done " of " (count plan-steps) " steps completed")]
+         [:progress {:value done :max (max 1 (count plan-steps))
                      :aria-label "Plan progress"}]
-         (if (seq steps)
-           (let [titles (into {} (map (juxt :my.plan.item/id :my.plan.item/title)) steps)]
+         (if (seq plan-steps)
+           (let [titles (into {} (map (juxt :my.plan.item/id :my.plan.item/title)) plan-steps)]
              (into [:ol {:class "my-plan-steps"}]
                    (map (fn [step]
                           [:li {:style {:margin-left (str (* 0.75 (get step :my.plan/depth 0)) "rem")}}
                            (item-html step titles)]))
-                   steps))
+                   plan-steps))
            [:p "No steps yet."])]))))
