@@ -55,6 +55,35 @@
 
 (declare commit-request)
 
+(deftest row-acquisition-observations-have-no-program-digest-promise
+  (test-support/with-database
+   (fn [connection]
+     (doseq [lookup [[:seon.fn/sym 'seon.id/id] [:seon.ns/name 'seon.id]]]
+      (let [database (db/db connection)
+           projection (schema/handed-projection)
+           row (db/pull database '[*] lookup)
+           observation (test-support/refusal-data
+                        #(@#'sci.eval/acquisition-refusal row
+                          (ex-info "row installation failed" {:seon.error-test/cause 42})))]
+       (is (= (second lookup) (:seon.sci.eval/row-member observation)))
+       (is (= "row installation failed"
+              (get-in observation [:seon.sci.eval/acquisition-observation
+                                   :seon.error.evidence/value])))
+       (is (not (contains? observation :seon.sci.eval/requested-program)))
+       (is (schema/valid-candidate-value? projection :seon.sci.eval/row-acquisition-error observation))
+       (is (not (schema/valid-candidate-value? projection :seon.sci.eval/acquisition-error observation)))
+       (when (:seon.sci.eval/row-member observation)
+         (let [recording (error/recording database (commit-request observation {}))
+               report (test-support/transacted! connection (:seon.db/tx-data recording))
+               root (db/pull (:db-after report) (error/observation-selector projection)
+                             (:seon.error/ref recording))
+               stored (error/latest-fact root)]
+           (is (schema/valid-candidate-value? projection :seon.sci.eval/row-acquisition-error stored))
+           (is (= (:seon.sci.eval/acquisition-observation observation)
+                  (dissoc (:seon.sci.eval/acquisition-observation stored) :db/id)))
+           (is (= (second lookup) (:seon.sci.eval/row-member stored)))
+           (is (not (contains? stored :seon.sci.eval/requested-program))))))))))
+
 (deftest error-identity-and-occurrences-are-owned-by-the-writer
   (test-support/with-database
     (fn [connection]

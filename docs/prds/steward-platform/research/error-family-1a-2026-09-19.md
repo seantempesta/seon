@@ -2422,3 +2422,75 @@ the cold command remain explicit; this is not a six-suite green landing.
 All fast and load JVMs were awaited serially. The final fast snapshot root
 was removed by its launcher; no worktree was created. Only foreign edits
 remain outside this final documentation update.
+
+## Row acquisition ruling implemented, 2026-09-20
+
+The owner selected option 2: a failed row observes its member and failure
+evidence without claiming the complete program digest. The new
+`:seon.sci.eval/row-acquisition-error` requires the base, `row-member`, and
+the existing `acquisition-observation` evidence component. `row-member`
+accepts namespace/function/test symbols and schema keywords. It is a new
+attribute because the existing `acquisition-member` promises a qualified
+symbol or keyword and cannot represent a namespace such as `seon.id`.
+The existing program acquisition facet and its required 64-character digest
+are unchanged. Occurrences own both facets; no identity was added.
+
+The producer is `seon.sci.eval/acquisition-refusal`; the namespace loader
+uses the same row facet for its observed namespace and preserves the actual
+loader cause/location. Exact pass-through contracts include the new facet
+in error/refusal/latest-fact, instrumentation, SCI admission/kernel, the
+database result union, and `seon.render.value`'s existing pass-through
+declarations. The latter file was clean and only its contracts changed.
+The canonical fixture's `refusal-data` helper still recognized retired kind
+maps; it now recognizes the base's three required members directly, so it
+does not misreport a returned complete error as a committed transaction.
+
+The new armed canonical regression reads both an actual function row and an
+actual namespace row, calls the producer, then records through
+`error/recording` and `transacted!` and reads the complete occurrence. It
+verifies the row facet before/after storage and falsifies the whole-program
+facet without fabricating a digest. The cold acquisition regression also
+queries the actual occurrence's observed member, rather than a retired root
+kind.
+
+Before implementation, request `75e0bb5b240d` durably recorded **46 tests /
+364 assertions / 2 failures / 1 error**, all in the new regression
+(`tmp/error-family-row-before.log`). The first six-suite candidate executed
+**276 tests / 6,030 assertions / 16 failures / 29 errors**
+(`tmp/error-family-row-after.log`). That request did not record: the armed
+`src/seon/blob.clj` `with-publication!` boundary declared zero facets while
+returning `:seon.db.write/validation-refusal` plus
+`:seon.test/execution-error`. Its nested evidence measured 16,407 against
+16,384 bytes. This is the same publication/recorder boundary measured in
+the bridge step-1 note; no cap was raised. It is an execution tally, never
+a durable verdict.
+
+### RESET NEEDED
+
+No existing attribute type changes in this slice. The additive stored
+attribute is exactly `:seon.sci.eval/row-member`; its evidence uses existing
+`:seon.sci.eval/acquisition-observation`. No reset, lifecycle operation,
+default adoption, or worktree was performed.
+
+The corrected focused snapshot selected `seon.error-test seon.sci.eval-test`
+with all row-facet, namespace-loader, and fixture-helper changes. Execution
+completed **120 tests / 759 assertions / 6 failures / 4 errors**
+(`tmp/error-family-row-corrected.log`). All 46 error tests passed, including
+both stored row-member cases. SCI cold row acquisition, JVM fallback, and
+namespace-loader evidence passed. Remaining events: configless installation
+(1E), foreign armed context (1E), retired entrance-kind assertions (2F),
+selected render (1E, `seon.render/present-output` receives a map where it
+declares a string), storable declaration assertion (1F), program injection
+rows (1F), override retraction (1E), and public walk allocation/plan reuse
+(2F). These are the next classification inputs, not attributed causes merely
+from the test names. The render diagnostic prints the supplied projection
+in a nested exception; subsequent log inspection is bounded to event lines.
+
+Request `dd9806c1ae02` finished with exit 1. Completion recording reached
+the same `seon.blob/with-publication!` undeclared-facet refusal, so the focused
+tally above is also execution evidence. Its snapshot tested foreign callers
+at HEAD bytes, including `src/seon/cluster.clj`, `src/seon/schema/edn.clj`,
+`src/seon/schema/internal.cljc`, `src/seon/fn.clj`, and the schema datahike/EDN
+tests. Their checkout changes were preserved. The required namespace load
+returned `:loads` before the row-facet commit
+(`tmp/error-family-row-load-before.log`).

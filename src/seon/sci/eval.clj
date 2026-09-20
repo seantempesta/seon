@@ -1214,7 +1214,13 @@
                        (when location (str " at " location)) ".")
                   diagnostic
                   (error/diagnostic
-                   {:seon.error/kind ::namespace-unloadable
+                   {:seon.error/at (java.util.Date.)
+                    :seon.error/layer ::acquisition
+                    :seon.error/operation 'seon.sci.eval/host-namespace!
+                    :seon.sci.eval/row-member namespace-name
+                    :seon.sci.eval/acquisition-observation
+                    {:seon.error.evidence/attribute :seon.error/message
+                     :seon.error.evidence/value cause-message}
                     :seon.error/message message
                     :seon.error/diagnostic-layer ::acquisition
                     :seon.error/diagnostic-operation
@@ -1227,8 +1233,7 @@
                     {:seon.sci.eval/cause-class
                      (symbol (.getName (class underlying)))
                      :seon.sci.eval/cause-location location-data}
-                    :seon.ns/name namespace-name
-                    :seon.sci.eval/namespace-unloadable true})]
+                    :seon.ns/name namespace-name})]
               (throw (ex-info message diagnostic failure)))))
         (or (find-ns namespace-name)
             (throw
@@ -1570,15 +1575,22 @@
 
 (defn- acquisition-refusal
   "A flat agent-mistake value naming one row that could not be installed."
+  {:malli/schema [:=> [:cat :map [:or :map :seon.error/throwable]]
+                  :seon.sci.eval/row-acquisition-error]}
   [row failure]
   (let [identity (program-row-identity row)
         failure-data (if (map? failure) failure (error/refusal failure))
-        cause-kind (:seon.error/kind failure-data)
         cause-message (or (:seon.error/message failure-data)
                           (when (instance? Throwable failure) (ex-message failure))
                           (.getName (class failure)))]
     (error/diagnostic
-     {:seon.error/kind ::acquisition-refused
+     {:seon.error/at (java.util.Date.)
+      :seon.error/layer ::acquisition
+      :seon.error/operation 'seon.sci.eval/install-row!
+      :seon.sci.eval/row-member (second identity)
+      :seon.sci.eval/acquisition-observation
+      {:seon.error.evidence/attribute :seon.error/message
+       :seon.error.evidence/value cause-message}
       :seon.error/message
       (str "Program row " (pr-str identity)
            " could not be installed during acquisition: " cause-message)
@@ -1588,16 +1600,17 @@
       :seon.error/diagnostic-expected ::installed
       :seon.error/diagnostic-offending identity
       :seon.error/diagnostic-cause
-      (or cause-kind (.getName (class failure)))
+      cause-message
       :seon.error/diagnostic-evidence
       {:seon.error/message cause-message
        :seon.error/diagnostic-cause
-       (or cause-kind (.getName (class failure)))}
+       cause-message}
       :seon.error/data
-      {::acquisition-row identity
-       ::acquisition-cause-kind cause-kind
-       ::acquisition-cause-message cause-message
-       ::acquisition-throwable-class (.getName (class failure))} :seon.sci.eval/acquisition-refused true})))
+      (cond-> {::acquisition-row identity
+               ::acquisition-cause-message cause-message}
+        failure-data (assoc ::acquisition-failure failure-data)
+        (instance? Throwable failure)
+        (assoc ::acquisition-throwable-class (.getName (class failure))))})))
 
 (defn- acquisition-refusal-id
   [refusal]

@@ -894,7 +894,10 @@
   [thunk]
   (try
     (let [result (thunk)]
-      (if (and (map? result) (keyword? (:seon.error/kind result)))
+      (if (and (map? result)
+               (inst? (:seon.error/at result))
+               (qualified-keyword? (:seon.error/layer result))
+               (qualified-symbol? (:seon.error/operation result)))
         result
         committed))
     (catch Throwable error

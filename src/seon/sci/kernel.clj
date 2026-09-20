@@ -550,7 +550,7 @@
          :seon.reconcile/error :seon.render/error :seon.render.data/error
          :seon.render.value/error :seon.render.walk/error :seon.render.web/error
          :seon.schedule/error :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error
-         :seon.schema.shape/error :seon.sci.admit/error :seon.sci.eval/acquisition-error
+         :seon.schema.shape/error :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error
          :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
          :seon.test/admission-error :seon.test/execution-error :seon.test/expired
          :seon.test/not-runnable-error :seon.test/resolution-error

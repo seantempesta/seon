@@ -900,7 +900,9 @@
             evidence (:seon.error/diagnostic-evidence diagnostic-data)
             location (:seon.sci.eval/cause-location evidence)
             cause-message (:seon.error/diagnostic-cause diagnostic-data)]
-        (is (= :seon.sci.eval/namespace-unloadable (:seon.error/kind data)))
+        (is (schema/valid-candidate-value? (schema/handed-projection)
+                                          :seon.sci.eval/row-acquisition-error data))
+        (is (= probe-namespace (:seon.sci.eval/row-member data)))
         (is (str/includes? cause-message "absent.namespace"))
         (is (str/ends-with? (:clojure.error/source location)
                             "unresolved_var_probe.clj"))
@@ -1563,13 +1565,15 @@
        {:seon.sci.eval/ctx ctx, :seon.db/db (db/db connection)})
       refusal
       (error/latest-fact
-       (first
-       (db/q
-        '[:find
-          [(pull ?error [* {:seon.error/occurrences [*]}]) ...]
-          :where
-          [?error :seon.error/kind :seon.sci.eval/acquisition-refused]]
-        (db/db connection))))]
+       (db/pull
+        (db/db connection)
+        (error/observation-selector (schema/handed-projection))
+        (db/q
+         '[:find ?error .
+           :where
+           [?error :seon.error/occurrences ?occurrence]
+           [?occurrence :seon.sci.eval/row-member acquire.poison/bad]]
+         (db/db connection))))]
      (is
       (= 42 (sci/eval-string* ctx "(acquire.poison/good 41)"))
       "a later valid row installs and works")
@@ -1577,7 +1581,8 @@
      (is
       (true? (:seon.sci.eval/acquisition-refusals-recorded? acquired)))
      (is
-      (some? refusal)
+      (schema/valid-candidate-value? (schema/handed-projection)
+                                    :seon.sci.eval/row-acquisition-error refusal)
       "the contained agent mistake is a durable fact")
      (is
       (str/includes?

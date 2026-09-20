@@ -282,6 +282,20 @@
                   :seon.schema/projection]]
  ; Additive error declaration manifest, 2026-09-18.
 
+ :seon.sci.eval/row-acquisition-error
+ [:and
+  {:seon.db/attributes true,
+   :description "Failure to acquire one observed program member. Owned by the error occurrence; no whole-program identity is asserted."}
+  :seon.error/base
+  [:map
+   {:seon.db/attributes true}
+   [:seon.sci.eval/row-member :seon.sci.eval/row-member]
+   [:seon.sci.eval/acquisition-observation :seon.sci.eval/acquisition-observation]]]
+
+ :seon.sci.eval/row-member
+ [:or {:description "The program name observed while acquiring a row: a namespace, function or test symbol, or a schema keyword. A value observation, never a ref; deleting the named declaration leaves this evidence unchanged."}
+  :symbol :qualified-keyword]
+
  :seon.sci.eval/acquisition-error
  [:and
  {:seon.db/attributes true}
