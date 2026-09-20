@@ -26,5 +26,15 @@ Datahike branch parents do not merge temporal indexes
 Acceptance: a real publication preserves all 1,001 admitted members, their
 coverage and original confidence, and the execution/result readers accept
 the retained evidence without weakening immutable admission or claim retries.
-Publication ownership has been extended to results-reuse-everywhere; the
-history strategy awaits an orchestrator ruling. No production repair is claimed.
+The orchestrator ruled on 2026-09-20 that publication must reconcile on the
+current published lineage. The publication-dissolution lane owns that repair
+in `src/seon/cluster.clj:1741`; results-reuse-everywhere must leave that held
+region untouched. See item 1 of
+[the publication dissolution spec](../../prds/steward-platform/plan/publication-dissolution-spec-2026-09-20.md).
+
+Commit `44b51bab0` replaces the run-preservation wildcard pull with complete
+EAV queries in `src/seon/cluster/source.clj:323`. This removes the collection
+cut; it does not repair the temporal references. The lineage owner must preserve
+the meaning of `:seon.test.run/selection-tx`, the `covered-by` membership at that
+transaction, and member claim/completion/termination transaction refs used by
+`src/seon/test/runner.clj:2334-2360`.

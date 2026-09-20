@@ -992,3 +992,70 @@ Cold command owed:
 `bin/test --paths bin/test src/seon/test/cache.clj src/seon/test/runner.clj test/seon/test_cache_test.clj test/seon/test_runner_test.clj -- seon.test-cache-test seon.test-runner-test`.
 The orchestrator still owes bare twice (second zero) and platform. No cold
 gate or lifecycle command was run by this lane.
+
+### Publication regression completed; host caller-scope checkpoint
+
+The canonical `seon.test.publication-test/publication-preserves-every-admitted-member`
+regression completed on 2026-09-20 at 03:09:00 UTC. It published the canonical
+manifest, admitted 1,001 actual test members through the source recorder,
+published again, and independently queried the complete member set: all three
+assertions passed. It exercises the collection preservation repair in
+`44b51bab0`; it does not claim that a rebuild preserves temporal history.
+
+The combined probe was:
+
+```sh
+bin/test-fast --paths src/seon/test.clj resources/seon/schemas/seon.test.edn test/seon/test/host_test.clj test/seon/test/publication_test.clj -- seon.test.host-test seon.test.publication-test
+```
+
+`tmp/results-reuse-everywhere/host-publication-fast.log`: **5,754 bytes**, SHA-256
+`fb99ce9249ba09605abe8a7d487891f5f6d8889eba07c8cb1b27e141e5598990`.
+Run `b88733a27be1`: **2 executed, 0 unchanged, 4 assertions, 0 failures,
+1 error**, exit 1. The error was in this lane's unlanded host draft:
+`run-owned` returned nil at the first call in `host_test.clj:27`; its armed
+`:seon.test/host-result` contract refused that value. No foreign attribution is
+made. The publication test ran afterward and passed. The draft source/schema
+changes were removed using their exact saved diff; the draft and fixture remain
+under `tmp/results-reuse-everywhere/host-integration-draft.patch` and
+`host_test.clj` for diagnosis. They are not landed implementation or green proof.
+
+Host integration cannot land atomically inside the current path assignment:
+`src/seon/plan.clj:770`, `test/seon/test_failure_facts_test.clj:50`, and
+`test/seon/test_expiry_test.clj:33` call `seon.test/run` without an explicit
+cluster. The plan caller also shares provenance across its test set. These paths
+were clean when inspected. `src/my/test.clj:43` and
+`test/my/test_test.clj:74` retain the old forced-execution/no-new-event claims.
+AGENTS lane rule 13 requires caller conversion in the same public behavior
+slice. The ownership question was sent before the draft was withdrawn:
+
+1. **Recommended:** extend this lane to those five direct caller/documentation/
+   fixture paths. Guarantee explicit cluster custody and fresh event semantics
+   in one coherent slice; cost is caller conversion plus their regressions;
+   scope expands beyond the original test-owner paths.
+2. Have their owner make coordinated conversions before the host slice.
+   Same guarantee, with a handoff and second checkpoint; independent host
+   landing is given up.
+3. Defer host integration. Keep the verified fast reuse and preservation
+   changes; no caller changes now, but the in-process task remains unfinished.
+
+`a6fbf412b`'s post-commit source/runner/cache require exited 0. The worker
+launcher duplication is removed, but the cold coordinator's remaining admission
+and shell preparation migration is still owed, alongside host integration.
+The two-run fast proof above remains valid on its named snapshot and lineage.
+
+Publication-dissolution owns lineage reconciliation at the held
+`src/seon/cluster.clj:1741`. It must preserve `selection-tx` meaning and the
+membership observed by `runner.clj:2334-2348`, including covered members, plus
+member claim/completion/termination transaction refs at `runner.clj:2359-2360`.
+No edit was made to that held file or to default.
+
+Cold preservation proof owed:
+`bin/test --paths src/seon/cluster/source.clj test/seon/test/publication_test.clj -- seon.test.publication-test`.
+The launcher cold command above, bare twice (second zero), and platform remain
+the orchestrator's proof. All named authorities were read end to end, including
+the publication-dissolution specification and its current-lineage ruling.
+
+Final pre-commit require of `seon.cluster.source`, `seon.test`, `seon.test.fast`,
+`seon.test.runner`, and `seon.test.cache` exited 0 (`final-load.log`, `:loads`).
+This checkpoint changes only the publication test's alias-qualified activation
+symbol, this note, and the existing publication-history issue's ownership/ruling.
