@@ -6986,3 +6986,18 @@ cannot be one query the lane stops and the owner decides. Also handed to
 the lane: the `force-branch!` race (its file), boot-phase timings + lazy
 acquisition of what the running system already has, items 2–3. The owner
 can veto option 3 before it lands (a cheap reset either way).
+
+## 2026-09-23 ~07:10 local — activation: the old check's subject is the CONFIG's named symbols → the replacement query lives at config reconciliation; a NEW cold-publication failure in `seon.schema/projection-registry` (mixed keyword/symbol sorted-map) reported by the redesign lane
+
+The lane stopped under the one-query condition (`184c2febe`): the sealed
+closure's boot check reported "expected identities now absent", where the
+expectations come from `config/default.edn`. RULED: the check moves to
+the config seam — when the manifest reconciles into facts (boot's config
+phase, `config apply`), every qualified symbol it names must resolve to a
+current `:seon.fn` row, one query, refused positively naming symbol and
+config key; no roster. Separately the lane hit a cold publication failure
+in `seon.schema/projection-registry` (a sorted-map merge with mixed
+keyword and symbol keys) — HEAD may not publish from zero; evidence being
+filed; schema.clj is the test-system lane's (its `30baf050a`), routed at
+its stop. Head base refreshed at HEAD (163 s); error lane running its
+result regressions.
