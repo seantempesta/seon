@@ -5634,3 +5634,13 @@ that facet since the test-system family is landed. Resumed.
 `kind-sweep-ops-effects-2` landed `86c3a73d4` (plan kinds retired; refusal
 evidence declared — the gate's `seon.plan/plan!` class) and `547d3c60a`
 (schedule kinds retired; transaction refusals preserved).
+
+## 2026-09-21 ~14:00 UTC — sci-program: await timeout facet ruled (option 1); maintenance kind-free
+
+`kind-sweep-sci-program` (`0d4ca5a75`): `check` classified completed
+failures as expiry because `seon.await/await!` exposes no timeout facet.
+Ruled option 1 — the lane owns `seon.await` (await.clj, seon.await.edn,
+await_test) and declares the timeout facet at the producer (bound that
+fired + elapsed ms + awaited identity); completed failures branch through
+the evidence members. Resumed. `kind-sweep-ops-effects-2` landed
+`aae012129` (maintenance kinds retired; projection refusals declared).
