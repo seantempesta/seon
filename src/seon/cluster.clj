@@ -2767,15 +2767,17 @@
             held (acquire-root-store! store-dir)]
         (try
           (let [published (source/current held)
-                database (d/commit-as-db (:seon.store/connection-object held)
-                                         (:seon.source/commit-id published))]
+                database (source/database held (:seon.source/commit-id published))
+                digest (db/q database '[:find ?digest . :where [_ :seon.source/digest ?digest]])]
             (try
+              (when (map? digest)
+                (refused! "The exported publication digest could not be read." digest))
               (report-source-progress! "publication export")
               (export/export! {:seon.store/store held
                                :seon.export/parent-dir (str (io/file destination "data"))})
               (let [artifact (read-source-artifact root)]
                 (when-not (= (:seon.source/digest artifact)
-                             (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] database))
+                             digest)
                   (refused! "The publication artifact does not identify the exported program."
                             {:seon.boot/root root}))
                 ;; Result recording advances the branch without changing the
@@ -2784,8 +2786,7 @@
                   (assoc artifact :seon.source/commit-id (:seon.source/commit-id published)))
                 (spit (io/file destination "manifest.edn") (pr-str (:seon.fn/manifest artifact))))
               (spit (io/file destination "provenance.edn")
-                    (pr-str {:seon.test.run/program-digest
-                             (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] database)
+                    (pr-str {:seon.test.run/program-digest digest
                              :seon.test.run/basis-t (db/basis-t database)
                              :seon.test.run/branch source/current-branch}))
               destination
