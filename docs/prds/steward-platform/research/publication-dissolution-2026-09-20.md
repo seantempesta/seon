@@ -1377,3 +1377,23 @@ was neither touched nor used for these proofs. All named binding authorities
 and groundings were read end to end across this lane's work.
 
 Cleanup: the owned snapshot was downed through `bin/seon --root tmp/publication-wt down` and removed. The serial HEAD-load JVM was closed. No owned cluster host remains; the shared default host was left alone. The additional exact-HEAD archive is removed after its final load check.
+
+
+### Optional offending member ruling applied
+
+The orchestrator accepted `3ac00fb8e`, `179f6c4bc`, and `974591456`, and
+ruled that the raw `:seon.error/offending` member is optional and in-memory;
+typed domain members remain required stored facts. Its durable representation
+uses the existing occurrence evidence. The three runner facet entries are now
+optional. `seon.cluster.publication-facet-test` publishes the canonical
+population and validates all three producer shapes with and without the raw
+member while refusing shapes missing their domain facts.
+
+The declarations and the common adapters load in the shared tree
+(`tmp/publication-dissolution/facet-adapters-load.log`). Behavior validation is
+pending the held bridge function: HEAD and its current draft both have
+`assert-error-declaration!` / `owned-storage!` checking every entry regardless
+of optionality. Coordination was requested from the orchestrator; this lane
+has not edited that held file, weakened validation, or launched another known
+failing suite. The Babashka publication adapters load and `bash -n bin/test`
+passes. Work continues on the common-publisher slice while that owner lands.

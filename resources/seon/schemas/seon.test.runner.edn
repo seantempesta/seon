@@ -83,7 +83,7 @@
   :seon.error/base
   [:map [:seon.test/sym :seon.test/sym]
    [:seon.test.runner/marker-key :seon.test.runner/marker-key]
-   [:seon.error/offending :seon.schema/value]]]
+   [:seon.error/offending {:optional true} :seon.schema/value]]]
  :process-tree-exit-backstop-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
   :seon.error/base
@@ -95,7 +95,7 @@
   :seon.error/base
   [:map [:seon.test.runner/worker-id :seon.test.runner/worker-id]
    [:seon.test.runner/worker-command-key :seon.test.runner/worker-command-key]
-   [:seon.error/offending :seon.schema/value]]]
+   [:seon.error/offending {:optional true} :seon.schema/value]]]
  :unresolved-test-var-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
   :seon.error/base
@@ -106,7 +106,7 @@
   :seon.error/base
   [:map [:seon.test.runner/worker-id :seon.test.runner/worker-id]
    [:seon.test.runner/worker-error-log :seon.test.runner/worker-error-log]
-   [:seon.error/offending :seon.schema/value]]]
+   [:seon.error/offending {:optional true} :seon.schema/value]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.test.runner/error
