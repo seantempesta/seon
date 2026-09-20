@@ -5340,3 +5340,15 @@ down to four dirty files (all the publication lane's). Launched
 Editing lanes: publication (items 2–4, cluster.clj now free for its
 population conversion), step 2, 1a; `bridge-step3-design` read-only. The
 step-1 cold gate runs next (one gate per major landing).
+
+## 2026-09-21 ~06:15 UTC — step-3 launch spec written; step-4 spec lane launched; step-1 gate in tests
+
+`bridge-step3-design` landed `12fae2e25`:
+[bridge-step3-stamp-spec-2026-09-21.md](bridge-step3-stamp-spec-2026-09-21.md)
+(stamp declaration as one identity family with the publication's source
+digest; acquisition and typed refusal; per-file instructions against HEAD;
+regressions + named live proof; reset batch; measured deletion budget;
+125 anchors re-verified). Read-only slot → `bridge-step4-design` (writer
+diet launch text; first item = the measured `dbi/search` reverse-lookup
+probe with go/no-go). Step-1 cold gate: base published in 88 s (was 226 s
+before the incremental analysis landed) and now executing.
