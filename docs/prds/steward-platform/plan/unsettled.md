@@ -4744,3 +4744,15 @@ hook publication paused, a start needs a republish, and a republish needs a
 coherent tree. Decision: default stays DOWN (nobody needs it beyond
 read-only probes) until `config-plan-family-1d` lands; then `bin/seon init`
 + `bin/seon start`. The stale advertisement (pid 8884) stopped.
+
+## 2026-09-20 ~12:05 UTC — load attribution: not ours alone; test heaps capped
+
+Owner: "my load still seems pretty high." Top consumers: Subnautica.exe
+under CrossOver (pid 97812, 360 % CPU, 6.5 GB), one lane fast JVM at 17 GB
+RSS (1a's plain working-tree form; the :test alias allowed 12.5 % of 128 GB
+= 16 GB per JVM), a second lane JVM 6.4 GB, Backblaze 62 %; swap still 8.1
+of 9.2 GB. Nothing of ours needs a restart. Fixed: `:test` alias heap
+capped at 8 % (~10 GB) — `9?` commit above; recorded that a gate can still
+run 1 coordinator + 3 pool + 1 serial worker per slot × 2 slots (A6/A4
+restructure this). 1a returns to `--paths` at its next stop now that the
+overlay admission is fixed.
