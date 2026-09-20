@@ -6174,3 +6174,31 @@ canonical regressions. RETIREMENT LATER as one atomic slice (readers in
 the issue's table converted, declarations deleted) once step 2 and
 gate-restructure release those paths; joins the RESET batch. Lane resumed
 on the accretion half (astra low).
+
+## 2026-09-22 ~11:35 local — RULING: the offending value becomes a result at the RECORDING seam (`seon.error/prepare`), not in the constructor
+
+The error lane stopped again (`8fa68b904`): `seon.error.refusal` is a pure
+function of observation data with no connection, SCI context or profile,
+and a direct leaf→blob/print require is a namespace cycle. Its three
+options: (1) thread result-writing inputs through instrumentation callers
+(2–4 h, storage only "when supplied"); (2) enrich at evaluation/recording
+(2–3 h); (3) require storage at every constructor call (a day+; boot
+failures need another outcome). RULED (orchestrator; the owner's amendment
+says "a normal result", and an evaluation's result is recorded by the
+evaluator, never by the function that produced the value): option 2, at
+the seam that already exists — `seon.error/prepare` + `recording`/
+`commit-tx`, called by the fault committer with the connection in hand
+(`src/seon/cluster.clj:3210–3235`), which today already converts the raw
+member into `data-edn`/`data-size` and size-gates `blob/stage!`. That
+conversion becomes: mint the result id, blob ALWAYS (content-addressed;
+the size gate is a tuned constant and goes), the printer's capped shown
+text under the profile, and `bind-result!` under `result-handle` when a
+SCI context is supplied. Two callers, one seam: the fault committer and
+the evaluation recorder in `seon.sci.eval` (agent-turn contract refusals;
+its `pr-str` of shown values at ~2580/2720 is a sighting for the note).
+The constructor keeps the raw object as the IN-FLIGHT carrier (transport
+law: objects ride in memory, facts are durable); it never reaches the
+transaction. Retirement of `data-edn`/`data-size`/`offending-projection`
+stays the atomic later slice. **Owner veto point:** this places the
+mechanism at the recorder rather than the constructor; if the owner wants
+the constructor to store, option 3 is the price. Lane resumed (astra low).
