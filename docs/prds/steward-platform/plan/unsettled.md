@@ -5323,3 +5323,20 @@ its research note (stamp attribute declaration, RESET batch, acquisition
 function and typed refusal, relation to the publication's source digest,
 proofs, deletion budget). Editing lanes: step 1 (landing), publication
 (items 2–4); one read-only design lane.
+
+## 2026-09-21 ~05:45 UTC — BRIDGE STEP 1 LANDED; step 2 launched; 1a resumed
+
+`bridge-step1-registry` landed `dc1efaf3c` (sealed compiled Malli
+registries carried by the projection; per-use candidate compilation
+retired; both candidate value APIs `[projection key value]`; native
+explanation paths) and `fb4dfee98` (subprocess runner coverage moved to an
+explicit long integration namespace — the publication lane's ruling,
+applied here). Measured: 4,694 providers, each called at most once; zero
+warm compiler calls; zero registry copies. Combined 313 tests / 4 F / 24 E;
+final focused 101 tests / 0 F / 2 classified foreign DB/fn errors. Tree
+down to four dirty files (all the publication lane's). Launched
+`bridge-step2-walker` (astra low, from its spec) and resumed
+`error-family-1a` (option-2 row-acquisition facet; db/sci.eval greening).
+Editing lanes: publication (items 2–4, cluster.clj now free for its
+population conversion), step 2, 1a; `bridge-step3-design` read-only. The
+step-1 cold gate runs next (one gate per major landing).
