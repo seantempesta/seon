@@ -2023,7 +2023,9 @@
                                   (clojure.core/name phase#)))
                     (flush)
                     (.write writer# (str (clojure.core/name phase#) "\n"))
-                    (.flush writer#))]
+                    (.flush writer#))
+                  loaded-inputs#
+                  ((requiring-resolve 'seon.test.cache/input-digests) ~repository)]
               (progress!# :seon.boot.phase/namespaces)
               (require 'seon.cluster 'seon.config 'seon.instrument)
               (let [progress-var#
@@ -2053,7 +2055,7 @@
                   (throw (ex-info (:seon.error/message rotation#) rotation#)))
                 ((ns-resolve 'seon.cluster (symbol "record-loaded-producers!"))
                  ~instance
-                 ((requiring-resolve 'seon.test.cache/input-digests) ~repository))
+                 loaded-inputs#)
                 (println "seon" ~name "ready — instrumented"
                          (:seon.instrument/instrumented applied#) "vars")
                 (flush)
