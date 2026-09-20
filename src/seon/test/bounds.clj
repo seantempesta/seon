@@ -33,10 +33,12 @@
           (throw (ex-info
                   (str "SEON_TEST_SILENCE_SECONDS refused: declared silence bound " declared
                        "s; :seon.test/long with :seon.test/long-ms and measured fixture priming raise it; override requires SEON_TEST_ORCHESTRATOR=1 without lane identity.")
-                  {:seon.error/kind ::unauthorized-override})))
+                  {::override-variable "SEON_TEST_SILENCE_SECONDS"
+                   ::required-authority "SEON_TEST_ORCHESTRATOR=1 without lane identity"})))
         (let [seconds (try (Long/parseLong configured)
                            (catch NumberFormatException _ 0))]
           (when-not (pos? seconds)
             (throw (ex-info "SEON_TEST_SILENCE_SECONDS must be a positive integer."
-                            {:seon.error/kind ::invalid-override})))
+                            {::override-variable "SEON_TEST_SILENCE_SECONDS"
+                             ::offending-override configured})))
           (max declared seconds))))))
