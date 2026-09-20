@@ -52,3 +52,16 @@ then publish the same tree) and `seon.cluster.publication-adoption-test`
 new explicit-projection assertion is not yet verified: subsequent fast
 admission is blocked by the SCI sweep's unstorable required candidates
 member. Status remains open; final scratch-root adoption remains owed.
+
+## Slice 0 — 2026-09-22
+
+The owner-approved redesign removes the guard rather than repairing its
+recording. Slice 0 deletes the four guard functions and every caller, the
+boot-time input read and recording transaction, and the 13 schema declarations
+used only by the guard. Existing boot/publication and adoption tests retain
+their behavioral assertions without recording a generation first.
+
+RESET NEEDED: the guard's attributes are removed. The issue stays open until
+the orchestrator resets and measures first adoption on the fresh host; code
+removal alone is not live acceptance. Exact verification and deletion counts
+are in the [slice 0 landing note](../../prds/steward-platform/research/one-jvm-redesign-2026-09-22.md).

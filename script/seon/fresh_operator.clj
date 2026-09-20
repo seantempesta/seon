@@ -2001,12 +2001,7 @@
 
 (defn- launch-form
   [root name manifest ready-port]
-  (let [instance (gensym "instance")
-        ;; The loaded-producer digests are computed INSIDE the child from the
-        ;; same tree at the same instant. Inlining them as a literal (every
-        ;; input's 64-char digest) pushed this form's compiled fn* past the
-        ;; JVM method-size limit ("Method code too large!", 2026-09-21).
-        repository (str (repository-root))]
+  (let [instance (gensym "instance")]
     (pr-str
      `(do
         (with-open [socket# (java.net.Socket. "127.0.0.1" ~ready-port)
@@ -2023,9 +2018,7 @@
                                   (clojure.core/name phase#)))
                     (flush)
                     (.write writer# (str (clojure.core/name phase#) "\n"))
-                    (.flush writer#))
-                  loaded-inputs#
-                  ((requiring-resolve 'seon.test.cache/input-digests) ~repository)]
+                    (.flush writer#))]
               (progress!# :seon.boot.phase/namespaces)
               (require 'seon.cluster 'seon.config 'seon.instrument)
               (let [progress-var#
@@ -2053,9 +2046,6 @@
                     applied# ~(instrument-form instance name)]
                 (when (:seon.error/kind rotation#)
                   (throw (ex-info (:seon.error/message rotation#) rotation#)))
-                ((ns-resolve 'seon.cluster (symbol "record-loaded-producers!"))
-                 ~instance
-                 loaded-inputs#)
                 (println "seon" ~name "ready — instrumented"
                          (:seon.instrument/instrumented applied#) "vars")
                 (flush)

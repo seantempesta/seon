@@ -58,3 +58,13 @@ The refusal changed (a schema that does not compile at fault-recording
 time, after the compiled-node bridge landed) and the fault's own message is
 still erased. Whoever fixes the last-resort shape gets this schema's name
 for free; until then the boot fault at HEAD is unknown.
+
+## Slice 0 fast-test observation — 2026-09-22
+
+The guard-deletion snapshot at `a70995402` reproduced the same erased fault
+while `seon.cluster.publication-adoption-test/freshly-booted-host-adopts-its-own-tree`
+ran in PID 31591. Its isolated cluster `publication-8551532f5f9e` reached the
+web-view announcement at `2026-09-20T17:14:56.997Z`, then emitted the exact
+second-sighting line above (`:malli.core/invalid-schema`). Removing the
+publication guard does not fix this independent fault-recording path; the
+owner's slice 4 assignment retains it.

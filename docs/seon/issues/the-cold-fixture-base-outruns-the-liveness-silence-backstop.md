@@ -104,3 +104,19 @@ Observed from four liveness diagnostic logs and the process table on one
 machine under four concurrent lanes. No change was made; no measurement of
 the base build's cost on an idle machine was taken, so "exceeds 300 s" is
 established only under concurrent load.
+
+## Slice 0 observation — 2026-09-22
+
+The one-JVM redesign lane's fast snapshot at `a70995402`, PID 31591,
+reported `failed-loaded-definition-scope-restores-arming` beginning at
+`2026-09-20T17:08:19.927835Z` and ending at `17:11:27.411151Z`: 187.483 s
+including first fixture acquisition, without a reported failure. This test's
+body was unchanged by slice 0. A `jcmd 31591 Thread.dump_to_file -format=json`
+sample during the silence showed `main` waiting in
+`seon.test-support/retrying-base` → `acquire-base!`; the
+`seon-test-database-base` thread was awaiting the Datahike transaction from
+`populate-database!` → `create-base`. The dump includes virtual threads.
+This observation establishes fixture population during the interval, not
+that the test body itself took 187 s. No backstop fired and no timeout was
+raised. Reducing that cost and enforcing the owner's per-test bounds remain
+outside the guard-deletion slice.

@@ -228,11 +228,10 @@ losable by construction.
 loaded behavior; file edits do not mutate the database's program facts. The
 edit hook and `bin/seon init` use one digest-driven publication: changed
 inputs plus affected declaration files reconcile on the current history.
-A changed producer toolchain requires complete analysis. A live host refuses
-publication until its recorded loaded-producer generation matches the requested
-toolchain; explicit development adoption or a class/protocol restart performs
-the named transition. `bin/seon init` reuses an unchanged publication;
-ordinary clusters are never synchronized. `bin/seon init --dev NAME` adopts
+A changed producer toolchain requires complete analysis. Development adoption
+reloads changed namespaces through Clojure `require :reload`; publication has
+no separate loaded-producer generation guard. `bin/seon init` reuses an
+unchanged publication; ordinary clusters are never synchronized. `bin/seon init --dev NAME` adopts
 the publication on an explicitly selected development cluster in its
 hosting JVM; the edit hook's `:current-source` root and cluster select that target.
 Its adoption commit is recorded only after schema and program reconciliation,

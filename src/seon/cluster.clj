@@ -2166,137 +2166,6 @@
           :seon.fn.manifest/manifest manifest)
          (catch Throwable _ false))))
 
-(defn- loaded-producer-digest
-  "ONE derivation for both sides of the loaded-producer guard.
-
-   `record-loaded-producers!` stamps it at boot and `require-loaded-producers!`
-   recomputes it before a publication through the live host; on 2026-09-21
-   the two sides passed different dependency maps (the recorder restricted
-   the pins to paths that were also inputs) and every freshly booted host
-   was refused as a producer mismatch."
-  {:malli/schema [:=> [:cat :seon.fn.manifest/manifest
-                       [:map-of :string :string] [:map-of :string :string]]
-                  :seon.source/toolchain-digest]}
-  [manifest inputs dependencies]
-  (seon.fn/toolchain-digest manifest inputs dependencies))
-
-(defn record-loaded-producers!
-  "Record a completed host load, checking the inputs captured before loading.
-  Callable objects remain with the instance; their observed content identity is durable."
-  {:malli/schema [:function
-                    [:=> [:cat :seon.boot/instance [:map-of :string :string]] :nil]
-                    [:=> [:cat :seon.boot/instance [:map-of :string :string] :seon.fn.manifest/manifest] :nil]]}
-  ([instance before]
-   (record-loaded-producers! instance before
-     (:seon.fn/manifest (read-source-artifact (get-in instance [:seon.boot/config :seon.boot/root])))))
-  ([instance before manifest]
-  (let [root (get-in instance [:seon.boot/config :seon.boot/root])
-        projection-state (get-in instance [:seon.sci.eval/ctx :seon.sci.eval/projection-state])
-        _ (when-not projection-state
-            (refused! "Recording loaded producers requires the booted instance's projection."
-                      {:seon.boot/root root}))
-        directory (fs/source-directory)
-        paths (seon.fn/producer-paths manifest)
-        missing (into #{} (remove find-ns) (keys paths))
-        _ (when (seq missing)
-            (refused! "The host has not loaded every producer namespace."
-                      {:seon.source/producer-mismatch missing}))
-        after (test.cache/input-digests directory)
-        dependencies (test.cache/toolchain-dependencies directory #{".clj-kondo"})
-        observed (into (set (vals paths)) (keys dependencies))
-        _ (when-not (= (select-keys before observed) (select-keys after observed))
-            (refused! "Producer source changed while the host loaded; restart the host."
-                      {:seon.source/producer-mismatch (set (keys paths))}))
-        digest (loaded-producer-digest manifest before dependencies)
-        host (id/id)
-        roots (into {} (for [name (keys paths)
-                             :let [namespace (find-ns name)]
-                             candidate (vals (when namespace (ns-interns namespace)))
-                             :when (and (bound? candidate) (ifn? @candidate))]
-                         [candidate @candidate]))
-        state {:seon.instrument/roots roots :seon.instrument/function-schemas {}}
-        _ (require-committed!
-           (db/transact! (:seon.boot/cluster-connection instance)
-             {:tx-data [{:seon.source/loaded-host host :seon.source/loaded-producer-digest digest
-               :seon.source/loaded-producers
-               (mapv (fn [[name path]] {:seon.source/producer-namespace name
-                                        :seon.source/producer-path path
-                                        :seon.source/producer-digest (get before path)}) paths)}]})
-           {:seon.boot/population :seon.source/loaded-generation})
-        database (db/carry-projection-state
-                  @(:seon.boot/cluster-connection instance) projection-state)]
-    ;; One hosting JVM has one set of callable roots. Every hosted instance
-    ;; carries the same observed database value, including across cluster stops.
-    (swap! running-instances
-           (fn [instances]
-             (update-vals instances
-               (fn [candidate]
-                 (if (= (:seon.store/store instance) (:seon.store/store candidate))
-                   (assoc candidate :seon.source/loaded-host host
-                          :seon.source/loaded-state state
-                          :seon.source/loaded-database database)
-                   candidate))))))
-  nil))
-
-(defn- require-loaded-producers!
-  "A live host's recorded generation must identify the requested producer."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.store/store :seon.fn.manifest/manifest] :nil]
-                  [:=> [:cat :seon.store/store :seon.fn.manifest/manifest :string] :nil]]}
-  ([store manifest] (require-loaded-producers! store manifest (fs/source-directory)))
-  ([store manifest directory]
-  (when-let [instance (some #(when (= store (:seon.store/store %)) %) (vals @running-instances))]
-    (let [database (:seon.source/loaded-database instance)
-          host (:seon.source/loaded-host instance)
-          observed (when host
-                     (db/pull database
-                              [:seon.source/loaded-producer-digest
-                               {:seon.source/loaded-producers
-                                [:seon.source/producer-namespace :seon.source/producer-path :seon.source/producer-digest]}]
-                              [:seon.source/loaded-host host]))
-          _ (when (:seon.error/at observed)
-              (refused! "The live host's recorded producer generation could not be read." observed))
-          loaded (:seon.source/loaded-producer-digest observed)
-          inputs (test.cache/input-digests directory)
-          requested (loaded-producer-digest
-                     manifest inputs (test.cache/toolchain-dependencies directory #{".clj-kondo"}))
-          replaced (when-let [state (:seon.source/loaded-state instance)]
-                     (instrument/replaced-definitions state))
-          mismatched (into (into #{} (map #(ns-name (:ns (meta %)))) replaced)
-                           (keep (fn [entry]
-                                   (when (not= (:seon.source/producer-digest entry)
-                                               (get inputs (:seon.source/producer-path entry)))
-                                     (:seon.source/producer-namespace entry))))
-                           (:seon.source/loaded-producers observed))
-          mismatched (if (and (not= loaded requested) (empty? mismatched))
-                       (set (keys (seon.fn/producer-paths manifest))) mismatched)]
-      (when (or (not= loaded requested) (seq mismatched))
-        (let [name (get-in instance [:seon.boot/config :seon.boot/cluster-name])
-              message "The live host's loaded producers do not match the requested toolchain."
-              root (-> (io/file (get-in instance [:seon.boot/config :seon.boot/root]))
-                       .getCanonicalFile .getParentFile .getParentFile .getPath)
-              command (str "bin/seon --root " (pr-str root))
-              class-namespaces
-              (into #{} (comp (mapcat :seon.fn.file/rows)
-                              (filter #(#{'clojure.core/deftype 'clojure.core/defrecord
-                                          'clojure.core/defprotocol} (:seon.fn/defined-by %)))
-                              (keep #(some-> (:seon.fn/sym %) namespace symbol)))
-                    (:seon.fn.manifest/artifacts manifest))
-              restart? (or (nil? loaded) (seq (set/intersection mismatched class-namespaces)))
-              transition (if restart?
-                           (str command " down; " command " start " name)
-                           (str command " init --dev " name))
-              refusal (cond-> {:seon.error/at (Date.) :seon.error/layer :seon.source/publication
-                               :seon.error/operation 'seon.cluster/refresh-source!
-                               :seon.error/message message
-                               :seon.source/producer-mismatch mismatched
-                               :seon.source/requested-producer-digest requested
-                               :seon.source/host-transition transition
-                               :seon.source/restart-required? (boolean restart?)}
-                        loaded (assoc :seon.source/loaded-producer-digest loaded))]
-          (throw (ex-info message refusal))))))
-  nil))
-
 (defn- full-source-refresh!
   "One publication path: reconcile changed artifacts on the current lineage."
   [root store roots]
@@ -2308,13 +2177,7 @@
         previous (when (and published
                             (= (:seon.source/digest published) (:seon.source/digest cached))
                             valid?)
-                   (:seon.fn/manifest cached))
-        _ (when (and (not valid?)
-                     (some #(= store (:seon.store/store %)) (vals @running-instances)))
-            (refused! "Live publication requires its recorded producer manifest; restore the publication artifact before retrying."
-                      {:seon.boot/root root}))
-        _ (when valid?
-            (require-loaded-producers! store (:seon.fn/manifest cached) (:seon.fn/root roots)))]
+                   (:seon.fn/manifest cached))]
     (if (and (= digest (:seon.source/digest published))
              (not (:seon.source/issue-notes? roots)))
       published
@@ -2429,55 +2292,6 @@
     (require namespace-name :reload))
   nil)
 
-(defn- prepare-development-producers!
-  "Explicit development transition, before the publisher can use a new producer.
-  Prospective analysis is isolated and discarded; it cannot populate the cache."
-  {:malli/schema [:=> [:cat :seon.boot/root :seon.store/store :seon.boot/instance :map] :nil]}
-  [root store instance roots]
-  (when-let [manifest (:seon.fn/manifest (read-source-artifact root))]
-    (let [mismatch (try (require-loaded-producers! store manifest) nil
-                       (catch clojure.lang.ExceptionInfo failure
-                         (if (:seon.source/producer-mismatch (ex-data failure))
-                           failure (throw failure))))]
-      (when mismatch
-        (let [data (ex-data mismatch)]
-          ;; Missing load evidence and class/protocol replacement require the
-          ;; host transition already named by admission; never fall back cold.
-          (when (or (nil? (:seon.source/loaded-producer-digest data))
-                    (:seon.source/restart-required? data))
-            (throw mismatch))
-          (let [before (test.cache/input-digests (:seon.fn/root roots))
-                temporary (.toFile (Files/createTempDirectory
-                           (.toPath (io/file root)) "producer-transition-"
-                           (make-array java.nio.file.attribute.FileAttribute 0)))]
-            (try
-              (let [candidate (seon.fn/build-manifest
-                               {:seon.fn/root (:seon.fn/root roots)
-                                :seon.fn/roots (:seon.fn/roots roots)
-                                :seon.fn.analyzer/cache-root (str temporary)})
-                    paths (seon.fn/producer-paths candidate)
-                    names (into (:seon.source/producer-mismatch data)
-                                (remove (set (keys (seon.fn/producer-paths manifest))))
-                                (keys paths))
-                    rows (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts candidate))
-                    class-change? (some #(and (#{'clojure.core/deftype 'clojure.core/defrecord
-                                                 'clojure.core/defprotocol} (:seon.fn/defined-by %))
-                                              (names (some-> (:seon.fn/sym %) namespace symbol))) rows)
-                    requires (into {} (keep #(when (:seon.ns/name %)
-                                               [(:seon.ns/name %) (set (:seon.ns/requires %))])) rows)]
-                (when class-change?
-                  (throw (ex-info "Producer transition introduces classes or protocols; restart the host."
-                                  (assoc data :seon.source/restart-required? true :seon.source/host-transition
-                                    (str "bin/seon --root "
-                                         (pr-str (-> (io/file root) .getParentFile .getParentFile .getCanonicalPath))
-                                         " down; bin/seon --root "
-                                         (pr-str (-> (io/file root) .getParentFile .getParentFile .getCanonicalPath))
-                                         " start " (get-in instance [:seon.boot/config :seon.boot/cluster-name]))))))
-                (load-development-definitions! names requires)
-                (record-loaded-producers! instance before candidate))
-              (finally (fs/delete-recursively! root (str temporary)))))))))
-  nil)
-
 (declare commit-fault! process-identity)
 
 (defn- acquire-development!
@@ -2586,7 +2400,6 @@
         database (db/db connection)
         projection (schema/projection-from-database database)
         deleted-identities (source/deleted-identities database)
-        loaded-inputs (test.cache/input-digests (:seon.fn/root roots))
         namespaces
         (into #{}
               (keep (fn [[attribute value]]
@@ -2681,7 +2494,6 @@
                               [:seon.render.web/view
                                :seon.render.web/runtime-eval-channel])]
       (async/offer! channel :seon.render.web/runtime-eval))
-    (record-loaded-producers! instance loaded-inputs)
     (report-source-progress! "development cluster converged")
     nil))))
 
@@ -2707,8 +2519,7 @@
 
   Content digests select changed inputs and declaration edges select affected
   files. Every entry point reuses the published manifest and the current
-  database history. A changed producer toolchain requires complete analysis;
-  a live host must first match its recorded loaded-producer generation.
+  database history. A changed producer toolchain requires complete analysis.
   A final source-change refusal retries publication/adoption once immediately;
   the last adopted source database remains the reconciliation basis."
   {:malli/schema
@@ -2753,8 +2564,7 @@
             (schema/call-with-projection
              (schema/declaration-projection (schema.edn/packaged-forms))
              (fn []
-               (let [_ (when instance (prepare-development-producers! root held-store instance roots))
-                     before-publication (source/current held-store)
+               (let [before-publication (source/current held-store)
                      published (full-source-refresh! root held-store roots)]
                  (when instance
                    (development-source-refresh! held-store instance
