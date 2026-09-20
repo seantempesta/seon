@@ -5055,3 +5055,16 @@ step 1 resumes (final conversion + arity removal in ONE commit) → the
 publication-dissolution lane launches on the freed `cluster.clj`. Nobody
 edits `src/seon/schema.clj` or `schema/internal.cljc` meanwhile (step 1's
 uncommitted bytes).
+
+## 2026-09-20 ~23:30 UTC — owner: "prioritize the optimizations to speed up repetitive work"; publication lane LAUNCHED
+
+Owner, verbatim: "keep coding but please don't just keep running the same
+tests over and over again and rebuilding everything every time. Prioritize
+the optimizations to speed up repetitive work." Standing consequences: NO
+cold gate until the publication dissolution and results reuse land (the
+stopped 1a gate is not relaunched); lanes rerun only suites whose inputs
+changed; `publication-dissolution` LAUNCHED now (astra medium) on the free
+owners (source.clj, test/cache.clj, launchers, hook, operator, fn.clj) in
+the spec's order by win, with `cluster.clj`'s population owner named held
+and converted last. Editing lanes: publication, turn-cluster, results-reuse;
+step 1 paused with its uncommitted free-path bytes until the sweep lands.
