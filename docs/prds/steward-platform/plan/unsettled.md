@@ -6266,3 +6266,56 @@ form in that same file during its proof — a third lane there buys a held-file
 stop, not progress. Decision (owner's focus rule this morning: fewer lanes,
 proven landings): the slot stays open until step 2 lands (error lane
 resumes there) and the bin/script sweep launches after publication lands.
+
+## 2026-09-22 ~12:50 local — OWNER RULINGS: strongly typed error entities; Malli's explanation is the stored data; anything outside the schema is a `result/e<id>` reference; "family" retired from prose; the 73 s was a COMPLETE publication, the small-update case is UNMEASURED
+
+Owner (verbatim): "Get rid of the error map edn copy. Serialize anything
+that doesn't fit the schema to a result/e<id> and store that reference. We
+should be using malli to generate a readable error message or to use their
+data format which we can clearly put into a schema and store. Everything
+that doesn't align with the schema should not be hacked into the database.
+Stop fighting the schemas. We don't need to store everything when shit goes
+sideways. If it happens during the runtime the agent can debug it from the
+results and otherwise it's historical data we are storing so we know wtf
+is going on. That's it. Yes. We want strongly typed data. Stop trying to
+store shit that isn't in the schema. Focus on clearing all the debt and
+finding all the remaining bottlenecks so we can work on the real system."
+
+RULED, superseding the 10:30/10:40/11:35/12:05 blocks where they differ:
+1. A stored error entity carries ONLY attributes its Malli error schema
+   declares (`[:and :seon.error/base [:map …]]`): the base members, the
+   schema's own members, and — for a validation failure — Malli's own
+   explanation data (`malli.core/explain` → `:errors` with `:in`, `:path`,
+   `:schema` form, `:type`; the readable sentence from
+   `malli.error/humanize`) declared as a Malli schema and stored as data;
+   bridge step 1 already carries `:in`/`:path` natively.
+2. Every value that does not fit the schema — the offending argument, a
+   thrown exception's data, a supplier's raw output — is serialized as ONE
+   `result/e<id>` (the evaluation-result mechanism: `seon.id` id, interned
+   in the agent's SCI context when one is in hand, shown text stored) and
+   the entity stores that reference. No EDN copy (`:seon.error/data-edn`,
+   `data-size`), no separate projection (`offending-projection`), no raw
+   member (`:seon.error/offending`), no writer-side dropping — retired,
+   readers converted, in the RESET batch.
+3. Nothing outside the schema reaches `seon.db/transact!`. A producer that
+   has data the schema does not declare either declares it (accretion) or
+   sends it to the result. The write validator refusing is the guarantee.
+4. Priority: clear the debt (unproven landings, the owed gates, default
+   up) and find the remaining bottlenecks before any new mechanism.
+
+VOCABULARY: "family" (as in "error family 1a", "the call-preparation
+family") is retired from prose; say "the error schemas declared in
+`seon.call-preparation`" / "the namespace's error schemas". "Kind sweep"
+means: removing the `:seon.error/kind` keyword discriminator from a
+namespace's error maps in favor of their Malli error schemas.
+
+MEASUREMENT CORRECTION: the 72.9 s reconciliation / 143 s lifecycle
+recorded today (`dbad91c5c`) is a COMPLETE publication on a fresh scratch
+root (381 inputs, 634 findings: population transaction 26.9 s, contract
+row batches 20.4 s). It is NOT a small update. The small-update
+(one-file) publication has NOT been measured on this tree — hook
+publication has been paused all day — and yesterday's 72.7 s activation
+was also the post-reset complete case. The one-file measurement is the
+publication lane's first item after the boot boundary clears; the two
+Datahike transaction phases above are the named bottleneck candidates for
+the complete case.
