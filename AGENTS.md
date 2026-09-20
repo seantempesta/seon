@@ -131,6 +131,29 @@ dependency already maintains, the design is wrong. The cheapest place to
 delete code is before it exists: build the smallest real thing and let live
 probes falsify the design while it is still a decision.
 
+**SECONDS, NOT MINUTES (owner law, 2026-09-22).** Anything that takes
+longer than TEN SECONDS requires the owner's explicit authorization, and
+only a handful of operations may ever hold one — the initial indexing of
+the whole program from zero is one; a cold JVM boot is another. Everything
+else must PROVE there is no simple algorithmic solution before it is
+allowed to be slow: name what work is proportional to the whole program
+that should be proportional to the change, and cite the seam that already
+does it in seconds. Treat anything above a couple of seconds with
+suspicion, especially where a tuned library (Datahike, clj-kondo, Malli,
+SCI, core.async) sits underneath — their authors nailed the
+implementations; our failures have almost always been bad algorithmic
+choices, never code correctness. Almost everything in Clojure is
+processing immutable data and it is extremely efficient. A fork is a
+branch pointer: milliseconds. A no-change request is two commit ids
+compared: milliseconds. An edit's cost is bounded by the changed
+declarations and their callers. A number is never explained by which path
+it took ("the cold path", "the first adoption") — it is explained by what
+work the algorithm should do. Tests FAIL when they exceed their declared
+bound (default 5 s; `:seon.test/long-ms` with its reason is the only way
+up), and the measurement script
+(`docs/prds/steward-platform/research/measure-publication-path-2026-09-22.sh`)
+is the gate for the publication path: no slice is landed without its row.
+
 **Prefer dissolution to addition.** The best change deletes a mechanism.
 When you meet a tuned constant, ask what observable event it stands in for.
 When a fix feels like hardening a mechanism against its own normal
