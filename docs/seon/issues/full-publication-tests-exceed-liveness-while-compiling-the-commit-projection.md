@@ -109,3 +109,41 @@ permitted item 1 stop. The three scoped options and retained before/after
 evidence are in the
 [redesign landing note](../../prds/steward-platform/research/one-jvm-redesign-2026-09-22.md).
 No latency target or cold gate pass is claimed.
+
+## Error result recording observation — 2026-09-23 assignment
+
+The refreshed-base error regression confirms the same writer cost outside
+publication. In `tmp/error-result-carried-fast.log`, result preparation and
+recording take 19.55–274.79 ms, while the five corresponding transactions
+take 863.54–3,040.20 ms. The one-second recording-plus-transaction assertions
+remain intact and fail; this is not a successful latency proof.
+
+A thread sample of that run's JVM (PID 13330,
+`tmp/error-result-carried-threads.txt`) catches the canonical cluster seed's
+writer in `seon.db/arity-mismatches-with`, reached from `write-report-error`.
+Source confirms the query walks all stored call-arity edges and declaration
+bounds whenever any entity is affected (`src/seon/db.clj:3802`, `:4061`),
+including ordinary error writes. That sample establishes the repeated
+whole-program work, not the fraction of each transaction it consumes.
+The existing affected-entity set and reverse call edges are the inputs for
+checking changed declarations and their callers at the writer.
+
+The error owner separately discarded carried projections and reparsed all
+program declarations. A first-run sample caught
+`render-faults-html → projection-from-database → projection-from-rows →
+clojure.edn/read-string` (`tmp/error-result-refreshed-threads.txt`). The
+error recording, transaction function and readers now reuse the database's
+immutable carried projection or the explicitly supplied projection. No
+process-global cache or second registry was added. The remaining database
+validation algorithm is outside this assignment's three permitted database
+reader sites; it was not edited.
+
+The agent regression also measures its first canonical SCI acquisition at
+35,255.36 ms, followed by a 29.42 ms agent fork. Its sample
+(`tmp/error-result-sci-threads.txt`) reaches `load-core-namespaces!` and
+namespace initialization through `host-namespace!`; this is full initial
+program acquisition. That integration test declares a 60-second bound and
+the acquisition reason, while retaining the separate one-second writer
+assertion. The ordinary object and nested-value tests retain their default
+five-second bound. See the per-test table and final tally in the
+[error landing note](../../prds/steward-platform/research/error-family-1a-2026-09-19.md).

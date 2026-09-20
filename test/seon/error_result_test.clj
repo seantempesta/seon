@@ -1,5 +1,5 @@
 (ns seon.error-result-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is]]
             [clojure.string :as str]
             [malli.registry :as mr]
             [sci.core :as sci]
@@ -20,7 +20,7 @@
 (deftest a-canonical-result-declarations-are-installed
   (support/with-database
    (fn [connection]
-     (let [projection (schema/projection-from-database (db/db connection))
+     (let [projection (db/carried-projection (db/db connection))
            registry (:seon.schema.projection/registry projection)]
        (doseq [attribute [:seon.error/result-id :seon.error/shown]]
          (is (some? (mr/schema registry attribute))
@@ -32,7 +32,7 @@
      :seon.error/id (id/id)
      :seon.error/at (java.util.Date.)
      :seon.error/process "error-result-test"
-     :seon.schema/projection (schema/projection-from-database (db/db connection))
+     :seon.schema/projection (db/carried-projection (db/db connection))
      :seon.sci.admit/caps (config/result-caps dials)
      :seon.config.error/max-evidence-bytes (:seon.config.error/max-evidence-bytes dials)
      :seon.config.error/recurrence-limit (:seon.config.error/recurrence-limit dials)
@@ -46,10 +46,18 @@
    :seon.error/message "A recorded observation."
    :seon.error/offending value})
 
+(defn- measured [stage f]
+  (let [started (System/nanoTime)]
+    (try
+      (f)
+      (finally
+        (println "ERROR-RESULT-TIMING" stage
+                 (/ (- (System/nanoTime) started) 1e6) "ms")))))
+
 (defn- verify-stored! [connection request value]
   (let [started (System/nanoTime)
-        recording (error/recording (db/db connection) request)
-        report (support/transacted! connection (:seon.db/tx-data recording))
+        recording (measured :recording #(error/recording (db/db connection) request))
+        report (measured :transaction #(support/transacted! connection (:seon.db/tx-data recording)))
         elapsed-ms (/ (- (System/nanoTime) started) 1e6)
         projection (:seon.schema/projection request)
         row (db/pull (:db-after report) (error/observation-selector projection)
@@ -75,9 +83,8 @@
 (deftest core-results-use-the-printer-for-arbitrary-objects
   (support/with-database
    (fn [connection]
-     (doseq [value [(atom 42) identity (Object.)]]
-       (testing (str (class value))
-         (verify-stored! connection (request connection (observation value)) value))))))
+     (let [value [(atom 42) identity (Object.)]]
+       (verify-stored! connection (request connection (observation value)) value)))))
 
 (deftest large-result-keeps-complete-and-profile-capped-printer-text
   (support/with-database
@@ -89,7 +96,10 @@
        (is (not= complete shown))
        (is (< (count shown) (count complete)))))))
 
-(deftest agent-contract-refusal-retains-its-live-offending-result
+(deftest ^{:seon.test/long
+           "First real SCI acquisition loads the canonical program namespaces and installs their declarations; subsequent agent forks reuse that context. The result writer retains its separate one-second assertion."
+           :seon.test/long-ms 60000}
+  agent-contract-refusal-retains-its-live-offending-result
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "error-result")
@@ -105,11 +115,11 @@
                                     :seon.cluster.eval/ordinal 0
                                     :seon.cluster.eval/at (java.util.Date.)
                                     :seon.cluster.eval/source source}))
-           base (support/fork-cluster-ctx connection "error-result")
+           base (measured :cluster-context #(support/fork-cluster-ctx connection "error-result"))
            ctx (:seon.sci.eval/ctx
-                (sci.eval/fork-for-turn {:seon.sci.eval/ctx base
+                (measured :agent-context #(sci.eval/fork-for-turn {:seon.sci.eval/ctx base
                                          :seon.db/db (db/db connection)
-                                         :seon.agent/id "error-result-agent"}))
+                                         :seon.agent/id "error-result-agent"})))
            dials (config/defaults)
            profile (render/agent-render-profile dials)
            evaluation (sci.eval/evaluate
@@ -143,7 +153,7 @@
                                         :seon.sci.admit/caps (config/result-caps dials)
                                         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms dials)
                                         :seon.config/on-core-error (:seon.config/on-core-error dials)
-                                        :seon.schema/projection (schema/projection-from-database (db/db connection))
+                                        :seon.schema/projection (db/carried-projection (db/db connection))
                                         :seon.render/profile profile
                                         :seon.render.walk/lookup [:seon.agent/id "error-result-agent"]})]
              (is (= 1 (count history)))

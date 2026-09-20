@@ -139,3 +139,15 @@ assertion, run 68259 again encountered the old usage schema. Successful
 development adoption was not established. See the
 [lane landing](../../prds/steward-platform/research/attempt-and-eval-facts-2026-09-16.md)
 for the distinction between direct probes, recorded failures, and pending gates.
+
+## Error-result refresh verification — 2026-09-23 assignment
+
+The orchestrator refreshed the published HEAD base. Run `38efdf08b0b9`
+now finds both `:seon.error/result-id` and `:seon.error/shown` in the
+canonical fixture's compiled registry, and executes every result assertion
+without a schema-compilation error. The later `b21d72a78cf9` run confirms
+the same. This resolves the error-result declaration observation recorded
+in the error landing note; it does not establish a general adoption fix for every case in this
+issue. Remaining error-result failures are measured writer latency, recorded
+in the existing publication/writer performance issue and the error landing
+note.

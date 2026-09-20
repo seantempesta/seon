@@ -3382,3 +3382,178 @@ Final load proof: `clojure -M -e "(require 'seon.error 'seon.sci.eval
 31.38 s wall-clock (`/usr/bin/time -p`, `tmp/error-result-load.log`).
 This includes the final optional result members on `:seon.error/fact`.
 Every owned command has exited; no scratch cluster was created.
+
+## 2026-09-23 — refreshed-base result verification and carried projection reuse
+
+The refreshed canonical base supplies both new attributes. All storage,
+complete/capped printer rendering, live SCI binding and history-walk
+assertions pass. **The slice is not green:** the final three failures are
+the retained one-second recording-plus-transaction assertions. No timing
+assertion was relaxed.
+
+Root cause fixed in the error owner: recording and readers discarded their
+carried projection and reparsed the complete program's schema, contract and
+source rows. A sample caught `render-faults-html → projection-from-database
+→ projection-from-rows → clojure.edn/read-string`. The error owner now
+prefers the immutable projection carried by the database, then the request's
+explicit projection where available. Existing acquisition remains the
+fallback for a database without either. This is reuse of the declared
+database/request inputs, not a new cache. The canonical result regression
+also uses its fixture database's carried projection.
+
+I reread the Clojure implementation/testing skills and the existing writer
+performance issue end to end for this continuation. The three runs were
+serial foreground `bin/test-fast --paths` invocations. No cold gate,
+worktree, reset or default operation was performed.
+
+| Fast run | Recorded tally | Wall-clock |
+| --- | --- | --- |
+| Refreshed base before correction, `38efdf08b0b9` | 51 executed, 0 unchanged; 427 assertions; 5 failures, 0 errors | 375.43 s |
+| Carried projection correction, `b21d72a78cf9` | 51 executed, 0 unchanged; 427 assertions; 4 failures, 0 errors | 287.69 s |
+| Final result tests, `aa55fe52638b` | 4 executed, 0 unchanged; 31 assertions; 3 failures, 0 errors | 153.12 s |
+
+Wall-clock includes JVM loading, contract arming and durable test-result
+recording, measured by `/usr/bin/time -p`. Logs respectively:
+`tmp/error-result-refreshed-fast.log`,
+`tmp/error-result-carried-fast.log`,
+`tmp/error-result-final-fast.log`. The 47 existing error tests passed in
+the second run (382 assertions); their inputs were unchanged by the final
+test-only edit, so that namespace was not rerun.
+
+The final test edit records the atom, function and opaque object together
+as one offending value. This preserves printer coverage with one durable
+observation instead of three. The integration test explicitly declares
+`:seon.test/long-ms 60000`: its first canonical SCI acquisition loads
+the complete program's namespaces and installs declarations. Measured
+acquisition is 32,378.28 ms, while the subsequent agent fork is 30.83 ms.
+The three other tests remain under their default five-second bound.
+
+Final per-test wall-clock, derived from the runner's BEGIN/END timestamps:
+
+| Test | Seconds |
+| --- | --- |
+| `seon.error-result-test/a-canonical-result-declarations-are-installed` | 3.671 |
+| `seon.error-result-test/agent-contract-refusal-retains-its-live-offending-result` | 48.588 |
+| `seon.error-result-test/core-results-use-the-printer-for-arbitrary-objects` | 2.994 |
+| `seon.error-result-test/large-result-keeps-complete-and-profile-capped-printer-text` | 2.446 |
+
+Final writer measurements are separate from those integration bounds:
+
+| Case | Recording preparation | Transaction | Combined |
+| --- | --- | --- | --- |
+| Agent refusal | 300.83 ms | 911.51 ms | 1,213.08 ms |
+| Core value containing atom/function/opaque object | 26.13 ms | 2,441.17 ms | 2,467.63 ms |
+| Large nested value | 98.48 ms | 1,759.80 ms | 1,858.49 ms |
+
+Every content assertion in (a)–(d) passed: the result handle resolves to the
+offending value, stored values validate, the blob equals complete printer
+text, shown text equals capped printer text, and the walk contains that
+saved shown text. Legacy evidence remains written.
+
+The remaining transaction cost is recorded in the existing
+[writer/publication performance issue](../../../seon/issues/full-publication-tests-exceed-liveness-while-compiling-the-commit-projection.md).
+A same-JVM sample catches the canonical seed's writer in
+`db/write-report-error → arity-mismatches-with`; source invokes this
+whole-program call-arity query for every nonempty affected-entity set.
+This establishes repeated O(program) work, not its exact share of each
+transaction. The relevant existing inputs are the writer's affected
+entities and reverse call edges. That validation algorithm is outside this
+slice's three permitted database reader sites; no database code was edited.
+The one-second failures remain visible for that owner. Prior tests exceeding
+five seconds are also visible in the complete timing table below; no new
+long-test allowances were placed on those older tests.
+
+Foreign dirty callers were tested at HEAD bytes, as overlay admission
+reported. The final snapshot named `src/seon/test.clj`,
+`src/seon/test/runner.clj`, `test/seon/cluster/cohost_boot_test.clj`,
+`test/seon/cluster/source_test.clj`, `test/seon/db_test.clj` and
+`test/seon/test/runner_test.clj`. They were neither edited nor included as
+checkout overlays. The earlier missing-registry observation is resolved
+in the [existing fixture issue](../../../seon/issues/canonical-fixture-retains-old-function-contracts-after-adoption.md).
+
+Files touched in this continuation: `src/seon/error.clj`,
+`test/seon/error_result_test.clj`, this landing note and the two existing
+issues linked above. The prior result implementation in
+`src/seon/sci/eval.clj` and its schema resource was included for verification
+but not edited.
+
+**RESET NEEDED remains:** `:seon.error/result-id` (nonempty string value)
+and `:seon.error/shown` (evaluation shown-text string shape). This
+continuation adds no attributes. Retirement of
+`:seon.error/offending`, `:seon.error/data-edn`,
+`:seon.error/data-size` and `:seon.error/offending-projection` remains the
+single atomic follow-up in the
+[retirement issue](../../../seon/issues/error-result-retirement-crosses-held-readers.md);
+`issue.clj` and the fault committer in `cluster.clj` remain untouched.
+
+Cold command owed to the orchestrator after the writer timing boundary is
+resolved:
+
+```sh
+bin/test --paths src/seon/error.clj src/seon/sci/eval.clj resources/seon/schemas/seon.error.edn test/seon/error_result_test.clj -- seon.error-result-test seon.error-test seon.sci.eval-test
+```
+
+Complete per-test wall-clock from combined run `b21d72a78cf9` (the final
+four-test table above supersedes its result-test rows):
+
+| Test | Seconds |
+| --- | --- |
+| `seon.error-result-test/a-canonical-result-declarations-are-installed` | 4.116 |
+| `seon.error-result-test/agent-contract-refusal-retains-its-live-offending-result` | 51.294 |
+| `seon.error-result-test/core-results-use-the-printer-for-arbitrary-objects` | 6.342 |
+| `seon.error-result-test/large-result-keeps-complete-and-profile-capped-printer-text` | 3.755 |
+| `seon.error-test/a-contract-violations-fault-keeps-the-value-that-broke-it` | 2.312 |
+| `seon.error-test/a-fault-observes-the-function-name-without-minting-an-identity` | 5.968 |
+| `seon.error-test/a-prepared-message-keeps-its-id-when-the-transaction-repeats` | 6.358 |
+| `seon.error-test/a-value-that-was-never-a-throwable-has-no-class` | 0.221 |
+| `seon.error-test/an-agent-this-cluster-does-not-have-is-no-attribution-at-all` | 5.282 |
+| `seon.error-test/an-unattributable-throwable-goes-to-the-escalation-owner` | 9.958 |
+| `seon.error-test/an-unclassifiable-source-is-fail-closed-never-absent` | 0.009 |
+| `seon.error-test/arity-facet-preserves-real-refusal-observations` | 0.876 |
+| `seon.error-test/attribution-is-a-lookup-ref-or-nothing` | 0.007 |
+| `seon.error-test/capping-is-honest` | 0.302 |
+| `seon.error-test/cause-chain-reading-preserves-the-deepest-complete-observation` | 0.001 |
+| `seon.error-test/complete-error-children-validate-through-the-writer` | 9.537 |
+| `seon.error-test/diagnostic-construction-is-evidence-complete` | 0.002 |
+| `seon.error-test/diagnostic-construction-preserves-domain-members` | 0.069 |
+| `seon.error-test/dropped-fault-counts-accumulate-in-the-occurrence` | 2.381 |
+| `seon.error-test/error-facets-persist-through-the-real-occurrence-owner` | 12.335 |
+| `seon.error-test/error-identity-and-occurrences-are-owned-by-the-writer` | 10.482 |
+| `seon.error-test/every-error-owner-function-declares-its-input-and-output` | 0.061 |
+| `seon.error-test/fault-preparation-bounds-the-fact-and-omits-disposable-flow-state` | 0.060 |
+| `seon.error-test/fitting-can-require-a-blob-below-the-content-size-threshold` | 0.007 |
+| `seon.error-test/flow-keys-ride-exactly-when-the-shape-carries-them` | 0.029 |
+| `seon.error-test/instrumentation-evidence-survives-normalization` | 0.011 |
+| `seon.error-test/new-error-facets-compose-and-report-missing-members` | 0.815 |
+| `seon.error-test/normalization-is-total` | 1.800 |
+| `seon.error-test/normalization-never-throws` | 0.006 |
+| `seon.error-test/notices-carry-structured-projection-evidence` | 0.997 |
+| `seon.error-test/only-a-throwable-tells-the-attributed-agent` | 9.466 |
+| `seon.error-test/over-bound-fault-evidence-retains-its-classifying-base` | 0.006 |
+| `seon.error-test/recording-ignores-transient-inline-members-when-finding-components` | 2.011 |
+| `seon.error-test/recording-refuses-an-unavailable-complete-observation` | 0.957 |
+| `seon.error-test/recurrence-counting-does-not-require-a-notification-threshold` | 6.086 |
+| `seon.error-test/recurrence-identity-is-the-complete-observations-stable-evidence` | 10.948 |
+| `seon.error-test/row-acquisition-observations-have-no-program-digest-promise` | 2.808 |
+| `seon.error-test/schema-refusals-are-admitted-at-the-recorder` | 1.815 |
+| `seon.error-test/specialist-renderers-use-their-declared-evidence` | 0.074 |
+| `seon.error-test/the-default-html-face-links-committed-evidence` | 0.001 |
+| `seon.error-test/the-default-renderers-accept-an-attribute-shaped-error` | 0.060 |
+| `seon.error-test/the-flat-value-projects-from-the-fact` | 0.013 |
+| `seon.error-test/the-log-line-is-one-line-and-derived` | 0.013 |
+| `seon.error-test/the-message-comes-from-the-rule-not-the-wrapper` | 0.010 |
+| `seon.error-test/the-message-points-at-the-fact-it-explains` | 4.981 |
+| `seon.error-test/the-observed-rule-comes-from-the-deepest-ex-data` | 0.000 |
+| `seon.error-test/the-proc-state-never-escapes-raw` | 0.013 |
+| `seon.error-test/the-projection-keys-are-derived-never-stored` | 0.010 |
+| `seon.error-test/the-signature-ignores-the-message` | 0.003 |
+| `seon.error-test/the-signature-separates-different-violated-schemas` | 0.003 |
+| `seon.error-test/the-storm-is-bounded-by-the-signature-count` | 8.702 |
+
+Final load proof: `clojure -M -e "(require 'seon.error 'seon.sci.eval
+'seon.print) (println :loaded)"` exited 0, printed `:loaded`, and took
+28.40 s wall-clock (`tmp/error-result-final-load.log`). All owned JVMs
+and shell commands exited before commit. `git diff --check` passes for the
+owned changes. Markdown lint reports two pre-existing stale Datahike
+gitlink citations in the wave-3a and wave-3bc plan documents; those foreign
+documents were not edited.

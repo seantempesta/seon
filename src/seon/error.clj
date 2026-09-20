@@ -1176,7 +1176,8 @@
            :seon.error/data {:seon.error/cause supplied}}
           (and (string? spec) (nat-int? position)
                (= "{" (:edamame/opened-delimiter container)))
-          (let [projection (schema/projection-from-database database)
+          (let [projection (or (db/carried-projection database)
+                               (schema/projection-from-database database))
                 compiled (m/function-schema (edn/read-string spec)
                           {:registry (:seon.schema.projection/registry projection)})
                 candidates
@@ -1254,7 +1255,9 @@
                        (m/schema expected
                                  (when-let [database (:seon.db/db unit)]
                                    {:registry (:seon.schema.projection/registry
-                                               (schema/projection-from-database database))}))
+                                               (or (db/carried-projection database)
+                                                   (:seon.schema/projection unit)
+                                                   (schema/projection-from-database database)))}))
                        (catch Exception _ nil))
             problem (when compiled
                       (explain-problem
@@ -1608,7 +1611,9 @@
                             steward-id steward-present occurrences])]
     (if read-refusal
       read-refusal
-      (let [projection (schema/projection-from-database database)
+      (let [projection (or (db/carried-projection database)
+                            (:seon.schema/projection request)
+                            (schema/projection-from-database database))
         stored-attributes (set (schema.datahike/database-attributes-core-in projection))
         diagnostic-attributes
         (schema/projection-cache-value
@@ -1697,7 +1702,9 @@
     [:=> [:cat :map :seon.db/database-value :seon.error/source :inst :map] [:or :seon.error/recording :seon.db/error-result :seon.error/base]]]}
   ([database request]
    (let [request (assoc request :seon.schema/projection
-                        (schema/projection-from-database database))
+                        (or (db/carried-projection database)
+                            (:seon.schema/projection request)
+                            (schema/projection-from-database database)))
          source (:seon.error/source request)
          acquiring? (and (map? source) (:seon.error/signature source)
                          (not (:seon.error.occurrence/id source)))
@@ -1908,7 +1915,9 @@
         database (:seon.db/db unit)
         value (if (and database (:seon.error/signature value))
                 (db/pull database
-                         (observation-selector (schema/projection-from-database database))
+                         (observation-selector (or (db/carried-projection database)
+                                                   (:seon.schema/projection unit)
+                                                   (schema/projection-from-database database)))
                          [:seon.error/signature (:seon.error/signature value)])
                 value)]
     (if (map? value) (latest-fact value) value)))
@@ -2144,7 +2153,9 @@
                    (assoc-in agent-faults-query [1 0]
                              (list 'pull '?error
                                    (observation-selector
-                                    (schema/projection-from-database (:seon.db/db unit))))))
+                                    (or (db/carried-projection (:seon.db/db unit))
+                                        (:seon.schema/projection unit)
+                                        (schema/projection-from-database (:seon.db/db unit)))))))
              agent-id)})))))
 
 (defn render-faults-ai
@@ -2187,7 +2198,8 @@
         entities (fault-entities
                   (mapv #(if (map? %) %
                              (db/pull database
-                                      (observation-selector (schema/projection-from-database database)) %))
+                                      (observation-selector (or (db/carried-projection database)
+                                                                (schema/projection-from-database database))) %))
                         references))]
     (into [:section {:class "seon-family-entry seon-error-faults"}
            [:h2 (str "Faults (" (count entities) ")")]]
