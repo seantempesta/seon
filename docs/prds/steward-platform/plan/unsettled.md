@@ -6155,3 +6155,22 @@ gate-restructure's dirty files). The `publication-dissolution` proof still
 waits on gate-restructure's docstring Var-contract item (the candidates
 declaration has landed). The stale gate poller and the broken usage-limit
 monitor were stopped; a fixed monitor watches lane exits and usage limits.
+
+## 2026-09-22 ~11:15 local — error lane stopped correctly at held readers; RULED: accrete the result mechanism now, retire atomically later
+
+`error-family-1a` read both rulings and stopped at the held-path boundary
+(`ae9cb3265`, issue
+[error-result-retirement-crosses-held-readers](../../../seon/issues/error-result-retirement-crosses-held-readers.md)):
+retiring `:seon.error/offending`/`data-edn`/`data-size`/`offending-projection`
+atomically requires converting readers in `src/seon/db.clj` (held by
+step 2) and `src/seon/test/{runner,accretion}.clj` + their schemas (held by
+gate-restructure). RULED (orchestrator, AGENTS.md §2.5 — adding is free):
+the slice splits. ACCRETION NOW on the lane's own paths: the constructor
+leaf mints the result id, blobs the value, stores the printer's capped
+shown text, interns through the existing `seon.sci.eval/bind-result!` under
+`seon.sci.admit/result-handle` when an agent context is in hand; old
+members stay written unchanged so held readers keep working; three armed
+canonical regressions. RETIREMENT LATER as one atomic slice (readers in
+the issue's table converted, declarations deleted) once step 2 and
+gate-restructure release those paths; joins the RESET batch. Lane resumed
+on the accretion half (astra low).
