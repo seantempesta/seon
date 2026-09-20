@@ -148,3 +148,14 @@ owner/capability facts in both background fixtures. Both corrections load from
 HEAD and lint with zero warnings. The remaining problems-test failures include
 retired-kind fixtures/assertions still owed by this lane; the refreshed
 background/problems fast pass is owed after those test inputs change.
+
+`d80232a4f` completed the problems R8 conversion. Error fixtures now supply
+diagnostic base evidence instead of kind-bearing exceptions; errored
+evaluations derive solely from their error fact; database-write and
+missing-projection assertions inspect operation/layer evidence; stale function
+identity is a symbol; and signature assertions use the observing operation.
+The ordered kind/class/predicate search is zero and clj-kondo reports zero
+errors and warnings. A plain `clojure -M` cannot load the test namespace
+because `test/` is not on that classpath; execution remains the fast gate's
+job. A refreshed `seon.problems-test` tally is owed after the runner resource
+finishes its concurrent conversion.
