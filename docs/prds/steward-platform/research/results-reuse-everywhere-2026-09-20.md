@@ -785,3 +785,80 @@ HEAD **baa0afca3** (`tally-committed-head-load.log`, **205 bytes**).
 The loader exited, then that archive was removed without following its
 vendored symlink. No test, lifecycle command or publication ran there.
 All lane-owned source paths are committed; unrelated edits remain intact.
+
+## Publication history gate after ownership extension
+
+The orchestrator approved extending preservation ownership. `git status --short`
+showed `src/seon/cluster/source.clj` and `test/seon/cluster/source_test.clj`
+clean; `src/seon/cluster.clj` remains held with uncommitted edits. No production
+file was edited in this followup.
+
+Confirmed the truncating read at `src/seon/cluster/source.clj:350`:
+`db/pull-many previous '[*] runs`. Datahike's `pull_api.cljc:16` declares
+1,000 and `:315–323` takes that many before expanding component rows.
+A query is required for complete membership; raising the limit is not a fix.
+
+A second independent defect prevents a query-only repair from delivering
+usable preserved admission. `seon.test.runner/execution-members` at `:2332`
+compares current membership with `db/as-of` at the run's `selection-tx`.
+The preservation map copies that numeric transaction ref unchanged into a
+rebuilt database whose transaction history differs. Datahike
+`versioning.cljc:323–390` changes the branch head and parent metadata; it
+does not merge the previous parent's datoms or temporal indexes.
+
+Read-only MCP probe against the published authority, using real admission,
+existing preservation, and immutable `datahike.api/with` only (11,126 ms):
+
+```edn
+#:seon.test{:before 1,
+           :selection-tx 536870931,
+           :rebuilt-basis 536870934,
+           :current-members 1,
+           :after "The test execution evidence does not authorize this transition.",
+           :database-mutated? false}
+```
+
+This probe isolates reasserting preserved evidence in a later transaction;
+it is not claimed as a full `publish!` regression. It proves that preserving
+the current member count alone cannot establish executable admission.
+The exact reproducible form (the prior run is existing live evidence):
+
+```clojure
+(try (let [held (some :seon.store/store (vals @(var-get (ns-resolve 'seon.cluster (symbol "running-instances"))))) database (seon.cluster.source/database held (:seon.source/commit-id (seon.cluster.source/current held))) prior (seon.db/pull database [:seon.test.run/published-base-digest :seon.test.run/overlay-input-digest :seon.test.run/program-digest :seon.test.run/basis-t :seon.test.run/input-digest :seon.test.run/branch] [:seon.test.run/id "eb10af2747d0"]) run (assoc (dissoc prior :db/id :seon.test.run/input-digest) :seon.test.run/id (seon.id/id) :seon.test.run/overlay-input-digest (seon.id/digest 64 [:publication-temporal-probe]) :seon.test.run/at (java.util.Date.)) sym (first (sort (seon.db/q '[:find [?symbol ...] :where [_ :seon.test/sym ?symbol]] database))) admission (seon.test/selection-admission {:seon.db/db database :seon.test.run/provenance run :seon.test.run/input-digest (:seon.test.run/input-digest prior) :seon.test.run/policy :named :seon.test.run/members [{:seon.test.member/symbol sym :seon.test.member/reasons #{:named}}]}) expanded (:db-after (datahike.api/with database (seon.test/admit-run database admission))) preserved ((deref (ns-resolve 'seon.cluster.source (symbol "result-preservation-tx"))) expanded) row (first (filter #(= (:seon.test.run/id run) (:seon.test.run/id %)) preserved)) advanced (nth (iterate #(:db-after (datahike.api/with % [])) database) 3) rebuilt (:db-after (datahike.api/with advanced [row])) read-members (deref (ns-resolve 'seon.test.runner (symbol "execution-members")))] (pr-str {:seon.test/before (count (read-members expanded (:seon.test.run/id run))) :seon.test/selection-tx (get-in row [:seon.test.run/selection-tx :db/id]) :seon.test/rebuilt-basis (:max-tx rebuilt) :seon.test/current-members (count (seon.db/q '[:find [?member ...] :in $ ?id :where [?run :seon.test.run/id ?id] [?run :seon.test.run/members ?member]] rebuilt (:seon.test.run/id run))) :seon.test/after (try (count (read-members rebuilt (:seon.test.run/id run))) (catch Throwable e (ex-message e))) :seon.test/database-mutated? false})) (catch Throwable e (str (.getName (class e)) ": " (ex-message e))))
+```
+
+The first attempt used the wrong arity of `seon.id/digest`; MCP hid that
+exception behind `seon.dev.mcp/projection-failed`. The corrected form above
+returns a string and succeeds. The existing open issue
+`docs/seon/issues/mcp-exception-projection-is-opaque-after-the-kind-removal.md`
+owns the tooling defect; no tool or default runtime was changed.
+
+### Decision required before production edits
+
+1. **Recommended: preserve the published lineage.** Build the next publication
+   from the current published database and reconcile program declarations there,
+   retaining run/member identities and transaction history in place. Guarantee:
+   admission, completion and immutable retries keep their existing meaning.
+   Cost: publication/reconciliation change plus canonical large-membership,
+   deletion and concurrency proofs. Give up rebuilding each publication from
+   the older `:db` base. The population owner is `src/seon/cluster.clj:1741`
+   (currently held); coordinate its release before any needed edits there.
+2. **Define explicit evidence transfer between histories.** Keep the older-base
+   rebuild, query all evidence, remap entity refs, and declare how original
+   selection/claim/completion transactions are observed after transfer.
+   Guarantee: complete evidence under a newly specified cross-history contract.
+   Cost: schema and reader/writer work across admission, claims, replay and
+   publication; give up leaving those contracts unchanged. Never silently
+   rewrite old selection/claim refs to the publication transaction.
+3. **Refuse full rebuilds while admitted runs need preservation.** Keep safe
+   incremental updates and recorded results on the existing head. Guarantee:
+   no truncated or temporally invalid transfer. Cost: a small exact refusal and
+   postponed full publication; give up full-rebuild availability until 1 or 2.
+
+No fast test was launched in this followup; no code changed and no
+new tally is claimed. One foreground namespace-load JVM exited 1 with the
+same shared-tree cycle recorded above, at `seon/issue.clj:1:1`
+(`tmp/results-reuse-everywhere/publication-history-load.log`). No individual
+foreign edit is attributed, and no worktree or archive was created. The
+1,001-member publication regression, thin launchers,
+host integration and identical-two-run zero-execution proof remain owed.
