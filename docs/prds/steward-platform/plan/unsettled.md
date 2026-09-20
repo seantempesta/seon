@@ -5476,3 +5476,16 @@ Third slot → `kind-sweep-test-system` (sol low; runner 58, accretion 8,
 arm 7; cache.clj named held). Editing lanes: publication (closing),
 ops-effects, test-system; wave-2 design read-only; step 2 parked; the
 turn/cluster sweep waits on turn.clj/cluster.clj.
+
+## 2026-09-21 ~09:55 UTC — test-system sweep: five marker-only runner facets ruled
+
+`kind-sweep-test-system` stopped (`bad7b1a99`) at five runner facets that
+were only a `[:= true]` marker plus `:seon.error/class true`:
+invalid-marker-reason, process-tree-exit-backstop, unknown-worker-command,
+unresolved-test-var, worker-launch-failure. Ruled: each keeps its name and
+gains the substantive required members its producer already holds (test
+identity + offending marker; worker + bound-ms + phase; worker + offending
+command; unresolved identity + namespace; worker + launch request + the
+underlying failure through 1a's throwable/evidence members), reusing
+existing `seon.test*` attributes before minting; the same rule applies to
+any further marker-only facet without a stop. Resumed.
