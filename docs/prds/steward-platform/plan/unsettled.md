@@ -5450,3 +5450,17 @@ Read-only slot → `wave2-contracts-design` (2a enforcement seam as finding
 facts; 2b W4 leaves; 2c W1 db consumers listing the gate's undeclared
 returned refusals first; what 2a records so an uncontracted function is a
 namespace-agent task).
+
+## 2026-09-21 ~09:20 UTC — ERROR FAMILY 1a LANDED (five suites green); ops-effects sweep launched
+
+`error-family-1a` landed through `db53f32fb`: seon.error/instrument/
+schema/db/cluster-test green; focused seon.sci.eval-test 74 / 406 / 2 F /
+0 E, both reds SCI walk performance. Ruled option 1: accept the error slice;
+the walk-performance reds route to the bridge walker work (step 2 resumes
+with them named). RESET NEEDED attributes and the exact cold command are
+in its note (the cold gate runs once the publication lane lands). Lane
+done; session retained. Third slot → `kind-sweep-ops-effects` (sol low;
+ai, problems, plan, background, schedule, maintenance, config, issue, … —
+the gate's remaining undeclared-refusal producers). Editing lanes:
+publication (closing), my-protocol, ops-effects; wave-2 design read-only;
+step 2 parked.
