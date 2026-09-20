@@ -5297,3 +5297,16 @@ those reds (native-path stale expectations flip to `:in`/key assertions;
 recorded measurement, not a landing condition; land as ONE commit when the
 six namespaces are green, or with the remaining reds classified by owner —
 the tree has been held four hours with three lanes waiting on these files.
+
+## 2026-09-21 ~05:10 UTC — publication lane: integration-namespace ruling; standing validation rule
+
+`publication-dissolution` (`ba8672d57`) found the nested-gate fixtures fit
+no existing eligibility: fast named runs include long tests, platform runs
+in bare gates, the destructive-platform guard rejects the child fixture.
+Ruled option 1: a separate `:seon.test/long` integration namespace the
+orchestrator runs explicitly by name; its `--platform` coverage is a later
+tools item (a separately admitted platform integration phase). Standing
+rule for the lane: further validation/selection choices are its own under
+two invariants (no nested gate or second JVM; coverage never silently
+dropped — moved to a named orchestrator namespace or listed as owed).
+Resumed on items 2–4.
