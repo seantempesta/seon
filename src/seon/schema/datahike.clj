@@ -7,8 +7,11 @@
   transaction. The store owner transacts the returned declarations."
   (:require [clojure.edn :as edn]
             [clojure.walk :as walk]
+            [malli.core :as m]
+            [malli.registry :as mr]
             [seon.schema :as schema]
             [seon.id :as id]
+            [seon.schema.internal :as internal]
             [seon.schema.form :as schema.form]))
 
 (defn- packaged-forms []
@@ -120,6 +123,130 @@
     (instance? Float literal)
     :db.type/float
     :else nil))
+
+(defn- compiled-storage
+  "Fold compiled value nodes; reference identity precedes logical dereference."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] :map]}
+  [compiled]
+  (letfn [(fold [compiled active]
+   (m/walk
+   compiled
+   (fn [node _ children _]
+     (let [t (m/type node)
+           properties (m/properties node)
+           child (first children)
+           result
+           (cond
+             (and (m/-ref-schema? node) (= :seon.db/ref (m/-ref node)))
+             {::value-type :db.type/ref ::cardinality :db.cardinality/one}
+
+             (m/-ref-schema? node)
+             (let [reference [(-> node m/options :registry) (m/-ref node)]
+                   target (if (and (m/-ref node) (contains? active reference))
+                            {::value-type nil}
+                            (if (nil? (m/-ref node))
+                              child
+                              (fold (m/deref node) (conj active reference))))]
+               (assoc target ::properties (merge (::properties target) properties)))
+
+             (= :and t)
+             (assoc child ::properties properties)
+
+             (#{:set :vector :sequential} t)
+             (assoc child ::cardinality :db.cardinality/many
+                          ::properties properties ::edn? false)
+
+             (and (= :or t)
+                  (some #(and (m/-ref-schema? %)
+                              (= :seon.db/component-entity (m/-ref %)))
+                        (m/children node)))
+             child
+
+             (= :or t)
+             (let [types (set (map ::value-type children))]
+               {::value-type (or (:seon.db/value-type properties)
+                                (when (and (= 1 (count types)) (not (contains? types nil)))
+                                  (first types))
+                                :db.type/string)
+                ::edn? (and (nil? (:seon.db/value-type properties))
+                            (or (> (count types) 1) (contains? types nil)))})
+
+             (= := t) {::value-type (literal->datahike-value-type child)}
+             (= :enum t) {::value-type (when (every? keyword? children) :db.type/keyword)}
+             (= :tuple t) {::value-type :db.type/tuple
+                            ::tuple-types (mapv ::value-type children)}
+             (= 'inst? t) {::value-type :db.type/instant}
+             :else {::value-type (malli-type->datahike-type t)})]
+       (cond-> (merge {::cardinality :db.cardinality/one ::properties properties} result)
+         (:seon.db/component properties)
+         (assoc ::value-type :db.type/ref ::edn? false))))))]
+    (fold compiled #{})))
+
+(defn- compiled-attribute
+  "Derive a native declaration from one retained root for parity verification."
+  {:malli/schema [:=> [:cat :map :qualified-keyword] :map]}
+  [projection attribute]
+  (let [root (mr/schema (:seon.schema.projection/registry projection) attribute)
+        _ (when-not (m/schema? root)
+            (throw (ex-info "Missing retained attribute declaration."
+                            {:seon.schema/missing-reference attribute})))
+        {::keys [value-type cardinality properties tuple-types]}
+        (compiled-storage root)
+        value-type (if (= :seon.db/ref attribute) :db.type/ref value-type)
+        secondary? (:db.secondary/only properties)]
+    (when-not value-type
+      (throw (ex-info "Compiled attribute has no native storage type."
+                      {::attr attribute ::value-type-unavailable true})))
+    (when (and secondary? (not (#{:db.type/float :db.type/double} value-type)))
+      (throw (ex-info "A secondary-only attribute must contain floats."
+                      {::attr attribute ::invalid-secondary-attribute attribute})))
+    (cond-> {:db/ident attribute
+             :db/valueType (if secondary? :db.type/tuple value-type)
+             :db/cardinality (if secondary? :db.cardinality/one cardinality)}
+      tuple-types (assoc :db/tupleTypes tuple-types)
+      secondary? (assoc :db.secondary/only true)
+      (:seon.db/identity properties) (assoc :db/unique :db.unique/identity)
+      (:seon.db/unique properties) (assoc :db/unique :db.unique/value)
+      (:seon.db/index properties) (assoc :db/index true)
+      (:seon.db/component properties) (assoc :db/isComponent true)
+      (:seon.db/no-history? properties) (assoc :db/noHistory true))))
+
+(defn- compiled-attribute-selection
+  "Select core and storable property attributes from retained canonical roots."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [projection]
+  (let [registry (:seon.schema.projection/registry projection)
+        roots (mapv #(mr/schema registry %) (keys (:seon.schema.projection/forms projection)))
+        facets #{:seon.db/identity :seon.db/unique :seon.db/index
+                 :seon.db/component :seon.db/no-history? :db.secondary/only}
+        core
+        (reduce
+         (fn [attributes [k root]]
+           (let [properties (m/properties root)]
+             (cond-> (if (true? (:seon.db/attributes (internal/entity-properties root)))
+                       (into attributes
+                             (comp
+                              (filter (fn [[attribute properties _]]
+                                        (or (not (:optional properties))
+                                            (try (compiled-attribute projection attribute)
+                                                 true
+                                                 (catch clojure.lang.ExceptionInfo _ false)))))
+                              (map first) (filter qualified-keyword?))
+                             (internal/entity-entries root))
+                       attributes)
+               (and (qualified-keyword? k) (some #(contains? properties %) facets))
+               (conj k))))
+         #{} (map vector (keys (:seon.schema.projection/forms projection)) roots))
+        properties
+        (into (sorted-set)
+              (comp (mapcat #(keys (m/properties %)))
+                    (filter qualified-keyword?)
+                    (filter #(try (compiled-attribute projection %) true
+                                  (catch clojure.lang.ExceptionInfo _ false))))
+              roots)]
+    {::core (vec (sort-by str core))
+     ::properties properties
+     ::attributes (vec (sort-by str (into core properties)))}))
 
 (defn form->datahike-value-type-in
   "The Datahike value type represented by a form in one projection."
@@ -333,7 +460,28 @@
    #(->> (schema.form/property-attributes forms)
          (filter (fn [attribute]
                    (storable-attribute-in? projection attribute)))
-         (into (set (schema.form/database-attributes forms)))
+         (into
+          (reduce-kv
+           (fn [attributes _ definition]
+             (if (true? (:seon.db/attributes (schema.form/schema-properties forms definition)))
+               (reduce
+                (fn [selected entry]
+                  (let [attribute (first entry)
+                        optional? (and (= 3 (count entry)) (:optional (second entry)))]
+                    (if (and optional? (not (storable-attribute-in? projection attribute)))
+                      selected
+                      (conj selected attribute))))
+                attributes (schema.form/map-entries forms definition))
+               attributes))
+           (into #{}
+                 (filter (fn [attribute]
+                           (or (storable-attribute-in? projection attribute)
+                               (some (set (keys (schema.form/attr-form-properties
+                                                (get forms attribute))))
+                                     [:seon.db/identity :seon.db/unique :seon.db/index
+                                      :seon.db/component :seon.db/no-history? :db.secondary/only]))))
+                 (schema.form/database-attributes forms))
+           forms))
          (sort-by str)
          vec)))
 

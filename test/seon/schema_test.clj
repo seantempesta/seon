@@ -1,6 +1,7 @@
 (ns seon.schema-test
   "Regression proofs for the canonical schema registration boundary."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -1121,6 +1122,46 @@
                    [:seon.schema.projection/function-contracts
                     'seon.schema-test.incremental/accept])))))
 
+(deftest pure-projection-composition-materializes-compiled-entity-indexes
+  (test-support/with-database
+   (fn [_connection]
+     (let [base (schema/handed-projection)
+           changed (schema/projection-with-schema
+                    base ::optional-entity
+                    [:map {:seon.db/attributes true}
+                     [:seon.agent/id {:optional true} :seon.agent/id]]
+                    {:seon.schema.admission/source :core})
+           data (schema/compose-projection-data
+                 (schema/projection-pure-data base)
+                 (schema/projection-delta base changed))
+           restored (schema/materialize-projection (edn/read-string (pr-str data)))]
+       (is (not (contains? data :seon.schema.projection/registry)))
+       (is (not (contains? data :seon.schema.projection/shape-index)))
+       (is (= (:seon.schema.projection/shape-index changed)
+              (:seon.schema.projection/shape-index restored)))
+       (is (some #{::optional-entity}
+                 (get-in restored [:seon.schema.projection/shape-index :seon.agent/id])))
+       (is ((schema/projection-validator restored ::optional-entity) {}))))))
+
+(deftest component-preparation-preserves-local-recursion-and-literal-data
+  (test-support/with-database
+   (fn [_connection]
+     (let [projection (schema/handed-projection)
+           payload [:set {:seon.db/component true} :seon.db/ref]
+           definition
+           [:schema {:registry
+                     {::recursive-node [:map [::children {:optional true} [:ref ::local-components]]]
+                      ::local-components [:set {:seon.db/component true} [:ref ::recursive-node]]}}
+            [:map [::tree [:ref ::recursive-node]]
+             [::literal [:enum payload]]]]
+           prepared (schema/compilable-form definition {})
+           compiled (m/schema prepared (:seon.schema.projection/compile-options projection))
+           value {::tree {::children #{{::owned "component"}}} ::literal payload}]
+       (is (= prepared (schema/compilable-form prepared {})) "Widening is idempotent")
+       (is (m/validate compiled value))
+       (is (not (m/validate compiled (assoc value ::literal [:or payload :seon.db/component-entity]))))
+       (is (m/validate compiled {::tree {::children #{{::children #{}}}} ::literal payload}))))))
+
 (deftest a-component-bearing-row-validates-its-own-declared-shape
   ;; CLASS: every component attribute declares `[<collection>
   ;; {:seon.db/component true} :seon.db/ref]`, and `:seon.db/ref` admits an
@@ -1481,7 +1522,9 @@
        (doseq [k declarations
                :let [entries (schema.form/map-entries forms (get forms k))]]
          (is (seq entries) (str "Owned declaration must exist: " k))
-         (doseq [[attribute] entries]
+         (doseq [[attribute properties] entries
+                 :when (or (not (:optional properties))
+                           (schema.datahike/storable-attribute-in? projection attribute))]
            (is (schema.datahike/storable-attribute-in? projection attribute) (str k " " attribute))
            (is (nil? (:db/unique (schema.datahike/malli->datahike-attr-in projection attribute)))
                (str "An observation cannot upsert its domain subject: " attribute))))

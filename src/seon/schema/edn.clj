@@ -16,8 +16,8 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [seon.schema :as schema]
-            [seon.schema.form :as schema.form])
+            [malli.core :as m]
+            [seon.schema :as schema])
   (:import [java.net JarURLConnection]))
 
 (def default-resource
@@ -29,27 +29,23 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- config-dial?
-  [identity definition]
+  [identity properties]
   (and
    (qualified-keyword? identity)
-   (true? (:seon.config/dial
-           (schema.form/attr-form-properties definition)))))
+   (true? (:seon.config/dial properties))))
 
 (defn- config-dial-entries
   [forms]
   (->> forms
        (keep
         (fn [[identity definition]]
-          (when (config-dial? identity definition)
-            (let [optional?
-                  (true? (:seon.config/optional
-                          (schema.form/attr-form-properties definition)))
-                  per-agent?
-                  (true? (:seon.config/per-agent
-                          (schema.form/attr-form-properties definition)))]
-              {:seon.schema.edn/identity identity
-               :seon.schema.edn/optional? optional?
-               :seon.schema.edn/per-agent? per-agent?}))))
+          (let [properties (m/properties (schema/structural-schema definition))]
+            (when (config-dial? identity properties)
+              (let [optional? (true? (:seon.config/optional properties))
+                    per-agent? (true? (:seon.config/per-agent properties))]
+                {:seon.schema.edn/identity identity
+                 :seon.schema.edn/optional? optional?
+                 :seon.schema.edn/per-agent? per-agent?})))))
        (sort-by (comp str :seon.schema.edn/identity))
        vec))
 
@@ -111,8 +107,8 @@
   (into {}
         (keep
          (fn [[identity definition]]
-           (let [properties (schema.form/attr-form-properties definition)]
-             (when (and (config-dial? identity definition)
+           (let [properties (m/properties (schema/structural-schema definition))]
+             (when (and (config-dial? identity properties)
                         (contains? properties :seon.config/default))
                [identity (:seon.config/default properties)]))))
         forms))

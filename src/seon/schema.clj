@@ -223,6 +223,41 @@
         (catch Throwable _ nil)))
     (loaded-predicate-var predicate)))
 
+(declare structural-schema)
+
+(defn- widen-component-children
+  "Reconstruct component transaction grammar through Malli's syntax nodes.
+
+   Local registry values are already compiled by Malli. Transform their
+   declarations without following recursive refs; the complete generation
+   subsequently compiles the resulting form in its own captured scopes."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:fn malli.core/schema?]]}
+  [compiled]
+  (m/walk
+   compiled
+   (fn [node _ children _]
+     (let [properties (m/properties node)
+           properties (cond-> properties
+                        (:registry properties)
+                        (update :registry update-vals widen-component-children))
+           children
+           (if (true? (:seon.db/component properties))
+             (mapv (fn [child]
+                     (if (and (= :or (m/type child))
+                              (some #(or (= :seon.db/component-entity (m/type %))
+                                         (and (m/-ref-schema? %)
+                                              (= :seon.db/component-entity (m/-ref %))))
+                                    (m/children child)))
+                       child
+                       (m/into-schema :or nil
+                                      [child :seon.db/component-entity]
+                                      (m/options node))))
+                   children)
+             children)]
+       (if (= properties (m/properties node))
+         (m/-set-children node children)
+         (m/into-schema (m/parent node) properties children (m/options node)))))))
+
 (defn compilable-form
   "Prepare one authored declaration for Malli compilation.
 
@@ -236,7 +271,7 @@
    here instead of opening that second evaluator.
 
    Component child positions are widened by
-   [[seon.schema.form/widen-component-children]] — derived from the
+   [[widen-component-children]] — derived from the
    `:seon.db/component true` property the form already declares, so a row
    that carries its component entities validates as the transaction data it
    is (owner ruling 2026-08-08). Only the COMPILED shape widens; the authored
@@ -310,7 +345,7 @@
                       (symbol (namespace predicate))))))))
 
        :else value))
-   (form/widen-component-children form)))
+   (m/form (widen-component-children (structural-schema form)))))
 
 (defn- compiled-function-arities [compiled]
   (mapv (fn [arity]
@@ -1226,11 +1261,9 @@
 ;; every schema resource on the classpath (152 reads, ~14 ms) only to answer
 ;; false. A placeholder with no child bound admits a reference used as a type.
 (defonce ^:private structural-registry
-  (let [defaults (mr/fast-registry (m/default-schemas))
-        opaque (m/-simple-schema {:type ::opaque-reference
-                                  :pred any?
-                                  :min 0
-                                  :max nil})]
+  (let [defaults (mr/fast-registry
+                  (assoc (m/default-schemas) :fn
+                         (m/-simple-schema {:type :fn :pred any? :min 1 :max 1})))]
     (reify
       mr/Registry
       (-schema [_ type]
@@ -1241,8 +1274,18 @@
             ;; Anything else — a string, a number, an unqualified symbol Malli
             ;; itself does not know — is not a reference and stays a refusal.
             (when (or (keyword? type) (qualified-symbol? type))
-              opaque)))
+              (m/-simple-schema {:type type :pred any? :min 0 :max nil}))))
       (-schemas [_] (mr/-schemas defaults)))))
+
+(defn structural-schema
+  "Compile syntax for preparation, with references opaque and predicates inert.
+
+   This cannot prove a target exists, storage mapping or inherited members.
+   Full admission resolves those questions in its supplied complete registry.
+   No predicate or generator namespace is loaded by this inspection."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:fn malli.core/schema?]]}
+  [definition]
+  (m/schema definition {:registry structural-registry}))
 
 (defn malli-form?
   "True when `value` is readable EDN and Malli can parse its STRUCTURE.
@@ -1828,14 +1871,19 @@
          (keys (:seon.schema.projection/forms projection)))))
 
 (defn- shape-row-in
-  [forms schema-key definition]
-  (let [props (or (form/schema-properties definition)
-                        (form/attr-form-properties definition) {})
+  [registry schema-key]
+  (let [compiled (mr/schema registry schema-key)
+        entries (internal/entity-entries compiled)
+        props (or (internal/entity-properties compiled)
+                  (m/properties compiled) {})
         required-attrs
-        (some-> (internal/map-required-attrs forms definition) set)]
+        (not-empty (into #{} (keep (fn [[k properties _]]
+                                    (when (and (keyword? k) (not= k ::m/default)
+                                               (not (:optional properties))) k)))
+                         entries))]
     (when (or (seq required-attrs)
               (and (:seon.db/attributes props)
-                   (seq (form/map-entries forms definition))))
+                   (seq entries)))
       (merge
         {:seon.schema/key schema-key
          :seon.schema/required-attrs required-attrs
@@ -2024,8 +2072,8 @@
         shape-rows
         (into (sorted-map)
               (keep
-                (fn [[k raw]]
-                  (when-let [row (shape-row-in forms k raw)]
+                (fn [[k _]]
+                  (when-let [row (shape-row-in registry k)]
                     [k row])))
               forms)
         required-by-key
@@ -2040,7 +2088,7 @@
                       (update result attr (fnil conj []) schema-key))
                     index
                     (or (seq required-attrs)
-                        (map first (form/map-entries forms (get forms schema-key))))))
+                        (map first (internal/entity-entries (mr/schema registry schema-key))))))
           (sorted-map)
           required-by-key)
         shape-rank
@@ -2093,6 +2141,9 @@
 
 (def ^:private projection-runtime-keys
   #{:seon.schema.projection/registry
+    :seon.schema.projection/shape-index
+    :seon.schema.projection/required-by-key
+    :seon.schema.projection/catalog
     :seon.schema.projection/compile-options
     :seon.schema.projection/compiled
     :seon.schema.projection/predicate-functions})
@@ -2133,7 +2184,7 @@
    dependencies))
 
 (defn- shape-projections
-  [forms shape-rows]
+  [registry shape-rows]
   (let [required-by-key
         (into (sorted-map)
               (map (fn [[k row]]
@@ -2146,7 +2197,7 @@
                      (update result attr (fnil conj []) schema-key))
                    index
                    (or (seq required-attrs)
-                       (map first (form/map-entries forms (get forms schema-key))))))
+                       (map first (internal/entity-entries (mr/schema registry schema-key))))))
          (sorted-map)
          required-by-key)
         shape-rank
@@ -2171,8 +2222,9 @@
   "Compose preproved base pure data with one divergence pure-data delta.
 
    Row identities are map keys, so divergence naturally wins for a redefined
-   base identity. The cross-population fingerprint and reverse/shape indexes
-   are recomputed over the composed ordinary data; no schema is compiled here."
+   base identity. The cross-population fingerprint and reverse indexes are
+   recomputed over ordinary data. Shape indexes derive at materialization
+   from the retained compiled roots; no schema is compiled here."
   {:malli/schema [:=> [:catn [::projection :map]
                              [:seon.schema/divergence-delta :map]]
                   :map]}
@@ -2212,10 +2264,7 @@
                  (:seon.schema.projection/schema-dependencies composed))
                 :seon.schema.projection/reverse-function-dependencies
                 (reverse-dependencies
-                 (:seon.schema.projection/function-dependencies composed))}
-               (shape-projections
-                (:seon.schema.projection/forms composed)
-                (:seon.schema.projection/shape-rows composed)))]
+                 (:seon.schema.projection/function-dependencies composed))})]
     (assoc composed
            :seon.schema.projection/fingerprint
            (projection-fingerprint-from-data composed))))
@@ -2353,9 +2402,10 @@
      ;; realized serially by the same construction owner as a fresh build.
      (with-compiled-cache
       (with-predicate-functions
-       (assoc pure-data
-              :seon.schema.projection/registry registry
-              :seon.schema.projection/compile-options options)
+       (merge pure-data
+              {:seon.schema.projection/registry registry
+               :seon.schema.projection/compile-options options}
+              (shape-projections registry (:seon.schema.projection/shape-rows pure-data)))
        predicate-functions)
       (into {} (map (fn [sym] [sym (mr/schema registry sym)]))
             (keys contracts))))))
@@ -2428,10 +2478,10 @@
      after)))
 
 (defn- replace-shape-rows
-  [shape-rows forms schema-keys]
+  [shape-rows registry schema-keys]
   (reduce
    (fn [rows schema-key]
-     (if-let [row (shape-row-in forms schema-key (get forms schema-key))]
+     (if-let [row (shape-row-in registry schema-key)]
        (assoc rows schema-key row)
        (dissoc rows schema-key)))
    shape-rows
@@ -2804,7 +2854,7 @@
         shape-rows
         (replace-shape-rows
          (:seon.schema.projection/shape-rows projection)
-         forms affected-schema-keys)
+         registry affected-schema-keys)
         shape-data
         (if (identical? shape-rows
                         (:seon.schema.projection/shape-rows projection))
@@ -2813,7 +2863,7 @@
            [:seon.schema.projection/required-by-key
             :seon.schema.projection/shape-index
             :seon.schema.projection/catalog])
-          (shape-projections forms shape-rows))
+          (shape-projections registry shape-rows))
         fingerprint
         (-> (reusable-projection-fingerprint projection)
             (replace-fingerprint-entry

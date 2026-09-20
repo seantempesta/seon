@@ -8,6 +8,21 @@ tags: [testing, fixture, class, absence-as-health]
 
 # Fixtures that ignore a refused transaction read absence as behaviour
 
+## Bridge construction observation, 2026-09-20
+
+The step-2 old-bridge baseline reproduces three fixture refusals in
+`seon.schema.datahike-test`: `agent-authored-render-symbols-cross-the-transaction-function-codec`
+reaches a program row missing `:seon.ns/name`;
+`edn-backed-attributes-have-one-canonical-datahike-round-trip` reads a nil
+tempid after a refused identity-less evidence write; and
+`registered-shape-round-trips-through-datahike` is refused for an unowned
+identity-less row. These precede replacement of the production bridge.
+The last test already surfaces its refusal with `transacted!`; the first
+two must preserve the write's actual refusal before asserting downstream
+codec behavior. No causal attribution to an in-flight foreign edit is made.
+Baseline identity and subsequent construction logs are in
+[the bridge note](../../prds/steward-platform/research/bridge-step2-walker-2026-09-21.md).
+
 ## Problem
 
 `seon.db/transact!` returns a flat `:seon.error` value when write admission
@@ -94,7 +109,6 @@ fixture writes are deliberate admission bypasses and throw on failure, so they
 are not this class. Measurements, the classification rules the detector needs
 (a textual rule reports 310 false positives), and the in-process tally are in
 [fixture-write-sweep-2026-09-17.md](../../prds/steward-platform/research/fixture-write-sweep-2026-09-17.md).
-
 
 ## Batch 107 followup
 

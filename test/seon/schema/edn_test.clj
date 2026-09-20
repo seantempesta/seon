@@ -339,6 +339,24 @@
           [:fn {:gen/schema :inst}
            'seon.schema.edn-test-fixture/late-instant?]}}))))
 
+(deftest config-preparation-inspects-syntax-without-loading-predicates
+  (test-support/with-database
+   (fn [_connection]
+     (let [forms (:seon.schema.projection/forms (schema/handed-projection))
+           owner 'seon.schema.edn-test.no-classpath-owner
+           definition [:and {:seon.config/dial true :seon.config/default 7}
+                       :seon.schema.edn-test/missing-target
+                       [:fn 'seon.schema.edn-test.no-classpath-owner/predicate?]]
+           prepared (schema.edn/derive-config-forms (assoc forms ::syntax-dial definition))]
+       (is (nil? (find-ns owner)))
+       (is (some #(= ::syntax-dial (first %))
+                 (drop 1 (:seon.config/effective prepared))))
+       (is (= 7 (get (schema.edn/config-registration-defaults prepared) ::syntax-dial)))
+       (is (nil? (find-ns owner)))
+       (is (thrown? clojure.lang.ExceptionInfo
+                    (schema/build-projection prepared))
+           "Opaque syntax is not proof of complete admission")))))
+
 (deftest an-unregistered-predicate-refusal-names-its-reload-owner
   (let [predicate 'seon.schema.edn-test/no-such-predicate?
         failure

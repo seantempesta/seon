@@ -1,15 +1,128 @@
 (ns seon.schema.datahike-test
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.set :as set]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [malli.core :as m]
+            [malli.registry :as mr]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.edn :as schema.edn]
-            [seon.test-support :as support])
-  (:import [java.util.concurrent Callable FutureTask]))
+            [seon.schema.internal :as internal]
+            [seon.test-support :as support]))
+
+(deftest optional-unstorable-facet-members-remain-in-memory
+  (support/with-database
+   (fn [_connection]
+     (let [forms (:seon.schema.projection/forms (schema/handed-projection))
+           facet (fn [optional?]
+                   [:and {:seon.db/attributes true} :seon.error/base
+                    [:map [::subject ::subject]
+                     [:seon.error/offending {:optional optional?} :seon.schema/value]]])
+           candidate (assoc forms ::subject :string ::observation (facet true))
+           projection (schema/build-projection candidate)
+           value {:seon.error/at (java.util.Date.)
+                  :seon.error/layer ::bridge
+                  :seon.error/operation 'seon.schema.datahike-test/optional-unstorable-facet-members-remain-in-memory
+                  ::subject "producer"
+                  :seon.error/offending (Object.)}]
+       (is ((schema/projection-validator projection ::observation) value))
+       (is (some #(= ::observation (:seon.schema/key %))
+                 (schema/canonical-schema-rows candidate)))
+       (is (not (some #{:seon.error/offending}
+                      (schema.datahike/database-attributes-in projection))))
+       (is (not (some #{:seon.error/offending}
+                      (::schema.datahike/attributes
+                       (#'schema.datahike/compiled-attribute-selection projection)))))
+       (let [refusal (try
+                       (schema/build-projection (assoc candidate ::observation (facet false)))
+                       nil
+                       (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+         (is (= :seon.error/offending (:seon.schema/member refusal))))))))
+
+(deftest canonical-population-native-parity
+  (support/with-database
+   (fn [_connection]
+     (let [projection (schema/handed-projection)
+           forms (:seon.schema.projection/forms projection)
+           selection (#'schema.datahike/compiled-attribute-selection projection)
+           core (::schema.datahike/core selection)
+           properties (::schema.datahike/properties selection)
+           attributes (::schema.datahike/attributes selection)
+           native (mapv #(#'schema.datahike/compiled-attribute projection %) attributes)
+           expected (edn/read-string
+                     (slurp (io/resource "seon/schema/datahike_parity.edn")))
+           expected-keys (set (:seon.bridge.parity/attributes expected))
+           actual-keys (set attributes)
+           expected-native (into {} (map (juxt :db/ident identity))
+                                 (:seon.bridge.parity/native expected))
+           actual-native (into {} (map (juxt :db/ident identity)) native)
+           mismatches (into (sorted-map)
+                            (keep (fn [k]
+                                    (when (not= (get expected-native k) (get actual-native k))
+                                      [k {:expected (get expected-native k)
+                                          :actual (get actual-native k)}])))
+                            (set/union expected-keys actual-keys))]
+       (is (seq forms))
+       (is (seq attributes))
+       (is (= (count attributes) (count native)))
+       (is (empty? (into (sorted-set)
+                        (filter #(not= (find (:seon.bridge.parity/forms expected) %)
+                                       (find forms %)))
+                        (set/union (set (keys (:seon.bridge.parity/forms expected)))
+                                   (set (keys forms)))))
+           "Canonical input drift requires an explained baseline update")
+       (is (= (:seon.bridge.parity/input-digest expected)
+              (schema/sha-256 [(.getBytes (schema/canonical-data-string forms) "UTF-8")])))
+       (is (true? (= (:seon.bridge.parity/core-attributes expected) core)))
+       (is (= (:seon.bridge.parity/property-attributes expected) properties))
+       (is (empty? (set/difference expected-keys actual-keys)) "Missing attributes")
+       (is (empty? (set/difference actual-keys expected-keys)) "Unexpected attributes")
+       (is (empty? mismatches) (pr-str mismatches))
+       (is (true? (= (:seon.bridge.parity/native expected) native)) "Ordered native declarations")
+       (println "BRIDGE-STEP2-PARITY" (count forms) (count attributes)
+                "mismatches" (count mismatches))))))
+
+(deftest compiled-entity-composition-keeps-scope-and-entry-boundaries
+  (support/with-database
+   (fn [_connection]
+     (let [projection (schema/handed-projection)
+           options (:seon.schema.projection/compile-options projection)
+           compile-node #(m/schema % options)
+           entity (compile-node
+                   [:and [:map [::required :int]]
+                    [:map {:gen/elements [{::payload [:map [::leak :string]]}]}
+                     [::nested [:map [::not-an-entity-entry :string]]]
+                     [::optional {:optional true} :string]]])
+           entries (internal/entity-entries entity)]
+       (is (= [::required ::nested ::optional] (mapv first entries)))
+       (is (= [false false true] (mapv #(true? (:optional (second %))) entries)))
+       (is (empty? (internal/entity-entries
+                    (compile-node [:or [:map [::left :int]] [:map [::right :int]]]))))
+       (is (thrown? clojure.lang.ExceptionInfo
+                    (internal/entity-entries
+                     (compile-node [:and [:map [::required :int]]
+                                    [:map [::required {:optional true} :int]]]))))
+       (is (thrown? clojure.lang.ExceptionInfo
+                    (internal/entity-entries
+                     (compile-node
+                      [:and
+                       [:schema {:registry {::local :int}} [:map [::same ::local]]]
+                       [:schema {:registry {::local :string}} [:map [::same ::local]]]]))))
+       (let [recursive [:schema
+                        {:registry {::node [:map [::next {:optional true} [:ref ::node]]]}}
+                        [:map [::same [:ref ::node]]]]]
+         (is (= [::same]
+                (mapv first (internal/entity-entries
+                             (compile-node [:and recursive recursive]))))))
+       (doseq [k [:seon.ns/ns :seon.error.occurrence/occurrence :my.fs/error]]
+         (is (seq (internal/entity-entries
+                   (mr/schema (:seon.schema.projection/registry projection) k)))
+             (str "Canonical entity exists: " k)))))))
 
 (def ^:private schema-delta (schema/begin-registration-delta))
 
@@ -138,37 +251,34 @@
     (is (contains? attributes :seon.error/class))
     (is (not (contains? attributes :gen/schema)))))
 
-(deftest database-attribute-derivation-resolves-the-population-once
-  (let [without-bindings
-        (fn [operation]
-          ;; A raw Java task starts with no Clojure thread bindings, matching
-          ;; the HTTP worker on which the live regression was measured.
-          (let [task (FutureTask. ^Callable (fn [] (operation)))
-                thread (Thread. task)]
-            (.start thread)
-            (.get task)))
-        resource-reads
-        (fn [operation]
-          (let [reads (atom 0)
-                read-one @#'schema.edn/read-schema-resource]
-            (with-redefs [schema.edn/read-schema-resource
-                          (fn [resource]
-                            (swap! reads inc)
-                            (read-one resource))]
-              (let [value (without-bindings operation)]
-                {:resource-reads @reads :value value}))))
-        acquired (resource-reads schema.edn/packaged-forms)
-        one-population (:resource-reads acquired)
-        result
-        (resource-reads
-         #(schema/canonical-database-attributes (:value acquired)))]
-    (testing "the bridge consumes one explicitly acquired population"
-      (is (pos? one-population)
-          "the explicit acquisition must read resources or the count is vacuous")
-      (is (> (count (:value result)) 500)
-          "the regression must exercise the production-wide attribute walk")
-      (is (zero? (:resource-reads result))
-          "one operation carries the supplied population through every question"))))
+(deftest compiled-storage-navigation-reuses-retained-roots
+  (support/with-database
+   (fn [_connection]
+     (let [projection (schema/handed-projection)
+           select-attributes #(#'schema.datahike/compiled-attribute-selection projection)
+           attributes (::schema.datahike/attributes (select-attributes))
+           derive-native #(mapv (partial #'schema.datahike/compiled-attribute projection) attributes)
+           expected (derive-native)
+           schema-fn m/schema
+           fast-registry mr/fast-registry
+           counts (atom {:compiles 0 :registries 0 :copied-entries 0})]
+       (is (seq attributes))
+       (is (= (count attributes) (count expected)))
+       (with-redefs [m/schema (fn counted-schema
+                               ([value] (counted-schema value nil))
+                               ([value options]
+                                (when-not (m/schema? value)
+                                  (swap! counts update :compiles inc))
+                                (schema-fn value options)))
+                     mr/fast-registry (fn [entries]
+                                        (swap! counts #(-> % (update :registries inc)
+                                                           (update :copied-entries + (count entries))))
+                                        (fast-registry entries))]
+         (dotimes [_ 3]
+           (is (true? (= attributes (::schema.datahike/attributes (select-attributes)))))
+           (is (true? (= expected (derive-native))))))
+       (println "BRIDGE-STEP2-NAVIGATION" (count attributes) @counts)
+       (is (= {:compiles 0 :registries 0 :copied-entries 0} @counts))))))
 
 (def ^:private refused-form-generator
   (gen/elements

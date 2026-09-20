@@ -30,6 +30,16 @@ this to an implementation or adoption defect. The sanctioned status surface
 must either return its health data or retain an evidence-complete refusal.
 See [the lane record](../../prds/context-generation/research/turn-test-reds-2026-09-16.md).
 
+Step-2 bridge re-observation, 2026-09-20 06:29:34 UTC: default PID 24777
+is advertised alive, but the same `seon.problems/problems` return boundary
+now refuses `[:seon.problems/error-signatures 0 :seon.error/at]`: the
+signature lacks required `:seon.error/at`. The MCP envelope preserves the
+exception message, unlike the resolved opaque-projection defect. A subsequent
+read-only JVM conjunction probe succeeded in 1 ms. Runtime health remains
+unavailable; this observation does not identify whether source or adoption
+is responsible. No runtime mutation was performed. Evidence is in
+[the step-2 note](../../prds/steward-platform/research/bridge-step2-walker-2026-09-21.md).
+
 Batch-19 continuation, 2026-09-16 02:37 UTC: default PID 7595 remains alive,
 but MCP runtime status again refuses the occurrence count, now at signature
 index 4. Direct read-only JVM evaluation succeeds and confirms cluster custody

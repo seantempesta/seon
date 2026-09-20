@@ -19,6 +19,111 @@
 
 (def ^:private undefined-types #{:any :some :nil})
 
+(defn- reference-id
+  "A ref name together with the options carrying its resolving registry."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]]
+                  [:maybe [:tuple :map [:or :keyword :string :symbol]]]]}
+  [compiled]
+  (when (m/-ref-schema? compiled)
+    (when-let [reference (m/-ref compiled)]
+      [(or (m/options compiled) {}) reference])))
+
+(defn- same-scoped-schema?
+  "Compare compiled children in their captured scopes, including local refs."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?] [:fn malli.core/schema?]] :boolean]}
+  [left right]
+  (letfn [(same? [left right seen]
+            (cond
+              (identical? left right) true
+              (and (m/schema? left) (m/schema? right))
+              (let [pair [(or (reference-id left) left) (or (reference-id right) right)]
+                    visited? (contains? seen pair)
+                    seen (conj seen pair)]
+                (cond
+                  visited? true
+                  (m/-ref-schema? left) (same? (m/deref left) right seen)
+                  (m/-ref-schema? right) (same? left (m/deref right) seen)
+                  :else
+                  (and (= (m/type left) (m/type right))
+                       (= (dissoc (m/properties left) :registry)
+                          (dissoc (m/properties right) :registry))
+                       (same? (m/children left) (m/children right) seen))))
+              (and (sequential? left) (sequential? right))
+              (and (= (count left) (count right))
+                   (every? true? (map #(same? %1 %2 seen) left right)))
+              :else (= left right)))]
+    (boolean (same? left right #{}))))
+
+(defn- entity-maps
+  "Only maps reached through entity aliases, wrappers and conjunction arms."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]
+                           [:set [:tuple :map [:or :keyword :string :symbol]]]]
+                  [:vector [:fn malli.core/schema?]]]}
+  [compiled active]
+  (let [reference (reference-id compiled)]
+    (when (and reference (contains? active reference))
+      (throw (ex-info "Cyclic entity declaration."
+                      {:seon.schema/definition (m/form compiled)})))
+    (let [active (cond-> active reference (conj reference))]
+      (cond
+        (m/-ref-schema? compiled) (entity-maps (m/deref compiled) active)
+        (= :map (m/type compiled)) [compiled]
+        (= :and (m/type compiled))
+        (into [] (mapcat #(entity-maps % active)) (m/children compiled))
+        :else []))))
+
+(defn entity-entries
+  "Ordered compiled map entries with inherited requiredness and conflict checks."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]]
+                  [:vector [:tuple :seon.schema/value [:maybe :map] [:fn malli.core/schema?]]]]}
+  [compiled]
+  (let [entries (into [] (mapcat m/children) (entity-maps compiled #{}))
+        merged
+        (reduce
+         (fn [result [k properties child :as entry]]
+           (if-let [[_ prior-properties prior-child :as prior] (get result k)]
+             (do
+               (when (or (not (same-scoped-schema? prior-child child))
+                         (and (not (:optional prior-properties)) (:optional properties)))
+                 (throw (ex-info "Conflicting inherited entity member or optionalized required member."
+                                 {:seon.schema/member k
+                                  :seon.schema/expected (m/form prior-child)
+                                  :seon.schema/offending (m/form child)})))
+               (assoc result k (if (:optional properties) prior entry)))
+             (assoc result k entry)))
+         {} entries)]
+    (mapv merged (distinct (map first entries)))))
+
+(defn entity-properties
+  "Entity-map properties followed by the selected root's explicit properties."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:maybe :map]]}
+  [compiled]
+  (when-let [maps (seq (entity-maps compiled #{}))]
+    (not-empty (merge (apply merge (map m/properties maps))
+                      (m/properties compiled)))))
+
+(defn entity-schema?
+  "Whether compiled entity composition reaches a map, including an empty map."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] :boolean]}
+  [compiled]
+  (boolean (seq (entity-maps compiled #{}))))
+
+(defn extends-schema?
+  "Follow only compiled alias and conjunction edges in their captured scopes."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?] :qualified-keyword] :boolean]}
+  [compiled ancestor]
+  (letfn [(extends? [node seen]
+            (let [node-id (or (reference-id node) node)]
+              (cond
+                (contains? seen node-id) false
+                (m/-ref-schema? node)
+                (or (= ancestor (m/-ref node))
+                    (extends? (m/deref node) (conj seen node-id)))
+                (= :and (m/type node))
+                (boolean (some #(extends? % (conj seen node-id)) (m/children node)))
+                :else false)))]
+    (extends? compiled #{})))
+
 (defn permissive-positions
   "Inspect schema syntax, excluding literal enum values and property data.
 
@@ -94,11 +199,7 @@
 
 (defn- guarded-predicate-symbol
   [schema]
-  (let [definition (m/form schema)
-        body (if (map? (second definition))
-               (drop 2 definition)
-               (rest definition))]
-    (first body)))
+  (first (m/children schema)))
 
 (defn- guarded-predicate-properties-complete?
   [properties]
@@ -119,18 +220,19 @@
 (defn- assert-error-declaration!
   "Validate structural error inheritance and the complete owned storage declaration."
   {:malli/schema [:=> [:cat :map] :nil]}
-  [{:seon.schema/keys [identity definition forms storable-attribute?]}]
-  (when (and (keyword? identity) (map? forms)
+  [{:seon.schema/keys [identity definition compiled storable-attribute?]}]
+  (when (and (keyword? identity)
              (or (= :seon.error/base identity)
-                 (form/extends-schema? forms definition :seon.error/base)))
-    (let [entries (form/map-entries forms definition)
+                 (extends-schema? compiled :seon.error/base)))
+    (let [registry (:registry (m/options compiled))
+          entries (entity-entries compiled)
           required (into #{} (keep #(when-not (:optional (second %)) (first %))) entries)
-          base-entries (form/map-entries forms (get forms :seon.error/base))
+          base-entries (entity-entries (mr/schema registry :seon.error/base))
           base-members (set (map first base-entries))
           base-required (into #{} (keep #(when-not (:optional (second %)) (first %))) base-entries)
           additions (remove base-members required)
           alias? (keyword? definition)
-          properties (form/schema-properties definition)]
+          properties (entity-properties compiled)]
       (when-not (every? required base-required)
         (contract-error! identity definition [] :seon.schema/invalid-schema
                          "An error declaration must retain every required base member."
@@ -138,42 +240,43 @@
       (when (and (not= :seon.error/base identity) (not alias?) (empty? additions))
         (contract-error! identity definition [] :seon.schema/invalid-schema
                          "An error facet requires a non-base domain member." {}))
-      (letfn [(boolean-form? [node seen]
+      (letfn [(boolean-schema? [node seen]
                 (cond
-                  (= :boolean node) true
-                  (and (keyword? node) (get forms node) (not (contains? seen node)))
-                  (boolean-form? (get forms node) (conj seen node))
-                  (vector? node)
-                  (case (first node)
+                  (not (m/schema? node)) false
+                  (contains? seen (or (reference-id node) node)) false
+                  (m/-ref-schema? node)
+                  (boolean-schema? (m/deref node) (conj seen (or (reference-id node) node)))
+                  :else
+                  (case (m/type node)
                     :boolean true
-                    := (boolean? (last node))
-                    :and (boolean (some #(boolean-form? % seen) (remove map? (rest node))))
-                    false)
-                  :else false))
+                    := (boolean? (first (m/children node)))
+                    :and (boolean (some #(boolean-schema? % (conj seen node)) (m/children node)))
+                    false)))
               (owned-storage! [node seen]
-                (doseq [entry (form/map-entries forms node)
+                (doseq [entry (entity-entries node)
                         :let [attribute (first entry)
-                              attribute-form (get forms attribute)
-                              attribute-properties (form/attr-form-properties attribute-form)
+                              attribute-schema (mr/schema registry attribute)
+                              attribute-properties (when attribute-schema (m/properties attribute-schema))
                               target (:seon.db/component-schema attribute-properties)]]
-                  (when (and storable-attribute? (not (storable-attribute? attribute)))
+                  (when (and (not (:optional (second entry)))
+                             storable-attribute? (not (storable-attribute? attribute)))
                     (contract-error! identity definition [attribute] :seon.schema/invalid-schema
                                      "A stored error member must have a storable registered attribute."
                                      {:seon.schema/member attribute}))
                   (when (:seon.db/component attribute-properties)
                     (when-not (and (qualified-keyword? target)
-                                   (form/map-shape? forms (get forms target)))
+                                   (some-> (mr/schema registry target) entity-schema?))
                       (contract-error! identity definition [attribute] :seon.schema/invalid-schema
                                        "An owned error member must declare a complete component schema."
                                        {:seon.schema/member attribute}))
                     (when-not (contains? seen target)
-                      (owned-storage! (get forms target) (conj seen target))))))]
-        (when (and (seq additions) (every? #(boolean-form? (get forms %) #{}) additions))
+                      (owned-storage! (mr/schema registry target) (conj seen target))))))]
+        (when (and (seq additions) (every? #(boolean-schema? (mr/schema registry %) #{}) additions))
           (contract-error! identity definition [] :seon.schema/invalid-schema
                            "A boolean marker alone cannot define an error facet."
                            {:seon.schema/member (first additions)}))
-        (when (:seon.db/attributes (form/schema-properties forms definition))
-          (owned-storage! definition #{identity})))
+        (when (:seon.db/attributes properties)
+          (owned-storage! compiled #{identity})))
       (doseq [property [:seon.render/ai :seon.render/html]
               :let [entry (find properties property)]
               :when (and entry (not (qualified-symbol? (val entry))))]
