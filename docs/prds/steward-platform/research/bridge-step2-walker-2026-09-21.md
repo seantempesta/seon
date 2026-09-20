@@ -1,11 +1,407 @@
 ---
 type: research
-status: optional storage admission committed; handler custody decision pending; retirement uncommitted
+status: caller conversion complete in tree; awaiting writer-selection ruling
 created: 2026-09-21
 tags: [schema, malli, bridge, projection]
 ---
 
 # Bridge step 2: compiled walker
+
+## Current decision: write-schema selection after compiled inheritance
+
+This section supersedes the historical checkpoints below. The complete
+specification, binding PRD, accepted review and step-1 note were read end
+to end. All callers are converted in the working tree; the raw file is
+removed there, but the coherent retirement commit is **not landed**.
+The formerly held error/test-support tests were clean before conversion.
+The cluster guard/export commits were re-read and their landed behavior
+preserved. No other lane's session or default was operated.
+
+The 55-namespace snapshot at `acb39cb6372919d94f409ea61c1c4e07526fc35f`
+loaded and armed 1,507 contracts (1,474 program-armable), selecting 969 tests.
+It completed 78 test bodies and began a 79th before this lane stopped its
+own JVM 7478 at the new decision. Five error blocks were printed; no full
+or durable tally exists. Raw evidence: `tmp/bridge-step2-retirement-fast.log`.
+Three blocks reject ordinary turns for missing error fields; two blocks
+are `seon.cluster.reply/sources` return-contract refusals, observed but not
+attributed to this conversion without a baseline proof.
+
+**New decision:** the compiled `write-entity-schemas` selection inherits
+`:seon.db/attributes` through `:seon.error/base`. The old writer's
+one-argument raw inspection did not follow that reference. Bootstrap error
+facets requiring `:seon.turn/id` therefore become ordinary turn write schemas,
+refusing a valid turn for missing `:seon.error/at`. The accepted
+`:seon.program/row-schema` adaptation remains intact but does not cover
+`:seon.turn/id`. This is recorded in
+[the writer-selection issue](../../../seon/issues/inherited-error-facets-select-ordinary-identity-write-schemas.md).
+The spec forbids changing writer selection guarantees in this slice without
+a ruling. No repair of this policy has been applied.
+
+1. **Recommended — preserve explicit write declarations using compiled
+   nodes.** Retain the old writer's storage-declaration selection, including
+   inline composition, while compiled schemas still validate the complete
+   selected entity. Guarantee: navigation changes without broadening the
+   writer's selected schemas. Cost: 2–4 hours and a canonical regression.
+   Give up: inherited storage membership alone selecting a write schema.
+2. **Declare row schemas on every identity.** Extend the accepted explicit
+   row-schema rule to turn, agent and other domain identities. Guarantee:
+   each identity names its write schema. Cost: about one lane-day plus
+   resource-owner coordination. Give up: the current resource scope and
+   implicit multiple-schema selection for those identities.
+3. **Separate observed identity tokens in error facets.** Introduce the
+   observation attributes and convert those producers with their owners.
+   Guarantee: observing a turn identity cannot select its write schema.
+   Cost: 1–2 lane-days across owners. Give up: landing bridge step 2 before
+   that error-family conversion.
+
+The Var-contract arming refusal had an owned cause: syntax preparation
+rejected Var schema references before the existing Malli var-registry could
+resolve them. Structural preparation now preserves Vars as opaque references;
+a canonical regression exercises their round trip. The broad snapshot
+successfully armed the previously refusing development linter.
+
+The preceding four-namespace request `2a6628354fa8` completed 72 tests,
+2,580 assertions, 9 failures and 4 errors. Its snapshot JVM 2031 called
+`seon.test.runner/record-snapshot!` -> `record-persistent-results!` ->
+`seon.cluster.store/open-store!`; the check refused `:held-elsewhere` for
+`/Users/sean/src/seon/data/store`. This was the snapshot recorder trying to
+acquire the published store, not a refusal from the store-holder's old JVM.
+Publication/gate owners retain that follow-up. Log:
+`tmp/bridge-step2-construction-final.log` (this resumed log supersedes the
+older same-named scratch log whose historical digest remains below).
+
+Corrections since that request: independent old-bridge recapture after the
+new call-preparation declarations; explicit projection throughout
+`program/declaration-row`; current declaration reads in the transaction-codec
+fixture; retained roots in canonical test loops; the declared
+`:seon.fn.arity/guard-schema` attribute in the graph audit; a complete
+synthetic config dial. The held effect resource still declares
+`:seon.effect/result-validator` without `:error/message`; the existing
+predicate-diagnostic regression names it. Its owner was notified through
+the orchestrator question; this lane did not edit that resource.
+
+### Retirement measurements and proof handoff
+
+Executable census (`src`, `test`, `script`, Clojure files): zero
+`seon.schema.form` references after removing the temporary capture writer.
+The raw namespace deletion and every caller conversion remain one pending
+commit. Original 1,012-attribute evidence is retained under
+`:seon.bridge.parity/initial-baseline`, alongside the refreshed independent
+capture. No expected native declaration was generated by the compiled fold.
+The refreshed capture loads `22a1a0567:src/seon/schema/datahike.clj` under a
+private temporary namespace while the old raw helper was still present,
+then runs the same canonical capture described below; no duplicate walker
+remains in source or tests.
+
+Physical owner LOC against step 1 `dc1efaf3c`:
+
+| Owner | Before | Working tree |
+|---|---:|---:|
+| schema/form.cljc | 216 | 0 |
+| schema/datahike.clj | 635 | 537 |
+| schema/internal.cljc | 453 | 520 |
+| schema.clj | 3,863 | 3,848 |
+| Total | 5,167 | 4,905 |
+
+Net reduction: 262 physical lines, including the earlier additive checkpoint.
+The measured earlier warmed navigation result remains zero compiler calls,
+zero registry constructions and zero copied entries over three complete
+passes. Final construction tally/load evidence is recorded below when the
+current request ends. No cold gate, platform proof, live adoption or browser
+proof was run. These remain orchestrator-owned after the writer ruling.
+
+Complete owned path list and exact eventual cold command (do not run until
+the decision is implemented and the coherent retirement lands):
+
+```sh
+bin/test --paths \
+  docs/prds/steward-platform/research/bridge-step2-walker-2026-09-21.md \
+  docs/seon/issues/inherited-error-facets-select-ordinary-identity-write-schemas.md \
+  resources/seon/schemas/seon.test.accretion.edn \
+  resources/seon/schemas/seon.test.edn \
+  src/seon/agent.clj \
+  src/seon/ai.clj \
+  src/seon/cluster.clj \
+  src/seon/cluster/source.clj \
+  src/seon/config.clj \
+  src/seon/db.clj \
+  src/seon/error.clj \
+  src/seon/fn.clj \
+  src/seon/issue.clj \
+  src/seon/maintenance.clj \
+  src/seon/print.cljc \
+  src/seon/program.cljc \
+  src/seon/reconcile.cljc \
+  src/seon/render.clj \
+  src/seon/render/transcript.clj \
+  src/seon/render/walk.clj \
+  src/seon/render/web.clj \
+  src/seon/schema.clj \
+  src/seon/schema/datahike.clj \
+  src/seon/schema/form.cljc \
+  src/seon/schema/internal.cljc \
+  src/seon/sci/eval.clj \
+  src/seon/shell/jvm.clj \
+  src/seon/turn.clj \
+  test/my/test_test.clj \
+  test/seon/ai_stream_fold_test.clj \
+  test/seon/ai_test.clj \
+  test/seon/bootstrap_drive_test.clj \
+  test/seon/classification_test.clj \
+  test/seon/cluster/agent_test.clj \
+  test/seon/cluster/armed_test.clj \
+  test/seon/cluster/boot_test.clj \
+  test/seon/cluster/mcp_test.clj \
+  test/seon/cluster/message_test.clj \
+  test/seon/cluster/program_restart_test.clj \
+  test/seon/cluster/registry_test.clj \
+  test/seon/cluster/source_test.clj \
+  test/seon/cluster/store_transact_test.clj \
+  test/seon/cluster/turn_test.clj \
+  test/seon/cluster/wake_test.clj \
+  test/seon/cluster_test.clj \
+  test/seon/concurrency_independence_test.clj \
+  test/seon/config_application_test.clj \
+  test/seon/config_test.clj \
+  test/seon/db_test.clj \
+  test/seon/error_class_schema_test.clj \
+  test/seon/error_test.clj \
+  test/seon/flow_test.clj \
+  test/seon/fn_test.clj \
+  test/seon/gen/loop_test.clj \
+  test/seon/html_views_test.clj \
+  test/seon/instrument_test.clj \
+  test/seon/loop_proof_test.clj \
+  test/seon/maintenance_schema_test.clj \
+  test/seon/maintenance_test.clj \
+  test/seon/owned_value_test.clj \
+  test/seon/problems_test.clj \
+  test/seon/program_test.clj \
+  test/seon/render_coverage_test.clj \
+  test/seon/reset_edges_test.clj \
+  test/seon/schema/admission_test.clj \
+  test/seon/schema/datahike_parity.edn \
+  test/seon/schema/datahike_test.clj \
+  test/seon/schema/declaration_population_test.clj \
+  test/seon/schema/edn_test.clj \
+  test/seon/schema/program_test.clj \
+  test/seon/schema_audit_test.clj \
+  test/seon/schema_test.clj \
+  test/seon/schema_usage_guard_test.clj \
+  test/seon/sci/eval_instrumentation_test.clj \
+  test/seon/sci/eval_test.clj \
+  test/seon/shell/jvm_test.clj \
+  test/seon/test/runner_test.clj \
+  test/seon/test/selection_test.clj \
+  test/seon/test_failure_facts_test.clj \
+  test/seon/test_support.clj \
+  test/seon/test_support_test.clj \
+  test/seon/test_test.clj \
+  test/seon/turn_backstop_test.clj \
+  test/seon/turn_continue_test.clj \
+  test/seon/turn_loop_test.clj \
+  -- \
+  my.test-test \
+  seon.ai-stream-fold-test \
+  seon.ai-test \
+  seon.bootstrap-drive-test \
+  seon.classification-test \
+  seon.cluster-test \
+  seon.cluster.agent-test \
+  seon.cluster.armed-test \
+  seon.cluster.boot-test \
+  seon.cluster.mcp-test \
+  seon.cluster.message-test \
+  seon.cluster.program-restart-test \
+  seon.cluster.registry-test \
+  seon.cluster.source-test \
+  seon.cluster.store-transact-test \
+  seon.cluster.turn-test \
+  seon.cluster.wake-test \
+  seon.concurrency-independence-test \
+  seon.config-application-test \
+  seon.config-test \
+  seon.db-test \
+  seon.error-class-schema-test \
+  seon.error-test \
+  seon.flow-test \
+  seon.fn-test \
+  seon.gen.loop-test \
+  seon.html-views-test \
+  seon.instrument-test \
+  seon.loop-proof-test \
+  seon.maintenance-schema-test \
+  seon.maintenance-test \
+  seon.owned-value-test \
+  seon.problems-test \
+  seon.program-test \
+  seon.render-coverage-test \
+  seon.reset-edges-test \
+  seon.schema-audit-test \
+  seon.schema-test \
+  seon.schema-usage-guard-test \
+  seon.schema.admission-test \
+  seon.schema.datahike-test \
+  seon.schema.declaration-population-test \
+  seon.schema.edn-test \
+  seon.schema.program-test \
+  seon.sci.eval-instrumentation-test \
+  seon.sci.eval-test \
+  seon.shell.jvm-test \
+  seon.test-failure-facts-test \
+  seon.test-support-test \
+  seon.test-test \
+  seon.test.runner-test \
+  seon.test.selection-test \
+  seon.turn-backstop-test \
+  seon.turn-continue-test \
+  seon.turn-loop-test
+bin/test --platform
+```
+
+### Latest completed construction evidence
+
+Run `adf54170ac72`, snapshot JVM 10151, recorded **72 executed, 0 unchanged,
+11,012 assertions, 12 failures and 2 errors**. Recording succeeded this time;
+the earlier held-store refusal is not a current recorder claim. Log:
+`tmp/bridge-step2-retirement-construction.log`.
+
+The compiled result has **3,370 forms and 1,207 attributes**, with **zero
+missing/extra attribute keys and zero per-key native map differences**,
+including ordered output, core selection and property selection. The original
+1,012-attribute capture also matches. The two parity failures are input
+identity only: the gate owner's newly landed `:seon.test.runner/report-options`
+changed the forms/digest after the independent capture. Captured input:
+`fcf3bcc28f9e42fd0175ca10efe83e0337b063d1566e5a3ba411fa29e89d6eff`;
+current input:
+`7a2b2424c95c24e5456d22705ac697ec5632d056caeba4d4c7605aca75e23754`.
+This is not a green whole-population regression; its frozen input must be
+recaptured independently when the population settles.
+
+Three complete navigation passes measured **0 compiler calls, 0 registry
+constructions, 0 copied entries**. The dependent-generation regression
+observed 4,905 named providers, maximum one call, with 5,053 sealed entries;
+all its retention/recompilation assertions passed. The optional unstorable
+facet, Var-reference round trip, pure-data materialization, local recursive
+component preparation, native refs/tuples and ordinary codec cases passed.
+
+Remaining failures: nine unique-identity observations in the whole error
+facet closure, the held effect predicate's missing diagnostic, and the two
+input-drift assertions above. The renderer transaction-codec error still
+reports an unavailable renderer contract despite explicit writer derivation;
+the earlier attribution to fixture projection staleness was not sufficient
+and is withdrawn. This remains an unresolved fixture/contract observation,
+not a proven mapping difference. The graph-audit error passed a bare
+`@connection` without its projection; that caller now uses `db/db`, but
+this final one-line correction has not been rerun.
+
+No production retirement commit is made while the writer decision is open.
+The expanded specification require command (including `seon.reconcile`)
+passed with exit 0 after deletion in `tmp/bridge-step2-retirement-load.log`.
+`git diff HEAD --check` is clean. The pending production/resource diff is
+664 additions and 1,269 deletions against current HEAD; the step-1 owner
+LOC comparison above also includes the earlier construction checkpoint.
+The source/test tree is preserved for continuation, with every caller and
+the raw helper deletion still in one pending slice. Only this decision note
+and its issue are committed at the stop.
+
+## Historical resumed verification after the usage-limit pause
+
+The orchestrator restored the shelved edits and ruled handler option 1.
+`seon.shell.jvm/run` reads the generation from its existing effect context's
+environment, then passes it explicitly to `execute` and
+`environment-overrides`. No request metadata carrier or handler protocol was
+added. The explicit handler environment argument remains the effect owner's
+Phase-3 item; `seon.shell.jvm/run` is the handler touched by this slice.
+
+The restored `seon.db/write-entity-schemas` adaptation is retained: an
+identity declaring `:seon.program/row-schema` selects only that write schema.
+This is the orchestrator's authorized merge adaptation, grounded in
+`2d0e9b17e` and the working edge's 2026-09-21 ~20:50 UTC ruling.
+
+Fast recording is available again. Earlier live-recorder refusals below
+are historical and do not describe these resumed requests:
+
+| Request | Executed / unchanged | Assertions | Failures / errors | Observation |
+|---|---:|---:|---:|---|
+| `5f0f46e8ea2b` | 13 / 0 | 24 | 0 / 8 | Incomplete owned overlay omitted converted AI callers. |
+| `c414a8b8f8ad` | 71 / 0 | 1,504 | 0 / 31 | Remaining threaded AI caller and synthetic syntax compilation corrected. |
+| `6abad4087b6c` | 14 / 0 | 25 | 0 / 9 | `storable-properties-in` incorrectly required qualified schema keys; canonical `:inst` exposed it. Contract corrected to keyword. |
+| `4dc80938f3ac` | 14 / 0 | 64 | 6 / 1 | Fixture built; old input baseline drift and transaction-codec return refusal remained. |
+
+The last request also captured the old bridge from commit `22a1a0567`
+against its current complete canonical population, independently of the
+compiled implementation. `datahike_parity.edn` retains the original
+1,012-attribute capture under `:seon.bridge.parity/initial-baseline`; the
+recurring regression checks that original population as well as current
+input identity and complete native declarations. The refreshed result is
+not yet claimed green here.
+
+Held callers awaiting release are `test/seon/error_test.clj` and
+`test/seon/test_support_test.clj`. Foreign cluster guard/export hunks were
+left untouched and subsequently landed. A transient hook refusal named
+unmatched parentheses in foreign `src/seon/call_preparation.clj:512,1332`;
+the snapshot run continued and the hook subsequently admitted commands.
+No foreign session, default operation, worktree or cold gate was used.
+
+The following checkpoint sections retain dated historical observations;
+their pending decisions and inventories are superseded by the ruling above.
+
+### Latest caller and proof boundary
+
+The four-namespace request in `tmp/bridge-step2-parity-proof.log` completed
+the bridge namespace but was terminated during the reference-grammar test.
+A sample from that same JVM (89160) showed `build-projection` inside its
+per-reference loop. That conversion error is corrected: the test now uses
+retained roots, including the fixture's generator-bound generation. The
+interrupted request has **no completed or durable tally**. Within its
+completed bridge namespace, the original **1,012 native declarations**
+matched exactly. Current population: **3,355 forms / 1,196 attributes**;
+the seven differences from the refreshed capture are newly published
+`:seon.program` attributes. Navigation measured **0 compiler calls,
+0 registry constructions, 0 copied entries** across three complete passes.
+
+The codec refusal's actual cause was a stale fixture projection after its
+own declaration writes, not a storage mapping difference. The fixture now
+uses `env/advance-projection!` after each checked transaction, as the
+existing declaration fixture does. That correction awaits execution.
+
+The broader 51-namespace attempt stopped **before tests** at
+`test/seon/cluster/store_transact_test.clj:35`: HEAD `fd93f709a` declares
+required `:seon.call-preparation/candidates` with nested-vector type in
+`resources/seon/schemas/seon.call-preparation.edn`. The bridge correctly
+refuses it. This is the recorded foreign issue
+[unstorable candidates](../../../seon/issues/a-call-preparation-facet-requires-unstorable-candidates.md),
+also named in the steward working edge's 2026-09-22 ~10:15 entry. Its
+in-flight declaration repair was not included in this lane's overlay.
+No recorder refusal is attributed to this attempt: execution never began.
+
+The final construction census also converted `program/declaration-row`
+and every source/test caller to an explicit projection. Schema-row
+materialization now extends that supplied generation and selects only the
+new row; it no longer rebuilds from ambient registered forms. The shell
+generation regression and the converted direct handler fixtures are ready
+but not yet executed. The settings renderer likewise uses its unit/database
+projection and returns the existing typed missing-projection diagnostic.
+
+The expanded specification require command, including `seon.reconcile`,
+exited **0** in `tmp/bridge-step2-caller-load-stable.log`. An earlier load
+raced this lane's edit of `agent.clj`; its reader failure is not attributed
+to a foreign lane. No source edits overlapped the successful load.
+The owned-file clj-kondo pass reports no error-level findings.
+
+The public retirement remains uncommitted because foreign staged edits
+hold `test/seon/error_test.clj` (raw navigation at lines 1304–1306 and its
+require) and `test/seon/test_support_test.clj` (forms-only argument at line
+272). Release was requested while other work continued. The raw file is
+still present; no retirement commit leaves those callers behind. The
+temporary capture test was removed. The frozen expected data retains both
+the initial and refreshed independent old-bridge captures; current input
+drift must still be recaptured after the foreign declaration admits.
+
+No final deletion-budget, completed caller tally, cold/platform verdict or
+live adoption is claimed. The coherent deletion/caller commit, final load,
+current-population equality and landing status remain outstanding.
 
 ## Resumed after publication release
 
