@@ -65,6 +65,7 @@
                       {:seon.effect/id "background-result"
                        :seon.effect/run [:seon.turn/id "background-run"]
                        :seon.effect/owner [:seon.fn/sym 'my.shell/run!]
+                       :seon.effect/capability 'my.shell/run!
                        :seon.effect/form-ordinal 0
                        :seon.effect/ordinal 0
                        :seon.effect/request-edn "{}"

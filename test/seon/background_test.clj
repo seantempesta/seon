@@ -1,11 +1,9 @@
 (ns seon.background-test
-  (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is]]
             [seon.turn :as turn]
 
             [seon.db :as db]
             [seon.config :as config]
-            [seon.render.walk :as walk]
             [seon.test-support :as support])
   (:import [java.util Date]))
 
@@ -20,7 +18,8 @@
                  {:seon.turn/id "origin-run" :seon.turn/agent [:seon.agent/id "background-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
                  {:seon.effect/id "background-effect"
                   :seon.effect/run [:seon.turn/id "origin-run"]
-                  :seon.effect/owner [:seon.fn/sym "clojure.core/identity"]
+                  :seon.effect/owner [:seon.fn/sym 'clojure.core/identity]
+                  :seon.effect/capability 'clojure.core/identity
                   :seon.effect/form-ordinal 0
                   :seon.effect/ordinal 0
                   :seon.effect/request-edn "{}"
