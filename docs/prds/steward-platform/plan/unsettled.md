@@ -6595,3 +6595,23 @@ bare (changed-tier) path unsupported; `--platform` then `--all` are
 running instead (`tmp/orchestrator/gate-cd701afc2-{platform,all}.log`).
 The bare path is a redesign sighting for the test system (an owed proof
 in the plan is "bare bin/test twice, the second executes 0").
+
+## 2026-09-22 ~20:20 local — first cold PLATFORM gate since the cut: RED (97 tests, 6 F / 12 E, five classes); `--all` refused by the fixture-observation rule; bridge lane on the reds, redesign lane on slice 1
+
+`bin/test --platform` at `cd701afc2` (749 s): 11 errors = ONE class in
+`seon.cluster.registry-test` (`malli->datahike-attr-in` calls
+`malli.registry/schema` on a nil registry — step 2's compiled-node path
+reached by a projection without its registry); 3 store-test + 2
+declaration-population failures = stale `:seon.error/kind` expectations
+(`:seon.db/non-temporal-database`, `:seon.schema/missing-projection`);
+1 error = `seon.db/call-with-custody` returns an undeclared
+`:seon.schema/validation-refusal` (rule 1.2); 1 failure =
+`test-support/refusal-data` recognizes error maps by the retired kind
+marker. `bin/test --all` refuses before executing:
+`verify-fixture-observations!` (runner.clj:1202) — two tests reach an
+expensive fixture without a declared observation. `bridge-step2-walker`
+resumed (astra low) on exactly those five classes + the two declarations,
+files disjoint from the redesign lane; `one-jvm-redesign` released on
+slice 1 (one JVM). Two lanes, disjoint paths; the orchestrator runs the
+platform gate again when the bridge lane stops. Retained root for the
+reds: `tmp/test-runs/run.HIBgd6` (swept after the rerun).
