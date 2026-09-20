@@ -122,6 +122,14 @@ publishes CHANGED files as same-identity upserts (`src/seon/cluster.clj`
    members. Remaining: duplicate-publisher deletions, final per-phase
    measurements, then landed.
 
+   **Implementation LANDED (2026-09-21 ~16:00 UTC):** `fa1ff1dbe` duplicate
+   publishers removed, gate bases through the common publisher; `6dae626e0`
+   three offending members optional with a canonical publication regression;
+   `ef70b0dc5` boundary. Final proof (bare×2, platform, per-phase timings) is
+   owed once the bridge validator skips optional unstorable members (step 2's
+   first commit) and the SCI `install-mismatch-error` facet applies the same
+   ruling.
+
 3. **Analysis cached by input digest.** clj-kondo analysis results per input
    are stored keyed by the input's content digest and reused; only changed
    inputs are analyzed. (Falls out of item 1's digest key; separate commit.)

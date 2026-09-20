@@ -5719,3 +5719,21 @@ wrapper validates the same contract); "local base recognition" is the
 general predicate D12 forbids. Its accumulated fast pass was refused at
 recording on the runner's optional offending member — the publication
 lane's current item; ruling waits for its evidence.
+
+## 2026-09-21 ~16:00 UTC — PUBLICATION DISSOLUTION IMPLEMENTED (one publisher); final proof blocked on the bridge's storability check; step 2 resumed
+
+`publication-dissolution` landed `fa1ff1dbe` (duplicate publishers
+removed; gate bases and scalar updates through the common publisher),
+`6dae626e0`, `ef70b0dc5`; owned files clean; no worktree. Its fast proof
+executed zero tests: recording refuses the sci sweep's
+`install-mismatch-error` (required offending member — the sci-program lane
+applies the standing ruling at its next slice) and the bridge validator
+still refuses OPTIONAL unstorable members for storability (step 2's parked
+files). Ruled for the bridge: an optional member the bridge cannot store
+is skipped, never refused; a required one refuses naming the key.
+`bridge-step2-walker` RESUMED with fn.clj/source.clj/cluster.clj/turn.clj
+released and that rule as its first commit. `kind-sweep-sci-program`
+landed `6cea2c6b9` (eval kinds retired; complete returned facets
+recognized — D12). Publication lane paused with measurements owed; the
+gate-restructure lane takes the next free slot. Editing lanes: step 2,
+ops-effects-2, sci-program.
