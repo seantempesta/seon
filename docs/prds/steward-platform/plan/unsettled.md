@@ -4999,3 +4999,16 @@ same file digest. The population commit halves with bridge step 4's diet
 bridge step 1 (the contract projection compiles inside publication and step
 1 rewrites that owner). Lane spec written when step 1 lands; owner: astra
 low from a spec; ~2 lane-days.
+
+## 2026-09-20 ~22:35 UTC — results-reuse: recording landed; publication loses the 1,001st member (ruled option 1)
+
+`results-reuse-everywhere` landed `48e3f80d6` (fast recording through the
+refreshed authority; manifest dump fixed), `baa0afca3` (recorded-fact
+tally; file basis deleted), `858e3053b` (note); fast 46 / 471 / 4 F / 6 E
+with all 46 results recorded; HEAD loads. Stopped: a full publication
+preserves 1,000 of 1,001 admitted test members silently — the pull
+truncation class (AGENTS.md §3; `pull_api.cljc:16/315/323`). Ruled option 1:
+the lane owns the preservation fix (query, never pull, or an elision naming
+the bound) plus a 1,001-member canonical regression; then thin launchers,
+host integration, the two-run zero-execution proof. If the seam sits in the
+turn-cluster sweep's held `src/seon/cluster.clj`, it stops and reports.
