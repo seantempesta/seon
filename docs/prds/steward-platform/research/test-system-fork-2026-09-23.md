@@ -164,3 +164,66 @@ The requested `clojure -M` load check cannot find `seon.test-support` because
 `test/` is absent from that classpath. The same require is run with `-M:test`.
 That load check passed before the slice commit. The one-line error-map
 assertion correction has not yet been rerun.
+
+## Committed slice and once-per-worker projection measurement
+
+Slice (1) landed as `8aca66774`. Committed HEAD loaded successfully with
+`clojure -M:test -e "(require 'seon.test-support 'seon.test 'seon.test.runner)"`.
+No default operation or cold gate was performed.
+
+The cited database line numbers have moved. The current seams are
+`src/seon/db.clj:235` (`carry-connection-projection-state!`), `:249`
+(`carry-projection-state`), `:295` (`resolve-database-value`), `:1219`
+(`carried-projection`), and `:1226` (`read-declarations`). The connection
+carries its state; `db/db` attaches that state's immutable projection to
+the returned database value. Reads choose the carried projection first.
+The metadata is a JVM object and is not serialized in the exported store.
+
+`create-base` at `test/seon/test_support.clj:363` checks the raw connected
+database for a carried projection before deriving one. The measurement
+observed **no carried projection at that first connection** and exactly
+**one** `projection-from-database`, `projection-from-rows`, `build-projection`
+and `projection-registry` invocation across **eleven** fixtures. Every
+fixture's `db/db` carried the **identical projection object**. The branch
+path at `:946` reads the base's carried projection and passes it into each
+branch's new state. There is no per-fixture projection derivation to remove.
+
+Fresh worker PID 88983, snapshot HEAD `f564b7922`, armed timing namespace:
+
+| Measured work | Milliseconds |
+|---|---:|
+| Whole `projection-from-database` | 5458.935792 |
+| Four Datahike `q` calls: schemas, contracts, sources, admission provenance | 2871.858250 |
+| Non-nested Malli `schema` / `function-schema` calls inside `projection-registry` | 47.737387 |
+| Final `schemas` enumeration and `fast-registry` seal | 2.206417 |
+| Other projection work, by subtraction | 2537.133738 |
+
+The last row includes EDN parsing, predicate/form preparation, completeness
+validation, reference graphs, shape rows and fingerprint construction. It
+is not labeled compilation. `build-projection` totaled 2468.590541 ms;
+its `projection-registry` call totaled 188.507541 ms. Those are nested
+measurements, not additional costs. Population: **3358 schemas, 1521
+function contracts**. No schema or SCI production code was changed.
+
+The observations wrap the actual armed functions. Compilation timing
+counts only outermost Malli calls during registry construction to avoid
+counting nested calls twice. Sealing selects the exact registry returned
+by `projection-registry` and its input table by object identity; no count
+threshold or roster chooses it. Malli's implementation is
+`reference-code/malli/src/malli/registry.cljc:17`, `:81`, `:102`.
+
+Recorded run `c05b070b5428` measured first fixture **6221.350667 ms**, subsequent
+p50 **39.888417 ms**. It does not overwrite the earlier 4647.819208 ms
+measurement. It ran **1 test / 16 assertions / 1 failure / 0 errors**;
+the sole failure remains the 2000 ms first-use target. Call count, missing
+initial metadata, identical carried projection, and subsequent bound
+assertions passed. The measured test took 6.874 s including all eleven
+fixtures, so its metadata now declares a 10000 ms bound with that reason;
+this does not widen the first-use assertion. The orchestrator's long-test
+selection is required to rerun that measurement after this declaration.
+
+Per the explicit instruction, work stops at this once-per-worker cost
+decision. The owner must authorize that acquisition cost or choose an
+algorithmic change. Compilation was not optimized; no cache was added.
+Slice (2) remains unimplemented, and the liveness allowance remains
+unchanged pending the independent SCI readiness proof.

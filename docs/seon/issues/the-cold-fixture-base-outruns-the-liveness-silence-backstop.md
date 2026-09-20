@@ -159,3 +159,14 @@ alone takes 3,995.958667 ms. Cold worker resolution also still requires SCI
 acquisition before readiness. Therefore the liveness allowance has not been
 reduced or declared solved. Exact measurements and dependency seams:
 [test-system-fork-2026-09-23.md](../../prds/steward-platform/research/test-system-fork-2026-09-23.md).
+
+Slice (1) landed at `8aca66774`. Follow-up recorded run `c05b070b5428`
+proves one projection acquisition across eleven fixtures, with the same
+projection object carried by all eleven database values. The first raw
+connection has no carried JVM metadata. Its 5458.935792 ms acquisition
+splits into Datahike row queries 2871.858250 ms, Malli compilation calls
+47.737387 ms, registry sealing 2.206417 ms, and other projection work
+2537.133738 ms. The owner requested a stop at this once-per-worker cost
+decision; no compilation optimization or cache was added. The 2000 ms
+first-use assertion still fails (1 test / 16 assertions / 1 failure /
+0 errors), while the subsequent p50 is 39.888417 ms.
