@@ -5489,3 +5489,16 @@ command; unresolved identity + namespace; worker + launch request + the
 underlying failure through 1a's throwable/evidence members), reusing
 existing `seon.test*` attributes before minting; the same rule applies to
 any further marker-only facet without a stop. Resumed.
+
+## 2026-09-21 ~10:10 UTC — ops-effects: marker-only facet in my.background ruled; files freed
+
+`kind-sweep-ops-effects` stopped (`f031bbeb6`) at a boolean-only facet in
+`my.background`'s shared schema whose producer sits in `src/my/background.clj`
+(named held at launch; free since the my-protocol sweep landed). The
+recording authority refused the draft with the class guard "A boolean
+marker alone cannot define an error facet". Ruled as for the runner
+facets: the facet gains its producer's substantive required members
+(request/task identity, failing phase or bound, underlying failure via
+1a's evidence members); ops-effects owns src/my/background.clj and its
+test for that conversion; further marker-only facets follow the same rule
+without a stop. Resumed (199 references remain in its family).
