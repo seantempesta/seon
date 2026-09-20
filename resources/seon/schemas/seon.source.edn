@@ -16,6 +16,34 @@
               :test-recording-request [:or :seon.test.run/completion :seon.source/test-selection-request],
               :test-recording-result
               [:or :seon.test.run/admission :seon.test/results :seon.source/test-evidence-error],
+              :loaded-host [:string {:seon.db/identity true :description "An observed producer generation of one hosting process. It remains historical after a later loaded generation."}],
+              :loaded-producer-digest [:and {:seon.db/identity false} :seon.source/digest],
+              :producer-namespace :symbol,
+              :producer-path :string,
+              :producer-digest [:and {:seon.db/identity false} :seon.source/digest],
+              :producer [:map {:seon.db/attributes true}
+                         [:seon.source/producer-namespace :seon.source/producer-namespace]
+                         [:seon.source/producer-path :seon.source/producer-path]
+                         [:seon.source/producer-digest :seon.source/producer-digest]],
+              :loaded-producers [:set {:seon.db/component true
+                                      :seon.db/component-schema :seon.source/producer
+                                      :description "Observed namespace inputs; deleting the generation cascades to these observations."} :seon.db/ref],
+              :loaded-generation [:map {:seon.db/attributes true}
+                                  [:seon.source/loaded-host :seon.source/loaded-host]
+                                  [:seon.source/loaded-producer-digest :seon.source/loaded-producer-digest]
+                                  [:seon.source/loaded-producers :seon.source/loaded-producers]],
+              :requested-producer-digest [:and {:seon.db/identity false} :seon.source/digest],
+              :producer-mismatch [:set :symbol],
+              :host-transition :string,
+              :restart-required? :boolean,
+              :producer-mismatch-error
+              [:map {:seon.error/class true}
+               [:seon.source/producer-mismatch :seon.source/producer-mismatch]
+               [:seon.source/loaded-producer-digest {:optional true} :seon.source/loaded-producer-digest]
+               [:seon.source/requested-producer-digest :seon.source/requested-producer-digest]
+               [:seon.source/host-transition :seon.source/host-transition]
+               [:seon.source/restart-required? :seon.source/restart-required?]
+               [:seon.error/message :seon.error/message]],
               :built-at :inst,
               :built? :boolean,
               :commit-id :uuid,

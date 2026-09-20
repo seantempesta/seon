@@ -1994,7 +1994,8 @@
 
 (defn- launch-form
   [root name manifest ready-port]
-  (let [instance (gensym "instance")]
+  (let [instance (gensym "instance")
+        loaded-inputs (test.cache/input-digests (str (repository-root)))]
     (pr-str
      `(do
         (with-open [socket# (java.net.Socket. "127.0.0.1" ~ready-port)
@@ -2039,6 +2040,8 @@
                     applied# ~(instrument-form instance name)]
                 (when (:seon.error/kind rotation#)
                   (throw (ex-info (:seon.error/message rotation#) rotation#)))
+                ((ns-resolve 'seon.cluster (symbol "record-loaded-producers!"))
+                 ~instance ~loaded-inputs)
                 (println "seon" ~name "ready — instrumented"
                          (:seon.instrument/instrumented applied#) "vars")
                 (flush)

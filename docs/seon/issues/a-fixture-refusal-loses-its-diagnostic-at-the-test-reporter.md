@@ -39,3 +39,11 @@ failed before delivering its completion. Evidence:
 The declaration was corrected by the results lane; fixture recovery remains
 outside that slice. Its diagnostic must preserve the original refusal and
 settle the completion even when construction fails.
+
+2026-09-21 publication followup reproduced the undelivered construction
+completion in `tmp/publication-dissolution/common-publisher-fixed-fast.log`
+(snapshot `run.LnGLSn`). The clean fixture helper now supplies the required
+`:seon.error/at`, `/layer`, and `/operation` to its existing diagnostic and
+recognizes the returned flat error when retiring a failed construction.
+The broader reporter work above remains open. Validation is recorded in the
+publication dissolution landing note.

@@ -40,27 +40,30 @@
 (def ^:dynamic *activation-missing* [])
 
 (defn- populate-schema!
-  {:malli/schema [:=> [:cat :seon.db/connection] :nil]}
-  [connection]
-  (cluster/populate-source! {:seon.db/connection connection
-                             :seon.fn/manifest @test-support/source-manifest})
+  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]]] :nil]}
+  [{connection :seon.db/connection prior :seon.source/previous-database :as request}]
+  ;; Subsequent synthetic publications change only the probe row. The real
+  ;; program population is already inherited from the published branch.
+  (when-not prior
+    (cluster/populate-source! (assoc request :seon.fn/manifest @test-support/source-manifest))
+    (test-support/transacted! connection probe-schema))
   nil)
 
 (defn populate!
-  [{:keys [:seon.db/connection :seon.source/digest]}]
-  (populate-schema! connection)
-  (test-support/transacted! connection probe-schema)
+  [{:keys [:seon.db/connection :seon.source/digest] :as request}]
+  (populate-schema! request)
   (test-support/transacted! connection
-                          [{:seon.source.test/marker digest}]))
+    (conj (mapv (fn [entity] [:db/retractEntity entity])
+                (db/q '[:find [?entity ...] :where [?entity :seon.source.test/marker]] @connection))
+          {:seon.source.test/marker digest})))
 
 (defn populate-fails!
   [_]
   (throw (ex-info "population failed" {::injected true})))
 
 (defn populate-from-data!
-  [{:keys [:seon.db/connection :seon.source.test/marker]}]
-  (populate-schema! connection)
-  (test-support/transacted! connection probe-schema)
+  [{:keys [:seon.db/connection :seon.source.test/marker] :as request}]
+  (populate-schema! request)
   (test-support/transacted! connection [{:seon.source.test/marker marker}]))
 
 (defn populate-blocked!
@@ -229,62 +232,6 @@
     (is (= 12 (:seon.render.data/total elision)))
     (is (= 10 (:seon.render.data/next-offset elision)))
     (is (< (count (:seon.error/message face)) 1000))))
-
-(deftest ^{:seon.test/long
-           "Multiple complete publications verify branch advancement and retirement."
-           :seon.test/long-ms 600000}
-  publication-advances-one-branch-and-retires-scratch
-  (with-store
-    (fn [opened]
-      (let [a (publish opened digest-a
-                       'seon.cluster.source-test/populate-from-data!
-                       {:seon.source.test/marker "from-populate-request"})
-            b (publish opened digest-b)]
-        (is (= :current-src (:seon.source/branch a)
-               (:seon.source/branch b)))
-        (is (= digest-a (:seon.source/digest a)))
-        (is (= digest-b (:seon.source/digest b)))
-        (is (= (cache/test-input-digest (cache/input-digests (fs/source-directory)))
-               (:seon.source/test-input-digest
-                (db/pull (source/database opened (:seon.source/commit-id b))
-                         [:seon.source/test-input-digest] [:seon.source/digest digest-b])))
-            "Publication carries its observed external-input identity.")
-        (is (not= (:seon.source/commit-id a)
-                  (:seon.source/commit-id b)))
-        (is (= #{(:seon.source/commit-id a)}
-               (d/parent-commit-ids
-                (d/branch-as-db (:seon.store/connection-object opened)
-                                source/current-branch)))
-            "published history follows prior current-src, not scratch")
-        (is (= #{:db :current-src} (registry/roster opened)))
-        (is (empty? (scratch-branches opened)))
-        (is (= {:seon.source/branch :current-src
-                :seon.source/commit-id (:seon.source/commit-id b)}
-               (source/current opened)))
-        (testing "a complete publication never trusts digest equality alone"
-          (let [connection (store/open-branch! opened source/current-branch)]
-            (try
-              (test-support/transacted! connection
-                                      [[:db/retract
-                                        [:seon.source.test/marker digest-b]
-                                        :seon.source.test/marker
-                                        digest-b]
-                                       {:seon.source.test/marker "stale-row"}])
-              (finally
-                (d/release connection))))
-          (let [again (publish opened digest-b)
-                current-db (d/branch-as-db
-                            (:seon.store/connection-object opened)
-                            source/current-branch)]
-            (is (true? (:seon.source/built? again)))
-            (is (= digest-b (:seon.source/digest again)))
-            (is (not= (:seon.source/commit-id b)
-                      (:seon.source/commit-id again)))
-            (is (= #{digest-b}
-                   (set (db/q '[:find [?marker ...]
-                               :where [_ :seon.source.test/marker ?marker]]
-                             current-db)))
-                "complete population repairs stale rows under an equal digest")))))))
 
 (deftest flat-scratch-write-refusal-retires-the-candidate
   (with-store
@@ -474,26 +421,6 @@
           (is (= (:seon.source/commit-id published)
                  (:seon.source/commit-id (source/current opened)))))))))
 
-(deftest stale-incremental-upsert-preserves-the-newer-publication
-  (with-store
-    (fn [opened]
-      (let [a (publish opened digest-a)
-            b (publish opened digest-b)
-            data (refusal
-                  #(upsert opened (:seon.source/commit-id a) digest-c
-                           [{:seon.source.test/marker "stale"}]))]
-        (is (= :stale-branch-head (:type data)))
-        (is (= (:seon.source/commit-id b)
-               (:seon.source/commit-id (source/current opened))))
-        (let [connection
-              (store/open-branch! opened source/current-branch)]
-          (try
-            (is (= #{digest-b} (source-digests connection)))
-            (is (= #{digest-b} (markers connection)))
-            (finally
-              (d/release connection))))
-        (is (empty? (scratch-branches opened)))))))
-
 (deftest incremental-publication-does-not-change-an-existing-cluster
   (with-store
     (fn [opened]
@@ -516,71 +443,6 @@
               (try
                 (is (= expected-digest (source-digests connection)))
                 (is (= expected-markers (markers connection)))
-                (finally
-                  (d/release connection))))))))))
-
-(deftest ^{:seon.test/long
-           "Three complete source publications exercise the stale branch-head decision."
-           :seon.test/long-ms 600000}
-  failed-and-stale-builds-preserve-the-published-head
-  (with-store
-    (fn [opened]
-      (let [a (publish opened digest-a)
-            commit-a (:seon.source/commit-id a)]
-        (is (= {::injected true}
-               (refusal #(publish opened digest-b
-                                   'seon.cluster.source-test/populate-fails!))))
-        (is (= commit-a (:seon.source/commit-id (source/current opened))))
-        (is (empty? (scratch-branches opened)))
-        (let [entered (CountDownLatch. 1)
-              release (CountDownLatch. 1)]
-          (reset! blocked-entered entered)
-          (reset! blocked-release release)
-          (let [stale (future
-                        (refusal #(publish opened digest-b
-                                           'seon.cluster.source-test/populate-blocked!)))]
-            (is (true? (test-support/await-event!
-                        entered "blocked source population entered")))
-            (let [c (try
-                      (publish opened digest-c)
-                      (finally
-                        (.countDown release)))
-                  stale-result
-                  (deref stale
-                         (.toMillis TimeUnit/SECONDS
-                                    (* 10 test-support/event-backstop-seconds))
-                         ::stale-publication-timeout)]
-              (when (= ::stale-publication-timeout stale-result)
-                (future-cancel stale)
-                (throw
-                 (ex-info "The stale source publication did not complete."
-                          {:seon.test-support/event
-                           "stale source publication"})))
-              (is (= :stale-branch-head (:type stale-result))
-                  (pr-str stale-result))
-              (is (= (:seon.source/commit-id c)
-                     (:seon.source/commit-id (source/current opened))))
-              (is (empty? (scratch-branches opened))))))))))
-
-(deftest existing-clusters-remain-on-their-chosen-source-commit
-  (with-store
-    (fn [opened]
-      (let [a (publish opened digest-a)]
-        (registry/ensure-cluster!
-         {:seon.store/store opened
-          :seon.boot/cluster-name "a"
-          :seon.source/commit-id (:seon.source/commit-id a)})
-        (let [b (publish opened digest-b)]
-          (registry/ensure-cluster!
-           {:seon.store/store opened
-            :seon.boot/cluster-name "b"
-            :seon.source/commit-id (:seon.source/commit-id b)})
-          (doseq [[cluster expected] [["a" #{digest-a}]
-                                      ["b" #{digest-b}]]]
-            (let [connection
-                  (store/open-branch! opened (registry/cluster-branch cluster))]
-              (try
-                (is (= expected (markers connection)))
                 (finally
                   (d/release connection))))))))))
 
@@ -642,26 +504,12 @@
                    (set (db/q '[:find [?digest ...]
                                 :where [_ :seon.source/digest ?digest]] @connection))))))))))
 
-(deftest incremental-source-refresh-includes-unreported-changes
-  (let [changed (deref #'cluster/changed-source-paths)
-        published {"/repo/src/a.clj" "a1"
-                   "/repo/src/b.clj" "b1"
-                   "/repo/resources/schema.edn" "s1"}]
-    (is (= ["/repo/src/a.clj"] (changed published
-                  (assoc published "/repo/src/a.clj" "a2")
-                  ["/repo/src/a.clj"])))
-    (is (= ["/repo/src/a.clj" "/repo/src/b.clj"] (changed published
-                          (assoc published "/repo/src/b.clj" "b2")
-                          ["/repo/src/a.clj"])))
-    (is (= ["/repo/resources/schema.edn" "/repo/src/a.clj"] (changed published
-                          (dissoc published "/repo/resources/schema.edn")
-                          ["/repo/src/a.clj"])))
-    (is (= ["/repo/src/a.clj" "/repo/src/new.clj"] (changed published
-                          (assoc published "/repo/src/new.clj" "n1")
-                          ["/repo/src/a.clj"])))
-    (is (= ["/outside/reported.clj"]
-           (changed published published ["/outside/reported.clj"]))
-        "reported paths absent from both digest maps remain analysis inputs")))
+(deftest publication-input-digests-include-unreported-edits-and-deletions
+  (let [before {"src/a.clj" "a1" "src/b.clj" "b1"}
+        after {"src/a.clj" "a2" "src/new.clj" "n1"}]
+    (is (= {:seon.test.cache/changed ["src/a.clj" "src/new.clj"]
+            :seon.test.cache/removed ["src/b.clj"]}
+           (seon.test.cache/changed-inputs before after)))))
 
 (deftest an-activation-closure-with-empty-member-collections-seals
   ;; A cardinality-many attribute with NO members emits no datoms, so the

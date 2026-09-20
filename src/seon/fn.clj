@@ -2251,33 +2251,37 @@
                    (:seon.fn.manifest/relative-roots manifest)
                    (concat retained desired-artifacts))))
 
-(defn toolchain-digest
-  "Digest producer files through the graph's requires closure from indexing.
-  Namespace membership derives from the supplied graph, never a file roster.
-  Input digests describe the candidate tree, including removed producer files."
-  {:malli/schema [:=> [:cat :seon.fn.manifest/manifest
-                       [:map-of :string :string] [:map-of :string :string]]
-                  :seon.source/toolchain-digest]}
-  [manifest input-digests dependency-digests]
+(defn producer-paths
+  "Namespace files in the published requires closure of the analysis entry points."
+  {:malli/schema [:=> [:cat :seon.fn.manifest/manifest] [:map-of :symbol :string]]}
+  [manifest]
   (let [artifacts (:seon.fn.manifest/artifacts manifest)
-        namespaces (into {} (comp (mapcat :seon.fn.file/rows)
-                                   (filter :seon.ns/name)
+        namespaces (into {} (comp (mapcat :seon.fn.file/rows) (filter :seon.ns/name)
                                    (map (juxt :seon.ns/name identity))) artifacts)
-        ; These are execution entry points, not a list of their dependencies.
-        entries ['seon.fn/build-manifest 'seon.fn/index!]
         requires (into {} (map (fn [[name row]]
                                  [[:seon.ns/name name]
                                   (into #{} (comp (filter namespaces)
                                                   (map #(vector :seon.ns/name %)))
                                         (:seon.ns/requires row))])) namespaces)
         reached (selection/declaration-closure
-                 requires (into #{} (map #(vector :seon.ns/name (symbol (namespace %)))) entries))
-        paths (into (sorted-set)
-                    (keep (fn [artifact]
-                            (when (some #(reached [:seon.ns/name (:seon.ns/name %)]) (:seon.fn.file/rows artifact))
-                              (:seon.fn.file/relative-path artifact)))) artifacts)]
-    (id/digest 64 [(into (sorted-map) (map #(vector % (get input-digests %))) paths)
-                   (into (sorted-map) dependency-digests)])))
+                 requires #{[:seon.ns/name 'seon.fn]})]
+    (into {}
+          (mapcat (fn [artifact]
+                    (keep (fn [row]
+                            (when (reached [:seon.ns/name (:seon.ns/name row)])
+                              [(:seon.ns/name row) (:seon.fn.file/relative-path artifact)]))
+                          (:seon.fn.file/rows artifact)))) artifacts)))
+
+(defn toolchain-digest
+  "Content identity of graph-derived producer files and pinned dependencies."
+  {:malli/schema [:=> [:cat :seon.fn.manifest/manifest
+                       [:map-of :string :string] [:map-of :string :string]]
+                  :seon.source/toolchain-digest]}
+  [manifest input-digests dependency-digests]
+  (id/digest 64 [(into (sorted-map)
+                       (map #(vector % (get input-digests %)))
+                       (vals (producer-paths manifest)))
+                   (into (sorted-map) dependency-digests)]))
 
 (defn- analyzed-artifacts
   {:malli/schema [:=> [:cat :map :seon.fn/roots :string
@@ -2355,6 +2359,8 @@
   [toolchain resolution path input-digest]
   (id/digest 64 [:artifact toolchain resolution path input-digest]))
 
+(declare published-index-rows)
+
 (defn build-manifest
   "Build the complete manifest, analyzing only changed inputs and referrers.
   Incremental requests carry the previous manifest, published graph rows and
@@ -2365,6 +2371,7 @@
               [:seon.fn/root {:optional true} :string]
               [:seon.fn/previous-manifest {:optional true} :seon.fn.manifest/manifest]
               [:seon.fn/published-rows {:optional true} :seon.program/rows]
+              [:seon.source/previous-database {:optional true} :seon.db/database-value]
               [::analyzer/cache-root {:optional true} :string]
               [:seon.schema.projection/forms {:optional true} :map]]]
     :seon.fn.manifest/manifest]}
@@ -2415,7 +2422,10 @@
               retained (remove #(changed (:seon.fn.file/relative-path %)) old-artifacts)
               candidate (assoc (manifest-data directory relative-roots (concat retained first-artifacts))
                                :seon.fn.manifest/declaration-digests schema-digests)
-              affected (publication-inputs previous candidate changed (or (:seon.fn/published-rows request) []))
+              published-rows (when (not= (resolution-digest previous) (resolution-digest candidate))
+                               (or (:seon.fn/published-rows request)
+                                   (some-> (:seon.source/previous-database request) published-index-rows)))
+              affected (publication-inputs previous candidate changed (or published-rows []))
               additional (set/difference affected changed)
               resolution (resolution-digest candidate)
               toolchain (id/digest 64 [(:seon.source/toolchain-digest previous) schema-digests])
@@ -3120,7 +3130,7 @@
   (reconcile-tx-in (program/shapes-in (declaration-forms nil))
                    database rows previous-identities))
 
-(defn- published-index-rows
+(defn published-index-rows
   "Read compiled rows with portable program refs and complete owned components."
   {:malli/schema
    [:=> [:cat :seon.db/database-value]

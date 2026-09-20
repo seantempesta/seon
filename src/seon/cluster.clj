@@ -46,6 +46,8 @@
             [seon.fn :as seon.fn]
             [seon.fs :as fs]
             [seon.instrument :as instrument]
+            [seon.id :as id]
+            [seon.test.cache :as test.cache]
             [seon.operator.runtime :as operator.runtime
              :refer [root-store-holder running-instances]]
             [seon.operator.state :as operator.state]
@@ -1768,6 +1770,9 @@
   [{connection :seon.db/connection
     manifest :seon.fn/manifest
     roots :seon.fn/roots
+    previous :seon.fn/previous-manifest
+    paths :seon.fn/changed-paths
+    prior-database :seon.source/previous-database
     classes :seon.source/change-classes}]
   (let [forms (schema.edn/packaged-forms)]
     (schema/call-with-forms
@@ -1808,7 +1813,10 @@
                       :seon.db/process
                       [:seon.db.process/id boot-process-identity]}
                manifest (assoc :seon.fn/manifest manifest)
-               classes (assoc :seon.source/previous-database (db/db connection))
+               (or classes prior-database)
+               (assoc :seon.source/previous-database (or prior-database (db/db connection)))
+               previous (assoc :seon.fn/previous-manifest previous)
+               paths (assoc :seon.fn/changed-paths paths)
                (nil? manifest) (assoc :seon.fn/roots (or roots seon.fn/source-roots)))
              report-source-progress!)
             (report-source-progress! "program rows complete"))
@@ -1920,12 +1928,6 @@
                        (when-not (identical? token (::holder-token current))
                          current))))))))))
 
-(defonce ^:private source-analysis-cache
-  ;; A source snapshot determines the complete static projection. Scratch
-  ;; stores differ, but their program rows do not; repeated test/experiment
-  ;; roots should not re-run clj-kondo for identical bytes.
-  (atom nil))
-
 (def ^:private issue-note-path
   "The one repository path whose Markdown the publication indexes but does
   NOT digest. An issue note owns no program facts, so it never re-identifies
@@ -1956,34 +1958,23 @@
   (let [tree-snapshot
         (source/snapshot {:seon.source/roots roots :seon.fn/root directory})
         schema-digest (schema.edn/declaration-digest)
-        schema-path schema-declaration-path
+        input-roots (test.cache/input-roots directory)
+        external (into {} (filter (fn [[path _]] (test.cache/input-path? input-roots path)))
+                       (test.cache/input-digests directory))
         file-digests
-        (assoc (:seon.source/relative-file-digests tree-snapshot)
-               schema-path schema-digest)
-        digest
-        (schema/sha-256
-         [(.getBytes (str "source\u0000"
-                          (:seon.source/digest tree-snapshot) "\n"
-                          "schema\u0000" schema-digest "\n")
-                    StandardCharsets/UTF_8)])]
+        (into (sorted-map)
+              (assoc (merge (:seon.source/relative-file-digests tree-snapshot) external)
+                     schema-declaration-path schema-digest))
+        ;; Producer pins and analyzer configuration identify the publication
+        ;; even when no Clojure file changed. Documentation remains outside
+        ;; the gate's declared input inventory.
+        digest (id/digest 64 file-digests)]
     {:seon.source/digest digest
      :seon.source/relative-file-digests (into (sorted-map) file-digests)})))
 
 (defn- current-source-snapshot
   [roots]
   (source-snapshot (:seon.source/roots roots) (:seon.fn/root roots)))
-
-(defn- publish-current-source!
-  [store source-digest manifest roots]
-  (source/publish!
-   {:seon.store/store store
-    :seon.fn/root (:seon.fn/root roots)
-    :seon.source/digest source-digest
-    :seon.source/populate `populate-source!
-    :seon.source/progress! report-source-progress!
-    :seon.source/activation `derive-activation
-    :seon.source/populate-request {:seon.fn/manifest manifest
-                                   :seon.fn/roots (:seon.fn/roots roots)}}))
 
 (defn- current-source!
   "The exact published source commit new clusters fork.
@@ -2149,28 +2140,19 @@
 
 (defn- current-publication
   [store expected-digest]
-  (when-let [{branch :seon.source/branch
-              commit-id :seon.source/commit-id}
+  (when-let [{branch :seon.source/branch commit-id :seon.source/commit-id}
              (source/current store)]
-    (let [database (source/database store commit-id)]
+    ;; Reading the seal needs no program projection. The changed publication
+    ;; acquires its prior declaration world once, after this cheap comparison.
+    (let [database (d/commit-as-db (:seon.store/connection-object store) commit-id)]
       (try
-        (let [digest (db/q '[:find ?digest .
-                                :where [_ :seon.source/digest ?digest]] database)]
-          (when (:seon.error/kind digest)
+        (let [digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] database)]
+          (when (map? digest)
             (refused! "Published source digest could not be read." digest))
           (when (and digest (or (nil? expected-digest) (= expected-digest digest)))
-            (let [files (db/q '[:find ?path ?digest
-                                :where [?file :seon.fn.file/relative-path ?path]
-                                       [?file :seon.fn.file/digest ?digest]] database)]
-              (when (:seon.error/kind files)
-                (refused! "Published source file digests could not be read." files))
-              {:seon.source/branch branch
-               :seon.source/commit-id commit-id
-               :seon.source/digest digest
-               :seon.source/relative-file-digests (into {} files)
-               :seon.source/built? false})))
-        (finally
-          (d/release-materialized-db database))))))
+            {:seon.source/branch branch :seon.source/commit-id commit-id
+             :seon.source/digest digest :seon.source/built? false}))
+        (finally (when database (d/release-materialized-db database)))))))
 
 (defn- valid-source-manifest?
   [manifest]
@@ -2181,220 +2163,184 @@
           :seon.fn.manifest/manifest manifest)
          (catch Throwable _ false))))
 
-(defn- stable-manifest
-  [roots]
-  (report-source-progress! "source snapshot")
-  (let [snapshot-before (current-source-snapshot roots)
-        cached @source-analysis-cache
-        cached? (and (= snapshot-before (:seon.source/snapshot cached))
-                     (valid-source-manifest? (:seon.fn/manifest cached))
-                     (= (get-in cached [:seon.fn/manifest :seon.fn.manifest/relative-roots])
-                        (mapv (partial fs/relative-path (:seon.fn/root roots))
-                              (:seon.fn/roots roots))))
-        _ (report-source-progress!
-           (str "analysis started: "
-                (count (:seon.source/relative-file-digests snapshot-before))
-                " source inputs"))
-        manifest (if cached?
-                   (assoc (:seon.fn/manifest cached) :seon.fn.manifest/root (:seon.fn/root roots))
-                   (seon.fn/build-manifest
-                    {:seon.fn/roots (:seon.fn/roots roots)
-                     :seon.fn/root (:seon.fn/root roots)}))
-        _ (report-source-progress! "analysis complete")
-        snapshot-after (current-source-snapshot roots)]
-    (when-not (= snapshot-before snapshot-after)
-      (refused! "Source changed while current-src was being analyzed; retry."
-                {:seon.source/digest-before
-                 (:seon.source/digest snapshot-before)
-                 :seon.source/digest-after
-                 (:seon.source/digest snapshot-after)}))
-    (let [result {:seon.source/snapshot snapshot-after
-                  :seon.source/digest (:seon.source/digest snapshot-after)
-                  :seon.fn/manifest manifest}]
-      (when-not cached?
-        (clojure.core/reset! source-analysis-cache result))
-      result)))
+(defn record-loaded-producers!
+  "Record a completed host load, checking the inputs captured before loading.
+  Callable objects remain with the instance; their observed content identity is durable."
+  {:malli/schema [:function
+                    [:=> [:cat :seon.boot/instance [:map-of :string :string]] :nil]
+                    [:=> [:cat :seon.boot/instance [:map-of :string :string] :seon.fn.manifest/manifest] :nil]]}
+  ([instance before]
+   (record-loaded-producers! instance before
+     (:seon.fn/manifest (read-source-artifact (get-in instance [:seon.boot/config :seon.boot/root])))))
+  ([instance before manifest]
+  (let [root (get-in instance [:seon.boot/config :seon.boot/root])
+        directory (fs/source-directory)
+        paths (seon.fn/producer-paths manifest)
+        missing (into #{} (remove find-ns) (keys paths))
+        _ (when (seq missing)
+            (refused! "The host has not loaded every producer namespace."
+                      {:seon.source/producer-mismatch missing}))
+        after (test.cache/input-digests directory)
+        dependencies (test.cache/toolchain-dependencies directory #{".clj-kondo"})
+        observed (into (set (vals paths)) (keys dependencies))
+        _ (when-not (= (select-keys before observed) (select-keys after observed))
+            (refused! "Producer source changed while the host loaded; restart the host."
+                      {:seon.source/producer-mismatch (set (keys paths))}))
+        digest (seon.fn/toolchain-digest manifest before (select-keys before (keys dependencies)))
+        host (id/id)
+        roots (into {} (for [name (keys paths)
+                             :let [namespace (find-ns name)]
+                             candidate (vals (when namespace (ns-interns namespace)))
+                             :when (and (bound? candidate) (ifn? @candidate))]
+                         [candidate @candidate]))
+        state {:seon.instrument/roots roots :seon.instrument/function-schemas {}}
+        _ (require-committed!
+           (db/transact! (:seon.boot/cluster-connection instance)
+             {:tx-data [{:seon.source/loaded-host host :seon.source/loaded-producer-digest digest
+               :seon.source/loaded-producers
+               (mapv (fn [[name path]] {:seon.source/producer-namespace name
+                                        :seon.source/producer-path path
+                                        :seon.source/producer-digest (get before path)}) paths)}]})
+           {:seon.boot/population :seon.source/loaded-generation})
+        database (db/db (:seon.boot/cluster-connection instance))]
+    ;; One hosting JVM has one set of callable roots. Every hosted instance
+    ;; carries the same observed database value, including across cluster stops.
+    (swap! running-instances
+           (fn [instances]
+             (update-vals instances
+               (fn [candidate]
+                 (if (= (:seon.store/store instance) (:seon.store/store candidate))
+                   (assoc candidate :seon.source/loaded-host host
+                          :seon.source/loaded-state state
+                          :seon.source/loaded-database database)
+                   candidate))))))
+  nil))
+
+(defn- require-loaded-producers!
+  "A live host's recorded generation must identify the requested producer."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.fn.manifest/manifest] :nil]}
+  [store manifest]
+  (when-let [instance (some #(when (= store (:seon.store/store %)) %) (vals @running-instances))]
+    (let [database (:seon.source/loaded-database instance)
+          host (:seon.source/loaded-host instance)
+          observed (when host
+                     (db/pull database
+                              [:seon.source/loaded-producer-digest
+                               {:seon.source/loaded-producers
+                                [:seon.source/producer-namespace :seon.source/producer-path :seon.source/producer-digest]}]
+                              [:seon.source/loaded-host host]))
+          loaded (:seon.source/loaded-producer-digest observed)
+          inputs (test.cache/input-digests (fs/source-directory))
+          requested (seon.fn/toolchain-digest manifest inputs
+                      (test.cache/toolchain-dependencies (fs/source-directory) #{".clj-kondo"}))
+          replaced (when-let [state (:seon.source/loaded-state instance)]
+                     (instrument/replaced-definitions state))
+          mismatched (into (into #{} (map #(ns-name (:ns (meta %)))) replaced)
+                           (keep (fn [entry]
+                                   (when (not= (:seon.source/producer-digest entry)
+                                               (get inputs (:seon.source/producer-path entry)))
+                                     (:seon.source/producer-namespace entry))))
+                           (:seon.source/loaded-producers observed))
+          mismatched (if (and (not= loaded requested) (empty? mismatched))
+                       (set (keys (seon.fn/producer-paths manifest))) mismatched)]
+      (when (or (not= loaded requested) (seq mismatched))
+        (let [name (get-in instance [:seon.boot/config :seon.boot/cluster-name])
+              message "The live host's loaded producers do not match the requested toolchain."
+              root (-> (io/file (get-in instance [:seon.boot/config :seon.boot/root]))
+                       .getParentFile .getParentFile .getCanonicalPath)
+              command (str "bin/seon --root " (pr-str root))
+              class-namespaces
+              (into #{} (comp (mapcat :seon.fn.file/rows)
+                              (filter #(#{'clojure.core/deftype 'clojure.core/defrecord
+                                          'clojure.core/defprotocol} (:seon.fn/defined-by %)))
+                              (keep #(some-> (:seon.fn/sym %) namespace symbol)))
+                    (:seon.fn.manifest/artifacts manifest))
+              restart? (or (nil? loaded) (seq (set/intersection mismatched class-namespaces)))
+              transition (if restart?
+                           (str command " down; " command " start " name)
+                           (str command " init --dev " name))
+              refusal (cond-> {:seon.error/at (Date.) :seon.error/layer :seon.source/publication
+                               :seon.error/operation 'seon.cluster/refresh-source!
+                               :seon.error/message message
+                               :seon.source/producer-mismatch mismatched
+                               :seon.source/requested-producer-digest requested
+                               :seon.source/host-transition transition
+                               :seon.source/restart-required? (boolean restart?)}
+                        loaded (assoc :seon.source/loaded-producer-digest loaded))]
+          (throw (ex-info message refusal))))))
+  nil)
 
 (defn- full-source-refresh!
+  "One publication path: reconcile changed artifacts on the current lineage."
   [root store roots]
-  (let [prior-publication (current-publication store nil)
-        prior-artifact (read-source-artifact root)
-        previous (when (and prior-publication
-                            (valid-source-manifest? (:seon.fn/manifest prior-artifact))
-                            (= (:seon.source/digest prior-publication)
-                               (:seon.source/digest prior-artifact)))
-                   (:seon.fn/manifest prior-artifact))
-        {source-digest :seon.source/digest
-         snapshot :seon.source/snapshot
-         manifest :seon.fn/manifest} (stable-manifest roots)
-        _ (report-analysis-warnings! previous manifest)
-        unchanged (current-publication store source-digest)
-        published (or unchanged
-                      (do (report-source-progress! "branch publication started")
-                          (let [result (publish-current-source! store source-digest manifest roots)]
-                            (report-source-progress! "branch publication complete")
-                            result)))]
-    (write-source-artifact! root (source-artifact published manifest snapshot))
-    published))
-
-(defn- changed-source-paths
-  [published-file-digests current-file-digests reported-paths]
-  (->> (concat reported-paths
-               (filter #(not= (get published-file-digests %)
-                              (get current-file-digests %))
-                       (distinct (concat (keys published-file-digests)
-                                         (keys current-file-digests)))))
-       distinct sort vec))
-
-(defn- incremental-source-refresh!
-  [root store changed-paths roots]
-  (let [cached (read-source-artifact root)
+  (let [snapshot (current-source-snapshot roots)
+        digest (:seon.source/digest snapshot)
         published (current-publication store nil)
-        manifest (some-> (:seon.fn/manifest cached)
-                         (assoc :seon.fn.manifest/root (:seon.fn/root roots)))
-        expected-commit (:seon.source/commit-id published)]
-    (if-not (and (valid-source-manifest? manifest)
-                 (= (:seon.fn.manifest/relative-roots manifest)
-                    (mapv (partial fs/relative-path (:seon.fn/root roots))
-                          (:seon.fn/roots roots)))
-                 expected-commit
-                 (= (:seon.source/digest published) (:seon.source/digest cached))
-                 (map? (:seon.source/relative-file-digests cached)))
-      (do (report-source-progress! "complete publication: manifest cache needs analysis")
-          (full-source-refresh! root store roots))
-      (let [snapshot-before (current-source-snapshot roots)
-            paths (changed-source-paths (merge (:seon.source/relative-file-digests cached)
-                                               (:seon.source/relative-file-digests published))
-                                        (:seon.source/relative-file-digests snapshot-before)
-                                        (map (partial fs/relative-path (:seon.fn/root roots)) changed-paths))
-            ;; An explicitly reported note must reach the issue owner even
-            ;; though it moved no digest; without this the unchanged
-            ;; short-circuit below would publish nothing at all.
-            issue-notes? (some #(str/starts-with? % (str issue-note-path "/")) paths)
-            known-functions (seon.fn/manifest-function-symbols manifest)
-            ;; ONE declaration world for the whole publication: without this
-            ;; every changed file re-read and re-merged the authored schema
-            ;; resources twice (18 ms a call, AGENTS.md 2.1).
-            declaration-forms (schema.edn/packaged-forms)
-            changes
-            (try
-             (mapv
-             (fn [path]
-               (let [file (io/file (fs/absolute-path (:seon.fn/root roots) path))
-                     current (seon.fn/artifact-by-path manifest path)
-                     clojure-source? (and (.isFile file)
-                                          (or (str/ends-with? path ".clj")
-                                              (str/ends-with? path ".cljc")))
-                     desired (when clojure-source?
-                               (seon.fn/build-artifact
-                                {:seon.fn/source-path path
-                                 :seon.fn/root (:seon.fn/root roots)
-                                 :seon.fn/roots (:seon.fn/roots roots)
-                                 :seon.schema.projection/forms declaration-forms
-                                 :seon.fn.file/first-party-functions
-                                 known-functions}))]
-                 ;; EVERY changed input names the owner that installs its
-                 ;; facts. A Clojure file owns program rows and enters the
-                 ;; artifact planner; every other input owns the population
-                 ;; its own owner writes, and a file that owns no facts at
-                 ;; all is a publication no-op (R2/R3,
-                 ;; docs/prds/steward-platform/research/recompute-from-scratch-inventory-2026-09-16.md).
-                 (if (or clojure-source? current)
-                 (assoc (seon.fn/plan-file-change
-                  (cond->
-                   {:seon.fn.change/status
-                    (cond
-                      (not (.exists file)) :deleted
-                      (not clojure-source?) :schema-resource
-                      current :modified
-                      :else :added)}
-                    current
-                    (assoc :seon.fn.change/current-artifact current)
-                    desired
-                    (assoc :seon.fn.change/desired-artifact desired)))
-                        :seon.fn.change/artifact desired
-                        :seon.source/change-class :program)
-                 {:seon.source/change-class
-                  (cond
-                    (or (= path schema-declaration-path)
-                        (str/starts-with? path (str schema-declaration-path "/")))
-                    :schema-resource
-                    (= path config/default-manifest-path) :config
-                    :else :no-program-facts)})))
-              paths)
-             (catch clojure.lang.ExceptionInfo failure
-               ;; A SOURCE CHANGE IS NOT A REBUILD REASON: rebuilding analyzes
-               ;; the same moving tree again. It rides out to the one retry.
-               (if (and (= :seon.fn/index-refused (:seon.error/kind (ex-data failure)))
-                        (not (source-change-phase failure)))
-                 ;; A new callee in another edited file is absent from the
-                 ;; old manifest. The complete analyzer is authoritative;
-                 ;; it either resolves the new population or refuses it.
-                 [{:seon.fn.change/action :full-rebuild
-                   :seon.fn.change/reasons [:analysis-refused]}]
-                 (throw failure))))
-            snapshot-after (current-source-snapshot roots)
-            digest-after (:seon.source/digest snapshot-after)
-            reasons (into #{} (mapcat :seon.fn.change/reasons) changes)
-            classes (into #{} (keep :seon.source/change-class) changes)
-            population? (some classes [:schema-resource :config])
-            structural (set/difference reasons
-                                       #{:component-or-cardinality-many-change
-                                         :attribute-retraction})
-            _ (when-not (= snapshot-before snapshot-after)
-                (refused! "Source changed while incremental publication was being analyzed."
-                          {:seon.source/digest-before (:seon.source/digest snapshot-before)
-                           :seon.source/digest-after digest-after}))]
-        (cond
-          (empty? paths)
-          (let [unchanged (current-publication store digest-after)]
-            (when (not= (:seon.fn.manifest/root (:seon.fn/manifest cached))
-                        (:seon.fn.manifest/root manifest))
-              (write-source-artifact! root (assoc cached :seon.fn/manifest manifest)))
-            (or unchanged (full-source-refresh! root store roots)))
-          (seq structural)
-          (do (report-source-progress! (str "complete publication: " (pr-str (sort reasons))))
-              (full-source-refresh! root store roots))
-          :else
-          (let [desired-artifacts
-                ;; Persist complete file analysis for the next edit. Only
-                ;; `:seon.fn.change/rows` is the safe database delta.
-                (into [] (keep :seon.fn.change/artifact) changes)
-                next-manifest
-                (seon.fn/replace-manifest-artifacts manifest desired-artifacts)
-                _ (report-analysis-warnings! manifest next-manifest)
-                scalar? (and (empty? reasons) (not population?))
-                rows (if scalar? (into [] (mapcat :seon.fn.change/rows) changes) [])
-                _ (report-source-progress!
-                   (str (if scalar? "incremental scalar publication" "incremental manifest reconciliation")
-                        ": " (count paths) " paths; owners=" (pr-str (sort classes))
-                        "; reasons=" (pr-str (sort reasons))))
-                unchanged
-                (when (and (not population?) (not issue-notes?) (empty? rows)
-                           (= digest-after (:seon.source/digest cached)))
-                  (current-publication store digest-after))
-                result
-                (or unchanged
-                    (source/upsert!
-                     (cond-> {:seon.store/store store
-                      :seon.fn/root (:seon.fn/root roots)
-                      :seon.source/expected-commit-id expected-commit
-                      :seon.source/digest digest-after
-                      :seon.source/upsert-rows rows
-                      :seon.source/activation `derive-activation
-                      :seon.db/process
-                      [:seon.db.process/id boot-process-identity]}
-                       (not scalar?) (assoc :seon.fn/manifest next-manifest)
-                       population?
-                       (assoc :seon.source/populate `populate-source!
-                              :seon.source/populate-request
-                              {:seon.fn/manifest next-manifest
-                               :seon.source/change-classes classes}))))]
-            (when-not unchanged
-              (write-source-artifact! root
-                                      (source-artifact result next-manifest
-                                                       snapshot-after)))
-            (cond-> result scalar? (assoc :seon.source/upsert-rows rows))))))))
+        cached (read-source-artifact root)
+        previous (when (and published
+                            (= (:seon.source/digest published) (:seon.source/digest cached))
+                            (valid-source-manifest? (:seon.fn/manifest cached)))
+                   (:seon.fn/manifest cached))
+        _ (when (and (not (valid-source-manifest? (:seon.fn/manifest cached)))
+                     (some #(= store (:seon.store/store %)) (vals @running-instances)))
+            (refused! "Live publication requires its recorded producer manifest; restore the publication artifact before retrying."
+                      {:seon.boot/root root}))
+        _ (when (valid-source-manifest? (:seon.fn/manifest cached))
+            (require-loaded-producers! store (:seon.fn/manifest cached)))]
+    (if (and (= digest (:seon.source/digest published))
+             (not (:seon.source/issue-notes? roots)))
+      published
+      (let [database (when published (source/database store (:seon.source/commit-id published)))]
+        (try
+          (let [resolver (str (io/file root "build" "analysis"))
+                _ (report-source-progress! "analysis started")
+                manifest (seon.fn/build-manifest
+                          (cond-> {:seon.fn/root (:seon.fn/root roots)
+                                   :seon.fn/roots (:seon.fn/roots roots)
+                                   :seon.fn.analyzer/cache-root resolver}
+                            (and previous (.isDirectory (io/file resolver)))
+                            (assoc :seon.fn/previous-manifest previous
+                                            :seon.source/previous-database database)))
+                _ (report-source-progress! "analysis complete")
+                _ (report-analysis-warnings! previous manifest)
+                changed (into #{} (keep (fn [[path value]]
+                                         (when (not= value (get (:seon.source/relative-file-digests cached) path)) path)))
+                              (:seon.source/relative-file-digests snapshot))
+                changed (into changed (remove #(contains? (:seon.source/relative-file-digests snapshot) %))
+                              (keys (:seon.source/relative-file-digests cached)))
+                toolchain-changed? (not= (:seon.source/toolchain-digest previous)
+                                        (:seon.source/toolchain-digest manifest))
+                paths (when (and previous (not toolchain-changed?))
+                        (into changed
+                              (keep (fn [artifact]
+                                      (when (not= artifact (seon.fn/artifact-by-path previous (:seon.fn.file/relative-path artifact)))
+                                        (:seon.fn.file/relative-path artifact))))
+                              (:seon.fn.manifest/artifacts manifest)))
+                classes (when paths
+                          (cond-> #{:program}
+                            (contains? changed schema-declaration-path) (conj :schema-resource)
+                            (contains? changed config/default-manifest-path) (conj :config)))
+                _ (when-not (= snapshot (current-source-snapshot roots))
+                    (refused! "Source changed during publication; retry."
+                              {:seon.source/digest-before digest}))
+                _ (report-source-progress! (str "branch publication started: "
+                                                (if paths (count paths) (count (:seon.fn.manifest/artifacts manifest)))
+                                                " inputs"))
+                result (source/publish!
+                        {:seon.store/store store :seon.fn/root (:seon.fn/root roots)
+                         :seon.source/digest digest :seon.source/populate `populate-source!
+                         :seon.source/activation `derive-activation
+                         :seon.source/progress! report-source-progress!
+                         :seon.source/populate-request
+                         (cond-> {:seon.fn/manifest manifest :seon.fn/roots (:seon.fn/roots roots)}
+                           database (assoc :seon.source/previous-database database)
+                           paths (assoc :seon.fn/previous-manifest previous
+                                        :seon.fn/changed-paths paths
+                                        :seon.source/change-classes classes))})]
+            (report-source-progress! "branch publication complete")
+            (write-source-artifact! root (source-artifact result manifest snapshot))
+            result)
+          (finally (when database (d/release-materialized-db database))))))))
 
 (defn reload-order
   "Namespaces ordered so each one's required namespaces reload first.
@@ -2444,6 +2390,65 @@
      (and (find-ns namespace-name)
           (or (io/resource (str resource ".clj"))
               (io/resource (str resource ".cljc")))))))
+
+(defn- load-development-definitions!
+  "The one ordered JVM definition replacement used by development adoption."
+  {:malli/schema [:=> [:cat [:set :symbol] [:map-of :symbol [:set :symbol]]] :nil]}
+  [namespaces requires]
+  (doseq [namespace-name (reload-order namespaces requires)
+          :when (reloadable-namespace? namespace-name)]
+    (report-source-progress! (str "development reload " namespace-name))
+    (require namespace-name :reload))
+  nil)
+
+(defn- prepare-development-producers!
+  "Explicit development transition, before the publisher can use a new producer.
+  Prospective analysis is isolated and discarded; it cannot populate the cache."
+  {:malli/schema [:=> [:cat :seon.boot/root :seon.store/store :seon.boot/instance :map] :nil]}
+  [root store instance roots]
+  (when-let [manifest (:seon.fn/manifest (read-source-artifact root))]
+    (let [mismatch (try (require-loaded-producers! store manifest) nil
+                       (catch clojure.lang.ExceptionInfo failure
+                         (if (:seon.source/producer-mismatch (ex-data failure))
+                           failure (throw failure))))]
+      (when mismatch
+        (let [data (ex-data mismatch)]
+          ;; Missing load evidence and class/protocol replacement require the
+          ;; host transition already named by admission; never fall back cold.
+          (when (or (nil? (:seon.source/loaded-producer-digest data))
+                    (:seon.source/restart-required? data))
+            (throw mismatch))
+          (let [before (test.cache/input-digests (:seon.fn/root roots))
+                temporary (.toFile (Files/createTempDirectory
+                           (.toPath (io/file root)) "producer-transition-"
+                           (make-array java.nio.file.attribute.FileAttribute 0)))]
+            (try
+              (let [candidate (seon.fn/build-manifest
+                               {:seon.fn/root (:seon.fn/root roots)
+                                :seon.fn/roots (:seon.fn/roots roots)
+                                :seon.fn.analyzer/cache-root (str temporary)})
+                    paths (seon.fn/producer-paths candidate)
+                    names (into (:seon.source/producer-mismatch data)
+                                (remove (set (keys (seon.fn/producer-paths manifest))))
+                                (keys paths))
+                    rows (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts candidate))
+                    class-change? (some #(and (#{'clojure.core/deftype 'clojure.core/defrecord
+                                                 'clojure.core/defprotocol} (:seon.fn/defined-by %))
+                                              (names (some-> (:seon.fn/sym %) namespace symbol))) rows)
+                    requires (into {} (keep #(when (:seon.ns/name %)
+                                               [(:seon.ns/name %) (set (:seon.ns/requires %))])) rows)]
+                (when class-change?
+                  (throw (ex-info "Producer transition introduces classes or protocols; restart the host."
+                                  (assoc data :seon.source/restart-required? true :seon.source/host-transition
+                                    (str "bin/seon --root "
+                                         (pr-str (-> (io/file root) .getParentFile .getParentFile .getCanonicalPath))
+                                         " down; bin/seon --root "
+                                         (pr-str (-> (io/file root) .getParentFile .getParentFile .getCanonicalPath))
+                                         " start " (get-in instance [:seon.boot/config :seon.boot/cluster-name]))))))
+                (load-development-definitions! names requires)
+                (record-loaded-producers! instance before candidate))
+              (finally (fs/delete-recursively! root (str temporary)))))))))
+  nil)
 
 (declare commit-fault! process-identity)
 
@@ -2551,6 +2556,7 @@
         database (db/db connection)
         projection (schema/projection-from-database database)
         deleted-identities (source/deleted-identities database)
+        loaded-inputs (test.cache/input-digests (:seon.fn/root roots))
         namespaces
         (into #{}
               (keep (fn [[attribute value]]
@@ -2590,14 +2596,7 @@
                          (list 'quote local-name)))}})))))
     ;; A changed caller reloaded before its changed callee fails on the
     ;; callee's new Var, so the order follows the declared requires facts.
-    (doseq [namespace-name (reload-order namespaces
-                                         (namespace-requires database namespaces))
-            :when (and (reloadable-namespace? namespace-name)
-                       (:seon.ns/source
-                        (db/pull database [:seon.ns/source]
-                                 [:seon.ns/name namespace-name])))]
-      (report-source-progress! (str "development reload " namespace-name))
-      (require namespace-name :reload))
+    (load-development-definitions! namespaces (namespace-requires database namespaces))
     (env/advance-projection! (get ctx env/state-carrier)
                              (db/basis-t database) projection)
     (report-source-progress! "development JVM instrumentation")
@@ -2652,16 +2651,17 @@
                               [:seon.render.web/view
                                :seon.render.web/runtime-eval-channel])]
       (async/offer! channel :seon.render.web/runtime-eval))
+    (record-loaded-producers! instance loaded-inputs)
     (report-source-progress! "development cluster converged")
     nil))
 
 (defn refresh-source!
   "Publish the current source tree onto the one `current-src` branch.
 
-  With changed paths, reuse the published manifest for safe same-identity
-  upserts. Same-identity metadata changes reconcile the existing manifest.
-  Structural changes or a missing/stale artifact require complete analysis;
-  snapshot differences supply any paths missed by an editing hook.
+  Content digests select changed inputs and declaration edges select affected
+  files. Every entry point reuses the published manifest and the current
+  database history. A changed producer toolchain requires complete analysis;
+  a live host must first match its recorded loaded-producer generation.
   A final source-change refusal retries publication/adoption once immediately;
   the last adopted source database remains the reconciliation basis."
   {:malli/schema
@@ -2690,7 +2690,10 @@
            held-store (acquire-root-store! store-dir)
            ;; The publication's own roots, read before any adoption reload can
            ;; re-evaluate the vars that declare them.
-           roots (publication-roots)]
+           roots (cond-> (publication-roots)
+                   (some #(str/starts-with? (fs/relative-path (fs/source-directory) %)
+                                            (str issue-note-path "/")) changed-paths)
+                   (assoc :seon.source/issue-notes? true))]
        (try
          (retrying-source-change
           (fn []
@@ -2698,11 +2701,9 @@
             (schema/call-with-projection
              (schema/declaration-projection (schema.edn/packaged-forms))
              (fn []
-               (let [before-publication (source/current held-store)
-                     published (if (seq changed-paths)
-                                 (incremental-source-refresh! root held-store
-                                                              changed-paths roots)
-                                 (full-source-refresh! root held-store roots))]
+               (let [_ (when instance (prepare-development-producers! root held-store instance roots))
+                     before-publication (source/current held-store)
+                     published (full-source-refresh! root held-store roots)]
                  (when instance
                    (development-source-refresh! held-store instance
                                                 before-publication published

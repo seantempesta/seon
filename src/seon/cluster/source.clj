@@ -584,7 +584,7 @@
         (throw (ex-info (:seon.error/message refusal) refusal failure))))))
 
 (defn publish!
-  "Build and atomically publish one complete source database value."
+  "Reconcile and atomically publish on the current source database history."
   {:malli/schema [:=> [:cat :seon.source/publish-request]
                   :seon.source/published]}
   [{:keys [:seon.store/store]
@@ -601,15 +601,18 @@
           expected-commit (:seon.source/commit-id (current store))
           scratch (scratch-branch)]
       (registry/branch! {:seon.store/store store
-                         :seon.cluster.registry/from :db
+                         :seon.cluster.registry/from (or expected-commit :db)
                          :seon.store/branch scratch})
       (try
-        (let [connection (store/open-branch! store scratch)]
+        (let [unresolved-report
+              (let [connection (store/open-branch! store scratch)]
           (try
-            ;; Give the scratch a unique committed head before invoking the
-            ;; population. If population fails immediately, this prevents its
-            ;; branch from remaining an alias of `:db`, whose commit is an
-            ;; ordinary ancestor of the already-published source history.
+            (let [previous-database
+                  (when expected-commit
+                    (or (:seon.source/previous-database populate-request)
+                        (db/carry-derived-projection (d/db connection))))]
+            ;; Reconcile on the published history. The scratch isolates refused
+            ;; work; no test evidence is copied into a new history.
             (require-committed!
              (db/transact!
               connection
@@ -619,26 +622,14 @@
              "the source scratch schema transaction was refused"
              {:seon.source/digest source-digest})
             (populate-fn
-             (merge populate-request
-                    {:seon.db/connection connection
-                     :seon.source/digest source-digest}))
+             (cond-> (merge populate-request
+                            {:seon.db/connection connection
+                             :seon.source/digest source-digest})
+               expected-commit
+               (assoc :seon.source/previous-database
+                      previous-database)))
             (progress! "publication issue indexing")
             (index-issues! connection source-digest (or directory (fs/source-directory)))
-            (progress! "publication test evidence")
-            (when expected-commit
-              (let [evidence (result-preservation-tx
-                              (database store expected-commit))]
-                (progress! "publication test evidence transaction")
-                (when (seq evidence)
-                  (require-committed!
-                   (db/transact!
-                    connection
-                    [[:db.fn/call
-                      (fn [database-value]
-                        (preserved-evidence-tx database-value evidence))]])
-                   ::source-seal-refused
-                   "The rebuilt source could not preserve test evidence."
-                   {:seon.source/digest source-digest}))))
             (progress! "publication activation seal")
             ;; The source seal is the genesis boundary. Population must first
             ;; install canonical schema/program rows and boot/config process
@@ -658,8 +649,7 @@
              "the source seal transaction was refused"
              {:seon.source/digest source-digest})
             (when expected-commit
-              (when-let [refusal (db/deletion-error (database store expected-commit)
-                                                    @connection)]
+              (when-let [refusal (db/deletion-error previous-database (db/db connection))]
                 (refuse! ::source-deletion-refused
                          (:seon.error/message refusal)
                          (:seon.error/data refusal))))
@@ -682,8 +672,9 @@
                            "another publisher created current-src first"
                            {:seon.source/branch current-branch
                             :seon.source/commit-id scratch-commit}))))
+            (unresolved-report! (db/db connection)))
             (finally
-              (d/release connection))))
+              (d/release connection))))]
         (let [commit-id
               (registry/branch-commit-id
                {:seon.store/store store
@@ -699,7 +690,7 @@
            :seon.source/digest source-digest
            :seon.source/built? true
            :seon.program/unresolved-report
-           (unresolved-report! (database store commit-id))})
+           unresolved-report}))
         (catch Throwable failure
           (retire-scratch! store scratch)
           (throw failure)))))

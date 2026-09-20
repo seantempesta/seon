@@ -1,5 +1,6 @@
 (ns seon.publication-digest-test
   (:require [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.test-support :as support]))
@@ -17,6 +18,9 @@
       (write! "test/fixture_test.clj" "(ns fixture-test)\n")
       (write! "config/default.edn" "{}\n")
       (write! "docs/seon/issues/fixture.md" "# Before\n")
+      (write! "deps.edn" "{:paths [\"src\" \"resources\"]}\n")
+      (is (zero? (:exit (shell/sh "git" "init" "-q" :dir (str directory)))))
+      (is (zero? (:exit (shell/sh "git" "add" "deps.edn" "config/default.edn" :dir (str directory)))))
       (let [before (snapshot)]
         (is (seq (:seon.source/relative-file-digests before)))
         (write! "docs/seon/issues/fixture.md" "# After\n")
@@ -24,6 +28,9 @@
         (is (= (:seon.source/digest before) (:seon.source/digest (snapshot))))
         (is (= (:seon.source/relative-file-digests before)
                (:seon.source/relative-file-digests (snapshot))))
+        (write! "deps.edn" "{:paths [\"src\" \"resources\"] :deps {example/lib {:mvn/version \"2\"}}}\n")
+        (is (not= (:seon.source/digest before) (:seon.source/digest (snapshot)))
+            "Producer dependency inputs cannot hit an older publication's seal.")
         (write! "src/fixture.clj" "(ns fixture)\n(def value 2)\n")
         (is (not= (:seon.source/digest before) (:seon.source/digest (snapshot)))))
       (finally (support/delete-recursively! directory)))))

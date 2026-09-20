@@ -5,7 +5,7 @@ created: 2026-09-20
 tags: [publication, test-system, wave/publication-velocity]
 ---
 
-# Publication dissolution — decision checkpoint
+# Publication dissolution — implementation and evidence
 
 Items 1–4 are **not complete**. The runner integration split is committed
 (`fb4dfee98`); live operator publication and phase-driven heartbeat are
@@ -14,8 +14,8 @@ artifact memoization is committed (`08ce441a6`), with 6 tests / 50 assertions
 green. The finding-summary slice is validated (1 test / 4 assertions) and lands
 with this note. Item 1's population
 conversion, shared gate publication, lineage reuse and duplicate-publisher
-removal remain owed. The current stop is the executing-toolchain validation
-boundary at the end of this note. Earlier sections preserve dated decisions,
+removal remain owed. The executing-toolchain boundary is ruled and implementation is in progress;
+it is no longer a pending decision. Earlier sections preserve dated decisions,
 not the present implementation status. Item 5 is outside this assignment.
 
 ## Decision: what constitutes an analysis input?
@@ -1214,3 +1214,60 @@ invocation was canceled before launching a JVM, and its launcher removed
 its snapshot; its tests were combined with the diagnostic to save a startup.
 All test JVMs and HEAD-load JVMs were serial. The foreign dirty paths remained
 excluded by `--paths`; no foreign session was resumed, messaged or edited.
+
+## Loaded-producer ruling accepted — implementation resumed
+
+The orchestrator accepted `fb4dfee98`, `4686e5c91`, `08ce441a6`, and
+`cf4d8d6ef`, and ruled option 1: a live producer mismatch refuses with both
+digests, namespace names, and the exact explicit development transition or
+class/protocol restart command. A mismatch never creates another JVM. The
+loaded generation is an observed database fact, and callable replacements
+are checked through `seon.instrument/replaced-definitions`. The common
+publisher, duplicate path deletion, lineage reuse regression and final
+measurements are now the remaining execution work, not a pending decision.
+
+At resumption `src/seon/cluster.clj` was clean. Instrumentation, database,
+schema bridge/internal/EDN and SCI files had foreign changes and are not
+edited by this lane. The initial common-publisher patch branches from the
+current commit and removes test-evidence copying from `publish!`; history
+rather than reconstructed evidence owns those references. It replaces the
+old scalar/full refresh split with one digest-driven reconciliation. A
+body-only edit does not pull the complete published database graph; recorded
+edge reads are only needed when declaration digests differ.
+
+
+### Common-publisher validation, 2026-09-20 08:00 UTC
+
+The population/refresh conversion deletes `incremental-source-refresh!`,
+`changed-source-paths`, `stable-manifest`, `publish-current-source!`, and the
+process-wide `source-analysis-cache`. The remaining refresh builds or reuses
+one artifact manifest, selects changed inputs and affected declaration files,
+and reconciles them through `seon.cluster.source/publish!`. Its scratch branch
+forks the current commit rather than `:db`. Prior test evidence is retained by
+history, not copied and reconstructed. The publication seal now includes the
+gate's declared external inputs: changing dependency pins or analyzer config
+cannot return an older source digest just because no Clojure input changed.
+
+Run `c7ccc3704846` proved the loaded-producer admission (2 tests, 6 assertions)
+and exercised four existing lineage tests. Three passed; the fourth's sole
+failure was the namespace of an injected fixture keyword after moving the
+test, now corrected. The new reuse test exposed an incorrect prior projection:
+the publisher passed the scratch read's bootstrap projection, which lacked
+function contracts. It now carries the exact published database projection
+through the population and deletion check. Seal-only reads no longer acquire
+a complete program projection, and the final unresolved report uses the open
+publication connection rather than acquiring the published value again.
+
+The next fast snapshot loaded and armed, then failed **before test execution**
+at the shared recording authority: `:seon.test.accretion/arguments` was rejected
+as a non-storable member of `:seon.test.accretion/install-refused-error`.
+Evidence: `tmp/publication-dissolution/reuse-acquisition-fast.log`. The held
+schema/runner edits were excluded; no shared host was restarted or reloaded.
+Under the assignment's explicit snapshot fallback, an owned detached snapshot
+at `tmp/publication-wt` receives only this lane's files and links the vendored
+sources. Its authority is a copy of the immutable cached published store,
+reidentified through `seon.cluster.export/reidentify!` before opening. The
+initial omitted reidentification was a setup error and refused before tests;
+it is not counted as lineage evidence. No cold gate or second simultaneous JVM
+was used. Namespace load and reidentification completed successfully in the
+same serial setup JVM (`owned-store-load.log`).

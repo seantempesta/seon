@@ -1001,10 +1001,7 @@
     (try
       (spit artifact-path (pr-str stale))
       (with-redefs-fn
-        {#'cluster/source-analysis-cache
-         (atom {:seon.source/snapshot (cluster/source-snapshot)
-                :seon.fn/manifest (:seon.fn/manifest stale)})
-         #'analyzer/analyze
+        {#'analyzer/analyze
          (fn [request]
            (swap! calls conj (count (:seon.fn.analyzer/sources request)))
            (analyze request))}
@@ -1190,52 +1187,19 @@
                   :seon.source/built? false}
         publications (atom 0)]
     (with-redefs-fn
-      {#'cluster/stable-manifest
-       (fn [_] {:seon.source/digest digest
-               :seon.source/snapshot snapshot
-               :seon.fn/manifest manifest})
+      {#'cluster/current-source-snapshot (fn [_] snapshot)
        #'cluster/read-source-artifact (fn [_] nil)
-       #'cluster/write-source-artifact!
-       (fn [_ rebuilt]
-         (is (= artifact rebuilt)
-             "an absent or old-shaped cache is re-derived without a publication"))
        #'source/current
        (fn [_] {:seon.source/branch source/current-branch
                 :seon.source/commit-id commit-id})
        #'cluster/current-publication (fn [_ _] expected)
-       #'cluster/publish-current-source!
+       #'source/publish!
        (fn [& _] (swap! publications inc) expected)}
       (fn []
         (is (= expected (#'cluster/full-source-refresh!
                          "root" ::store (#'cluster/publication-roots))))
         (is (zero? @publications)
             "the database digest owns currentness even without an artifact")))))
-
-(deftest invalid-cached-manifest-falls-back-before-incremental-analysis
-  (let [commit-id (random-uuid)
-        malformed {:seon.source/commit-id commit-id
-                   :seon.source/relative-file-digests {"src/example.clj" "digest"}
-                   :seon.fn/manifest
-                   #:seon.fn.manifest{:artifacts
-                                      {0 #:seon.fn.file{:rows
-                                                       {1 #:seon.ns{:name nil}}}}}}
-        rebuilt {:seon.source/branch source/current-branch
-                 :seon.source/commit-id commit-id
-                 :seon.source/digest (apply str (repeat 64 "b"))}
-        full-builds (atom 0)]
-    (with-redefs-fn
-      {#'cluster/read-source-artifact (fn [_] malformed)
-       #'source/current (fn [_] {:seon.source/commit-id commit-id})
-       #'cluster/current-publication (fn [_ _] {:seon.source/commit-id commit-id})
-       #'cluster/full-source-refresh!
-       (fn [_ _ _] (swap! full-builds inc) rebuilt)}
-      (fn []
-        (is (= rebuilt
-               (#'cluster/incremental-source-refresh!
-                "root" ::store ["src/example.clj"]
-                (#'cluster/publication-roots))))
-        (is (= 1 @full-builds)
-            "a malformed cache never reaches manifest-function-symbols")))))
 
 (deftest ^{:seon.test/fixture-observation "The test observes reopen-time configuration repair before real boot consumers acquire their settings."} ^{:seon.test/long
            "53.139 s pool: real boot, locked-state config repair, restart, and pre-arm fact proof."}

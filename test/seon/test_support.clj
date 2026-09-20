@@ -512,8 +512,12 @@
                                  (schema/call-with-projection projection construct)
                                  (construct))))
                            (catch Throwable failure
+                             (.printStackTrace failure)
                              (error/diagnostic
                               {:seon.error/kind ::database-base-unavailable
+                               :seon.error/at (java.util.Date.)
+                               :seon.error/layer :seon.test/fixture
+                               :seon.error/operation 'seon.test-support/create-base
                                :seon.error/message
                                (str "Canonical fixture base construction failed: "
                                     (ex-message failure))
@@ -527,7 +531,7 @@
                                (or (ex-message failure) :seon.error/unknown)
                                :seon.error/diagnostic-evidence
                                (or (ex-data failure) :seon.error/unknown)})))]
-                     (if (:seon.error/kind result)
+                     (if (or (:seon.error/kind result) (:seon.error/at result))
                        (do (swap! state
                                   (fn [current]
                                     (cond-> current
