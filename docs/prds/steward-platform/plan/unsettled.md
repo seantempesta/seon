@@ -6892,3 +6892,14 @@ its next stop: (1) the config phase's work is O(what?) and must be named
 and made proportional or authorized; (2) a bound firing is a bug report
 naming what never arrived — it fired correctly. The slice 3 table is
 re-measured in a quiet window (no lane JVMs) before slice 4 is judged.
+
+## 2026-09-23 ~04:40 local — TEST-SYSTEM slice (1) LANDED (`8aca66774`): canonical fixture = a branch of the published base; first use 188.9 s → 4.65 s, p50 37–40 ms; the remaining 5.4 s split: Malli compile 48 ms, seal 2 ms, READING 3,358 STORED ROWS 2.87 s, unexplained 2.54 s → sent back as an algorithm, not an authorization
+
+Exactly one projection acquisition per worker across eleven fixtures
+(`97ec3cbb2`). The lane asked for the once-per-worker authorization; RULED
+no: the library's part is 50 ms, the 5.4 s is a per-row read where
+Datahike's AVET index returns the rows in milliseconds, plus 2.5 s of
+unexplained work — both are ours to name and remove (target ≤ 1 s). Then
+slice (2), bare `bin/test`. Error lane landed `b9d983b72` (contract
+refusals validated against declared error schemas). Redesign lane on
+slice 4 (dirty: cluster.clj, fn.clj, issue.clj).
