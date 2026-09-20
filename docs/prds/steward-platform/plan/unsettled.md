@@ -6971,3 +6971,18 @@ the published base lacks publishes ITS OWN base through the live JVM
 (seconds now) instead of refusing or reading absence. Test-system lane
 landed `30baf050a` (worker projection acquired from indexed rows and the
 carried schemas — its 5.4 s item; reviewed at its stop).
+
+## 2026-09-23 ~06:40 local — SLICE 4 item 1 LANDED (`245f693f6`): one-file edit 139.9 → 49.0 s end to end; only the changed namespace reloads, only its three wrappers re-arm; no change 1.74 s. RULED option 3 on activation: the sealed closure is a roster and goes
+
+The lane stopped at the design gate with three options on the activation
+closure (a stored, per-publication sealed roster of executable functions,
+`:seon.source/activation-closure` → `:seon.activation/closure`, 5.3 s to
+seal, compared at boot). RULED option 3 (derive-or-die; dissolution): the
+roster mirrors the program graph; "every function is callable" is the
+`:seon.fn` rows and "unreferenced" is one Datalog clause at the moment of
+asking; the boot check keeps its semantics as a query or is deleted with
+its reason; RESET NEEDED for the three declarations; if the derivation
+cannot be one query the lane stops and the owner decides. Also handed to
+the lane: the `force-branch!` race (its file), boot-phase timings + lazy
+acquisition of what the running system already has, items 2–3. The owner
+can veto option 3 before it lands (a cheap reset either way).
