@@ -543,3 +543,63 @@ Load proof: `clojure -Sdeps '{:paths ["src" "resources" "script"]}' -M`
 required `seon.cluster.registry`, `seon.cluster`, `seon.cluster.source`, and
 `seon.fresh-operator`, printed `:owned-namespaces-loaded`, and exited 0.
 `git diff --check` passes.
+
+## Slice 2 — measurement before deletion
+
+Dependency ledger: `seon.fn.analyzer/invoke-kondo` calls
+`clj-kondo.core/run!` with `:cache-dir` (`src/seon/fn/analyzer.clj:260–282`).
+Read the vendored `clj_kondo/impl/cache.clj` and `impl/core.clj` end to end.
+`cache/load-when-missing` (`:128–147`) keeps definitions produced by the
+current lint and reads absent required namespaces from the disk/builtin
+cache; `update-defs` (`:148–170`) writes fresh definitions only.
+`sync-cache*` (`:172–211`) combines those definitions under the cache lock
+(`sync-cache`, `:213–218`). Public `clj-kondo.core/run!` processes the
+supplied files, then synchronizes that cache before linting usages
+(`reference-code/clj-kondo/src/clj_kondo/core.clj:234–255`).
+`impl/core.clj:595–614` visits the supplied lint paths. It does not discover
+caller files for us: the published database's reverse `:seon.fn/calls`
+edges select those files. Datahike's indexed attribute/value search uses
+AVET (`reference-code/datahike/src/datahike/db/search.cljc:140–157`).
+No second per-file analysis cache is needed for this operation.
+
+Before deletion, at `5cf44da20`, scratch PID 60626, source commit
+`6ab03d6b-43cf-592d-a941-146ecf716a6d`: the one-file `my.note` docstring
+probe took **138.893 s** including preparation. The existing progress
+reporter measured: input inventory **507.3 ms**; toolchain comparison
+**28.5 ms**; forget-namespaces **0.7 ms**; known symbols **23.9 ms**;
+changed-file analyzed-artifacts **83.8 ms**; candidate manifest **51.6 ms**;
+published-index-rows **15,561.8 ms**; publication-inputs caller closure
+**104,968.8 ms**; cache keys **39.1 ms**; cached-analysis reads **8.9 ms**;
+additional analyzed-artifacts **14,991.6 ms**; replace-manifest-artifacts
+**162.2 ms**; result cache keys **50.4 ms**; cache writes **68.5 ms**;
+manifest return **20.1 ms**. The file digest walk was **25.6 ms**, below
+the 112 ms comparison, while the complete publication snapshot took
+**486.1 ms**: it also hashes schema/config/test inputs. The dominant
+O(program) work is reading all published rows and reconstructing their
+complete declaration graph with `tree-seq`, then following its transitive
+closure. Additional lint consumes that broad closure instead of direct
+callers. Cache I/O is small in this sample but is still the redundant layer
+the owner ruled out. No deletion preceded these numbers.
+
+Reproducer: load and invoke
+[one-jvm-slice2-analysis-2026-09-22.clj](one-jvm-slice2-analysis-2026-09-22.clj)
+through the advertised host's existing `prepl-eval!`, passing
+`ROOT/data/clusters`, `"s"`, and an output filename. The client carries
+`publication-bound-ms`, forwards `:out`/`:err`, and reads the terminal
+`:ret`; no child JVM is used. Exact phase rows are preserved in
+[one-jvm-slice2-before-2026-09-22.edn](one-jvm-slice2-before-2026-09-22.edn).
+The probe restores the exact docstring bytes in `finally`. An initial
+probe assertion mistakenly expected `source/current` to include a digest;
+that function returns branch/commit only. The corrected probe reads the
+source digest from that immutable database. No source edit happened in the
+failed attempt.
+
+Preparing the corrected publication before this probe took 173.895 s,
+including 141.469 s analysis. The setup thread sample independently named
+`declaration-targets` → `publication-inputs` → `build-manifest`. Other setup
+phases above two seconds were source preparation (4.483 s: snapshot plus
+manifest read/validation), reconciliation transaction (6.487 s: selected
+program rows and their contracts), issue indexing (2.190 s: whole issue
+inventory), activation seal (3.723 s: activation closure), and branch-head
+readback (3.872 s: unresolved-call report). Slices 3–4 own publication and
+adoption beyond analysis; those are findings, not accepted latency.
