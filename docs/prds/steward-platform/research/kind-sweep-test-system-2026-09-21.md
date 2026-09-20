@@ -145,3 +145,24 @@ owned implementation paths are byte-identical to HEAD, the shared-tree
 `seon.test.runner` load printed `:loads` during the probe, and no test JVM,
 cold gate, default lifecycle operation, held-path edit, or foreign-session
 operation occurred. The retirement census and cold proof above remain owed.
+
+## Option-2 implementation checkpoint
+
+The orchestrator ruled option 2: raw arbitrary values use the error family's
+existing `:seon.error/offending` and durable occurrence projection; facets
+store only queryable scalar observations. Commit `e8ca8aa42` applies that rule
+to the five formerly marker-only runner facets, their producers and launch
+consumer, and the confirmation-launch regression. The required namespace load
+printed `:loads`. Commit `b671525e9` converts the accretion producer/consumer
+family and its install-refusal schema; `seon.test.accretion` reloaded and
+printed `:loads`. No parallel EDN attribute or second projection mechanism was
+introduced.
+
+This is an implementation checkpoint, not the terminal landing. The current
+full owned census has **89 matching lines** remaining, concentrated in
+`src/seon/test/runner.clj`, `src/seon/test/arm.clj`, runner tests, and the
+remaining old runner class schemas. `src/seon/test/accretion.clj` and
+`resources/seon/schemas/seon.test.accretion.edn` are now kind/class/predicate
+free. The final foreground fast run has deliberately not been spent on this
+intermediate snapshot; the exact cold command above remains owed after the
+remaining source and R8 conversions.
