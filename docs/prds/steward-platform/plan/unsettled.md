@@ -4864,3 +4864,20 @@ option 1 (enable and verify fast recording). `kind-sweep-render` resumed
 (sol low) to land its 23 drafts and free `src/seon/render.clj` for bridge
 step 1. Editing lanes after the reset: results-reuse, 1a, render sweep;
 step 1 when render.clj is free.
+
+## 2026-09-20 ~19:55 UTC — first reset failed at the publication bound; bound raised; reset re-run
+
+First `bin/seon reset --force`: down/destroy fine (5.0 GB reclaimed),
+republish killed at 185 s by `:seon.operator.subprocess/deadline-ms 180000`
+(derived from `.claude/seon-hook.edn :current-source :timeout-seconds`,
+`script/seon/fresh_operator.clj:273`) while the child was still progressing
+("publication issue indexing" after population 98,825/98,825) — load was
+33 (1a, render and both research lanes' JVMs plus the base prep finishing).
+Bound raised 180 → 600 s (`dd2e4daff`): unloaded publication is ~150 s
+(tools item 2), a 10-minute backstop still names a hang. Reset re-run
+(`tmp/orchestrator/default-reset-2026-09-20b.log`). Fresh overlay base
+`7d2fac621d` published for HEAD `e618c14eb` (206 s); 1a resumed on it
+(astra high, --paths form). Tools item 2 gains: the publication's own
+phase progress should extend or replace a flat subprocess deadline —
+a bound on a process that is visibly progressing is the tuned-constant
+smell (AGENTS.md §2.3).
