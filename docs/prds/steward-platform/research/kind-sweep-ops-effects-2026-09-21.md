@@ -723,3 +723,27 @@ remains untouched and owed under option 2. Other effect sites remain unconverted
 `src/seon/store.clj` remains absent. Other sweeps still own seon.db,
 seon.cluster.message, seon.turn and seon.cluster.reply; error pass-through
 contract owners must add the new complete facets to their manifests.
+
+### owed to the turn/cluster sweep
+
+The orchestrator accepted `9104e322a` and ruled context option 3 now, option
+1 at the turn/error owner. Leave `src/seon/context.clj:487` (contribution
+projection) and `:533` (capture projection) unchanged. The required handoff
+members are the existing `:seon.error.occurrence/ref` and `:seon.db/tx-data`
+from `seon.error/recording`, with the reference attached to the capture or
+contribution by an owner-declared relation. The turn seam at
+`src/seon/turn.clj:4335` supplies the occurrence recording custody. No recorder
+inputs are threaded into capture. The owner must settle the relation's exact
+schema and deletion behavior in its coherent slice; arbitrary offending
+values remain on the canonical occurrence, not a capture EDN field.
+
+Blob: five producer kind sites → zero. Existing digest, store path and read
+offset observations now extend the base; invalid threshold names its actual
+config attribute and retains the arbitrary observed value on
+`:seon.error/offending`. All seven diagnostic evidence inputs are supplied.
+These are throwing storage boundaries; their successful return contracts
+remain unchanged. Existing blob tests contain no kind assertions. Source
+lint is clean and `require seon.blob` exits zero. Append source and
+`resources/seon/schemas/seon.blob.edn` to the accumulated paths and
+`seon.blob-test`, `seon.blob-threshold-test`, `seon.blob-publication-test` to
+the end-of-pass namespaces. Fast and cold tally remain owed.

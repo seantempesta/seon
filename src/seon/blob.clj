@@ -7,6 +7,7 @@
             [datahike.gc-guard :as gc-guard]
             [konserve.core :as k]
             [seon.db :as db]
+            [seon.error.refusal :as error]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
   (:import [java.io ByteArrayInputStream File InputStream OutputStream
@@ -70,10 +71,22 @@
       (throw
        (ex-info
         "Blob threshold is not a positive integer."
-        {:seon.error/kind :core-bug
-         :seon.blob/invalid-threshold threshold
+        (error/diagnostic
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer :seon.blob/storage
+          :seon.error/operation 'seon.blob/binary-threshold
+          :seon.error/offending threshold
+          :seon.error/diagnostic-layer :seon.blob/storage
+          :seon.error/diagnostic-operation 'seon.blob/binary-threshold
+          :seon.error/diagnostic-member :seon.config.eval.result/blob-threshold
+          :seon.error/diagnostic-expected :pos-int
+          :seon.error/diagnostic-offending threshold
+          :seon.error/diagnostic-cause :seon.blob/storage-refused
+          :seon.error/diagnostic-evidence {}
+
+         :seon.blob/threshold-attribute :seon.config.eval.result/blob-threshold
          :seon.error/message "Blob threshold is not a positive integer."
-         :seon.config.eval.result/blob-threshold threshold})))
+         }))))
     (Math/toIntExact (long threshold))))
 
 (defn- stage-file!
@@ -84,10 +97,22 @@
       (throw
        (ex-info
         "The file-backed blob store has no process root."
-        {:seon.error/kind :core-bug
+        (error/diagnostic
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer :seon.blob/storage
+          :seon.error/operation 'seon.blob/stage-file!
+          :seon.error/offending store-base
+          :seon.error/diagnostic-layer :seon.blob/storage
+          :seon.error/diagnostic-operation 'seon.blob/stage-file!
+          :seon.error/diagnostic-member :seon.blob/store-base
+          :seon.error/diagnostic-expected "a store directory with a process-root parent"
+          :seon.error/diagnostic-offending store-base
+          :seon.error/diagnostic-cause :seon.blob/storage-refused
+          :seon.error/diagnostic-evidence {}
+
          :seon.blob/store-root-absent (str store-base)
          :seon.error/message "The file-backed blob store has no process root."
-         :seon.blob/store-base store-base})))
+         :seon.blob/store-base store-base}))))
     (let [directory (io/file process-root "blob-staging")]
       (Files/createDirectories (.toPath directory)
                                (make-array java.nio.file.attribute.FileAttribute 0))
@@ -130,12 +155,24 @@
       (throw
        (ex-info
         "Stored blob does not match its digest and size."
-        {:seon.error/kind :core-bug
+        (error/diagnostic
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer :seon.blob/storage
+          :seon.error/operation 'seon.blob/verify-stored!
+          :seon.error/offending actual
+          :seon.error/diagnostic-layer :seon.blob/storage
+          :seon.error/diagnostic-operation 'seon.blob/verify-stored!
+          :seon.error/diagnostic-member :seon.blob/digest
+          :seon.error/diagnostic-expected content-digest
+          :seon.error/diagnostic-offending actual
+          :seon.error/diagnostic-cause :seon.blob/storage-refused
+          :seon.error/diagnostic-evidence {:seon.blob/expected-size expected-size}
+
          :seon.blob/stored-content-mismatch content-digest
          :seon.error/message "Stored blob does not match its digest and size."
          :seon.blob/digest content-digest
          :seon.blob/size expected-size
-         :seon.blob/actual actual}))))
+         :seon.blob/actual actual})))))
   nil)
 
 (defn- staged-write
@@ -202,7 +239,7 @@
   {:malli/schema
    [:=> [:cat :seon.db/connection :seon.blob/content]
     :seon.blob/staged-write]}
-  [connection content]
+  [_connection content]
   (let [octets (utf8-bytes content)
         digester (doto (MessageDigest/getInstance "SHA-256")
                    (.update octets))]
@@ -235,10 +272,22 @@
           (throw
            (ex-info
             "Blob input stream made no progress."
-            {:seon.error/kind :core-bug
+            (error/diagnostic
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer :seon.blob/storage
+          :seon.error/operation 'seon.blob/stage-binary!
+          :seon.error/offending read-count
+          :seon.error/diagnostic-layer :seon.blob/storage
+          :seon.error/diagnostic-operation 'seon.blob/stage-binary!
+          :seon.error/diagnostic-member :seon.blob/input-stream
+          :seon.error/diagnostic-expected "a positive read or EOF"
+          :seon.error/diagnostic-offending read-count
+          :seon.error/diagnostic-cause :seon.blob/storage-refused
+          :seon.error/diagnostic-evidence {:seon.blob/size total-size}
+
              :seon.blob/input-stalled total-size
              :seon.error/message "Blob input stream made no progress."
-             :seon.blob/size total-size}))
+             :seon.blob/size total-size})))
 
           :else
           (let [prefix-count (min read-count (- threshold prefix-size))
@@ -361,9 +410,21 @@
         (throw
          (ex-info
           "Blob content does not match its digest."
-          {:seon.error/kind :core-bug
+          (error/diagnostic
+         {:seon.error/at (java.util.Date.)
+          :seon.error/layer :seon.blob/storage
+          :seon.error/operation 'seon.blob/get
+          :seon.error/offending actual
+          :seon.error/diagnostic-layer :seon.blob/storage
+          :seon.error/diagnostic-operation 'seon.blob/get
+          :seon.error/diagnostic-member :seon.blob/digest
+          :seon.error/diagnostic-expected content-digest
+          :seon.error/diagnostic-offending actual
+          :seon.error/diagnostic-cause :seon.blob/storage-refused
+          :seon.error/diagnostic-evidence {}
+
            :seon.blob/content-digest-mismatch content-digest
            :seon.error/message "Blob content does not match its digest."
            :seon.blob/digest content-digest
-           :seon.blob/actual-digest actual})))
+           :seon.blob/actual-digest actual}))))
       (String. ^bytes octets StandardCharsets/UTF_8))))
