@@ -1,6 +1,6 @@
 ---
 type: research
-status: optional storage admission and construction checkpoint; retirement pending
+status: optional storage admission committed; handler custody decision pending; retirement uncommitted
 created: 2026-09-21
 tags: [schema, malli, bridge, projection]
 ---
@@ -26,7 +26,7 @@ optional-member rule.
 The first resumed fast request `5e8c66c72579` at snapshot HEAD
 `cade2f346f893299b9c03500d498ed298525a063` loaded and armed 1,472 contracts
 (1,469 program-armable), then refused admission before executing tests.
-Its external recording authority still executed the HEAD check refusing
+Its external recording authority still executed the live store-holder's old check refusing
 optional `:seon.error/offending` on
 `:seon.test.runner/invalid-marker-reason-error`. Raw evidence is
 `tmp/bridge-step2-optional.log`. Executed: zero; assertions: unavailable;
@@ -37,7 +37,118 @@ Foreign checkout callers explicitly excluded from that snapshot were
 `src/seon/sci/admit.clj`, `test/seon/sci/admit_test.clj` and
 `test/seon/env_test.clj`; their HEAD bytes were used.
 
-Baseline HEAD is `dc1efaf3c`; `fb4dfee98` is its parent. Read the step-2
+## Handler custody decision after the first commit
+
+The optional-member and additive construction checkpoint landed as
+`22a1a0567723ddeeb26d476ab0b199b78757f815`. Production loads passed before
+and after that commit (`tmp/bridge-step2-precommit-load.log` and
+`tmp/bridge-step2-postcommit-load.log`). No public helper was retired in it.
+The second fast request, `6173f1f457ce`, tested that HEAD and again refused
+before executing tests; raw evidence is `tmp/bridge-step2-optional-landed.log`.
+The recording seam in `src/seon/test/runner.clj` delegates persistent results
+through `fresh-operator/live-root-value!`: this is a loaded live-JVM boundary,
+not evidence that the new source check failed. Acquiring the commit there
+belongs to the orchestrator. This lane did not operate default.
+
+At refreshed HEAD `bd817b01d5534b085c836370e12edfef2c2748e8`, the shell
+consumer exposes a new scope decision:
+
+- `src/seon/shell/jvm.clj:86` obtains declaration forms inside
+  `environment-overrides`; its handler at `:482` receives only request and
+  effective configuration. Neither declares a supplied generation.
+- `src/seon/effect.clj:663` owns the request database and context. Foreground
+  dispatch at `:462` and background dispatch at `:811` call the same two-arg
+  handler. The generation is available in this owner's existing context.
+- `src/seon/effect.clj:451` explicitly assigns replacing the dynamic context
+  with handler environment arguments to seon.env Phase 3.
+- Effect admission already recognizes `:seon.schema/projection` on requests
+  (`:190`), but neither dispatch branch currently attaches it to handler
+  input. Carrying it there is a possible protocol change, not a missing
+  bridge lookup. The step-2 specification forbids a new metadata carrier.
+
+No effect protocol or shell implementation has been changed for this
+decision. Exactly three options, with estimates incremental to the remaining
+bridge conversion/proof work:
+
+1. **Recommended: constrain step 2 to the existing effect context.** Acquire
+   its carried generation once at the shell handler boundary and pass that
+   explicitly through `execute` to `environment-overrides`. Guarantee:
+   compiled navigation uses the request's generation, with no new registry,
+   carrier or handler protocol. Cost: roughly half a lane-day including
+   foreground/background and disagreeing-generation regressions. Give up:
+   eliminating the existing dynamic-context read in this slice; approve
+   that explicit scope exception and leave its retirement in Phase 3.
+2. **Move explicit handler environment arguments into this slice.** Change
+   the common foreground/background dispatcher, every handler contract and
+   caller together. Guarantee: handlers receive custody as an ordinary
+   argument. Cost: approximately 1–2 additional lane-days plus effect-owner
+   coordination and capability integration proof. Give up: the bounded
+   step-2 scope and Phase 3's current ownership of this transition.
+3. **Authorize projection on dispatched request maps.** At the existing
+   effect owner, attach the captured projection to both handler inputs using
+   the existing qualified key; keep persistence/external encoding separate.
+   Guarantee: explicit generation custody without changing handler arity.
+   Cost: approximately half to one lane-day for contracts and both dispatch
+   regressions. Give up: the no-new-metadata-carrier constraint for this
+   boundary; request values now also carry execution custody.
+
+The retirement remains uncommitted. The raw walker still exists and the
+refreshed namespace-reference census has 22 executable paths, including the
+walker itself and the newly discovered `test/seon/sci/eval_test.clj` caller.
+Remaining callers and tests are not converted. The working tree changes
+public bridge APIs and is a partial implementation, not a landing candidate.
+The earlier 1,012-attribute equality is construction-checkpoint evidence;
+it is not a green result for this later conversion or today's population.
+No cold/platform/live proof, final parity or deletion-budget claim is made.
+
+Owned uncommitted source/test paths at this decision (foreign changes are
+excluded; no foreign file or session was modified):
+
+```text
+src/seon/agent.clj
+src/seon/cluster.clj
+src/seon/cluster/source.clj
+src/seon/config.clj
+src/seon/db.clj
+src/seon/error.clj
+src/seon/fn.clj
+src/seon/issue.clj
+src/seon/print.cljc
+src/seon/reconcile.cljc
+src/seon/render.clj
+src/seon/render/transcript.clj
+src/seon/render/walk.clj
+src/seon/render/web.clj
+src/seon/schema.clj
+src/seon/schema/datahike.clj
+src/seon/schema/internal.cljc
+src/seon/turn.clj
+test/seon/cluster/turn_test.clj
+test/seon/schema/datahike_test.clj
+test/seon/schema_audit_test.clj
+test/seon/schema_test.clj
+```
+
+The expanded production require command in the launch specification, plus
+`seon.reconcile`, exits zero on the current working tree; evidence is
+`tmp/bridge-step2-decision-load.log`. That is a namespace load, not test or
+runtime behavior proof. Before a retirement commit, remaining work includes
+converting the convenience-API test callers, removing the stale private
+`compiled-attribute` Var reference in the navigation-cost test, preserving
+the old bridge's complete refusal grammar and tuple-child checks, updating
+the independent parity baseline for explained population drift, and fixing
+the canonical-fixture refusals recorded below. The optional-member test
+currently proves canonical-row construction, not an executed publication.
+The required-member refusal and the actual publication still need executed
+canonical evidence. Review the newly converted boundary fallbacks before
+landing; they do not authorize leaf generation acquisition.
+
+These paths pass `git diff --check`. No worktree, cold gate, background JVM,
+second concurrent lane JVM, default mutation or hook re-enable was used.
+
+## Historical initial grounding and held-caller checkpoint
+
+Baseline HEAD was `dc1efaf3c`; `fb4dfee98` is its parent. Read the step-2
 launch specification, binding Malli-native bridge PRD, accepted dissolution
 review, step-1 landing note, and the four schema owners end to end. Read the
 five required skills and the context-generation roadmap entry. The supplied
