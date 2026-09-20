@@ -4756,3 +4756,16 @@ capped at 8 % (~10 GB) — `9?` commit above; recorded that a gate can still
 run 1 coordinator + 3 pool + 1 serial worker per slot × 2 slots (A6/A4
 restructure this). 1a returns to `--paths` at its next stop now that the
 overlay admission is fixed.
+
+## 2026-09-20 ~18:40 UTC — research lanes resumed (steps 3 and 4)
+
+Load 11 and falling, two lane JVMs live, swap still 8.1 GB but free memory
+ample; no landings since `12d968126`; all four editing/review lanes alive
+with no new usage-limit stops. Resumed `step3-carried-projection` and
+`step4-validator-measurement` (astra medium, one foreground JVM each, no
+worktrees) with the §6 rulings and the review lane's two Datahike limits
+(missing numeric ref target accepted; all-wrong heterogeneous tuple
+accepted) as keep-ours rows. Deliverables: the step-3 seam enumeration +
+metadata survival + stamp/restart proof + per-seam adoption-bug risk; the
+step-4 refusal table + measured cost split + diet prototype parity. Six
+lanes again (three editing, one review, two research); load watched.
