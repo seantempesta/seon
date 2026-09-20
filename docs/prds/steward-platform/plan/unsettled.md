@@ -6643,3 +6643,16 @@ five fixes therefore remain proven only by fast runs until then.
 Sighting for the redesign's slice 1: the refusal is right (the live JVM
 publishes its own tree), and once every request goes through the running
 JVM the gate's base is that JVM's publication by construction.
+
+## 2026-09-22 ~22:10 local — SLICE 1 LANDED (`0c6be06f3`, one JVM): lane-measured fork 439 ms (was 27 s), no-change request 6.0 s (was 128 s); orchestrator gate + measurement running on the quiet tree
+
+The redesign lane's own numbers (to be confirmed by the script): a live
+fork is a Datahike branch in 439 ms; a no-change `init --dev` through the
+running JVM's prepl is 6.0 s; live requests launch no JVM (asserted on
+process records); operator tests 8/70 green; 1,335 bytes net deleted.
+The paused publication lane's one-line unstaged edit in cluster.clj is
+shelved to `tmp/orchestrator/parked-2026-09-22/publication-lane-progress-line.patch`
+(that lane is superseded by the redesign) so the tree is clean at HEAD.
+Running serially: `bin/test --platform` → `--all` → the measurement
+script at `0c6be06f3`. Slice 2 (no double caching) is released after the
+diff review and those results.
