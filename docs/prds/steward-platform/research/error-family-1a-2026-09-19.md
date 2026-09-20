@@ -3189,3 +3189,38 @@ bin/test --paths src/seon/error.clj src/seon/turn.clj src/seon/db.clj src/seon/b
 
 The clean completed boot and the per-test five-second bound are still owed;
 the recorded 48/388 green result does not establish either.
+
+## 2026-09-23 — result retirement: additional held producer verified
+
+Read the five named 2026-09-22 ruling blocks (10:30, 10:40, 11:35,
+12:05 and 12:50) end to end, including the final superseding requirements;
+read the existing retirement issue and the Clojure, modeling and testing
+skills. The latest assignment supersedes the earlier accretion-only slice.
+
+`git status --short` shows the two test-system source files and their schema
+resources are clean. However, the complete retired-key search finds 22 raw
+member producers in concurrently edited `src/seon/issue.clj` (39 additions,
+21 deletions). The exact lines and required conversion are appended to
+[the existing retirement issue](../../../seon/issues/error-result-retirement-crosses-held-readers.md).
+The pure constructor preserves those supplied members; deleting their
+declaration alone would leave these producers emitting the retired key.
+This is the explicit held-file boundary under AGENTS.md rule 4. No production
+edit or partial retirement was made. The dirty cluster fault-committer hunk
+at lines 3025–3033 remains deferred to its assigned owner, as instructed.
+
+Measured fast tally: **not run; zero tests executed**. No changed executable
+inputs justify rerunning the accepted suites. No writer timing or result
+storage guarantee is claimed. No JVM, scratch root, or default operation
+was launched for implementation or tests. Only this note and the existing
+issue were changed.
+
+RESET NEEDED on completion: retire `:seon.error/offending`,
+`:seon.error/data-edn`, `:seon.error/data-size`, and
+`:seon.error/offending-projection`. No new attributes were declared in this
+stopped slice; result-id and shown-text names remain to be selected from the
+registry. No reset is requested for these documentation-only changes.
+
+The four requested canonical regressions and the implementation's exact
+cold command remain owed after the held producer is released. There is no
+new cold gate for this documentation-only stop; the accepted four-class
+work and its orchestrator-owned clean-boot proof are not reopened.

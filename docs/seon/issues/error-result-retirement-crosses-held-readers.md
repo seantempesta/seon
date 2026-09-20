@@ -97,3 +97,27 @@ not a test assertion failure or evidence against the recording design.
 The required overlay cannot include held changes or revert restored callers
 to the schema implementation being retired. Resume the selected baseline
 after that dependency lands; no new design choice is needed.
+
+## Atomic retirement resume — 2026-09-23
+
+The earlier schema dependency is resolved. The new assignment requires all
+four old attributes and their consumers to retire atomically. The test-system
+sources and schemas named above are clean at this check. A fresh whole-source
+search exposes another concurrently edited producer: `src/seon/issue.clj`
+(`git diff --numstat`: 39 additions, 21 deletions). Its diagnostic maps supply
+`:seon.error/offending` at lines 88, 148, 214, 546, 562, 577, 606, 621,
+641, 802, 1048, 1081, 1095, 1110, 1125, 1139, 1154, 1222, 1238, 1342,
+1357 and 1405. These are 22 producer sites, not 22 observed test failures.
+They must stop emitting that key in the atomic retirement; their existing
+`:seon.error/diagnostic-offending` inputs carry the same raw observation into
+the pure constructor. `seon.error.refusal/diagnostic` currently preserves
+supplied domain members, so removing the schema declaration alone cannot
+retire these emissions. The lane stopped before production edits rather than
+alter a concurrently edited source or silently discard members.
+
+The separately authorized deferred fault-committer conversion now lives at
+`src/seon/cluster.clj:3025–3033`: it reads `data-size` and `data-edn` from
+`prepare`, then conditionally stages `data-content`. This file is also dirty.
+Its redesign owner must supply connection/profile on the request and use the
+shared result preparation instead of the size-gated staging. This existing
+issue remains the single follow-up for that conversion.
