@@ -5595,3 +5595,18 @@ listed as owed to bin/script; every site convertible with existing facets
 converts now. tmp swept under rule 14: two dead run roots (3.7 GB), five
 stale worktrees, two old probe dirs, orchestrator logs older than two days
 — 12 GB → 4.8 GB; lane session records intact (79).
+
+## 2026-09-21 ~13:00 UTC — wave-3b/3c specs written; sweeps landing; wave-5 design lane launched
+
+`wave3bc-render-proofs-design` landed `633e79d05`
+([wave-3bc-render-pairs-and-template-proofs-spec-2026-09-21.md](wave-3bc-render-pairs-and-template-proofs-spec-2026-09-21.md),
+with a complete dated declaration census; the recursive-rendering
+question answered from walk.clj:91–756 — acquisition already recurses
+through declared components/refs; no second renderer). Sweeps landed:
+test-system `3c0018771`, `b5e3a5e40`, `decff675f` (worker exchange kind
+states, runner refusal facet schemas, convertible runner kinds);
+ops-effects-2 `975fbdc09` (AI kinds retired; concrete output facets — the
+gate's `seon.ai/complete` class). Read-only slot → `wave5-writeback-demo-design`
+(F2/F3 byte-identical write-back, the stricter disk gate, the two-agent
+demonstration narrative). Every wave now has or is getting a verbatim
+launch text.
