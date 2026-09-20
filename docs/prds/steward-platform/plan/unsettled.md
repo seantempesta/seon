@@ -5363,3 +5363,15 @@ before/after measurement contract; deletion budget). Read-only slot →
 `bridge-step5-design` (instrument retained contracts). With it, every
 bridge step has a verbatim launch text: 1 landed, 2 running, 3/4/5 ready
 in order. Gate for step 1 executing.
+
+## 2026-09-21 ~07:10 UTC — bridge fully specified; publication item 3 landed; wave-3a spec lane launched
+
+`bridge-step5-design` landed `0329e5593`
+([bridge-step5-instrument-spec-2026-09-21.md](bridge-step5-instrument-spec-2026-09-21.md)):
+every bridge step now has a verbatim launch text — 1 landed, 2 running,
+3/4/5 queued in order. `publication-dissolution` landed `08ce441a6`
+(publication artifacts memoized by input and declaration world = item 3).
+Read-only slot → `wave3a-task-family-design` (the `seon.task` family per
+D1/D2/D13: schema delta, trigger→task writer with fingerprint identity via
+`seon.id`, task render pair, rename census, regressions, reset batch).
+Step-1 gate: 51 serial tasks done, still executing.
