@@ -6443,3 +6443,21 @@ always analyze completely — 10 s — keeping incremental POPULATION only).
 Summary so far: from zero 175 s; no change 149 s; core docstring 419 s;
 non-core docstring 483 s. Every "incremental" case is slower than
 starting over.
+
+## 2026-09-22 ~16:20 local — OWNER: STOP WORK AND REDESIGN. Rulings: one JVM, index once then incremental, stop fighting the tools; tests FAIL on time limits
+
+All lanes paused (sessions retained). Owner: "It was always supposed to be
+a single JVM and we pay the cost of startup once. We pay the cost of
+indexing once and then it's incremental. Stop fighting the tools they are
+already optimized." "Start making tests fail if they exceed reasonable
+time limits. None of this shit should require minutes of computation."
+The complete plan, seams by file:line, targets and slice order:
+[one-jvm-publication-redesign-2026-09-22.md](one-jvm-publication-redesign-2026-09-22.md)
+(supersedes the publication-dissolution spec). Why it kept happening
+(recorded so it stops): proof was a green fast run, never a clock on the
+hook's own command; mechanisms were decomposed before the invariant was
+written; lanes built around clj-kondo, Datahike and the running JVM
+instead of on them. Standing from now: nothing is "landed" without its row
+in the measurement table, produced by the committed script and run by the
+orchestrator. Order: step 2's identity slice (so the shared tree boots) →
+one redesign lane, slices 1–5 measured one at a time → everything else.
