@@ -6344,3 +6344,23 @@ orchestrator's `2d0e9b17e` `declared-row-schema` selection patch and
 symptom); a scratch boot on the lane's own root is part of step 2's
 landing proof. Step 2 resumed (astra low). This also clears the error
 lane's and the publication lane's boundary.
+
+## 2026-09-22 ~14:00 local — ORCHESTRATOR HANDS-ON: from-zero at HEAD measured (owner: "measure the incremental cost")
+
+Throwaway worktree `tmp/head-wt` at HEAD `7924f4dae` (reference-code
+symlinked; the worktree's empty submodule dirs first swallowed the
+symlink — "Could not derive the project classpath" — fixed), isolated
+root `tmp/head-root`. Complete publication from zero:
+`bin/seon --root tmp/head-root init` — **175.0 s lifecycle**, exit 0,
+381 inputs, 613 findings, 3,370 schemas / 1,552 functions, 11,471
+contract rows, population 107,499. Fork `init head`: 29.0 s wall (77.7 s
+user CPU — JVM boot and namespace load, not the Datahike branch fork).
+Start `head`: in progress. The publication result's
+`:seon.program/unresolved-callers` carried 42,767 entries, 38,902 of them
+into `clojure.core` — noise reading a missing `:seon.fn` row for a library
+function as "unresolved"; filed
+[the-unresolved-callers-report-lists-every-library-callee](../../../seon/issues/the-unresolved-callers-report-lists-every-library-callee.md)
+with the one-clause fix (callee namespace has a `:seon.ns` row and no
+function row). Next: one-file edit through the hook's own command
+(`init --dev head --changed PATH`), timed, twice (docstring-only, then a
+body change), and the errors/warnings read as they come.
