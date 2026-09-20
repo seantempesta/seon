@@ -3233,13 +3233,29 @@
           (d/db connection))))
 
 (defn- jdk-integers->long
+  "Normalize submitted storage data, preserving transaction-function arguments.
+   A function receives its in-memory request unchanged; the same conversion
+   handles its returned transaction data before Datahike validates it."
+  {:malli/schema [:=> [:cat :seon.store/transaction] :seon.store/transaction]}
   [transaction]
-  (walk/postwalk
-   (fn [value]
-     (if (instance? Integer value)
-       (long value)
-       value))
-   transaction))
+  (letfn [(normalize [value]
+            (walk/postwalk #(if (instance? Integer %) (long %) %) value))
+          (entries [values]
+            (if-not (sequential? values)
+              values
+              (mapv (fn [entry]
+                      (if (and (sequential? entry) (= :db.fn/call (first entry)))
+                        (let [[operation f & args] entry]
+                          (into [operation (fn [database & supplied]
+                                             (entries (apply f database supplied)))]
+                                args))
+                        (normalize entry)))
+                    values)))]
+    (if (map? transaction)
+      (cond-> transaction
+        (contains? transaction :tx-data) (update :tx-data entries)
+        (contains? transaction :tx-meta) (update :tx-meta normalize))
+      (entries transaction))))
 
 (def ^:private entity-identity-query
   '[:find ?identity-attribute ?identity-value
@@ -3631,7 +3647,7 @@
 (defn- write-owned-values-error
   "Validate complete owning values, reached through both sides of this report.
    EAVT supplies every child; AVET discovers owners without pull's 1,000 cap."
-  [projection report attribute-plans identity-attrs]
+  [projection report attribute-plans identity-attrs changed-identity-attributes]
   (let [before (:db-before report)
         after (:db-after report)
         limit (:seon.config.db/validation-node-limit projection)
@@ -3757,6 +3773,7 @@
                  (let [value (get @expanded root)
                        identities (merge (select-keys (row :before before root) identity-attrs)
                                          (select-keys value identity-attrs))]
+                   (vswap! changed-identity-attributes into (keys identities))
                    (when (and (seq value) (empty? identities))
                      (fail! ::unowned-entity {::entity root ::entity-value value}))
                    (write-entity-error after projection attribute-plans root identities value)))
@@ -4014,6 +4031,8 @@
               affected)]
     (removed-definition-error database removed identity-attrs)))
 
+(declare retention-report-check)
+
 (defn- write-report-error
   "One final check for native operations and all expanded transaction-function output."
   [projection report]
@@ -4021,6 +4040,7 @@
         before (:db-before report)
         attempted (:datahike/attempted-tx-data report)
         affected (distinct (map :e (concat attempted (:tx-data report))))
+        changed-identity-attributes (volatile! #{})
         identity-attrs (set/union (set (identity-attributes before))
                                   (set (identity-attributes database)))
         attribute-plans (schema/projection-cache-value
@@ -4034,6 +4054,7 @@
                                 (merge datahike.schema/implicit-schema-spec
                                        (dbi/-schema database))))]
     (or
+     (retention-report-check projection report affected)
      (some (fn [datom]
              (when (:added datom)
                (let [attribute (:a datom)
@@ -4053,11 +4074,18 @@
            attempted)
      (write-agent-retraction-error (:tx-data report))
      (write-deletion-error before database affected identity-attrs)
-     (write-owned-values-error projection report attribute-plans identity-attrs)
+     (write-owned-values-error projection report attribute-plans identity-attrs
+                               changed-identity-attributes)
      (when (some (comp #{:seon.schema/form :seon.schema/key :seon.fn/sym} :a)
                  (concat attempted (:tx-data report)))
        (write-render-target-error database))
-     (when (seq affected)
+     ;; Arity admission depends on declarations, their owned children, shared
+     ;; shapes and supplied defaults. The owning-value walk already found
+     ;; every changed root on both sides, including swept/deleted children.
+     ;; An error, message or other ordinary fact cannot change call arities.
+     (when (some @changed-identity-attributes
+                 [:seon.fn/sym :seon.test/sym :seon.schema/key
+                  :seon.schema.shape/fingerprint :seon.call-preparation/key])
        (let [result (arity-mismatches-with d/q database projection)
              mismatches (:seon.fn/arity-mismatches result)]
          (if (and (map? result) (inst? (:seon.error/at result))
@@ -4106,7 +4134,7 @@
                        :seon.db/authority (:seon.db/retraction-authority properties)}))))
           (:seon.schema.projection/forms projection))))
 
-(defn- retention-snapshot [database rules]
+(defn- retention-snapshot [database rules entities]
   (let [identities (vec (identity-attributes database))
         ;; A non-temporal database keeps no history, and Datahike throws
         ;; rather than answering `history` for one. Its current datoms ARE
@@ -4117,14 +4145,13 @@
     (into {}
       (mapcat
        (fn [{attribute :seon.db/attribute activation :seon.db/activation authority :seon.db/authority}]
-         (let [activated (into #{} (comp (filter :added) (map :e))
-                               (d/datoms history :aevt activation))
+         (let [activated (into #{} (filter #(some :added (d/datoms history :eavt % activation)))
+                               entities)
                creators (when (and authority (db.utils/entid database authority))
-                          (reduce (fn [result datom]
-                                    (if (and (:added datom) (not (get result (:e datom))))
-                                      (assoc result (:e datom) (:v datom)) result))
-                                  {} (sort-by :tx (d/datoms history :aevt authority))))
-               entities (into activated (map :e) (d/datoms database :aevt attribute))]
+                          (into {} (keep (fn [entity]
+                                           (when-let [creator (first (sort-by :tx (filter :added
+                                                                            (d/datoms history :eavt entity authority))))]
+                                             [entity (:v creator)]))) entities))]
            (mapv
             (fn [entity]
               (let [values (into #{} (map :v) (d/datoms database :eavt entity attribute))]
@@ -4183,20 +4210,28 @@
                   :seon.db/user actor :seon.db/creator creator}})))))
   [])
 
-(defn- retain-transaction [projection transaction]
-  (let [rules (retention-rules projection)]
-    (if (empty? rules) transaction
-      (let [request (if (map? transaction) transaction {:tx-data transaction})
-            user (get-in request [:tx-meta :seon.db/user])]
-        (assoc request :tx-data
-          [[:db.fn/call
-            (fn [database]
-              (let [before (retention-snapshot database rules)
-                    actor (when user (db.utils/entid database user))]
-                (conj (vec (:tx-data request))
-                      [:db.fn/call
-                       (fn [after]
-                         (retention-check before (retention-snapshot after rules) actor))])))] ])))))
+(defn- retention-report-check
+  "Check touched owners and owners of touched retained targets in the final report.
+   Reverse AVET seeks include an identity-only target retraction; transaction
+   functions and reference sweeps are already expanded by this authority."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report
+                       [:sequential :int]] :nil]}
+  [projection report affected]
+  (let [before (:db-before report)
+        after (:db-after report)
+        rules (retention-rules projection)
+        entities (into (set affected)
+                       (for [database [before after]
+                             {attribute :seon.db/attribute} rules
+                             :when (get (dbi/-schema database) attribute)
+                             entity affected
+                             datom (d/datoms database :avet attribute entity)]
+                         (:e datom)))
+        user (get-in report [:tx-meta :seon.db/user])
+        actor (when user (db.utils/entid before user))]
+    (retention-check (retention-snapshot before rules entities)
+                     (retention-snapshot after rules entities) actor)
+    nil))
 
 (defn- agent-provenance?
   "True when the write's own provenance metadata names an agent user.
@@ -4281,9 +4316,7 @@
                       (apply min configured-bounds)
                       declared-bound))
                   request
-                  (retain-transaction
-                   projection
-                   (schema.datahike/encode-transaction-in projection prepared))
+                  (schema.datahike/encode-transaction-in projection prepared)
                   pending (d/transact! connection request)
                   timeout (Object.)
                   started (System/nanoTime)

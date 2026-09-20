@@ -108,6 +108,50 @@ removing the duplicate membership is the explicit decision at the assignment's
 permitted item 1 stop. The three scoped options and retained before/after
 evidence are in the
 [redesign landing note](../../prds/steward-platform/research/one-jvm-redesign-2026-09-22.md).
+
+## Ordinary error-write measurement — 2026-09-23 assignment
+
+The error lane's canonical armed probe measured an unrelated complete arity
+scan at 121.77 ms on one error write. Final-report validation now uses the
+changed roots already discovered by its owning-value walk to enter arity
+admission only for program declarations, shared schema shapes, and supplied
+defaults. Ordinary error writes execute zero arity scans. Program-changing
+writes still enter the existing complete arity check; incremental checking of
+program changes is not claimed by this result.
+
+Two retention snapshots also read every issue's activation, creator, members
+and member identities on every write: 273.83 ms in the split. Retention now
+uses the final report's touched entities, reverse AVET seeks for retaining
+owners, and per-entity EAVT history. The measured replacement is 4.82 ms.
+The regression covers expanded transaction-function output, retained-target
+identity removal, enduring creator authority, and nonempty membership.
+
+The supplementary program-write probe reaches arity admission but returns
+`seon.call-preparation/incoherent` for `:seon.db/connection`: the published
+`seon.db/supplied-connection` return declaration does not agree with its
+supplied-default value schema. That is the actual refusal, not the intended
+argument-count mismatch. The new test proves that program writes still enter
+arity admission; it does not claim to verify the mismatch diagnostic past
+this refusal. The complete return is recorded in
+`tmp/error-write-split-selection.log`; the reproducible probe is
+`test/seon/error_write_timing_test.clj`. Supplier coherence is outside this
+bounded error-write performance assignment.
+
+The final split, per-test durations and remaining cold gate are in the
+[error landing note](../../prds/steward-platform/research/error-family-1a-2026-09-19.md).
+This issue remains open for the publication work and program-write behavior
+described above; the ordinary error-write scan is fixed.
+
+The remaining admission gap was also measured: integer normalization walked
+the complete projection in a `:db.fn/call` argument, taking 177.29 ms and
+replacing in-memory argument objects. Two canonical regression assertions
+falsified that behavior before the fix. The same normalizer now handles
+submitted storage entries and metadata, leaves function arguments unchanged,
+and normalizes the function's returned transaction data. This is necessary
+because Datahike requires Java Long values for `:db.type/long`; merely skipping
+the arguments exposed Integer values produced by the error recorder. The
+regression verifies preserved request identity and successful stored integers
+from both native entries and transaction-function output.
 No latency target or cold gate pass is claimed.
 
 ## Error result recording observation — 2026-09-23 assignment

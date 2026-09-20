@@ -921,8 +921,8 @@
   "Commit one error and return [fact-count messages-by-recipient]."
   [connection source extra]
   (test-support/transacted! connection
-                          (error/commit-tx @connection (commit-request source extra)))
-  (let [db @connection]
+                          (error/commit-tx (db/db connection) (commit-request source extra)))
+  (let [db (db/db connection)]
     [(count (db/q '[:find ?e :where [?e :seon.error/id _]] db))
      ;; ?message is bound so two messages to one recipient are two
      ;; rows: a `[?to ...]` find returns a SET and would have counted
@@ -947,8 +947,8 @@
     (fn [connection]
       (let [request (dissoc (commit-request (transform-error (ex-info "boom" {})) {})
                             :seon.config.error/recurrence-limit)]
-        (test-support/transacted! connection (error/commit-tx @connection request))
-        (test-support/transacted! connection (error/commit-tx @connection request))
+        (test-support/transacted! connection (error/commit-tx (db/db connection) request))
+        (test-support/transacted! connection (error/commit-tx (db/db connection) request))
         (is (= 2 (db/q '[:find (sum ?n) . :where [_ :seon.error.occurrence/count ?n]]
                         (db/db connection))))
         (is (= 1 (count (db/q '[:find ?m :where [?m :seon.message/about]]
@@ -1030,12 +1030,12 @@
       (let [source (transform-error (ex-info "boom" {}))
             request (commit-request source {:seon.agent/id "agent-3"
                                             :seon.turn/id "run-9"})
-            tx (error/commit-tx @connection request)]
+            tx (error/commit-tx (db/db connection) request)]
         ;; the SAME request committed twice: re-execution after a crash
         ;; must upsert, never double-send
         (test-support/transacted! connection tx)
         (test-support/transacted! connection tx)
-        (let [db @connection]
+        (let [db (db/db connection)]
           (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/id _]] db))))
           (is (= 1 (count (db/q '[:find ?m :where
                                  [?m :seon.message/about _]]
@@ -1045,7 +1045,7 @@
   (with-db
     (fn [connection]
       (commit! connection (transform-error (ex-info "boom" {})) {})
-      (let [db @connection
+      (let [db (db/db connection)
             about (db/q '[:find ?id .
                          :where
                          [?message :seon.message/about ?signature]
@@ -1078,7 +1078,7 @@
 (deftest new-error-facets-compose-and-report-missing-members
   (test-support/with-database
    (fn [connection]
-     (let [projection (schema/projection-from-database (db/db connection))
+     (let [projection (db/carried-projection (db/db connection))
            base {:seon.error/at #inst "2026-09-18T00:00:00Z"
                  :seon.error/layer :seon.db/read :seon.error/operation 'seon.db/q}
            matching (partial error/facets projection)
@@ -1101,7 +1101,7 @@
 (deftest arity-facet-preserves-real-refusal-observations
   (test-support/with-database
    (fn [connection]
-     (let [projection (schema/projection-from-database (db/db connection))
+     (let [projection (db/carried-projection (db/db connection))
            observed-at (java.util.Date.)
            refusal (test-support/refusal-data #(apply seon.id/valid? []))
            data (:seon.error/data refusal)
@@ -1143,7 +1143,7 @@
       (schema.datahike/malli->datahike-schema-in projection [::manifest-id ::manifest-location ::manifest-observation ::manifest-explanations])}
      (fn [connection]
        (db/carry-connection-projection-state!
-        connection (sci.eval/projection-state @connection projection))
+        connection (sci.eval/projection-state (db/db connection) projection))
        (test-support/transacted! connection [{::manifest-id "root-path"
                                               ::manifest-location {:seon.error.location/length 0}}])
        (test-support/transacted!
@@ -1270,7 +1270,7 @@
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "error-family-1a")
-     (let [projection (schema/projection-from-database (db/db connection))
+     (let [projection (db/carried-projection (db/db connection))
            observed {:seon.error/at #inst "2026-09-19T00:00:00Z"
                      :seon.error/layer :seon.agent/lifecycle
                      :seon.error/operation 'seon.agent/by-id
@@ -1358,7 +1358,7 @@
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "error-family-d13")
-     (let [projection (schema/projection-from-database (db/db connection))
+     (let [projection (db/carried-projection (db/db connection))
            observed {:seon.error/at #inst "2026-09-19T00:00:00Z"
                      :seon.error/layer :seon.agent/lifecycle
                      :seon.error/operation 'seon.agent/by-id

@@ -3557,3 +3557,279 @@ and shell commands exited before commit. `git diff --check` passes for the
 owned changes. Markdown lint reports two pre-existing stale Datahike
 gitlink citations in the wave-3a and wave-3bc plan documents; those foreign
 documents were not edited.
+
+## Error write cost split — 2026-09-23 assignment
+
+The timing failures after `4e20bc458` were defects, not a verification
+boundary. This slice measures and removes work unrelated to the error being
+written. It uses the supplied AGENTS lane rules and seconds-not-minutes law,
+the canonical armed fixture, and the data-oriented Clojure, testing and
+Datahike skills. No default operation, cold gate or worktree was used.
+
+The recurring measurement is
+`test/seon/error_write_timing_test.clj`. Its scoped wrappers call the actual
+entering armed functions with unchanged arguments and results. The Datahike
+commit wrapper times delivery on the existing commit channel, not merely
+creation of that channel. All wrappers are restored after the synchronous
+write completes. Dependency grounding: Datahike's final-report callback in
+`reference-code/datahike/src/datahike/db/transaction.cljc:1210`, AVET lookup
+dispatch in `reference-code/datahike/src/datahike/db/search.cljc:140`, and
+the commit channel and writer acknowledgement in
+`reference-code/datahike/src/datahike/writing.cljc:423` and
+`reference-code/datahike/src/datahike/writer.cljc:230`.
+
+Root causes and changes:
+
+- `write-report-error` scanned all program call sites after an ordinary
+  error write. Its existing component walk now supplies the identities of
+  changed roots on both sides of the transaction. Arity validation runs for
+  changed declarations, shared shapes and supplied defaults; an error write
+  runs zero arity scans. Program-write validation remains conservative and
+  still uses the complete arity check.
+- Retention wrapped every transaction with two snapshots of every issue's
+  members, activation history, creator and referenced identities. It now
+  checks the final report's touched entities and their retaining owners,
+  found by reverse AVET seeks. Activation and creator history use per-entity
+  EAVT reads. Expanded transaction functions, identity-only target retractions,
+  enduring creator authority and nonempty membership have a real-writer
+  regression.
+- The error recorder repeatedly selected attributes from the entire schema
+  registry. It now selects stored members from error schemas only. Restoring
+  a complete observation reads cached declarations only for members actually
+  present, recursively following components. Transient error schemas are
+  excluded from stored selectors; bridge-storability alone is insufficient.
+- Recurrence starts with one lookup ref on the indexed
+  `:seon.error/signature`, then reads its occurrence counts with an explicit
+  unlimited collection selector. Agent and turn presence use identity lookup
+  refs. There is no database-population scan in these reads.
+- Integer normalization walked the complete projection carried in a
+  `:db.fn/call` argument: **177.29 ms** in the isolated probe. It also
+  replaced the request object and changed an in-flight Java integer. Both
+  identity assertions failed before the change. The one existing normalizer
+  now converts submitted storage entries and metadata, passes function
+  arguments unchanged, and applies that same conversion to the function's
+  returned transaction data. This preserves Datahike's Long requirement
+  without walking the caller's world. The regression verifies both object
+  identity and Java integers stored from direct entries and function output.
+  Datahike's native `:db.fn/call` application is at
+  `reference-code/datahike/src/datahike/db/transaction.cljc:1153`;
+  its Long requirement is at `reference-code/datahike/src/datahike/schema.cljc:27`.
+- Older test helpers now use `db/db` and its carried projection rather than
+  raw connection dereferences or unnecessary complete projection derivation.
+  Even the older tests writing thousands of component entities or making
+  multiple sequential durable commits now fit their five-second bound.
+  The ordinary result tests retain that bound and their one-second write
+  assertion unchanged.
+
+The initial 30-datom probe took **1646.34 ms**: complete Datahike commit
+**183.43 ms**, unrelated arity scan **121.77 ms**, whole-entity validation
+**7.13 ms**, and schema selection **0.14 ms**. A subsequent split isolated
+retention snapshots at **273.83 ms**. These are measured inclusive spans;
+nested spans must not be added together.
+
+Iteration record (tests / assertions / failures / errors, wall seconds):
+
+| Run | Tally | Wall seconds | Observation |
+| --- | --- | ---: | --- |
+| `a4c139f0c08f` | 1 / 5 / 0 / 0 | 146.93 | Initial write split. |
+| `b35593c47291` | 53 / 419 / 3 / 0 | 305.47 | Two write timing failures; program-probe diagnostic differs. |
+| `371564e95796` | 6 / 15 / 1 / 3 | 164.16 | Probe diagnostic plus transient members incorrectly included in stored selectors; corrected at selection. |
+| `4d92d8dc14a1` | 54 / 429 / 0 / 0 | 267.98 | Bounded retention, result writes under one second. |
+| `a8cd6e12692e` | 54 / 429 / 0 / 0 | 248.34 | Carried projection in older helpers; further first-write member selection then narrowed. |
+| `e5b72625c39b` | 54 / 429 / 0 / 0 | 241.60 | Per-member storage declarations; first instrumented write 987.33 ms. |
+| `159bea0ee7e3` | 4 / 20 / 2 / 0 | 149.79 | Before-change request-identity regressions falsify recursive normalization of in-flight arguments. |
+| `e15289a2323b` | 55 / 401 / 0 / 2 | 125.22 | Preserved arguments expose Integer values in function-produced storage; same normalizer moved to returned transaction data. |
+
+The supplementary program-change regression positively verifies entry into
+arity admission. Its actual refusal is
+`seon.call-preparation/incoherent` for `:seon.db/connection`, because the
+published `seon.db/supplied-connection` return declaration disagrees with its
+supplied-default value schema. It cannot prove the intended argument-count
+diagnostic past that refusal. This remaining fact and the still-complete
+program-write arity query are recorded in the
+[existing performance issue](../../../seon/issues/full-publication-tests-exceed-liveness-while-compiling-the-commit-projection.md).
+
+One edit hook reported a foreign dirty syntax error in
+`test/seon/turn_test.clj:1322`; that file was not edited. The authorized fast
+snapshot used its HEAD bytes. Dirty publication/config/test-system callers
+were likewise explicitly admitted at HEAD, as listed in each run log.
+
+RESET NEEDED: no new attribute or type change in this performance slice.
+The pending result-storage batch still contains `:seon.error/result-id` and
+`:seon.error/shown`. Legacy members remain written; their atomic retirement
+and the fault-committer conversion remain in the existing retirement issue.
+
+### Final measured split and verification
+
+Run `705061322dc5`: **55 tests / 433 assertions / 0 failures / 0 errors**,
+**111.66 s** command wall-clock including JVM initialization. The instrumented
+31-datom write takes **328.821 ms**, versus **1646.340 ms** initially.
+Measured GC time during the write is **0 ms**. The ordinary result regressions
+measure the following preparation plus committed-write times:
+
+| Case | Recording ms | Transaction ms | Total ms |
+| --- | ---: | ---: | ---: |
+| Agent contract refusal | 14.076 | 126.982 | 141.059 |
+| Arbitrary core objects | 16.840 | 184.753 | 201.593 |
+| Large nested value | 51.442 | 155.835 | 207.277 |
+
+Every measured owner span follows. Spans are inclusive: the component walk
+contains entity/schema validation; final validation contains retention and
+that walk; Datahike transaction expansion contains the error transaction
+function and final validation. The final commit channel is measured separately.
+Printer arity delegation is counted once, at its outer call.
+
+| Span | Calls | Milliseconds |
+| --- | ---: | ---: |
+| `[seon.render.value/prepare :capped]` | 1 | 4.321 |
+| `[seon.render.value/prepare :complete]` | 1 | 18.158 |
+| `datahike.db.transaction/transact-tx-data` | 1 | 68.098 |
+| `datahike.writing/commit!` | 1 | 81.028 |
+| `seon.blob/put!` | 1 | 16.759 |
+| `seon.db/jdk-integers->long` | 1 | 0.023 |
+| `seon.db/pull` | 4 | 4.083 |
+| `seon.db/retention-check` | 1 | 0.018 |
+| `seon.db/retention-report-check` | 1 | 6.505 |
+| `seon.db/retention-snapshot` | 2 | 4.873 |
+| `seon.db/transact-call` | 1 | 150.092 |
+| `seon.db/write-deletion-error` | 1 | 0.014 |
+| `seon.db/write-entity-error` | 4 | 1.276 |
+| `seon.db/write-entity-schemas` | 5 | 0.045 |
+| `seon.db/write-entity-value` | 7 | 1.076 |
+| `seon.db/write-error` | 1 | 0.170 |
+| `seon.db/write-owned-values-error` | 1 | 5.285 |
+| `seon.db/write-report-error` | 1 | 12.278 |
+| `seon.error/agent-exists?` | 1 | 2.114 |
+| `seon.error/bounded-error-admission` | 2 | 117.143 |
+| `seon.error/commit-call` | 1 | 48.915 |
+| `seon.error/entity-exists?` | 1 | 1.960 |
+| `seon.error/facets` | 11 | 7.600 |
+| `seon.error/prepare` | 1 | 166.084 |
+| `seon.error/prepare-result` | 1 | 42.668 |
+| `seon.error/recording` | 1 | 178.514 |
+| `seon.error/recurrence` | 1 | 2.354 |
+| `seon.error/signature` | 1 | 1.531 |
+| `seon.error/stored-observation` | 2 | 9.016 |
+| `seon.render.value/render-ai-data` | 2 | 0.235 |
+| `seon.schema.datahike/encode-transaction-in` | 1 | 0.060 |
+| `seon.sci.eval/bind-result!` | 1 | 1.928 |
+| `seon.db/arity-mismatches-with` | 0 | 0 |
+| `seon.schema/projection-from-database` | 0 | 0 |
+| `seon.error/observation-selector` | 0 | 0 |
+
+The fresh-write probe does not acquire a previously stored observation,
+so its observation-selector count is explicitly zero. Stored observation
+acquisition and rendering remain covered by the result and error regressions.
+Whole-entity validation reads touched rows by EAVT; it does not use pull to
+materialize the whole database. The four public pull calls include indexed
+presence/recurrence and the existing occurrence lookup.
+
+`prepare` excluding the new result-preparation subcall is **123.416 ms**;
+that includes legacy evidence admission still required by the accretion ruling.
+Result preparation excluding its measured printer/blob/binding children is
+**1.267 ms**. Native transaction expansion excluding the error transaction
+function and final validator is **6.905 ms**, including storage normalization
+of the function output. The synchronous transaction span exceeds native
+expansion plus commit by only **0.965 ms**. This closes the previously
+unexplained admission gap: it was the projection walk, not file storage.
+The actual Datahike commit is **81.028 ms**; no store-choice decision is needed
+for this measured write.
+
+Per-test wall-clock below comes from this run's BEGIN/END events. The profiling
+test declares 60 s because it first acquires the real canonical SCI program;
+the existing agent-turn test carries the same acquisition allowance. Every
+other test is below 5 s. Temporary long declarations on older error tests were
+removed after the algorithmic fix, preserving their normal eligibility and
+five-second bound; their follow-up verification is recorded below.
+
+| Test | Seconds |
+| --- | ---: |
+| `seon.error-write-timing-test/one-error-write-has-a-measured-preparation-validation-and-commit` | 19.744 |
+| `seon.error-write-timing-test/program-call-changes-still-enter-final-arity-validation` | 1.942 |
+| `seon.error-write-timing-test/retention-validates-expanded-writes-and-retained-target-identities` | 0.473 |
+| `seon.error-write-timing-test/transaction-functions-receive-their-request-object-unchanged` | 0.218 |
+| `seon.error-result-test/a-canonical-result-declarations-are-installed` | 0.045 |
+| `seon.error-result-test/agent-contract-refusal-retains-its-live-offending-result` | 4.452 |
+| `seon.error-result-test/core-results-use-the-printer-for-arbitrary-objects` | 0.454 |
+| `seon.error-result-test/large-result-keeps-complete-and-profile-capped-printer-text` | 0.475 |
+| `seon.error-test/a-contract-violations-fault-keeps-the-value-that-broke-it` | 0.986 |
+| `seon.error-test/a-fault-observes-the-function-name-without-minting-an-identity` | 1.758 |
+| `seon.error-test/a-prepared-message-keeps-its-id-when-the-transaction-repeats` | 1.635 |
+| `seon.error-test/a-value-that-was-never-a-throwable-has-no-class` | 0.006 |
+| `seon.error-test/an-agent-this-cluster-does-not-have-is-no-attribution-at-all` | 1.533 |
+| `seon.error-test/an-unattributable-throwable-goes-to-the-escalation-owner` | 3.088 |
+| `seon.error-test/an-unclassifiable-source-is-fail-closed-never-absent` | 0.003 |
+| `seon.error-test/arity-facet-preserves-real-refusal-observations` | 0.044 |
+| `seon.error-test/attribution-is-a-lookup-ref-or-nothing` | 0.002 |
+| `seon.error-test/capping-is-honest` | 0.140 |
+| `seon.error-test/cause-chain-reading-preserves-the-deepest-complete-observation` | 0.000 |
+| `seon.error-test/complete-error-children-validate-through-the-writer` | 2.788 |
+| `seon.error-test/diagnostic-construction-is-evidence-complete` | 0.001 |
+| `seon.error-test/diagnostic-construction-preserves-domain-members` | 0.055 |
+| `seon.error-test/dropped-fault-counts-accumulate-in-the-occurrence` | 0.244 |
+| `seon.error-test/error-facets-persist-through-the-real-occurrence-owner` | 3.696 |
+| `seon.error-test/error-identity-and-occurrences-are-owned-by-the-writer` | 2.553 |
+| `seon.error-test/every-error-owner-function-declares-its-input-and-output` | 0.044 |
+| `seon.error-test/fault-preparation-bounds-the-fact-and-omits-disposable-flow-state` | 0.023 |
+| `seon.error-test/fitting-can-require-a-blob-below-the-content-size-threshold` | 0.003 |
+| `seon.error-test/flow-keys-ride-exactly-when-the-shape-carries-them` | 0.018 |
+| `seon.error-test/instrumentation-evidence-survives-normalization` | 0.006 |
+| `seon.error-test/new-error-facets-compose-and-report-missing-members` | 0.051 |
+| `seon.error-test/normalization-is-total` | 0.688 |
+| `seon.error-test/normalization-never-throws` | 0.002 |
+| `seon.error-test/notices-carry-structured-projection-evidence` | 0.459 |
+| `seon.error-test/only-a-throwable-tells-the-attributed-agent` | 2.945 |
+| `seon.error-test/over-bound-fault-evidence-retains-its-classifying-base` | 0.003 |
+| `seon.error-test/recording-ignores-transient-inline-members-when-finding-components` | 0.191 |
+| `seon.error-test/recording-refuses-an-unavailable-complete-observation` | 0.388 |
+| `seon.error-test/recurrence-counting-does-not-require-a-notification-threshold` | 1.596 |
+| `seon.error-test/recurrence-identity-is-the-complete-observations-stable-evidence` | 1.959 |
+| `seon.error-test/row-acquisition-observations-have-no-program-digest-promise` | 0.373 |
+| `seon.error-test/schema-refusals-are-admitted-at-the-recorder` | 0.249 |
+| `seon.error-test/specialist-renderers-use-their-declared-evidence` | 0.045 |
+| `seon.error-test/the-default-html-face-links-committed-evidence` | 0.000 |
+| `seon.error-test/the-default-renderers-accept-an-attribute-shaped-error` | 0.045 |
+| `seon.error-test/the-flat-value-projects-from-the-fact` | 0.006 |
+| `seon.error-test/the-log-line-is-one-line-and-derived` | 0.005 |
+| `seon.error-test/the-message-comes-from-the-rule-not-the-wrapper` | 0.005 |
+| `seon.error-test/the-message-points-at-the-fact-it-explains` | 1.463 |
+| `seon.error-test/the-observed-rule-comes-from-the-deepest-ex-data` | 0.000 |
+| `seon.error-test/the-proc-state-never-escapes-raw` | 0.006 |
+| `seon.error-test/the-projection-keys-are-derived-never-stored` | 0.005 |
+| `seon.error-test/the-signature-ignores-the-message` | 0.001 |
+| `seon.error-test/the-signature-separates-different-violated-schemas` | 0.001 |
+| `seon.error-test/the-storm-is-bounded-by-the-signature-count` | 1.916 |
+
+Files touched in this slice:
+
+- `src/seon/error.clj`
+- `src/seon/db.clj`
+- `test/seon/error_test.clj`
+- `test/seon/error_write_timing_test.clj` (new recurring probe and regressions)
+- `docs/seon/issues/full-publication-tests-exceed-liveness-while-compiling-the-commit-projection.md`
+- this landing note.
+
+Load proof: `clojure -M -e "(require 'seon.error 'seon.sci.eval 'seon.print 'seon.db) (println :loaded)"`
+exited 0, printed `:loaded`, and took **12.62 s**. Source bytes did not
+change after that proof. Evidence logs are `tmp/error-write-split-storage.log`
+and `tmp/error-write-load.log`; the committed timing test reproduces the split.
+
+Cold gate owed to the orchestrator (not run by this lane):
+
+```sh
+bin/test --paths src/seon/error.clj src/seon/db.clj test/seon/error_test.clj test/seon/error_write_timing_test.clj -- seon.error-write-timing-test seon.error-result-test seon.error-test seon.db-test seon.issue-settlement-test
+```
+
+After removing the temporary long-test metadata, run `e194ec9102ad`
+verified **47 tests / 382 assertions / 0 failures / 0 errors**, **86.41 s**
+command wall-clock. All 47 use their unchanged default five-second bound;
+the slowest was **4.048 s** (`error-facets-persist-through-the-real-occurrence-owner`).
+The first fixture-backed test was **3.435 s**. The result and timing namespaces
+had unchanged inputs and were not rerun. Their green evidence remains run
+`705061322dc5`. No ordinary test bound was raised in the landed change.
+
+All owned JVMs exited before commit. `git diff --check` passed. Markdown
+lint still reports the two pre-existing foreign wave-3 plan gitlink citations;
+neither document was edited. This is the completed recording-performance
+slice; the cold gate and the already-recorded retirement remain owed to their
+owners.

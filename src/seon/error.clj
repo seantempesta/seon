@@ -272,37 +272,18 @@
      :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
      :seon.turn.loop/error]]}
   [projection observation]
-  (let [attributes
-        (schema/projection-cache-value
-         projection ::observation-attributes
-         (fn []
-           (let [registry (:seon.schema.projection/registry projection)
-                 stored-attributes (set (schema.datahike/database-attributes-core-in projection))
-                 attributes
-                 (loop [pending (vec (conj (facet-keys projection) :seon.error/base))
-                        seen #{} result #{}]
-                   (if-let [entity (peek pending)]
-                     (if (seen entity)
-                       (recur (pop pending) seen result)
-                       (let [members (map first (internal/entity-entries (mr/schema registry entity)))
-                             children (keep #(some-> (mr/schema registry %) m/properties
-                                                      :seon.db/component-schema)
-                                            (filter stored-attributes members))]
-                         (recur (into (pop pending) children) (conj seen entity)
-                                (into result members))))
-                     result))]
-             (into {}
-                   (comp (filter stored-attributes)
-                         (map (fn [attribute]
-                                [attribute (schema.datahike/malli->datahike-attr-in projection attribute)])))
-                   attributes))))]
-    (letfn [(restore [value]
+  (letfn [(restore [value]
               (if-not (map? value)
                 value
                 (into {}
                       (keep (fn [[attribute observed]]
                               (when (not= :db/id attribute)
-                                (let [declaration (get attributes attribute)
+                                (let [declaration
+                                      (schema/projection-cache-value
+                                       projection [::observation-attribute attribute]
+                                       #(when (and (qualified-keyword? attribute)
+                                                   (schema.datahike/storable-attribute-in? projection attribute))
+                                          (schema.datahike/malli->datahike-attr-in projection attribute)))
                                       convert (fn [member]
                                                 (cond
                                                   (:db/isComponent declaration) (restore member)
@@ -314,7 +295,7 @@
                                                (into #{} (map convert) observed)
                                                (convert observed))]))))
                       value)))]
-      (restore observation))))
+      (restore observation)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Flat diagnostics — one evidence-complete construction
@@ -1527,18 +1508,20 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :boolean :seon.db/error-result]]}
   [database agent-id]
-  (let [result (db/q '[:find ?agent . :in $ ?id
-                       :where [?agent :seon.agent/id ?id]] database agent-id)]
-    (if (or (nil? result) (integer? result)) (some? result) result)))
+  (let [result (db/pull database [:db/id] [:seon.agent/id agent-id])]
+    (cond (nil? result) false
+          (:db/id result) true
+          :else result)))
 
 (defn- entity-exists?
   "Return presence or the database's declared read refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.schema/value]
                   [:or :boolean :seon.db/error-result]]}
   [database attribute value]
-  (let [result (db/q '[:find ?entity . :in $ ?attribute ?value
-                       :where [?entity ?attribute ?value]] database attribute value)]
-    (if (or (nil? result) (integer? result)) (some? result) result)))
+  (let [result (db/pull database [:db/id] [attribute value])]
+    (cond (nil? result) false
+          (:db/id result) true
+          :else result)))
 
 (defn steward
   "The steward of the currently defined function named by a historical fault."
@@ -1557,12 +1540,15 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/signature]
                   [:or [:int {:min 0}] :seon.db/error-result]]}
   [database signature]
-  (let [rows (db/q '[:find ?occurrence ?count :in $ ?signature
-                     :where [?error :seon.error/signature ?signature]
-                            [?error :seon.error/occurrences ?occurrence]
-                            [?occurrence :seon.error.occurrence/count ?count]]
-                   database signature)]
-    (if (map? rows) rows (reduce + 0 (map second rows)))))
+  (let [row (db/pull database
+                     '[{(:seon.error/occurrences :limit nil)
+                        [:seon.error.occurrence/count]}]
+                     [:seon.error/signature signature])]
+    (if (and (inst? (:seon.error/at row))
+             (qualified-keyword? (:seon.error/layer row))
+             (qualified-symbol? (:seon.error/operation row)))
+      row
+      (reduce + 0 (map :seon.error.occurrence/count (:seon.error/occurrences row))))))
 
 (defn- message-tx
   {:malli/schema [:=> [:cat :seon.error/fact :seon.agent/id :seon.agent/id :seon.error/reason :map]
@@ -1614,13 +1600,17 @@
       (let [projection (or (db/carried-projection database)
                             (:seon.schema/projection request)
                             (schema/projection-from-database database))
-        stored-attributes (set (schema.datahike/database-attributes-core-in projection))
         diagnostic-attributes
         (schema/projection-cache-value
          projection ::facet-attributes
-         #(into #{} (mapcat (fn [facet]
-                              (filter stored-attributes (map first (internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) facet))))))
-                (conj (facet-keys projection) :seon.error/base)))
+         (fn []
+           (into #{}
+                 (comp (mapcat (fn [schema-key]
+                                 (let [compiled (mr/schema (:seon.schema.projection/registry projection) schema-key)]
+                                   (when (:seon.db/attributes (internal/entity-properties compiled))
+                                     (map first (internal/entity-entries compiled))))))
+                       (filter #(schema.datahike/storable-attribute-in? projection %)))
+                 (conj (facet-keys projection) :seon.error/base))))
         replacements (mapv (fn [attribute]
                              [:db.fn/retractAttribute occurrence-ref attribute])
                            (filter diagnostic-attributes (keys old)))
@@ -1652,7 +1642,7 @@
                                      (let [attributes (into #{}
                                                             (mapcat #(map first (internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) %))))
                                                             (conj (facets projection source) :seon.error/base))]
-                                       (select-keys source (filter stored-attributes attributes)))))
+                                       (select-keys source (filter diagnostic-attributes attributes)))))
                                  {:seon.error.occurrence/id occurrence-id
                                   :seon.error.occurrence/count count
                                   :seon.error.occurrence/first-at (or (:seon.error.occurrence/first-at old) at)
@@ -1781,12 +1771,14 @@
    projection ::observation-selector
    (fn []
      (let [forms (:seon.schema.projection/forms projection)
-           stored-attributes (set (schema.datahike/database-attributes-core-in projection))
+           storable? #(schema.datahike/storable-attribute-in? projection %)
            observation-keys (conj (facet-keys projection)
                                   :seon.error/base :seon.error.occurrence/occurrence)]
        (letfn [(members [schemas]
-                 (sort (into #{} (comp (mapcat #(map first (internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) %))))
-                                       (filter stored-attributes)) schemas)))
+                 (sort (into #{} (comp (mapcat #(let [compiled (mr/schema (:seon.schema.projection/registry projection) %)]
+                                                                (when (:seon.db/attributes (internal/entity-properties compiled))
+                                                                  (map first (internal/entity-entries compiled)))))
+                                       (filter storable?)) schemas)))
                (selector [schemas active]
                  (into [:db/id]
                        (map (fn [attribute]
