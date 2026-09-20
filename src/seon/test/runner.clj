@@ -781,8 +781,7 @@
            (ex-info
             (str "The program source roots declare no test root: "
                  (pr-str roots) ".")
-            {:seon.error/kind ::test-source-root-undeclared
-             ::source-roots roots}))))))
+            {::source-roots roots}))))))
 
 (defn- bare-namespaces
   "Every namespace the bare gate runs, derived from the published manifest.
@@ -817,8 +816,7 @@
         (str "The published program manifest declares no namespace under the "
              "test source root " (pr-str @test-source-root)
              ", so bare selection would run nothing and report success.")
-        {:seon.error/kind ::no-bare-namespaces
-         ::test-source-root @test-source-root
+        {::test-source-root @test-source-root
          ::artifact-count (count (:seon.fn.manifest/artifacts manifest))})))
     (vec derived)))
 
@@ -868,8 +866,7 @@
              ". The tier partition reads the row, so an unindexed declaration "
              "runs a platform regression in the bulk tier; publish the tree so "
              "the declaration is indexed.")
-        {:seon.error/kind ::platform-declaration-drift
-         ::drifted-platform-declarations drifted
+        {::drifted-platform-declarations drifted
          :seon.test.runner/platform-declaration-drift true}))))
   nil)
 
@@ -921,8 +918,7 @@
              ". Selection and the per-exchange bound read the row, so an "
              "unindexed declaration runs a long test under the ordinary "
              "bound; publish the tree so the declaration is indexed.")
-        {:seon.error/kind ::long-declaration-drift
-         ::drifted-long-declarations drifted
+        {::drifted-long-declarations drifted
          :seon.test.runner/long-declaration-drift true}))))
   nil)
 
@@ -941,8 +937,7 @@
                        test/*testing-vars*))]
     (when-not (and (string? reason) (not (str/blank? reason)))
       (throw (ex-info "Expensive fixture requires a nonblank observation an ordinary branch cannot prove."
-                      {:seon.error/kind ::missing-fixture-observation
-                       ::fixture fixture
+                      {::fixture fixture
                        :seon.test/sym (var-symbol (first test/*testing-vars*))})))
     reason))
 
@@ -1084,7 +1079,7 @@
       (throw (ex-info (str "No analyzed declaration carries :seon.fn/destroys, "
                            "so tier selection cannot tell which tests delete a "
                            "filesystem path they did not create.")
-                      {:seon.error/kind ::missing-destructive-owners})))
+                      {::destructive-owner-attribute :seon.fn/destroys})))
     owner-rows))
 
 (defn- destructive-call-path
@@ -1142,8 +1137,7 @@
                "fixture that deletes a filesystem path runs there before any "
                "evidence exists; declare the test :seon.test/long or leave it "
                "to the bulk tier, under an isolated root.")
-          {:seon.error/kind ::destructive-platform-test
-           ::destructive-platform-tests offenders
+          {::destructive-platform-tests offenders
            :seon.test.runner/destructive-platform-test true})))))
   nil)
 
@@ -1208,8 +1202,7 @@
         (throw (ex-info
                 (str "Selected tests reach an expensive fixture without a declared observation: "
                      (str/join ", " offenders) ".")
-                {:seon.error/kind ::missing-fixture-observation
-                 :seon.test/syms offenders
+                {:seon.test/syms offenders
                  :seon.test/sym (first offenders)})))))
   nil)
 
@@ -1358,8 +1351,7 @@
       (@run-interpreted-tests request)
 
       :else
-      {:seon.error/kind ::mixed-host-and-sci-task
-       :seon.error/message
+      {:seon.error/message
        "One worker task resolved both host and SCI test Vars; their fixture and arm boundaries cannot be shared."
        ::task-symbols (::task-symbols task)})))
 
@@ -1390,10 +1382,8 @@
                      [namespace-name (count bindings)]))
               (:namespaces @env)))
       (catch Exception failure
-        {::fixture-base-unavailable true
-         :seon.error/kind ::fixture-base-unavailable
-         :seon.error/message (or (ex-message failure)
-                                 (.getName (class failure)))}))))
+        {::fixture-base-unavailable (or (ex-message failure)
+                                        (.getName (class failure)))}))))
 
 (defn live-cluster-schema-states
   "Each running cluster's projection state and the environment it holds now.
@@ -1463,7 +1453,9 @@
       (let [connection (:seon.db/connection entering-environment)
             exit-projection (:seon.schema/projection @state)
             database (when connection (db/db connection))]
-        (if (or (nil? connection) (:seon.error/kind database))
+        (if (or (nil? connection)
+                (and (map? database)
+                     (contains? database :seon.error/at)))
           {:seon.cluster/name cluster-name
            ::schema-authority-unavailable
            (if connection
@@ -1637,14 +1629,16 @@
       (let [test-vars (mapv #(@resolve-admitted-test
                               (assoc resolution :seon.test/identity (symbol %)))
                             (::task-symbols task))
-            _ (when-let [failure (first (filter :seon.error/kind test-vars))]
+            _ (when-let [failure (first (filter :seon.test/resolution-refusal test-vars))]
                 (throw (ex-info (:seon.error/message failure) failure)))
             results
             (binding [*out* output
                       *err* output
                       test/*test-out* output]
               (run-resolved-tests! resolution task test-vars))
-            _ (when (:seon.error/kind results)
+            _ (when (and (map? results)
+                         (or (contains? results :seon.test/not-runnable)
+                             (contains? results :seon.test/execution-refusal)))
                 (throw (ex-info (:seon.error/message results) results)))
             summary {::test-count (count results)
                      ::pass-count (reduce + 0 (map :seon.test/pass-count results))
@@ -1755,8 +1749,7 @@
                                    (.getName (class failure)))}))]
     (cond
       (and (map? form) (contains? form ::unreadable))
-      {:seon.error/kind ::unreadable-program-source
-       :seon.error/message
+      {:seon.error/message
        (str "A first-party source file could not be read: " (.getPath file)
             " — " (::unreadable form) ".")
        ::source-file (.getPath file)}
@@ -1765,8 +1758,7 @@
       (second form)
 
       :else
-      {:seon.error/kind ::program-source-declares-no-namespace
-       :seon.error/message
+      {:seon.error/message
        (str "A first-party source file declares no namespace: "
             (.getPath file)
             " — its first form must be an `ns` form, or the worker arms a"
@@ -1800,8 +1792,7 @@
         (str "The first-party program source root does not resolve: "
              (.getPath root) " from working directory "
              (.getCanonicalPath (io/file ".")) ".")
-        {:seon.error/kind ::program-source-root-unresolved
-         ::program-source-root (.getPath root)
+        {::program-source-root (.getPath root)
          ::working-directory (.getCanonicalPath (io/file "."))
          ::instrumentation-unavailable true})))
     (let [declared (mapv declared-namespace (program-source-files root))]
@@ -1814,8 +1805,7 @@
          (ex-info
           (str "The first-party program source root declares no namespaces: "
                (.getCanonicalPath root) ".")
-          {:seon.error/kind ::program-declares-no-namespaces
-           ::program-source-root (.getCanonicalPath root)
+          {::program-source-root (.getCanonicalPath root)
            ::instrumentation-unavailable true})))
       declared)))
 
@@ -1872,8 +1862,7 @@
               (str "bin/test could not re-arm worker " worker-id
                    " after a task stripped its contracts: "
                    (ex-message failure))
-              {:seon.error/kind ::re-arm-failed
-               ::worker-id worker-id
+              {::worker-id worker-id
                ::installed live
                ::armed-at-initialization instrumented}
               failure))))))))
@@ -2045,7 +2034,7 @@
               ;; `seon.test-support` lives under `test/`: a deliberate late
               ;; dependency of the worker, never a load-cycle dodge.
               #(deref @(requiring-resolve 'seon.test-support/database-base)))]
-    (when (:seon.error/kind base)
+    (when (and (map? base) (contains? base :seon.error/at))
       (throw (ex-info "A test worker could not prepare its canonical fixture base."
                       base)))
     (write-protocol! writer {::worker-event :ready
@@ -2153,14 +2142,16 @@
                    (db/since (db/history database) (::reach-basis previous)) reach-attributes)
              (db/q '[:find [?e ...] :in $ [?a ...] :where [?e ?a]]
                    database [:seon.fn/sym :seon.test/sym :seon.schema/key]))
-       _ (when (:seon.error/kind ids) (throw (ex-info "Reach identities unavailable." ids)))
+       _ (when (and (map? ids) (contains? ids :seon.db/read-operation))
+           (throw (ex-info "Reach identities unavailable." ids)))
        pulled (if (seq ids)
                 (db/pull-many database
                  '[:db/id :seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/keywords
                    (limit :seon.fn/calls nil) (limit :seon.fn/references nil) :seon.test/sym :seon.test/source
                    :seon.test/subject
                    :seon.schema/key :seon.schema/form] ids) [])
-       _ (when (:seon.error/kind pulled) (throw (ex-info "Reach rows unavailable." pulled)))
+       _ (when (and (map? pulled) (contains? pulled :seon.db/read-operation))
+           (throw (ex-info "Reach rows unavailable." pulled)))
        old-rows (::reach-rows previous {})
        pulled (mapv (fn [e r] (assoc (or r {}) :db/id e)) ids pulled)
        changed (filterv #(not= (dissoc (get old-rows (:db/id %)) ::reach-symbol ::reach-leaf ::reach-keys) %) pulled)
@@ -2258,8 +2249,19 @@
    (let [index (derive-index nil)]
     (select-keys (::reach-digests index) test-symbols))))
  (catch Exception failure
-  {:seon.error/kind :seon.test/unknown :seon.test/unknown "reach digest"
-   :seon.error/message (str "Reach digest unavailable: " (ex-message failure))})))
+  (error/diagnostic
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.test/recording
+    :seon.error/operation `reach-entries
+    :seon.error/message (str "Reach digest unavailable: " (ex-message failure))
+    :seon.error/diagnostic-layer :seon.test/recording
+    :seon.error/diagnostic-operation `reach-entries
+    :seon.error/diagnostic-member :seon.test/reach-digests
+    :seon.error/diagnostic-expected "derived reach digests for the requested tests"
+    :seon.error/diagnostic-offending test-symbols
+    :seon.error/diagnostic-cause :seon.test/reach-digest-unavailable
+    :seon.error/diagnostic-evidence {:seon.test/syms test-symbols}
+    :seon.test/unknown "reach digest"}))))
 
 (defn reach-digests
   "Derive equality keys from the tested database's incremental reach index."
@@ -2277,10 +2279,10 @@
 (defn reach-memberships
   "The tested closure's function names, including unresolved targets."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
-                  [:or :seon.test/reaches :seon.error/value]]}
+                  [:or :seon.test/reaches :seon.test/unknown-error]]}
   [database test-symbols]
   (let [entries (reach-entries database test-symbols)]
-    (if (:seon.error/kind entries) entries
+    (if (contains? entries :seon.test/unknown) entries
         (into {} (keep (fn [[s entry]] (when (set? (::reach-refs entry))
                                        [s (::reach-refs entry)]))) entries))))
 
@@ -2841,8 +2843,7 @@
     (let [missing (into [] (comp (map :seon.test/sym) (remove current-by-symbol)) results)]
       (when (seq missing)
         (throw (ex-info "Test completion has no surviving test definition."
-                        {:seon.error/kind ::test-definition-absent
-                         :seon.test/symbols missing}))))
+                        {:seon.test/symbols missing}))))
     (into [(assoc run :db/id "test-run")]
      (mapcat
       (fn [{test-symbol :seon.test/sym :as result}]
@@ -3053,7 +3054,7 @@
   "Commit captured test results and return those exact committed facts."
   {:malli/schema
    [:=> [:cat :seon.db/connection :seon.test.run/completion]
-    [:or :seon.test/results :seon.error/value]]}
+    [:or :seon.test/results :seon.db/error-result]]}
   [connection {results :seon.test.runner/results :as completion}]
   (let [database (db/db connection)
         completion (prepare-failures! connection database completion)
@@ -3123,7 +3124,7 @@
 (defn record!
   "Commit one runner completion into an explicitly named, non-default cluster."
   {:malli/schema [:=> [:cat :seon.test.runner/record-request]
-                  [:or :seon.test/results :seon.error/value]]}
+                  [:or :seon.test/results :seon.db/error-result]]}
   [{run-result :seon.test.runner/run-result
     cluster-name :seon.boot/cluster-name
     root :seon.boot/root}]
@@ -3191,27 +3192,36 @@
 
   A missing or unreadable file is named — never read as an empty completion."
   [path]
-  (let [file (io/file (str path))]
+  (let [file (io/file (str path))
+        refuse (fn [message offending expected]
+                 (error/diagnostic
+                  {:seon.error/at (java.util.Date.)
+                   :seon.error/layer :seon.test/recording
+                   :seon.error/operation `staged-completion
+                   :seon.error/message message
+                   :seon.error/diagnostic-layer :seon.test/recording
+                   :seon.error/diagnostic-operation `staged-completion
+                   :seon.error/diagnostic-member ::completion-path
+                   :seon.error/diagnostic-expected expected
+                   :seon.error/diagnostic-offending offending
+                   :seon.error/diagnostic-cause :seon.test.runner/staged-completion-unreadable
+                   :seon.error/diagnostic-evidence {::completion-path (str path)}
+                   ::completion-path (str path)}))]
     (if-not (.isFile file)
-      {:seon.error/kind ::staged-completion-unreadable
-       :seon.error/message (str "No staged gate completion file at " path ".")
-       ::completion-path (str path)}
+      (refuse (str "No staged gate completion file at " path ".")
+              path "a readable staged completion EDN map")
       (try
         (let [value (edn/read-string (slurp file))]
           (if (map? value)
             value
-            {:seon.error/kind ::staged-completion-unreadable
-             :seon.error/message
-             (str "The staged gate completion at " path
-                  " did not read as a completion map but as "
-                  (.getName (class value)) ".")
-             ::completion-path (str path)}))
+            (refuse (str "The staged gate completion at " path
+                         " did not read as a completion map but as "
+                         (.getName (class value)) ".")
+                    value "a staged completion EDN map")))
         (catch Throwable failure
-          {:seon.error/kind ::staged-completion-unreadable
-           :seon.error/message
-           (str "The staged gate completion at " path
-                " did not read as EDN: " (ex-message failure))
-           ::completion-path (str path)})))))
+          (refuse (str "The staged gate completion at " path
+                       " did not read as EDN: " (ex-message failure))
+                  path "readable EDN"))))))
 
 (defn- commit-staged-completion!
   "Read one staged completion off disk and commit it through the held store.
@@ -3220,7 +3230,7 @@
   the completion itself, so the compiled form stays O(1) in the result count."
   [held-store path]
   (let [completion (staged-completion path)]
-    (if (:seon.error/kind completion)
+    (if (contains? completion ::completion-path)
       completion
       (commit-persistent-results! held-store completion))))
 
@@ -3257,10 +3267,20 @@
           ((deref (ns-resolve 'seon.test.runner
                               (symbol "commit-staged-completion!")))
            store# ~(str completion-path))
-          {:seon.error/kind
-           :seon.test.runner/live-store-unavailable
-           :seon.error/message
-           "The live process has no held operator store."}))
+          (seon.error/diagnostic
+           {:seon.error/at (java.util.Date.)
+            :seon.error/layer :seon.test/recording
+            :seon.error/operation 'seon.test.runner/record-persistent-results!
+            :seon.error/message "The live process has no held operator store."
+            :seon.error/diagnostic-layer :seon.test/recording
+            :seon.error/diagnostic-operation 'seon.test.runner/record-persistent-results!
+            :seon.error/diagnostic-member :seon.store/store
+            :seon.error/diagnostic-expected "a held operator store"
+            :seon.error/diagnostic-offending :seon.error/absent
+            :seon.error/diagnostic-cause :seon.test.runner/live-store-unavailable
+            :seon.error/diagnostic-evidence {:seon.store/store :seon.error/absent}
+            :seon.test.run/unavailable true
+            :seon.test.run/provenance-failure "The live process has no held operator store."})))
       (catch Throwable failure#
         ;; Preserve the producer's complete refusal, including its schema and
         ;; member. Older throwers lack base observations; this boundary adds
@@ -3270,7 +3290,7 @@
                 :seon.error/operation 'seon.test.runner/record-persistent-results!
                 :seon.error/message (or (ex-message failure#)
                                         "Recording the test request failed.")}
-               (dissoc (ex-data failure#) :seon.error/kind))))))
+               (ex-data failure#))))))
 
 (defn- record-persistent-results!
   "Commit one bare-gate completion through the authoritative store holder."
@@ -3750,7 +3770,8 @@
         basis (when basis-file (edn/read-string (slurp basis-file)))
         _ (when-not basis
             (throw (ex-info "A worker needs the resolved test classpath basis."
-                            {:seon.error/kind :seon.test/classpath-unavailable})))
+                            {:seon.test/admission-refusal :seon.test/classpath-unavailable
+                             :seon.test.runner/worker-id worker-id})))
         command (cond-> [(or (System/getenv "SEON_TEST_CLOJURE") "clojure")
                          "-Scp" (cache/classpath basis (.getCanonicalPath checkout-root))
                          (str "-J-Dseon.operator.root="
@@ -4821,7 +4842,7 @@
                 database (vary-meta database assoc :seon.schema/projection
                                     (schema/projection-from-database database))
                 captured (provenance database)]
-            (when (:seon.error/kind captured)
+            (when (contains? captured :seon.test.run/unavailable)
               (throw (ex-info (:seon.error/message captured) captured)))
             (spit (io/file root "provenance.edn")
                   (pr-str (select-keys captured

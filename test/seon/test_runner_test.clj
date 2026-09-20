@@ -255,24 +255,6 @@
           ::runner/at (java.time.Instant/now)})
    worker task))
 
-(defn- assert-one-terminal-error!
-  [case-name result expected-kind]
-  (is (= {::runner/test-count 1
-          ::runner/pass-count 0
-          ::runner/fail-count 0
-          ::runner/error-count 1}
-         (::runner/task-summary result))
-      (str case-name " contributes one terminal task to the total tally"))
-  (is (= 1 (count (::runner/task-results result))))
-  (is (= (str "seon.exchange-test/" case-name)
-         (:seon.test/sym (first (::runner/task-results result)))))
-  (is (= expected-kind
-         (get-in result [::runner/worker-exchange-result
-                         :seon.error/kind])))
-  (is (= [(str "seon.exchange-test/" case-name)]
-         (get-in result [::runner/worker-exchange-result
-                         ::runner/task-symbols]))))
-
 (deftest the-gate-runs-under-the-contracts-a-cluster-runs-under
   (testing "a worker JVM arms instrumentation from the shipped decisions"
     (is (pos? (count (instrument/instrumented)))
@@ -281,8 +263,8 @@
          about a subject it cannot see")
     (let [failure (try (error/value "not a fact")
                        (catch Exception thrown thrown))]
-      (is (= :seon.instrument/contract-violated
-             (:seon.error/kind (ex-data failure)))
+      (is (= :input (:seon.instrument/check (ex-data failure))))
+      (is (= 'seon.error/value (:seon.instrument/fn (ex-data failure)))
           "and a violated contract stops the call inside the gate, exactly
            as it does on every live cluster")))
   (testing "the armable set IS the set a cluster arms, derived the same way"
@@ -332,10 +314,10 @@
         actual (into #{} (filter expected) (instrument/instrumented))]
     (is (seq expected) "Absent contracts must not pass set equality.")
     (is (= expected actual))
-    (is (= :seon.instrument/contract-violated
-           (:seon.error/kind
-            (ex-data (try (error/value "not a fact")
-                          (catch Exception failure failure))))))))
+    (let [refusal (ex-data (try (error/value "not a fact")
+                                (catch Exception failure failure)))]
+      (is (= :input (:seon.instrument/check refusal)))
+      (is (= 'seon.error/value (:seon.instrument/fn refusal))))))
 
 (deftest a-worker-rearms-only-when-a-task-stripped-its-contracts
   ;; CLASS: a pooled worker runs many tests per JVM, and `instrument/remove!`
@@ -724,7 +706,7 @@
                      [[:db.fn/retractEntity [:seon.test/sym test-symbol]]])
         (let [before (db/basis-t @connection)
               recorded (runner/commit-results! connection completion)]
-          (is (= :seon.test.runner/test-definition-absent (:seon.error/kind recorded)))
+          (is (= [test-symbol] (:seon.test/symbols recorded)))
           (is (= before (db/basis-t @connection))
               "a refused completion changes no database facts")
           (is (nil? (:db/id (db/pull @connection [:db/id] [:seon.test/sym test-symbol])))
@@ -853,7 +835,7 @@
                               [{:seon.cluster.eval/source source
                                 :seon.cluster.eval/ns [:seon.ns/name 'seon.test-runner-test]
                                 :seon.program/row (:seon.program/row evaluation)}])
-                    row (when-not (:seon.error/kind analysis)
+                    row (when-not (contains? analysis :seon.error/at)
                           (second (first analysis)))]
                 (is (map? row) (pr-str analysis))
                 (when row
@@ -878,8 +860,8 @@
            {:seon.test.runner/run-result (captured-run)
             :seon.boot/cluster-name "default"
             :seon.boot/root "tmp/test-result-default-refusal"}))]
-    (is (= :seon.test.runner/default-cluster-refused
-           (:seon.error/kind refusal)))))
+    (is (= "default" (:seon.test.runner/default-cluster-refused refusal)))
+    (is (= `runner/record! (:seon.error/operation refusal)))))
 
 
 
@@ -1167,8 +1149,8 @@
       (fn []
         (let [refusal (test-support/refusal-data
                        #(#'runner/declared-program-namespaces))]
-          (is (= ::runner/program-source-root-unresolved
-                 (:seon.error/kind refusal))
+          (is (= "no-such-first-party-source-root"
+                 (::runner/program-source-root refusal))
               "and it names the root and the working directory, rather than
                answering the empty set the caller cannot distinguish from a
                program with no namespaces")
@@ -1182,8 +1164,6 @@
           (fn []
             (let [refusal (test-support/refusal-data
                            #(#'runner/declared-program-namespaces))]
-              (is (= ::runner/program-source-declares-no-namespace
-                     (:seon.error/kind refusal)))
               (is (str/ends-with? (::runner/source-file refusal)
                                   "silent.clj")
                   "naming the exact file that would have dropped out of the
@@ -1195,8 +1175,8 @@
       (try
         (with-redefs-fn {#'runner/program-source-root (.getCanonicalPath root)}
           (fn []
-            (is (= ::runner/program-declares-no-namespaces
-                   (:seon.error/kind
+            (is (= (.getCanonicalPath root)
+                   (::runner/program-source-root
                     (test-support/refusal-data
                      #(#'runner/declared-program-namespaces)))))))
         (finally
@@ -1467,15 +1447,16 @@
                 "the staged file reads back as the exact completion")
             (is (= at (:seon.test/run-at staged))
                 "instants survive the EDN round trip")
-            (is (= :seon.test.runner/test-definition-absent
-                   (:seon.error/kind (runner/commit-results!
-                           connection
-                           (assoc (select-keys staged
-                                               [:seon.test.runner/results
-                                                :seon.test/run-basis-t
-                                                :seon.test/run-at])
-                                  :seon.test.run/provenance
-                                  (runner/provenance @connection)))))
+            (is (= [(-> results first :seon.test/sym)]
+                   (:seon.test/symbols
+                    (runner/commit-results!
+                     connection
+                     (assoc (select-keys staged
+                                         [:seon.test.runner/results
+                                          :seon.test/run-basis-t
+                                          :seon.test/run-at])
+                            :seon.test.run/provenance
+                            (runner/provenance @connection)))))
                 "transported results cannot fabricate absent program definitions"))
           (finally
             (io/delete-file file true)))))))
@@ -1484,8 +1465,7 @@
   ;; A check that reads absence of signal as health would commit an empty
   ;; completion here — retracting every recorded result. Absence is typed.
   (let [missing (#'runner/staged-completion "/nonexistent/gate-completion.edn")]
-    (is (= :seon.test.runner/staged-completion-unreadable
-           (:seon.error/kind missing)))
+    (is (= `runner/staged-completion (:seon.error/operation missing)))
     (is (str/includes? (:seon.error/message missing)
                        "/nonexistent/gate-completion.edn"))
     (is (= "/nonexistent/gate-completion.edn"
@@ -1494,14 +1474,12 @@
     (try
       (spit file "{:seon.test.runner/results [")
       (let [truncated (#'runner/staged-completion file)]
-        (is (= :seon.test.runner/staged-completion-unreadable
-               (:seon.error/kind truncated)))
+        (is (= (str file) (:seon.test.runner/completion-path truncated)))
         (is (str/includes? (:seon.error/message truncated) "did not read as EDN")
             (:seon.error/message truncated)))
       (spit file "[1 2 3]")
       (let [not-a-map (#'runner/staged-completion file)]
-        (is (= :seon.test.runner/staged-completion-unreadable
-               (:seon.error/kind not-a-map)))
+        (is (= (str file) (:seon.test.runner/completion-path not-a-map)))
         (is (str/includes? (:seon.error/message not-a-map)
                            "did not read as a completion map")
             (:seon.error/message not-a-map)))

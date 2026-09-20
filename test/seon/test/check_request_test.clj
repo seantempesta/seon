@@ -14,14 +14,15 @@
                     :seon.boot/cluster-name cluster}
            projection (db/carried-projection (db/db connection))
            missing (test/check-request request)]
-       (is (:seon.error/kind missing))
+       (is (= "cluster adoption" (:seon.test/unknown missing)))
+       (is (= `test/check-request (:seon.error/operation missing)))
        (is ((schema/projection-validator projection :seon.test.check/response) missing))
        (support/transacted!
         connection
         [{:db/id :db/current-tx
           :seon.test/adoption-cluster [:seon.cluster/name cluster]}])
        (let [result (test/check-request request)]
-         (is (nil? (:seon.error/kind result)) (pr-str result))
+         (is (not (contains? result :seon.test/unknown)) (pr-str result))
          (is ((schema/projection-validator projection :seon.test.check/response) result))
          (is (= 0 (:seon.test/pass-count result)))
          (is (= 0 (:seon.test/fail-count result)))

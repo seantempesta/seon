@@ -464,8 +464,7 @@
                            (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
                  expected [(symbol (str namespace-name) "fresh")
                            (symbol (str namespace-name) "unreasoned")]]
-             (is (= :seon.test.runner/missing-fixture-observation
-                    (:seon.error/kind refusal)))
+             (is (= expected (:seon.test/syms refusal)))
              (is (= expected (:seon.test/syms refusal))
                  "One refusal names every undeclared test, sorted and without duplicates.")
              (is (= (first expected) (:seon.test/sym refusal))))
@@ -573,8 +572,9 @@
                            (catch clojure.lang.ExceptionInfo failure failure))]
           (is (some? refusal)
               "a program declaring nothing refuses instead of reporting the tier clean")
-          (is (= :seon.test.runner/missing-destructive-owners
-                 (:seon.error/kind (ex-data refusal)))))
+          (is (= :seon.fn/destroys
+                 (:seon.test.runner/destructive-owner-attribute
+                  (ex-data refusal)))))
         (let [refusal (try (#'runner/verify-platform-tier-carries-no-destructive-drill!
                             manifest (selected 'drill))
                            nil
@@ -1194,8 +1194,8 @@
                            (catch clojure.lang.ExceptionInfo failure failure))]
           (is (some? refusal)
               "a manifest with no test-rooted namespace refuses instead of running nothing and reporting success")
-          (is (= :seon.test.runner/no-bare-namespaces
-                 (:seon.error/kind (ex-data refusal))))))
+          (is (= "test" (:seon.test.runner/test-source-root
+                          (ex-data refusal))))))
       (finally
         (test-support/delete-recursively! root)))))
 

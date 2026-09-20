@@ -74,8 +74,7 @@
                                    (.getName (class failure)))}))]
     (cond
       (and (map? form) (contains? form :seon.test.runner/unreadable))
-      {:seon.error/kind :seon.test.runner/unreadable-program-source
-       :seon.error/message
+      {:seon.error/message
        (str "A first-party source file could not be read: " (.getPath file)
             " — " (:seon.test.runner/unreadable form) ".")
        :seon.test.runner/source-file (.getPath file)}
@@ -84,8 +83,7 @@
       (second form)
 
       :else
-      {:seon.error/kind :seon.test.runner/program-source-declares-no-namespace
-       :seon.error/message
+      {:seon.error/message
        (str "A first-party source file declares no namespace: "
             (.getPath file)
             " — its first form must be an `ns` form, or the worker arms a"
@@ -119,8 +117,7 @@
         (str "The first-party program source root does not resolve: "
              (.getPath root) " from working directory "
              (.getCanonicalPath (io/file ".")) ".")
-        {:seon.error/kind :seon.test.runner/program-source-root-unresolved
-         :seon.test.runner/program-source-root (.getPath root)
+        {:seon.test.runner/program-source-root (.getPath root)
          :seon.test.runner/working-directory (.getCanonicalPath (io/file "."))
          :seon.test.runner/instrumentation-unavailable true})))
     (let [declared (mapv declared-namespace (program-source-files root))]
@@ -133,8 +130,7 @@
          (ex-info
           (str "The first-party program source root declares no namespaces: "
                (.getCanonicalPath root) ".")
-          {:seon.error/kind :seon.test.runner/program-declares-no-namespaces
-           :seon.test.runner/program-source-root (.getCanonicalPath root)
+          {:seon.test.runner/program-source-root (.getCanonicalPath root)
            :seon.test.runner/instrumentation-unavailable true})))
       declared)))
 
@@ -156,7 +152,7 @@
   []
   (let [decisions (config/defaults)
         caps (config/result-caps decisions)]
-    (when (:seon.error/kind caps)
+    (when (contains? caps :seon.config/error-key)
       (throw
        (ex-info (:seon.error/message caps)
                 (assoc caps :seon.test.runner/instrumentation-unavailable true))))
@@ -191,13 +187,14 @@
                     :seon.schema/projection projection}
                      (:seon.flow/commit-fault! decision)
                      (assoc :seon.flow/commit-fault! (:seon.flow/commit-fault! decision))))]
-      (when (:seon.error/kind applied)
+      (when (contains? applied :seon.instrument/registration-error)
         (throw
          (ex-info (:seon.error/message applied)
                   (assoc applied :seon.test.runner/instrumentation-unavailable true))))
       (when (zero? (:seon.instrument/instrumented applied))
         (throw (ex-info "No test contracts were armed."
-                        {:seon.error/kind :seon.test.runner/instrumentation-unavailable})))
+                        {:seon.instrument/instrumented 0
+                         :seon.test.runner/instrumentation-unavailable true})))
       ;; ABSENCE IS NEVER HEALTH, AND A COUNT IS NOT THE QUESTION. A floor of
       ;; zero was satisfied by the worker's OWN test vars, so a worker that
       ;; armed none of the program still passed. The question is SET COVERAGE
