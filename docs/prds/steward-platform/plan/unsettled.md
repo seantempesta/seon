@@ -5706,3 +5706,16 @@ repeats per task is measured in the spec. Its verbatim assignment (astra
 low) launches as soon as an editing slot frees (publication lane landing
 now). `publication-dissolution` landed `fa1ff1dbe` (gate bases and scalar
 updates through the common publisher).
+
+## 2026-09-21 ~15:40 UTC — effect settlement ruled (D12: validate against the handler's own contract)
+
+`kind-sweep-ops-effects-2` (`9c6ae56db`, issue
+`effect-settlement-cannot-classify-polymorphic-handler-results`): effect
+settlement receives an arbitrary handler payload and has no refusal union
+to replace its kind check. Ruled: option 3 now (defer, listed), option 2
+last — settlement recognizes a refusal only by validating the value
+against THAT handler's declared output contract (a program fact; the
+wrapper validates the same contract); "local base recognition" is the
+general predicate D12 forbids. Its accumulated fast pass was refused at
+recording on the runner's optional offending member — the publication
+lane's current item; ruling waits for its evidence.
