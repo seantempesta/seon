@@ -4646,3 +4646,20 @@ seam enumeration, Datahike metadata survival, the stamp prototype and
 restart proof; Datahike-vs-ours refusal tables, the validator's traversal
 cost split, a diet prototype with parity. Six lanes (three editing, three
 research); load watched.
+
+## 2026-09-20 ~11:25 UTC — swap-bound machine; default restarted (republish required); hook JVM per schema edit
+
+Owner: "my machine dragging". Measured: swap 8.1 GB of 9.2 GB used, ~14k free
+pages; default's JVM at 10 GB RSS after the day's adoption attempts; a
+`clojure -M:dev -m seon.schema.admission` JVM launched by the edit hook for
+EVERY schema resource edit (bin/seon-hook:493) — with six lanes editing,
+constant JVM churn (tools item 9: run admission in bb or through the live
+JVM's prepl, never a fresh JVM). Restarted default under the standing
+rule; the start REFUSED: "source activation closure is missing 5 facts"
+(seon.test/check-selection, seon.test.runner/admission-member-values, …):
+boot loads the working tree but validates against the published
+`current-src`, stale since publication was paused at ~05:30 (≈40 commits).
+Consequence recorded: while hook publication is paused, every default start
+needs `bin/seon init` first. Running `bin/seon init` (complete publication)
+then `bin/seon start` in the background
+(`tmp/orchestrator/default-republish-2026-09-20.log`).
