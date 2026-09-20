@@ -1269,7 +1269,8 @@
         red {::runner/task-summary {::runner/fail-count 1
                                     ::runner/error-count 0}}
         dead {::runner/worker-exchange-result
-              {:seon.error/kind ::runner/worker-exited}}]
+              {::runner/worker-phase :exited
+               ::runner/missing-worker-event :task-complete}}]
     (is (= :worker-exchange
            (#'runner/parallel-failure-classification dead green))
         "green in isolation does NOT make a dead worker's task parallel-only")
@@ -1287,8 +1288,9 @@
              [{::runner/task-ordinal 1
                ::runner/task-symbols ["seon.a/one"]
                ::runner/worker-exchange-result
-               {:seon.error/kind ::runner/worker-exited
-                ::runner/worker-id "pool-1"
+               {::runner/worker-id "pool-1"
+                ::runner/worker-phase :exited
+                ::runner/missing-worker-event :task-complete
                 ::runner/worker-exit 1
                 ::runner/worker-error-log "/tmp/pool-1.log"}}
               {::runner/task-ordinal 2
@@ -1298,8 +1300,9 @@
               {::runner/task-ordinal 5
                ::runner/task-symbols ["seon.d/four"]
                ::runner/worker-exchange-result
-               {:seon.error/kind ::runner/worker-retired
-                ::runner/worker-id "serial"}}
+               {::runner/worker-id "serial"
+                ::runner/worker-phase :retired
+                ::runner/missing-worker-event :task-complete}}
               {::runner/task-ordinal 3
                ::runner/task-symbols ["seon.c/three"]
                ::runner/executed-by "pool-2"

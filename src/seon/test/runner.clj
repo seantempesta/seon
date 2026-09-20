@@ -3602,7 +3602,7 @@
 
 (defn- exchange-failure?
   [value]
-  (true? (::worker-exchange-failure value)))
+  (contains? value ::missing-worker-event))
 
 (defn- worker-exchange!
   [{worker ::worker
@@ -3626,8 +3626,7 @@
                    (seq task-symbols) (assoc ::task-symbols task-symbols))]
     (if @(::worker-retired? worker)
       (assoc dispatch
-             ::worker-exchange-failure true
-             :seon.error/kind ::worker-retired
+             ::worker-phase :retired
              ::missing-worker-event expected-event)
       (let [executor (Executors/newVirtualThreadPerTaskExecutor)
             phase (atom :dispatched)
@@ -3660,8 +3659,7 @@
                 (retire-worker! worker true)
                 (assoc dispatch
                        ::dispatch-journal journal
-                       ::worker-exchange-failure true
-                       :seon.error/kind ::worker-write-failure
+                       ::worker-phase :write-failed
                        ::missing-worker-event expected-event))
               (let [{terminal ::exchange-terminal :as outcome}
                     (.get
@@ -3677,11 +3675,9 @@
                     (retire-worker! worker false)
                     (assoc dispatch
                            ::dispatch-journal journal
-                           ::worker-exchange-failure true
-                           :seon.error/kind (if (= :re-arming @phase)
-                                              ::re-arm-failed
-                                              ::worker-exited)
-                           ::worker-phase @phase
+                           ::worker-phase (if (= :re-arming @phase)
+                                            :re-arm-failed
+                                            :exited)
                            ::worker-exit (::worker-exit outcome)
                            ::worker-error-log (::worker-error-log worker)
                            ::missing-worker-event expected-event))
@@ -3690,23 +3686,20 @@
                     (retire-worker! worker true)
                     (assoc dispatch
                            ::dispatch-journal journal
-                           ::worker-exchange-failure true
-                           :seon.error/kind ::worker-exchange-bound
+                           ::worker-phase :exchange-bound
                            ::worker-error-log (::worker-error-log worker)
                            ::missing-worker-event expected-event))))))
           (catch InterruptedException failure
             (.interrupt (Thread/currentThread))
             (retire-worker! worker true)
             (assoc dispatch
-                   ::worker-exchange-failure true
-                   :seon.error/kind ::worker-exchange-interrupted
+                   ::worker-phase :interrupted
                    ::missing-worker-event expected-event
                    ::failure-message (ex-message failure)))
           (catch Throwable failure
             (retire-worker! worker true)
             (assoc dispatch
-                   ::worker-exchange-failure true
-                   :seon.error/kind ::worker-exchange-failed
+                   ::worker-phase :exchange-failed
                    ::missing-worker-event expected-event
                    ::failure-class (.getName (class failure))
                    ::failure-message (or (ex-message failure) "")))
@@ -4381,7 +4374,7 @@
                     " "
                     (into [" -" (str/join "," (::task-symbols task-result))
                            (str "worker=" (::worker-id exchange))
-                           (str "kind=" (:seon.error/kind exchange))]
+                           (str "phase=" (::worker-phase exchange))]
                           (remove nil?)
                           [(when-let [exit (::worker-exit exchange)]
                              (str "exit=" exit))
@@ -4408,7 +4401,7 @@
           (println " -" (str/join "," (::task-symbols task-result))
                    "worker=" (::worker-id failure)
                    (when (::injected? failure) "[INJECTED FIXTURE]")
-                   "kind=" (:seon.error/kind failure))))))
+                   "phase=" (::worker-phase failure))))))
   (let [parallel-only
         (sort-by ::task-ordinal
                  (filter #(= :parallel-only (::parallel-failure %))
