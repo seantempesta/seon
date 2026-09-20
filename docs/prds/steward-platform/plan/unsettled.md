@@ -6227,3 +6227,18 @@ if it still refuses; `freshly-booted-host-adopts-its-own-tree` is the
 regression). Default stays stopped until that proof passes. The two dirty
 test schemas (`[:vector {:seon.db/cardinality :many} …]` → `[:vector …]`)
 are step 2's.
+
+## 2026-09-22 ~12:05 local — error lane: cluster.clj held by publication; RULED: `prepare` reads its world from OPEN request keys; fault committer converts later
+
+The error lane stopped (`d425ec4c1`) because `src/seon/cluster.clj` is
+staged by the publication lane and the fault-committer hunk lives there.
+RULED (§2.5, maps are open; §2.1, the value carries its world): `prepare`
+performs result preparation when the request carries the connection, the
+render profile and optionally the agent SCI context (existing keys, reused
+by name); otherwise it behaves as today. No signature change, so the held
+caller stays untouched. The evaluation recorder (`seon.sci.eval`, the lane's
+file) supplies those keys now, so the agent-turn regression holds end to
+end; the fault committer's conversion (supply the keys, drop the size-gated
+`blob/stage!`, lines ~3216–3233) is filed as the follow-up and lands when
+publication releases the file. The transitional "when supplied" is
+one held hunk wide and dated here — not a permanent optional storage path.
