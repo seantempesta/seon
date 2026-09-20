@@ -6806,3 +6806,13 @@ fork now records the published commit, so the adoption is the short-circuit.
 The boot log still carries the one erased core fault (error lane, class 1,
 in progress). Platform tier at `c402d3c1d` running; slice 3 released to
 the redesign lane (astra low) after the gate published its base.
+
+## 2026-09-23 ~02:05 local — the corrected script at `0c6be06f3` (slice 1): fork against the running cluster 180 ms; no-change 1.57 s; first adoption after fork 76.6 s (fixed in `5cf44da20`)
+
+The earlier gate chain finished its trailing measurement with the
+start-then-fork script at slice 1: from zero + first cluster + start =
+the once cost; **fork 180 ms**; adopt-first 76.6 s (no recorded commit
+at that commit; 2.7 s at slice 2 per the reset); **adopt-nochange 1.57 s**;
+non-core docstring 326.1 s and core 289.1 s (both pre-slice-2 analysis).
+The owner's numbers were the correct ones. Platform tier at `c402d3c1d`
+still running, its measurement follows.
