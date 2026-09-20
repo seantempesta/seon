@@ -5955,3 +5955,15 @@ was in no sweep's family — its `error-value` still builds `{kind true
 `(:seon.error/kind refusal)` expectation is that family's R8. The seventh
 was my regression's facet detection (fixed; one rerun in flight). No
 duplicate fixes tonight.
+
+## 2026-09-21 ~23:30 UTC — db suite recorded: 64 executed, six reds = the call-preparation family only
+
+`bin/test-fast --paths src/seon/db.clj test/seon/db_test.clj -- seon.db-test`:
+64 executed / 466 assertions, recorded; the identity row-schema
+regression passes; the six reds (`diff-*` ×3, wildcard pull, arity ×2)
+are all `seon.call-preparation/snapshot`'s unswept refusals — owed to the
+sci-program lane. The orchestrator's overnight fixes are complete and
+proven to the extent a fast run can: write-schema rule (`2d0e9b17e` +
+regression), boot form size (operator), guard derivation (`d8921fbd4`).
+Blocking issues for the publication lane stand as filed. Waiting on the
+owner's credits; wakeups continue every 20 minutes.
