@@ -5222,3 +5222,21 @@ after step 1. Lane done; session retained. Third slot → `kind-sweep-render-2`
 (sol low; hiccup, lint, ns, test, value; hiccup_test.clj named held by
 step 1). 1a's facet slice, the turn/cluster sweep, sci-fn-program,
 ops-effects and my-protocol all wait on step 1's 46-file release.
+
+## 2026-09-21 ~03:35 UTC — step 1: callers converted, landing blocked by a recording-admission refusal that hides its evidence
+
+`bridge-step1-registry` checkpoint (52 paths uncommitted, loads, lint
+clean): both candidate value APIs accept only `[projection key value]`;
+measured 3,237 schemas + 1,430 contracts → 4,667 providers invoked at most
+once, zero registry copies. First full fast run 849 tests / 10,059
+assertions / 164 F / 180 E (interrupted once at an unbounded HTTP wait in
+web_test.clj:307, now bounded by the fixture). The follow-up run was
+refused BEFORE any test by the recording authority: "A boolean marker alone
+cannot define an error facet" — `runner.clj:3190`'s catch drops the
+offending declaration (issue `fast-admission-refuses-on-live-error-facet-schema`).
+Resumed at astra HIGH: fix the recorder's evidence loss first (runner.clj
+free since results-reuse landed), let the refusal name the declaration,
+decide registry-defect vs malformed-facet by evidence, classify the reds
+by boundary, land the coherent commit when section 7's six namespaces are
+green. Also filed by the lane: `default-web-request-times-out-during-partial-adoption`.
+Publication lane and render-2 sweep running; editing lanes: three.
