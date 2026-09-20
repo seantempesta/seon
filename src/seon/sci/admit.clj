@@ -586,7 +586,7 @@
      :seon.instrument/arity-error :seon.instrument/contract-error
      :seon.instrument/registration-error :seon.instrument/undeclared-error
      :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
+     :seon.problems/error :seon.program/error :seon.program/declaration-refused-error :seon.program/no-declaration-at-error :seon.program/binding-error :seon.program/signature-error :seon.reconcile/error
      :seon.render/request-error :seon.render.transcript/request-error
      :seon.render.walk/elided-error :seon.render.value/window-failed-error
      :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error

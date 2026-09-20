@@ -279,10 +279,10 @@
            (:seon.fn.signature/reason
             (refusal-data
              (request "(defn join [x] x)" '([analyzer-x]))))))
-    (is (= :unmatched-arity
-           (:seon.fn.signature/reason
-            (refusal-data
-             (request "(defn join [x y] x)" '([x y]))))))
+    (let [failure (refusal-data (request "(defn join [x y] x)" '([x y])))]
+      (is (= :seon.fn/arities (:seon.program/signature-member failure)))
+      (is (= 1 (:seon.program/signature-count failure)))
+      (is (= 'seon.program/contract-facts (:seon.error/operation failure))))
     (is (= :unsupported-declaration
            (:seon.fn.signature/reason
             (refusal-data
@@ -533,7 +533,7 @@
                         (row-tx current {} {:seon.program/delete-identities [identity]}))]])]
         (is (seq (:seon.fn/form-span before)))
         (is (seq (:seon.fn/call-arities before)))
-        (is (= :seon.db/invalid-write (:seon.error/kind result)) (pr-str result))
+        (is (some? (:seon.db.write.attempt/request-id result)) (pr-str result))
         (is (= before
                (db/pull (db/db connection) '[*] identity)))))))
 
@@ -623,7 +623,7 @@
           (let [data (refusal-data
                       #(row-tx (db/db connection) {:seon.turn/id "absent"}
                                changed))]
-            (is (= :seon.turn/refused (:seon.error/kind data)))
+            (is (qualified-symbol? (:seon.error/operation data)))
             (is (= :seon.turn/run-opening-basis-unreadable (:seon.turn/rule data))
                 "the refusal names the unreadable basis, not a concurrent definition")))
         (is (= (:seon.fn/source original)
@@ -732,19 +732,20 @@
               :seon.test/sym (quote sample/f)
               :seon.test/ns [:seon.ns/name 'sample]
               :seon.test/source "(deftest f)"}))]
-      (is (= :seon.program/declaration-refused (:seon.error/kind data)))
+      (is (= 'seon.program/declaration-refused! (:seon.error/operation data)))
+      (is (= #{:seon.fn/sym :seon.test/sym} (:seon.program/identity-attributes data)))
       (is (= [[:seon.fn/sym (quote sample/f)]
               [:seon.test/sym (quote sample/f)]]
-             (:seon.program/identities data)))))
+             (:seon.error/offending data)))))
   (testing "a recognized family without its reader-required data is loud"
     (doseq [event [{:seon.schema/key :sample/missing-form}
                    {:seon.test/sym (quote sample/missing-source)
                     :seon.test/ns [:seon.ns/name 'sample]}]]
       (let [data (refusal-data #(program/declaration-row event :all :agent))]
-        (is (= :seon.program/declaration-refused
-               (:seon.error/kind data)))
+        (is (= 'seon.program/declaration-refused! (:seon.error/operation data)))
+        (is (= #{(first (program/row-identity event))} (:seon.program/identity-attributes data)))
         (is (= [(program/row-identity event)]
-               (:seon.program/identities data)))))))
+               (:seon.error/offending data)))))))
 
 (deftest optional-attributes-are-replaced-exactly
   (let [current {:seon.fn/sym (quote sample/f)
@@ -789,9 +790,9 @@
 
 (deftest schema-row-properties-survive-and-retract-exactly
   (let [current {:seon.schema/key :sample/error
-                 :seon.schema/form "[:map {:seon.error/class true}]"
+                 :seon.schema/form "[:map {:seon.db/attributes false}]"
                  :seon.schema.admission/source :agent
-                 :seon.error/class true
+                 :seon.db/attributes false
                  :seon.render/ai 'sample/render-ai}
         desired (dissoc current :seon.render/ai)]
     (is (= current (program/canonical-row current)))
@@ -800,9 +801,9 @@
 
 (deftest runtime-schema-declarations-project-namespaced-properties
   (let [event (one-event
-               "(seon.schema/register! ::error [:map {:seon.error/class true :seon.render/ai sample/render-ai} [:seon.error/message :seon.error/message]])")
+               "(seon.schema/register! ::error [:map {:seon.db/attributes false :seon.render/ai sample/render-ai} [:seon.error/message :seon.error/message]])")
         row (program/declaration-row event :contracted :agent)]
-    (is (= true (:seon.error/class row)))
+    (is (= false (:seon.db/attributes row)))
     (is (= 'sample/render-ai (:seon.render/ai row)))
     (is (= :agent (:seon.schema.admission/source row)))))
 

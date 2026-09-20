@@ -1,6 +1,7 @@
 (ns seon.program
   "Pure declaration identities and exact-row ownership for program rows."
   (:require [malli.core :as m]
+            [seon.error.refusal :as error]
             [seon.fn.schema-shape :as schema-shape]
             [seon.fn.signature :as signature]
             [seon.schema :as schema]
@@ -54,11 +55,11 @@
       Example:
       (seon.program/overrides (seon.db/db connection))"
      {:malli/schema [:=> [:cat :seon.db/database-value]
-                     [:or [:vector :seon.fn/sym] :seon.error/value]]}
+                     [:or [:vector :seon.fn/sym] :seon.db/error-result]]}
      [database]
      ; seon.db requires this declaration owner; resolve its read functions late.
      (let [history ((requiring-resolve 'seon.db/history) database)]
-       (if (:seon.error/kind history)
+       (if (and (map? history) (contains? history :seon.error/at) (contains? history :seon.error/layer) (contains? history :seon.error/operation)) ;; debt: seon.db/history declares :seon.error/value through its output union.
          history
          (let [result
                ((requiring-resolve 'seon.db/q)
@@ -74,7 +75,7 @@
                   [$history ?member :seon.fn/file ?file]
                   [$ ?file :seon.fn.file/relative-root "src"]]
                 database history)]
-           (if (:seon.error/kind result)
+           (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value through its output union.
              result
              (vec (sort result))))))))
 
@@ -102,12 +103,24 @@
           vec))))
 
 (defn- declaration-refused!
+  {:malli/schema [:=> [:cat :string [:vector :seon.program/identity] :map] :nil]}
   [message identities data]
   (throw
    (ex-info message
-            (merge {:seon.error/kind :seon.program/declaration-refused
-                    :seon.program/identities identities :seon.program/declaration-refused true}
-                   data))))
+            (error/diagnostic
+             {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
+              :seon.error/layer :seon.program/declaration
+              :seon.error/operation 'seon.program/declaration-refused!
+              :seon.error/message message
+              :seon.error/offending identities
+              :seon.error/diagnostic-layer :seon.program/declaration
+              :seon.error/diagnostic-operation 'seon.program/declaration-refused!
+              :seon.error/diagnostic-member :seon.program/identity-attributes
+              :seon.error/diagnostic-expected :seon.program/declaration-row
+              :seon.error/diagnostic-offending identities
+              :seon.error/diagnostic-cause :seon.error/unknown
+              :seon.error/diagnostic-evidence identities
+              :seon.program/identity-attributes (set (map first identities)) :seon.error/data data}))))
 
 (defn- entry-attribute
   [entry]
@@ -266,25 +279,32 @@
   one declaration and `end` belongs to the next. THE ANSWER IS NEVER NIL:
   \"no declaration contains this byte\" is a fact a caller must be able to
   read and report, so it comes back as a flat
-  `:seon.program/no-declaration-at` value naming the position and the
+  `:seon.program/no-declaration-at-error` value naming the position and the
   spanned declarations examined. A merge that silently found nothing is
   the absence-as-health defect this exists to prevent."
   {:malli/schema
    [:=> [:cat [:sequential :map] :seon.program/position]
-    [:or :map :seon.error/value]]}
+    [:or :map :seon.program/no-declaration-at-error]]}
   [declarations position]
   (let [spanned (filter :seon.fn/form-span declarations)]
     (or (first (filter (fn [declaration]
                          (let [[start end] (:seon.fn/form-span declaration)]
                            (and (<= start position) (< position end))))
                        spanned))
-        {:seon.program/no-declaration-at true
-         :seon.error/kind :seon.program/no-declaration-at
-         :seon.error/message
-         (str "No declaration span contains byte " position ".")
-         :seon.error/data
-         {:seon.program/position position
-          :seon.program/declarations-examined (count spanned)}})))
+        (error/diagnostic
+         {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
+          :seon.error/layer :seon.program/declaration
+          :seon.error/operation 'seon.program/declaration-at
+          :seon.error/message "No declaration span contains the requested byte; choose a byte within a declaration."
+          :seon.error/offending position
+          :seon.error/diagnostic-layer :seon.program/declaration
+          :seon.error/diagnostic-operation 'seon.program/declaration-at
+          :seon.error/diagnostic-member :seon.program/position
+          :seon.error/diagnostic-expected :seon.fn/form-span
+          :seon.error/diagnostic-offending position
+          :seon.error/diagnostic-cause :seon.error/unknown
+          :seon.error/diagnostic-evidence position
+          :seon.program/position position :seon.program/declarations-examined (count spanned)}))))
 
 (defn shape
   "The program shape owned by `identity-attribute`.
@@ -440,8 +460,20 @@
                                  path order :rest (second remaining)))
             (throw
              (ex-info "Sequential destructuring has a malformed rest binding."
-                      {:seon.error/kind :seon.fn.binding/unsupported
-                       :seon.fn.binding/form (pr-str binding) :seon.fn.binding/unsupported true})))
+                      (error/diagnostic
+                       {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
+                        :seon.error/layer :seon.program/declaration
+                        :seon.error/operation 'seon.program/sequential-binding-children
+                        :seon.error/message "Sequential binding syntax is invalid; correct the rest or alias binding."
+                        :seon.error/offending binding
+                        :seon.error/diagnostic-layer :seon.program/declaration
+                        :seon.error/diagnostic-operation 'seon.program/sequential-binding-children
+                        :seon.error/diagnostic-member :seon.fn.binding/form
+                        :seon.error/diagnostic-expected :seon.fn.binding/row
+                        :seon.error/diagnostic-offending binding
+                        :seon.error/diagnostic-cause :seon.error/unknown
+                        :seon.error/diagnostic-evidence binding
+                        :seon.program/binding-function function-symbol :seon.program/binding-argument argument-index}))))
 
           (= :as value)
           (if (and (next remaining) (nil? (next (next remaining))))
@@ -450,8 +482,20 @@
                                  path order :as (second remaining)))
             (throw
              (ex-info "Sequential destructuring has a malformed :as binding."
-                      {:seon.error/kind :seon.fn.binding/unsupported
-                       :seon.fn.binding/form (pr-str binding) :seon.fn.binding/unsupported true})))
+                      (error/diagnostic
+                       {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
+                        :seon.error/layer :seon.program/declaration
+                        :seon.error/operation 'seon.program/sequential-binding-children
+                        :seon.error/message "Sequential binding syntax is invalid; correct the rest or alias binding."
+                        :seon.error/offending binding
+                        :seon.error/diagnostic-layer :seon.program/declaration
+                        :seon.error/diagnostic-operation 'seon.program/sequential-binding-children
+                        :seon.error/diagnostic-member :seon.fn.binding/form
+                        :seon.error/diagnostic-expected :seon.fn.binding/row
+                        :seon.error/diagnostic-offending binding
+                        :seon.error/diagnostic-cause :seon.error/unknown
+                        :seon.error/diagnostic-evidence binding
+                        :seon.program/binding-function function-symbol :seon.program/binding-argument argument-index}))))
 
           :else
           (recur (next remaining) (inc order)
@@ -497,8 +541,20 @@
     :else
     (throw
      (ex-info "Function declaration has an unsupported binding form."
-              {:seon.error/kind :seon.fn.binding/unsupported
-               :seon.fn.binding/form (pr-str binding) :seon.fn.binding/unsupported true}))))
+              (error/diagnostic
+               {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
+                :seon.error/layer :seon.program/declaration
+                :seon.error/operation 'seon.program/binding-row
+                :seon.error/message "Function binding is unsupported; use a symbol, map or sequential binding."
+                :seon.error/offending binding
+                :seon.error/diagnostic-layer :seon.program/declaration
+                :seon.error/diagnostic-operation 'seon.program/binding-row
+                :seon.error/diagnostic-member :seon.fn.binding/form
+                :seon.error/diagnostic-expected :seon.fn.binding/row
+                :seon.error/diagnostic-offending binding
+                :seon.error/diagnostic-cause :seon.error/unknown
+                :seon.error/diagnostic-evidence binding
+                :seon.program/binding-function function-symbol :seon.program/binding-argument argument-index})))))
 
 (defn- schema-reference-keys
   [compiled canonical-keys]
@@ -540,10 +596,20 @@
                      grouped)]
       (throw
        (ex-info "Function source and Malli contract are not bijective."
-                {:seon.error/kind :seon.fn/signature-refused
-                 :seon.fn.signature/reason reason
-                 :seon.fn.signature/join-key join-key
-                 :seon.fn.signature/count (count matches) :seon.fn/signature-refused true})))
+                (error/diagnostic
+                 {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
+                  :seon.error/layer :seon.program/declaration
+                  :seon.error/operation 'seon.program/one-by-key
+                  :seon.error/message "Function arity is duplicated; give each source and contract arity one matching declaration."
+                  :seon.error/offending matches
+                  :seon.error/diagnostic-layer :seon.program/declaration
+                  :seon.error/diagnostic-operation 'seon.program/one-by-key
+                  :seon.error/diagnostic-member reason
+                  :seon.error/diagnostic-expected 1
+                  :seon.error/diagnostic-offending matches
+                  :seon.error/diagnostic-cause :seon.error/unknown
+                  :seon.error/diagnostic-evidence matches
+                  :seon.program/signature-member reason :seon.program/signature-count (count matches) :seon.error/data {:seon.fn.signature/join-key join-key}}))))
     (into {} (map (fn [[join-key matches]]
                     [join-key (first matches)])) grouped)))
 
@@ -562,9 +628,20 @@
 
     (throw
      (ex-info "Function input contract must be a :cat or :catn schema."
-              {:seon.error/kind :seon.fn/signature-refused
-               :seon.fn.signature/reason :unsupported-input-schema
-               :seon.fn.signature/input (pr-str (m/form input)) :seon.fn/signature-refused true}))))
+              (error/diagnostic
+               {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
+                :seon.error/layer :seon.program/declaration
+                :seon.error/operation 'seon.program/input-slots
+                :seon.error/message "Function input contract needs cat or catn; correct its input schema."
+                :seon.error/offending (m/form input)
+                :seon.error/diagnostic-layer :seon.program/declaration
+                :seon.error/diagnostic-operation 'seon.program/input-slots
+                :seon.error/diagnostic-member :seon.fn/spec
+                :seon.error/diagnostic-expected [:enum :cat :catn]
+                :seon.error/diagnostic-offending (m/form input)
+                :seon.error/diagnostic-cause :seon.error/unknown
+                :seon.error/diagnostic-evidence (m/form input)
+                :seon.program/signature-member :seon.fn/spec :seon.program/signature-count (count (m/children input))})))))
 
 (defn- label-facts
   [label]
@@ -616,10 +693,20 @@
         _ (when-not (= expected-count (count slots))
             (throw
              (ex-info "A source binding has no matching Malli input slot."
-                      {:seon.error/kind :seon.fn/signature-refused
-                       :seon.fn.signature/reason :unmatched-slot
-                       :seon.fn.signature/source-count expected-count
-                       :seon.fn.signature/malli-count (count slots) :seon.fn/signature-refused true})))
+                      (error/diagnostic
+                       {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
+                        :seon.error/layer :seon.program/declaration
+                        :seon.error/operation 'seon.program/arity-row
+                        :seon.error/message "Source bindings and contract slots differ; declare one slot per binding."
+                        :seon.error/offending source-signature
+                        :seon.error/diagnostic-layer :seon.program/declaration
+                        :seon.error/diagnostic-operation 'seon.program/arity-row
+                        :seon.error/diagnostic-member :seon.fn.arity/argument-count
+                        :seon.error/diagnostic-expected expected-count
+                        :seon.error/diagnostic-offending source-signature
+                        :seon.error/diagnostic-cause :seon.error/unknown
+                        :seon.error/diagnostic-evidence source-signature
+                        :seon.program/signature-member :seon.fn.arity/argument-count :seon.program/signature-count (count slots) :seon.error/data {:seon.fn.signature/source-count expected-count}}))))
         arguments (mapv (fn [argument-order slot]
                           (argument-row function-symbol order source-signature
                                         argument-order slot schema-forms
@@ -682,18 +769,28 @@
                   :seon.fn.signature/aliases (or reader-aliases {})}
            arglists (assoc :seon.fn/arglists arglists)))
         source-by-key (one-by-key source-signatures signature-key
-                                  :duplicate-source-arity)
+                                  :seon.fn/source)
         malli-by-key (one-by-key (mapv m/-function-info arities)
-                                 malli-arity-key :duplicate-malli-arity)
+                                 malli-arity-key :seon.fn/spec)
         source-keys (set (keys source-by-key))
         malli-keys (set (keys malli-by-key))]
     (when-not (= source-keys malli-keys)
       (throw
        (ex-info "Source and Malli arity sets do not match."
-                {:seon.error/kind :seon.fn/signature-refused
-                 :seon.fn.signature/reason :unmatched-arity
-                 :seon.fn.signature/source-arities source-keys
-                 :seon.fn.signature/malli-arities malli-keys :seon.fn/signature-refused true})))
+                (error/diagnostic
+                 {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
+                  :seon.error/layer :seon.program/declaration
+                  :seon.error/operation 'seon.program/contract-facts
+                  :seon.error/message "Source and contract arities differ; give each source arity a matching contract."
+                  :seon.error/offending malli-keys
+                  :seon.error/diagnostic-layer :seon.program/declaration
+                  :seon.error/diagnostic-operation 'seon.program/contract-facts
+                  :seon.error/diagnostic-member :seon.fn/arities
+                  :seon.error/diagnostic-expected source-keys
+                  :seon.error/diagnostic-offending malli-keys
+                  :seon.error/diagnostic-cause :seon.error/unknown
+                  :seon.error/diagnostic-evidence malli-keys
+                  :seon.program/signature-member :seon.fn/arities :seon.program/signature-count (count malli-keys)}))))
     (cond->
      {:seon.fn/arities
       (mapv (fn [order arity]

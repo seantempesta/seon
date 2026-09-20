@@ -271,5 +271,5 @@
  :seon.error/base
  [:map [:seon.sci.eval/missing-declaration :seon.sci.eval/missing-declaration]]]
 
-:installation-member [:or :symbol :qualified-keyword]
+:installation-member [:or :symbol :qualified-keyword :string]
 }

@@ -103,22 +103,14 @@
     attribute its family owns."}
   :seon.program/identity-attribute :seon.program/shape]
  :seon.program/position [:int {:min 0}]
- :seon.program/no-declaration-at [:= true]
- :seon.program/no-declaration-at-error
- [:map {:seon.error/class true
-        :seon.render/ai seon.error/render-ai
-        :seon.render/html seon.error/render-html
-        :error/message "must name the position no declaration span contains"}
-  [:seon.program/no-declaration-at :seon.program/no-declaration-at]
-  [:seon.error/message :seon.error/message]]
+
+ :seon.program/no-declaration-at-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.program/position :seon.program/position] [:seon.program/declarations-examined :seon.program/declarations-examined]]]
  :seon.program/declaration-refused [:= true]
- :seon.program/declaration-refused-error
- [:map {:seon.error/class true
-        :seon.render/ai seon.error/render-ai
-        :seon.render/html seon.error/render-html
-        :error/message "must mark a program declaration refused by canonical admission"}
-  [:seon.program/declaration-refused :seon.program/declaration-refused]
-  [:seon.error/message :seon.error/message]]
+ :seon.program/declaration-refused-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.program/identity-attributes :seon.program/identity-attributes]]]
  :seon.program/subject
  [:or {:description "A function or test symbol, namespace symbol, or schema key."}
   :symbol :qualified-keyword]
@@ -278,4 +270,17 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.evidence/entity}
  :seon.db/ref]
+
+:seon.program/declarations-examined [:int {:min 0}]
+:seon.program/identity-attributes [:set {:min 1} :seon.program/identity-attribute]
+:seon.program/binding-function :qualified-symbol
+:seon.program/binding-argument [:int {:min 0}]
+:seon.program/signature-member :qualified-keyword
+:seon.program/signature-count [:int {:min 0}]
+:seon.program/binding-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.program/binding-function :seon.program/binding-function] [:seon.program/binding-argument :seon.program/binding-argument]]]
+:seon.program/signature-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.program/signature-member :seon.program/signature-member] [:seon.program/signature-count :seon.program/signature-count]]]
 }

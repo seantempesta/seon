@@ -1305,8 +1305,8 @@
                 :seon.error/diagnostic-cause :seon.error/unknown
                 :seon.error/diagnostic-evidence namespace-name
                 ::row-member namespace-name
-                ::acquisition-observation {:seon.error.evidence/attribute :seon.ns/name
-                                           :seon.error.evidence/value namespace-name}})))))))
+                ::acquisition-observation {:seon.error.evidence/attribute :seon.error/message
+                                           :seon.error.evidence/value "Loaded source defined no namespace."}})))))))
 
 (defn- load-core-namespaces!
   "The effectful cluster caller loads JVM namespaces before pure construction."

@@ -478,3 +478,132 @@ four namespaces load. Cold command owed: `bin/test --paths
 src/seon/sci/reader.cljc resources/seon/schemas/seon.sci.reader.edn
 test/seon/sci/reader_test.clj src/seon/sci/kernel.clj src/seon/sci/admit.clj --
 seon.sci.reader-test`.
+
+## Program conversion and final census at this boundary
+
+Pure program source kinds 11 → 0. Declaration refusal requires the observed
+identity attributes; no-declaration carries its byte position and examined
+count; invalid bindings carry function and argument index; signature joins
+carry the member and count observed at the failed seam. Arbitrary binding,
+identity and schema values ride offending/evidence, never facet EDN strings.
+The database override pass-through names the DB union and its two debts.
+Both SCI pass-through unions name the pure program facets. The old schema
+property regressions now use the real `:seon.db/attributes` property, including
+its false value, rather than an error class marker.
+
+The one program snapshot (`tmp/sci-program-program-fast.log`) armed 1,480
+contracts (1,477 program-armable), then refused at the same recording authority:
+**0 executed, tally owed**. The final property-assertion correction was made
+while that snapshot ran; no second fast request was made. The final load and
+conversion lint pass. A final eval evidence correction keeps an unqualified
+namespace symbol in row-member and reports the absence as message evidence,
+whose scalar grammar accepts strings but not unqualified symbols.
+
+Counts below include source, owning resource and affected tests, against
+`603d2587c`, measured by literal occurrence, not line count:
+
+| Family | error/kind before → now | error/class before → now |
+| --- | ---: | ---: |
+| eval | 53 → 0 | 9 → 0 |
+| kernel | 3 → 0 | 7 → 0 |
+| admit | 5 → 0 | 1 → 0 |
+| reader | 16 → 0 | 5 → 0 |
+| program | 15 → 0 | 8 → 2 |
+
+All assigned source/test files have zero retirement matches. The two remaining
+class schemas in seon.program.edn are protocol-owned read-refused-error and
+not-found-error; they are not claimed converted. The shared declaration-refused
+boolean is also still emitted by the protocol. No new replacement predicate,
+boolean facet marker or per-facet EDN string was added.
+
+## New section-6 boundary: shared program protocol observations
+
+The actual `my.program/read-result` and `supplied-context` producers return
+real failures with **zero declared facets**. The pure declaration producer
+now returns the complete identity-attribute facet. Exact output of
+[sci-program-shared-program-facets-2026-09-21.clj](sci-program-shared-program-facets-2026-09-21.clj):
+
+```clojure
+{:sci-program/read-facets #{}
+ :sci-program/context-facets #{}
+ :sci-program/declaration-facets #{:seon.program/declaration-refused-error}
+ :sci-program/read-member sample/f
+ :sci-program/context-member :my.program/context
+ :sci-program/declaration-members #{:seon.fn/sym}}
+```
+
+The probe exits 0, loads the four assigned namespaces and uses the complete
+packaged declaration projection. It is unarmed source/schema evidence, not a
+canonical regression. No foreign dirty source was edited. `src/my/program.clj`
+and its tests are clean, but are outside this explicit ownership assignment.
+The separate [issue](../../../seon/issues/program-protocol-refusals-have-no-substantive-facet.md)
+records the producer/caller evidence. This is PRD §6's consumer condition:
+D12's `shown-result` cannot distinguish these real library failures through
+the facets currently expressed. Structural recognition is explicitly ruled
+out. This is not the foreign snapshot-admission failure used as a stop.
+
+### Three priced continuation options
+
+1. **Extend ownership to the program protocol (recommended).** Add
+   `src/my/program.clj`, its producer/consumer contracts and affected tests
+   (`test/my/program_test.clj`, `test/my/program_mutation_test.clj`, and query
+   tests if affected). Declare the read/context/mutation observations from
+   their actual required evidence and finish the shared resource in one
+   coherent slice. Guarantee: complete facets reach D12 without changing its
+   semantics. Cost: approximately 1–2 hours plus canonical verification.
+   Give up: keeping the assignment limited to the core SCI/program files.
+2. **Have the protocol owner land that slice.** Supply this probe and keep the
+   same required-member and D12 acceptance conditions. Guarantee: the same
+   complete error recognition with file ownership unchanged. Cost: the same
+   1–2 hours plus coordination and resumed integration. Give up: independent
+   completion of the shared resource by this lane; no owner session was
+   contacted or operated.
+3. **Accept the core slice and explicitly defer protocol completeness.**
+   Record the two class schemas and incomplete protocol producers as the
+   owning lane's remaining work. Guarantee: only the converted core producers
+   and their kind-free source, not correct protocol-error recognition. Cost:
+   no additional code now, but the same repair and proof remain owed. Give up:
+   this sweep's full resource/D12 acceptance until that follow-up lands.
+
+## Held-owner handoffs (measured at this boundary)
+
+- `src/seon/fn.clj`: 28 kind lines at 49, 160, 195, 199, 614, 978, 993, 1039,
+  1106, 1230, 1523, 1524, 1628–1630, 1997, 2090, 2242, 2321, 2408, 2602,
+  2615, 2626, 2858, 2897, 2974, 3263, 3271. In particular 1230 consumes
+  declaration-at and must branch on its position/count observation. The
+  publication-dissolution owner retains this file, cluster/source.clj,
+  fresh_operator.clj and bin/*.
+- `src/seon/schema/edn.clj`: 12 kind lines at 131, 183, 191, 221, 229, 238,
+  247, 272, 287, 299, 317, 479. `src/seon/schema/datahike.clj`: 7 at 270, 281,
+  304, 313, 372, 386, 528. These remain bridge-step2-walker ownership, together
+  with schema.clj/internal and their dirty tests. Cluster/turn remain held.
+- `test/seon/edit_test.clj:376` still asserts declaration-at's retired stamp;
+  its owner must assert the requested position/examined count and operation.
+- `src/seon/fn/signature.cljc` and seon.fn/seon.fn.binding resources still own
+  their independent legacy failures. No edit was made there. The new pure
+  program failures describe the observations made inside program.cljc.
+- Error-owner complete pass-through manifests must accrete the newly declared
+  eval, admission, reader and program facets, plus the await facets from the
+  preceding slice. This lane updated both of its SCI unions; it did not edit
+  error.clj or error/refusal.clj. Kernel retains the explicitly named generic
+  cause-chain-reader debt; DB and call-preparation debts remain at eval/program
+  sites until their owners narrow those outputs.
+
+Cold program scope owed: `bin/test --paths src/seon/program.cljc
+resources/seon/schemas/seon.program.edn test/seon/program_test.clj
+src/seon/sci/kernel.clj src/seon/sci/admit.clj src/seon/sci/eval.clj --
+seon.program-test`. The preceding per-family commands and orchestrator
+`bin/test --platform` remain owed. No fast family has a green execution tally:
+all five fast snapshots stopped before test execution at recording.
+All named authorities were read end to end earlier in this lane. Default,
+foreign sessions, foreign dirty files and cold gates remain untouched.
+
+Final declaration review also admits string-valued file/lint identities in the
+installation mismatch member, as required by program identity declarations.
+That schema accretion is included in the program checkpoint; its cold scope
+therefore also includes resources/seon/schemas/seon.sci.eval.edn.
+
+The final shared-facet probe constructs the context input with
+`seon.env/environment` and validates it against `:seon.env/environment` before
+asserting the refusal's missing facet. It does not infer a reachable producer
+failure from an invalid hand-built environment. Final output is unchanged.
