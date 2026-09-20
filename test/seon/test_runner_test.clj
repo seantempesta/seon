@@ -505,9 +505,23 @@
                    (throw
                     (ex-info
                      "Injected confirmation process launch refusal."
-                     {:seon.error/kind
-                      ::runner/worker-launch-failure
-                      ::runner/injected? true}))))
+                     (assoc
+                      (error/diagnostic
+                       {:seon.error/at (java.util.Date.)
+                        :seon.error/layer :seon.test.runner/worker-process
+                        :seon.error/operation 'seon.test.runner/start-worker!
+                        :seon.error/message "Injected confirmation process launch refusal."
+                        :seon.error/diagnostic-layer :seon.test.runner/worker-process
+                        :seon.error/diagnostic-operation 'seon.test.runner/start-worker!
+                        :seon.error/diagnostic-member :seon.test.runner/worker-process
+                        :seon.error/diagnostic-expected "a launched worker process"
+                        :seon.error/diagnostic-offending ["clojure" "-M:test"]
+                        :seon.error/diagnostic-cause :worker-launch-failure
+                        :seon.error/diagnostic-evidence {::runner/injected? true}})
+                      :seon.test.runner/worker-id "confirmation-1"
+                      :seon.test.runner/worker-error-log "/tmp/worker-stderr.log"
+                      :seon.error/offending ["clojure" "-M:test"]
+                      ::runner/injected? true)))))
                 summary (#'runner/summarize-task-results confirmed)]
             (reset! confirmed* confirmed)
             (reset! summary* summary)
@@ -521,8 +535,7 @@
            @summary*)
         "confirmation launch is outside the already-complete bulk tally")
     (is (= :unconfirmed (::runner/parallel-failure unconfirmed)))
-    (is (= :seon.test.runner/confirmation-worker-launch-failure
-           (:seon.error/kind failure)))
+    (is (= ["clojure" "-M:test"] (::runner/launch-request failure)))
     (is (= ["seon.example-test/unlaunchable"]
            (::runner/task-symbols failure))
         "the typed launch failure carries the task known before readiness")

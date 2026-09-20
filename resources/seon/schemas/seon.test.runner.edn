@@ -71,16 +71,42 @@
                    :default-cluster-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the default cluster refused by the test runner"} [:seon.test.runner/default-cluster-refused :seon.test.runner/default-cluster-refused] [:seon.error/message :seon.error/message]]
                    :invalid-selection-mode :seon.test.runner/selection-mode
                    :invalid-selection-mode-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invalid test selection mode"} [:seon.test.runner/invalid-selection-mode :seon.test.runner/invalid-selection-mode] [:seon.error/message :seon.error/message]]
- :seon.test.runner/invalid-marker-reason [:= true]
- :seon.test.runner/invalid-marker-reason-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.test.runner/invalid-marker-reason class marker"} [:seon.test.runner/invalid-marker-reason :seon.test.runner/invalid-marker-reason] [:seon.error/message :seon.error/message]]
- :seon.test.runner/process-tree-exit-backstop [:= true]
- :seon.test.runner/process-tree-exit-backstop-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.test.runner/process-tree-exit-backstop class marker"} [:seon.test.runner/process-tree-exit-backstop :seon.test.runner/process-tree-exit-backstop] [:seon.error/message :seon.error/message]]
- :seon.test.runner/unknown-worker-command [:= true]
- :seon.test.runner/unknown-worker-command-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.test.runner/unknown-worker-command class marker"} [:seon.test.runner/unknown-worker-command :seon.test.runner/unknown-worker-command] [:seon.error/message :seon.error/message]]
- :seon.test.runner/unresolved-test-var [:= true]
- :seon.test.runner/unresolved-test-var-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.test.runner/unresolved-test-var class marker"} [:seon.test.runner/unresolved-test-var :seon.test.runner/unresolved-test-var] [:seon.error/message :seon.error/message]]
- :seon.test.runner/worker-launch-failure [:= true]
- :seon.test.runner/worker-launch-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.test.runner/worker-launch-failure class marker"} [:seon.test.runner/worker-launch-failure :seon.test.runner/worker-launch-failure] [:seon.error/message :seon.error/message]]
+ :marker-key [:qualified-keyword {:description "The test metadata key whose observed value was invalid."}]
+ :worker-id [:string {:min 1 :description "The worker identity observed by the runner; a value that survives worker exit."}]
+ :process-tree-exit-bound-ms [:int {:min 1 :description "The process-tree exit bound that fired, in milliseconds."}]
+ :process-tree-phase [:keyword {:description "The runner phase observed when the process-tree exit bound fired."}]
+ :worker-command-key [:keyword {:description "The command key observed before worker protocol dispatch."}]
+ :worker-namespace [:and {:description "The namespace token in which the runner sought a test Var; a value that survives namespace deletion."} :seon.ns/name]
+ :worker-error-log [:string {:min 1 :description "The worker error-log path observed when process launch failed."}]
+ :invalid-marker-reason-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base
+  [:map [:seon.test/sym :seon.test/sym]
+   [:seon.test.runner/marker-key :seon.test.runner/marker-key]
+   [:seon.error/offending :seon.schema/value]]]
+ :process-tree-exit-backstop-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base
+  [:map [:seon.test.runner/worker-id :seon.test.runner/worker-id]
+   [:seon.test.runner/process-tree-exit-bound-ms :seon.test.runner/process-tree-exit-bound-ms]
+   [:seon.test.runner/process-tree-phase :seon.test.runner/process-tree-phase]]]
+ :unknown-worker-command-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base
+  [:map [:seon.test.runner/worker-id :seon.test.runner/worker-id]
+   [:seon.test.runner/worker-command-key :seon.test.runner/worker-command-key]
+   [:seon.error/offending :seon.schema/value]]]
+ :unresolved-test-var-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base
+  [:map [:seon.test/sym :seon.test/sym]
+   [:seon.test.runner/worker-namespace :seon.test.runner/worker-namespace]]]
+ :worker-launch-failure-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base
+  [:map [:seon.test.runner/worker-id :seon.test.runner/worker-id]
+   [:seon.test.runner/worker-error-log :seon.test.runner/worker-error-log]
+   [:seon.error/offending :seon.schema/value]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.test.runner/error

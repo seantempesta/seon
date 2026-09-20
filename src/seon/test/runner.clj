@@ -714,13 +714,24 @@
                  (get namespace-metadata marker-attribute))]
     (when (some? marker)
       (when-not (and (string? marker) (not (str/blank? marker)))
-        (throw
-         (ex-info
-          (str marker-attribute " must contain a non-blank reason.")
-          {:seon.error/kind ::invalid-marker-reason
-           :seon.test/sym (var-symbol test-var)
-           ::marker marker-attribute
-           ::value marker :seon.test.runner/invalid-marker-reason true})))
+        (let [message (str marker-attribute " must contain a non-blank reason.")]
+          (throw
+           (ex-info message
+                    (assoc (error/diagnostic
+                            {:seon.error/at (java.util.Date.)
+                             :seon.error/layer :seon.test.runner/metadata
+                             :seon.error/operation `marker-reason
+                             :seon.error/message message
+                             :seon.error/diagnostic-layer :seon.test.runner/metadata
+                             :seon.error/diagnostic-operation `marker-reason
+                             :seon.error/diagnostic-member marker-attribute
+                             :seon.error/diagnostic-expected "a non-blank reason string"
+                             :seon.error/diagnostic-offending marker
+                             :seon.error/diagnostic-cause :invalid-marker-reason
+                             :seon.error/diagnostic-evidence {:seon.test/sym (var-symbol test-var)}})
+                           :seon.test/sym (var-symbol test-var)
+                           :seon.test.runner/marker-key marker-attribute
+                           :seon.error/offending marker)))))
       marker)))
 
 (defn- manifest-rows
@@ -1983,8 +1994,22 @@
 
           (throw
            (ex-info "A test worker received an unknown command."
-                    {:seon.error/kind ::unknown-worker-command
-                     ::command command :seon.test.runner/unknown-worker-command true})))))))
+                    (assoc (error/diagnostic
+                            {:seon.error/at (java.util.Date.)
+                             :seon.error/layer :seon.test.runner/worker-protocol
+                             :seon.error/operation `serve-worker-commands!
+                             :seon.error/message "A test worker received an unknown command."
+                             :seon.error/diagnostic-layer :seon.test.runner/worker-protocol
+                             :seon.error/diagnostic-operation `serve-worker-commands!
+                             :seon.error/diagnostic-member ::worker-command
+                             :seon.error/diagnostic-expected #{:initialize :run :stop}
+                             :seon.error/diagnostic-offending command
+                             :seon.error/diagnostic-cause :unknown-worker-command
+                             :seon.error/diagnostic-evidence {::worker-id worker-id}})
+                           :seon.test.runner/worker-id worker-id
+                           :seon.test.runner/worker-command-key
+                           (or (::worker-command command) :missing)
+                           :seon.error/offending command))))))))
 
 (defn- worker-command-loop!
   "Prime the canonical fixture before readiness, then serve commands until stopped."
@@ -3722,12 +3747,28 @@
         (try
           (.start builder)
           (catch Exception failure
-            (throw
-             (ex-info "A test worker process could not launch."
-                      {:seon.error/kind ::worker-launch-failure
-                       ::worker-id worker-id
-                       ::worker-error-log (.getCanonicalPath error-log) :seon.test.runner/worker-launch-failure true}
-                      failure))))
+            (let [message "A test worker process could not launch."
+                  error-log-path (.getCanonicalPath error-log)]
+              (throw
+               (ex-info message
+                        (assoc (error/diagnostic
+                                {:seon.error/at (java.util.Date.)
+                                 :seon.error/layer :seon.test.runner/worker-process
+                                 :seon.error/operation `start-worker!
+                                 :seon.error/message message
+                                 :seon.error/diagnostic-layer :seon.test.runner/worker-process
+                                 :seon.error/diagnostic-operation `start-worker!
+                                 :seon.error/diagnostic-member ::worker-process
+                                 :seon.error/diagnostic-expected "a launched worker process"
+                                 :seon.error/diagnostic-offending command
+                                 :seon.error/diagnostic-cause :worker-launch-failure
+                                 :seon.error/diagnostic-evidence
+                                 {:seon.error/throwable-class (.getName (class failure))
+                                  ::worker-error-log error-log-path}})
+                               :seon.test.runner/worker-id worker-id
+                               :seon.test.runner/worker-error-log error-log-path
+                               :seon.error/offending command)
+                        failure)))))
         worker {::worker-id worker-id
                 ::worker-journal (atom [])
                 ::worker-process process
@@ -3749,12 +3790,25 @@
                 ::expected-worker-event :ready
                 ::completion-bound-seconds (exchange-bound-seconds)})]
     (when (exchange-failure? ready)
-      (throw
-       (ex-info "A test worker did not publish readiness."
-                (assoc ready
-                       :seon.error/kind ::worker-launch-failure
-                       ::underlying-failure-kind (:seon.error/kind ready)
-                       :seon.test.runner/worker-launch-failure true))))
+      (let [message "A test worker did not publish readiness."
+            error-log-path (::worker-error-log worker)]
+        (throw
+         (ex-info message
+                  (assoc (error/diagnostic
+                          {:seon.error/at (java.util.Date.)
+                           :seon.error/layer :seon.test.runner/worker-process
+                           :seon.error/operation `start-worker!
+                           :seon.error/message message
+                           :seon.error/diagnostic-layer :seon.test.runner/worker-process
+                           :seon.error/diagnostic-operation `start-worker!
+                           :seon.error/diagnostic-member :ready
+                           :seon.error/diagnostic-expected "a worker readiness event"
+                           :seon.error/diagnostic-offending ready
+                           :seon.error/diagnostic-cause :worker-launch-failure
+                           :seon.error/diagnostic-evidence ready})
+                         :seon.test.runner/worker-id worker-id
+                         :seon.test.runner/worker-error-log error-log-path
+                         :seon.error/offending ready)))))
     (println "bin/test: WORKER READY" (pr-str ready))
     (flush)
     (cond-> worker
@@ -3816,7 +3870,7 @@
         (.destroy handle)))))
 
 (defn- stop-owned-process-tree!
-  [{::keys [process-handles process-root] :as ownership}]
+  [worker-id phase {::keys [process-handles process-root] :as ownership}]
   (signal-process-tree! ownership false)
   (when-not (await-process-tree-exit ownership)
     (let [stuck-processes
@@ -3832,9 +3886,22 @@
       (let [forced-completion? (await-process-tree-exit ownership)]
         (throw
          (ex-info "A worker process tree exceeded its exit backstop."
-                  {:seon.error/kind ::process-tree-exit-backstop
-                   ::processes stuck-processes
-                   ::forced-completion? forced-completion? :seon.test.runner/process-tree-exit-backstop true})))))
+                  (assoc (error/diagnostic
+                          {:seon.error/at (java.util.Date.)
+                           :seon.error/layer :seon.test.runner/worker-process
+                           :seon.error/operation `stop-owned-process-tree!
+                           :seon.error/message "A worker process tree exceeded its exit backstop."
+                           :seon.error/diagnostic-layer :seon.test.runner/worker-process
+                           :seon.error/diagnostic-operation `stop-owned-process-tree!
+                           :seon.error/diagnostic-member ::process-tree-exit
+                           :seon.error/diagnostic-expected "the complete process tree to exit before the bound"
+                           :seon.error/diagnostic-offending stuck-processes
+                           :seon.error/diagnostic-cause :process-tree-exit-backstop
+                           :seon.error/diagnostic-evidence {::forced-completion? forced-completion?}})
+                         :seon.test.runner/worker-id worker-id
+                         :seon.test.runner/process-tree-exit-bound-ms
+                         (* 1000 process-tree-exit-backstop-seconds)
+                         :seon.test.runner/process-tree-phase phase))))))
   ;; The exact root exit is already one of process-tree-exit's publications.
   (.get (.onExit ^ProcessHandle process-root)))
 
@@ -3849,7 +3916,7 @@
           ::exchange-id (str (::worker-id worker) "/stop")
           ::expected-worker-event :stopped
           ::completion-bound-seconds (event-backstop-seconds)})
-        (stop-owned-process-tree! ownership)
+        (stop-owned-process-tree! (::worker-id worker) :stopping ownership)
         (.waitFor process)))))
 
 (defn- drain-worker-tasks!
@@ -4086,25 +4153,22 @@
 (defn- unconfirmed-confirmation
   [task-result failure]
   (let [launch (confirmation-launch task-result)
-        underlying-kind (:seon.error/kind (ex-data failure))
-        failure-kind
-        (if (= ::worker-launch-failure underlying-kind)
-          ::confirmation-worker-launch-failure
-          ::confirmation-worker-failure)
+        failure-data (ex-data failure)
+        launch-failure? (contains? failure-data :seon.test.runner/worker-error-log)
         failure-fact
         (cond->
          (assoc launch
-                :seon.error/kind failure-kind
                 ::failure-class (.getName (class failure))
                 ::failure-message (or (ex-message failure) ""))
-          (::injected? (ex-data failure)) (assoc ::injected? true)
-          underlying-kind (assoc ::underlying-failure-kind underlying-kind)
-          (ex-data failure) (assoc ::failure-data (ex-data failure)))]
+          (::injected? failure-data) (assoc ::injected? true)
+          launch-failure? (assoc ::launch-request
+                                 (:seon.error/offending failure-data))
+          failure-data (assoc ::failure-data failure-data))]
     (println "bin/test: confirmation unconfirmed"
              (when (::injected? (ex-data failure)) "[INJECTED FIXTURE]")
              (str/join "," (::task-symbols task-result))
              "worker=" (::worker-id launch)
-             "kind=" failure-kind)
+             "cause=" (if launch-failure? "worker-launch" "worker"))
     (cond-> (assoc task-result ::parallel-failure :unconfirmed
                    ::confirmation-failure failure-fact)
       (not (::task-summary task-result))
