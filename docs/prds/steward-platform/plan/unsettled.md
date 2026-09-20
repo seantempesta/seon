@@ -5999,8 +5999,14 @@ map" for the value and "error schema" for its Malli map schema
 `[:and :seon.error/base [:map …]]`; a retirement pass (sol low, after the
 current lanes land: 46 code/resource/test files with the word, mostly
 comments/docstrings/test-local keywords such as `:facet-member`,
-`:facet-validators`; 166 docs) restates every mention; no stored attribute
-or schema key contains the word (checked). (2) Every explanation from
+`:facet-validators`; 166 docs) restates every mention; TEN stored attribute keys carry the
+word (`:seon.fn/error-facets`, `:seon.fn.arity/error-facets`,
+`/error-facet-digest`, `:seon.fn.contract.finding/undeclared-error-facet`,
+`/error-facet-analysis-unavailable`, `:seon.instrument/declared-facets`,
+`/declared-facet-count`, `/declared-facet-digest`, `/actual-facets`,
+`/actual-facet-count`) — a key's definition never changes (AGENTS.md §2.5),
+so these become NEW keys named with "error-schema" in the RESET batch,
+readers converted in the same slice; docs and comments restate now. (2) Every explanation from
 here uses Clojure, Malli, Datahike, SCI and core.async terms only.
 (3) The offending-value question: an arbitrary Clojure value has no
 `:db/valueType`; it is stored as `pr-str` EDN in `:seon.error/data-edn`
