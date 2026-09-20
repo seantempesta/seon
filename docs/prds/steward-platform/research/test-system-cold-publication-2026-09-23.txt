@@ -1,0 +1,51 @@
+● init phase=lifecycle log=/Users/sean/src/seon/tmp/test-system-fork-root/data/operator/operations/init-lifecycle-14147.log
+● init phase=init log=/Users/sean/src/seon/tmp/test-system-fork-root/data/operator/operations/init-init-14147.log
+● boot dependency cache: checking inputs
+seon cache: reference lock wait-ms= 2 held-ms= 235
+● boot dependency cache: :current 372 namespaces
+● JVM output=/Users/sean/src/seon/tmp/test-system-fork-root/data/operator/operations/jvm-9f7ea100-8f7f-452a-85c0-371f7bbf3cae.log
+WARNING: Using incubator modules: jdk.incubator.vector
+Warning: environ value /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home for key :java-home has been overwritten with /opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home
+● current-src: publication started
+● current-src: #:seon.source{:progress "request accepted", :completed-phase "publication preparation", :elapsed-ms 12262}
+● current-src: #:seon.source{:progress "bootstrap configuration", :completed-phase "request accepted", :elapsed-ms 9}
+● current-src: #:seon.source{:progress "store acquisition", :completed-phase "bootstrap configuration", :elapsed-ms 1025}
+2026-09-20T22:58:52.672Z seans-m5-macbook-pro WARN [seon.fs:156] - seon recursive deletion: #:seon.cluster.store{:root "/Users/sean/src/seon/tmp/test-system-fork-root/data/store", :targets ["/Users/sean/src/seon/tmp/test-system-fork-root/data/store"], :file-bytes 0, :operation "seon.cluster.store/create-store!", :caller "seon.cluster$acquire_root_store_BANG_.invokeStatic(cluster.clj:982)", :pid 14197}
+● current-src: #:seon.source{:progress "source build", :completed-phase "store acquisition", :elapsed-ms 303}
+● current-src: #:seon.source{:progress "published manifest read", :completed-phase "source build", :elapsed-ms 1578}
+● current-src: #:seon.source{:progress "published manifest validation", :completed-phase "published manifest read", :elapsed-ms 0}
+● current-src: #:seon.source{:progress "published database acquisition", :completed-phase "published manifest validation", :elapsed-ms 0}
+● current-src: #:seon.source{:progress "analysis started", :completed-phase "published database acquisition", :elapsed-ms 0}
+● current-src: #:seon.source{:progress "analysis input inventory", :completed-phase "analysis started", :elapsed-ms 0}
+● current-src: #:seon.source{:progress "analysis caller files", :completed-phase "analysis input inventory", :elapsed-ms 200}
+● current-src: #:seon.source{:progress "analysis selected files", :completed-phase "analysis caller files", :elapsed-ms 285}
+● current-src: #:seon.source{:progress "analysis replace artifacts", :completed-phase "analysis selected files", :elapsed-ms 24070}
+● current-src: #:seon.source{:progress "analysis manifest complete", :completed-phase "analysis replace artifacts", :elapsed-ms 104}
+● current-src: #:seon.source{:progress "analysis complete", :completed-phase "analysis manifest complete", :elapsed-ms 0}
+● current-src: #:seon.source{:progress "findings: 630; delta unavailable: no corresponding previous manifest", :completed-phase "analysis complete", :elapsed-ms 1}
+● current-src: #:seon.source{:progress "branch publication started: 390 inputs", :completed-phase "findings: 630; delta unavailable: no corresponding previous manifest", :elapsed-ms 782}
+● current-src: #:seon.source{:progress "schema population started", :completed-phase "branch publication started: 390 inputs", :elapsed-ms 1331}
+● current-src: #:seon.source{:progress "schema population complete", :completed-phase "schema population started", :elapsed-ms 3650}
+● current-src: #:seon.source{:progress "instruction rows", :completed-phase "schema population complete", :elapsed-ms 0}
+● current-src: #:seon.source{:progress "program rows started", :completed-phase "instruction rows", :elapsed-ms 101}
+● current-src: #:seon.source{:progress "contract projection started: 3333 schemas, 1527 functions", :completed-phase "program rows started", :elapsed-ms 9084}
+● current-src: #:seon.source{:progress "contract projection complete", :completed-phase "contract projection started: 3333 schemas, 1527 functions", :elapsed-ms 357}
+● current-src: #:seon.source{:progress "contract rows: 1907/11440", :completed-phase "contract projection complete", :elapsed-ms 22732}
+● current-src: #:seon.source{:progress "contract rows: 3814/11440", :completed-phase "contract rows: 1907/11440", :elapsed-ms 19546}
+● current-src: #:seon.source{:progress "contract rows: 5721/11440", :completed-phase "contract rows: 3814/11440", :elapsed-ms 1718}
+● current-src: #:seon.source{:progress "contract rows: 7628/11440", :completed-phase "contract rows: 5721/11440", :elapsed-ms 75}
+● current-src: #:seon.source{:progress "contract rows: 9535/11440", :completed-phase "contract rows: 7628/11440", :elapsed-ms 1517}
+● current-src: #:seon.source{:progress "contract rows: 11440/11440", :completed-phase "contract rows: 9535/11440", :elapsed-ms 5006}
+● current-src: #:seon.source{:progress "program population compiled: 35876 entities, 27375 identities, 43964 keyword facts", :completed-phase "contract rows: 11440/11440", :elapsed-ms 24051}
+● current-src: #:seon.source{:progress "population: 107215/107215", :completed-phase "program population compiled: 35876 entities, 27375 identities, 43964 keyword facts", :elapsed-ms 54933}
+● current-src: #:seon.source{:progress "program rows complete", :completed-phase "population: 107215/107215", :elapsed-ms 0}
+● current-src: #:seon.source{:progress "initialization rows", :completed-phase "program rows complete", :elapsed-ms 0}
+● current-src: #:seon.source{:progress "publication issue indexing", :completed-phase "initialization rows", :elapsed-ms 2273}
+● current-src: #:seon.source{:progress "publication source identity", :completed-phase "publication issue indexing", :elapsed-ms 10425}
+● current-src: #:seon.source{:progress "publication branch head", :completed-phase "publication source identity", :elapsed-ms 1152}
+● current-src: #:seon.source{:progress "branch publication complete", :completed-phase "publication branch head", :elapsed-ms 9913}
+● current-src: {:seon.source/progress :instrumentation-restoration}
+● :current-src commit 6ab065e5-78f2-56c3-ad52-f69eaaf1eb01 digest 2802842562b49ae794d7b1a76b6d665f2751dcafb23afbb30cd262220078e9fc
+Program analysis: 6697 declarations; 42647 unresolved named calls. Complete work list: (seon.fn/unresolved-callers (seon.db/db)).
+● init phase=init elapsed-ms=254469 log=/Users/sean/src/seon/tmp/test-system-fork-root/data/operator/operations/init-init-14147.log
+● init phase=lifecycle elapsed-ms=254656 log=/Users/sean/src/seon/tmp/test-system-fork-root/data/operator/operations/init-lifecycle-14147.log

@@ -8,6 +8,32 @@
             [seon.schema.datahike :as bridge]
             [seon.test-support :as support]))
 
+(deftest sorted-declarations-and-indexed-rows-preserve-registry-identities
+  (support/with-database
+    (fn [connection]
+      (let [indexed (db/carried-projection (db/db connection))
+            forms (into (sorted-map) (:seon.schema.projection/forms indexed))
+            contracts (into (sorted-map) (:seon.schema.projection/function-contracts indexed))
+            declared (schema/build-projection
+                      forms contracts
+                      {:seon.schema/schema-admissions (:seon.schema.projection/schema-admissions indexed)
+                       :seon.schema/function-admissions (:seon.schema.projection/function-admissions indexed)
+                       :seon.schema/predicate-functions (schema/predicate-functions-in indexed)})
+            indexed-registry (:seon.schema.projection/registry indexed)
+            declared-registry (:seon.schema.projection/registry declared)]
+        (is (seq forms))
+        (is (seq contracts))
+        (is (every? keyword? (keys forms)))
+        (is (every? qualified-symbol? (keys contracts)))
+        (is (= forms (:seon.schema.projection/forms declared)))
+        (is (= contracts (:seon.schema.projection/function-contracts declared)))
+        (is (= (set (keys (mr/schemas indexed-registry)))
+               (set (keys (mr/schemas declared-registry)))))
+        (is (= (into {} (map (fn [k] [k (m/form (mr/schema indexed-registry k))]))
+                     (concat (keys forms) (keys contracts)))
+               (into {} (map (fn [k] [k (m/form (mr/schema declared-registry k))]))
+                     (concat (keys forms) (keys contracts)))))))))
+
 (deftest ^{:seon.test/long "Compares indexed acquisition with the original whole-population Datalog joins on the canonical fixture."
            :seon.test/long-ms 10000}
   indexed-projection-rows-preserve-the-query-result
@@ -65,7 +91,9 @@
         (is (m/validate ::root ["x" true] options))
         (is (not (m/validate ::root [[] true] options)))))))
 
-(deftest core-reference-sharing-preserves-agent-output-refusal
+(deftest ^{:seon.test/long "Acquires the canonical fixture and constructs four projections to verify core reuse preserves three independent admission refusals."
+           :seon.test/long-ms 10000}
+  core-reference-sharing-preserves-agent-output-refusal
   (support/with-database
     (fn [connection]
       (let [projection (db/carried-projection (db/db connection))

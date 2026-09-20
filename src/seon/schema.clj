@@ -475,7 +475,7 @@
                    (assoc changed identity definition)))
                changed population))
             {} [forms contracts])
-           (merge forms contracts))
+           (merge {} forms contracts))
          predicate-functions
          (reduce (fn [bindings predicate]
                    (if (contains? bindings predicate)

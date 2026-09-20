@@ -410,3 +410,44 @@ Pre-commit loading passed in the shared tree:
 `clojure -M:test -e "(require 'seon.schema 'seon.test-support 'seon.test 'seon.test.runner 'seon.schema.projection-acquisition-test 'seon.test.fixture-timing-test)"`.
 No worktree or additional gate was needed. The full cold gate and platform
 proof remain the orchestrator's responsibility.
+
+## Item 0: mixed Malli registry identities
+
+The orchestrator interrupted slice (2) for the cold-publication failure in
+`projection-registry`. Both inputs were verified: `seon.fn/add-contract-facts`
+builds keyword schema forms and symbol function contracts as separate sorted
+maps. `(merge forms contracts)` retained the keyword comparator. The fix
+starts the merge with `{}`. Compilation order remains the two explicit
+`sort-by str` passes; Malli's provider uses key lookup, `lazy-registry` holds
+an ordinary map, and `fast-registry` uses Java HashMap semantics
+(`reference-code/malli/src/malli/registry.cljc:17,81`).
+
+The canonical parity regression builds from sorted declaration maps without
+retained roots, then compares declaration maps, the complete registry key
+set, and each compiled schema/function form against indexed acquisition.
+Fast run `1888eb5cccc3`, HEAD-plus-owned-paths snapshot of `1983ca39c`:
+**5 tests, 30 assertions, 0 failures, 0 errors**. The new parity body took
+**690.676 ms**. The existing four-projection refusal regression took
+5626.326 ms including first fixture acquisition; it now declares a 10 s
+bound with that work as its reason. The indexed-query oracle already
+declares 10 s and took 5207.169 ms. The other bodies took 553.740 and
+1059.852 ms.
+
+The snapshot excluded foreign edits in `src/seon/config.clj`,
+`src/seon/error.clj`, and `test/seon/error_result_test.clj`, and preserved
+this lane's unfinished slice (2) edits in the test selector and runner.
+Cold scratch-root publication and load verification are recorded below.
+
+`bin/seon --root tmp/test-system-fork-root init` succeeded from an empty
+directory, exit 0, **254.81 s** end to end. Published commit:
+`6ab065e5-78f2-56c3-ad52-f69eaaf1eb01`; digest:
+`2802842562b49ae794d7b1a76b6d665f2751dcafb23afbb30cd262220078e9fc`.
+The cold compiler processed **3333 schema forms and 1527 function contracts
+in 357 ms**. This is the explicitly authorized publication-from-zero proof,
+not a changed-publication latency claim. The proof used the shared source
+tree, including concurrent activation/error work and the preserved slice (2)
+edits; the isolated fast proof above used only item 0's paths.
+[Operator output](test-system-cold-publication-2026-09-23.txt).
+`down` reported zero recorded JVMs and a free store lock; the root was deleted.
+Pre-commit loading passed:
+`clojure -M:test -e "(require 'seon.schema 'seon.test-support 'seon.test 'seon.test.runner 'seon.schema.projection-acquisition-test)"`.
