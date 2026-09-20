@@ -141,3 +141,24 @@ can preserve the live object; it does not define its durable bytes.
 
 The landing note prices exactly three choices. No new codec, lossy substitute
 or production change was introduced while that guarantee is undecided.
+
+## Representation ruled; accretion implemented — 2026-09-23
+
+The owner selected the printer representation precisely: the blob contains
+the value printer's complete rendering, the entity contains its rendering
+under the supplied profile, and only SCI retains the live object. No faithful
+EDN probe or additional object encoder belongs in this path. That resolves
+the representation decision above.
+
+`seon.error/prepare-result` is the shared result preparation function called
+by `prepare` and the SCI evaluation recorder. Its two new stored attributes
+are `:seon.error/result-id` and `:seon.error/shown`; the existing blob digest
+attribute remains `:seon.error/data-blob`. Legacy writes remain in place.
+Verification is currently blocked by the canonical fixture's missing new
+declarations, recorded in the existing
+[fixture issue](canonical-fixture-retains-old-function-contracts-after-adoption.md).
+
+This issue remains the single atomic-retirement follow-up: convert the 22
+issue producers, the fault committer's staging hunk and the other inventoried
+readers, then remove all four legacy declarations and writes together once
+the held sources are released. No producer was partly retired here.

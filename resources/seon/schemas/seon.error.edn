@@ -24,6 +24,8 @@
               [:seon.error/fix :string]],
              :run [:and #:seon.db{:index true} :seon.db/ref],
              :data-blob :seon.blob/digest,
+             :result-id [:string {:min 1 :description "The result identity whose live object is bound as result/e<id>; a value token, not another entity identity."}],
+             :shown :seon.eval/shown,
              :doc
              [:map
               {:description "Function documentation attached to a contract refusal at the agent evaluation boundary."}
@@ -103,6 +105,8 @@
               {:seon.render/ai seon.error/render-ai,
                :seon.render/html seon.error/render-html}
               [:seon.error/id :seon.error/id]
+              [:seon.error/result-id {:optional true} :seon.error/result-id]
+              [:seon.error/shown {:optional true} :seon.error/shown]
               [:seon.error/at :seon.error/at]
               [:seon.error/process :seon.error/process]
               [:seon.error/message :seon.error/message]
@@ -270,6 +274,9 @@
  [:seon.error/at :seon.error/at]
  [:seon.error/layer :seon.error/layer]
  [:seon.error/operation :seon.error/operation]
+ [:seon.error/result-id {:optional true} :seon.error/result-id]
+ [:seon.error/shown {:optional true} :seon.error/shown]
+ [:seon.error/data-blob {:optional true} :seon.error/data-blob]
  [:seon.error/message {:optional true} :seon.error/message]
  [:seon.error/member {:optional true} :seon.error/member]
  [:seon.error/expected-key {:optional true} :seon.error/expected-key]

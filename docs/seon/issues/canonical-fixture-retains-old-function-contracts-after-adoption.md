@@ -7,6 +7,32 @@ tags: [issue, test, schema, wave/test-fixture]
 
 # Refresh canonical fixture contracts after development adoption
 
+## New result attributes absent from a selected snapshot's fixture — 2026-09-23
+
+The error result accretion adds `:seon.error/result-id` and
+`:seon.error/shown` in its selected `seon.error.edn`. The fast snapshot
+explicitly lists that modified resource, but the database projection inside
+`with-database` returns nil from `malli.registry/schema` for both keys.
+The recurring probe is
+`seon.error-result-test/a-canonical-result-declarations-are-installed`.
+Run `18a6ed2cb5bc`: 4 tests / 7 assertions / 2 failures / 3 errors. The two
+failures name those missing declarations; the other tests encounter
+`:malli.core/invalid-schema` compiling the new function contract before
+result storage can be verified. Log: `tmp/error-result-focused-fast.log`.
+
+The selected overlay announces graph
+`ca359707d66214bfbb12353e877fa8411584461717f643007e26dcbb42876e19`,
+25 commits behind HEAD. It also explicitly excludes the dirty
+`test/seon/test_support.clj` checkout bytes and uses HEAD. That file is held
+by the test-system lane. The error lane did not replace the supplied
+registry, hand-install its production attributes through synthetic fixture
+schema, or operate a default cluster. This proves a missing fixture
+declaration; it does not identify which acquisition step needs repair.
+
+The first fixture-only probe took 13.27 seconds, already exceeding the
+five-second target before any result writer was called. No longer test
+allowance was added to conceal that cost.
+
 ## Fast snapshot observation — 2026-09-23
 
 The same mismatch is now verified in a newly launched `--paths` fast JVM,

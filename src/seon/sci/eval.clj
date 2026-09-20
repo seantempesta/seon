@@ -2205,6 +2205,7 @@
                (if (env/environment? (env/of base-ctx))
                  (env/environment-state (env/of base-ctx))
                  (projection-state db (context-projection base-ctx)))))
+        ctx (assoc ctx ::bind-result! #'bind-result!)
         assigned-namespace (agent-namespace db agent-id)]
     (advance-context-projection! ctx db (context-projection base-ctx))
     (when (and assigned-namespace (not (sci/find-ns ctx assigned-namespace)))
@@ -2234,6 +2235,7 @@
      projection
      (fn []
        (let [ctx (assoc (build-base-ctx projection)
+                        ::bind-result! #'bind-result!
                         :seon.schema/projection projection
                         ::kernel/install-function! install-function-from-database!)
              _ (swap! (::kernel/program-snapshot ctx) merge
@@ -2556,7 +2558,24 @@
 
 (defn- shown-result
   [value request record]
-  (let [function-name (when (and (map? value) (contains? value :seon.instrument/check))
+  (let [ctx (:seon.sci.eval/ctx request)
+        connection (or (:seon.db/connection request)
+                       (get-in ctx [::custody :seon.db/connection]))
+        profile (render/request-profile request)
+        value (if (and connection
+                       (:seon.instrument/check value)
+                       ((schema/projection-validator (render/request-projection request)
+                                                     :seon.instrument/contract-error) value)
+                       (not (:seon.error/result-id value)))
+                (merge value
+                       (error/prepare-result
+                        (cond-> {:seon.error/source value
+                                 :seon.schema/projection (render/request-projection request)
+                                 :seon.db/connection connection
+                                 :seon.render/profile profile}
+                          ctx (assoc :seon.sci.eval/ctx ctx))))
+                value)
+        function-name (when (and (map? value) (contains? value :seon.instrument/check))
                         (:seon.instrument/fn value))
         database (when function-name
                    (or (:seon.db/db request)
@@ -2566,7 +2585,6 @@
                                 [:seon.fn/sym function-name]))
         value (if (:seon.fn/sym function-row)
                 (assoc value :seon.error/doc (function-doc-map database function-row)) value)
-        profile (render/request-profile request)
         projection (render.value/prepare
                (assoc request
                       :seon.render/value value

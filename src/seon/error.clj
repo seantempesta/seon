@@ -18,6 +18,7 @@
             [malli.core :as m]
             [malli.error :as me]
             [seon.call-preparation :as call-preparation]
+            [seon.blob :as blob]
             [seon.db :as db]
             [seon.id :as id]
             [seon.error.refusal :as error.refusal]
@@ -650,6 +651,40 @@
           fact
           (recur (max 1 (quot field-limit 2))))))))
 
+(defn prepare-result
+  "Render one result twice through the value printer and retain its live binding.
+  A supplied SCI context carries its owner's binding operation. Complete text
+  is blob content; only the AI rendering applies the supplied profile."
+  {:malli/schema
+   [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
+                    [:seon.render/profile :seon.render.profile/profile]
+                    [:seon.error/source :seon.error/source]
+                    [:seon.sci.eval/ctx {:optional true}
+                     [:and :seon.sci.eval/ctx
+                      [:map [:seon.sci.eval/bind-result! :seon.instrument/callable]]]]]]
+    [:map [:seon.error/result-id :seon.error/result-id]
+          [:seon.error/shown :seon.error/shown]
+          [:seon.error/data-blob :seon.error/data-blob]]]}
+  [{source :seon.error/source :as request}]
+  (let [entry (or (offending-entry source)
+                  (when (map? source) (find source :seon.error/offending))
+                  (find (:seon.error/data source) :seon.error/diagnostic-offending))
+        value (if entry (val entry) source)
+        result-id (id/id)
+        handle (admit/result-handle result-id)
+        ctx (:seon.sci.eval/ctx request)
+        unit (assoc (select-keys request [:seon.schema/projection :seon.render/profile])
+                    :seon.render/value value :seon.repl/handle handle
+                    :seon.render.call/id handle)
+        complete (render.value/render-ai-data (render.value/prepare unit :seon.render/html))
+        shown (render.value/render-ai-data (render.value/prepare unit))
+        digest (blob/put! (:seon.db/connection request) complete)]
+    (when ctx
+      ((:seon.sci.eval/bind-result! ctx) ctx handle value))
+    {:seon.error/result-id result-id
+     :seon.error/shown shown
+     :seon.error/data-blob digest}))
+
 (defn prepare
   "Prepare one bounded fact and its full meaningful admitted evidence."
   {:malli/schema [:=> [:cat :seon.error/prepare-request]
@@ -659,7 +694,7 @@
     projection :seon.schema/projection
     :seon.sci.admit/keys [caps]
     run-id :seon.turn/id
-    agent-id :seon.agent/id}]
+    agent-id :seon.agent/id :as request}]
   (let [failure (throwable source)
         class-name (when failure (.getName (class failure)))
         source (meaningful-source source)
@@ -779,9 +814,15 @@
                     ;; same handful of bytes (F1, 2026-09-07).
                     (boolean (or marker
                                  (not= full-edn
-                                       (:seon.error/data-edn fact)))))]
-    {:seon.error/fact fact
-     :seon.error/source observation
+                                       (:seon.error/data-edn fact)))))
+        result (or (when (and (:seon.error/result-id source)
+                              (:seon.error/shown source)
+                              (:seon.error/data-blob source))
+                       (select-keys source [:seon.error/result-id :seon.error/shown :seon.error/data-blob]))
+                     (when (and (:seon.db/connection request) (:seon.render/profile request))
+                       (prepare-result (assoc request :seon.error/source error-value))))]
+    {:seon.error/fact (merge fact result)
+     :seon.error/source (merge observation result)
      :seon.error/data-content full-edn}))
 
 (defn normalize
@@ -798,6 +839,7 @@
   {:malli/schema [:=> [:cat :seon.error/fact] :seon.error/base]}
   [fact]
   (assoc (select-keys fact [:seon.error/at :seon.error/layer :seon.error/operation
+                          :seon.error/result-id :seon.error/shown :seon.error/data-blob
                           :seon.error/message :seon.error/signature])
          :seon.error/data {:seon.error/id (:seon.error/id fact)}))
 
@@ -1587,6 +1629,7 @@
         first-occurrence? (zero? occurrences)
         interrupted? (some? (:seon.error/exception-class fact))
         evidence (select-keys fact [:seon.error/process :seon.error/proc :seon.error/op
+                                   :seon.error/result-id :seon.error/shown
                                    :seon.error/cid :seon.error/throwable-class
                                    :seon.error/data-edn :seon.error/data-size :seon.error/capped?
                                    :seon.error/dropped-fault-count :seon.error/dropped-fault-digest
@@ -1937,6 +1980,8 @@
     (str (or (refusal-text unit (or source value) (:seon.error/data (or source value)))
         (:seon.error/message (or source value))
         "Error evidence is unavailable.")
+         (when-let [shown (:seon.error/shown value)]
+           (str "\n" shown))
          (when-let [n (:seon.error/occurrence-count value)]
            (str " Occurrences: " n ".")))))
 

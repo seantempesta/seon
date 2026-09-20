@@ -3282,3 +3282,103 @@ the later four legacy attribute removals listed above; the two new attribute
 names are not yet declared. The canonical regressions, writer measurements
 and their cold command remain owed after this representation is selected.
 The previous request's retirement hold is not being reused as this gate.
+
+## 2026-09-23 — printer result accretion; fixture declaration boundary
+
+The owner resolved the representation: **complete printer rendering in the
+blob, profile-capped printer rendering on the entity, live object only in
+SCI**. No object serializer, faithful EDN check or supported-type list was
+added. The previous representation options are superseded.
+
+`seon.error/prepare-result` is the single function that mints the result id,
+prints the value through `seon.render.value/prepare` twice, writes the
+complete text through `seon.blob/put!`, and invokes the supplied context's
+`seon.sci.eval/bind-result!` Var with `seon.sci.admit/result-handle`.
+The renderer's existing HTML path builds the complete tree and emits text
+as well as HTML; its AI path applies the profile. No extra clipping exists.
+
+`prepare` calls this function when connection and profile are present;
+requests without them retain their legacy behavior. The SCI evaluation
+recorder calls the same function for a value satisfying the declared
+`:seon.instrument/contract-error` schema. This result-only preparation needs
+no invented process provenance or full fault normalization. SCI base and
+turn contexts carry the binding Var, including retained turn contexts, so
+there is no reverse require, lookup at call time or second intern path.
+Already prepared observations retain their complete result bundle through
+recording. The occurrence owns the result observation; no observation
+identity attribute or copy of its result on the fault-class root is added.
+The error reader includes saved shown text. Every legacy write remains.
+
+Registry naming review: evaluations use `:seon.cluster.eval/id` (a string
+identity) and `:seon.eval/shown` (the printer's string observation).
+The new result token uses the same nonempty string shape without identity
+semantics; shown text references the existing `:seon.eval/shown` shape.
+
+The new canonical tests cover core observations containing an atom, function
+and opaque object; a large nested value; and an armed refusal in a real SCI
+turn fork with turn opening, evaluation, settlement and the history walk.
+They compare blob bytes and shown text with the printer's own two outputs,
+require successful transactions, check the stored schema and preserve legacy
+evidence. A recording-plus-transaction assertion requires less than 1,000 ms.
+Those acceptance assertions are **not yet proven**: the fixture lacks the
+new attribute declarations and the wrappers cannot compile against it.
+
+| Fast selection | Recorded result | Run | Log lifespan |
+| --- | --- | --- | --- |
+| `seon.error-test seon.error-result-test` | 50 executed, 0 unchanged; 382 assertions; 4 failures, 5 errors | `119da9086378` | 622.94 s |
+| Focused `seon.error-result-test` with explicit registry probe | 4 executed, 0 unchanged; 7 assertions; 2 failures, 3 errors | `18a6ed2cb5bc` | 221.56 s |
+
+Log lifespan is measured from file creation through its last output write,
+including snapshot preparation, JVM startup, arming and result recording;
+it is not writer time. Logs: `tmp/error-result-accretion-fast.log` and
+`tmp/error-result-focused-fast.log`. The first error namespace's test window
+was 437.33 s; the initial three result tests took 51.84 s. In the focused
+run, the first fixture registry probe alone took 13.27 s. No long-test
+annotation was added and no subsecond writer or five-second test claim is
+made. The observed costs do not satisfy the requested timing targets.
+
+The explicit probe finds nil compiled nodes for **both**
+`:seon.error/result-id` and `:seon.error/shown`. The snapshot includes the
+modified schema resource but announces overlay graph
+`ca359707d66214bfbb12353e877fa8411584461717f643007e26dcbb42876e19`,
+25 commits behind HEAD. Dirty `test/seon/test_support.clj` is excluded at
+HEAD bytes and is held by the test-system lane. The
+[existing fixture issue](../../../seon/issues/canonical-fixture-retains-old-function-contracts-after-adoption.md)
+contains that exact boundary. No substitute registry or synthetic population
+was used. The older suite also has four failures and one error in
+`complete-error-children-validate-through-the-writer`, plus a registration
+error in `a-contract-violations-fault-keeps-the-value-that-broke-it`; their
+underlying causes were not independently classified in this bounded slice.
+No additional bulk red class was taken on.
+
+Final source refinements after the focused snapshot keep the binding as a
+Var through retained turn forks, require a complete bundle before reuse,
+and keep observation fields off the fault-class root. They need the same
+fast rerun once the fixture supplies the new declarations. Namespace loading
+is checked separately before landing; it does not substitute for those
+armed regressions.
+
+RESET NEEDED: add **`:seon.error/result-id`** (nonempty string value token)
+and **`:seon.error/shown`** (the existing evaluation shown-text string shape).
+The old four attributes remain declared and written; their atomic retirement
+and the fault-committer conversion remain the single follow-up in
+[the retirement issue](../../../seon/issues/error-result-retirement-crosses-held-readers.md).
+No reset or default operation was performed.
+
+Executable paths touched: `src/seon/error.clj`, `src/seon/sci/eval.clj`,
+`resources/seon/schemas/seon.error.edn`, `test/seon/error_result_test.clj`.
+Documentation paths: this landing note, the retirement issue and the existing
+fixture issue. No database, print, issue, cluster or test-system source was
+edited. One JVM ran at a time; no worktree was created.
+
+Cold command owed to the orchestrator after fixture admission is repaired:
+
+```sh
+bin/test --paths src/seon/error.clj src/seon/sci/eval.clj resources/seon/schemas/seon.error.edn test/seon/error_result_test.clj -- seon.error-test seon.error-result-test seon.sci.eval-test
+```
+
+Final load proof: `clojure -M -e "(require 'seon.error 'seon.sci.eval
+'seon.print) (println :loaded)"` exited 0 and printed `:loaded` in
+31.38 s wall-clock (`/usr/bin/time -p`, `tmp/error-result-load.log`).
+This includes the final optional result members on `:seon.error/fact`.
+Every owned command has exited; no scratch cluster was created.
