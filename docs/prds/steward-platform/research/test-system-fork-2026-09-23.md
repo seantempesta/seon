@@ -603,3 +603,27 @@ Pre-commit load passed with `clojure -M:test -e` requiring
 `seon.test.published-selection-test`, `seon.test.selection-test` and
 `seon.test.runner-test`. The fast snapshot independently loaded HEAD plus
 only this slice's paths.
+
+### Slice (2) landed; reference parity bounded
+
+Slice (2) landed as `cec1b6782`, excluding fn.clj. Both immediate post-commit
+and final checks still found foreign `unresolved-callers` and adoption
+identity hunks beside the owned `declared-reference-edges` change. Per the
+orchestrator's explicit instruction, fn.clj and its pending regression
+changes remain uncommitted; none of those foreign hunks were edited.
+
+Reference parity run `81b1333a102d`: **1 test, 3 assertions, zero failures or
+errors; 4981.556 ms total**. Indexed acquisition: **322.143 ms**, 10 edges.
+The original three rules, queried separately and unioned as Clojure sets,
+took **20.260 ms**, **1700.408 ms**, and **709.023 ms**. Their result equals
+the indexed query's result. Splitting the old OR query removed the 10.188 s
+overrun without increasing its declared bound. This compares reference-edge
+sets; schema-projection parity was already measured and landed in item (0).
+
+This last parity snapshot included the complete shared fn.clj, including
+the two foreign hunks, but excluded foreign dirty caller files. It is a fast
+iteration result, not the orchestrator's cold gate. Its JVM exited normally
+and its scratch snapshot was removed. The abandoned zero-byte Git index
+lock that briefly refused slice (2)'s commit had no Git process or open file
+descriptor; it was preserved under tmp while retrying, then removed after
+the successful commit. No default operation or cold test gate was run.
