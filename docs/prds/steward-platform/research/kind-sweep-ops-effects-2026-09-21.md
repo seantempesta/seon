@@ -159,3 +159,79 @@ errors and warnings. A plain `clojure -M` cannot load the test namespace
 because `test/` is not on that classpath; execution remains the fast gate's
 job. A refreshed `seon.problems-test` tally is owed after the runner resource
 finishes its concurrent conversion.
+
+## ops-effects-2 continuation — AI, 2026-09-20
+
+Read this note, the error-conversion PRD, the my-protocol and test-system
+landing notes, and error-family-1a end to end. Read AGENTS lane rules 11–16;
+used data-oriented-clojure, repl, llm-providers, data-modeling and
+clojure-testing. Preserved every inherited dirty path. No other lane's
+session, default lifecycle, or cold gate was operated.
+
+Default PID 24777 was alive. MCP health refused at
+`seon.problems/problems`, path `[:seon.problems/error-signatures 0
+:seon.error/at]`, missing the required instant. This is the already recorded
+[runtime-status issue](../../../seon/issues/runtime-status-refuses-error-occurrence-count.md),
+whose file was foreign dirty and left untouched. A read-only request-body
+probe reached the live schema authority but lacked its handed projection;
+it proves no changed AI behavior. No adoption or browser proof is claimed.
+
+Dependency ledger: Malli's output validation is
+`reference-code/malli/src/malli/core.cljc:2203`; the first-party facet wrapper
+is `src/seon/instrument.clj:627`. The pure, field-preserving constructor is
+`src/seon/error/refusal.clj:39`; the already-landed idiom is
+`src/seon/background.clj:51`. No HTTP protocol, retry, provider descriptor,
+or transport scheduling behavior is changed.
+
+AI producers now construct the diagnostic base and concrete facets. Required
+observations replace marker-only members: extra-body source, conflicting
+builder keys, unreadable response member, unanswered reasoning count,
+exhausted finish reason, interrupted text count, and missing credential
+variable name. Arbitrary offending objects remain in `:seon.error/offending`
+and diagnostic evidence, for the occurrence recorder's existing projection.
+Unused marker-only credential/response/model/before-send descriptors had no
+producer or source caller and were removed. Existing status/endpoint/bound
+facets retain their substantive members and compose the base. Request-body,
+parser, streaming, HTTP and complete contracts name their returned unions.
+Tests inspect complete facets and the existing concrete evidence; prose no
+longer embeds the transport cause chain, which remains available as data.
+
+At starting HEAD `b5e3a5e40`, retirement matching lines changed:
+
+| Path | Before | After |
+| --- | ---: | ---: |
+| src/seon/ai.clj | 26 | 0 |
+| resources/seon/schemas/seon.ai.edn | 20 | 0 |
+| test/seon/ai_test.clj | 25 | 0 |
+| test/seon/ai_stream_fold_test.clj | 9 | 0 |
+
+`clojure -M -e "(require 'seon.ai) (println :loads)"` printed `:loads`.
+clj-kondo: **0 errors / 0 warnings**, one redundant-coercion info.
+The one accumulated fast invocation selected `seon.ai-test` and
+`seon.ai-stream-fold-test`. It armed 1,423 contracts, then exited 1 before
+tests: `record-persistent-results!` refused
+`:seon.test.accretion/install-refused-error` at
+`:seon.test.accretion/arguments`, "A stored error member must have a
+storable registered attribute." **Fast tally owed — admission held by
+resources/seon/schemas/seon.test.accretion.edn** and its recording authority;
+that held resource was clean locally, so this is not attributed to an
+uncommitted draft. No tests executed and no green verdict is claimed.
+
+Debt: `seon.db/pull` still declares `:seon.error/value` through
+`:seon.db/error-result`; AI's three inherited database propagation branches
+retain documented base checks. The reply/SCI producer assertions in AI tests
+use the existing observed text/reader evidence; their producers remain the
+other sweeps' responsibility. New facets also need the error owners' complete
+pass-through manifest review. This lane does not edit those owners.
+
+Cold proof owed for this slice (orchestrator only):
+
+```sh
+bin/test --paths src/seon/ai.clj resources/seon/schemas/seon.ai.edn \
+  test/seon/ai_test.clj test/seon/ai_stream_fold_test.clj \
+  -- seon.ai-test seon.ai-stream-fold-test
+```
+
+Then `bin/test --platform`, plus the earlier background/problems obligations.
+New scalar observations require publication; removed marker attributes join
+the wave reset. No existing attribute's type was changed in this slice.

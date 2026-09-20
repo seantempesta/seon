@@ -37,9 +37,7 @@
    :seon.ai/prompt "say hello"
    :seon.ai/timeout-ms 250})
 
-(defn- error? [value]
-  (and (map? value) (keyword? (:seon.error/kind value))
-       (string? (:seon.error/message value))))
+
 
 (def ^:private json-number-generator
   (gen/one-of
@@ -352,7 +350,7 @@
                  {:seon.ai/text "must not happen"})}
               #(ai/complete (assoc target :seon.ai/prompt "hello")))]
         (is (= missing-variable (:seon.ai/api-key-variable target)))
-        (is (= :seon.ai/no-credential (:seon.error/kind outcome)))
+        (is ((schema/projection-validator (schema/handed-projection) :seon.ai/no-credential-error) outcome))
         (is (empty? @requests)
             "the explicit absent credential refuses before the network")))))
 
@@ -505,20 +503,20 @@
 
 (defspec every-schedule-is-finite-bounded-and-inside-its-jitter-band 200
   (prop/for-all
-   [base (gen/choose 1 500)
+   [base-delay (gen/choose 1 500)
     retries (gen/choose 0 8)
     jitter (gen/elements [0.0 0.1 0.25 0.5 1.0])
     maximum (gen/choose 1 5000)
     budget (gen/choose 0 20000)
     randoms (gen/vector (gen/elements [0.0 0.25 0.5 0.75 0.999]) 1 12)]
-   (let [strategy {:seon.ai.retry/base-delay-ms base
+   (let [generated-strategy {:seon.ai.retry/base-delay-ms base-delay
                    :seon.ai.retry/multiplier 2.0
                    :seon.ai.retry/jitter-fraction jitter
                    :seon.ai.retry/maximum-delay-ms maximum
                    :seon.ai.retry/maximum-retries retries
                    :seon.ai.retry/maximum-total-delay-ms budget}
          drawn (atom (cycle randoms))
-         schedule (ai/delays strategy
+         schedule (ai/delays generated-strategy
                              (fn [] (let [v (first @drawn)]
                                       (swap! drawn rest)
                                       v)))]
@@ -534,11 +532,11 @@
           ;; the randomness is SPREAD rather than merely added
           (every? true?
                   (map-indexed
-                   (fn [index delay]
-                     (let [raw (* (double base) (Math/pow 2.0 index))]
+                   (fn [index wait-ms]
+                     (let [raw (* (double base-delay) (Math/pow 2.0 index))]
                        (<= (long (min (double maximum)
                                       (max 0.0 (* raw (- 1.0 jitter)))))
-                           delay
+                           wait-ms
                            (long (min (double maximum)
                                       (* raw (+ 1.0 jitter)))))))
                    schedule))))))
@@ -651,10 +649,7 @@
                                 :seon.turn/opened-tx "datomic.tx"})
                  [{:seon.config/agent [:seon.agent/id "stop-agent"]
                    :seon.config.ai/stop ["END"]}]]]
-       (let [created (db/transact! connection tx)]
-         (is (nil? (:seon.error/kind created)) (pr-str created))
-         (when (:seon.error/kind created)
-           (throw (ex-info "Stop fixture setup refused" created)))))
+       (test-support/transacted! connection tx))
      (doseq [[ordinal agent-id expected] [[0 "absent" ["#:seon.repl"]]
                                          [1 "stop-agent" ["END"]]]]
        (let [settings (ai/settings (config/effective @connection "default")
@@ -700,8 +695,8 @@
                  (swap! evaluated inc)
                  (is (contains? result :seon.sci.admit/value)
                      (str id " must return an evaluated value: " (pr-str result)))
-                 (is (not= :seon.sci.reader/fabricated-response
-                           (get-in result [:seon.sci.admit/value :seon.error/kind])) id))))))
+                 (is (not= true
+                           (get-in result [:seon.sci.admit/value :seon.sci.reader/fabricated-response])) id))))))
        (is (pos? @evaluated) "At least one preceding form must actually evaluate.")))))
 
 (deftest disabled-thinking-emits-sampling-and-omits-effort
@@ -725,12 +720,12 @@
     (let [failure (ai/request-body
                    (assoc base :seon.ai/extra-body-edn
                           (pr-str {protected "override"})))]
-      (is (= :seon.ai/extra-body-conflict (:seon.error/kind failure)))
+      (is ((schema/projection-validator (schema/handed-projection) :seon.ai/extra-body-conflict-error) failure))
       (is (= [protected]
              (get-in failure
                      [:seon.error/data :seon.ai/protected-keys])))))
-  (is (= :seon.ai/invalid-extra-body
-         (:seon.error/kind
+  (is (= "[:not :a-map]"
+         (:seon.ai/extra-body-edn
           (ai/request-body (assoc base :seon.ai/extra-body-edn "[:not :a-map]"))))))
 
 (deftest an-extra-body-conflict-refuses-before-the-http-leaf
@@ -741,7 +736,7 @@
           #(ai/complete
             (assoc base :seon.ai/extra-body-edn
                    "{\"authorization\" \"leak\"}")))]
-    (is (= :seon.ai/extra-body-conflict (:seon.error/kind outcome)))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/extra-body-conflict-error) outcome))
     (is (zero? @sent))))
 
 (deftest usage-cache-detail-is-normalized-only-at-read
@@ -778,8 +773,9 @@
                   ;; sneak through a fallback
                   {:choices [{:message {:content "hi"}}]}]]
       (let [outcome (ai/completion-text body)]
-        (is (error? outcome) (str "must classify: " (pr-str body)))
-        (is (= :seon.ai/unparseable-body (:seon.error/kind outcome)))))))
+        (is (contains? outcome :seon.error/offending)
+            "The observed malformed value remains available as evidence.")
+        (is ((schema/projection-validator (schema/handed-projection) :seon.ai/unparseable-body-error) outcome))))))
 
 (deftest an-empty-normal-stop-is-a-reply-but-malformed-json-is-a-provider-refusal
   (doseq [content ["" nil]]
@@ -788,14 +784,14 @@
                                    "finish_reason" "stop"}]})]
       (is (= "" (:seon.ai/text completion)))
       (is (= "stop" (:seon.ai/finish-reason completion)))
-      (is (= :seon.cluster.reply/no-forms
-             (:seon.error/kind (reply/sources (:seon.ai/text completion)))))))
+      (is (= "" (get-in (reply/sources (:seon.ai/text completion))
+                       [:seon.error/data :seon.cluster.reply/text])))))
   (doseq [[body expected]
           [["data: {\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n" nil]
            ["data: {malformed json\n\n" :seon.ai/unparseable-body]]]
     (let [completion (#'ai/streamed-completion
                       (java.io.ByteArrayInputStream. (.getBytes ^String body "UTF-8")) nil)]
-      (is (= expected (:seon.error/kind completion)))
+      (is (= (some? expected) (contains? completion :seon.ai/unreadable-response-member)))
       (if expected
         (is (= :fail (ai/disposition {:seon.error/value completion :seon.ai/backup? false})))
         (is (= "" (:seon.ai/text completion)))))))
@@ -833,8 +829,7 @@
                                   "content" ""}
                       "finish_reason" "length"}]
           "usage" usage})]
-    (is (= :seon.ai/reasoning-without-answer
-           (:seon.error/kind failure)))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/reasoning-without-answer-error) failure))
     (is (= "length" (get-in failure
                              [:seon.error/data :seon.ai/finish-reason])))
     (is (= 8 (get-in failure
@@ -888,8 +883,7 @@
         body (java.io.ByteArrayInputStream.
               (.getBytes (str/join "\n" lines) "UTF-8"))
         failure (#'seon.ai/streamed-completion body nil)]
-    (is (= :seon.ai/reasoning-without-answer
-           (:seon.error/kind failure)))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/reasoning-without-answer-error) failure))
     (is (= "length" (get-in failure
                              [:seon.error/data :seon.ai/finish-reason])))
     (is (= usage (get-in failure [:seon.error/data :seon.ai/usage])))
@@ -929,10 +923,10 @@
               (throw (java.io.IOException. "closed" cause))
               byte-read)))
          ([buffer offset length]
-          (let [read (.read delivered buffer offset length)]
-            (if (neg? read)
+          (let [bytes-read (.read delivered buffer offset length)]
+            (if (neg? bytes-read)
               (throw (java.io.IOException. "closed" cause))
-              read))))))))
+              bytes-read))))))))
 
 (defn- streamed-lines [& lines] (str (str/join "\n" lines) "\n"))
 
@@ -945,11 +939,11 @@
         completion (#'seon.ai/streamed-completion body #(swap! seen conj %))]
     (is (= "(+ 1 2) (+ 3" (:seon.ai/text completion))
         "the turn keeps what arrived rather than discarding a paid completion")
-    (is (nil? (:seon.error/kind completion))
+    (is (contains? completion :seon.ai/text)
         "a partial completion is a completion, not a refusal")
     (is (= 2 (count @seen)) "every arrived delta still published to the sink")
     (let [truncation (:seon.ai/truncation completion)]
-      (is (= :seon.ai/stream-truncated (:seon.error/kind truncation))
+      (is ((schema/projection-validator (schema/handed-projection) :seon.ai/stream-truncated-error) truncation)
           "the truncation is a flat error value the caller can record")
       (is (= 12 (get-in truncation [:seon.error/data :seon.ai/text-received])))
       (is (= false (get-in truncation
@@ -958,13 +952,12 @@
               "java.io.IOException: connection reset by peer"]
              (get-in truncation [:seon.error/data :seon.ai/cause-chain]))
           "the JDK's real cause is recorded, not just the word closed")
-      (is (str/includes? (:seon.error/message truncation)
-                         "connection reset by peer")
-          "the rendered message names the cause the database holds"))))
+      (is (= 'seon.ai/truncation (:seon.error/operation truncation))
+          "The observation names the function that read the ended stream."))))
 
 (deftest a-stream-that-ends-before-any-text-is-named-truncation-not-bad-json
   (let [completion (#'seon.ai/streamed-completion (truncating-stream "") nil)]
-    (is (= :seon.ai/stream-truncated (:seon.error/kind completion))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/stream-truncated-error) completion)
         "an early close is distinguished from a body that could not be parsed")
     (is (zero? (get-in completion [:seon.error/data :seon.ai/text-received])))
     (is (= ["java.io.IOException: closed"
@@ -980,15 +973,13 @@
           "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}")
          (java.net.http.HttpTimeoutException. "request timed out"))
         failure (#'seon.ai/streamed-completion body nil)]
-    (is (= :seon.ai/stream-truncated (:seon.error/kind failure)))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/stream-truncated-error) failure))
     (is (= 8 (get-in failure
                       [:seon.error/data :seon.ai/reasoning-received])))
     (is (zero? (get-in failure
                        [:seon.error/data :seon.ai/text-received])))
-    (is (str/includes? (:seon.error/message failure)
-                       "8 characters of reasoning but no assistant text"))
-    (is (str/includes? (:seon.error/message failure)
-                       "configured time limit fired"))
+    (is (zero? (:seon.ai/interrupted-text-count failure)))
+    (is (true? (get-in failure [:seon.error/data :seon.ai/time-limit-fired?])))
     (is (true? (#'seon.ai/output-observed? (:seon.error/data failure)))
         "reasoning is paid output even when assistant text is absent")))
 
@@ -1023,8 +1014,8 @@
              (swap! requests conj request)
              {:seon.ai/text "must not happen"})}
           #(ai/complete base))]
-    (is (error? outcome))
-    (is (= :seon.ai/no-credential (:seon.error/kind outcome)))
+    (is (= :seon.ai/request (:seon.error/layer outcome)))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/no-credential-error) outcome))
     (is (re-find #"SEON_AI_TEST_KEY_ABSENT" (:seon.error/message outcome))
         "the message names the variable that is unset")
     (is (empty? @requests)
@@ -1054,9 +1045,9 @@
   ;; genuinely attempted
   (let [outcome (with-redefs [ai/credential (constantly "test-key")]
                   (ai/complete base))]
-    (is (error? outcome))
-    (is (contains? #{:seon.ai/transport-failure :seon.ai/timeout}
-                   (:seon.error/kind outcome)))))
+    (is (= :seon.ai/request (:seon.error/layer outcome)))
+    (is (or (contains? outcome :seon.ai/transport-failure)
+            (contains? outcome :seon.ai/timeout)))))
 
 (deftest the-deadline-fires-as-an-outcome-not-a-bug-report
   ;; 10.255.255.1 is unroutable: the connection hangs rather than
@@ -1067,9 +1058,9 @@
                                       :seon.ai/endpoint
                                       "http://10.255.255.1:8080/v1"
                                       :seon.ai/timeout-ms 300)))]
-    (is (error? outcome))
-    (is (contains? #{:seon.ai/timeout :seon.ai/transport-failure}
-                   (:seon.error/kind outcome)))
+    (is (= :seon.ai/request (:seon.error/layer outcome)))
+    (is (or (contains? outcome :seon.ai/transport-failure)
+            (contains? outcome :seon.ai/timeout)))
     (is (not (re-find #"(?i)bug" (:seon.error/message outcome)))
         "a slow model is a condition, not a defect report")))
 
@@ -1077,7 +1068,7 @@
   ;; nothing retries a paid call — the count is the contract
   (let [calls (atom 0)]
     (with-redefs [ai/credential (constantly "test-key")
-                  ai/request-body (fn [request] (swap! calls inc) {})]
+                  ai/request-body (fn [_request] (swap! calls inc) {})]
       (ai/complete base))
     (is (= 1 @calls) "exactly one request was built, and so one was made")))
 
@@ -1130,12 +1121,12 @@
      (reify com.sun.net.httpserver.HttpHandler
        (handle [_ exchange]
          (let [body "{\"error\":{\"message\":\"Insufficient Balance\"}}"
-               bytes (.getBytes body "UTF-8")]
+               body-bytes (.getBytes body "UTF-8")]
            (.add (.getResponseHeaders exchange)
                  "Content-Type" "application/json")
-           (.sendResponseHeaders exchange 402 (long (alength bytes)))
+           (.sendResponseHeaders exchange 402 (long (alength body-bytes)))
            (with-open [out (.getResponseBody exchange)]
-             (.write out bytes))))))
+             (.write out body-bytes))))))
     (.setExecutor
      server (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor))
     (.start server)
@@ -1225,8 +1216,8 @@
             truncation (:seon.ai/truncation completion)]
         (is (= "(+ 1 2) (+ 3" (:seon.ai/text completion))
             "a run built from this settles forms instead of closing with zero")
-        (is (nil? (:seon.error/kind completion)))
-        (is (= :seon.ai/stream-truncated (:seon.error/kind truncation)))
+        (is (contains? completion :seon.ai/text))
+        (is ((schema/projection-validator (schema/handed-projection) :seon.ai/stream-truncated-error) truncation))
         (is (pos? (get-in truncation
                           [:seon.error/data :seon.ai/text-received])))
         (is (seq (get-in truncation [:seon.error/data :seon.ai/cause-chain]))
@@ -1347,8 +1338,10 @@
 
 (defn- failure
   "One error value carrying the evidence the leaf would have recorded."
-  [kind evidence]
-  {:seon.error/kind kind
+  [_observation evidence]
+  {:seon.error/at (java.util.Date.)
+   :seon.error/layer :seon.ai/request
+   :seon.error/operation 'seon.ai-test/failure
    :seon.error/message "probe"
    :seon.error/data evidence})
 
@@ -1422,13 +1415,13 @@
   (test-support/assert-check!
    (tc/quick-check
     160
-    (prop/for-all [partition (gen/elements evidence-partitions)
+    (prop/for-all [evidence-partition (gen/elements evidence-partitions)
                    backup? gen/boolean]
-      (let [value (partition-value partition)
+      (let [value (partition-value evidence-partition)
             request {:seon.error/value value :seon.ai/backup? backup?}]
         (and ((schema/projection-validator (schema/handed-projection) :seon.error/value) value)
              ((schema/projection-validator (schema/handed-projection) :seon.ai/disposition-request) request)
-             (= (expected-disposition partition backup?)
+             (= (expected-disposition evidence-partition backup?)
                 (ai/disposition request)))))
     :seed 202607280401)
    "Every registered cost-evidence partition must derive one action."))
@@ -1462,7 +1455,7 @@
                             :seon.config.ai/no-auth true
                             :seon.ai/prompt "hello"
                             :seon.ai/timeout-ms 500})]
-    (is (= :seon.ai/transport-failure (:seon.error/kind value))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/transport-failure-error) value)
         (str "the production transport boundary must construct the subject: "
              (pr-str value)))
     (is ((schema/projection-validator (schema/handed-projection) :seon.error/value) value)
@@ -1486,7 +1479,7 @@
                             :seon.ai/api-key-variable "SEON_AI_ABSENT_KEY_PROBE"
                             :seon.ai/prompt "hello"
                             :seon.ai/timeout-ms 500})]
-    (is (= :seon.ai/no-credential (:seon.error/kind value)))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/no-credential-error) value))
     (is (false? (:seon.ai/request-transmitted? (:seon.error/data value)))
         "no network call happened at all")
     (is (= :fail (disposed value true)))

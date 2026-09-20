@@ -31,6 +31,7 @@
             [seon.db :as db]
             [org.httpkit.server :as http]
             [seon.ai :as ai]
+            [seon.schema :as schema]
             [seon.blob :as blob]
             [seon.turn]
             [seon.config :as config]
@@ -132,7 +133,7 @@
           suffix (content-chunk "\")")]
       (doseq [malformed malformed-lines]
         (let [result (ai/stream-fold [prefix malformed suffix] nil)]
-          (is (= :seon.ai/unparseable-body (:seon.error/kind result))
+          (is ((schema/projection-validator (schema/handed-projection) :seon.ai/unparseable-body-error) result)
               (str "malformed data must refuse the stream: " malformed))
           (is (= (subs malformed 6) (:seon.ai/body (:seon.error/data result))))
           (is (not (contains? result :seon.ai/text))
@@ -144,7 +145,7 @@
                                   (reasoning-chunk "second")
                                   (content-chunk "(seon.run/complete :safe)")]
                                  nil)]
-      (is (= :seon.ai/unparseable-body (:seon.error/kind result)))
+      (is ((schema/projection-validator (schema/handed-projection) :seon.ai/unparseable-body-error) result))
       (is (not (contains? result :seon.ai/reasoning-partial))))))
 
 (deftest the-fold-is-total-over-arbitrary-lines
@@ -163,14 +164,14 @@
            {"choices"
             [{"message" {"content" "(seon.run/complete :safe)"
                           "reasoning_content" 123}}]})]
-      (is (= :seon.ai/unparseable-body (:seon.error/kind completion)))
+      (is ((schema/projection-validator (schema/handed-projection) :seon.ai/unparseable-body-error) completion))
       (is (not (contains? completion :seon.ai/text)))))
   (testing "a provider error document cannot hide behind a completion"
     (let [completion
           (ai/completion-text
            {"error" {"message" "provider failed"}
             "choices" [{"message" {"content" "(seon.run/complete :safe)"}}]})]
-      (is (= :seon.ai/unparseable-body (:seon.error/kind completion)))
+      (is ((schema/projection-validator (schema/handed-projection) :seon.ai/unparseable-body-error) completion))
       (is (not (contains? completion :seon.ai/text))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -248,7 +249,7 @@
         (let [completion (ai/complete
                           (request endpoint {:seon.ai/stream? true}))
               evidence (:seon.error/data completion)]
-          (is (= :seon.ai/unparseable-body (:seon.error/kind completion)))
+          (is ((schema/projection-validator (schema/handed-projection) :seon.ai/unparseable-body-error) completion))
           (is (not (contains? completion :seon.ai/text))
               "the reconstructed program must never be a completion")
           (is (= "{not json" (:seon.ai/body evidence)))
@@ -268,7 +269,7 @@
   (with-provider {}
     (fn [endpoint]
       (let [completion (ai/complete (request endpoint {:seon.ai/stream? true}))]
-        (is (nil? (:seon.error/kind completion)))
+        (is (contains? completion :seon.ai/text))
         (is (= "Hello, world" (:seon.ai/text completion)))
         (is (= 7 (:seon.ai/tokens completion)))
         (is (= 3 (get (:seon.ai/usage completion) "prompt_tokens")))))))
@@ -286,8 +287,8 @@
   (let [received (promise)
         server
         (http/run-server
-         (fn [request]
-           (deliver received (json/read-str (slurp (:body request))))
+         (fn [http-request]
+           (deliver received (json/read-str (slurp (:body http-request))))
            {:status 200
             :headers {"content-type" "application/json"}
             :body
@@ -310,14 +311,14 @@
   (with-provider {:body "data: [DONE]\n"}
     (fn [endpoint]
       (let [completion (ai/complete (request endpoint {:seon.ai/stream? true}))]
-        (is (= :seon.ai/unparseable-body (:seon.error/kind completion)))))))
+        (is ((schema/projection-validator (schema/handed-projection) :seon.ai/unparseable-body-error) completion))))))
 
 (deftest a-non-2xx-streaming-response-still-reads-its-body
   ;; The error path has to work when the body handler changed under it.
   (with-provider {:status 429 :body "slow down"}
     (fn [endpoint]
       (let [completion (ai/complete (request endpoint {:seon.ai/stream? true}))]
-        (is (= :seon.ai/provider-error (:seon.error/kind completion)))
+        (is ((schema/projection-validator (schema/handed-projection) :seon.ai/provider-error-error) completion))
         (is (= 429 (:seon.ai/http-status (:seon.error/data completion))))
         (is (str/includes? (str (:seon.ai/body (:seon.error/data completion)))
                            "slow down"))))))
@@ -339,7 +340,7 @@
             failure (ai/complete (assoc target :seon.ai/prompt "hello"))
             sent-body @received-body
             status (:seon.ai/http-status (:seon.error/data failure))]
-        (is (= :seon.ai/provider-error (:seon.error/kind failure)))
+        (is ((schema/projection-validator (schema/handed-projection) :seon.ai/provider-error-error) failure))
         (is (nil? (:seon.ai.attempt/sent-body failure)))
         (is (= "disabled"
                (get-in (json/read-str sent-body) ["thinking" "type"])))
