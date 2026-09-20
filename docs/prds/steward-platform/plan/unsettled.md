@@ -4950,3 +4950,21 @@ releases `src/seon/schema.clj`. Editing lanes: 1a, results-reuse,
 turn-cluster. Cold gates owed by the orchestrator, in order: 1a's six
 suites; 1d's R1 and R2 commands; render (`bin/test --paths <23 files> --
 seon.render.*-test`); then `--platform`.
+
+## 2026-09-20 ~21:45 UTC — 1a stopped at the acquisition decision (ruled option 2); step 1 LAUNCHED; 1a's three-suite cold gate running
+
+`error-family-1a` landed `ace176c50`, `8704e5ed5`, `494c40715`, `679782648`;
+paths clean; seon.error/instrument/schema-test green on the fresh overlay;
+focused schema+cluster 46 / 3,635 / 0 / 0; last combined six-suite 273 /
+5,134 / 10 F / 30 E, the reds in seon.db-test and seon.sci.eval-test at the
+acquisition facet: `seon.sci.eval/acquisition-refusal` cannot supply the
+required 64-char `:seon.sci.eval/requested-program` from a failed row, and
+the only whole-program digest owner is the runner's (held by results-reuse).
+**Ruled (orchestrator, D12 rule "a facet promises exactly what it
+observes"): option 2 — a separate row-acquisition facet** (observed member +
+failure evidence; the program-acquisition facet keeps its digest promise);
+no facet identity minted; ~2–4 h. 1a resumes with it when an editing slot
+frees (three hold: results-reuse, turn-cluster, and `bridge-step1-registry`,
+LAUNCHED now on astra low from PRD §7 with held paths named). Cold gate
+running on 1a's three green suites (`tmp/orchestrator/gate-1a-three-suites-2026-09-20.log`);
+the six-suite gate follows the acquisition slice.
