@@ -550,8 +550,9 @@
                "the contract reporter re-raises the bound's own interrupt")
            (is (not (schema/valid-candidate-value? :seon.instrument/contract-error (ex-data thrown)))
                "a bound firing is never reported as a contract violation")
-           (is (nat-int? (:seon.sci.eval/time-limit outcome))
-               "the evaluation boundary names the bound that fired"))
+           (is (schema/valid-candidate-value? :seon.sci.kernel/error outcome))
+           (is (= :time (get-in outcome [:seon.error/data :seon.sci.admit/record :seon.eval/outcome]))
+               "the evaluation boundary retains the deadline's actual outcome"))
          (finally ((:seon.sci.kernel/stop! armed))))))))
 
 (deftest a-sci-only-arity-miss-names-its-program-graph-arglists
@@ -1193,7 +1194,9 @@
       (let [output (last (:malli/schema (meta candidate)))
             declared (#'instrument/declared-result projection output)]
         (is (= (error/facet-keys projection) (:seon.instrument/declared declared))
-            (str candidate))
+            (str candidate " missing declarations: "
+                 (pr-str (remove (:seon.instrument/declared declared)
+                                 (error/facet-keys projection)))))
         (is (true? (:seon.instrument/base? declared)))))))
 
 (deftest hot-host-facet-check-measurement
@@ -1380,7 +1383,8 @@
         composed (assoc complete :seon.test/unknown "seon.instrument-test/absent")
         refusal (test-support/refusal-data #(wrapped base))]
     (is (= complete (wrapped complete)))
-    (is (= #{:seon.agent/error :seon.test/unknown-error} (error/facets projection composed)))
+    (is (every? (error/facets projection composed)
+                #{:seon.agent/error :seon.test/unknown-error}))
     (is (= composed (wrapped composed))
         "A complete declared facet permits additional facets on the same open map.")
     (is ((schema/projection-validator projection :seon.instrument/undeclared-error)

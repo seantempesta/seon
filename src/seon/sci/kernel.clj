@@ -517,35 +517,19 @@
             (.remove thread-arm)))))))
 
 (defn failure-value
-  "The ONE flat `:seon.error` value for a failure at the guarded boundary.
-
-  Both entrances classify here so they cannot drift apart. A throwable that
-  already carries a refusal — an instrument contract violation, a refused
-  schema declaration, an unresolved invocation — keeps its own
-  `:seon.error/kind` and gains this boundary's evidence; everything else
-  becomes `::time-limit-kind` when the diagnostic record's outcome is `:time`
-  and `::failure-kind` otherwise. `:seon.fn/sym` is the invoked function
-  symbol when one exists: it prefixes the message and rides in the data. A
-  form evaluation supplies no symbol, which is the ONLY difference between
-  the two entrances — the classification itself is identical.
-
-  THE OUTPUT UNION ENUMERATES EVERY ERROR FACET (program-facts PRD §1q).
-  This boundary classifies failures it did not raise, so the facet a value
-  carries is whatever the original refusal declared. A generic pass-through
-  lists the whole facet population rather than claiming a narrower one; the
-  armed wrapper derives its permissions from that union and refuses an
-  unlisted facet. The 63 members are `seon.error/facet-keys` over the
-  packaged declarations, sorted, on 2026-09-18."
+  "Preserve an existing structural refusal and accrete guard evidence.
+  Otherwise return the kernel facet with the observed evaluation duration;
+  the complete diagnostic record retains whether the deadline fired."
   {:malli/schema
    [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record]
-    [:or :seon.error/value :seon.error/base
+    [:or :seon.error/base
          :my.background/error :my.edit/error :my.fs/error :my.message/error :my.plan/error
          :my.shell/error :my.turn/error :seon.agent/error :seon.agent.graph/error
          :seon.ai/request-error :seon.artifact/error :seon.boot/error :seon.bootstrap/error
          :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
          :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
          :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-         :seon.db.availability/error :seon.db.read/error :seon.db.write/error
+         :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
          :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
          :seon.flow/error :seon.fn/error :seon.fn.binding/error :seon.instrument/arity-error
          :seon.instrument/contract-error :seon.instrument/registration-error
@@ -553,14 +537,16 @@
          :seon.operator.collect/error :seon.problems/error :seon.program/error
          :seon.reconcile/error :seon.render/error :seon.render.data/error
          :seon.render.value/error :seon.render.walk/error :seon.render.web/error
-         :seon.schedule/error :seon.schema/error :seon.schema.datahike/error
+         :seon.schedule/error :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error
          :seon.schema.shape/error :seon.sci.admit/error :seon.sci.eval/acquisition-error
          :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
+         :seon.test/admission-error :seon.test/execution-error :seon.test/expired
+         :seon.test/not-runnable-error :seon.test/resolution-error
+         :seon.test/selection-error :seon.test/unknown-error
+         :seon.test.run/immutable-error :seon.test.run/unavailable-error
          :seon.search/error :seon.test/error :seon.test.accretion/error :seon.test.run/error
          :seon.test.runner/error :seon.turn/error :seon.turn.loop/error]]}
-  [{subject :seon.fn/sym
-    time-limit-kind ::time-limit-kind
-    failure-kind ::failure-kind}
+  [{subject :seon.fn/sym}
    throwable
    diagnostic-record]
   (let [timed-out? (= :time (:seon.eval/outcome diagnostic-record))
@@ -569,7 +555,9 @@
                           :seon.sci.admit/record diagnostic-record}
                    subject (assoc :seon.fn/sym subject))
         existing (error.refusal/refusal throwable)]
-    (if (:seon.error/kind existing)
+    (if (and (:seon.error/at existing)
+             (:seon.error/layer existing)
+             (:seon.error/operation existing))
       ;; The refusal is already the boundary value. Wrapping it copied its
       ;; data, its ex-data (the whole refusal), and its throw-site message into
       ;; a `:nested-refusal` envelope, so the terminal renderer fitted six
@@ -581,11 +569,12 @@
         (assoc :seon.error/message
                (or (ex-message throwable) "The operation was refused.")))
       (error/diagnostic
-       (let [kind (if timed-out? time-limit-kind failure-kind)]
-         {kind (or subject (if timed-out?
-                             (:seon.eval/fn-entries diagnostic-record)
-                             true))
-        :seon.error/kind kind
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.sci.kernel/evaluation
+        :seon.error/operation 'seon.sci.kernel/failure-value
+        :seon.sci.kernel/guard-observation
+        {:seon.error.evidence/attribute :seon.eval/duration-ms
+         :seon.error.evidence/value (:seon.eval/duration-ms diagnostic-record)}
       :seon.error/message
       (or (:seon.error/message existing)
           (cond->> (if timed-out?
@@ -595,7 +584,7 @@
                          (.getName (class throwable))))
             subject (str "Invocation of " subject " failed: ")))
       :seon.error/diagnostic-layer :sci
-      :seon.error/diagnostic-operation (or subject :evaluation)
+      :seon.error/diagnostic-operation 'seon.sci.kernel/failure-value
       :seon.error/diagnostic-member :throwable
       :seon.error/diagnostic-expected :successful-evaluation
       :seon.error/diagnostic-offending
@@ -612,7 +601,7 @@
         (assoc :seon.sci.eval/symbol (:sci.impl/symbol throwable-data))
 
         (ex-message throwable)
-        (assoc :seon.error/throw-site-message (ex-message throwable)))})))))
+        (assoc :seon.error/throw-site-message (ex-message throwable)))}))))
 
 (defn unarmed-record
   "The diagnostic record for a failure that never reached an arm."
