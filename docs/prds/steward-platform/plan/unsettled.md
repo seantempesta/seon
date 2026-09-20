@@ -4731,3 +4731,16 @@ holder record; 9 schema admission through the live JVM/bb; manifest dump
 (19 MB line) in --paths gate logs (results-reuse). Resolved today: 3 overlay
 admission, 7 report-all, 8 slot cap, docs never publish/widen, pin linter
 scoped to living docs, hook JVMs off.
+
+## 2026-09-20 ~11:55 UTC — default stays down until 1d lands
+
+`bin/seon init` (complete republish from the working tree) REFUSED at
+initialization: "Per-agent dial :seon.config.ai.backup/api-key-variable must
+declare a nonempty :seon.config/display-label" — that is lane 1d's in-flight
+R1 (display metadata on each dial) half-applied in the tree; the start then
+refused the same five activation facts. This is the standing rule (no
+start/reset while lanes hold src dirty) observed from the other side: with
+hook publication paused, a start needs a republish, and a republish needs a
+coherent tree. Decision: default stays DOWN (nobody needs it beyond
+read-only probes) until `config-plan-family-1d` lands; then `bin/seon init`
++ `bin/seon start`. The stale advertisement (pid 8884) stopped.
