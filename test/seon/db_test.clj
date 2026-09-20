@@ -2306,11 +2306,12 @@
            for-tests (set (get schemas :seon.test/sym))
            facets (into #{}
                         (keep (fn [[k form]]
-                                (when (and (vector? form) (= :and (first form))
-                                           (= :seon.error/base (second form))
-                                           (some (fn [entry] (and (vector? entry) (= :seon.test/sym (first entry))))
-                                                 (drop 1 (nth form 2))))
-                                  k)))
+                                (let [nodes (when (coll? form) (tree-seq coll? seq form))]
+                                  (when (and (vector? form) (= :and (first form))
+                                             (some #(= :seon.error/base %) nodes)
+                                             (some (fn [node] (and (vector? node) (= :seon.test/sym (first node))))
+                                                   nodes))
+                                    k))))
                         forms)]
        (is (= #{:seon.test/test} for-tests)
            "the declared row schema is the only write schema for test rows")
