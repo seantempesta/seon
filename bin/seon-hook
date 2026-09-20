@@ -479,8 +479,17 @@
            (= schema-directory (.getCanonicalFile (.getParentFile file)))))))
 
 (defn- run-schema-admission
-  "Run the JVM admission owner for split schema paths or prospective source."
+  "Run the JVM admission owner for split schema paths or prospective source.
+
+  Owner, 2026-09-20: this launches a complete `clojure -M:dev` JVM per schema
+  resource edit; with several lanes editing it was a second hidden JVM
+  source on a swapping machine. `:schema-admission {:enabled false}` in the
+  hook config skips it (no findings, no block) until admission runs through
+  the live JVM or Babashka."
   [{:seon.hook/keys [file-paths prospective-content]}]
+  (if-not (get-in (load-config) [:schema-admission :enabled] true)
+    {:seon.hook.analysis/findings []
+     :seon.hook.schema-admission/skipped "schema admission disabled by hook config"}
   (try
     (let [absolute-paths (mapv absolute-file-path file-paths)
           request
@@ -514,7 +523,7 @@
                 (str ": " (str/trim (:err result)))))}))
     (catch Exception error
       {:seon.hook.analysis/status :unavailable
-       :seon.hook.analysis/reason (.getMessage error)})))
+       :seon.hook.analysis/reason (.getMessage error)}))))
 
 (defn- schema-admission-error
   [analysis]

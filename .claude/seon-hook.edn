@@ -48,7 +48,10 @@
  {:enabled false
   :root "."
   :cluster "default"
-  :check-tests true
+  ;; 2026-09-20 (owner): the post-adoption test check is OFF until the new
+  ;; test system (results reuse everywhere) lands; it ran reaching tests in
+  ;; the development JVM after every adoption.
+  :check-tests false
   :timeout-seconds 180}
 
  ;; The standing review rubric is DATA: `:skills` names skill directories
@@ -71,6 +74,11 @@
   ;; The provider call's own declared bound. One review window waits at most
   ;; this long; a fired bound drops the snapshot and is logged, never retried.
   :call-timeout-seconds 60}
+
+ ;; 2026-09-20 (owner): schema admission spawned a full clojure -M:dev JVM per
+ ;; schema resource edit; OFF until it runs through the live JVM or Babashka.
+ :schema-admission
+ {:enabled false}
 
  :feedback
  {:max-tokens 300}}
