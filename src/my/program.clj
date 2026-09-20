@@ -12,24 +12,22 @@
             [seon.fn :as function]
             [seon.issue :as issue]))
 
-(defn- checked [value]
-  (if (and (map? value) (:seon.error/at value))
-    (throw (ex-info (:seon.error/message value) value))
-    value))
-
 (defn- read-result [request operation read-value]
   (try (read-value)
        (catch Exception failure
-         (if (:seon.error/at (ex-data failure))
+         (if (or (:seon.program/not-found (ex-data failure))
+                 (:seon.program/blocked-subject (ex-data failure))
+                 (:seon.program/read-operation (ex-data failure)))
            (ex-data failure)
            (error/diagnostic
             {:seon.error/at (java.util.Date.)
              :seon.error/layer :seon.program/read
-             :seon.error/operation operation
+             :seon.error/operation 'my.program/read-result
              :seon.error/message (str "Cannot read program facts: " (ex-message failure))
-             :seon.program/read-refused true
+             :seon.program/read-operation operation
+             :seon.error/exception-class (symbol (.getName (class failure)))
              :seon.error/diagnostic-layer :seon.program/read
-             :seon.error/diagnostic-operation operation
+             :seon.error/diagnostic-operation 'my.program/read-result
              :seon.error/diagnostic-member (:seon.program/subject request)
              :seon.error/diagnostic-expected :seon.program/breakage
              :seon.error/diagnostic-offending request
@@ -45,37 +43,40 @@
 (defn- locate [database subject]
   (or (some (fn [attribute]
               (let [value subject
-                    entities (checked
-                              (db/q database
+                    entities (let [result (db/q database
                                     '[:find [?entity ...] :in $ ?attribute ?value
                                       :where [?entity ?attribute ?value]]
-                                    attribute value))]
+                                    attribute value)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))]
                 (when (seq entities)
                   {:seon.program/kind attribute
                    :seon.program/identity [attribute value]
                    :seon.program/entities entities})))
             (subject-identities subject))
-      (checked
-       (error/diagnostic
+      (let [refusal (error/diagnostic
         {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.program/read
-         :seon.error/operation 'my.program/breaks
+         :seon.error/operation 'my.program/locate
          :seon.error/message (str "No program declaration names " subject ".")
          :seon.program/not-found subject
          :seon.error/diagnostic-layer :seon.program/read
-         :seon.error/diagnostic-operation 'my.program/breaks
+         :seon.error/diagnostic-operation 'my.program/locate
          :seon.error/diagnostic-member subject
          :seon.error/diagnostic-expected (subject-identities subject)
          :seon.error/diagnostic-offending subject
          :seon.error/diagnostic-cause :seon.program/not-found
-         :seon.error/diagnostic-evidence {:seon.db/basis-t (db/basis-t database)}}))))
+         :seon.error/diagnostic-evidence {:seon.db/basis-t (db/basis-t database)}})] (throw (ex-info (:seon.error/message refusal) refusal)))))
 
 (defn- names-through [database attribute target identity-attribute]
-  (checked
-   (db/q database
+  (let [result (db/q database
          '[:find [?name ...] :in $ ?attribute ?target ?identity
            :where [?owner ?attribute ?target] [?owner ?identity ?name]]
-         attribute target identity-attribute)))
+         attribute target identity-attribute)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result)))
 
 (defn- symbols [values] (into #{} (map symbol) values))
 
@@ -94,27 +95,40 @@
 (defn- caller-data [database subject entity]
   (let [callers (into (set (names-through database :seon.fn/calls subject :seon.fn/sym))
                       (names-through database :seon.fn/calls subject :seon.test/sym))
-        arities (checked
-                 (db/q database
+        arities (let [result (db/q database
                        '[:find [?arity ...] :in $ ?entity
-                         :where [?entity :seon.fn/arities ?arity]] entity))
-        declared (mapv #(dissoc (checked (db/pull database
-                                                 [:seon.fn.arity/min :seon.fn.arity/max] %))
+                         :where [?entity :seon.fn/arities ?arity]] entity)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
+        declared (mapv #(dissoc (let [result (db/pull database
+                                                 [:seon.fn.arity/min :seon.fn.arity/max] %)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/pull declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
                                 :db/id) arities)
         sites
         (into []
               (mapcat
                (fn [caller]
                  (let [stored caller
-                       row (or (checked (db/pull database [:db/id :seon.fn/form-span]
-                                                 [:seon.fn/sym stored]))
-                               (checked (db/pull database [:db/id :seon.fn/form-span]
-                                                 [:seon.test/sym stored])))
-                       tuples (checked
-                               (db/q database
+                       row (or (let [result (db/pull database [:db/id :seon.fn/form-span]
+                                                 [:seon.fn/sym stored])]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/pull declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
+                               (let [result (db/pull database [:db/id :seon.fn/form-span]
+                                                 [:seon.test/sym stored])]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/pull declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result)))
+                       tuples (let [result (db/q database
                                      '[:find [?tuple ...] :in $ ?entity
                                        :where [?entity :seon.fn/call-arities ?tuple]]
-                                     (:db/id row)))
+                                     (:db/id row))]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
                        counts (keep (fn [[callee arity]]
                                       (when (= subject callee) arity)) tuples)
                        site (cond-> {:seon.fn/sym caller}
@@ -134,7 +148,7 @@
   Example:
   (my.program/callers {:seon.program/subject 'seon.turn/open?})"
   {:malli/schema [:=> [:cat :my.program/subject-request]
-                  [:or :seon.program/breakage :seon.error/value]]}
+                  [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db subject :seon.program/subject :as request}]
   (read-result request 'my.program/callers
                #(let [{kind :seon.program/kind entities :seon.program/entities}
@@ -149,35 +163,46 @@
   Example:
   (my.program/tests-reaching {:seon.program/subject 'seon.turn/open?})"
   {:malli/schema [:=> [:cat :my.program/subject-request]
-                  [:or :seon.program/breakage :seon.error/value]]}
+                  [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db subject :seon.program/subject :as request}]
   (read-result request 'my.program/tests-reaching
                #(let [{kind :seon.program/kind} (locate database subject)]
                   (merge (observation database subject kind)
                          (present-groups
                           {:seon.program/gating
-                           (mapv symbol (checked (function/gate-set
-                                                  database subject)))})))))
+                           (mapv symbol (let [result (function/gate-set
+                                                  database subject)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.fn/gate-set declares :seon.error/value
 
-(defn- key-data [database schema-key entity]
+ (throw (ex-info (:seon.error/message result) result)) result)))})))))
+
+(defn- key-data [database schema-key _entity]
   (let [contracts
-        (checked
-         (db/q database
+        (let [result (db/q database
                '[:find [?name ...]
                  :in $ ?key [?attribute ...]
                  :where [?arity ?attribute ?key]
                  [?function :seon.fn/arities ?arity]
                  [?function :seon.fn/sym ?name]]
                schema-key [:seon.fn.arity/input-refs :seon.fn.arity/output-refs
-                       :seon.fn.arity/guard-refs]))
+                       :seon.fn.arity/guard-refs])]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
         datoms (if (get-in (db/schema-database database) [:schema schema-key])
-                 (checked (db/datoms database :aevt schema-key)) [])]
+                 (let [result (db/datoms database :aevt schema-key)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/datoms declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result)) [])]
     (present-groups
      {:seon.program/contract-refs (symbols contracts)
       :seon.program/writes-of (symbols (names-through database :seon.fn/writes schema-key :seon.fn/sym))
       :seon.program/schema-references
       (set (names-through database :seon.schema/references schema-key :seon.schema/key))
-      :seon.program/mentions (symbols (checked (function/functions-using database schema-key)))
+      :seon.program/mentions (symbols (let [result (function/functions-using database schema-key)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.fn/functions-using declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result)))
       :seon.program/data-in-use (when (seq datoms)
                                  {:seon.schema/key schema-key :seon.schema/datoms (count datoms)})})))
 
@@ -188,7 +213,7 @@
   Example:
   (my.program/reads-key {:seon.schema/key :seon.db/connection})"
   {:malli/schema [:=> [:cat :my.program/key-request]
-                  [:or :seon.program/breakage :seon.error/value]]}
+                  [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db schema-key :seon.schema/key :as request}]
   (read-result request 'my.program/reads-key
                #(let [{entities :seon.program/entities} (locate database schema-key)]
@@ -205,17 +230,23 @@
            (keep (fn [[schema-key renderer]]
                    (when (= subject renderer)
                      {:seon.schema/key schema-key :seon.schema/property property}))
-                 (checked (db/q database
+                 (let [result (db/q database
                                 '[:find ?key ?renderer :in $ ?property :where
                                   [?schema :seon.schema/key ?key]
                                   [?schema ?property ?renderer]]
-                                property)))))
+                                property)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result)))))
         [:seon.render/ai :seon.render/html]))
 
 (defn- proposed-plan [database subject caller-symbols sites]
   (let [names (sort caller-symbols)
         stored (vec names)
-        gates (checked (function/gate-sets database stored))
+        gates (let [result (function/gate-sets database stored)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.fn/gate-sets declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
         detector 'seon.program/unresolved-callers]
     {:seon.program/issues
      (mapv (fn [caller value]
@@ -248,7 +279,7 @@
   Example:
   (my.program/breaks {:seon.program/subject 'seon.turn/open?})"
   {:malli/schema [:=> [:cat :my.program/breaks-request]
-                  [:or :seon.program/breakage :seon.error/value]]}
+                  [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db subject :seon.program/subject :as request}]
   (read-result
    request 'my.program/breaks
@@ -264,7 +295,10 @@
           gate-names (if (= :seon.ns/name kind) owned-functions
                          (when (qualified-symbol? subject)
                            [subject]))
-          gates (checked (function/gate-sets database (vec gate-names)))
+          gates (let [result (function/gate-sets database (vec gate-names))]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.fn/gate-sets declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
           report
           (merge (observation database subject kind) calls
                  (present-groups
@@ -307,7 +341,10 @@
             (if (= :db.cardinality/many (get-in (db/schema-database database) [:schema a :db/cardinality]))
               (update row a (fnil conj #{}) v)
               (assoc row a v)))
-          {} (checked (db/datoms database :eavt entity))))
+          {} (let [result (db/datoms database :eavt entity)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/datoms declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))))
 
 (defn history
   "Read source events and their definition facts and transaction provenance.
@@ -317,26 +354,43 @@
   Example:
   (my.program/history {:seon.program/subject 'seon.turn/open?})"
   {:malli/schema [:=> [:cat :my.program/history-request]
-                  [:or :seon.program/history-report :seon.error/value]]}
+                  [:or :seon.program/history-report :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db subject :seon.program/subject at :seon.db/tx :as request}]
   (read-result
    request 'my.program/history
-   #(let [view (if at (checked (db/as-of database at)) database)
-          past (checked (db/history database))
+   #(let [view (if at (let [result (db/as-of database at)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/as-of declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result)) database)
+          past (let [result (db/history database)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/history declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
           {kind :seon.program/kind entities :seon.program/entities} (locate past subject)
-          identity-declaration (checked (db/pull database [:seon.program/source-attribute]
-                                                [:seon.schema/key kind]))
+          identity-declaration (let [result (db/pull database [:seon.program/source-attribute]
+                                                [:seon.schema/key kind])]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/pull declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
           source-attribute (:seon.program/source-attribute identity-declaration)
-          events (checked
-                  (db/q (if at view past)
+          events (let [result (db/q (if at view past)
                         '[:find ?entity ?source ?tx ?added
                           :in $ [?entity ...] ?attribute
                           :where [?entity ?attribute ?source ?tx ?added]]
-                        entities source-attribute))
+                        entities source-attribute)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
           entries
           (mapv (fn [[entity source tx added]]
-                     (let [snapshot (checked (db/as-of database (or at (if added tx (dec tx)))))
-                           provenance (checked (db/pull database [:seon.db/user :seon.db/process] tx))]
+                     (let [snapshot (let [result (db/as-of database (or at (if added tx (dec tx))))]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/as-of declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
+                           provenance (let [result (db/pull database [:seon.db/user :seon.db/process] tx)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/pull declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))]
                        (merge {:seon.db/tx tx :seon.db/added? added
                                :seon.program/source source
                                :seon.program/definition (entity-facts snapshot entity)}
@@ -352,7 +406,7 @@
   Call preparation carries the executing context explicitly; no process or
   thread lookup is used. A host call without that context refuses."
   {:malli/schema [:=> [:cat :seon.env/environment]
-                  [:or :my.program/context :seon.error/value]]}
+                  [:or :my.program/context :seon.program/context-unavailable-error]]}
   [environment]
   (let [ctx (:my.program/executing-ctx environment)
         base (:my.program/base-ctx ctx)
@@ -363,7 +417,10 @@
        {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.program/write
         :seon.error/operation 'my.program/supplied-context
-        :seon.program/declaration-refused true
+        :seon.program/missing-context-members
+        (into #{} (keep (fn [[member value]] (when-not value member)))
+              [[:my.program/executing-ctx ctx] [:my.program/base-ctx base]
+               [:seon.db/connection connection]])
         :seon.error/message "Program mutation requires the executing SCI context, its cluster base and connection."
         :seon.error/diagnostic-layer :seon.program/write
         :seon.error/diagnostic-operation 'my.program/supplied-context
@@ -382,7 +439,7 @@
   database value. This does not assert JVM write-back or SCI loadability.
   Example: (my.program/overrides)"
   {:malli/schema [:=> [:cat :my.program/read-request]
-                  [:or [:vector :seon.fn/sym] :seon.error/value]]}
+                  [:or [:vector :seon.fn/sym] :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db :as request}]
   (read-result request 'my.program/overrides
                #((requiring-resolve 'seon.program/overrides) database)))
@@ -392,12 +449,12 @@
    (error/diagnostic
     {:seon.error/at (java.util.Date.)
      :seon.error/layer :seon.program/write
-     :seon.error/operation operation
-     :seon.program/declaration-refused true
+     :seon.error/operation 'my.program/refusal
+     :seon.program/blocked-subject (:seon.program/subject report)
      :seon.error/message (str "Cannot perform " operation " on " (:seon.program/subject report)
                               "; repair the named referrers first.")
      :seon.error/diagnostic-layer :seon.program/write
-     :seon.error/diagnostic-operation operation
+     :seon.error/diagnostic-operation 'my.program/refusal
      :seon.error/diagnostic-member (:seon.program/subject report)
      :seon.error/diagnostic-expected :seon.program/change
      :seon.error/diagnostic-offending report
@@ -420,10 +477,14 @@
                              :seon.program/data-in-use])))))
 
 (defn- deletion-report [database subject]
-  (let [root (checked (breaks {:seon.db/db database :seon.program/subject subject}))
+  (let [root (let [result (breaks {:seon.db/db database :seon.program/subject subject})]
+ (if (or (:seon.program/read-operation result) (:seon.program/not-found result))
+ (throw (ex-info (:seon.error/message result) result)) result))
         affected (conj (set (:seon.program/owned-declarations root)) subject)
         reports (into [root]
-                      (map #(checked (breaks {:seon.db/db database :seon.program/subject %})))
+                      (map #(let [result (breaks {:seon.db/db database :seon.program/subject %})]
+ (if (or (:seon.program/read-operation result) (:seon.program/not-found result))
+ (throw (ex-info (:seon.error/message result) result)) result)))
                       (sort-by str (disj affected subject)))
         relations [:seon.program/callers :seon.program/references :seon.program/subject-of
                    :seon.program/capability-of :seon.program/schedule-tasks
@@ -449,7 +510,10 @@
   (read-result
    {:seon.program/subject subject} operation
    #(let [connection (:seon.db/connection context)
-          [report affected] (deletion-report (checked (db/db connection)) subject)]
+          [report affected] (deletion-report (let [result (db/db connection)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/db declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result)) subject)]
       (if (or (blocking? report) (some keyword? affected))
         (cond-> (refusal operation report affected)
           (some keyword? affected)
@@ -459,8 +523,7 @@
                  (merge (:seon.error/data (refusal operation report affected))
                         {:seon.error/diagnostic-cause :schema-retraction-unavailable})))
         (let [transaction
-              (checked
-               (db/transact!
+              (let [result (db/transact!
                 connection
                 [[:db.fn/call
                   (fn [database]
@@ -469,7 +532,10 @@
                         (throw (ex-info "Program retraction refused." (refusal operation current subjects))))
                       (mapv (fn [target]
                               [:db/retractEntity (:seon.program/identity (locate database target))])
-                            (sort-by str subjects))))]]))]
+                            (sort-by str subjects))))]])]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/transact! declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))]
           (native! (:seon.sci.eval/ctx context) native-form)
           (native! (:my.program/base-ctx context) native-form)
           {:seon.program/subject subject
@@ -485,7 +551,7 @@
   dispatch, apply and macro callers the analyzer cannot see.
   Example: (my.program/ns-unmap! 'seon.turn/open?)"
   {:malli/schema [:=> [:cat :my.program/context :qualified-symbol]
-                  [:or :seon.program/change :seon.error/value]]}
+                  [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error]]}
   [context subject]
   (retract-operation! context subject 'my.program/ns-unmap!
                       (list 'clojure.core/ns-unmap (list 'quote (symbol (namespace subject)))
@@ -501,7 +567,7 @@
   retraction seam can be shared; declaration-only deletion would leave DB attributes.
   Example: (my.program/remove-ns! 'my.scratch)"
   {:malli/schema [:=> [:cat :my.program/context :symbol]
-                  [:or :seon.program/change :seon.error/value]]}
+                  [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error]]}
   [context namespace-name]
   (retract-operation! context namespace-name 'my.program/remove-ns!
                       (list 'clojure.core/remove-ns (list 'quote namespace-name))))
@@ -515,31 +581,38 @@
   :seon.program/unknown for dispatch, apply and macro callers.
   Example: (my.program/ns-unalias! 'my.scratch 'str)"
   {:malli/schema [:=> [:cat :my.program/context :symbol :symbol]
-                  [:or :seon.program/change :seon.error/value]]}
+                  [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error]]}
   [context namespace-name alias-name]
   (read-result
    {:seon.program/subject namespace-name} 'my.program/ns-unalias!
    #(let [connection (:seon.db/connection context)
-          [report affected] (deletion-report (checked (db/db connection)) namespace-name)]
+          [report affected] (deletion-report (let [result (db/db connection)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/db declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result)) namespace-name)]
       (if (blocking? report)
         (refusal 'my.program/ns-unalias! report affected)
         (let [transaction
-              (checked
-               (db/transact!
+              (let [result (db/transact!
                 connection
                 [[:db.fn/call
                   (fn [database]
                     (let [[current subjects] (deletion-report database namespace-name)
                           _ (when (blocking? current)
                               (throw (ex-info "Alias removal refused." (refusal 'my.program/ns-unalias! current subjects))))
-                          aliases (checked
-                                   (db/q database
+                          aliases (let [result (db/q database
                                          '[:find [?alias ...] :in $ ?ns ?local :where
                                            [?namespace :seon.ns/name ?ns]
                                            [?namespace :seon.ns/aliases ?alias]
                                            [?alias :seon.ns.alias/local ?local]]
-                                         namespace-name alias-name))]
-                      (mapv (fn [entity] [:db/retractEntity entity]) aliases)))]]))
+                                         namespace-name alias-name)]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))]
+                      (mapv (fn [entity] [:db/retractEntity entity]) aliases)))]])]
+ (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/transact! declares :seon.error/value
+
+ (throw (ex-info (:seon.error/message result) result)) result))
               form (list 'clojure.core/ns-unalias (list 'quote namespace-name) (list 'quote alias-name))]
           (native! (:seon.sci.eval/ctx context) form)
           (native! (:my.program/base-ctx context) form)
@@ -579,16 +652,17 @@
                 report (when subject
                          (breaks {:seon.db/db (db/db connection) :seon.program/subject subject}))]
             (when (or (#{'clojure.core/remove-ns 'clojure.core/ns-unalias} native)
-                      (and report (not (:seon.error/at report))))
+                      (:seon.program/kind report))
               (reduced
                (error/diagnostic
                 {:seon.error/at (java.util.Date.)
                  :seon.error/layer :seon.program/write
-                 :seon.error/operation operation
-                 :seon.program/declaration-refused true
+                 :seon.error/operation 'my.program/native-call-refusal
+                 :seon.program/native-operation native
+                 :seon.program/advised-operation operation
                  :seon.error/message (str "Use " operation " so program facts decide before SCI changes.")
                  :seon.error/diagnostic-layer :seon.program/write
-                 :seon.error/diagnostic-operation operation
+                 :seon.error/diagnostic-operation 'my.program/native-call-refusal
                  :seon.error/diagnostic-member native
                  :seon.error/diagnostic-expected operation
                  :seon.error/diagnostic-offending arguments

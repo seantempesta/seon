@@ -107,7 +107,6 @@
  :seon.program/no-declaration-at-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
  [:map [:seon.program/position :seon.program/position] [:seon.program/declarations-examined :seon.program/declarations-examined]]]
- :seon.program/declaration-refused [:= true]
  :seon.program/declaration-refused-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
  [:map [:seon.program/identity-attributes :seon.program/identity-attributes]]]
@@ -210,22 +209,27 @@
   [:seon.db/tx {:optional true} :seon.db/tx]
   [:seon.program/unknown :seon.program/unknown]
   [:seon.program/history :seon.program/history]]
- :seon.program/read-refused [:= true]
- :seon.program/read-refused-error
- [:map {:seon.error/class true
-        :seon.render/ai seon.error/render-ai
-        :seon.render/html seon.error/render-html
-        :error/message "must identify a program read that could not complete"}
-  [:seon.program/read-refused :seon.program/read-refused]
-  [:seon.error/message :seon.error/message]]
+ :seon.program/read-operation :qualified-symbol
  :seon.program/not-found :seon.program/subject
+ :seon.program/missing-context-members [:set {:min 1} :qualified-keyword]
+ :seon.program/blocked-subject :seon.program/subject
+ :seon.program/native-operation :qualified-symbol
+ :seon.program/advised-operation :qualified-symbol
+ :seon.program/read-refused-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.program/read-operation :seon.program/read-operation] [:seon.error/exception-class :seon.error/exception-class]]]
  :seon.program/not-found-error
- [:map {:seon.error/class true
-        :seon.render/ai seon.error/render-ai
-        :seon.render/html seon.error/render-html
-        :error/message "must identify the absent program subject"}
-  [:seon.program/not-found :seon.program/not-found]
-  [:seon.error/message :seon.error/message]]
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.program/not-found :seon.program/not-found]]]
+ :seon.program/context-unavailable-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.program/missing-context-members :seon.program/missing-context-members]]]
+ :seon.program/mutation-refused-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.program/blocked-subject :seon.program/blocked-subject] [:seon.program/affected :seon.program/affected]]]
+ :seon.program/native-call-refused-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.program/native-operation :seon.program/native-operation] [:seon.program/advised-operation :seon.program/advised-operation]]]
  :seon.program/affected [:set :seon.program/subject]
  :seon.program/change
  [:map [:seon.program/subject :seon.program/subject]

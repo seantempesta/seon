@@ -30,8 +30,8 @@
        (get-in context-failure [:seon.error/data :seon.error/diagnostic-member])
        :sci-program/declaration-members (:seon.program/identity-attributes declaration-failure)}]
   (assert ((schema/projection-validator projection :seon.env/environment) environment))
-  (assert (empty? (:sci-program/read-facets observed)))
-  (assert (empty? (:sci-program/context-facets observed)))
+  (assert (contains? (:sci-program/read-facets observed) :seon.program/read-refused-error))
+  (assert (contains? (:sci-program/context-facets observed) :seon.program/context-unavailable-error))
   (assert (contains? (:sci-program/declaration-facets observed)
                      :seon.program/declaration-refused-error))
   (prn observed))

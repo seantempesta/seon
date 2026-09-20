@@ -9,7 +9,7 @@
    (fn [connection]
      (let [database (db/db connection)
            pulled (db/pull database [:seon.fn/sym]
-                           [:seon.fn/sym "my.note/forget!"])
+                           [:seon.fn/sym 'my.note/forget!])
            nested (db/q database
                         '[:find [?s ...] :where
                           [?f :seon.fn/sym ?s]
@@ -23,7 +23,7 @@
                         '[:find [?s ...] :where
                           [?f :seon.fn/sym ?s]
                           [(clojure.string/starts-with? ?s "my.")]])]
-       (is (= "my.note/forget!" (:seon.fn/sym pulled)))
+       (is (= 'my.note/forget! (:seon.fn/sym pulled)))
        (is (= [] nested))
        (is (seq bound))
        (is (= (set direct) (set bound)))

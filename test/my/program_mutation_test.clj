@@ -18,7 +18,7 @@
            before @(:env fork)
            base-before @(:env ctx)
            refused (program/ns-unmap! context 'seon.turn/open?)]
-       (is (true? (:seon.program/declaration-refused refused)))
+       (is (= 'seon.turn/open? (:seon.program/blocked-subject refused)))
        (is (seq (get-in refused [:seon.error/data :seon.program/callers])))
        (is (= (count (get-in refused [:seon.error/data :seon.program/callers]))
               (count (get-in refused [:seon.program/plan :seon.program/issues]))))
@@ -33,7 +33,7 @@
                       :seon.sci.admit/caps (config/result-caps decisions)
                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)
                       :seon.config/on-core-error :panic})]
-         (is (true? (get-in result [:seon.sci.admit/value :seon.program/declaration-refused]))
+         (is (= 'seon.turn/open? (get-in result [:seon.sci.admit/value :seon.program/blocked-subject]))
              (pr-str (select-keys result [:seon.cluster.eval/error :seon.eval/shown]))))
        (support/transacted! connection [(assoc (support/program-fn-row (db/db connection) (symbol "my.program" "disposable") "(defn disposable [] 42)")
                                               :seon.fn/source "(defn disposable [] 42)")])
@@ -68,7 +68,7 @@
                         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)
                         :seon.config/on-core-error :panic})
                value (:seon.sci.admit/value result)]
-           (is (true? (:seon.program/declaration-refused value)) (pr-str result))
+           (is (= expected (:seon.program/advised-operation value)) (pr-str result))
            (is (= expected (get-in value [:seon.error/data :seon.error/diagnostic-expected])))
            (is (= basis (db/basis-t (db/db connection))))
            (is (true? (= (get-in before [:namespaces 'seon.turn])

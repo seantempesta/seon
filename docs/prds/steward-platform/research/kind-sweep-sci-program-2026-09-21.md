@@ -607,3 +607,28 @@ The final shared-facet probe constructs the context input with
 `seon.env/environment` and validates it against `:seon.env/environment` before
 asserting the refusal's missing facet. It does not infer a reachable producer
 failure from an invalid hand-built environment. Final output is unchanged.
+
+
+## Morning continuation — protocol facets
+
+The owner extended ownership to `my.program` and its tests. Read/context,
+not-found, blocked-mutation and native-call failures now have substantive
+facets; the generic `checked` helper is dissolved at its actual callers.
+Database and function-owner generic returns remain inline, named step-6 debts
+(`seon.db/q`, `pull`, `datoms`, `as-of`, `history`, `db`, `transact!`;
+`seon.fn/gate-set`, `gate-sets`, `functions-using`).
+
+First fast iteration: run `600f1f2a5da5`, 10 executed, 0 unchanged,
+124 assertions, 7 failures, 2 errors. The new complete-facet regression passes.
+SCI calls still meet the assigned call-preparation snapshot defect (its old
+marker refusals fail the now-required base), which the next slice owns.
+The query regression also supplied a string where program identity is a
+symbol; its fixture/expectation is corrected. The snapshot failure emitted
+roughly 79 MB of diagnostic output in one tool chunk; this is unreadable
+failure reporting, not additional independent failures.
+
+The four SCI/program namespaces plus `my.program` load; touched Clojure lint
+is clean. No default lifecycle or foreign file was changed. Cold proof is
+still orchestrator-owned. The next fast iteration includes call-preparation
+and `seon.db-test`, with the protocol namespaces because their supplier
+acquisition input changes.
