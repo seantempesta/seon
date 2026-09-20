@@ -1,0 +1,34 @@
+---
+type: issue
+status: open
+severity: blocker
+tags: [issue, dev, mcp, error, wave/dev-mcp, wave/error-class-contract, class/tools]
+---
+
+# MCP exception projection is opaque after the kind removal
+
+## Observation — 2026-09-20 ~20:20 UTC, default pid 24777 (fresh reset)
+
+Every JVM-mode evaluation that THROWS returns
+`{:seon.error/kind :seon.dev.mcp/projection-failed, :seon.error/message "The MCP value projection failed.", :seon.error/data {:seon.error/diagnostic-offending "clojure.lang.PersistentArrayMap"}}`
+with `exception true` and no message, class or frame. A scalar or string result
+projects fine (`(+ 1 2)` → 3). Wrapping the same form in `try`/`catch` and
+returning the message as a string works, which proves the failure is in the
+exception projection, not the evaluation.
+
+`src/seon/cluster.clj` ~`:330-360`: the exception projection builds its value
+with `error/diagnostic` and a `:seon.error/kind` member (`{kind true
+:seon.error/kind kind …}`) and the fallback `mcp-projection-error` also
+stamps `:seon.error/kind`. After the error family cut (D3/D12: kinds deleted,
+contracts name exact facets, the wrapper refuses undeclared facets) the
+constructor call itself fails, so the fallback runs and reports the map it
+could not project. The orchestrator's tooling loses every exception's cause.
+
+## Fix
+
+Owned by the `kind-sweep-turn-cluster` sweep (PRD
+`docs/prds/steward-platform/plan/error-conversion-prd-2026-09-20.md`): convert
+the MCP projection producers in `src/seon/cluster.clj` to declared facets via
+`seon.error.refusal`, and one regression: a thrown `ex-info` in jvm mode
+projects to a value carrying message, exception class and the first
+first-party frame. The kind-free fallback must still name the offending class.

@@ -4881,3 +4881,27 @@ Bound raised 180 → 600 s (`dd2e4daff`): unloaded publication is ~150 s
 phase progress should extend or replace a flat subprocess deadline —
 a bound on a process that is visibly progressing is the tuned-constant
 smell (AGENTS.md §2.3).
+
+## 2026-09-20 ~20:25 UTC — default UP after the second reset; three tool defects filed
+
+Second `bin/seon reset --force`: republish 233 s, refork 52 s, start 51 s —
+default alive (pid 24777, prepl 62586, web 7994), fresh store 1.21 GiB,
+499,402 datoms with the complete program graph (255k `seon.fn`, 18.7k
+arity, 8.7k `seon.ns`, 6.5k `seon.test`, 18.3k `seon.schema`), one root
+agent. The reset still EXITED 1: its adopt phase was silent ~540 s and the
+lifecycle watchdog (900 s from lock acquisition, never refreshed by phase
+output) failed the run → issue
+`the-lifecycle-watchdog-measures-silence-from-lock-acquisition`. The root
+page's first paint after the reset was >40 s of `schema-properties` under
+arming (warm: 0.27 s) → issue
+`the-root-page-first-paint-after-a-reset-exceeds-forty-seconds`. The MCP
+bridge projects scalars but every THROWN evaluation collapses to
+"projection failed" because `src/seon/cluster.clj`'s exception projection
+still builds a kinded diagnostic → issue
+`mcp-exception-projection-is-opaque-after-the-kind-removal` (blocker for
+tooling; first item of `kind-sweep-turn-cluster`, which resumes on sol low
+the moment the render sweep lands — three editing lanes hold: 1a,
+results-reuse, render). Hook publication stays PAUSED (test system first);
+every default start still needs `bin/seon init` while paused, and a
+publication cannot pass an admission rule stricter than the stored
+population (the 19:35 block) — a reset is the recovery.
