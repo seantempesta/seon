@@ -2189,6 +2189,10 @@
      (:seon.fn/manifest (read-source-artifact (get-in instance [:seon.boot/config :seon.boot/root])))))
   ([instance before manifest]
   (let [root (get-in instance [:seon.boot/config :seon.boot/root])
+        projection-state (get-in instance [:seon.sci.eval/ctx :seon.sci.eval/projection-state])
+        _ (when-not projection-state
+            (refused! "Recording loaded producers requires the booted instance's projection."
+                      {:seon.boot/root root}))
         directory (fs/source-directory)
         paths (seon.fn/producer-paths manifest)
         missing (into #{} (remove find-ns) (keys paths))
@@ -2217,7 +2221,8 @@
                                         :seon.source/producer-path path
                                         :seon.source/producer-digest (get before path)}) paths)}]})
            {:seon.boot/population :seon.source/loaded-generation})
-        database (db/db (:seon.boot/cluster-connection instance))]
+        database (db/carry-projection-state
+                  @(:seon.boot/cluster-connection instance) projection-state)]
     ;; One hosting JVM has one set of callable roots. Every hosted instance
     ;; carries the same observed database value, including across cluster stops.
     (swap! running-instances
