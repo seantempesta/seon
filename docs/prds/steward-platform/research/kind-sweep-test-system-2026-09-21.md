@@ -166,3 +166,35 @@ remaining old runner class schemas. `src/seon/test/accretion.clj` and
 free. The final foreground fast run has deliberately not been spent on this
 intermediate snapshot; the exact cold command above remains owed after the
 remaining source and R8 conversions.
+
+## New section-6 boundary after option 2
+
+The continued census reaches a different cross-owner stop at
+`src/seon/test/runner.clj:3432-3469`. `recording-failure` accepts the result or
+Throwable from a supplied recording function. Its live callers cross
+`seon.fresh-operator/live-root-value!`; that function is owned by the held,
+currently dirty `script/seon/fresh_operator.clj:1612-1635`. It has no Malli
+contract and its `prepl-value!` failure path still emits
+`:seon.error/kind :seon.fresh-operator/prepl-exception` at
+`script/seon/fresh_operator.clj:1872-1879`.
+
+Consequently the runner has no declared facet member on which rule 1.3 can
+branch. Its current branch at `runner.clj:3435` recognizes a returned foreign
+kind; its catch at `:3442-3444` copies the foreign kind; and its notice at
+`:3467` renders that copied classification. Minting a runner facet would
+mis-own the fresh-operator transport failure, while replacing the checks with
+the base-three predicate would merely recreate the retired general predicate
+and leave the callee's output contract absent. This is PRD section 6's
+"consumer needs to distinguish more than the facet members express" case.
+
+The held owner must first declare and return its exact prepl/transport facet
+union, with a substantive advertisement/transport observation. Once that
+lands, the runner can pass the facet through, branch on its required member,
+and update `recording-refusal-notice-names-the-cluster-cause` without copying a
+kind. This lane did not edit the held script, resume another lane, or add a
+compatibility facet.
+
+No final fast tally is claimed. The option-2 and accretion slices load and are
+committed, but the family remains at **89 matching lines** because the binding
+stop rule forbids continuing past this undeclared foreign boundary. The final
+fast command and cold command remain those already recorded above.
