@@ -5,6 +5,7 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.env :as env]
+            [seon.schema :as schema]
             [my.message :as message]
             [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
@@ -55,7 +56,8 @@
            result (evaluate ctx connection
                             "(my.message/send {:my.message/to \"root\" :my.message/content \"Hello\" :seon.db/connection nil})")
            value (:seon.sci.admit/value result)]
-       (is (= :seon.instrument/contract-violated (:seon.error/kind value)))
+       (is ((schema/projection-validator (schema/handed-projection)
+                                         :seon.instrument/contract-error) value))
        (is (str/includes? (:seon.error/message value)
                           ":seon.db/connection is supplied by the runtime; do not pass it"))
        (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] @connection)))))))
@@ -67,7 +69,8 @@
            result (evaluate ctx connection
                             "(my.message/send {:my.message/to \"root\" :my.message/content \"Hello\" :my.message/about [:seon.message/id \"f500b1f2\"]})")
            value (:seon.sci.admit/value result)]
-       (is (= :seon.instrument/contract-violated (:seon.error/kind value)))
+       (is ((schema/projection-validator (schema/handed-projection)
+                                         :seon.instrument/contract-error) value))
        (is (str/includes? (:seon.error/message value) "got a lookup-ref vector"))
        (is (str/includes? (:seon.error/message value) "Pass the string id"))
        (is (str/includes? (:seon.error/message value) ":my.message/about"))

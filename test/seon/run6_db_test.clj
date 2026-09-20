@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
+            [seon.schema :as schema]
             [seon.test-support :as support]))
 
 ; Exact stored run-6 source, including whitespace, read from default on 2026-09-15.
@@ -21,7 +22,9 @@
                      #(db/q {:query query :args [[]]})
                      #(db/q @connection {:query query :args [[]]})]]
          (let [failure (support/refusal-data call)]
-           (is (= :seon.instrument/contract-violated (:seon.error/kind failure)))
+           (is ((schema/projection-validator (schema/handed-projection)
+                                             :seon.instrument/contract-error) failure)
+               (pr-str failure))
            (is (str/includes? (:seon.error/message failure) ":in"))
            (is (str/includes? (:seon.error/message failure) "(seon.db/q query input ...)"))
            (is (str/includes? (:seon.error/message failure) "(seon.db/q database query input ...)"))))
@@ -30,8 +33,10 @@
                        #(db/q query @connection "a" "extra")
                        #(db/q {:query query :args [@connection "a"]} "ignored")
                        #(db/q '[:find ?id :in $other :where [$other _ :seon.agent/id ?id]] [])]]
-           (is (= :seon.instrument/contract-violated
-                  (:seon.error/kind (support/refusal-data call))))))
+           (let [failure (support/refusal-data call)]
+             (is ((schema/projection-validator (schema/handed-projection)
+                                               :seon.instrument/contract-error) failure)
+                 (pr-str failure)))))
        (is (= #{["root"]}
               (db/q '[:find ?id :in [?id ...]] ["root"])))
        (is (= (db/q '[:find ?id :where [_ :seon.agent/id ?id]])
@@ -41,21 +46,21 @@
   (support/with-database
    (fn [connection]
      (binding [db/*conn* connection]
-       (doseq [[label call]
+       (doseq [[label call error-schema]
                [[:pull-map #(db/pull {:selector '[*] :eid 1} [])]
                 [:pull-positional #(db/pull '[*] 1 [])]
-                [:pull-explicit #(apply db/pull [@connection '[*] 1 []])]
+                [:pull-explicit #(apply db/pull [@connection '[*] 1 []]) :seon.instrument/arity-error]
                 [:pull-db #(db/pull [] '[*] 1)]
                 [:pull-map-db #(db/pull [] {:selector '[*] :eid 1})]
                 [:pull-explicit-map #(db/pull @connection {:selector '[*] :eid 1} [])]
                 [:pull-many-map #(db/pull-many {:selector '[*] :eids [1]} [])]
                 [:pull-many-positional #(db/pull-many '[*] [1] [])]
-                [:pull-many-explicit #(apply db/pull-many [@connection '[*] [1] []])]
+                [:pull-many-explicit #(apply db/pull-many [@connection '[*] [1] []]) :seon.instrument/arity-error]
                 [:pull-many-db #(db/pull-many [] '[*] [1])]
                 [:pull-many-map-db #(db/pull-many [] {:selector '[*] :eids [1]})]
                 [:pull-many-explicit-map #(db/pull-many @connection {:selector '[*] :eids [1]} [])]
                 [:entity #(db/entity 1 [])]
-                [:entity-explicit #(apply db/entity [@connection 1 []])]
+                [:entity-explicit #(apply db/entity [@connection 1 []]) :seon.instrument/arity-error]
                 [:entity-db #(db/entity [] 1)]
                 [:datoms-map #(db/datoms {:index :eavt} [])]
                 [:datoms-explicit-map #(db/datoms @connection {:index :eavt} [])]
@@ -64,5 +69,8 @@
                 [:datoms-explicit-components #(db/datoms @connection :eavt 1 :seon.agent/id "root" 1 true)]
                 [:datoms-db #(db/datoms [] :eavt)]]]
          (testing (name label)
-           (is (= :seon.instrument/contract-violated
-                  (:seon.error/kind (support/refusal-data call))))))))))
+           (let [failure (support/refusal-data call)]
+             (is ((schema/projection-validator (schema/handed-projection)
+                                               (or error-schema :seon.instrument/contract-error))
+                  failure)
+                 (pr-str failure)))))))))

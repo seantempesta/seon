@@ -29,9 +29,10 @@
                       :seon.sci.admit/caps {}
                       :seon.sci.admit/interrupt-fn (fn [])
                       :seon.config/on-core-error :record}))]
-      (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
-      (is (= "seon.sci.admit/admit-value"
-             (:seon.instrument/contract-violated refusal))
+      (is ((schema/projection-validator (schema/handed-projection)
+                                        :seon.instrument/contract-error) refusal))
+      (is (= 'seon.sci.admit/admit-value
+             (:seon.instrument/fn refusal))
           "bounded admission still requires its declared limits"))))
 
 (defn- projected

@@ -7,6 +7,25 @@ tags: [issue, schema, render, test, class/n11, wave/error-class-contract]
 
 # Reconcile the error-class catalog with declared schemas and renderers
 
+## Current error-schema regression boundary — 2026-09-23
+
+The older migration narrative below is historical. Current owner rulings
+identify error maps structurally through their declared Malli schemas;
+neither kind nor a stored schema stamp is the classification mechanism.
+
+The bounded error lane converted nine contract-kind assertion sites to
+schema validation. Its four-namespace fast run still found other retired
+reader/evaluation/missing-supplied-key assertions, a string-valued function
+lookup, expected diagnostic examples/fixes, and value-printer bounds that
+do not hold. One scalar render was 24,621 bytes against the test's 8,192-byte
+expectation. These are remaining migration/render observations, not evidence
+for restoring old keys. The exact test/file table and measured tally are in
+[the current landing note](../../prds/steward-platform/research/error-family-1a-2026-09-19.md),
+under “Stale contract-refusal expectations”; the raw run is
+`tmp/error-contract-assertions-fast.log`. Its separate configuration-admission
+error and unavailable result recording are identified there without claiming
+a renderer caused them. No renderer was changed by that slice.
+
 ## Refusal-grammar boundary — 2026-09-15
 
 The derived class/schema/renderer regression now passes its registry to

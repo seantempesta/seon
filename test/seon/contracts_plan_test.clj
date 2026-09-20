@@ -3,14 +3,16 @@
             [clojure.test :refer [deftest is]]
             [seon.contracts-fixture :as fixture]
             [seon.ai.tokens :as tokens]
-            [seon.db :as db]))
+            [seon.db :as db]
+            [seon.schema :as schema]))
 
 (defn- missing-note-id-names-the-key-and-the-docstring-example
   [connection handle routing]
   (let [[saved refusal] (fixture/submit connection handle routing
                                         "(my.note/add! {:my.note/content \"A verified observation.\"})")
         shown (:seon.eval/shown saved)]
-    (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+    (is ((schema/projection-validator (schema/handed-projection)
+                                      :seon.instrument/contract-error) refusal))
     (doseq [fragment ["my.note/add! refused request at [:my.note/id]"
                       "missing :my.note/id" "Fix: Supply :my.note/id with a string"
                       "Example: (my.note/add!" "A verified observation."]]
@@ -25,7 +27,8 @@
                                     [:seon.fn/sym "my.agents.juniper/largest-customer"]))))
       (let [[saved refusal] (fixture/submit connection handle routing fixture/run5-lazy-call)
             message (:seon.error/message refusal "")]
-        (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+        (is ((schema/projection-validator (schema/handed-projection)
+                                          :seon.instrument/contract-error) refusal))
         (doseq [fragment ["refused argument 0 (0-based) at []" "expected a vector" "got a lazy sequence" "Fix: Convert the sequence with vec"]]
           (is (str/includes? message fragment) message)
           (is (str/includes? (:seon.eval/shown saved) fragment) (:seon.eval/shown saved)))
@@ -52,7 +55,8 @@
   (let [[saved refusal] (fixture/submit connection handle routing
                          "(my.note/add! {:my.note/id \"probe\" :my.note/content \"Observed.\" :my.note/about \"largest-customer-original\"})")
         shown (:seon.eval/shown saved)]
-    (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+    (is ((schema/projection-validator (schema/handed-projection)
+                                      :seon.instrument/contract-error) refusal))
     (doseq [fragment ["my.note/add! refused request at [:my.note/about]"
                       "an entity id or a lookup ref" "[:my.note/id" "Fix:" "largest-customer-original"]]
       (is (str/includes? shown fragment) shown))

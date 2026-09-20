@@ -3106,3 +3106,37 @@ than nine reported assertions. The adjacent MCP function assertion now
 uses the declared symbol-valued `:seon.instrument/fn`, rather than the
 retired marker. Other legacy expectations in these files are outside this
 specific assertion conversion; their test outcomes will be reported.
+
+Three excess-arity cases now specifically validate
+`:seon.instrument/arity-error`; malformed argument values still require
+`:seon.instrument/contract-error`. The arity regression passes all 21 cases.
+
+The four-namespace command executed **20 tests / 203 assertions / 28 failures
+/ 25 errors**, wall-clock **360.87 s**. Results were **not recorded**:
+the recorder's projection still gives `with-publication!` an empty declared
+error set and refuses its returned write/execution error. This is the
+class-4 stale-projection boundary, not a durable green tally.
+
+The focused follow-up ran only the changed `seon.run6-db-test`: **2 tests /
+60 assertions / 13 failures / 24 errors**, **162.88 s**, again unrecorded.
+It verifies all three arity corrections. Its remaining query error is
+`:seon.schema/callable-property` on the compiled guard's `:error/fn`;
+both loaded and projected declarations have the guard. The existing
+normalizer rejects that runtime property while instrumentation constructs
+the refusal. The [schema-owner issue](../../../seon/issues/compiled-guard-error-functions-refuse-error-observation.md)
+contains the exact value and acceptance; no local fingerprint workaround
+was introduced in instrumentation.
+
+Other failures in the broader run, outside the requested kind assertions:
+
+| Test / file | Observed boundary |
+| --- | --- |
+| `installed-contract-refusal-names-the-run5-failing-coordinate`, `contracts_plan_test.clj:26` | String-valued function lookup returns no current symbol-valued row. |
+| `refusal-grammar-survives-real-evaluation`, `contracts_plan_test.clj` | Two other retired kind assertions, expected example/fix text, problem-count and capped-render expectations. |
+| `missing-runtime-key-is-a-runtime-fault`, `supplied_documentation_test.clj:93` | Separate retired missing-supplied-key assertion. |
+| `artifact-lifecycle-preserves-identity-paging-and-retraction`, `cluster/mcp_test.clj` | `seon.config/refuse!`: configuration requires an admitted configuration transaction. |
+| Three value-window regressions in `cluster/mcp_test.clj` | Capped-render expectations fail; the scalar example is 24,621 bytes against 8,192. |
+
+The converted contract-error assertions in the MCP and supplied-key tests
+pass. The remaining render/config/source findings are not attributed to a
+specific implementation change by this bounded run.
