@@ -6364,3 +6364,34 @@ with the one-clause fix (callee namespace has a `:seon.ns` row and no
 function row). Next: one-file edit through the hook's own command
 (`init --dev head --changed PATH`), timed, twice (docstring-only, then a
 body change), and the errors/warnings read as they come.
+
+## 2026-09-22 ~14:40 local — FINDING: a one-file edit in any of 36 core namespaces is a COMPLETE republication by construction (the "producer toolchain" closure)
+
+HEAD boots from zero on the isolated root (start 43 s, page 6.0 s, log
+clean except one core fault — see below). The hook's own command on a
+DOCSTRING-ONLY edit to `src/seon/id.clj`
+(`init --dev head --changed src/seon/id.clj`) ran the complete path:
+source build 33.6 s, development reload of `seon.id` 9.7 s, analysis
+31.1 s (slower than the from-zero 10.2 s), then "branch publication
+started: **381 inputs**", the full contract-row and population phases
+again, "development changed definition comparison" 29.0 s. Total: see the
+next block. Cause, read from source: `seon.cluster/full-source-refresh!`
+takes the incremental path only when the toolchain digest is unchanged;
+`seon.fn/toolchain-digest` hashes the BYTES of every "producer path" =
+the requires closure of `seon.fn` (`producer-paths`). Computed from the
+artifact: that closure is **36 of the 110 src namespaces** — `seon.db`,
+`seon.error`, `seon.schema`, `seon.env`, `seon.config`, `seon.blob`,
+`seon.ai`, `seon.id`, `seon.call-preparation`, … — so any byte change in
+the core, a comment included, is "a changed producer toolchain" and
+republishes everything. The 74 others (`my.*`, `seon.cluster*`,
+`seon.render*`, `seon.turn`, …) can take the incremental path; measuring
+that next (`src/my/note.clj`). Two representation problems to rule on:
+(1) "toolchain changed" is decided by file bytes, not by the declarations
+the analyzer actually depends on — a digest over the analyzer's DECLARED
+inputs (the `:seon.fn/calls` closure of the analysis entry points, which
+the graph already stores) would exclude docstrings, comments and unrelated
+functions; (2) `seon.fn` requiring the whole core makes the core the
+toolchain — the analyzer's genuine dependencies are a handful of
+namespaces. Also at boot: one core fault printed with NO message because
+its record was refused on the raw `:seon.error/offending` member
+([issue](../../../seon/issues/a-core-fault-whose-record-is-refused-loses-its-own-message.md)).
