@@ -30,8 +30,8 @@ Measured at HEAD `7924f4dae` before this plan (isolated root, hook command):
 | Fork a cluster | 29 s (two JVM boots) | < 1 s (a Datahike branch) |
 | Boot to ready | 43 s | measured, paid once |
 | No change at all | 149 s | < 1 s (two commit ids compared) |
-| Docstring edit, non-core file | 483 s | ≤ 15 s |
-| Docstring edit, core file | 419 s | ≤ 15 s (no "toolchain" class) |
+| Docstring edit, non-core file | 483 s | ≤ 5 s |
+| Docstring edit, core file | 419 s | ≤ 5 s (no "toolchain" class) |
 
 ## The seams we build ON (read before editing; cite when landing)
 
@@ -63,12 +63,21 @@ Measured at HEAD `7924f4dae` before this plan (isolated root, hook command):
    when no cluster is running (cold start, reset). DELETE: the relay child
    JVM (`init`, `init --dev`, `init --changed`), the publish-before-fork
    JVM. Fork = `init NAME` over the prepl = a Datahike branch.
-2. **Analysis is complete, always.** DELETE: the `reusable?` branch of
-   `seon.fn/build-manifest` (`src/seon/fn.clj:2369–2420`), the per-file
-   cache under `build/analysis`, `seon.fn/toolchain-digest` and
-   `producer-paths` (the 36-namespace closure). The analyzer's own
-   namespaces changing is an ordinary changed namespace; a changed analysis
-   output SHAPE is a reset (database data is disposable by ruling).
+2. **No double caching: clj-kondo's cache is the ONLY analysis cache**
+   (owner, 2026-09-22: "No double caching. Use all the existing tool
+   caches."). An edit lints the changed files, and the files of their
+   callers for findings (callers come from the program graph's
+   `:seon.fn/calls` reverse edges), with `:cache true` so clj-kondo
+   supplies every other namespace from its own cache; the complete
+   analysis (10.2 s) is the cold case only. Target for one file: ≤ 2 s.
+   DELETE: our layer on top of it — the `reusable?` branch of
+   `seon.fn/build-manifest` (`src/seon/fn.clj:2369–2420`: forget-namespaces,
+   known-symbol sets, `publication-inputs`, `cached-analysis` reads of the
+   44 MB `build/analysis` cache — that layer, not clj-kondo, is the 277 s),
+   `seon.fn/toolchain-digest` and `producer-paths` (the 36-namespace
+   closure). The analyzer's own namespaces changing is an ordinary changed
+   namespace; a changed analysis output SHAPE is a reset (database data is
+   disposable by ruling).
 3. **Publication transacts the difference.** Changed files = digest
    difference between the new manifest and the stored rows; changed rows =
    their declarations; transact only those (the existing population path

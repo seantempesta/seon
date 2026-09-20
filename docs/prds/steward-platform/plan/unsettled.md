@@ -6461,3 +6461,15 @@ instead of on them. Standing from now: nothing is "landed" without its row
 in the measurement table, produced by the committed script and run by the
 orchestrator. Order: step 2's identity slice (so the shared tree boots) →
 one redesign lane, slices 1–5 measured one at a time → everything else.
+
+## 2026-09-22 ~16:35 local — OWNER: "No double caching. Use all the existing tool caches."
+
+Ruled into the plan's slice 2: clj-kondo's own namespace cache is the ONLY
+analysis cache; an edit lints the changed files plus their callers' files
+(program-graph reverse edges) with `:cache true`; the complete analysis is
+the cold case only; our per-file cache layer (`build/analysis`,
+`reusable?` branch) is deleted. The owner's question — why a single
+changed file costs as much as the whole codebase — has a sharper answer:
+it costs 27× MORE (277 s vs 10.2 s), and the cost is entirely our layer
+around clj-kondo, not clj-kondo. One-file target ≤ 2 s analysis, ≤ 5 s
+end to end.
