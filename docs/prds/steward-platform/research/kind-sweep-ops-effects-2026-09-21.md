@@ -747,3 +747,14 @@ lint is clean and `require seon.blob` exits zero. Append source and
 `resources/seon/schemas/seon.blob.edn` to the accumulated paths and
 `seon.blob-test`, `seon.blob-threshold-test`, `seon.blob-publication-test` to
 the end-of-pass namespaces. Fast and cold tally remain owed.
+
+Edit: source kind sites 9 → 0; tests 11 → 0. Parser refusals carry observed
+source byte count and raw offending source; lossless verification carries
+the attempted character span. No-match and ambiguous-match reuse the existing
+path-valued facets. `form`, `exact`, and `lines` now name only their returned
+facets; parser/single-form helpers declare their parsing refusal. The private
+kind argument and flat-error constructor are gone. Tests assert actual
+parse size, refused paths, successful digests, and the program owner's
+declared position member. Source/test lint is clean and `require seon.edit`
+exits zero. Append `src/seon/edit.clj`, `resources/seon/schemas/my.edit.edn`,
+`test/seon/edit_test.clj` and `seon.edit-test` to the accumulated commands.

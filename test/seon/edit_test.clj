@@ -83,7 +83,7 @@
                     (assoc selector :my.edit.form/dispatch-source ":beta")
                     :replace "(defmethod render :beta [x] :changed)")
                    8192)]
-    (is (= :my.edit/ambiguous-match (:seon.error/kind ambiguous)))
+    (is (string? (:my.edit/ambiguous-match ambiguous)))
     (is (= [1 2]
            (mapv :my.edit/from-line
                  (get-in ambiguous
@@ -101,7 +101,8 @@
                                     :my.edit.form/name 'broken}
                                    :replace "(defn broken [] :new)")
                      8192)]
-      (is (= :my.edit/parse-refused (:seon.error/kind result)))
+      (is (= (alength (.getBytes source java.nio.charset.StandardCharsets/UTF_8))
+             (:my.edit/parse-byte-count result)))
       (is (nil? (:seon.edit/source result)))))
   (testing "malformed replacement is refused by the declared contract"
     ;; `:my.edit/form-request` has always required one readable form in
@@ -123,7 +124,7 @@
                                     :my.edit.form/name 'absent}
                                    :delete nil)
                      8192)]
-      (is (= :my.edit/no-match (:seon.error/kind result)))
+      (is (string? (:my.edit/no-match result)))
       (is (= [{:my.edit.form/head 'def
                :my.edit.form/name 'present
                :my.edit/from-line 1
@@ -141,12 +142,12 @@
         all (edit/exact source (assoc base :my.edit/replace-all? true) 8192)
         absent (edit/exact source (assoc base :my.edit/old-string "missing")
                            8192)]
-    (is (= :my.edit/ambiguous-match (:seon.error/kind ambiguous)))
+    (is (string? (:my.edit/ambiguous-match ambiguous)))
     (is (= 2 (get-in ambiguous
                      [:seon.error/data :my.edit/replacements])))
     (is (= "NEW\nkeep\nNEW\n" (:seon.edit/source all)))
     (is (= 2 (:my.edit/replacements all)))
-    (is (= :my.edit/no-match (:seon.error/kind absent)))))
+    (is (string? (:my.edit/no-match absent)))))
 
 (deftest line-window-is-an-exact-second-fence
   (let [source "one\r\ntwo\r\nlast"
@@ -168,7 +169,7 @@
                            :my.edit/new-window "done")
                     8192)]
     (is (= "one\r\nchanged\r\nlast" (:seon.edit/source changed)))
-    (is (= :my.edit/no-match (:seon.error/kind refused)))
+    (is (string? (:my.edit/no-match refused)))
     (is (= "two\r\n"
            (get-in refused [:seon.error/data :my.edit/actual-window])))
     (is (= "one\r\ntwo\r\ndone" (:seon.edit/source final-line)))))
@@ -334,7 +335,7 @@
                               :my.edit/source "(defn subject [] 2)"}))
             receipt (effect-of connection 1)]
         (testing "the edit succeeded and the agent never sees writer keys"
-          (is (nil? (:seon.error/kind edited)) (pr-str edited))
+          (is (string? (:my.edit/after-digest edited)) (pr-str edited))
           (is (nil? (:seon.effect/provenance edited))
               "write-back provenance is the writer's, not the agent's"))
         (testing "the effect refs the indexed file and the declaration it wrote"
@@ -358,7 +359,7 @@
                                    :my.edit/old-string "heading comment"
                                    :my.edit/new-string "heading note"}))
                 comment-receipt (effect-of connection 2)]
-            (is (nil? (:seon.error/kind comment-edit)) (pr-str comment-edit))
+            (is (string? (:my.edit/after-digest comment-edit)) (pr-str comment-edit))
             (is (= (fs/relative-path (fs/source-directory) path) (get-in comment-receipt
                                 [:seon.effect/file :seon.fn.file/relative-path])))
             (is (some? (:seon.effect/form-span comment-receipt)))
@@ -373,7 +374,7 @@
                         [?declaration :seon.fn/file ?file]]
                       (db/db connection) (fs/relative-path (fs/source-directory) path))
                 refusal (program/declaration-at declarations 0)]
-            (is (= :seon.program/no-declaration-at (:seon.error/kind refusal)))
+            (is (= 0 (:seon.program/position refusal)))
             (is (= 0 (get-in refusal
                              [:seon.error/data :seon.program/position])))))
         (.delete file)
@@ -411,7 +412,7 @@
                                     :my.edit/operation :replace
                                     :my.edit/source
                                     (str "(defn " declaration-name " [] 2)")}))]
-              (is (nil? (:seon.error/kind result)) (pr-str result))
+              (is (string? (:my.edit/after-digest result)) (pr-str result))
               (recur (inc ordinal) (:my.edit/after-digest result) (next names)))))
         (is (= #{"fixture-changed/alpha" "fixture-changed/beta"}
                (set (db/q '[:find [?symbol ...]
@@ -453,7 +454,7 @@
                                              :my.edit.form/name 'subject}
                               :my.edit/operation :replace
                               :my.edit/source "(defn subject [] 2)"}))]
-        (is (= :my.fs/path-refused (:seon.error/kind refused))
+        (is (= outside (:my.fs/path-refused refused))
             (str "the refusal must name what was missing, not collapse into "
                  "a handler failure; got " (pr-str refused)))
         (is (= outside (get-in refused [:seon.error/data :my.fs/path]))

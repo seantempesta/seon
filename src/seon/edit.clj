@@ -4,14 +4,8 @@
   This namespace deliberately has no cluster, database, filesystem, schema
   loading, or JVM-handler dependency so the edit hook can load it while Seon
   is down."
-  (:require [rewrite-clj.zip :as z]))
-
-(defn- flat-error
-  [kind marker subject message data]
-  {marker subject
-   :seon.error/kind kind
-   :seon.error/message message
-   :seon.error/data data})
+  (:require [rewrite-clj.zip :as z]
+            [seon.error.refusal :as error]))
 
 (defn- utf8-bytes
   [text]
@@ -120,13 +114,26 @@
     (when (and index (<= 0 index (count source))) index)))
 
 (defn- parse-root
+  {:malli/schema [:=> [:cat :string] [:or :map :my.edit/parse-refused-error]]}
   [source]
   (try
     {:seon.edit/root (z/of-string* source {:track-position? true})}
     (catch Throwable error
-      (flat-error :my.edit/parse-refused :my.edit/parse-refused true
-                  "The complete source could not be parsed structurally."
-                  {:seon.edit/cause (.getMessage error)}))))
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.edit/source
+        :seon.error/operation 'seon.edit/parse-root
+        :seon.error/message "The complete source could not be parsed structurally."
+        :seon.error/offending source
+        :seon.error/diagnostic-layer :my.edit/source
+        :seon.error/diagnostic-operation 'seon.edit/parse-root
+        :seon.error/diagnostic-member :my.edit/source
+        :seon.error/diagnostic-expected "readable source with the required form count"
+        :seon.error/diagnostic-offending source
+        :seon.error/diagnostic-cause error
+        :seon.error/diagnostic-evidence {:seon.edit/cause (.getMessage error)}
+        :seon.error/data {:seon.edit/cause (.getMessage error)}
+        :my.edit/parse-byte-count (utf8-bytes source)}))))
 
 (defn- top-level-locations
   [root]
@@ -143,11 +150,11 @@
     (catch Throwable _ nil)))
 
 (defn- single-form
-  [source error-kind message]
+  {:malli/schema [:=> [:cat :string :string] [:or :map :my.edit/parse-refused-error]]}
+  [source message]
   (let [parsed (parse-root source)]
-    (if (:seon.error/kind parsed)
+    (if (:my.edit/parse-byte-count parsed)
       (assoc parsed
-             :seon.error/kind error-kind
              :seon.error/message message)
       (let [locations (top-level-locations (:seon.edit/root parsed))
             location (first locations)
@@ -156,15 +163,28 @@
           {:seon.edit/location location
            :seon.edit/node (z/node location)
            :seon.edit/sexpr (:seon.edit/sexpr semantic)}
-          (flat-error error-kind :my.edit/parse-refused true message
-                      {:seon.edit/form-count (count locations)}))))))
+          (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.edit/source
+        :seon.error/operation 'seon.edit/single-form
+        :seon.error/message message
+        :seon.error/offending source
+        :seon.error/diagnostic-layer :my.edit/source
+        :seon.error/diagnostic-operation 'seon.edit/single-form
+        :seon.error/diagnostic-member :my.edit/source
+        :seon.error/diagnostic-expected "readable source with the required form count"
+        :seon.error/diagnostic-offending source
+        :seon.error/diagnostic-cause :my.edit/parse-refused
+        :seon.error/diagnostic-evidence {:seon.edit/form-count (count locations)}
+        :seon.error/data {:seon.edit/form-count (count locations)}
+        :my.edit/parse-byte-count (utf8-bytes source)}))))))
 
 (defn single-form?
   "True when `source` is exactly one readable semantic form."
   {:malli/schema [:=> [:cat :string] :boolean]}
   [source]
-  (not (:seon.error/kind
-        (single-form source :my.edit/invalid-replacement
+  (not (:my.edit/parse-byte-count
+        (single-form source
                      "Replacement source must contain exactly one form."))))
 
 (defn- semantic-form
@@ -259,18 +279,40 @@
           actual (actual-edit source start end operation replacement)
           candidate (:seon.edit/source actual)
           reparsed (parse-root candidate)]
-      (if (or (:seon.error/kind reparsed)
+      (if (or (:my.edit/parse-byte-count reparsed)
               (not= rendered (z/root-string (:seon.edit/root reparsed))))
-        (flat-error :my.edit/lossless-check-failed
-                    :my.edit/lossless-check-failed true
-                    "The structural edit did not preserve the source boundary."
-                    {})
+        (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.edit/source
+        :seon.error/operation 'seon.edit/lossless-candidate
+        :seon.error/message "The structural edit did not preserve the source boundary."
+        :seon.error/offending source
+        :seon.error/diagnostic-layer :my.edit/source
+        :seon.error/diagnostic-operation 'seon.edit/lossless-candidate
+        :seon.error/diagnostic-member :my.edit/source
+        :seon.error/diagnostic-expected "an edit preserving all unrelated source bytes"
+        :seon.error/diagnostic-offending source
+        :seon.error/diagnostic-cause :my.edit/lossless-check-failed
+        :seon.error/diagnostic-evidence {}
+        :seon.error/data {}
+        :my.edit/unverified-char-span [start end]})
         actual))
     (catch Throwable error
-      (flat-error :my.edit/lossless-check-failed
-                  :my.edit/lossless-check-failed true
-                  "The structural edit could not be verified losslessly."
-                  {:seon.edit/cause (.getMessage error)}))))
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.edit/source
+        :seon.error/operation 'seon.edit/lossless-candidate
+        :seon.error/message "The structural edit could not be verified losslessly."
+        :seon.error/offending source
+        :seon.error/diagnostic-layer :my.edit/source
+        :seon.error/diagnostic-operation 'seon.edit/lossless-candidate
+        :seon.error/diagnostic-member :my.edit/source
+        :seon.error/diagnostic-expected "an edit preserving all unrelated source bytes"
+        :seon.error/diagnostic-offending source
+        :seon.error/diagnostic-cause error
+        :seon.error/diagnostic-evidence {:seon.edit/cause (.getMessage error)}
+        :seon.error/data {:seon.edit/cause (.getMessage error)}
+        :my.edit/unverified-char-span [start end]}))))
 
 (defn- matched-form-result
   [source starts match request context-byte-limit]
@@ -279,9 +321,8 @@
         (when-not (= :delete operation)
           (single-form
            (:my.edit/source request)
-           :my.edit/invalid-replacement
            "Replacement source must contain exactly one complete form."))]
-    (if (:seon.error/kind replacement)
+    (if (:my.edit/parse-byte-count replacement)
       replacement
       (let [selected (:seon.edit/location match)
             [start end] (location-span source starts selected)
@@ -289,7 +330,7 @@
             (lossless-candidate source start end operation
                                 (or (:my.edit/source request) "") selected
                                 (:seon.edit/node replacement))]
-        (if (:seon.error/kind candidate)
+        (if (:my.edit/unverified-char-span candidate)
           candidate
           (let [candidate-source (:seon.edit/source candidate)
                 changed-start (:seon.edit/start candidate)
@@ -304,10 +345,12 @@
   "Transform one unambiguous named top-level form."
   {:malli/schema
    [:=> [:cat :string :my.edit/form-request [:int {:min 1}]]
-    [:or :seon.edit/candidate :seon.error/value]]}
+    [:or :seon.edit/candidate :my.edit/parse-refused-error
+     :my.edit/lossless-check-failed-error :my.edit/no-match-error
+     :my.edit/ambiguous-match-error]]}
   [source request context-byte-limit]
   (let [parsed (parse-root source)]
-    (if (:seon.error/kind parsed)
+    (if (:my.edit/parse-byte-count parsed)
       parsed
       (let [root (:seon.edit/root parsed)
             starts (line-starts source)
@@ -316,10 +359,10 @@
             dispatch-source (:my.edit.form/dispatch-source selector)
             dispatch (when dispatch-source
                        (single-form
-                        dispatch-source :my.edit/parse-refused
+                        dispatch-source
                         (str "The selector dispatch source is not one "
                              "complete form.")))]
-        (if (:seon.error/kind dispatch)
+        (if (:my.edit/parse-byte-count dispatch)
           dispatch
           (let [matches (filterv #(selector-matches?
                                    selector (:seon.edit/sexpr dispatch) %)
@@ -330,25 +373,50 @@
                     (bounded-values
                      (map #(candidate-evidence source starts %) semantics)
                      context-byte-limit)]
-                (flat-error
-                 :my.edit/no-match :my.edit/no-match (:my.edit/path request)
-                 "No top-level form matches the exact selector."
-                 {:seon.edit/candidates (:seon.edit/values evidence)
+                (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.edit/source
+        :seon.error/operation 'seon.edit/form
+        :seon.error/message "No top-level form matches the exact selector."
+        :seon.error/offending request
+        :seon.error/diagnostic-layer :my.edit/source
+        :seon.error/diagnostic-operation 'seon.edit/form
+        :seon.error/diagnostic-member :my.edit/path
+        :seon.error/diagnostic-expected "one matching source region, or explicit replacement of all matches"
+        :seon.error/diagnostic-offending request
+        :seon.error/diagnostic-cause :my.edit/no-match
+        :seon.error/diagnostic-evidence {:seon.edit/candidates (:seon.edit/values evidence)
                   :seon.edit/candidates-complete?
-                  (:seon.edit/complete? evidence)}))
+                  (:seon.edit/complete? evidence)}
+        :seon.error/data {:seon.edit/candidates (:seon.edit/values evidence)
+                  :seon.edit/candidates-complete?
+                  (:seon.edit/complete? evidence)}
+        :my.edit/no-match (:my.edit/path request)}))
 
               (< 1 (count matches))
               (let [evidence
                     (bounded-values
                      (map #(candidate-evidence source starts %) matches)
                      context-byte-limit)]
-                (flat-error
-                 :my.edit/ambiguous-match :my.edit/ambiguous-match
-                 (:my.edit/path request)
-                 "More than one top-level form matches the selector."
-                 {:seon.edit/candidates (:seon.edit/values evidence)
+                (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.edit/source
+        :seon.error/operation 'seon.edit/form
+        :seon.error/message "More than one top-level form matches the selector."
+        :seon.error/offending request
+        :seon.error/diagnostic-layer :my.edit/source
+        :seon.error/diagnostic-operation 'seon.edit/form
+        :seon.error/diagnostic-member :my.edit/path
+        :seon.error/diagnostic-expected "one matching source region, or explicit replacement of all matches"
+        :seon.error/diagnostic-offending request
+        :seon.error/diagnostic-cause :my.edit/ambiguous-match
+        :seon.error/diagnostic-evidence {:seon.edit/candidates (:seon.edit/values evidence)
                   :seon.edit/candidates-complete?
-                  (:seon.edit/complete? evidence)}))
+                  (:seon.edit/complete? evidence)}
+        :seon.error/data {:seon.edit/candidates (:seon.edit/values evidence)
+                  :seon.edit/candidates-complete?
+                  (:seon.edit/complete? evidence)}
+        :my.edit/ambiguous-match (:my.edit/path request)}))
 
               :else
               (matched-form-result source starts (first matches) request
@@ -379,7 +447,7 @@
   "Replace one exact string occurrence, or every occurrence when explicit."
   {:malli/schema
    [:=> [:cat :string :my.edit/exact-request [:int {:min 1}]]
-    [:or :seon.edit/candidate :seon.error/value]]}
+    [:or :seon.edit/candidate :my.edit/no-match-error :my.edit/ambiguous-match-error]]}
   [source request context-byte-limit]
   (let [old-string (:my.edit/old-string request)
         new-string (:my.edit/new-string request)
@@ -394,19 +462,46 @@
                   context-byte-limit)]
     (cond
       (empty? positions)
-      (flat-error :my.edit/no-match :my.edit/no-match (:my.edit/path request)
-                  "The exact prior string does not occur in the source."
-                  {:my.edit/replacements 0
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.edit/source
+        :seon.error/operation 'seon.edit/exact
+        :seon.error/message "The exact prior string does not occur in the source."
+        :seon.error/offending request
+        :seon.error/diagnostic-layer :my.edit/source
+        :seon.error/diagnostic-operation 'seon.edit/exact
+        :seon.error/diagnostic-member :my.edit/path
+        :seon.error/diagnostic-expected "one matching source region, or explicit replacement of all matches"
+        :seon.error/diagnostic-offending request
+        :seon.error/diagnostic-cause :my.edit/no-match
+        :seon.error/diagnostic-evidence {:my.edit/replacements 0
                    :seon.edit/lines (:seon.edit/values evidence)
-                   :seon.edit/lines-complete? (:seon.edit/complete? evidence)})
+                   :seon.edit/lines-complete? (:seon.edit/complete? evidence)}
+        :seon.error/data {:my.edit/replacements 0
+                   :seon.edit/lines (:seon.edit/values evidence)
+                   :seon.edit/lines-complete? (:seon.edit/complete? evidence)}
+        :my.edit/no-match (:my.edit/path request)})
 
       (and (not replace-all?) (< 1 (count positions)))
-      (flat-error :my.edit/ambiguous-match :my.edit/ambiguous-match
-                  (:my.edit/path request)
-                  "The exact prior string occurs more than once."
-                  {:my.edit/replacements (count positions)
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.edit/source
+        :seon.error/operation 'seon.edit/exact
+        :seon.error/message "The exact prior string occurs more than once."
+        :seon.error/offending request
+        :seon.error/diagnostic-layer :my.edit/source
+        :seon.error/diagnostic-operation 'seon.edit/exact
+        :seon.error/diagnostic-member :my.edit/path
+        :seon.error/diagnostic-expected "one matching source region, or explicit replacement of all matches"
+        :seon.error/diagnostic-offending request
+        :seon.error/diagnostic-cause :my.edit/ambiguous-match
+        :seon.error/diagnostic-evidence {:my.edit/replacements (count positions)
                    :seon.edit/lines (:seon.edit/values evidence)
-                   :seon.edit/lines-complete? (:seon.edit/complete? evidence)})
+                   :seon.edit/lines-complete? (:seon.edit/complete? evidence)}
+        :seon.error/data {:my.edit/replacements (count positions)
+                   :seon.edit/lines (:seon.edit/values evidence)
+                   :seon.edit/lines-complete? (:seon.edit/complete? evidence)}
+        :my.edit/ambiguous-match (:my.edit/path request)})
 
       :else
       (let [applied (if replace-all? positions [(first positions)])
@@ -430,29 +525,57 @@
   "Replace a one-based inclusive line window guarded by its exact bytes."
   {:malli/schema
    [:=> [:cat :string :my.edit/lines-request [:int {:min 1}]]
-    [:or :seon.edit/candidate :seon.error/value]]}
+    [:or :seon.edit/candidate :my.edit/no-match-error]]}
   [source request context-byte-limit]
   (let [starts (line-starts source)
         from-line (:my.edit/from-line request)
         to-line (:my.edit/to-line request)]
     (if (or (> from-line to-line) (> to-line (count starts)))
-      (flat-error :my.edit/no-match :my.edit/no-match (:my.edit/path request)
-                  "The guarded line range is outside the current source."
-                  {:my.edit/from-line from-line
+      (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.edit/source
+        :seon.error/operation 'seon.edit/lines
+        :seon.error/message "The guarded line range is outside the current source."
+        :seon.error/offending request
+        :seon.error/diagnostic-layer :my.edit/source
+        :seon.error/diagnostic-operation 'seon.edit/lines
+        :seon.error/diagnostic-member :my.edit/path
+        :seon.error/diagnostic-expected "one matching source region, or explicit replacement of all matches"
+        :seon.error/diagnostic-offending request
+        :seon.error/diagnostic-cause :my.edit/no-match
+        :seon.error/diagnostic-evidence {:my.edit/from-line from-line
                    :my.edit/to-line to-line
-                   :seon.edit/line-count (count starts)})
+                   :seon.edit/line-count (count starts)}
+        :seon.error/data {:my.edit/from-line from-line
+                   :my.edit/to-line to-line
+                   :seon.edit/line-count (count starts)}
+        :my.edit/no-match (:my.edit/path request)})
       (let [start (nth starts (dec from-line))
             end (or (nth starts to-line nil) (count source))
             actual (subs source start end)
             expected (:my.edit/old-window request)]
         (if (not= expected actual)
-          (flat-error :my.edit/no-match :my.edit/no-match
-                      (:my.edit/path request)
-                      "The guarded line window does not match current source."
-                      {:my.edit/from-line from-line
+          (error/diagnostic
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :my.edit/source
+        :seon.error/operation 'seon.edit/lines
+        :seon.error/message "The guarded line window does not match current source."
+        :seon.error/offending request
+        :seon.error/diagnostic-layer :my.edit/source
+        :seon.error/diagnostic-operation 'seon.edit/lines
+        :seon.error/diagnostic-member :my.edit/path
+        :seon.error/diagnostic-expected "one matching source region, or explicit replacement of all matches"
+        :seon.error/diagnostic-offending request
+        :seon.error/diagnostic-cause :my.edit/no-match
+        :seon.error/diagnostic-evidence {:my.edit/from-line from-line
                        :my.edit/to-line to-line
                        :my.edit/actual-window actual
-                       :my.edit/source-window-complete? true})
+                       :my.edit/source-window-complete? true}
+        :seon.error/data {:my.edit/from-line from-line
+                       :my.edit/to-line to-line
+                       :my.edit/actual-window actual
+                       :my.edit/source-window-complete? true}
+        :my.edit/no-match (:my.edit/path request)})
           (let [new-window (:my.edit/new-window request)
                 candidate-source (splice source start end new-window)
                 changed-end (+ start (count new-window))]

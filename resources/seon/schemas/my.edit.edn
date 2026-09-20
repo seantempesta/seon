@@ -61,17 +61,17 @@
   [:my.edit/source-window-complete? :my.edit/source-window-complete?]
   [:my.edit/replacements {:optional true} :my.edit/replacements]],
  :my.edit/no-match :my.edit/path
- :my.edit/no-match-error [:map {:seon.error/class true :seon.render/ai seon.error/edit-prose :seon.render/html seon.error/render-html :error/message "must identify the path with no matching edit target"} [:my.edit/no-match :my.edit/no-match] [:seon.error/message :seon.error/message]]
+ :my.edit/no-match-error [:and :seon.error/base [:map [:my.edit/no-match :my.edit/no-match]]]
  :my.edit/ambiguous-match :my.edit/path
- :my.edit/ambiguous-match-error [:map {:seon.error/class true :seon.render/ai seon.error/edit-prose :seon.render/html seon.error/render-html :error/message "must identify the path with ambiguous edit targets"} [:my.edit/ambiguous-match :my.edit/ambiguous-match] [:seon.error/message :seon.error/message]]
- :my.edit/parse-refused [:= true]
- :my.edit/parse-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark edited source refused by the Clojure reader"} [:my.edit/parse-refused :my.edit/parse-refused] [:seon.error/message :seon.error/message]]
- :my.edit/lossless-check-failed [:= true]
- :my.edit/lossless-check-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark edited source that failed the lossless check"} [:my.edit/lossless-check-failed :my.edit/lossless-check-failed] [:seon.error/message :seon.error/message]]
+ :my.edit/ambiguous-match-error [:and :seon.error/base [:map [:my.edit/ambiguous-match :my.edit/ambiguous-match]]]
+ :my.edit/parse-byte-count [:int {:min 0}]
+ :my.edit/parse-refused-error [:and :seon.error/base [:map [:my.edit/parse-byte-count :my.edit/parse-byte-count]]]
+ :my.edit/unverified-char-span [:tuple [:int {:min 0}] [:int {:min 0}]]
+ :my.edit/lossless-check-failed-error [:and :seon.error/base [:map [:my.edit/unverified-char-span :my.edit/unverified-char-span]]]
  :my.edit/stale-source :my.edit/path
- :my.edit/stale-source-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose source is stale"} [:my.edit/stale-source :my.edit/stale-source] [:seon.error/message :seon.error/message]]
+ :my.edit/stale-source-error [:and :seon.error/base [:map [:my.edit/stale-source :my.edit/stale-source]]]
  :my.edit/not-utf8 :my.edit/path
- :my.edit/not-utf8-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose source is not strict UTF-8"} [:my.edit/not-utf8 :my.edit/not-utf8] [:seon.error/message :seon.error/message]]
+ :my.edit/not-utf8-error [:and :seon.error/base [:map [:my.edit/not-utf8 :my.edit/not-utf8]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :my.edit/edit-observation
