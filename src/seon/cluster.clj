@@ -3567,6 +3567,7 @@
               :seon.boot/cluster-name cluster-name
               :seon.source/commit-id
               (:seon.source/commit-id source-base)
+              :seon.schema/projection (:seon.schema/projection source-base)
               :datahike.gc-guard/reachability-permit start-permit}))
           (finally
             (gc-guard/release-reachability-permit! start-permit)))

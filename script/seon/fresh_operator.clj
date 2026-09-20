@@ -2633,7 +2633,24 @@
              ~request {:seon.store/store ~store
                        :seon.boot/cluster-name ~name
                        :seon.source/commit-id
-                       (:seon.source/commit-id ~source)}]
+                       (:seon.source/commit-id ~source)}
+             ~request
+             (if-let [projection#
+                      (some
+                       (fn [[cluster-name# instance#]]
+                         (when-let [state# (get-in instance# [:seon.sci.eval/ctx :seon.sci.eval/projection-state])]
+                           (let [database# ((ns-resolve 'seon.db (symbol "carry-projection-state"))
+                                            ((ns-resolve 'seon.db (symbol "db"))
+                                             (:seon.boot/cluster-connection instance#)) state#)
+                                 row# ((ns-resolve 'seon.db (symbol "pull")) database#
+                                       [:seon.source/commit-id]
+                                       [:seon.cluster/name cluster-name#])]
+                             (when (= (:seon.source/commit-id ~source)
+                                      (:seon.source/commit-id row#))
+                               ((ns-resolve 'seon.db (symbol "carried-projection")) database#)))))
+                       @@(ns-resolve 'seon.operator.runtime (symbol "running-instances")))]
+               (assoc ~request :seon.schema/projection projection#)
+               ~request)]
          (when (and (not ~force?)
                     (contains? ((ns-resolve 'seon.cluster.registry (symbol "roster"))
                                 ~store) ~branch))

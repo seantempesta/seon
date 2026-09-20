@@ -1193,9 +1193,10 @@
     (try
       (let [result
             (registry/reset-cluster!
-             {:seon.store/store operation-store
-              :seon.boot/cluster-name (:seon.boot/cluster-name request)
-              :seon.source/commit-id source-commit})]
+             (merge (select-keys request [:seon.schema/projection])
+                    {:seon.store/store operation-store
+                     :seon.boot/cluster-name (:seon.boot/cluster-name request)
+                     :seon.source/commit-id source-commit}))]
         result)
       (finally
         (when release? (store/release-store! operation-store))))))

@@ -64,6 +64,8 @@
   (:require [clojure.edn :as edn]
             [datahike.api :as d]
             [seon.db :as db]
+            [seon.config :as config]
+            [seon.schema :as schema]
             [datahike.connections :as connections]
             [datahike.store :as datahike.store]
             [konserve.core :as k]
@@ -221,6 +223,32 @@
 
           (throw failure))))))
 
+(defn- record-fork!
+  "Record the exact source commit with the new branch's cluster row."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.boot/cluster-name
+                       :seon.source/commit-id [:or :nil :map]] :nil]}
+  [store cluster-name source-commit supplied-projection]
+  (let [connection (store/open-branch! store (cluster-branch cluster-name))]
+    (try
+      (let [database (db/db connection)
+            projection (or supplied-projection (db/carried-projection database)
+                           (schema/handed-projection)
+                           (schema/projection-from-database database))]
+        (schema/call-with-projection
+         projection
+         (fn []
+           (let [compiled (config/compile-manifest {:seon.boot/cluster-name cluster-name})
+                 result (db/transact!
+                         connection
+                         {:tx-data [(:seon.config/desired-row compiled)
+                                    {:seon.cluster/name cluster-name
+                                     :seon.cluster/config [:seon.config/cluster cluster-name]
+                                     :seon.source/commit-id source-commit}]})]
+             (when-not (:db-after result)
+               (throw (ex-info "The fork's source commit could not be recorded." result)))))))
+      (finally (store/release-branch! connection))))
+  nil)
+
 (defn ensure-cluster!
   "Ensure `:cluster-<name>` exists at the requested source commit.
   Idempotent by the roster: a second call returns
@@ -230,11 +258,14 @@
   regression, not an assumption.
   The source is an exact immutable commit ID, so publication can advance
   while this operation still forks the database value its caller chose.
+  A new branch records that commit on its cluster row in one transaction
+  with the row's required config. Boot preserves the recorded source fact.
   Refuses `::source-absent` when that commit is unavailable."
   {:malli/schema [:=> [:cat :seon.cluster.registry/cluster-request]
                   :seon.cluster.registry/branch-result]}
   [{:keys [:seon.store/store :seon.boot/cluster-name]
     source-commit :seon.source/commit-id
+    projection :seon.schema/projection
     reachability-permit :datahike.gc-guard/reachability-permit}]
   (when-not (commit-present? store source-commit)
     (refuse! ::source-absent
@@ -242,10 +273,13 @@
              {::dir (:seon.store/dir store)
               :seon.source/commit-id source-commit
               :seon.boot/cluster-name cluster-name}))
-  (branch! {:seon.store/store store
-            :seon.cluster.registry/from source-commit
-            :seon.store/branch (cluster-branch cluster-name)
-            :datahike.gc-guard/reachability-permit reachability-permit}))
+  (let [result (branch! {:seon.store/store store
+                         :seon.cluster.registry/from source-commit
+                         :seon.store/branch (cluster-branch cluster-name)
+                         :datahike.gc-guard/reachability-permit reachability-permit})]
+    (when (:seon.cluster/created? result)
+      (record-fork! store cluster-name source-commit projection))
+    result))
 
 (defn reset-cluster!
   "Return a cluster to an exact source commit.
@@ -262,7 +296,8 @@
   {:malli/schema [:=> [:cat :seon.cluster.registry/cluster-request]
                   :seon.cluster.registry/branch-result]}
   [{:keys [:seon.store/store :seon.boot/cluster-name]
-    source-commit :seon.source/commit-id}]
+    source-commit :seon.source/commit-id
+    projection :seon.schema/projection}]
   (let [branch (cluster-branch cluster-name)
         current-commit (branch-commit-id {:seon.store/store store
                                           :seon.store/branch branch})]
@@ -286,6 +321,7 @@
                   :seon.boot/cluster-name cluster-name}))
       (d/force-branch! source-db branch #{source-commit}
                        {:expected-current-commit current-commit})
+      (record-fork! store cluster-name source-commit projection)
       {:seon.store/branch branch :seon.cluster/created? true})))
 
 (defn retire-branch!

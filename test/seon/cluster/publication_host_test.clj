@@ -6,10 +6,13 @@
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
+            [seon.cluster.store :as store]
+            [seon.db :as db]
             [seon.fresh-operator :as operator]
             [seon.id :as id]
             [seon.operator.runtime :as runtime]
             [seon.operator.state :as state]
+            [seon.schema :as schema]
             [seon.test-support :as support]))
 
 (deftest ^{:seon.test/long "Publish and boot a real cluster in the test JVM, then send operator requests through its advertised prepl."
@@ -36,6 +39,8 @@
                               :seon.operator.process-record/log (str root "/host.log")})
                _ (#'operator/write-process-record! (str root) record)
                before (#'operator/read-process-records (str root))
+               projection-reads (atom 0)
+               derive-projection schema/projection-from-database
                published (:seon.source/commit-id (source/current (:seon.store/store instance)))]
            (try
              (is (= [record] (:seon.fresh-operator/process-records before)))
@@ -45,6 +50,12 @@
                                (assoc-in [:current-source :root]
                                          (str (.relativize (.toPath repository) (.toPath root)))))))
              (spit (io/file root "invalid.edn") "{:seon.config/on-core-error :invalid}")
+             (with-redefs [schema/projection-from-database
+                           (fn [database & arguments]
+                             (when (= (registry/cluster-branch fork-name)
+                                      (get-in database [:config :branch]))
+                               (swap! projection-reads inc))
+                             (apply derive-projection database arguments))]
              (doseq [arguments [["init" fork-name]
                                 ["init"]
                                 ["init" "--changed" "src/my/note.clj"]
@@ -111,11 +122,17 @@
                                                (.getName (io/file (first (:seon.operator.subprocess/argv %)))))
                                    records)
                          (pr-str records))))
-                 (is (= before (#'operator/read-process-records (str root))))))
-             (is (= published
-                    (registry/branch-commit-id
-                     {:seon.store/store (:seon.store/store instance)
-                      :seon.store/branch (registry/cluster-branch fork-name)})))
+                 (is (= before (#'operator/read-process-records (str root)))))))
+             (is (zero? @projection-reads)
+                 "An exact source fork carries the existing projection instead of reading the whole program.")
+             (let [connection (store/open-branch! (:seon.store/store instance)
+                                                  (registry/cluster-branch fork-name))]
+               (try
+                 (is (= published
+                        (:seon.source/commit-id
+                         (db/pull (db/db connection) [:seon.source/commit-id]
+                                  [:seon.cluster/name fork-name]))))
+                 (finally (store/release-branch! connection))))
              (finally
                (cluster/stop! (get @runtime/running-instances name instance)))))))
       (finally

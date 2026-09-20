@@ -78,3 +78,15 @@ origin, and the bridge's ref type timed out at 20,000 ms. HTTP independently
 reproduced the origin contract refusal. The assignment permits only one
 evaluation, so no retry or alternate prepl transport was used. This records
 unavailable probe evidence without attributing its cause.
+
+## Scratch fork observation — 2026-09-22
+
+At HEAD `c96db3e94`, cluster `s` in `tmp/one-jvm-redesign-root`, PID
+56462, a JVM `seon.db/pull` without the cluster's supplied projection
+returned a validation refusal whose MCP rendering then failed:
+`seon.render.value/artifact-value returned undeclared error facets
+#{:seon.schema/validation-refusal}`. The outer diagnostic retained that
+message and the offending class `clojure.lang.PersistentHashMap`.
+Repeating the read under the instance's `:seon.sci.eval/projection-state`
+returned the cluster name in 7 ms. This establishes a refused diagnostic
+render, not a failed cluster read with the correct supplied projection.

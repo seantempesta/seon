@@ -411,3 +411,135 @@ production/test byte counts. There is no schema change in slice 1; a fresh
 boot acquires the new initial test classpath. Stop here for the orchestrator's
 cold gate, platform proof, reset/boot measurement, and remaining publication
 rows before slice 2.
+
+## Fork correction before slice 2
+
+Owner correction: the first adoption after a fork must use the existing
+convergence check. The live scratch host at `c96db3e94` confirmed that its
+cluster row had `:seon.cluster/name` but no `:seon.source/commit-id`.
+`registry/ensure-cluster!` and `reset-cluster!` now record that exact source
+commit with the new cluster row. The same transaction writes the required
+config row, produced by `seon.config/compile-manifest`; it adds no config
+compiler or cache. `store/open-branch!`, `seon.db/transact!`, and
+`store/release-branch!` are the existing connection/write seams. Boot's
+`ensure-cluster-entity!` preserves the source fact. Datahike still creates
+its branch from the immutable published commit; the cluster/config
+transaction advances only the new branch. It does not re-index source.
+
+The branch operation and subsequent row transaction are separate Datahike
+operations, not one atomic operation across the store roster and branch.
+A refused row transaction is reported rather than acknowledged as a
+successful initialization. This change does not alter branch concurrency
+or recovery semantics.
+
+`fresh_operator.clj:2830–2889` already sends every named initialization to
+an advertised live host's `prepl-eval!`. Its child JVM arm is reached only
+without a live process; an alive but unadvertised process refuses. That
+remaining child is the allowed cold-start cost. The existing transport selection needs no change for correction (b).
+
+Live evidence uses only `tmp/one-jvm-redesign-root`, cluster `s`, PID 56462.
+After reloading the registry, the fork plus its row transaction took
+1,371.650 ms. Calling the existing `development-source-refresh!` against
+that branch and the same published commit emitted only `development cluster
+converged`; the whole inspection took 25 ms, and `:max-tx` did not change.
+This is a direct JVM probe, not the complete `refresh-source!` regression.
+The scratch host was downed before the armed fast run.
+
+The extended adoption regression performs real publication and boot, then
+calls `refresh-source!` with unchanged source. It observes calls to the real
+writer and namespace reload owner on that thread, asserting zero calls and
+positive convergence progress. The operator host regression reads the
+fork's stored source commit; its branch head now includes the required
+cluster/config transaction and therefore is no longer byte-identical to
+the published head. Both tests retain their explicit long-test reasons and
+bounds for full publication and boot.
+
+An MCP read without the explicit cluster projection returned a validation
+refusal that itself failed rendering. The repeated read with the supplied
+projection succeeded; the diagnostic-render boundary is recorded in
+[the existing MCP projection issue](../../../seon/issues/mcp-jvm-small-result-projection-fails-during-live-adoption.md).
+The Markdown hook also reports the same two out-of-scope stale Datahike
+pins listed in the slice 1 note. No foreign session or file was changed.
+
+Fast iteration at snapshot HEAD `8fc5a6ed7`: run `a4aa660ce57e`, **3
+executed, 44 assertions, zero failures/errors**, exit 0. The three owned
+paths were `src/seon/cluster/registry.clj`,
+`test/seon/cluster/publication_adoption_test.clj`, and
+`test/seon/cluster/publication_host_test.clj`; the two test namespaces
+were passed to `bin/test-fast --paths`. No cold gate was run.
+Program digest `c5c927703cc82a423a1b12b520ec5e99822fd59c32814cc6ec2e295d3566d9f5`;
+input digest `296eb62dba1f1bc499a5659f01ce549b74c02a8ca6ad3f3073b44719a63ee93f`.
+The fixture/restoration test took 119.177 s; the new regression including
+publication/boot took 147.799 s; the operator fixture took 162.372 s.
+A virtual-thread-inclusive `jcmd Thread.dump_to_file -format=json` sample
+of the sole test JVM showed the new regression awaiting the Datahike writer
+from `seon.cluster/populate-source!`: full program population, not its
+subsequent no-change assertion. Those full-fixture costs remain O(program).
+
+The operator rows (client wall time) were live fork **5.156 s**, unchanged
+`init` **1.960 s**, unchanged `--changed` **1.557 s**, first `--dev`
+**2.232 s**, config **0.849 s**, status **0.847 s**, hook admission
+**0.502 s**, invalid config **0.245 s**. Every request retained the host's
+process records and launched no JVM. The erased core-fault diagnostic
+appeared again; slice 4 still owns that recorded issue.
+
+The first implementation missed the fork target. Its row writer's fallback invokes
+`schema/projection-from-database`, whose `derive-projection-from-database`
+reads every schema, function contract, and function source before this
+small write (`src/seon/schema.clj:2705–2735`). The direct live probe supplied
+the existing cluster projection and took 1.372 s; the ordinary operator
+request has no supplied projection and took 5.156 s. This identifies the
+O(program) fallback in the new path; it is not a measured breakdown of
+that 5.156 s. The needed cost is the new cluster/config rows. The 2.232 s
+no-change request still reads the source inventory and stored manifest;
+its adoption now compares equal commit IDs and writes nothing. Slice 2's
+snapshot/analysis measurements must separate those remaining reads.
+
+No attributes change and no reset is needed for this correction.
+
+The final operator request carries an existing running cluster's projection
+only when its recorded source commit equals the immutable source commit
+being forked. It captures that projection with `db/carry-projection-state`
+and reads the commit through `db/pull`; the registry receives it on the
+request. Boot similarly passes the projection already acquired by
+`source-base!`. Refork passes the same value through its existing request.
+There is no new cache or retained state. If no matching projection exists,
+the source database remains the derivation authority. That less common
+case still reads O(program) rows and needs further measurement.
+
+With the final operator form, live `init fork-carried` completed its
+lifecycle in 1.134 s. A separate `init fork-timed` through the same
+`prepl-eval!` function returned Clojure's terminal `:ret :ms` of **890 ms**,
+meeting the JVM-time target. Both forked commit
+`6ab035cd-03b5-54e8-bf55-71e33f0f42e2` in the existing scratch JVM.
+The final regression additionally observes the real projection owner and
+asserts zero whole-program derivations for the forked branch.
+
+Final fast request `2aea6e413827` recovered the final host regression's
+recorded green after the terminal session was lost: **0 executed, 1 unchanged,
+37 assertions, zero failures/errors**, exit 0. This is reuse, not another
+execution. Its recorded program digest is
+`6d04dbde59af66ba96286695df7c5487a601cfe131387de3193d6091588ab36c`, input
+`45b1656b61157dbaf9ce6ebd4fe98d82e907d7fa593c219b7f6b1e66ef82b97b`,
+basis `536870950`. The request selected all six production/test paths below.
+The earlier adoption regression remains the 44-assertion run above; the
+orchestrator still owns cold/platform proof.
+
+| Path | Before | After | Net deleted |
+|---|---:|---:|---:|
+| `script/seon/fresh_operator.clj` | 155,975 | 157,158 | -1,183 |
+| `src/seon/cluster.clj` | 187,314 | 187,390 | -76 |
+| `src/seon/cluster/registry.clj` | 29,575 | 31,482 | -1,907 |
+| `src/seon/operator.clj` | 52,873 | 52,963 | -90 |
+| `test/seon/cluster/publication_adoption_test.clj` | 2,647 | 4,350 | -1,703 |
+| `test/seon/cluster/publication_host_test.clj` | 8,062 | 9,084 | -1,022 |
+
+Correction adds 3,256 production bytes and 2,725 test bytes; no cache is
+introduced. Measure the first unchanged adoption after a fresh fork and
+reset, plus live fork JVM time. The scratch host is down before load/test
+JVMs. Source caching remains unchanged pending the required slice 2 probe.
+
+Load proof: `clojure -Sdeps '{:paths ["src" "resources" "script"]}' -M`
+required `seon.cluster.registry`, `seon.cluster`, `seon.cluster.source`, and
+`seon.fresh-operator`, printed `:owned-namespaces-loaded`, and exited 0.
+`git diff --check` passes.
