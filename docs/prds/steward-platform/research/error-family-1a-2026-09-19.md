@@ -2764,3 +2764,75 @@ yet claim complete inputs: its held readers must be included once converted.
 The orchestrator must release/coordinate the issue's paths before this lane
 can implement and measure that slice. All unrelated staged and unstaged edits
 are preserved.
+
+## 2026-09-22 additive scope — explicit constructor inputs still needed
+
+The orchestrator ruled accretion now, retirement later. The four old members
+must remain declared and written unchanged; their held readers no longer
+block adding optional attributes. No old member was touched.
+
+Traced the actual constructor, instrumentation report, blob API, printer and
+SCI binding owners. This exposes a different dependency from the retirement
+hold: the leaf takes only observation data; the instrumentation report
+passes projection/caps but no connection or agent context. `seon.blob/put!`
+requires a connection and string; the binary API requires a connection and
+input stream. Blob and schema both depend on the leaf, and print depends on
+schema. Direct requires from the leaf back to those owners create cycles.
+The actual binding owner remains `seon.sci.eval/bind-result!`.
+The [same issue](../../../seon/issues/error-result-retirement-crosses-held-readers.md)
+now distinguishes this additive-input dependency from the deferred retirement.
+
+Existing dynamic environment reads elsewhere in instrumentation do not give
+the constructor explicitly carried inputs. Reusing that pattern here would
+violate AGENTS §2.1. Likewise, silently enriching an error only at recording
+would contradict the newly ruled constructor guarantee. The allowed-path
+list excludes instrumentation and the blob owner. No implementation can
+promise durable storage without a supplied store, particularly before one
+exists. Printer defaults solve missing presentation inputs, not missing
+storage custody.
+
+Registry source inspection found `:seon.eval/shown` and the existing
+evaluation identity `:seon.cluster.eval/id`; the latter is an entity identity,
+not an independent offending-result attribute. No new attribute was declared:
+a merged-registry probe and identity selection remain part of implementation
+after the input boundary is resolved. Blob serialization also needs an honest
+domain: `store-faithful-edn` explicitly returns no representation for values
+whose value, class or metadata cannot survive an EDN round trip. Live SCI
+objects can still be bound, but that does not prove a faithful durable blob.
+
+Exactly three options at this design gate, simplest first:
+
+1. **Authorize an optional, explicitly supplied result-writing operation in
+   the leaf constructor and its real instrumentation/evaluation callers
+   (recommended).** The operation uses the existing blob, printer and
+   `bind-result!` owners; the leaf mints the identity. Guarantee: callers
+   supplying acquired storage get all new result members before the error
+   map returns; agent callers additionally retain the actual object. Cost:
+   extend ownership to the instrumentation request/report sites and their
+   schemas, estimated 2–4 hours plus the canonical runs. Given up: an
+   unconditional blob promise for boot/store failures with no connection;
+   unsupported serialization must remain an explicit refusal.
+2. **Enrich at the existing evaluation/recording boundary.** Guarantee:
+   admitted errors have the new stored result members and the existing SCI
+   binding while low-level constructors stay pure. Cost: roughly 2–3 hours
+   in the current owners plus regression runs. Given up: the ruling that
+   every leaf constructor returns the final stored map. This requires an
+   explicit owner amendment, not an implementation shortcut.
+3. **Require storage and result operations at every constructor call.**
+   Guarantee: construction is unavailable without the explicit prerequisites;
+   no missing blob can pass as success. Cost: a cross-owner caller conversion,
+   estimated one day or more, including currently held boot/database/test
+   paths. Given up: constructing ordinary errors before storage acquisition
+   or while that acquisition itself fails; those paths need a separately
+   specified failure outcome.
+
+Stopped before production changes under AGENTS §2.5's design gate: the
+necessary input propagation crosses the permitted owner boundary and changes
+the universal guarantee. No new global lookup, callback registry, dynamic
+binding, second intern path, serialization copy, or new attribute was added.
+The restored source/test changes remain untouched and uncommitted by this
+resume. Test tally: **not run**; no new regression is claimed. RESET NEEDED:
+no additional attributes yet. The prior retirement list remains pending.
+The accumulated cold command above remains owed for earlier implementation;
+the new slice's command must include its authorized producer inputs once
+that scope is settled.

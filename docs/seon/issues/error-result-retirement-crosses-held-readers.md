@@ -41,3 +41,32 @@ Acceptance remains two armed canonical regressions: an agent turn's
 contract refusal exposes the actual value through `result/e<id>` and stores
 the blob and printer text; a large nested value has capped shown text and
 validates as stored. The walk must render the printer's shown text.
+
+## Additive slice ruling and explicit-input dependency — 2026-09-22
+
+The orchestrator authorized accretion first: retain all four old members
+unchanged and retire them with held readers later. The retirement hold no
+longer prevents adding attributes. A separate source-verified dependency
+remains before the additive producer can promise storage and SCI binding:
+
+- `seon.error.refusal/diagnostic` accepts observation data only. Its callers
+  do not supply a connection, SCI context, render profile or result writer.
+- `src/seon/instrument.clj:376` constructs the actual contract refusal with
+  diagnostic data; `boundary-refusal` at line 682 carries a projection and
+  caps but no connection/context. An agent-turn regression must exercise this
+  path, not a manually enriched error map in a fixture.
+- `seon.blob/put!` at line 342 accepts a connection and string content;
+  `put-binary!` accepts a connection and input stream. Neither accepts an
+  arbitrary object without a serialization decision. `store-faithful-edn`
+  returns no text when EDN cannot preserve value, class and metadata.
+- `seon.blob` requires the leaf constructor itself and `seon.db`;
+  `seon.db` also requires that leaf. A direct leaf-to-blob require creates
+  a namespace cycle. The printer requires schema, which also requires the
+  leaf. SCI object binding remains in the existing eval owner.
+
+Supplying explicit operations from an already acquired environment can
+avoid the cycle, but those operations must reach the constructor through
+the actual producer's inputs. A dynamic binding, global connection lookup,
+or deferred writer-side enrichment would not satisfy the ruled constructor
+guarantee and the carried-input law. No such mechanism was added. The
+landing note records three scope choices for this remaining decision.
