@@ -87,6 +87,15 @@ publishes CHANGED files as same-identity upserts (`src/seon/cluster.clj`
    toolchain digest change forces one complete publication; the digest is a
    fact on the published base; the equality regression gains the indexer case.
 
+   **Landed (2026-09-21 ~04:30 UTC, `8edfae1b7`):** declaration/toolchain
+   invalidation, incremental analysis prerequisites, unchanged-publication seal
+   repair; the activation regression fell 410.8 → 72.7 s by removing four
+   redundant publications. Still owed: the population owner's conversion in
+   `src/seon/cluster.clj` (held by step 1 at the time), the duplicate-publisher
+   deletions, lineage reuse and the live-JVM proof. **Validation ruling:** the
+   runner suite's child-gate fixtures move to an orchestrator-only integration
+   namespace (platform tier); no lane ever launches a nested cold gate.
+
 2. **Publish through the live JVM, never a fresh one.** When `default` (or
    any live cluster JVM of the root) is alive, the publication runs over its
    prepl (the same seam `init --dev` adoption uses), removing the 40–60 s

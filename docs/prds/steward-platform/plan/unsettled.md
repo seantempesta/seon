@@ -5269,3 +5269,17 @@ verbatim step-2 launch text (compiled walker; delete `seon.schema.form`;
 attribute derivation by `m/walk` with whole-population equality as the
 regression) so step 2 starts the minute step 1 lands. Default RSS 15.8 GB
 idle (was 4.7 GB at reset) — watched, not restarted.
+
+## 2026-09-21 ~04:30 UTC — publication lane: item 1 core landed (activation 410.8 → 72.7 s); nested-gate ruling
+
+`publication-dissolution` landed `8edfae1b7` (declaration + toolchain
+invalidation; incremental analysis prerequisites; unchanged-publication
+seal repair; 68 tests / 485 assertions / 0 F / 1 E in step 1's held
+fn_test fixture; activation regression 410.8 → 72.7 s, four redundant
+publications gone). Stopped at (a) step 1's hold on `cluster.clj`'s
+population owner and (b) a validation boundary: the runner suite launches
+nested cold child gates. Ruled option 1: child-gate fixtures move to an
+orchestrator-only integration namespace on the platform tier. Resumed on
+items 2–4; cluster.clj conversion and duplicate-publisher deletions land
+when step 1 releases the file. (A "usage limit" grep hit in its log was my
+monitor's own command text in a `ps` listing, not a stop.)
