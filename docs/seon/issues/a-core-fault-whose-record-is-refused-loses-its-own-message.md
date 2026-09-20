@@ -68,3 +68,22 @@ web-view announcement at `2026-09-20T17:14:56.997Z`, then emitted the exact
 second-sighting line above (`:malli.core/invalid-schema`). Removing the
 publication guard does not fix this independent fault-recording path; the
 owner's slice 4 assignment retains it.
+
+## Error recording correction and boot boundary — 2026-09-23
+
+`b2095ca4b` corrects `stored-observation`'s registry lookup: inline transient
+members have no standalone schema, so component discovery must not pass nil
+to Malli. `fb41a5244` corrects the corresponding writer discovery case and
+completes its unknown write-error return. The combined canonical run passes
+48 tests / 388 assertions, including complete stored error components.
+
+A fresh isolated root published commit
+`6ab05683-a7b8-5b5c-bf46-1e422662402b` and forked cluster `e`. Boot then failed
+at the config-phase event bound: no READY event for 30,000 ms, child PID
+91993. `tmp/error-fresh-seon.log` preserves the child log; it contains neither
+`invalid-schema` nor `durable record refused`, but boot never reached READY,
+so this does **not** establish a clean completed boot. The config/adoption
+owner must resolve or measure that boundary before the boot claim is green.
+No timeout was increased. `down` found no live child and a free store flock;
+the isolated root was removed. The original last-resort message-loss defect
+remains outside the bounded recording correction.

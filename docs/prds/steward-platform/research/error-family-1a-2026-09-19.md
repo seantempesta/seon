@@ -3140,3 +3140,52 @@ Other failures in the broader run, outside the requested kind assertions:
 The converted contract-error assertions in the MCP and supplied-key tests
 pass. The remaining render/config/source findings are not attributed to a
 specific implementation change by this bounded run.
+
+### Fresh boot and final verification boundary — 2026-09-23
+
+Read the requested AGENTS.md rules and
+`one-jvm-publication-redesign-2026-09-22.md` end to end for this assignment.
+No default lifecycle operation, worktree, or cold test gate was used. This
+lane never overlapped two of its JVMs. Every production slice passed the
+requested namespace load before its path-limited commit; the final load
+also exited 0 (`tmp/error-final-load.log`).
+
+| Isolated operation | Result | Wall-clock |
+| --- | --- | --- |
+| `bin/seon --root tmp/error-family-1a-root init` | Published `6ab05683-a7b8-5b5c-bf46-1e422662402b`, digest `2f95b5f11d3bdb55e8161fcd72d3b39793d17a881f5ef01b66e11e582bbe4ebe` | 253.55 s |
+| `bin/seon --root tmp/error-family-1a-root init e` | Forked `:cluster-e` from that exact commit | 25.91 s |
+| `bin/seon --root tmp/error-family-1a-root start e` | Refused: config phase silent for 30,000 ms; READY absent; child 91993 exited | 81.40 s |
+| `bin/seon --root tmp/error-family-1a-root down` | No recorded JVMs; stale advertisement removed; store flock free | 0.46 s |
+
+The child log was copied to `tmp/error-fresh-seon.log` before cleanup.
+It contains no `invalid-schema`, `durable record refused`, or core-fault
+line. Because boot failed before READY, that absence is **not** a successful
+boot proof. The [existing boot-fault issue](../../../seon/issues/a-core-fault-whose-record-is-refused-loses-its-own-message.md)
+records the remaining config-phase boundary. The isolated root was removed.
+No held publication file or operator bound was changed.
+
+RESET NEEDED: **none for this assignment**; no attributes changed. Older
+reset items and the parked offending-value work above remain separate.
+
+Code/test paths touched in this assignment: `src/seon/error.clj`,
+`src/seon/turn.clj`, `src/seon/db.clj`, `src/seon/blob.clj`,
+`test/seon/error_test.clj`, `test/seon/turn_error_test.clj`,
+`test/seon/db_error_test.clj`, `test/seon/blob_error_test.clj`,
+`test/seon/run6_db_test.clj`, `test/seon/contracts_plan_test.clj`,
+`test/seon/supplied_documentation_test.clj`, `test/seon/cluster/mcp_test.clj`.
+Documentation: this note and the five issue notes for fixture timing,
+stale fixture contracts, compiled guard error functions, remaining
+schema/render disagreement, and the boot fault's lost message.
+
+Commits: class 1 `b2095ca4b`; class 2 `39406b8cf`; class 3 `fb41a5244`;
+class 4 `c5ce4ba3a`; assertion conversion `b9d983b72`.
+
+Cold command owed to the orchestrator, after a current authoritative
+fixture/recording projection is available:
+
+```sh
+bin/test --paths src/seon/error.clj src/seon/turn.clj src/seon/db.clj src/seon/blob.clj test/seon/error_test.clj test/seon/turn_error_test.clj test/seon/db_error_test.clj test/seon/blob_error_test.clj test/seon/run6_db_test.clj test/seon/contracts_plan_test.clj test/seon/supplied_documentation_test.clj test/seon/cluster/mcp_test.clj -- seon.error-test seon.turn-error-test seon.db-error-test seon.blob-error-test seon.turn-test seon.db-test seon.blob-test seon.instrument-test seon.run6-db-test seon.contracts-plan-test seon.supplied-documentation-test seon.cluster.mcp-test
+```
+
+The clean completed boot and the per-test five-second bound are still owed;
+the recorded 48/388 green result does not establish either.
