@@ -5352,3 +5352,14 @@ regressions + named live proof; reset batch; measured deletion budget;
 diet launch text; first item = the measured `dbi/search` reverse-lookup
 probe with go/no-go). Step-1 cold gate: base published in 88 s (was 226 s
 before the incremental analysis landed) and now executing.
+
+## 2026-09-21 ~06:45 UTC — step-4 launch spec written; step-5 spec lane launched
+
+`bridge-step4-design` landed `d7d894458`:
+[bridge-step4-writer-diet-spec-2026-09-21.md](bridge-step4-writer-diet-spec-2026-09-21.md)
+(first bounded item = the measured `dbi/search` reverse-lookup probe with
+go/no-go; parity regressions incl. the six error-family assertions;
+before/after measurement contract; deletion budget). Read-only slot →
+`bridge-step5-design` (instrument retained contracts). With it, every
+bridge step has a verbatim launch text: 1 landed, 2 running, 3/4/5 ready
+in order. Gate for step 1 executing.
