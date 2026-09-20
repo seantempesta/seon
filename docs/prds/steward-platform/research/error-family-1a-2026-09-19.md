@@ -2175,3 +2175,225 @@ The existing manifest regression is the before-change proof; candidate fast
 verification follows below. The required namespace load passed before this
 slice. No stored attributes change: **RESET NEEDED: no additions** to the
 earlier batch.
+
+### Reporter and producer evidence in the fresh snapshot
+
+The database suite reproduces the existing noncanonical-generator reporter
+defect at `src/seon/fn/schema_shape.clj:130`. The compile/inverse owner is
+`src/seon/schema.clj`: `compilable-form` resolves a named `:gen/gen` into an
+opaque Generator, and `canonical-definition` previously tried to serialize
+its implementation. Malli consumes the supplied object directly
+(`reference-code/malli/src/malli/generator.cljc:473`); test.check declares it
+as a record and treats it as opaque
+(`reference-code/test.check/src/main/clojure/clojure/test/check/generators.cljc:28`).
+The candidate carries the authored symbol in that object's metadata and reads
+it back at the inverse boundary. It adds no registry or global lookup to the
+reporter. The armed canonical-fixture regression checks both round-trip
+definition equality and the original input contract refusal, including its
+function, check, and explanations. This extends the existing open
+[projection/refusal issue](../../../seon/issues/test-refusal-observations-overflow-in-projection-acquisition.md).
+
+`seon.db/projection-fallback` also returned a marker-only map despite its base
+output contract. Its candidate now returns the already-declared transient
+`:seon.schema/validation-refusal`, with the missing projection's key and the
+requesting operation as submitted data. `dependency-error` recognizes that
+specific facet member and preserves it. The unbound-read regression validates
+through a validator captured before removing the supplied projection; its
+assertion cannot accidentally acquire the missing world. SCI's corresponding
+regression checks the same raw facet and exact requesting operation.
+
+Stale contract-marker assertions in the database, cluster and SCI tests now
+assert the declared contract/arity/kernel facet and retain their operation,
+path, outcome, or unchanged-state evidence. The refusal-preservation fixture
+constructs a complete declared agent facet. Two independently created
+declarations-read observations are compared without their event timestamps;
+the new timestamp itself must still be an instant. The cluster convergence
+assertion now retains desired and actually read rows for the next probe.
+
+The source-facet slice landed as `ace176c50`; the five-namespace load passed
+before and after it. Reporter, projection-producer and assertion candidates
+are separate pending slices at this point in the note. No additional stored
+attributes or type changes are proposed by those candidates.
+
+### Acquisition model decision — production edit held at the decision
+
+The fresh canonical fixture verifies that
+`one-unloadable-row-cannot-prevent-cold-acquisition` and
+`non-evaluable-agent-source-reports-its-jvm-fallback` stop at
+`seon.sci.eval/acquisition-refusal`: its diagnostic omits the required base
+members. Adding those alone cannot fulfill the declared acquisition facet.
+`resources/seon/schemas/seon.sci.eval.edn:285` requires
+`:seon.sci.eval/requested-program` (64-character digest),
+`:seon.sci.eval/acquisition-member`, and a complete owned observation.
+The constructor at `src/seon/sci/eval.clj:1571` receives only `[row failure]`.
+The three calls in `acquire-program!` carry no program digest. A row/source
+hash would not identify the whole requested program.
+
+There is already a whole-program digest owner:
+`seon.test.runner/program-digest` derives it from a source seal plus changed
+program facts. It can itself return a typed unavailable result; it is not
+equivalent to hashing the failed row. The runner is held by the results-reuse
+lane. Introducing a second digest algorithm or weakening the existing stored
+facet would make a cross-owner decision here. This is the assignment's design
+stop rule, not an approval requirement inferred from a skill.
+
+Exactly three options, ordered by implementation cost (estimates):
+
+1. **Make requested-program optional on the existing acquisition facet.**
+   Guarantee: the failed member and complete observation are always present;
+   a supplied program digest remains valid. Cost: roughly 1–2 hours for the
+   breaking output-contract change, reader review and regression updates.
+   Gives up: callers can no longer rely on a program identity in every
+   acquisition error. This changes the existing schema's promise and needs an
+   explicit ruling.
+2. **Declare a separate row-acquisition facet — recommended.** Guarantee:
+   row-level failures promise the actual observed member and failure evidence;
+   the existing program-acquisition facet keeps all its required members.
+   Occurrence ownership remains unchanged; no facet identity is minted.
+   Cost: roughly 2–4 hours across the SCI declaration/producer, recorder
+   admission, explicit pass-through contracts, and canonical regressions.
+   Gives up: a row-only observation does not claim whole-program identity.
+3. **Carry the authoritative program identity into acquisition.** Guarantee:
+   every emitted acquisition facet satisfies the current required digest
+   promise using the source-seal authority. Cost: roughly 4–8 hours to share
+   that authority with SCI acquisition, carry its result through the three
+   producer calls, and specify unsealed-program refusal; this crosses the
+   held runner and publication owners. Gives up: acquisition cannot promise
+   this facet until program identity acquisition succeeds.
+
+No acquisition schema or producer change has been made for these options.
+The independent reporter, projection and assertion fixes continue through
+their pending fast verification before the lane stops.
+
+### Fresh overlay verification after the reporter and producer repairs
+
+The second six-suite run used HEAD `ace176c5088aeaeba785c4c20856f22e578aee7d`
+plus the six selected dirty files named in its snapshot preamble. Exact fast
+tally: **273 tests / 5,134 assertions / 10 failures / 30 errors**, exit 1.
+Evidence: `tmp/error-family-resume-fast-2.log`. The first run was
+272 / 5,109 / 34F / 31E. The new generator regression adds one test; the
+changed assertions retain required evidence rather than accepting retired
+markers.
+
+| Namespace | Tests | Failures | Errors |
+| --- | ---: | ---: | ---: |
+| seon.error-test | 45 | 0 | 0 |
+| seon.instrument-test | 45 | 0 | 0 |
+| seon.schema-test | 34 | 0 | 0 |
+| seon.db-test | 63 | 0 | 22 |
+| seon.cluster-test | 12 | 1 | 0 |
+| seon.sci.eval-test | 74 | 9 | 8 |
+
+The writer read-back and corrected schema assertion both pass again. The
+generator round-trip/reporting regression and explicit facet manifest pass.
+The missing-projection regressions pass at both the database and SCI
+boundaries. The changed contract, arity, kernel, observation-timestamp and
+complete-agent-fixture assertions all pass.
+
+The cluster read-back probe falsifies a config metadata mismatch: **434 rows**
+have different serialized `:seon.schema/form` bytes under the caller's
+`*print-namespace-maps*` binding. One exact pair from the probe is:
+
+```clojure
+;; desired
+"[:and #:seon.config{:display-label \"Jitter fraction\", :per-agent true, :dial true} :seon.ai.retry/jitter-fraction]"
+;; stored
+"[:and {:seon.config/display-label \"Jitter fraction\", :seon.config/per-agent true, :seon.config/dial true} :seon.ai.retry/jitter-fraction]"
+```
+
+The display attributes themselves match. `canonical-schema-rows` owns these
+bytes and now binds namespace-map printing to false when serializing a form.
+The existing canonical-fixture regression now requires no row changes under
+both print settings. This is a serialization fix, not a new schema shape or a
+relaxation of convergence. Its focused fast verification is recorded below.
+
+Every remaining red in the second run is accounted for here. “Owned remaining”
+means an unresolved cause, not permission to weaken the assertion. No broad
+green claim follows from the three green namespaces.
+
+| Test (namespace prefix omitted only within the named group) | F/E | Classification and observed boundary |
+| --- | ---: | --- |
+| db: a-write-naming-another-clusters-branch-is-refused-naming-both | 0/1 | Owned remaining: `src/seon/db.clj` foreign-connection producer returns incomplete error data; `transact!` output validation refuses it. |
+| db: every-database-value-reader-answers-for-all-four-view-shapes | 0/1 | Owned remaining: `src/seon/db.clj` `database-value-identity` returns a marker-only refusal for an uncommitted view; output fits neither identity nor complete error. |
+| db: unique-rejection-names-the-existing-owner-as-data | 0/1 | Owned remaining: `src/seon/db.clj` `rejected-value` still produces a marker-only native rejection; `transact-call` output refuses it. |
+| db: every-public-read-preserves-an-upstream-database-error | 0/15 | Stale fixture plus remaining consumers: `test/seon/db_test.clj` constructs marker-only upstream data; `src/seon/db.clj` still uses its legacy private predicate. Converting only the assertion would lose the preservation guarantee. |
+| db: non-temporal-reads-return-one-flat-error-before-datahike | 0/1 | Owned remaining: `src/seon/db.clj` `history` returns a marker-only non-temporal refusal rejected at output. |
+| db: non-unique-writer-rejections-retain-their-datahike-data | 0/1 | Owned remaining: the same native `rejected-value` boundary as the uniqueness case. |
+| db: transaction-wrappers-cannot-hide-a-classified-refusal | 0/2 | Stale fixture plus remaining producer: `test/seon/db_test.clj` supplies marker-only exception data; `src/seon/db.clj` `transact-call` cannot return it as a complete error. |
+| cluster: schema-row-convergence-uses-the-stores-own-semantics | 1/0 | Owned serialization cause in `src/seon/schema.clj`, verified by desired/stored bytes above; fixed candidate in focused verification. |
+| sci.eval: a-refusal-keeps-its-own-kind-at-both-entrances | 2/0 | Stale assertion plus owned producers: reader-count in `src/seon/sci/eval.clj:515` and missing-installer in `src/seon/sci/kernel.clj:174` are incomplete. Kernel correctly does not preserve an undeclared marker-only map as an error. |
+| sci.eval: one-unloadable-row-cannot-prevent-cold-acquisition | 0/1 | Acquisition design decision above; `src/seon/sci/eval.clj` `acquisition-refusal` calls the diagnostic without base members and cannot supply the required whole-program digest from its arguments. |
+| sci.eval: base-context-injections-have-program-rows | 1/0 | Program population boundary: `src/seon/fn.clj` `desired-rows` omits 39 public `clojure.test` names derived by `src/seon/program.cljc` from `seon.sci.binding.edn`. Set difference is verified; the indexing cause is not yet isolated. |
+| sci.eval: unloadable-host-namespace-carries-the-cause-message-and-location | 4/2 | Owned producer: `src/seon/sci/eval.clj:1216` calls the diagnostic without base members. Its contract refusal replaces the loader evidence, then location assertions encounter nil. |
+| sci.eval: a-foreign-armed-context-is-refused-as-a-value | 0/1 | Owned boundary: `src/seon/sci/kernel.clj:307` throws from arm acquisition before `src/seon/sci/eval.clj` enters the evaluation body's catch. |
+| sci.eval: non-evaluable-agent-source-reports-its-jvm-fallback | 0/1 | Same acquisition design decision and producer as the unloadable-row test. |
+| sci.eval: overrides-follow-current-admission-and-survive-lost-file-coordinates | 0/1 | Owned investigation remains: fixture transaction in `test/seon/sci/eval_test.clj` is refused by the final writer for `seon.id/digest`, path `[3251 :seon.schema.admission/source]`. Observed value is `:core`; the reason it fails the candidate shape is not yet isolated. No assertion changed. |
+| sci.eval: a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed | 0/1 | Verified foreign held boundary: `src/seon/render.clj:916` calls the diagnostic without base members. The snapshot uses HEAD, not that lane's drafts. |
+| sci.eval: public-walk-is-callable-through-an-agent-sci-eval | 2/0 | Foreign held render-plan boundary (`src/seon/render/walk.clj` and `src/seon/render.clj`): plan-reuse assertion is false and through-SCI allocation is 6,236,661,904 bytes against the existing 1 GiB bound. This run does not isolate whether the adjacent test's diagnostic defect causes the performance failure. |
+| sci.eval: a-configless-database-refuses-contract-installation | 0/1 | Owned producer/consumer: `src/seon/sci/eval.clj` `database-effective-config` returns marker-only data and `instrumentation-config` passes it to `seon.config/result-caps`, whose effective-config input refuses it. |
+
+The reporter repair changes the 22 database errors from a secondary
+noncanonical-generator exception into the original contract refusal with
+function, member, expected shape and caller. It does not itself repair the
+incomplete database producers listed above.
+
+**RESET NEEDED:** no additional stored attribute or type changes in this
+resume. The earlier reset batch remains owed; the lane did not touch default.
+
+The render lane subsequently landed `f5716e841` while the focused run was
+already using its `0d5088438` snapshot. The foreign rows above describe the
+measured older snapshot; they are not claims about that later render commit.
+
+### Cold proof owed after the acquisition decision
+
+No cold gate, platform gate, live adoption or lifecycle command was run by
+this lane. The orchestrator owes the following accumulated path-limited cold
+command, followed by its platform and reset-boundary live proof:
+
+```sh
+bin/test --paths \
+  docs/prds/steward-platform/research/error-family-1a-2026-09-19.md \
+  docs/prds/steward-platform/research/error-kind-retirement-inventory-2026-09-19.md \
+  resources/seon/schemas/seon.db.edn \
+  resources/seon/schemas/seon.db.write.edn \
+  resources/seon/schemas/seon.db.write.attempt.edn \
+  resources/seon/schemas/seon.error.edn \
+  resources/seon/schemas/seon.instrument.edn \
+  resources/seon/schemas/seon.schema.edn \
+  src/seon/db.clj src/seon/error.clj src/seon/error/refusal.clj \
+  src/seon/instrument.clj src/seon/schema.clj src/seon/schema/internal.cljc \
+  src/seon/cluster/status.clj src/seon/sci/admit.clj src/seon/sci/eval.clj \
+  src/seon/sci/kernel.clj \
+  test/seon/error_test.clj test/seon/instrument_test.clj \
+  test/seon/schema_test.clj test/seon/db_test.clj \
+  test/seon/cluster_test.clj test/seon/sci/eval_test.clj \
+  -- seon.error-test seon.instrument-test seon.schema-test \
+  seon.db-test seon.cluster-test seon.sci.eval-test
+```
+
+Files changed in this resume: `src/seon/error.clj`,
+`src/seon/error/refusal.clj`, `src/seon/instrument.clj`,
+`src/seon/sci/admit.clj`, `src/seon/sci/kernel.clj`,
+`resources/seon/schemas/seon.db.edn`, `src/seon/schema.clj`,
+`src/seon/db.clj`, `test/seon/instrument_test.clj`,
+`test/seon/db_test.clj`, `test/seon/cluster_test.clj`,
+`test/seon/sci/eval_test.clj`, and this landing note. The inventory and other
+paths in the cold command were changed in earlier accepted slices of this
+lane. Foreign checkout edits were neither changed nor committed.
+
+### Focused canonical serialization verification
+
+The final focused `--paths` run selected `seon.schema-test seon.cluster-test`
+on HEAD `0d50884382ce1fa87f0c05ba0ddbca14d5258369` plus this lane's selected
+changes. Exact tally: **46 tests / 3,635 assertions / 0 failures / 0 errors**,
+exit 0 (`tmp/error-family-resume-convergence-fast.log`). The convergence
+regression passed with both `*print-namespace-maps*` settings. A thread sample
+from its one JVM (`tmp/error-family-resume-convergence-threads.log`) confirmed
+that the initial wait was canonical fixture construction, not a second JVM
+or a blocked schema-test body.
+
+This resolves the one cluster failure in the preceding six-suite snapshot.
+There is no newer combined six-suite tally: 273 / 5,134 / 10F / 30E remains
+the last complete combined measurement, with the focused 46 / 3,635 / 0 / 0
+as subsequent evidence. Acquisition remains at the three-option decision
+above. No pending producer is made green by accepting incomplete error data.

@@ -1343,6 +1343,24 @@
          (finally
            (remove-ns namespace-name)))))))
 
+(deftest named-generators-survive-compilation-in-refusal-evidence
+  (test-support/with-database
+   (fn [_]
+     (let [projection (schema/handed-projection)
+           definition (get (:seon.schema.projection/forms projection)
+                           :seon.db/database-value)
+           predicates (schema/predicate-functions-in projection)
+           compiled (m/schema (schema/compilable-form definition predicates))
+           refusal (test-support/refusal-data
+                    #(db/database-value-identity :seon.instrument-test/not-a-database))]
+       (is (= definition (schema/canonical-definition (m/form compiled) predicates)))
+       (is (schema/valid-candidate-value? :seon.instrument/contract-error refusal)
+           (pr-str refusal))
+       (is (= :input (:seon.instrument/check refusal)))
+       (is (= 'seon.db/database-value-identity (:seon.instrument/fn refusal)))
+       (is (pos? (get-in refusal [:seon.instrument/explanations
+                                 :seon.instrument.explanations/count] 0)))))))
+
 (deftest the-caller-frame-is-part-of-the-refusal-sentence
   (let [refusal (test-support/refusal-data #(prefix-contract "wrong"))
         caller (get-in refusal [:seon.error/data :seon.instrument/caller])]

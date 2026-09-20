@@ -97,9 +97,12 @@
                          {ordered-marker [:a :b :c]}
                          {ordered-marker [:a :b]}))
             "a genuinely different cardinality-many value is still a change")
-        (is (= [] (changes database (schema/registered-schemas)))
-            "a canonical database is already converged, so no branch open
-             re-transacts a schema row it did not need to")))))
+        (doseq [namespace-maps? [false true]]
+          (binding [*print-namespace-maps* namespace-maps?]
+            (let [delta (changes database (schema/registered-schemas))]
+              (is (= [] delta)
+                  (str "canonical schema bytes converge with namespace-map printing "
+                       namespace-maps?)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The fault committer hands `seon.error` the dials its contracts declare
@@ -151,7 +154,10 @@
     (fn [connection]
       (let [dials (test-support/effective-config)
             request {:seon.error/source
-                     {:seon.error/kind :seon.cluster-test/probe
+                     {:seon.error/at #inst "2026-09-20T00:00:00Z"
+                      :seon.error/layer :seon.agent/lifecycle
+                      :seon.error/operation 'seon.agent/by-id
+                      :seon.agent/error-agent-id "cluster-test-observed"
                       :seon.error/message "probe core fault"}
                      :seon.error/id (str (random-uuid))
                      :seon.error/at (java.util.Date.)
@@ -167,8 +173,10 @@
                @connection
                (dissoc request :seon.config.error/max-evidence-bytes)))
             data (:seon.error/data refusal)]
-        (is (= :seon.instrument/contract-violated (:seon.error/kind refusal))
+        (is (contains? (error/facets (schema/handed-projection) refusal)
+                       :seon.instrument/contract-error)
             "the contract refuses before the recorder is reached")
+        (is (= :input (:seon.instrument/check refusal)))
         (is (= 'seon.error/commit-tx (:seon.error/diagnostic-operation data))
             "and names the function that was called")
         (is (some #{[:seon.config.error/max-evidence-bytes]}

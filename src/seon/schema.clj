@@ -261,7 +261,8 @@
        (and (map? value)
             (qualified-symbol? (:gen/gen value)))
        (assoc value :gen/gen
-              (some-> (:gen/gen value) requiring-resolve deref))
+              (some-> (:gen/gen value) requiring-resolve deref
+                      (vary-meta assoc ::generator-symbol (:gen/gen value))))
 
        (and (vector? value) (= :and (first value))
             (not (and (map? (second value)) (:gen/gen (second value))))
@@ -443,7 +444,9 @@
    qualified symbol names, and a Var carries that symbol, so the inverse is
    reading the name back off the Var — no process-global table of callables
    is scanned, and no second environment's registration can supply a
-   different answer. Callables the caller supplied explicitly (a preprocessed
+   different answer. A compiled generator carries its authored symbol in
+   metadata, preserving the same inverse without inspecting its implementation.
+   Callables the caller supplied explicitly (a preprocessed
    projection carries raw functions) are matched by identity against that
    supplied map. Anonymous or otherwise unresolvable callables are refused
    instead of being printed as unreadable `#object` values."
@@ -475,6 +478,10 @@
         canonical
         (letfn [(canonicalize [value reference-kind]
                   (cond
+                    (and (= :generator reference-kind)
+                         (qualified-symbol? (::generator-symbol (meta value))))
+                    (::generator-symbol (meta value))
+
                     (callable? value)
                     (let [predicate (callable-symbol value)]
                       (if reference-kind
@@ -3456,7 +3463,9 @@
            (cond->
             (merge (storable-properties-in projection definition)
                    {:seon.schema/key schema-key
-                    :seon.schema/form (pr-str definition)
+                    :seon.schema/form
+                    (binding [*print-namespace-maps* false]
+                      (pr-str definition))
                     :seon.schema.admission/source :core})
              (seq references)
              (assoc :seon.schema/references
