@@ -1985,3 +1985,159 @@ No stored attribute type changes. The new keys
 `:seon.schema/expected-value` are transient. Existing stored write-attempt and
 schema-error shapes are unchanged. Earlier reset-batch obligations in this note
 remain owed.
+
+## Verification boundary after ac3944048 and fc23a08b8 (2026-09-20)
+
+Both path-limited commits passed the required five-namespace load before and
+after landing. `ac3944048` owns raw producer/recorder conversion; `fc23a08b8`
+owns the kernel repair and composition regression. The next plain working-tree
+run completed **198 tests / 5,215 assertions / 17 failures / 24 errors**.
+
+| Namespace | Tests | Failures | Errors |
+|---|---:|---:|---:|
+| `seon.error-test` | 45 | 3 | 1 |
+| `seon.instrument-test` | 44 | 3 | 0 |
+| `seon.schema-test` | 34 | 2 | 0 |
+| `seon.db-test` | 63 | 4 | 23 |
+| `seon.cluster-test` | 12 | 5 | 0 |
+
+The only remaining error-suite test is
+`complete-error-children-validate-through-the-writer`: its raw-facet, submitted
+transaction, observed-basis and unchanged-database assertions pass, but the
+subsequent root pull does not supply an occurrence/attempt (3 failures, 1 error).
+The first run passed this test. The second followed the pull-cache contract
+repair; this does **not** establish that storage lost the attempt. The added
+assertion retains the complete root read result so the next run can distinguish
+a read refusal from missing datoms. Its execution is blocked below; this item
+remains open. `schema-refusals-are-admitted-at-the-recorder` and the structural
+cause-chain regression pass.
+
+Instrumentation's three failures are all
+`semantic-admission-explicitly-declares-every-error-facet`, at
+`seon.sci.admit/semantic-value`, `seon.error/refusal`, and
+`seon.error/latest-fact`. The exact missing keys, all declared by the paused
+render lane's uncommitted resources, are:
+
+```clojure
+#{:seon.render/request-error :seon.render.transcript/request-error
+  :seon.render.walk/elided-error :seon.render/invalid-output-error
+  :seon.render/ambiguous-error :seon.render.data/no-such-path-error
+  :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
+  :seon.render.walk/no-such-entity-error :seon.render/walk-failed-error
+  :seon.render.web/value-not-found-error :seon.render/unknown
+  :seon.render.web/function-unavailable-error
+  :seon.render.data/observation-error :seon.render.web/request-error}
+```
+
+Their owning files are `resources/seon/schemas/seon.render.edn`,
+`seon.render.transcript.edn`, `seon.render.walk.edn`, `seon.render.data.edn`, and
+`seon.render.web.edn` in that directory. No references to unpublished foreign
+facets were added to HEAD. Both kernel regressions, both host/SCI multi-assertion
+contract tests, and `a-sovereign-sci-fork-acquires-its-own-recorder` pass.
+
+Schema's remaining foreign boundary is
+`declared-reference-maps-accept-the-pull-reference-grammar` at
+`test/seon/schema_test.clj:279`: the generated pulled row for the draft
+`:seon.render/ambiguous-error` fails at `:seon.render/candidates`, whose owner is
+`resources/seon/schemas/seon.render.edn`. The second schema failure was the
+`pulled-forms-derive-from-the-entity-schema-and-selector` assertion expecting
+`seon.schema/pulled-form-in` instead of the actual observing producer
+`seon.schema/pulled-selector-refusal`; corrected after the run. The canonical
+reference grammar test (formerly 14 failures) and render-contract coherence
+test pass. No render file was edited.
+
+The database suite is outside the granted test-file scope. Its remaining tests
+and event counts are recorded below; the normalized-form errors at
+`src/seon/fn/schema_shape.clj:130` are the already open class in
+[the projection/refusal issue](../../../seon/issues/test-refusal-observations-overflow-in-projection-acquisition.md).
+Several tests still construct or assert the retired kind-only shape; no kind
+or general predicate was restored to satisfy them.
+
+| Database test | Failures | Errors |
+|---|---:|---:|
+| `a-refused-declarations-read-refuses-decoding` | 1 | 0 |
+| `a-write-naming-another-clusters-branch-is-refused-naming-both` | 0 | 1 |
+| `every-database-value-reader-answers-for-all-four-view-shapes` | 0 | 1 |
+| `every-public-read-preserves-an-upstream-database-error` | 0 | 15 |
+| `malformed-public-database-requests-name-the-public-operation` | 2 | 0 |
+| `malformed-reads-return-flat-errors` | 1 | 0 |
+| `non-temporal-reads-return-one-flat-error-before-datahike` | 0 | 1 |
+| `non-unique-writer-rejections-retain-their-datahike-data` | 0 | 1 |
+| `transaction-wrappers-cannot-hide-a-classified-refusal` | 0 | 2 |
+| `uncarried-read-reports-one-projection-fallback-per-call` | 0 | 1 |
+| `unique-rejection-names-the-existing-owner-as-data` | 0 | 1 |
+
+Cluster's `a-commit-tx-request-without-the-evidence-bound-names-the-key` still
+asserts the retired kind. Four other failures are in
+`a-dropped-storage-facet-refuses-reopening-the-branch-in-place`,
+`schema-row-convergence-uses-the-stores-own-semantics`, and
+`an-added-index-adopts-in-place-instead-of-forcing-a-refork`. The actual
+convergence delta includes `:seon.config/display-divisor`, `/display-label`,
+`/display-unit`, and `:seon.source/refused-test-run`, added by foreign edits
+after fixture acquisition. The earlier run similarly named the then-new
+`:seon.test.run/overlay-input-digest` and `/published-base-digest`. These are
+working-tree/loaded-fixture boundaries, not an error-family storage migration.
+
+### The next run admitted zero tests
+
+After the second tally, the live-edited launcher printed
+`bin/test-fast: line 45: syntax error near unexpected token then` (exit 2).
+The subsequent launch parsed, loaded, and armed 1,391 contracts, then exited 1
+before a test began:
+
+```text
+bin/test-fast: initialization or execution failed: Snapshot admission refused.
+Per-agent dial :seon.config.ai.backup/api-key-variable must declare a nonempty :seon.config/display-label.
+```
+
+The returned observation names `seon.test.runner/record-snapshot!`, with causal
+operation `seon.schema/assert-config-display!`, expected key
+`:seon.config/display-label`, and the refused published definition
+`[:string {:min 1, :seon.config/optional true, :seon.config/per-agent true,
+:seon.config/dial true}]`. The new working-tree resource already carries the
+label; the snapshot reader reports published base
+`c7c66f815606ca3f11a53ab24f6067df22c9449f4e8eef83d6a3b20fcef150c3`,
+97 commits behind HEAD. Run identity: `879e7da68973`.
+
+Verified held files: `src/seon/test/fast.clj`, `bin/test-fast`, `bin/test`,
+`src/seon/schema.clj` (foreign `assert-config-display!` plus candidate/build
+regions), and `resources/seon/schemas/seon.config.ai.backup.edn`. No held bytes
+were changed or committed by this lane. This admission dependency prevents the
+writer read-back probe and the corrected schema assertion from executing. A
+new publication is orchestrator-owned; no bypass, worktree, lifecycle operation,
+second JVM, or cold gate was attempted. **The suites are not claimed green.**
+
+### Files and proof owed
+
+This continuation changed the landing note plus:
+
+- `resources/seon/schemas/seon.db.edn`, `seon.db.write.attempt.edn`,
+  `seon.db.write.edn`, `seon.error.edn`, `seon.schema.edn` in that directory;
+- `src/seon/db.clj`, `src/seon/error.clj`, `src/seon/error/refusal.clj`,
+  `src/seon/instrument.clj`, `src/seon/schema.clj`,
+  `src/seon/schema/internal.cljc`, `src/seon/sci/admit.clj`,
+  `src/seon/sci/kernel.clj`;
+- `test/seon/error_test.clj`, `test/seon/instrument_test.clj`,
+  `test/seon/schema_test.clj`.
+
+The foreign agent-surface regression in schema-test landed separately before
+this lane's path-limited commit; it was preserved. The final test-only slice
+adds the explicit read-result assertion and corrects the diagnostic observer
+name. The preceding RESET NEEDED statement applies without additions.
+
+The orchestrator still owes the cold command already listed above, including
+all these paths and the earlier `src/seon/cluster/status.clj` and
+`src/seon/sci/eval.clj` changes, with namespaces `seon.error-test`,
+`seon.instrument-test`, `seon.schema-test`, `seon.db-test`,
+`seon.cluster-test`, and `seon.sci.eval-test`, then platform/reset-boundary proof.
+First restore snapshot admission and run the writer read-back assertion; its
+actual refusal or successful row is the next decision input.
+
+| Evidence | Bytes | SHA-256 |
+|---|---:|---|
+| `raw-fast.log` | 180,239 | `4b9e45363a69868caab2f43e2e9e985fe02252865e611bfff634a2d0f1ae7160` |
+| `raw-fast-2.log` | 142,045 | `368fe1e2e371ed258444f0981b79df3f3fe4d0900b906a705ccc3bc4bc0723ae` |
+| `raw-fast-3.log` | 6,129 | `15540bf1cc009e4266f8d3e6a0d9cb2b22decaca9f60073584fe74d373950334` |
+| `raw-load-2.log` | 205 | `579c3de9fb226ffa47e63f1160596a1fe89089af30718e0a8855f4a369c28a18` |
+| `kernel-load.log` | 205 | `579c3de9fb226ffa47e63f1160596a1fe89089af30718e0a8855f4a369c28a18` |
+| `kernel-post-load.log` | 205 | `579c3de9fb226ffa47e63f1160596a1fe89089af30718e0a8855f4a369c28a18` |

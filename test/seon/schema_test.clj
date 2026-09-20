@@ -376,7 +376,7 @@
        (let [selector '[{:seon.ns/steward 2}]
              refused (schema/pulled-form-in
                       projection :seon.ns/ns selector)]
-         (is (= 'seon.schema/pulled-form-in (:seon.error/operation refused)))
+         (is (= 'seon.schema/pulled-selector-refusal (:seon.error/operation refused)))
          (is (= {:seon.ns/steward 2}
                 (get-in refused
                         [:seon.error/data

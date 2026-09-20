@@ -1164,10 +1164,11 @@
          (is (= 2 (count (db/datoms database :eavt location :seon.error.location/segments))))
          (let [recording (error/recording database (commit-request result {}))
                report (test-support/transacted! connection (:seon.db/tx-data recording))
-               occurrence (first (:seon.error/occurrences
-                                  (db/pull (:db-after report) (error/observation-selector projection)
-                                           (:seon.error/ref recording))))
+               stored (db/pull (:db-after report) (error/observation-selector projection)
+                               (:seon.error/ref recording))
+               occurrence (first (:seon.error/occurrences stored))
                attempt (:seon.db.write/attempt occurrence)]
+           (is (seq (:seon.error/occurrences stored)) (pr-str stored))
            (is (= (:seon.db.write.attempt/request-id result)
                   (:seon.db.write.attempt/request-id attempt)))
            (is (= before (get-in occurrence [:seon.error/basis :seon.error.basis/t])))
