@@ -5514,3 +5514,15 @@ Resumed to keep converting family by family on load+lint proofs, with the
 fast tally taken once that resource is committed. Editing lanes:
 publication (closing), ops-effects, test-system; wave-2 design read-only;
 step 2 parked.
+
+## 2026-09-21 ~10:45 UTC — wave-2 spec written; problems family kind-free; wave-3b/3c design lane launched; README pointer refreshed
+
+`wave2-contracts-design` landed `86c0623ef`
+([wave-2-contracts-spec-2026-09-21.md](wave-2-contracts-spec-2026-09-21.md):
+2a seam, 2b W4 leaves — corrected to 186 missing contracts across the
+three namespaces — 2c W1 db consumers with the gate's six recorded output
+failures first, the wave-5 task handoff). `kind-sweep-ops-effects` landed
+`3633edd55` (problem kind projections retired). Read-only slot →
+`wave3bc-render-proofs-design` (render pairs incl. the recursive-rendering
+question answered from walk/block source; the five template proofs with
+judging bars). README state pointer rewritten for the morning.
