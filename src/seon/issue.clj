@@ -498,8 +498,9 @@
 
       result
       (merge (select-keys (meta delta) [:seon.issue/refusals :seon.issue/ambiguous :seon.issue/unresolved])
-             {:seon.issue/count (count (db/q '[:find [?e ...] :where [?e :seon.issue/path]]
-                                             (or (:db-after result) database)))}))))
+             (cond-> {:seon.issue/count (count (db/q '[:find [?e ...] :where [?e :seon.issue/path]]
+                                                      (or (:db-after result) database)))}
+               result (assoc :seon.db/transaction-report result))))))
 
 (def ^:private generated-prose
   "Attributes a detector proposes once. A human's or a worker's edit survives
@@ -909,25 +910,34 @@
                 (db/q '[:find [?e ...] :where [?e :seon.issue/path]] database)))
 
 (defn adopt-tx
-  "Reconcile the published issue facts by identity into a development database."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map]] :seon.db/tx-data]}
-  [database rows]
-  (let [current (mapv #(db/pull database '[*] %)
-                     (db/q '[:find [?e ...] :where [?e :seon.issue/path]] database))
+  "Reconcile the selected published issue identities into a development database."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value [:vector :map]] :seon.db/tx-data]
+    [:=> [:cat :seon.db/database-value [:vector :map] [:set :seon.issue/id]] :seon.db/tx-data]]}
+  ([database rows]
+   (adopt-tx database rows
+             (into (set (map :seon.issue/id rows))
+                   (db/q '[:find [?id ...] :where [?e :seon.issue/id ?id]
+                           [?e :seon.issue/path]] database))))
+  ([database rows identities]
+  (let [pulled (mapv #(db/pull database '[*] [:seon.issue/id %]) identities)
+        _ (when-let [refusal (some #(when (:seon.error/at %) %) pulled)]
+            (throw (ex-info (:seon.error/message refusal) refusal)))
+        current (filterv :seon.issue/id pulled)
         by-id (into {} (map (juxt :seon.issue/id identity)) current)
         ids (set (map :seon.issue/id rows))
         ref-attributes (into {:seon.issue/members :seon.issue/id}
                              (for [[identity-attribute attribute] (citation-attributes database)
                                    :when (not= :seon.issue/files attribute)]
                                [attribute identity-attribute]))
-        citation-entities (into {} (map (juxt :v :e))
-                                (db/datoms database :avet :seon.issue.citation/id))
         adopted-citations
         (fn [row]
           (if-let [citations (seq (:seon.issue/files row))]
             (assoc row :seon.issue/files
                    (into #{} (map (fn [cited]
-                                    (or (get citation-entities (:seon.issue.citation/id cited))
+                                    (or (:db/id (db/pull database [:db/id]
+                                                        [:seon.issue.citation/id (:seon.issue.citation/id cited)]))
                                         (-> (select-keys cited [:seon.issue.citation/id :seon.issue.citation/row
                                                             :seon.issue.citation/end-row])
                                         (assoc :seon.issue.citation/file
@@ -953,19 +963,29 @@
                 (if prior (replacement-tx prior desired) [desired])))
             rows)
            (map #(vector :db/retractEntity [:seon.issue/id (:seon.issue/id %)])
-                   (remove #(contains? ids (:seon.issue/id %)) current))))))
+                   (remove #(contains? ids (:seon.issue/id %)) current)))))))
 
 (defn adopt!
-  "Adopt issue entities from the exact published database, never reread the files."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.db/database-value]
-                  [:or :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]}
-  [connection source]
-  (let [rows (identity-rows source)]
-    (if (and (map? rows) (:seon.error/at rows)
-           (:seon.error/layer rows) (:seon.error/operation rows)) ; debt: database and detector reads still declare generic seon.db/error-result.
-
-      rows
-      (db/transact! connection [[:db.fn/call #'adopt-tx rows]]))))
+  "Adopt selected issue entities from the exact published database."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/connection :seon.db/database-value]
+     [:or :nil :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]
+    [:=> [:cat :seon.db/connection :seon.db/database-value [:set :seon.issue/id]]
+     [:or :nil :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]]}
+  ([connection source]
+   (let [rows (identity-rows source)]
+     (if (:seon.error/at rows)
+       rows
+       (db/transact! connection [[:db.fn/call #'adopt-tx rows]]))))
+  ([connection source identities]
+   (when (seq identities)
+     (let [rows (db/pull-many source (citation-pattern (citation-attributes source))
+                              (mapv #(vector :seon.issue/id %) identities))]
+       (if (:seon.error/at rows)
+         rows
+         (db/transact! connection
+                       [[:db.fn/call #'adopt-tx (filterv :seon.issue/id rows) identities]]))))))
 
 (def ^:private tests-done-query
   "Nonempty tests all have positive green results on their current reach digest."

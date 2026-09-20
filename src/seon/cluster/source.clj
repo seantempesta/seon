@@ -89,7 +89,7 @@
 
 (defn- require-committed!
   [result rule message data]
-  (when (:seon.error/kind result)
+  (when (:seon.error/at result)
     (refuse! rule (str message " " (:seon.error/message result))
              (assoc data :seon.source/transaction-result result)))
   result)
@@ -176,6 +176,36 @@
                (schema/projection-from-database database))
     (refuse! ::source-absent "the adopted source commit is unavailable"
              {:seon.source/commit-id commit-id})))
+
+(defn changed-identities
+  "Publication report identities, or history since the cluster's adopted commit."
+  {:malli/schema
+   [:=> [:cat :seon.store/store :seon.source/published :seon.source/commit-id]
+    :seon.reconcile/adopt-identities]}
+  [store published prior-commit]
+  (if (and (= prior-commit (:seon.source/expected-commit-id published))
+           (contains? published :seon.reconcile/adopt-identities))
+    (:seon.reconcile/adopt-identities published)
+    (let [before (d/commit-as-db (:seon.store/connection-object store) prior-commit)]
+      (when-not before
+        (refuse! ::source-absent "The adopted source commit is unavailable."
+                 {:seon.source/commit-id prior-commit}))
+      (try
+        (let [after (d/commit-as-db (:seon.store/connection-object store)
+                                  (:seon.source/commit-id published))]
+          (when-not after
+            (refuse! ::source-absent "The published source commit is unavailable." published))
+          (try
+            (let [identities (fn/report-identities
+                              {:db-before before :db-after after
+                               :tx-data (vec (d/datoms (d/since (d/history after) (db/basis-t before))
+                                                      :eavt))
+                               :tempids {} :tx-meta {}})]
+              (when (:seon.error/at identities)
+                (refuse! ::publish-readback-failed "Publication changes could not be read." identities))
+              identities)
+            (finally (d/release-materialized-db after))))
+        (finally (d/release-materialized-db before))))))
 
 (defn- unresolved-report!
   {:malli/schema
@@ -506,7 +536,7 @@
                          :seon.cluster.registry/from (or expected-commit :db)
                          :seon.store/branch scratch})
       (try
-        (let [unresolved-report
+        (let [outcome
               (let [connection (store/open-branch! store scratch)]
           (try
             (let [previous-database
@@ -527,16 +557,18 @@
                                    ::scratch-schema-refused
                                    "the source scratch schema transaction was refused"
                                    {:seon.source/digest source-digest})))
-            (populate-fn
+            (let [population-result (populate-fn
              (cond-> (merge populate-request
                             {:seon.db/connection connection
                              :seon.source/digest source-digest})
                expected-commit
                (assoc :seon.source/previous-database
                       previous-database)))
-            (progress! "publication issue indexing")
-            (index-issues! connection source-digest (or directory (fs/source-directory)))
-            (progress! "publication activation seal")
+                  _ (progress! "publication issue indexing")
+                  issues (index-issues! connection source-digest (or directory (fs/source-directory)))
+                  _ (progress! "publication activation seal")]
+            (require-committed! population-result ::source-population-refused
+                                "The source population was refused." {})
             ;; The source seal is the genesis boundary. Population must first
             ;; install canonical schema/program rows and boot/config process
             ;; facts; the digest and build instant are the final complete fact.
@@ -576,7 +608,17 @@
                            "another publisher created current-src first"
                            {:seon.source/branch current-branch
                             :seon.source/commit-id scratch-commit}))))
-            (when-not expected-commit (unresolved-report! (db/db connection))))
+            (cond-> {}
+              (and (map? population-result)
+                   (contains? population-result :seon.reconcile/adopt-identities))
+              (assoc :seon.reconcile/adopt-identities
+                     (into (:seon.reconcile/adopt-identities population-result)
+                           (when-let [report (:seon.db/transaction-report issues)]
+                             (require-committed! (fn/report-identities report)
+                                                 ::publish-readback-failed
+                                                 "Issue report identities could not be read." {}))))
+              (nil? expected-commit)
+              (assoc :seon.program/unresolved-report (unresolved-report! (db/db connection))))))
             (finally
               (d/release connection))))]
         (let [commit-id
@@ -589,11 +631,12 @@
                      {:seon.source/branch current-branch}))
           (registry/retire-branch! {:seon.store/store store
                                     :seon.store/branch scratch})
-          (cond-> {:seon.source/branch current-branch
-                   :seon.source/commit-id commit-id
-                   :seon.source/digest source-digest
-                   :seon.source/built? true}
-            unresolved-report (assoc :seon.program/unresolved-report unresolved-report))))
+          (cond-> (merge outcome
+                          {:seon.source/branch current-branch
+                           :seon.source/commit-id commit-id
+                           :seon.source/digest source-digest
+                           :seon.source/built? true})
+            expected-commit (assoc :seon.source/expected-commit-id expected-commit))))
         (catch Throwable failure
           (retire-scratch! store scratch)
           (throw failure)))))))

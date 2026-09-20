@@ -45,7 +45,7 @@
 
 (defn- require-committed!
   [result phase]
-  (when (:seon.error/kind result)
+  (when (:seon.error/at result)
     (throw
      (ex-info
       (str "Program indexing transaction was refused. "
@@ -2975,12 +2975,43 @@
   (reconcile-tx-in (program/shapes-in (db/carried-projection database))
                    database rows previous-identities))
 
+(defn report-identities
+  "Identities touched by a Datahike report, including retracted identities."
+  {:malli/schema
+   [:=> [:cat :seon.db/transaction-report]
+    [:or :seon.reconcile/adopt-identities :seon.error/value]]}
+  [{before :db-before after :db-after datoms :tx-data}]
+  (let [attributes (vec (set/union (set (db/identity-attributes before))
+                                  (set (db/identity-attributes after))))]
+    (loop [pending (seq (into #{} (map :e) datoms)) identities #{}]
+      (if-let [entity (first pending)]
+        (let [rows [(db/pull before attributes entity)
+                    (db/pull after attributes entity)]]
+          (if-let [refusal (some #(when (:seon.error/at %) %) rows)]
+            refusal
+            (recur (next pending) (into identities (mapcat seq) rows))))
+        identities))))
+
 (defn published-index-rows
   "Read compiled rows with portable program refs and complete owned components."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value]
-    [:or :seon.program/rows :seon.error/value]]}
-  [database]
+   [:function
+    [:=> [:cat :seon.db/database-value]
+     [:or :seon.program/rows :seon.error/value]]
+    [:=> [:cat :seon.db/database-value :seon.fn.file/identities]
+     [:or :seon.program/rows :seon.error/value]]]}
+  ([database]
+   (let [identities
+         (reduce (fn [result attribute]
+                   (let [values (db/q '[:find [?value ...] :in $ ?attribute
+                                        :where [_ ?attribute ?value]] database attribute)]
+                     (if (:seon.error/at values)
+                       (reduced values)
+                       (into result (map #(vector attribute %)) values))))
+                 [] (filter #(get (:schema database) %) program/identity-attributes))]
+     (if (:seon.error/at identities) identities
+         (published-index-rows database identities))))
+  ([database identities]
   (let [entity (memoize #(db/pull database '[*] %))]
    (letfn [(reference [value]
             (let [pulled (entity (:db/id value))]
@@ -3031,38 +3062,17 @@
                        (reduced portable)
                        (assoc result attribute portable)))))
                {} entity)))]
-    (loop [attributes
-           (seq (filter #(get (:schema database) %)
-                        program/identity-attributes))
-           rows []]
-      (if-let [attribute (first attributes)]
-        (let [entity-ids
-              (db/q '[:find [?entity ...] :in $ ?attribute
-                      :where [?entity ?attribute]]
-                    database attribute)]
-          (if (and (map? entity-ids)
-                   (contains? entity-ids :seon.error/at)
-                   (contains? entity-ids :seon.error/layer)
-                   (contains? entity-ids :seon.error/operation))
-            entity-ids
-            (let [attribute-rows
-                  (loop [pending (seq entity-ids) result []]
-                    (if-let [entity-id (first pending)]
-                      (let [portable (row (entity entity-id))]
-                        (if (and (map? portable)
-                                 (contains? portable :seon.error/at)
-                                 (contains? portable :seon.error/layer)
-                                 (contains? portable :seon.error/operation))
-                          portable
-                          (recur (next pending) (conj result portable))))
-                      result))]
-              (if (and (map? attribute-rows)
-                       (contains? attribute-rows :seon.error/at)
-                       (contains? attribute-rows :seon.error/layer)
-                       (contains? attribute-rows :seon.error/operation))
-                attribute-rows
-                (recur (next attributes) (into rows attribute-rows))))))
-        rows)))))
+    (loop [pending (seq identities) rows []]
+      (if-let [identity (first pending)]
+        (let [pulled (entity identity)]
+          (cond
+            (:seon.error/at pulled) pulled
+            (empty? pulled) (recur (next pending) rows)
+            :else (let [portable (row pulled)]
+                    (if (:seon.error/at portable)
+                      portable
+                      (recur (next pending) (conj rows portable))))))
+        rows))))))
 
 (defn index!
   "Populate one fresh source scratch branch from static analysis.
@@ -3089,17 +3099,19 @@
                      (or (:seon.schema/projection request)
                          (schema/build-projection (declaration-forms request))))
          rows (if source-database
-                (published-index-rows source-database)
+                (if-let [identities (:seon.reconcile/adopt-identities request)]
+                  (published-index-rows source-database (vec identities))
+                  (published-index-rows source-database))
                 (desired-rows request progress!))]
      (if (and (map? rows)
               (contains? rows :seon.error/at)
               (contains? rows :seon.error/layer)
               (contains? rows :seon.error/operation))
        rows
-       (let [_ (when source-database
-                 (report-index-progress! progress! "development published rows read"))
-             _ (assert-one-row-per-identity! rows)
-             _ (when-not (:seon.fn/changed-paths request) (assert-populated! rows))
+       (let [_ (assert-one-row-per-identity! rows)
+             _ (when-not (or (:seon.fn/changed-paths request)
+                             (:seon.reconcile/adopt-identities request))
+                 (assert-populated! rows))
              existing (some (fn [identity-attribute]
                               (db/q '[:find ?entity .
                                      :in $ ?attribute
@@ -3112,7 +3124,9 @@
                         ::existing-program-entity existing :seon.fn/index-refused true})))
      (if previous-database
        (let [previous-identities
-             (if-let [paths (:seon.fn/changed-paths request)]
+             (if-let [identities (:seon.reconcile/adopt-identities request)]
+               (vec identities)
+               (if-let [paths (:seon.fn/changed-paths request)]
                (do
                  (when-not (and previous-database (:seon.fn/previous-manifest request))
                    (throw (ex-info "Incremental indexing requires its published database and manifest."
@@ -3135,7 +3149,7 @@
                                    [?entity :seon.schema.admission/source :core]]
                                  previous-database attribute))))
                    (filter #(get (:schema previous-database) %)
-                           program/identity-attributes)))
+                           program/identity-attributes))))
              projection (schema/handed-projection)
              _ (report-index-progress! progress! "development reconciliation transaction")
              report
@@ -3160,39 +3174,11 @@
                                 tx-data)))]]}
                  process (assoc :tx-meta {:seon.db/process process})))
               :seon.fn/population)
-             _ (report-index-progress! progress! "development changed definition comparison")
-             changed-entities (into #{} (map :e) (:tx-data report))
-             previous-entity (memoize #(db/pull previous-database '[*] %))
-             current-entity (memoize #(db/pull (:db-after report) '[*] %))
-             previous-identity-attributes (db/identity-attributes previous-database)
-             current-identity-attributes (db/identity-attributes (:db-after report))
-             source-changed-identities
-             (into #{}
-                   (keep (fn [row]
-                           (let [identity (program/row-identity row)]
-                             (when (not=
-                                    (normalized-index-row
-                                     row-shapes
-                                     previous-database
-                                     (when (get (:schema previous-database) (first identity))
-                                       (previous-entity identity))
-                                     previous-identity-attributes previous-entity)
-                                    (normalized-index-row
-                                     row-shapes (:db-after report) row
-                                     current-identity-attributes current-entity))
-                               identity))))
-                   rows)
-             removed-identities
-             (remove (into #{} (map program/row-identity) rows)
-                     previous-identities)
-             changed-identities
-             (into (into source-changed-identities removed-identities)
-                   (keep #(program/row-identity
-                           (db/pull (:db-after report) program/identity-attributes %)))
-                   changed-entities)]
+             changed-identities (require-committed! (report-identities report)
+                                                     :seon.fn/population)]
          {:seon.reconcile/converged? (empty? changed-identities)
           :seon.reconcile/operations (count changed-identities)
-          :seon.program/identities (vec changed-identities)})
+          :seon.reconcile/adopt-identities changed-identities})
        ;; Fresh branches have installed attributes, but their canonical schema
        ;; rows arrive in this transaction. Capture the supplied construction
        ;; projection instead of deriving an empty declaration world from @conn.

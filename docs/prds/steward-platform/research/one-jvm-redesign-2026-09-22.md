@@ -986,3 +986,99 @@ Cleanup: `bin/seon --root tmp/one-jvm-redesign-root down` reaped PID 84063
 and confirmed the store lock free. With no JVM referencing it, the own
 scratch root and source archive were removed without following symlinks.
 No foreign root or session was operated.
+
+## Slice 4 — transaction-report adoption (in progress)
+
+Before measurement used an immutable source archive at `42660b9ca` under
+`tmp/one-jvm-redesign-root/source`, its own root and cluster `s`, through the
+operator's existing advertised-prepl client. A first cold initialization against
+the changing shared tree refused source drift after 101.171 s; the fixed archive's
+cold initialization completed in 309.189 s, fork in 23.694 s without a running
+host, and boot in 62.109 s. The one-file docstring measurement completed in
+139.859 s: program-row acquisition 31,046 ms, reconciliation transaction 22,676 ms,
+whole-program definition comparison 27,103 ms, and the span from issue reconciliation through the subsequent projection/deletion reads 18,702 ms.
+Reload was 16 ms, instrumentation 498 ms, SCI acquisition 1,308 ms. Publication
+also spent 4,718 ms acquiring the published database projection, 2,509 ms reconciling rows,
+4,403 ms indexing issues, 5,320 ms sealing activation, and 10,883 ms between branch
+publication completion and schema reconciliation. These are measurements, not
+accepted bounds: the first four adoption costs walk all declarations/issues when
+the transaction report already identifies the changed entities.
+
+Dependency ledger: Datahike's writer returns the committed transaction report
+(`reference-code/datahike/src/datahike/writer.cljc:404–428`). It delivers the
+transaction promise before notifying listeners; collecting reports in a listener
+and reading an atom after `transact!` would race. The returned report is the seam.
+Datahike `since` excludes its basis transaction (`db.cljc:150`), composes temporal
+predicates (`db.cljc:680`), and `history` retains retractions (`api/impl.cljc:185`).
+A missed publication therefore derives its changed identities from history since
+the adopted source commit; no report cache or second durable history is added.
+
+The issue writer requires a scoped arity in `src/seon/issue.clj`: its existing
+unscoped `adopt!` interprets omitted issues as deletions. This clean file was
+extended at its existing transaction owner instead of duplicating that writer in
+`cluster.clj`. The foreign dirty boundaries observed were `src/seon/schema.clj`
+and `test/seon/test/fixture_timing_test.clj`; neither is part of this slice.
+
+The first fast run (`run.hbOZnR`, HEAD-plus-owned-paths) selected a published
+base 18 commits behind HEAD. `activation-missing`'s four-argument call was
+refused although the snapshot's authored function and contract both declare
+that arity. The following existing source-publication test began complete
+population; its own JVM thread sample showed `populate-source!` awaiting a
+Datahike transaction after several minutes. The lane terminated that owned
+run (exit 143), retained its evidence, and selected the new bounded regression
+namespace instead. This is the existing
+[`canonical-fixture-retains-old-function-contracts-after-adoption`](../../../seon/issues/canonical-fixture-retains-old-function-contracts-after-adoption.md)
+verification boundary, not a green source-suite claim. No test-system file or
+foreign session was changed.
+
+
+Item 1 after measurement: 48,982 ms end to end, versus 139,859 ms before.
+The published result carried the report identities for the three `my.note`
+functions and its file row. The only reload was `my.note`; the only changed
+armed roots were `my.note/add!`, `my.note/notes`, and `my.note/forget!`. Clojure
+`require :reload` replaces those definitions, so the fresh roots must be armed;
+unrelated wrappers retained object identity. The existing SCI fault recorder is
+carried through acquisition and instrumentation rather than creating a new
+callback (and therefore a different record-mode policy) on every adoption.
+No-change was 1,738 ms, with the exact same source commit before/after and an
+empty changed-wrapper set. The five-second edit and one-second no-change targets
+are NOT met.
+
+Remaining spans over two seconds (progress labels are preserved in the raw
+output; several announce completion, not start): published database projection
+acquisition 6,037 ms; row preparation before contract projection 2,176 ms;
+publication reconciliation/report extraction 3,313 ms; publication issue indexing
+2,733 ms; activation derivation/sealing plus the final deletion comparison
+8,264 ms; adoption's published-database acquisition 6,097 ms; selected program
+transaction followed by live projection derivation 6,372 ms; SCI acquisition
+2,863 ms. Projection acquisition reads the complete stored declaration population
+one row at a time (the concurrently held `schema.clj` owner is correcting that).
+Issue publication parses the complete issue population. Activation derives all
+schema/config/function membership again. The publisher's final deletion check
+compares every program identity despite `db/write-report-error` already checking
+affected entities through `write-deletion-error` and reverse AVET seeks
+(`src/seon/db.clj:3924,4000,4055`). The writer also computes whole-program arity
+mismatches after any affected entity (`:4061`). SCI's required base regeneration
+reads the complete program. These identify remaining algorithms; none is an
+acceptance of the elapsed time.
+
+The focused fast run `2eb1d5bee425` ran three tests: namespace selection and
+wrapper preservation passed; the report test had a fixture namespace omission,
+subsequently corrected. The next fast run proves the remaining contract boundary:
+the old canonical fixture refuses `published-index-rows`' two-argument arity
+before its implementation runs. No unarmed result is substituted. The new
+namespace regression uses four tiny source files, not a complete publication;
+its declared long allowance names the measured first fixture acquisition plus
+analysis (12.0 s). The last live measurement's JVM was downed before the explicit
+Clojure load check.
+
+Item 1 exact UTF-8 source bytes (diff payload, including line endings):
+
+| Path | Deleted | Added | Net |
+|---|---:|---:|---:|
+| `src/seon/cluster.clj` | 5934 | 6106 | +172 |
+| `src/seon/cluster/source.clj` | 663 | 3226 | +2563 |
+| `src/seon/fn.clj` | 4026 | 3051 | -975 |
+| `src/seon/issue.clj` | 1411 | 2372 | +961 |
+
+Seams: `fn/report-identities` reads the report’s touched entities in before/after; `published-index-rows` selects those lookup refs; `program/exact-replacement-tx` remains the row writer; `source/changed-identities` uses native history for missed publications; `issue/adopt-tx` receives an identity scope; Clojure `require :reload`, `reload-order`, existing `instrument/apply!`, and SCI `acquire!` remain the execution owners. No schema attribute was added or removed. The explicit require of cluster/source/fn/issue exited zero. The orchestrator still owes the cold gate and its measurement-script row.

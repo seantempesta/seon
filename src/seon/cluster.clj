@@ -1723,6 +1723,12 @@
   `:seon.schema/missing-projection`. A projection the caller already handed
   (`refresh-source!`'s declaration projection, a cluster's advanceable
   projection state) wins, so this derives one only when nothing supplied it."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/connection [:or :nil :seon.boot/cluster-name]]
+     [:or :nil :seon.db/transaction-report]]
+    [:=> [:cat :seon.db/connection [:or :nil :seon.boot/cluster-name] :boolean]
+     [:or :nil :seon.db/transaction-report]]]}
   ([connection cluster-name]
    (accrete-schema-population! connection cluster-name true))
   ([connection cluster-name publish-schema-rows?]
@@ -1760,8 +1766,7 @@
                               :tx-meta
                               {:seon.db/process
                                [:seon.db.process/id boot-process-identity]}})
-               {:seon.boot/population :seon.schema/rows}))))))))
-  nil))
+               {:seon.boot/population :seon.schema/rows}))))))))))
 
 (defn populate-source!
   "The default `current-src` content: this code's schema and program rows.
@@ -1781,7 +1786,7 @@
   {:malli/schema
    [:=> [:cat [:map [:seon.db/connection
                      :seon.db/connection]]]
-    :nil]}
+    [:or :nil :seon.reconcile/result]]}
   [{connection :seon.db/connection
     manifest :seon.fn/manifest
     roots :seon.fn/roots
@@ -1802,12 +1807,14 @@
           ;; names exactly the owners its changed inputs belong to, so a
           ;; schema resource never re-indexes the program and a config
           ;; document never re-accretes the schema.
-          (when (or (nil? classes) (classes :schema-resource))
+          (let [schema-report
+                (when (or (nil? classes) (classes :schema-resource))
           (report-source-progress! "schema population started")
           ;; Complete publication admits schema rows with their renderer
           ;; definitions in index!'s one final transaction.
-          (accrete-schema-population! connection nil (some? classes))
-          (report-source-progress! "schema population complete"))
+          (let [report (accrete-schema-population! connection nil (some? classes))]
+            (report-source-progress! "schema population complete")
+            report))]
           (when (nil? classes)
           (report-source-progress! "instruction rows")
           (let [rows (instruction-row-changes
@@ -1821,9 +1828,10 @@
                               {:seon.db/process
                                [:seon.db.process/id boot-process-identity]}})
                {:seon.boot/population :seon.cluster.instruction/rows}))))
-          (when (or (nil? classes) (classes :program))
-            (report-source-progress! "program rows started")
-            (seon.fn/index!
+          (let [result
+                (when (or (nil? classes) (classes :program))
+                  (report-source-progress! "program rows started")
+                  (let [result (seon.fn/index!
              (cond-> {:seon.db/connection connection
                       :seon.db/process
                       [:seon.db.process/id boot-process-identity]}
@@ -1833,8 +1841,9 @@
                previous (assoc :seon.fn/previous-manifest previous)
                paths (assoc :seon.fn/changed-paths paths)
                (nil? manifest) (assoc :seon.fn/roots (or roots seon.fn/source-roots)))
-             report-source-progress!)
-            (report-source-progress! "program rows complete"))
+             report-source-progress!)]
+                    (report-source-progress! "program rows complete")
+                    result))]
           ;; Initialization rows come LAST because they may name a program row
           ;; by lookup ref — the call-preparation suppliers do — and program
           ;; rows are asserted by `index!` immediately above. Nothing earlier in
@@ -1846,8 +1855,12 @@
           (report-source-progress! "initialization rows")
           (let [rows (config/default-population)]
             (when (seq rows)
-              (transact-initialization! connection rows)))))))))
-  nil)
+              (transact-initialization! connection rows))))
+            (cond-> result
+              (and result schema-report)
+              (update :seon.reconcile/adopt-identities (fnil into #{})
+                      (require-committed! (seon.fn/report-identities schema-report)
+                                          {:seon.boot/population :seon.schema/rows})))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Ordered boot above the REPL
@@ -2301,20 +2314,13 @@
 (declare commit-fault! process-identity)
 
 (defn- acquire-development!
-  [connection cluster-name ctx projection]
-  (let [database (db/db connection)
-        effective (config/effective database cluster-name)
-        _ (when (:seon.error/kind effective)
-            (refused! "Development acquisition configuration is unavailable."
-                      effective))
-        result (sci.eval/acquire!
+  [connection _cluster-name ctx projection]
+  (let [result (sci.eval/acquire!
                 {:seon.sci.eval/ctx ctx
-                 :seon.db/db database
+                 :seon.db/db (db/db connection)
                  :seon.schema/projection projection
                  :seon.flow/commit-fault!
-                 #(commit-fault! connection cluster-name
-                                 "seon.sci.eval/acquire"
-                                 (config/result-caps effective) %)})]
+                 (:seon.flow/commit-fault! @(:seon.sci.kernel/program-snapshot ctx))})]
     (when-let [failure (:seon.sci.eval/acquisition-recording-error result)]
       (refused! "Development acquisition could not record a row fault." failure))
     result))
@@ -2337,8 +2343,34 @@
   [identities]
   (into [] (filter (comp adoption-identity-attribute? first)) identities))
 
+(defn development-namespaces
+  "Changed declaration namespaces and their transitive declared dependents."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.fn.file/identities] [:set :seon.ns/name]]}
+  [database identities]
+  (loop [selected (into #{}
+                       (keep (fn [[attribute value]]
+                               (case attribute
+                                 :seon.ns/name value
+                                 (:seon.fn/sym :seon.test/sym) (symbol (namespace value))
+                                 nil))) identities)
+         pending nil]
+    (let [callers (db/q '[:find [?name ...] :in $ [?required ...]
+                         :where [?ns :seon.ns/requires ?required]
+                         [?ns :seon.ns/name ?name]]
+                       database (vec (or pending selected)))
+          _ (when (:seon.error/at callers)
+              (refused! "Development namespace dependents could not be read." callers))
+          added (set/difference (set callers) selected)]
+      (if (seq added) (recur (into selected added) added) selected))))
+
 (defn- development-source-refresh!
-  [held-store instance before-publication published changed-paths roots]
+  {:malli/schema
+   [:=> [:cat :seon.store/store :seon.boot/instance :seon.source/published
+          [:vector :string]
+          [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]]]
+    :nil]}
+  [held-store instance published changed-paths roots]
   (let [connection (:seon.boot/cluster-connection instance)
         cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
         cluster-ref [:seon.cluster/name cluster-name]
@@ -2347,83 +2379,54 @@
                       (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref))]
     (if (and prior-commit (= prior-commit (:seon.source/commit-id published)))
       (do (report-source-progress! "development cluster converged") nil)
-      (let [previous-database (if prior-commit
-                            (try
-                              (source/database held-store prior-commit)
-                              (catch clojure.lang.ExceptionInfo failure
-                                (if (= :seon.cluster.source/source-absent
-                                       (:seon.cluster.source/rule (ex-data failure)))
-                                  (do
-                                    (log/warn "Development source basis unavailable; reconciling against the live cluster"
-                                              {:seon.source/commit-id prior-commit
-                                               :seon.cluster/name cluster-name})
-                                    (report-source-progress!
-                                     (str "development source basis unavailable: " prior-commit
-                                          "; reconciling against the live cluster"))
-                                    (db/db connection))
-                                  (throw failure))))
-                            (db/db connection))
-        published-database (source/database held-store (:seon.source/commit-id published))
-        published-projection (schema/projection-from-database published-database)
+      (let [previous-database (db/db connection)
+        published-database (source/database held-store (:seon.source/commit-id published))]
+       (try
+        (let [published-projection (db/carried-projection published-database)
+        identities (if prior-commit
+                     (source/changed-identities held-store published prior-commit)
+                     (into #{} (keep program/row-identity)
+                           (seon.fn/published-index-rows published-database)))
+        program-identities (into #{} (filter (comp (set program/identity-attributes) first)) identities)
+        issue-identities (into #{} (keep (fn [[attribute value]]
+                                         (when (= :seon.issue/id attribute) value))) identities)
         forms (:seon.schema.projection/forms published-projection)
-        _ (report-source-progress! "development schema declarations")
-        _ (schema/call-with-forms
-           forms
-           #(require-committed!
-             (db/transact!
-              connection
-              {:tx-data
-               [[:db.fn/call
-                 (fn [database]
-                   (declaration-changes database published-projection cluster-name))]]})
-             {:seon.boot/population :seon.schema/declarations}))
-        scalar-rows (:seon.source/upsert-rows published)
-        scalar? (and scalar-rows
-                     (= prior-commit (:seon.source/commit-id before-publication)))
-        _ (report-source-progress! "development program reconciliation")
-        changed-identities
-        (adoption-identities
-         (if scalar?
-           (do
-             (when (seq scalar-rows)
-               (require-committed!
-                (db/transact! connection {:tx-data scalar-rows})
-                {:seon.boot/population :seon.fn/population}))
-             ;; `program/row-identity` is the one identity derivation: a
-             ;; per-call roster of identity attributes reads every row it
-             ;; does not list — a file-digest row, a lint finding — as nil.
-             (into [] (keep program/row-identity) scalar-rows))
-           (:seon.program/identities
-            (seon.fn/index!
-             {:seon.db/connection connection
-              :seon.source/database published-database
-              :seon.source/previous-database previous-database}
-             *source-progress!*))))
-        _ (report-source-progress! "development issue reconciliation")
-        _ (require-committed!
-           ((requiring-resolve 'seon.issue/adopt!) connection published-database)
-           {:seon.boot/population :seon.issue/rows})
+        _ (when (some #(= :seon.schema/key (first %)) identities)
+            (report-source-progress! "development changed schema declarations")
+            (schema/call-with-forms
+             forms
+             #(require-committed!
+               (db/transact! connection
+                             {:tx-data [[:db.fn/call
+                                         (fn [database]
+                                           (declaration-changes database published-projection cluster-name))]]})
+               {:seon.boot/population :seon.schema/declarations})))
+        _ (when (seq program-identities)
+            (report-source-progress! "development changed program rows")
+            (require-committed!
+             (schema/call-with-projection
+              published-projection
+              #(seon.fn/index!
+              {:seon.db/connection connection
+               :seon.schema/projection published-projection
+               :seon.source/database published-database
+               :seon.source/previous-database previous-database
+               :seon.reconcile/adopt-identities program-identities}
+              *source-progress!*))
+             {:seon.boot/population :seon.fn/population}))
+        _ (when (seq issue-identities)
+            (report-source-progress! "development changed issues")
+            (require-committed!
+             ((requiring-resolve 'seon.issue/adopt!) connection published-database issue-identities)
+             {:seon.boot/population :seon.issue/rows}))
         database (db/db connection)
         projection (schema/projection-from-database database)
-        deleted-identities (source/deleted-identities database)
-        namespaces
-        (into #{}
-              (keep (fn [[attribute value]]
-                      (case attribute
-                        :seon.ns/name value
-                        (:seon.fn/sym :seon.test/sym)
-                        (symbol (namespace (symbol value)))
-                        nil)))
-              (if prior-commit
-                changed-identities
-                (mapv (fn [namespace-name] [:seon.ns/name namespace-name])
-                      (db/q '[:find [?name ...]
-                              :where [?namespace :seon.ns/name ?name]
-                              [?namespace :seon.ns/source]]
-                            database))))]
+        changed-identities (adoption-identities program-identities)
+        deleted-identities (filterv #(empty? (db/pull published-database '[*] %)) changed-identities)
+        namespaces (development-namespaces database changed-identities)]
     (report-source-progress! "development loaded definitions")
     ;; Clojure reload leaves removed interns behind. Remove only definitions
-    ;; whose identity now has no source, retaining their durable tombstones.
+    ;; whose identity is absent from the published database.
     (doseq [[attribute function-symbol :as deleted-identity] deleted-identities
             :when (#{:seon.fn/sym :seon.test/sym} attribute)]
       (let [qualified (symbol function-symbol)
@@ -2460,9 +2463,7 @@
                      {:seon.config/on-core-error
                       (:seon.config/on-core-error effective)
                       :seon.flow/commit-fault!
-                      #(commit-fault! connection cluster-name
-                                      (process-identity (:seon.boot/advertisement instance))
-                                      (config/result-caps effective) %)
+                      (:seon.flow/commit-fault! @(:seon.sci.kernel/program-snapshot ctx))
                       :seon.sci.admit/caps (config/result-caps effective)
                       :seon.config.error/max-evidence-bytes
                       (:seon.config.error/max-evidence-bytes effective)
@@ -2493,7 +2494,8 @@
                                (:seon.source/commit-id published)}
                               {:db/id :db/current-tx
                                :seon.test/adoption-cluster cluster-ref
-                               :seon.test/adoption-identities (set changed-identities)
+                               :seon.test/adoption-identities (set/difference (set changed-identities)
+                                                                             (set deleted-identities))
                                :seon.test/adoption-inputs (set changed-paths)}]})
      {:seon.boot/population :seon.source/commit-id})
     (when-let [channel (get-in instance
@@ -2501,7 +2503,8 @@
                                :seon.render.web/runtime-eval-channel])]
       (async/offer! channel :seon.render.web/runtime-eval))
     (report-source-progress! "development cluster converged")
-    nil))))
+    nil)
+    (finally (d/release-materialized-db published-database)))))))
 
 (defn- require-publication-resources!
   "A snapshot may vary program inputs, but loaded resources must be identical."
@@ -2567,14 +2570,10 @@
             (schema/call-with-projection
              (schema/declaration-projection (schema.edn/packaged-forms))
              (fn []
-               (let [before-publication (source/current held-store)
-                     published (full-source-refresh! root held-store roots)]
+               (let [published (full-source-refresh! root held-store roots)]
                  (when instance
-                   (development-source-refresh! held-store instance
-                                                before-publication published
-                                                changed-paths roots))
-                 (dissoc published :seon.source/upsert-rows
-                         :seon.source/relative-file-digests))))))
+                   (development-source-refresh! held-store instance published changed-paths roots))
+                 published)))))
          (finally
            (release-root-store! store-dir))))))))
 
@@ -2690,7 +2689,7 @@
 
 (defn- require-committed!
   [result offense]
-  (when (:seon.error/kind result)
+  (when (:seon.error/at result)
     (refused! (str "The cluster population transaction was refused: " (:seon.error/message result))
               (assoc offense :seon.boot/result result)))
   result)
