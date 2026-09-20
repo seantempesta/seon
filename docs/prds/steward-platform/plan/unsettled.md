@@ -6420,3 +6420,26 @@ core-edit run additionally reloaded 113 namespaces (the dependents of
 `seon.id`, ~10–140 ms each — cheap; the reconciliation reads are the cost).
 Third run (a real docstring edit in the non-core `src/my/note.clj`) in
 progress.
+
+## 2026-09-22 ~15:40 local — MEASURED: docstring edit in a NON-core namespace = 483 s; the incremental analysis itself is 277 s (the complete one is 10 s)
+
+`src/my/note.clj` docstring edit through `init --dev head --changed`:
+**482.9 s**. The incremental path DID fire — "branch publication started:
+2 inputs" — and it is the slowest case of all: "analysis" **276.8 s**
+(the from-zero complete analysis of 381 files took 10.2 s), then
+program reconciliation 39.8 s, source build 32.3 s, reconciliation
+transaction 24.0 s, changed-definition comparison 23.0 s, findings
+16.4 s, issue reconciliation 14.2 s, branch head 11.3 s. The incremental
+branch of `seon.fn/build-manifest` (`reusable?` true: `forget-namespaces!`,
+re-analysis of the changed file with `known` symbols, `publication-inputs`
+for affected files, `cached-analysis` lookups per additional path) is
+27× slower than analyzing everything. That branch is a representation
+fighting the tool: clj-kondo analyzes a classpath in seconds; an
+incremental scheme that per-file forgets, re-analyzes and re-reads caches
+costs more than the thing it avoids. Handed to the publication lane at
+its next stop as item 0 (measure where the 277 s goes, then either make
+the incremental analysis cheaper than the complete one or delete it and
+always analyze completely — 10 s — keeping incremental POPULATION only).
+Summary so far: from zero 175 s; no change 149 s; core docstring 419 s;
+non-core docstring 483 s. Every "incremental" case is slower than
+starting over.
