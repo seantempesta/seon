@@ -27,7 +27,7 @@
   (testing "an absent required member refuses as a flat value"
     (let [refusal (sut/environment {})]
       (is (not (sut/environment? refusal)))
-      (is (= :seon.env/incomplete-environment (:seon.error/kind refusal)))
+      (is (= :seon.boot/cluster-name (:seon.env/missing-member refusal)))
       (is (= :store (get-in refusal [:seon.error/data :seon.env/layer])))
       (is (= :seon.boot/cluster-name
              (get-in refusal [:seon.error/data :seon.env/member])))))
@@ -63,8 +63,8 @@
       (is (= "agent-a"
              (:seon.agent/id
               (sut/scope environment {:seon.agent/id "agent-a"}))))
-      (is (= :seon.env/unscopable-member
-             (:seon.error/kind
+      (is (= [:seon.db/connection]
+             (:seon.env/unscopable-members
               (sut/scope environment {:seon.db/connection ::not-a-connection})))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -333,7 +333,7 @@
   (testing "the proc construction seam"
     (let [refusal (test-support/refusal-data
                    #(flow/var-process #'inert-step :io {}))]
-      (is (= :seon.env/absent-environment (:seon.error/kind refusal)))
+      (is (= :seon.flow/var-process (:seon.env/boundary refusal)))
       (is (= :seon.flow/var-process
              (get-in refusal [:seon.error/data :seon.env/boundary])))))
 
@@ -345,7 +345,7 @@
     (let [refusal (test-support/refusal-data
                    #(flow/start-work-launcher!
                      {:seon.flow/configuration launcher-configuration}))]
-      (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+      (is (= :input (:seon.instrument/check refusal)))
       (is (= 'seon.flow/start-work-launcher!
              (:seon.error/diagnostic-operation
               (:seon.error/data refusal))))))
@@ -363,7 +363,7 @@
                           :seon.flow/workload :io
                           :seon.flow/work-fn (fn [_] ::unreached)
                           :seon.flow/complete! (fn [_])}))]
-          (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+          (is (= :input (:seon.instrument/check refusal)))
           (is (= 'seon.flow/submit!
                  (:seon.error/diagnostic-operation
                   (:seon.error/data refusal))))))
@@ -376,7 +376,7 @@
                           :seon.flow/workload :compute
                           :seon.flow/time-limit-ms 1000
                           :seon.flow/work-fn (fn [_] ::unreached)}))]
-          (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+          (is (= :input (:seon.instrument/check refusal)))
           (is (= 'seon.flow/submit!!
                  (:seon.error/diagnostic-operation
                   (:seon.error/data refusal))))))

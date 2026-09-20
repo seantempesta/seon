@@ -634,3 +634,16 @@ Add `src/seon/flow.clj`, `resources/seon/schemas/seon.flow.edn`,
 accumulated fast/cold paths, with `seon.flow-test` and
 `seon.flow-configuration-test`. Cold and platform proof remain orchestrator
 work. This is a conversion checkpoint, not a live adoption claim.
+
+Env: source kind sites 10 → 0; test sites 6 → 0. Refusals name the missing
+member, expected schema, crossing boundary, missing schema, agent's cluster,
+or unscopable keys. Raw supplied values ride `:seon.error/offending` and
+diagnostic evidence. Provided-member count is required while the possibly
+empty set of available keys is optional, so absence of collection datoms
+does not erase the observation. Public returned refusals and the private
+constructor name exact facets. Old boolean-only facets are removed; the
+invalid-value facet describes malformed construction/state inputs directly.
+Env loads; source and test lint have zero errors/warnings. Fast tally remains
+owed at the runner admission boundary; append `src/seon/env.clj`,
+`resources/seon/schemas/seon.env.edn`, `test/seon/env_test.clj` and namespace
+`seon.env-test` to the accumulated commands.
