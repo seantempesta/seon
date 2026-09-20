@@ -5240,3 +5240,18 @@ decide registry-defect vs malformed-facet by evidence, classify the reds
 by boundary, land the coherent commit when section 7's six namespaces are
 green. Also filed by the lane: `default-web-request-times-out-during-partial-adoption`.
 Publication lane and render-2 sweep running; editing lanes: three.
+
+## 2026-09-21 ~03:50 UTC — render-2 kind-free; step 1's recorder fix landed; wave-4 design lane launched
+
+`kind-sweep-render-2` landed `f1ce65c02` (hiccup, lint, ns, test, value
+kind-free; exact Hiccup/lint/value facets; 56 tests / 390 assertions / 79 F
+/ 13 E recorded against the symbol-type schema boundary step 1 is changing
+under it — re-measure after step 1 lands; hiccup_test.clj's R8 conversion
+owed once step 1 releases it). `bridge-step1-registry` landed `667f6519e`
+(live test recording preserves complete refusals — the recorder now names
+the offending declaration). Every remaining sweep and 1a are blocked by
+step 1's 52-file hold, so the third slot is a read-only design lane:
+`wave4-isolation-merge-design` (astra high) writes the launchable specs
+for 4a/4b/4c from the isolation research, the landed test system and
+Datahike's versioning source — the owner's branch-and-merge requirement,
+verbatim, is its acceptance.
