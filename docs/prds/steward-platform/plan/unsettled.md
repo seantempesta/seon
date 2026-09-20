@@ -5564,3 +5564,12 @@ from the same landing note, remaining families ai → operator/state, with
 both facet rulings restated. Tools-queue note: `bin/codex-agent` needs a
 "continue until done" resume mode; sol low ends turns at seams and stalls
 after many resumes — astra low is the workhorse for multi-family sweeps.
+
+## 2026-09-21 ~12:15 UTC — test-system checkpoint landed (admission clear); resumed
+
+`kind-sweep-test-system` landed `e8ca8aa42` (the five runner facets with
+`:seon.error/offending` + queryable scalar members; producers, consumer,
+launch regression), `b671525e9` (accretion family kind-free), `e03781c89`
+(note). Its runner resource is committed with its consumer, so every
+lane's snapshot admission is clear. 89 references remain (runner 50, arm
+7, runner tests, older runner schemas); resumed for the rest in one pass.
