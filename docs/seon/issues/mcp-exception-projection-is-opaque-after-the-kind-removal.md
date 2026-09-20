@@ -26,6 +26,14 @@ could not project. The orchestrator's tooling loses every exception's cause.
 
 ## Fix
 
+Step-1 registry lane re-observation (2026-09-20): `runtime_status` for
+`default`, pid 24777, returned the same `projection-failed` map instead of
+health evidence. A read-only JVM evaluation returning a string succeeded:
+the carried projection had 3,228 forms and registry lookup for
+`:seon.agent/id` was not a compiled Malli Schema. This establishes that
+the REPL remains reachable; it does not establish runtime health or the
+cause of the status projection failure. No runtime mutation was performed.
+
 Owned by the `kind-sweep-turn-cluster` sweep (PRD
 `docs/prds/steward-platform/plan/error-conversion-prd-2026-09-20.md`): convert
 the MCP projection producers in `src/seon/cluster.clj` to declared facets via
