@@ -5526,3 +5526,16 @@ failures first, the wave-5 task handoff). `kind-sweep-ops-effects` landed
 `wave3bc-render-proofs-design` (render pairs incl. the recursive-rendering
 question answered from walk/block source; the five template proofs with
 judging bars). README state pointer rewritten for the morning.
+
+## 2026-09-21 ~11:05 UTC — test-system sweep: offending values ride the occurrence projection (ruled)
+
+`kind-sweep-test-system` stopped again (`2692a9b02`): the raw offending
+marker value cannot be a typed datom (the bridge stores no `:any`/`:map`).
+Ruled: reuse the error family's existing mechanism — `:seon.error/offending`
+in memory (seon.error.edn:20); durable evidence through the occurrence's
+`offending-projection` + `data-edn`/`data-blob` (seon.error.edn:118-124,
+:280; occurrence.edn:15/34); the facet's queryable required datoms are
+identities, keys, bounds and phases. No per-facet EDN string (one
+mechanism, §2.5). The lane lands its runner resource and consumer together
+as early as they load, because the dirty resource is holding every other
+lane's snapshot admission. Ops-effects resumed for a continuous pass.
