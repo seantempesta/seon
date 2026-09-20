@@ -919,3 +919,19 @@ Precommit namespace load exited 0, requiring `seon.fn`, `seon.fn.analyzer`,
 That command used the shared tree, including foreign edits; the fast evidence
 above used HEAD plus the explicit owned paths. A committed-HEAD-only namespace
 load follows the commit; it is a source load, not another suite execution.
+
+
+### Accepted 8edfae1b7 followup: selection-policy boundary
+
+The prescribed fixture split was audited before editing. Existing `:platform`
+and `:long` cannot provide all three requested properties: explicit platform
+coverage, exclusion from bare gates, and mechanical exclusion from fast named
+requests. The child fixture also reaches the declared destructive population
+owner that the platform checker forbids. My earlier recommendation omitted
+that conflict. Exact file/line evidence and three priced choices are recorded
+in [the existing nested-gate issue](../../../seon/issues/fast-runner-suite-can-launch-cold-gates-and-exceed-lane-jvm-budget.md#followup-existing-metadata-cannot-express-the-requested-isolation).
+
+No production or fixture changes, no suite rerun, and no default operation in
+this followup. The population owner is still dirty/held. The requested ordering
+was fixture-split commit first; that slice stops before changing validation
+policy. Items 2–4 remain unimplemented.

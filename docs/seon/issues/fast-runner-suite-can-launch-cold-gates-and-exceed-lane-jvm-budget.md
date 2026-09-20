@@ -37,3 +37,58 @@ selected integration namespace, retaining their recurring platform coverage.
 This keeps ordinary lane fast selection within one JVM without a new policy
 schema or silently skipping an obligation. Changing validation selection is
 an orchestrator decision; this lane has not changed runner policy or fixtures.
+
+
+## Followup: existing metadata cannot express the requested isolation
+
+At HEAD `8eec50b46`, the accepted namespace-split direction encounters a
+validation-policy boundary before a safe metadata-only move:
+
+- `src/seon/test/fast.clj:45` explicitly supplies `:seon.test/include-long? true`
+  and `:named`; lines 48–51 enumerate every test in the requested namespaces.
+  Moving a test protects the remaining runner namespace, but `:long` does not
+  mechanically prevent a fast request naming the integration namespace.
+- `src/seon/test/runner.clj:952–957` skips long tests before partitioning
+  platform tests. A non-long platform test participates in bare cold gates;
+  a long platform test is skipped by the ordinary platform request. The
+  canonical selector likewise applies the long eligibility test at
+  `src/seon/test.clj:1026–1027`, before platform reasons at line 1049.
+- There is no existing orchestrator-only test declaration in the canonical
+  `resources/seon/schemas/seon.test.edn` registry or the selector/runner.
+- `concurrent-bin-test-invocations-both-reach-their-tallies` calls
+  `populate-published-operator-root!` (`test/seon/test_runner_test.clj:2113`).
+  That owner declares `:seon.fn/destroys` at `test/seon/test_support.clj:129`.
+  `verify-platform-tier-carries-no-destructive-drill!`
+  (`src/seon/test/runner.clj:1091–1126`) refuses that call path in platform.
+  This is the existing store-wipe regression guarantee, not a hypothetical
+  concern. The resolved store-wipe issue was read end to end.
+
+The earlier recommendation to preserve platform coverage by namespace metadata
+was incomplete: it did not account for these eligibility and destructive-owner
+rules. No fixture was moved, no guard weakened, no test executed, and no cold
+child process launched in this followup. Changing this policy needs a ruling;
+the assignment explicitly permits stopping at a validation boundary.
+
+Three options (engineering estimates, excluding the orchestrator's cold proof):
+
+1. **Recommended smallest change: separate a long integration namespace and
+   give the orchestrator an explicit recurring named cold invocation.**
+   30–60 minutes for fixture separation and local selection verification.
+   Preserves the destructive-platform guard and safe ordinary runner fast
+   selection. Gives up coverage inside `--platform` and a mechanical refusal
+   of an intentionally named fast integration invocation.
+2. **Enforce orchestrator-only eligibility as a new declared test fact in the
+   shared selector, keeping integration outside platform.** 1–3 hours for
+   schema/indexer/selection/launcher integration and regression. Explicit fast
+   requests refuse; bare requests exclude it; recurring orchestrator integration
+   retains coverage. Gives up the no-new-policy shape and platform membership.
+3. **Keep the requested explicit platform coverage by introducing a separately
+   admitted integration phase and orchestrator-only declaration.** 3–6 hours
+   for shared selection, root/resource admission, and cold verification. The
+   existing ordinary platform guard stays intact; the new phase needs an
+   explicit isolated-root guarantee for destructive child fixtures. Gives up
+   the current single platform-phase semantics and broadens this lane into
+   test execution architecture.
+
+`src/seon/cluster.clj` remains dirty/held. The held function fixture is untouched.
+Items 2–4 have not advanced during this read-only selection audit.
