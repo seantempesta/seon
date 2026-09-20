@@ -93,12 +93,32 @@ expected connection member. No execution behavior changed.
 
 Fast command: `bin/test-fast --paths src/seon/db.clj test/seon/test_support_test.clj -- seon.test-support-test`.
 The custody regression passed in **0.673291 s**. The whole namespace run took
-**749.105036750 s**, exit 1 (`tmp/bridge-platform-class4.log`); its sole
+**749.105036750 s**, 18 executed, 158 assertions, 1 failure, 0 errors,
+exit 1 (`tmp/bridge-platform-class4.log`); its sole
 failure is the unchanged class 5 kind-only fixture. Independent canonical
 population and isolated fixture publication dominate this namespace's cost;
 the thread sample is `tmp/bridge-platform-class4-threads.txt`. The final
 class 5 run below is the combined green proof. Source require of `seon.db`
 brackets this class's commit.
+
+### Class 5 — a flat refusal fixture carries the base members
+
+Root cause: the fixture supplied only the retired kind marker, so it was
+correctly treated as an ordinary result. `test-support/refusal-data` already
+recognizes the base members at `test/seon/test_support.clj:901`; its producer
+needed no change. The fixture now supplies an instant, qualified layer and
+qualified operation, asserts the same map is returned, and verifies that
+removing the operation leaves an ordinary result.
+
+Fast command: `bin/test-fast --paths test/seon/test_support_test.clj -- seon.test-support-test`.
+Final combined support proof: **18 executed, 159 assertions, 0 failures,
+0 errors**, exit 0, **809.017914666 s** (`tmp/bridge-platform-class5.log`,
+recorded run `b7742a25c145`). The corrected fixture body took **0.009416 s**;
+the custody regression passed again. The selector executed all 18 members,
+including the independent full-population and isolated-store tests. No
+publication implementation changed to accommodate their cost. Source require
+of `seon.db` brackets the commit. All five assigned classes now have green
+fast evidence; the orchestrator's cold platform gate remains owed.
 
 ## Final ruled slice and verification
 

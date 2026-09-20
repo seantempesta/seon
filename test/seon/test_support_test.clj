@@ -436,9 +436,13 @@
     (is (= {::rule ::refused}
            (test-support/refusal-data
             #(throw (ex-info "refused" {::rule ::refused})))))
-    (is (= {:seon.error/kind ::flat-refusal}
-           (test-support/refusal-data
-            (constantly {:seon.error/kind ::flat-refusal}))))
+    (let [refusal {:seon.error/at (java.util.Date.)
+                   :seon.error/layer ::observation
+                   :seon.error/operation `test-support/refusal-data}]
+      (is (identical? refusal (test-support/refusal-data (constantly refusal))))
+      (is (= test-support/committed
+             (test-support/refusal-data
+              (constantly (dissoc refusal :seon.error/operation))))))
     (test-support/delete-recursively! path)
     (is (not (.exists (java.io.File. path))))))
 
