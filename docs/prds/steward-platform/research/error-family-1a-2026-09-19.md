@@ -2836,3 +2836,35 @@ no additional attributes yet. The prior retirement list remains pending.
 The accumulated cold command above remains owed for earlier implementation;
 the new slice's command must include its authorized producer inputs once
 that scope is settled.
+
+## 2026-09-22 recording-seam ruling — explicit dirty-file stop
+
+The orchestrator settled the preceding decision: the pure constructor keeps
+the actual object in flight; `prepare` performs result preparation with
+explicit connection, render profile and optional SCI context. The fault
+committer and evaluation recorder call that same owner. Legacy members remain
+unchanged until their later atomic retirement. This resolves the preceding
+constructor-input design gate; those options are no longer pending.
+
+The first status check reports `M  src/seon/cluster.clj` (staged foreign
+changes). Its diff against HEAD changes schema imports, declaration-change
+inputs, activation, schema population and development publication. It does
+not change the fault-committer block, but this assignment explicitly says:
+“if cluster.clj is dirty from another lane, STOP and report that hunk as held”.
+Accordingly, the fault-committer preparation/staging block at approximately
+lines 3216–3233 is held for this resume. It still calls `error/prepare`,
+conditionally stages the legacy content and associates `:seon.error/data-blob`.
+No edit was made to that block or any other production file.
+
+No new design ruling is requested. Release the dirty cluster file or
+explicitly permit editing only that hunk while preserving its other edits,
+then resume the already ruled recording-seam implementation. The restored
+error/print/SCI edits remain preserved. Test tally: **not run**. The four
+new canonical regressions remain owed, as do attribute selection and the
+new slice's cold command. **RESET NEEDED:** no new attributes landed in this
+resume. No default, worktree, cold gate or foreign session operation ran.
+
+Load verification before this documentation commit: `clojure -M -e
+"(require 'seon.error 'seon.sci.eval 'seon.print) (println :loads)"`
+exited 0 and printed `:loads` against the current shared tree. This verifies
+loading only; it is not a test tally or an isolated HEAD proof.
