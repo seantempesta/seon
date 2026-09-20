@@ -6816,3 +6816,20 @@ at that commit; 2.7 s at slice 2 per the reset); **adopt-nochange 1.57 s**;
 non-core docstring 326.1 s and core 289.1 s (both pre-slice-2 analysis).
 The owner's numbers were the correct ones. Platform tier at `c402d3c1d`
 still running, its measurement follows.
+
+## 2026-09-23 ~02:20 local — OWNER: "I want a faster schedule. I want to finish the problems and start building later today." — the day's plan
+
+Bar for "start building": platform tier green (is), a one-file edit
+published + adopted in seconds (slices 3–4 today), reaching-tests
+selection working from a branch (test-system cut), the reds of the
+namespaces an agent touches green. Three lanes, disjoint files:
+`one-jvm-redesign` (slice 3 → 4), `error-family-1a` (complete-tier
+classes 1–4 + kind expectations, then the next classes), and NEW
+`test-system-fork` (astra medium): the canonical fixture becomes a
+Datahike branch of the published base (150 s → ms; no in-worker
+`index!`), and bare `bin/test` receives the published database it
+already holds (the `:seon.test/cluster-required` refusal). Orchestrator:
+gates + measurement after each landing, and the task-family spec (wave
+3a) rewritten against today's seams for the evening build lane.
+Checkpoints: slice 3 → slice 4 (+ boot fault message, hook publication
+ON) → test-system cut → reset + platform + measurement → build lane.
