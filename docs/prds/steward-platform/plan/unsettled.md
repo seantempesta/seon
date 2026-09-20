@@ -4769,3 +4769,21 @@ accepted) as keep-ours rows. Deliverables: the step-3 seam enumeration +
 metadata survival + stamp/restart proof + per-seam adoption-bug risk; the
 step-4 refusal table + measured cost split + diet prototype parity. Six
 lanes again (three editing, one review, two research); load watched.
+
+## 2026-09-20 ~18:50 UTC — 1a stopped at the stale-base boundary; held for 1d
+
+`error-family-1a` landed `ac3944048`, `fc23a08b8`, `511d347bd` (HEAD loads)
+and stopped: 198 tests / 5,215 assertions / 17 F / 24 E on its first two
+runs, then ZERO tests admitted — 1d's uncommitted
+`seon.schema/assert-config-display!` (tree `src/seon/schema.clj`) refuses
+the published base (`c7c66f81…`, 97 commits behind HEAD, publication paused
+since ~05:30) because the base's per-agent dials carry no
+`:seon.config/display-label`. The class named in AGENTS.md §7 ("a schema
+resource and its loaded consumer land in one publication") observed from a
+third lane. Nothing to fix in 1a; it resumes when 1d commits resources +
+consumer together. `bin/test --prepare-head-base` would NOT unblock it (HEAD
+resources also lack the labels) and is deferred to the post-1d republish.
+Order when 1d lands: `bin/seon init` → `bin/seon start` →
+`bin/test --prepare-head-base` → resume 1a (its writer read-back probe is
+the next decision input) → 1a's cold gate on
+seon.error/instrument/schema/db/cluster/sci.eval-test.
