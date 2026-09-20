@@ -45,3 +45,16 @@ printed by `emit-core-fault!`. One regression: a fault whose map is
 refused by the writer still prints the fault's own message and the
 refusal. Lands with the fault-committer conversion the error lane owns
 (the hunk is held by the publication lane at this writing).
+
+## Second sighting, HEAD `0f5f849bd` (step 2 landed)
+
+Same boot sequence on `tmp/head-root2`, `seon.log:18`:
+
+```text
+SEON CORE FAULT (dev panic): A core fault could not be normalized. [signature ; durable record refused: :malli.core/invalid-schema]
+```
+
+The refusal changed (a schema that does not compile at fault-recording
+time, after the compiled-node bridge landed) and the fault's own message is
+still erased. Whoever fixes the last-resort shape gets this schema's name
+for free; until then the boot fault at HEAD is unknown.

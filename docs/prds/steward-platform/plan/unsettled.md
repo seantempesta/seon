@@ -6495,3 +6495,29 @@ errors it triaged are fixed-by-reasoning until the cold gate runs. The
 orchestrator runs `bin/test --prepare-head-base` and step 2's named cold
 command now (machine otherwise idle), and the measurement script on
 `0f5f849bd` is running on `tmp/head-wt` / `tmp/head-root2`.
+
+## 2026-09-22 ~17:40 local — MEASURED at `0f5f849bd`: from zero 234 s, fork 26 s, boot 40 s, first adoption REFUSED by the loaded-producer guard; boot fault now `:malli.core/invalid-schema`
+
+Script run on `tmp/head-wt` (detached at `0f5f849bd`) / `tmp/head-root2`:
+
+| Case | `7924f4dae` (morning) | `0f5f849bd` (step 2 landed) |
+|---|---:|---:|
+| From zero, complete publication | 175.0 s | 233.6 s |
+| Fork | 29.0 s | 26.1 s |
+| Boot to ready | 43.0 s | 39.5 s |
+| No change (first adoption on the fresh host) | 149.4 s | **REFUSED** |
+| Docstring, non-core / core | 482.9 s / 419.0 s | not reached |
+
+The refusal is the guard the redesign deletes (slice 4): "The live host's
+loaded producers do not match the requested toolchain", mismatch set = the
+entire 36-namespace producer closure, i.e. the fresh host recorded no
+matching generation (`the-loaded-producer-guard-refuses-a-freshly-booted-host`
+reproduced; this morning's host passed because the fork's
+publish-before-fork JVM wrote the artifact the boot then recorded). The
+from-zero cost grew 58 s; no attribution yet (the population phases carry
+the new compiled-schema path — the lane's own claim was "zero-cost
+navigation", unverified). Boot log: one core fault, message erased, refusal
+now `:malli.core/invalid-schema` (was the raw-member refusal this morning)
+— a schema that does not compile at fault-recording time, evidence added to
+[the fault-erasure issue](../../../seon/issues/a-core-fault-whose-record-is-refused-loses-its-own-message.md).
+The bare cold gate at `0f5f849bd` is running (`tmp/orchestrator/gate-0f5f849bd-bare.log`).
