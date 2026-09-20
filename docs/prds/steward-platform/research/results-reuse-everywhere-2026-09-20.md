@@ -1287,3 +1287,171 @@ its namespace is included in the final load check, not claimed as an armed
 HTML regression. The issue runner's fresh per-member database capture and the
 issue-settlement reader conversion are in the final snapshot; the turn-level
 settlement regression remains a cold proof owed as named above.
+
+
+## Final bounded closeout — 2026-09-20
+
+Ownership checked again: `test/seon/bootstrap_test.clj` remains dirty in
+bridge-step1-registry. Per the orchestrator, leave its paired conversion owed,
+without waiting: `src/seon/bootstrap.clj:245`, `:412`, `:460` still read legacy
+counts. `src/seon/fn.clj:1378`, `:1381` (formerly :1376/:1379) and the reader
+formerly at :1553 are explicitly handed to publication-dissolution; this lane
+has not edited that file. These are remaining consumers, not a second writer.
+
+The four failures in `recording-distinguishes-run-replay-from-a-new-event`
+are foreign-with-path: `src/seon/blob.clj:271` (`with-publication!`) declares
+`:seon.schema/value` while returning the callback's typed refusal. Its armed
+wrapper replaces the invalid-read/immutable evidence with undeclared-facet
+errors. The three subsequent absent diagnostic assertions are consequences
+of that same boundary, not expectations changed to accept a lost diagnostic.
+The deletion-refusal error is foreign-with-path: `src/seon/db.clj:4121`
+(`transact-call`), called at :4457 in the saved snapshot, validates the refused
+write against a report requiring `:db-before`. The writer had already refused
+the missing test definition. Neither owner was edited by this slice.
+
+Cleanup evidence before deletion (all under this lane's own log directory):
+
+| Log | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `host-readers-final-fast.log` | 286514790 | `ba2fdaa0f661b9486e9ce395af51c3d38762ec8be50380396d8b90ba997a3f31` |
+| `baseline.log` | 20013366 | `0e0b4c81b0408e37c83dfb11554b6e8503289f573e5178bafcda628368ee6648` |
+| `resume-baseline.log` | 20062155 | `16483a23d03b4973ec722a295941413eddb00c875ca858b1fe5ccc09cd9de2ef` |
+
+Deleted those three completed logs: **326,590,311 bytes**. No shared run root
+or foreign log was removed. The smaller proof logs remain available.
+
+Complete implementation/checkpoint history, derived from this note's Git
+history: `b26dc7904`, `c6c72b832`, `db24035ee`, `a86344441`, `48e3f80d6`,
+`baa0afca3`, `858e3053b`, `6e011707c`, `44b51bab0`, `a6fbf412b`, `3f0a92135`,
+`c4be385e3`, `b0b5eedfe`; this closeout is the following path-limited commit.
+
+The system now treats every request policy as an eligibility scope: recorded
+green members with matching confidence are unchanged and execute nothing.
+Every request is a fresh event; snapshot provenance records the published
+base, overlay input digest, program digest and tested basis honestly. Both
+launchers and agent-owned host execution use admitted immutable result facts,
+with oversized payloads stored as blobs and tallies queried from those facts.
+Host execution binds only its explicit cluster custody. Migrated completion
+and reporting readers share that authority. The accepted fast 4→0 proof and
+host two-request/one-execution proof establish reuse; the bootstrap/fn reader
+handoffs and the orchestrator's cold/platform integration remain explicitly owed.
+
+After publication-dissolution lands, the orchestrator runs the focused cold
+command recorded above, then these exact integration commands (not run here):
+
+```sh
+bin/test
+bin/test
+bin/test --platform
+```
+
+The second bare request must execute zero and report unchanged members with
+basis, program digest and input digest. Publication must preserve the recorded
+selection transaction lineage described earlier in this note.
+
+
+The closeout diagnostic snapshot `run.WIpHfF` ran only `seon.test-test`,
+whose fixture diagnostic changed. It reproduced **8 tests / 50 assertions /
+4 failures / 2 errors**, exit **1**. `admission-final-fast.log`: **57,966
+bytes**, SHA-256 `210fa78796775d1434fc4fb90430c0e97d142ec6d63e1e87460b13d891d2a5bf`.
+The outer recorder again refused at the published authority; this is an
+execution tally, not a durable green tally. The exception reporter omitted
+ex-data, so the fixture now includes the original SCI evaluation and failed
+source in its exception message before calling `declaration-row`.
+
+The read-refusal equality expectation is not stale: `src/seon/db.clj:4243`
+explicitly returns a Seon transition refusal verbatim. No expectation was
+weakened to accept replaced evidence. The last green host tally remains
+**1 test / 25 assertions / 0 failures / 0 errors**, with the durable and
+inner zero-execution evidence recorded above. Already-green host, agent-SCI,
+and expiry namespaces were not rerun during closeout.
+
+
+The second diagnostic run (`run.tZ049a`) exposed a successful evaluation:
+`ordinary` returned `#'selection.check/ordinary`, outcome `:ok`, but no row.
+The initial hypothesis was a missing explicit `:seon.db/db`; a subsequent
+probe (`run.cGsGON`) supplied it and **falsified that attribution**: the same
+missing-row error remained. The second diagnostic log is **59,007 bytes**,
+SHA-256 `c524838c02c311dbcd956eff3f45b2f18560cf669b319331a6e503759b3d9f4f`,
+and repeats the pre-fix **8 / 50 / 4 / 2** tally.
+
+The fixture calls `acquire!` between declarations. That is a base regeneration
+(`src/seon/sci/eval.clj:2141`), replacing its fork environment; authored Var
+recognition needs the SCI generation (`:371`, `:381`). The dependency gives
+a fresh generation to `sci/fork` (`reference-code/sci/src/sci/core.cljc:351`).
+The correction uses `install-evaluated-rows!` (`src/seon/sci/eval.clj:1049`),
+the existing settlement path, preserving the evaluated definitions and fork.
+This is an owned fixture error, not a foreign SCI refusal. The explicit
+database and visible original-evaluation diagnostic remain in the fixture.
+The original six observations classify as **one owned fixture error, four
+foreign blob-boundary failures, one foreign database-boundary error; zero
+stale expectations among those six**.
+
+
+Intermediate evidence, retained to distinguish the falsified hypothesis from
+the correction:
+
+| Log | Execution tally (tests/assertions/failures/errors) | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| `admission-corrected-fast.log` | 8/50/4/2 | 58180 | `1ddd591cfe02c1477cc47b70fe183575923cd4fcefb3c740864c956a50962425` |
+| `admission-settlement-fast.log` | 8/65/13/1 | 72558 | `86d5854ab16ed8b274f90b601c376b01dfd4faf73b6d6a89e0d4182ea4f7e836` |
+
+Settlement made the declarations observable. Its newly reached assertions
+then showed the initial fixture program had never acquired the namespace
+setup writes. The fixture now acquires its seeded database once, forks that
+base, and installs evaluated definitions without regenerating that fork.
+The same regression exposed an owned selector omission: long exclusions did
+not apply the named eligibility scope. `src/seon/test.clj` now applies the
+same `named?` predicate to those exclusions as to admitted members. The
+existing canonical check regression verifies the exclusion set, so there is
+no duplicate regression. No error contracts or facets were widened.
+
+The hook also observed foreign in-flight syntax errors at
+`src/seon/fn.clj:2165` and `test/seon/fn/publication_test.clj:127`, followed
+by an unmatched form at the latter file's :70/:173. Those paths were neither
+edited nor included in this lane's HEAD-plus-paths snapshot. Existing kondo
+shadowed-var/docstring warnings in `src/seon/test.clj` were reported by the
+hook; the scope fix adds no new binding or public function.
+
+
+### Final verification boundary and checkpoint
+
+The final corrected snapshot was requested with exactly:
+
+```sh
+bin/test-fast --paths src/seon/test.clj test/seon/test_test.clj -- seon.test-test
+```
+
+It **executed no JVM and no tests**: exit **75**, after the declared **1,800 s**
+slot wait. Holder 96666 retained `run.b7dtUo` (elapsed 1:20:47) and holder
+15275 retained `run.O81Ldt` (elapsed 30:53). Neither foreign process/root was
+operated. This is unavailable verification, **not** an unchanged/green tally.
+`admission-scope-final-fast.log`: **8,978 bytes**, SHA-256
+`915fbe62eef12e6c74d44fad551e14539ae7a72bb44fa43a23a8516b8af63ae1`.
+The launcher's own snapshot `run.SAU7sI` was removed on exit.
+
+The latest executed admission tally is therefore **8 tests / 65 assertions /
+13 failures / 1 error**, from the intermediate fixture. Nine failures exposed
+the fixture acquisition and named-exclusion corrections now in the checkpoint;
+four failures and one error remain the blob/database boundaries. The final
+corrections have **not been verified green**, because no slot became available.
+The latest durable green host tally remains **1 / 25 / 0 / 0**, and the accepted
+fast **4 executed → 0 executed / 4 unchanged** proof remains unchanged.
+
+This checkpoint touches exactly `src/seon/test.clj`,
+`test/seon/test_test.clj`, this note, and
+`docs/seon/issues/test-refusal-observations-overflow-in-projection-acquisition.md`.
+The final fast command above is still owed when capacity becomes available;
+then the focused cold command earlier in this note and bare `bin/test` twice
+plus `bin/test --platform` remain the orchestrator's integration work after
+publication-dissolution. No cold gate or lifecycle command was run here.
+
+
+Precommit shared-tree namespace load passed, exit **0**, printing
+`:results-reuse-closeout-load` (`closeout-precommit-load.log`). Command:
+
+```sh
+clojure -M -e "(require 'seon.cluster.source 'seon.test 'seon.test.runner 'seon.plan 'my.test 'seon.issue 'seon.issue.opening 'seon.problems 'seon.render.test) (println :results-reuse-closeout-load)"
+```
+
+This verifies loading only; it does not replace the slot-blocked fast proof.

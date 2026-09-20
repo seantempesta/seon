@@ -19,20 +19,32 @@
        [{:seon.ns/name 'selection.check}
         {:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
          :seon.source/test-input-digest (id/digest 64 [:check :inputs])}])
-     (let [ctx (test-support/fork-cluster-ctx connection)]
+     (let [base (test-support/fork-cluster-ctx connection)
+           _ (sci.eval/acquire! {:seon.sci.eval/ctx base :seon.db/db (db/db connection)})
+           ctx (sci.eval/fork-cluster-ctx base (db/db connection) connection)]
        (doseq [source ["(defn leaf {:malli/schema [:=> [:cat] :int]} [] 1)"
                        "(clojure.test/deftest ordinary (clojure.test/is (= 1 (leaf))))"
                        "(clojure.test/deftest ^{:seon.test/long \"Declared long fixture\"} slow (clojure.test/is (= 1 (leaf))))"]]
          (let [evaluation (sci.eval/evaluate
                             {:seon.sci.eval/ctx ctx :seon.cluster.eval/source source
+                             :seon.db/db (db/db connection)
                              :seon.cluster.eval/ns [:seon.ns/name 'selection.check]
                              :seon.sci.admit/caps (config/result-caps (config/defaults))
                              :seon.sci.eval/time-limit-ms 120000 :seon.config/on-core-error :panic})
+               _ (when-not (:seon.program/row evaluation)
+                   (throw (ex-info (str "SCI fixture declaration was not admitted: "
+                                        (pr-str {:seon.test/source source
+                                                 :seon.test/evaluation evaluation}))
+                                   {:seon.test/source source
+                                    :seon.test/evaluation evaluation})))
                row (program/declaration-row (:seon.program/row evaluation) :all :agent)]
            (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
            (is (string? (:seon.program/analyzed-source-digest row)) (pr-str row))
            (test-support/transacted! connection [row])
-           (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)})))
+           (sci.eval/install-evaluated-rows!
+            {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+             :seon.sci.eval/installations
+             [{:seon.program/row row :seon.sci.eval/evaluation evaluation}]})))
        (is (= (runner/program-digest (db/db connection))
               (runner/program-digest (:seon.db/db (sci.eval/acquired-program ctx)))))
        (let [request {:seon.db/connection connection :seon.boot/cluster-name "check-reuse"

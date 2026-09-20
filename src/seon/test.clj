@@ -1034,6 +1034,7 @@
             long-excluded
             (into [] (keep (fn [[test-symbol entity]]
                              (when (and (not include-long?) (not (identities test-symbol))
+                                        (or (not= :named policy) (named? [test-symbol entity]))
                                         (not (excluded? [test-symbol entity])) (one entity :seon.test/long))
                                {:seon.test/sym test-symbol :seon.test/long (one entity :seon.test/long)
                                 :seon.test/command ["bin/test-check" (:seon.cluster/name cluster-row)

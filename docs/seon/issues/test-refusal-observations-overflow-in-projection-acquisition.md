@@ -88,3 +88,27 @@ authority: `with-publication!` reported undeclared
 `#{:seon.db.write/validation-refusal :seon.test/execution-error}`. Its printed
 execution tally is not a recorded tally. The lane did not edit the blob,
 database, error, schema, or publication owners to bypass these refusals.
+
+
+Closeout classification (2026-09-20): the four replay/immutability assertion
+failures remain foreign to results-reuse at `src/seon/blob.clj:271`; the
+absent-definition error remains at `src/seon/db.clj:4121`. The nil declaration
+was probed independently. The first hypothesis, a missing explicit
+`:seon.db/db`, was falsified: adding it retained the same successful SCI value
+without a program row. The fixture calls `acquire!` after every declaration;
+`src/seon/sci/eval.clj:2141` replaces its fork environment with a fresh base,
+while `:371` requires the SCI fork generation to recognize authored Vars.
+The fixture now uses the existing `install-evaluated-rows!` settlement path
+(:1049), preserving the fork and its evaluated definitions. The explicit
+database remains an honest fixture input. The diagnostic includes the full
+original evaluation in its visible exception message instead of failing on
+nil first. The final fast result is recorded in the lane note.
+
+
+Final closeout capacity boundary: the corrected fixture also acquires its
+seeded database once before forking, and named long exclusions now stay in
+scope. The requested verification ran out of the declared 1,800-second slot
+wait (exit 75; no JVM/test execution). These final corrections are not claimed
+green. The prior intermediate run was 8 tests / 65 assertions / 13 failures /
+1 error; the accepted durable host proof remains 1 / 25 / 0 / 0. Exact logs,
+hashes and the pending command are in the lane note.
