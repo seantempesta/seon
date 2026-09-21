@@ -2280,7 +2280,9 @@
                                   (cond-> {} commit-fault!
                                     (assoc :seon.flow/commit-fault! commit-fault!)))
               acquired (::acquisition generated)]
-          (reset! (:env ctx) @(:env generated))
+          ;; SCI stamps later definitions with this generation. Installing the
+          ;; unforked base loses the provenance that definition-row observes.
+          (reset! (:env ctx) @(:env (sci/fork generated)))
           (reset! (::kernel/installed-functions ctx) @(::kernel/installed-functions generated))
           (advance-context-projection! ctx database (:seon.schema/projection generated))
           (let [recorded (record-acquisition-refusals! ctx database acquired commit-fault!)]

@@ -346,6 +346,8 @@
                         :seon.sci.admit/caps (config/result-caps (config/defaults))
                         :seon.sci.eval/time-limit-ms 10000
                         :seon.config/on-core-error :panic})
+           _ (when-not (:seon.program/row evaluation)
+               (throw (ex-info "SCI test declaration did not produce a program row." evaluation)))
            declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]
        (is (nil? (:seon.cluster.eval/error evaluation)))
        (support/transacted! connection [declaration])
