@@ -1834,3 +1834,21 @@ Exact changed-line UTF-8 bytes:
 | development source verification | 939.835 | 522.576 |
 | development adoption record | 197.908 | 106.734 |
 | development cluster converged | 0.938 | 0.521 |
+
+### Item 2 decision boundary — unchanged non-program input facts
+
+The next live probe found 788 digest inputs but only 402 `:seon.fn.file`
+digest rows; **386 individual input digests are absent from the database**.
+Their aggregate test-input digest is stored, but cannot reconstruct the
+map hashed by the current publication identity. The
+[issue and three priced options](../../../seon/issues/publication-input-digests-are-not-all-database-facts.md)
+record the exact gap; [raw evidence](one-jvm-input-digest-facts-2026-09-23.edn)
+and [script](one-jvm-input-digest-facts-2026-09-23.clj) are retained.
+Recommended: populate the existing file digest rows for all publication
+inputs, explicitly including non-analyzed resource and pin paths, then
+remove the disk mirror. No item-2 production edit has been made.
+
+The lane stops at this permitted data-model decision. Items 2, 4, 5, 6,
+8 and config remain open in the assigned order. Item 1 commit is
+`d726468e0`; docstring is 5416.485 ms, not the subsecond target. The scratch
+JVM was downed and its root removed; no default operation was performed.
