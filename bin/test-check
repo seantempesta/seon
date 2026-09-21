@@ -1,7 +1,7 @@
 #!/usr/bin/env bb
 ;; Run no JVM: use the operator's existing prepl transport to the live cluster.
 (require '[clojure.java.io :as io]
-         '[seon.fresh-operator :as operator])
+         '[seon.operator :as operator])
 
 (let [[root args] (if (= "--root" (first *command-line-args*))
                     [(second *command-line-args*) (drop 2 *command-line-args*)]
@@ -37,7 +37,7 @@
       (throw (ex-info "config/default.edn declares no :seon.test/check-time-limit-ms; the transport has no backstop to derive." {})))
     (let [bound (some-> bound-value parse-long)
           request (cond-> {:seon.boot/cluster-name cluster
-                           :seon.db/connection (list 'seon.operator/connection cluster)}
+                           :seon.db/connection (list 'seon.cluster.boot/connection cluster)}
                     test-symbol (assoc :seon.test/sym test-symbol)
                     bound (assoc :seon.test/check-time-limit-ms bound))
           result (eval! (list 'seon.test/check-request request)

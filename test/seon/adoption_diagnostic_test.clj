@@ -3,7 +3,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
-            [seon.fresh-operator :as operator]
+            [seon.operator :as operator]
             [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
 
@@ -41,7 +41,7 @@
                                     {:seon.error/kind ::missing-namespace
                                      :seon.error/message "Namespace adoption.probe is unavailable."}})))
             failure (try
-                      (#'operator/prepl-eval!
+                      (#'operator/prepl-value!
                        {:seon.boot/prepl-host "127.0.0.1"
                         :seon.boot/prepl-port (.getLocalPort socket)}
                        form (* 1000 test-support/event-backstop-seconds))
@@ -50,7 +50,7 @@
             byte-count (alength (.getBytes shown "UTF-8"))]
         (is (str/includes? shown "adoption.probe/broken"))
         (is (str/includes? shown "Namespace adoption.probe is unavailable."))
-        (is (not (str/includes? shown "seon.fresh-operator/events")))
+        (is (not (str/includes? shown "seon.operator/events")))
         (is (< byte-count 1024))
         (println "operator refusal bytes=" byte-count))
       (finally (server/stop-server server-name)))))

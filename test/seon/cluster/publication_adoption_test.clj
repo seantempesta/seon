@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.db :as db]
@@ -46,7 +47,7 @@
       (support/preserving-instrumentation-state
         (fn []
           (cluster/refresh-source! root)
-          (let [instance (cluster/start! {:seon.boot/root root :seon.boot/cluster-name name})
+          (let [instance (boot/start! {:seon.boot/root root :seon.boot/cluster-name name})
                 store (:seon.store/store instance)
                 published (source/current store)
                 operations (atom [])
@@ -75,8 +76,8 @@
                           (:seon.source/commit-id (cluster/refresh-source! root [] name))))))
               (is (empty? @operations) (pr-str @operations))
               (is (some #{"development cluster converged"} @phases))
-              (finally (cluster/stop! (get @runtime/running-instances name instance)))))))
+              (finally (boot/stop! (get @runtime/running-instances name instance)))))))
       (finally
         (when-let [instance (get @runtime/running-instances name)]
-          (cluster/stop! instance))
+          (boot/stop! instance))
         (support/delete-recursively! root)))))

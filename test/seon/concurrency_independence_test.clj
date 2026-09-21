@@ -16,6 +16,7 @@
             [seon.ai :as ai]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
             [seon.config :as config]
@@ -79,7 +80,7 @@
         cluster-name "concurrency-independence"]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
-    (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+    (let [instance (boot/start! {:seon.boot/cluster-name cluster-name
                                     :seon.boot/root root})]
       (try
         (await-bootstrap (:seon.boot/cluster-connection instance))
@@ -89,7 +90,7 @@
           (is (= :paused (::flow/status (flow/ping-proc graph :seon.agent/mailbox))))
           (body instance))
         (finally
-          (cluster/stop! instance)
+          (boot/stop! instance)
           (test-support/delete-recursively! root))))))
 
 (defn- initial-spec

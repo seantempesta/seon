@@ -13,7 +13,7 @@
             [seon.dev.clj-kondo :as dev.kondo]
             [seon.dev.state :as state]
             [seon.dev.test-roots :as test-roots]
-            [seon.operator.state :as operator.state])
+            [seon.cluster.process :as operator.process])
   (:import [java.io File]))
 
 (def test-timeout-ms 300000)
@@ -136,7 +136,7 @@
     (try
       (let [files (host-corpus root)
             result
-            (operator.state/run-process!
+            (operator.process/run-process!
              {:seon.operator.subprocess/argv
               (into ["clj-kondo" "--lint"]
                     (concat files ["--config" host-analysis-config]))
@@ -200,7 +200,7 @@
         execution
         (try
           {:seon.dev.changed-test/process
-           (operator.state/run-process!
+           (operator.process/run-process!
             {:seon.operator.subprocess/argv argv
              :seon.operator.subprocess/directory root
              :seon.operator.subprocess/extra-env environment

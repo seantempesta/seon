@@ -607,7 +607,7 @@
     (is (= :seon.db/connection (:seon.schema/expected-value result)))
     (is (nil? (:seon.schema/refused-value result)))
     (is (str/includes? (:seon.error/message result)
-                       "(seon.operator/connection \"default\")"))
+                       "(seon.cluster.boot/connection \"default\")"))
     (is (= 'seon.db/*conn*
            (get-in result [:seon.error/data :seon.db/binding])))))
 

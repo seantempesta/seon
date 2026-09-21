@@ -8,6 +8,7 @@
             [seon.db :as db]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.cluster.agent :as agent]
             [seon.oversight :as oversight]
             [seon.render.hiccup :as hiccup]
@@ -80,7 +81,7 @@
   (let [root (str "tmp/oversight-test/" name)]
     (support/delete-recursively! root)
     (support/populate-published-root! root)
-    (let [instance (cluster/start! {:seon.boot/cluster-name name
+    (let [instance (boot/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]
       (try
         (await-fact
@@ -94,7 +95,7 @@
                 db (bootstrap/run-id "root"))))
         (body instance)
         (finally
-          (cluster/stop! instance))))))
+          (boot/stop! instance))))))
 
 (defn- fetch-root
   "Fetch the booted cluster's root page through its real socket."

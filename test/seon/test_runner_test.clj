@@ -1490,28 +1490,28 @@
         (ex-info
          (str "The cluster threw during the prepl operation: "
               "clojure.lang.ExceptionInfo: record-results! refused completion")
-         {:seon.error/kind :seon.fresh-operator/prepl-exception
-          :seon.fresh-operator/cause "record-results! refused completion"
-          :seon.fresh-operator/exception-data
+         {:seon.error/kind :seon.operator/prepl-exception
+          :seon.operator/cause "record-results! refused completion"
+          :seon.operator/exception-data
           {:seon.error/kind :seon.instrument/contract-violated}
-          :seon.fresh-operator/form "(try (require 'seon.cluster.source)"
-          :seon.fresh-operator/events [{:tag :ret :exception true}]})
+          :seon.operator/form "(try (require 'seon.cluster.source)"
+          :seon.operator/events [{:tag :ret :exception true}]})
         failure (#'runner/recording-failure
                  (fn [] (throw operator-failure)))
         notice (#'runner/recording-failure-notice "persistent results" failure)]
     (testing "the refusal value keeps the raiser's kind and data"
-      (is (= :seon.fresh-operator/prepl-exception (:seon.error/kind failure)))
+      (is (= :seon.operator/prepl-exception (:seon.error/kind failure)))
       (is (= "record-results! refused completion"
-             (:seon.fresh-operator/cause (:seon.error/data failure))))
+             (:seon.operator/cause (:seon.error/data failure))))
       (is (= {:seon.error/kind :seon.instrument/contract-violated}
-             (:seon.fresh-operator/exception-data
+             (:seon.operator/exception-data
               (:seon.error/data failure)))))
     (testing "the printed gate line names the cluster's cause"
       (is (str/includes? notice "persistent results NOT recorded:") notice)
-      (is (str/includes? notice ":seon.fresh-operator/prepl-exception") notice)
+      (is (str/includes? notice ":seon.operator/prepl-exception") notice)
       (is (str/includes? notice "record-results! refused completion") notice)
       (is (str/includes? notice ":seon.instrument/contract-violated") notice)
-      (is (not (str/includes? notice ":seon.fresh-operator/events"))
+      (is (not (str/includes? notice ":seon.operator/events"))
           "the raw prepl events stay out of the one-line notice"))
     (testing "a refusal with no data still prints kind and message"
       (let [bare (#'runner/recording-failure

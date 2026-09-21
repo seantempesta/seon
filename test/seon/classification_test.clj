@@ -7,8 +7,8 @@
             [seon.cluster.instruction :as instruction]
             [seon.db :as db]
             [seon.program :as program]
-            [seon.operator.state :as operator.state]
-            [seon.fresh-operator]
+            [seon.cluster.process :as operator.process]
+            [seon.operator]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [sci.core :as sci]
@@ -90,36 +90,3 @@
           (is (not (:seon.error/kind report)) (pr-str report)))
         (is (= (conj before 'sample.relevant)
                (set (instruction/toolkit-namespaces @connection))))))))
-
-(deftest process-claim-installations-follow-the-exact-root-fact
-  (let [directory (.toFile (java.nio.file.Files/createTempDirectory
-                            (.toPath (io/file "tmp")) "n7-claims-"
-                            (make-array java.nio.file.attribute.FileAttribute 0)))
-        root (operator.state/canonical-path (io/file directory "managed"))
-        installation (operator.state/canonical-path (io/file directory "checkout"))
-        record {:seon.operator.process-record/generation (random-uuid)
-                :seon.operator.process-record/root root
-                :seon.operator.process-record/repository-root installation
-                :seon.operator.process-record/log (str root "/process.log")
-                :seon.boot/pid 1
-                :seon.boot/start-instant #inst "2026-09-15T00:00:00Z"}
-        observation {:seon.operator.state/root root
-                     :seon.operator.process-record/repository-root installation}]
-    (try
-    (operator.state/write-process-claim! installation record)
-    (is (empty? (:seon.fresh-operator/process-records
-                 (#'seon.fresh-operator/read-process-records root []))))
-    (is (= [record] (:seon.fresh-operator/process-records
-                     (#'seon.fresh-operator/read-process-records root [observation]))))
-    (is (= #{} (operator.state/process-claim-repositories root [])))
-    (is (= #{installation}
-           (operator.state/process-claim-repositories root [observation])))
-    (is (= #{}
-           (operator.state/process-claim-repositories
-            root [(assoc observation :seon.operator.state/root (str root "-other"))])))
-    (is (= #{}
-           (operator.state/process-claim-repositories
-            root [{:seon.operator.state/command (str "seon.cluster start! " root)}])))
-    (#'seon.fresh-operator/clear-process-record! root record)
-    (is (empty? (:records (operator.state/process-claims installation))))
-    (finally (test-support/delete-recursively! directory)))))

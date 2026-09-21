@@ -17,11 +17,11 @@
    "script/seon/fresh_operator.clj"])
 
 (def ^:private lifecycle-lock-symbols
-  '#{seon.operator.state/with-control-lock!
-     seon.operator.state/with-lifecycle-lock!})
+  '#{seon.cluster.process/with-control-lock!
+     seon.cluster.process/with-lifecycle-lock!})
 
 (def ^:private subprocess-seam-symbol
-  'seon.operator.state/run-process!)
+  'seon.cluster.process/run-process!)
 
 (def ^:private babashka-process-symbols
   '#{babashka.process/check babashka.process/process babashka.process/sh
@@ -146,12 +146,12 @@
     :as subject}]
   (when (contains? lifecycle-lock-symbols head)
     (let [forwarding-seam?
-          (and (= head 'seon.operator.state/with-lifecycle-lock!)
+          (and (= head 'seon.cluster.process/with-lifecycle-lock!)
                (or (and (= path "src/seon/operator/state.clj")
                         (= owner 'with-control-lock!))
                    (and (= path "script/seon/fresh_operator.clj")
                         (= owner 'with-operator-lock))))
-          request (if (= head 'seon.operator.state/with-control-lock!)
+          request (if (= head 'seon.cluster.process/with-control-lock!)
                     (nth form 2 nil)
                     (second form))
           bounded?
@@ -339,10 +339,10 @@
 (deftest synthetic-unbounded-forms-are-classified-as-defects
   (doseq [[label source expected-class]
           [[:lock
-            "(ns fixture.lock (:require [seon.operator.state :as state]))\n(defn f [] (state/with-lifecycle-lock! {:seon.operator.lock/path \"x\" :seon.operator.lock/acquisition-timeout-ms 10} identity))\n"
+            "(ns fixture.lock (:require [seon.cluster.process :as state]))\n(defn f [] (state/with-lifecycle-lock! {:seon.operator.lock/path \"x\" :seon.operator.lock/acquisition-timeout-ms 10} identity))\n"
             :lifecycle-lock]
            [:subprocess-seam
-            "(ns fixture.seam (:require [seon.operator.state :as state]))\n(defn f [] (state/run-process! {:seon.operator.subprocess/argv [\"true\"]}))\n"
+            "(ns fixture.seam (:require [seon.cluster.process :as state]))\n(defn f [] (state/run-process! {:seon.operator.subprocess/argv [\"true\"]}))\n"
             :foreign-subprocess]
            [:timed-direct-wait
             "(ns fixture.wait)\n(defn f [p] (.waitFor p 1 java.util.concurrent.TimeUnit/SECONDS))\n"
@@ -365,7 +365,7 @@
 
 (deftest synthetic-declared-calls-are-bounded
   (with-source
-    (str "(ns fixture.bounded (:require [seon.operator.state :as state]))\n"
+    (str "(ns fixture.bounded (:require [seon.cluster.process :as state]))\n"
          "(defn f []\n"
          "  (state/with-lifecycle-lock!\n"
          "   {:seon.operator.lock/path \"x\"\n"

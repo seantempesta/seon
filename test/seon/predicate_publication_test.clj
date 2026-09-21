@@ -5,6 +5,7 @@
             [clojure.walk :as walk]
             [sci.core :as sci]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
             [seon.db :as db]
@@ -91,13 +92,13 @@
                  (is (contains? (set (source/deleted-identities after)) old-ref))
                  (is (not (contains? (:seon.schema.projection/predicate-functions
                                       (schema/projection-from-database after)) old-symbol)))))))
-         (reset! instance (cluster/start! {:seon.boot/root root
+         (reset! instance (boot/start! {:seon.boot/root root
                                            :seon.boot/cluster-name "predicate-rename"}))
          (is (nat-int? (:seon.boot/ready-ms @instance)))
          (let [ctx (:seon.sci.eval/ctx @instance)]
            (is (nil? (sci/resolve ctx old-symbol)))
            (is (some? (sci/resolve ctx 'seon.shell/stdin?))))
          (finally
-           (when @instance (cluster/stop! @instance))
+           (when @instance (boot/stop! @instance))
            (when (find-ns namespace-name) (remove-ns namespace-name))
            (support/delete-recursively! root)))))))

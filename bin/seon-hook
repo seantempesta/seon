@@ -41,8 +41,8 @@
       (root-file "src") java.io.File/pathSeparator
       (root-file "resources")))
 (require '[seon.dev.clj-kondo :as dev.kondo]
-         '[seon.fresh-operator :as operator]
-         '[seon.operator.state :as operator.state])
+         '[seon.operator :as operator]
+         '[seon.cluster.process :as operator.process])
 
 (def config-path
   (or (System/getenv "SEON_HOOK_CONFIG")
@@ -497,17 +497,17 @@
                 (str (root-file (get-in (load-config) [:current-source :root] ".")))
                 (pr-str `((requiring-resolve 'seon.schema.admission/admit) ~request)))
           result
-          (when-not (:seon.fresh-operator/live-process? live)
-            (operator.state/run-process!
+          (when-not (:seon.operator/live-process? live)
+            (operator.process/run-process!
              {:seon.operator.subprocess/argv
               ["clojure" "-M:dev" "-m" "seon.schema.admission"]
               :seon.operator.subprocess/directory repo-root
               :seon.operator.subprocess/input (pr-str request)
               :seon.operator.subprocess/deadline-ms
-              (operator.state/event-silence-backstop-ms repo-root {})}))
+              (operator/operator-silence-backstop-ms {})}))
           findings
-          (if (:seon.fresh-operator/live-process? live)
-            (:seon.fresh-operator/value live)
+          (if (:seon.operator/live-process? live)
+            (:seon.operator/value live)
             (when (zero? (:seon.operator.subprocess/exit result))
               (try (some->> (:seon.operator.subprocess/output result)
                             str/split-lines
@@ -1486,7 +1486,7 @@
 (defn- publication-result [path]
   (let [result (edn/read-string (slurp path))]
     (when-not (and (map? result)
-                   (or (:seon.error/kind result)
+                   (or (:seon.error/at result) (:seon.error/kind result)
                        (:seon.source/commit-id result)))
       (throw (ex-info "Operator returned no typed publication evidence."
                       {:seon.hook/result-path (str path)})))
@@ -1497,7 +1497,7 @@
   (let [output (str (:out result) "\n" (:err result))
         evidence (root-file "logs/current-source-failure.log")
         omitted (max 0 (- (count output) hook-log-cap))
-        failure-data (:seon.fresh-operator/exception-data failure)
+        failure-data (:seon.operator/exception-data failure)
         failure-data (if (:seon.fn/findings failure-data)
                        (update failure-data :seon.fn/findings
                                #(filterv (fn [finding]
@@ -1553,13 +1553,13 @@
                          (publication-result result-path)
                          {:seon.error/kind :seon.hook/publication-result-unavailable
                           :seon.error/message (str "Operator returned no result; exit " (:exit result))})]
-          (doseq [progress (:seon.fresh-operator/progress terminal)]
+          (doseq [progress (:seon.operator/progress terminal)]
             (log! "SOURCE_PROGRESS" (str "publication=" publication-id)
                   (str "paths=" (pr-str paths))
                   (pr-str (:seon.source/progress progress))))
           (if (and (zero? (:exit result)) (not (:seon.error/kind terminal)))
               (str (if (get-in config [:current-source :cluster]) "converged: " "published: ")
-                   (pr-str (dissoc terminal :seon.fresh-operator/progress))
+                   (pr-str (dissoc terminal :seon.operator/progress))
                    (when (and (get-in config [:current-source :check-tests] true)
                               (get-in config [:current-source :cluster]))
                      (let [check (process/process

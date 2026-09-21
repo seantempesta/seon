@@ -1,5 +1,6 @@
 (ns seon.maintenance-test
-  (:require [malli.registry :as mr]
+  (:require [clojure.java.io :as io]
+            [malli.registry :as mr]
             [seon.schema.internal] [malli.core] [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.maintenance :as maintenance]
@@ -49,7 +50,7 @@
      :seon.operator.process-census/claim-errors
      [{:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.operator/collection
-         :seon.error/operation 'seon.operator/collect!
+         :seon.error/operation 'seon.maintenance/collect!
        :seon.error/message "Unreadable claim."
        :seon.error/data {:seon.operator.claim/path "claim.edn"}}]
      :seon.operator.process-census/complete? false}))
@@ -223,7 +224,7 @@
          :seon.operator.cluster-cleanup/collection
          {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.operator/collection
-         :seon.error/operation 'seon.operator/collect!
+         :seon.error/operation 'seon.maintenance/collect!
           :seon.error/message "Public collection evidence lands in Unit 6."
           :seon.error/data {:seon.cluster.registry/swept :opaque}}
          :seon.operator.cluster-cleanup/remaining []
@@ -247,7 +248,7 @@
                    :seon.operator.cluster-cleanup/reclaimed-bytes ?bytes]
                   [?result :seon.operator.cluster-cleanup/complete? ?complete]]
                 @connection)))
-        (is (= #{['seon.operator/collect!
+        (is (= #{['seon.maintenance/collect!
                   "Public collection evidence lands in Unit 6."]}
                (db/q
                 '[:find ?operation ?message
@@ -305,7 +306,7 @@
 (defn- seed-report!
   [connection]
   (let [footprint-task "root/maintenance/footprint"
-        footprint-handler 'seon.operator/observe-footprint!
+        footprint-handler 'seon.maintenance/observe-footprint!
         census-task "root/maintenance/process-census"
         census-handler 'seon.operator/census-processes!]
     (test-support/transacted!
@@ -461,7 +462,7 @@
 (deftest a-refused-collection-keeps-its-typed-error-on-the-same-slot
   (let [refusal {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.operator/collection
-         :seon.error/operation 'seon.operator/collect!
+         :seon.error/operation 'seon.maintenance/collect!
                  :seon.error/message "Collection did not verify every root."
                  :seon.error/data {:seon.cluster.registry/swept :opaque}}
         projected (maintenance/result-entity (schema/handed-projection) (cleanup-result refusal))]
@@ -471,7 +472,7 @@
          connection
          [(assoc projected
                  :seon.maintenance.result/id "cleanup-result/refused")])
-        (is (= #{['seon.operator/collect!
+        (is (= #{['seon.maintenance/collect!
                   "Collection did not verify every root."]}
                (db/q
                 '[:find ?operation ?message
@@ -534,7 +535,7 @@
   (test-support/with-database
     (fn [connection]
       (let [collect-task "root/maintenance/compact"
-            collect-handler 'seon.operator/collect!
+            collect-handler 'seon.maintenance/collect!
             cleanup-task "root/maintenance/cleanup"
             cleanup-handler 'seon.operator/cleanup-cluster!]
         (test-support/transacted!
@@ -587,3 +588,56 @@
             (is (= at-2 (:seon.maintenance.receipt/completed-at answer)))
             (is (= 8192
                    (:seon.operator.collect/reclaimed-bytes answer)))))))))
+
+(defn- owned-root
+  []
+  (let [root (str "tmp/operator-test/" (random-uuid))]
+    (.mkdirs (io/file root))
+    (.getCanonicalPath (io/file root))))
+
+
+(deftest live-log-inode-is-bounded-and-archived
+  (let [root (owned-root)
+        log-dir (io/file root "logs")
+        log-file (io/file log-dir "seon.log")]
+    (try
+      (.mkdirs log-dir)
+      (spit log-file (apply str (repeat 32 "x")))
+      (let [result (maintenance/rotate-logs!
+                    {:seon.boot/log-dir (.getCanonicalPath log-dir)
+                     :seon.config.maintenance/log-max-bytes 16
+                     :seon.config.maintenance/log-retained-files 1})]
+        (is (true? (:seon.operator.log/rotated? result)))
+        (is (zero? (.length log-file)))
+        (is (= 32 (.length (io/file (str (.getCanonicalPath log-file) ".1"))))))
+      (finally
+        (test-support/delete-recursively! root)))))
+
+
+(deftest collection-reports-and-verifies-the-exact-store
+  (let [repository-root (owned-root)
+        managed-root (.getCanonicalPath
+                      (io/file repository-root "managed"))]
+    (try
+      (let [result
+            (maintenance/collect!
+             {:seon.operator/repository-root repository-root
+              :seon.operator/managed-root managed-root})]
+        (is (uuid? (:seon.operator.collect/store-id result)))
+        (is (= managed-root
+               (:seon.operator.collect/managed-root result)))
+        (is (= [:db]
+               (mapv :seon.store/branch
+                     (:seon.operator.collect/branches result))))
+        (is (every? uuid?
+                    (map :seon.source/commit-id
+                         (:seon.operator.collect/branches result))))
+        (is (<= (:seon.operator.collect/objects-after result)
+                (:seon.operator.collect/objects-before result)))
+        (is (<= (:seon.operator.collect/bytes-after result)
+                (:seon.operator.collect/bytes-before result)))
+        (is (zero?
+             (:seon.operator.collect/verification-pass-swept result)))
+        (is (true? (:seon.operator.collect/complete? result))))
+      (finally
+        (test-support/delete-recursively! repository-root)))))

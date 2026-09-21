@@ -31,6 +31,7 @@
             [seon.ai :as ai]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
             [seon.config :as config]
@@ -67,7 +68,7 @@
   (let [root (str "tmp/armed-test/" name)]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
-    (let [instance (cluster/start! {:seon.boot/cluster-name name
+    (let [instance (boot/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]
       (try
         (await-fact
@@ -81,7 +82,7 @@
                 db (bootstrap/run-id "root"))))
         (body instance)
         (finally
-          (cluster/stop! instance))))))
+          (boot/stop! instance))))))
 
 (defn- errors
   [db]
@@ -108,7 +109,7 @@
     (fn [instance]
       (let [connection (:seon.boot/cluster-connection instance)]
         (testing "fresh boot reaches READY"
-          (is (some? (:seon.boot/ready-ms (cluster/readiness instance)))))
+          (is (some? (:seon.boot/ready-ms (boot/readiness instance)))))
         (testing "the root agent exists, so the escalation dial names
         something real rather than something hoped for"
           (is (= "root"
@@ -187,9 +188,9 @@
   (let [root "tmp/armed-test/live-program-boundary"]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
-    (let [left (cluster/start! {:seon.boot/cluster-name "live-left"
+    (let [left (boot/start! {:seon.boot/cluster-name "live-left"
                                 :seon.boot/root root})
-          right (cluster/start! {:seon.boot/cluster-name "live-right"
+          right (boot/start! {:seon.boot/cluster-name "live-right"
                                  :seon.boot/root root})]
       (try
         (doseq [instance [left right]]
@@ -238,8 +239,8 @@
                   (:seon.sci.admit/value isolated-call)))
               "the right cluster cannot see the left cluster's definition"))
         (finally
-          (cluster/stop! right)
-          (cluster/stop! left))))))
+          (boot/stop! right)
+          (boot/stop! left))))))
 
 (deftest ^{:seon.test/fixture-observation "The observation is that the complete boot and initial wake spend no model call, not merely that database facts exist."} booting-spends-no-model-call
   ;; The system-authored bootstrap plan evaluates locally; boot must not
@@ -307,7 +308,7 @@
        ai/complete
        (fn [_projection _request]
          {:seon.ai/text "(seon.run/complete \"answered\")"})]
-      (let [instance (cluster/start! {:seon.boot/cluster-name name
+      (let [instance (boot/start! {:seon.boot/cluster-name name
                                       :seon.boot/root root})]
         (try
           (let [run
@@ -329,7 +330,7 @@
                                 :seon.message/id]))
                 "the committed message opened a run without a later wake"))
           (finally
-            (cluster/stop! instance)))))))
+            (boot/stop! instance)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; THE VISIBILITY PROPERTY — an escaped Throwable becomes facts
@@ -456,7 +457,7 @@
        ai/complete
        (fn [_projection _request]
          {:seon.ai/text "(seon.run/complete \"fault observed\")"})]
-      (let [instance (cluster/start! {:seon.boot/cluster-name name
+      (let [instance (boot/start! {:seon.boot/cluster-name name
                                       :seon.boot/root root})]
         (try
           (let [connection (:seon.boot/cluster-connection instance)
@@ -483,4 +484,4 @@
             ;; this test deliberately perturbed so cluster teardown can send
             ;; its armer-quiescence request before stopping the graph.
             (flow/resume (:seon.flow/graph instance))
-            (cluster/stop! instance)))))))
+            (boot/stop! instance)))))))

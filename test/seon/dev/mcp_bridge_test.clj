@@ -195,10 +195,10 @@
       (let [outcome
             (with-redefs-fn {(bridge-var 'operator-private)
                              (fn [& _]
-                               {:seon.fresh-operator/advertisements []
-                                :seon.fresh-operator/jvms []
-                                :seon.fresh-operator/process-records []
-                                :seon.fresh-operator/process-record-errors []})}
+                               {:seon.operator/advertisements []
+                                :seon.operator/jvms []
+                                :seon.operator/process-records []
+                                :seon.operator/process-record-errors []})}
               #(try
                  ((bridge-var 'read-clj-endpoint)
                   (.getCanonicalPath fixture-root) "fixture")
@@ -226,42 +226,42 @@
         degraded (advertisement "degraded" pid started)
         unknown (advertisement "unknown" pid started)
         observations
-        {:seon.fresh-operator/advertisements
-         [{:seon.fresh-operator/name "alive"
-           :seon.fresh-operator/root root
-           :seon.fresh-operator/path (str root "/alive/prepl.edn")
-           :seon.fresh-operator/process-alive? true
-           :seon.fresh-operator/advertisement alive}
-          {:seon.fresh-operator/name "stale"
-           :seon.fresh-operator/root root
-           :seon.fresh-operator/path (str root "/stale/prepl.edn")
-           :seon.fresh-operator/process-alive? false
-           :seon.fresh-operator/advertisement stale}
-          {:seon.fresh-operator/name "invalid"
-           :seon.fresh-operator/root root
-           :seon.fresh-operator/path (str root "/invalid/prepl.edn")
-           :seon.fresh-operator/process-alive? true
-           :seon.fresh-operator/advertisement {:not :an-advertisement}}
-          {:seon.fresh-operator/name "degraded"
-           :seon.fresh-operator/root root
-           :seon.fresh-operator/path (str root "/degraded/prepl.edn")
-           :seon.fresh-operator/process-alive? true
-           :seon.fresh-operator/advertisement degraded}
-          {:seon.fresh-operator/name "unknown"
-           :seon.fresh-operator/root root
-           :seon.fresh-operator/path (str root "/unknown/prepl.edn")
-           :seon.fresh-operator/process-alive? true
-           :seon.fresh-operator/advertisement unknown}]
-         :seon.fresh-operator/jvms
-         [{:seon.fresh-operator/root root
-           :seon.fresh-operator/reachable? true
-           :seon.fresh-operator/probe-advertisement alive
-           :seon.fresh-operator/registrations
-           [{:seon.fresh-operator/name "degraded"
-             :seon.fresh-operator/root root
-             :seon.fresh-operator/advertisement degraded}]}]
-         :seon.fresh-operator/process-records []
-         :seon.fresh-operator/process-record-errors []}
+        {:seon.operator/advertisements
+         [{:seon.operator/name "alive"
+           :seon.operator/root root
+           :seon.operator/path (str root "/alive/prepl.edn")
+           :seon.operator/process-alive? true
+           :seon.operator/advertisement alive}
+          {:seon.operator/name "stale"
+           :seon.operator/root root
+           :seon.operator/path (str root "/stale/prepl.edn")
+           :seon.operator/process-alive? false
+           :seon.operator/advertisement stale}
+          {:seon.operator/name "invalid"
+           :seon.operator/root root
+           :seon.operator/path (str root "/invalid/prepl.edn")
+           :seon.operator/process-alive? true
+           :seon.operator/advertisement {:not :an-advertisement}}
+          {:seon.operator/name "degraded"
+           :seon.operator/root root
+           :seon.operator/path (str root "/degraded/prepl.edn")
+           :seon.operator/process-alive? true
+           :seon.operator/advertisement degraded}
+          {:seon.operator/name "unknown"
+           :seon.operator/root root
+           :seon.operator/path (str root "/unknown/prepl.edn")
+           :seon.operator/process-alive? true
+           :seon.operator/advertisement unknown}]
+         :seon.operator/jvms
+         [{:seon.operator/root root
+           :seon.operator/reachable? true
+           :seon.operator/probe-advertisement alive
+           :seon.operator/registrations
+           [{:seon.operator/name "degraded"
+             :seon.operator/root root
+             :seon.operator/advertisement degraded}]}]
+         :seon.operator/process-records []
+         :seon.operator/process-record-errors []}
         rows
         (with-redefs-fn {(bridge-var 'operator-private)
                          (fn [var-symbol & _]
@@ -440,17 +440,17 @@
         degraded (advertisement "partial" pid (current-process-start-date))
         observed-root (atom nil)
         observations
-        {:seon.fresh-operator/advertisements []
-         :seon.fresh-operator/jvms
-         [{:seon.fresh-operator/root root
-           :seon.fresh-operator/reachable? true
-           :seon.fresh-operator/registrations
-           [{:seon.fresh-operator/name "partial"
-             :seon.fresh-operator/root root
-             :seon.fresh-operator/advertisement degraded}]}]
-         :seon.fresh-operator/process-records
+        {:seon.operator/advertisements []
+         :seon.operator/jvms
+         [{:seon.operator/root root
+           :seon.operator/reachable? true
+           :seon.operator/registrations
+           [{:seon.operator/name "partial"
+             :seon.operator/root root
+             :seon.operator/advertisement degraded}]}]
+         :seon.operator/process-records
          [{:seon.boot/pid pid}]
-         :seon.fresh-operator/process-record-errors []}
+         :seon.operator/process-record-errors []}
         endpoint
         (with-redefs-fn
           {(bridge-var 'operator-private)
@@ -472,23 +472,23 @@
         started (current-process-start-date)
         candidate (advertisement "same" pid started)
         observations
-        {:seon.fresh-operator/advertisements []
-         :seon.fresh-operator/jvms
-         [{:seon.fresh-operator/root root
-           :seon.fresh-operator/reachable? true
-           :seon.fresh-operator/registrations
-           [{:seon.fresh-operator/name "same"
-             :seon.fresh-operator/root root
-             :seon.fresh-operator/advertisement candidate}]}
-          {:seon.fresh-operator/root root
-           :seon.fresh-operator/reachable? true
-           :seon.fresh-operator/registrations
-           [{:seon.fresh-operator/name "same"
-             :seon.fresh-operator/root root
-             :seon.fresh-operator/advertisement
+        {:seon.operator/advertisements []
+         :seon.operator/jvms
+         [{:seon.operator/root root
+           :seon.operator/reachable? true
+           :seon.operator/registrations
+           [{:seon.operator/name "same"
+             :seon.operator/root root
+             :seon.operator/advertisement candidate}]}
+          {:seon.operator/root root
+           :seon.operator/reachable? true
+           :seon.operator/registrations
+           [{:seon.operator/name "same"
+             :seon.operator/root root
+             :seon.operator/advertisement
              (assoc candidate :seon.boot/pid (inc pid))}]}]
-         :seon.fresh-operator/process-records []
-         :seon.fresh-operator/process-record-errors []}
+         :seon.operator/process-records []
+         :seon.operator/process-record-errors []}
         outcome
         (with-redefs-fn {(bridge-var 'operator-private)
                          (fn [& _] observations)}
@@ -536,15 +536,15 @@
                               (current-process-start-date))
                :seon.boot/prepl-port (.getLocalPort server))
         observations
-        {:seon.fresh-operator/advertisements
-         [{:seon.fresh-operator/name cluster
-           :seon.fresh-operator/root root
-           :seon.fresh-operator/path (str root "/live/prepl.edn")
-           :seon.fresh-operator/process-alive? true
-           :seon.fresh-operator/advertisement live-advertisement}]
-         :seon.fresh-operator/jvms []
-         :seon.fresh-operator/process-records []
-         :seon.fresh-operator/process-record-errors []}
+        {:seon.operator/advertisements
+         [{:seon.operator/name cluster
+           :seon.operator/root root
+           :seon.operator/path (str root "/live/prepl.edn")
+           :seon.operator/process-alive? true
+           :seon.operator/advertisement live-advertisement}]
+         :seon.operator/jvms []
+         :seon.operator/process-records []
+         :seon.operator/process-record-errors []}
         session-key [root cluster "default"]]
     (try
       (let [result
@@ -599,7 +599,7 @@
     (is (str/includes? (:description eval-tool)
                        "agent/orchestrator context"))
     (is (str/includes? (:description eval-tool)
-                       "(seon.operator/connection \"default\")"))
+                       "(seon.cluster.boot/connection \"default\")"))
     (is (= ["jvm" "sci"]
            (get-in eval-tool [:inputSchema :properties :mode :enum])))
     (is (contains? (get-in eval-tool [:inputSchema :properties]) :root))
@@ -732,7 +732,7 @@
         "the parent-watchdog fixture root was deleted after exact child exit")))
 
 (clojure.test/deftest read-only-intent-crosses-evaluation-and-discovery-forms
-  (require 'seon.fresh-operator)
+  (require 'seon.operator)
   (let [remote (bridge-var 'remote-evaluation-form)
         consume (ns-resolve 'seon.cluster 'consume-mcp-projection!)
         mark seon.cluster/project-next-prepl-value!]
@@ -749,13 +749,13 @@
       (eval (second form))
       (clojure.test/is (= {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false}
                          (consume))))
-    (eval (read-string ((ns-resolve 'seon.fresh-operator 'jvm-snapshot-form))))
+    (eval (read-string ((ns-resolve 'seon.operator 'jvm-snapshot-form))))
     (clojure.test/is (= {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false}
                        (consume)))
     (mark)))
 
 (clojure.test/deftest census-return-declares-read-only-intent
-  (require 'seon.operator.state)
+  (require 'seon.cluster.process)
   (let [name (str "mcp-census-" (random-uuid))
         seen (atom ::absent)
         project seon.cluster/mcp-valf
@@ -770,7 +770,7 @@
                       (when (= name (first args)) (reset! seen (.get ^ThreadLocal marker)))
                       (apply project args))]
         (clojure.test/is
-         ((ns-resolve 'seon.operator.state 'responsive-advertisement?)
+         ((ns-resolve 'seon.cluster.process 'responsive-advertisement?)
           {:seon.boot/prepl-host "127.0.0.1" :seon.boot/prepl-port (.getLocalPort server)}
           (* 1000 seon.test-support/event-backstop-seconds))))
       (clojure.test/is (= {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false} @seen))

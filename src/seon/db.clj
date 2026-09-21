@@ -79,7 +79,7 @@
   "True for a Datahike connection, live or RELEASED.
   The shape question, as distinct from `connection?`'s liveness question:
   a connection object outlives its own liveness, and the callers whose job
-  IS the released case -- `seon.cluster/stop!` on a stopped instance,
+  IS the released case -- `seon.cluster.boot/stop!` on a stopped instance,
   `seon.cluster.wake/unlisten!` after a store release -- hold exactly that
   value. Liveness stays where it is DECIDED: `transact!` answers a typed
   value for a released connection, and Datahike refuses at the write."
@@ -316,7 +316,7 @@
         "elided only inside an agent evaluation; elsewhere — a raw or "
         "virtual thread, a fixture, a REPL — pass the database value or "
         "connection explicitly, as in (db/pull db selector eid). "
-        "At a development REPL, (seon.operator/connection \"default\") "
+        "At a development REPL, (seon.cluster.boot/connection \"default\") "
         "supplies that connection.")
    {::binding 'seon.db/*conn*
     ::needed needed}))

@@ -4,7 +4,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.operator.state :as operator.state]
+            [seon.cluster.process :as operator.process]
             [seon.test-support :as test-support]))
 
 (def ^:private repo-root
@@ -13,7 +13,7 @@
 (defn- run-process
   [{::keys [command directory environment input deadline-ms]}]
   (let [result
-        (operator.state/run-process!
+        (operator.process/run-process!
          {:seon.operator.subprocess/argv command
           :seon.operator.subprocess/directory directory
           :seon.operator.subprocess/extra-env (or environment {})
@@ -49,9 +49,9 @@
         path (io/file directory "operator.edn")
         failure {:seon.error/kind :publication-failed
                  :seon.error/message "missing schema"
-                 :seon.fresh-operator/exception-data {:schema :example/input}}
+                 :seon.operator/exception-data {:schema :example/input}}
         program
-        (str "(require '[seon.fresh-operator :as operator]) "
+        (str "(require '[seon.operator :as operator]) "
              "(binding [*in* (java.io.StringReader. \"{}\") "
              "*out* (java.io.StringWriter.)] (load-file \"bin/seon-hook\")) "
              "(with-redefs [operator/init! (fn [& _] "

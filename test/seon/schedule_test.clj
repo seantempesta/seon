@@ -53,7 +53,7 @@
        (is (seq expected))
        (is (= expected (set rows)))
        (is (every? #(not= "* * * * *" (nth % 2)) rows))
-       (is (some #(= (quote seon.operator/collect!) (second %)) rows))
+       (is (some #(= (quote seon.maintenance/collect!) (second %)) rows))
        (is (empty? (schedule/root-maintenance-seed-call database)))))))
 
 (defn- instant

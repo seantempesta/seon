@@ -5,9 +5,9 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.fresh-operator]
+            [seon.operator]
             [seon.instrument :as instrument]
-            [seon.operator.state :as operator.state]
+            [seon.cluster.process :as operator.process]
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
@@ -30,7 +30,7 @@
                    {:seon.boot/cluster-name "instrumentation-test"}
                    :seon.sci.eval/ctx
                    {:seon.sci.eval/projection-state state}}})
-           source ((ns-resolve 'seon.fresh-operator 'init-form)
+           source ((ns-resolve 'seon.operator 'init-form)
                    "tmp/source-instrumentation-test" nil false [] false
                    "instrumentation-test")]
        (doseq [failure-point [:reload :publication :none]]
@@ -74,13 +74,13 @@
              :none (is (= :current-src (:seon.source/branch actual)))
              :reload (is (identical? failure actual))
              :publication (is (= (ex-data failure)
-                                 (:seon.fresh-operator/exception-data actual))))))))))
+                                 (:seon.operator/exception-data actual))))))))))
 
 
 (deftest ^{:seon.test/long "Start a cold Clojure JVM to compile operator forms before runtime namespaces load."
            :seon.test/long-ms 60000}
   generated-init-compiles-before-runtime-owners-are-loaded
-  (let [init-form (ns-resolve 'seon.fresh-operator 'init-form)
+  (let [init-form (ns-resolve 'seon.operator 'init-form)
         forms (mapv (fn [arguments]
                       (apply init-form "tmp/source-instrumentation-test" arguments))
                     [[nil false [] true nil]
@@ -99,7 +99,7 @@
                     "compilation must not need the runtime require to have happened")
             (println "cold-init-compilation-passed")))
         outcome
-        (operator.state/run-process!
+        (operator.process/run-process!
          {:seon.operator.subprocess/argv
           [(str (io/file (System/getProperty "java.home") "bin" "java"))
            "-cp" (System/getProperty "java.class.path")

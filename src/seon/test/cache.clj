@@ -423,11 +423,11 @@
                      ~(str (io/file source "data/clusters")) ~snapshot ~base))))
         ;; BB loads the operator after this cache namespace is complete. The
         ;; same advertisement/send authority is used by result recording.
-        live ((requiring-resolve 'seon.fresh-operator/live-root-value!)
-              source form {:seon.fresh-operator/observe-output!
+        live ((requiring-resolve 'seon.operator/live-root-value!)
+              source form {:seon.operator/observe-output!
                            (fn [text] (print text) (flush))})]
-    (if (:seon.fresh-operator/live-process? live)
-      (when-not (= base (:seon.fresh-operator/value live))
+    (if (:seon.operator/live-process? live)
+      (when-not (= base (:seon.operator/value live))
         (throw (ex-info "The live publisher refused the requested base." live)))
       (child! snapshot
               (into ["clojure" "-Scp" (classpath basis snapshot)]

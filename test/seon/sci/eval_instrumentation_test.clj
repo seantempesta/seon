@@ -7,6 +7,7 @@
             [seon.db :as db]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.instrument :as instrument]
             [seon.schema.internal :as schema.internal]
             [seon.test-support :as test-support])
@@ -30,7 +31,7 @@
     (try
       (test-support/populate-published-root! root)
       (let [instance
-            (cluster/start! {:seon.boot/cluster-name cluster-name
+            (boot/start! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})]
         (try
           (let [connection (:seon.boot/cluster-connection instance)
@@ -70,6 +71,6 @@
                 (finally
                   (instrument/remove!)))))
           (finally
-            (cluster/stop! instance))))
+            (boot/stop! instance))))
       (finally
         (test-support/delete-recursively! root)))))))

@@ -5,7 +5,7 @@
             [clojure.test :refer [deftest is testing]]
             [dev-cache :as dev-cache]
             [seon.dev.state :as state]
-            [seon.operator.state :as operator.state]
+            [seon.cluster.process :as operator.process]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent TimeUnit]))
 
@@ -71,7 +71,7 @@
                      `(compile '~(:seon.dev-cache/namespace row)))
                    rows)))
         result
-        (operator.state/run-process!
+        (operator.process/run-process!
          {:seon.operator.subprocess/argv
           ["clojure" "-Sdeps"
            (pr-str {:paths [(.getCanonicalPath (io/file source-root))]})

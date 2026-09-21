@@ -16,7 +16,7 @@
      (fix {::content \"...\"})"
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [seon.operator.state :as operator.state])
+            [seon.cluster.process :as operator.process])
   (:import [java.io File]))
 
 ;;; ---------------------------------------------------------------------------
@@ -947,7 +947,7 @@
 (defn- run-git [repository-root arguments]
   (let [command (into ["git" "-C" repository-root] arguments)
         result
-        (operator.state/run-process!
+        (operator.process/run-process!
          {:seon.operator.subprocess/argv command
           :seon.operator.subprocess/deadline-ms 30000})]
     {::exit (:seon.operator.subprocess/exit result)

@@ -1,7 +1,7 @@
 (ns seon.transact-feedback-probe
   "Reproduce the scratch-cluster evaluation and validation cost evidence."
   (:require [seon.db :as db]
-            [seon.operator :as operator]
+            [seon.cluster.boot :as operator]
             [seon.operator.runtime :as runtime]
             [seon.repl :as repl]
             [seon.schema :as schema]

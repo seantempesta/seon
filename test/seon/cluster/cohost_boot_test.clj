@@ -35,6 +35,7 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.config :as config]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
@@ -102,7 +103,7 @@
   (let [root (published-root)
         instances (atom [])]
     (try
-      (let [a (cluster/start! {:seon.boot/cluster-name "cohost-a"
+      (let [a (boot/start! {:seon.boot/cluster-name "cohost-a"
                                :seon.boot/root root})
             _ (swap! instances conj a)
             applied (apply-instrumentation-under a)
@@ -110,7 +111,7 @@
             ;; wrappers installed, cluster B's own boot refused at
             ;; boot admission. A throw out of `start!` is the
             ;; reproduction, so it is not caught — a red test names it.
-            b (cluster/start! {:seon.boot/cluster-name "cohost-b"
+            b (boot/start! {:seon.boot/cluster-name "cohost-b"
                                :seon.boot/root root})
             _ (swap! instances conj b)]
         (testing "instrumentation is genuinely live, not a vacuous pass"
@@ -146,4 +147,4 @@
                   (str label " returned its own computed value"))))))
       (finally
         (doseq [instance @instances]
-          (try (cluster/stop! instance) (catch Throwable _ nil)))))))
+          (try (boot/stop! instance) (catch Throwable _ nil)))))))

@@ -3,6 +3,7 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]))
 
@@ -97,11 +98,11 @@
         :seon.artifact/initialization-install-ms
         (/ (double (- installation-completed installation-started)) 1e6)})
       (flush))
-    (let [instance (cluster/start! {:seon.boot/root root
+    (let [instance (boot/start! {:seon.boot/root root
                                     :seon.boot/cluster-name cluster-name})]
       (.addShutdownHook
        (Runtime/getRuntime)
-       (Thread. #(cluster/stop! instance) "seon-artifact-shutdown"))
-      (println (cluster/banner (cluster/readiness instance)))
+       (Thread. #(boot/stop! instance) "seon-artifact-shutdown"))
+      (println (boot/banner (boot/readiness instance)))
       (flush)
       @(promise))))

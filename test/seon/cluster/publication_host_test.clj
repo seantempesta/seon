@@ -4,14 +4,15 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
             [seon.db :as db]
-            [seon.fresh-operator :as operator]
+            [seon.operator :as operator]
             [seon.id :as id]
             [seon.operator.runtime :as runtime]
-            [seon.operator.state :as state]
+            [seon.cluster.process :as state]
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
@@ -23,27 +24,22 @@
         fork-name (str name "-fork")
         repository (.getCanonicalFile (io/file "."))
         records-file (io/file root "subprocesses.edn")
-        generation (random-uuid)]
+        _ nil]
     (.mkdirs root)
     (try
       (support/preserving-instrumentation-state
        (fn []
-         (state/claim-root! repository root (state/current-process-identity) name)
          (cluster/refresh-source! (str root "/data/clusters"))
-         (let [instance (cluster/start! {:seon.boot/root (str root "/data/clusters")
+         (let [instance (boot/start! {:seon.boot/root (str root "/data/clusters")
                                          :seon.boot/cluster-name name})
                advertisement (:seon.boot/advertisement instance)
-               record (merge (select-keys advertisement [:seon.boot/pid :seon.boot/start-instant])
-                             {:seon.operator.process-record/generation generation
-                              :seon.operator.process-record/root (str root)
-                              :seon.operator.process-record/log (str root "/host.log")})
-               _ (#'operator/write-process-record! (str root) record)
-               before (#'operator/read-process-records (str root))
+               record (select-keys advertisement [:seon.boot/pid :seon.boot/start-instant])
+               before (operator/selected-processes (str root))
                projection-reads (atom 0)
                derive-projection schema/projection-from-database
                published (:seon.source/commit-id (source/current (:seon.store/store instance)))]
            (try
-             (is (= [record] (:seon.fresh-operator/process-records before)))
+             (is (contains? before record))
              (spit (io/file root "hook.edn")
                    (pr-str (-> (edn/read-string (slurp (io/file repository ".claude/seon-hook.edn")))
                                (assoc-in [:schema-admission :enabled] true)
@@ -67,7 +63,7 @@
                (let [program
                      (pr-str
                       `(do
-                         (require 'babashka.process 'seon.fresh-operator)
+                         (require 'babashka.process 'seon.operator)
                          (let [start# babashka.process/process
                                records# (atom [])]
                            (try
@@ -87,7 +83,7 @@
                                                     {:seon.hook/file-paths [~(second arguments)]})]
                                        (when-not (= :available (:seon.hook.analysis/status result#))
                                          (throw (ex-info "Hook schema admission failed." result#)))))
-                                  `(seon.fresh-operator/-main
+                                  `(seon.operator/-main
                                     "--seon-root" ~(str root) ~@arguments)))
                              (finally
                                (spit ~(str records-file) (pr-str @records#)))))))
@@ -105,7 +101,7 @@
                               {"SEON_OPERATOR_EPHEMERAL_OWNER_PID" (str (:seon.boot/pid record))
                                "SEON_HOOK_CONFIG" (str (io/file root "hook.edn"))
                                "SEON_HOOK_STATE_DIR" (str (io/file root "hook-state"))}
-                              :seon.operator.subprocess/deadline-ms (#'operator/publication-bound-ms)
+                              :seon.operator.subprocess/deadline-ms 1200000
                               :seon.operator.subprocess/merge-error? true})
                      invalid? (= (last arguments) (str root "/invalid.edn"))
                      output (:seon.operator.subprocess/output result)]
@@ -122,7 +118,7 @@
                                                (.getName (io/file (first (:seon.operator.subprocess/argv %)))))
                                    records)
                          (pr-str records))))
-                 (is (= before (#'operator/read-process-records (str root)))))))
+                 (is (= before (operator/selected-processes (str root)))))))
              (is (zero? @projection-reads)
                  "An exact source fork carries the existing projection instead of reading the whole program.")
              (let [connection (store/open-branch! (:seon.store/store instance)
@@ -134,10 +130,8 @@
                                   [:seon.cluster/name fork-name]))))
                  (finally (store/release-branch! connection))))
              (finally
-               (cluster/stop! (get @runtime/running-instances name instance)))))))
+               (boot/stop! (get @runtime/running-instances name instance)))))))
       (finally
-        (state/delete-process-claim! repository generation)
-        (state/delete-edn! (state/root-claim-path repository root))
         (when-let [instance (get @runtime/running-instances name)]
-          (cluster/stop! instance))
+          (boot/stop! instance))
         (support/delete-recursively! (str root))))))

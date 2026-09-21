@@ -4,14 +4,14 @@
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [seon.dev.clj-kondo :as sut]
-            [seon.operator.state :as operator.state]
+            [seon.cluster.process :as operator.process]
             [seon.test-support :as test-support]))
 
 (deftest incomplete-dependency-cache-is-repopulated-before-analysis
   (let [root (io/file "tmp/kondo-completeness" (str (random-uuid)))
         project (.getCanonicalFile (io/file "."))
         run-command! (fn [argv]
-               (operator.state/run-process!
+               (operator.process/run-process!
                 {:seon.operator.subprocess/argv argv
                  :seon.operator.subprocess/directory (.getCanonicalPath root)
                  :seon.operator.subprocess/deadline-ms 300000}))]

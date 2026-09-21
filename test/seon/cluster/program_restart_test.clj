@@ -11,6 +11,7 @@
             [seon.ai :as ai]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.cluster.message :as message]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
@@ -169,7 +170,7 @@
     (try
       (test-support/populate-published-root! root)
       (let [first-instance
-            (cluster/start! {:seon.boot/cluster-name cluster-name
+            (boot/start! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})
             connection (:seon.boot/cluster-connection first-instance)]
         (try
@@ -269,10 +270,10 @@
             (is (not (contains? required-names 'missing.restart.namespace))
                 ":as-alias is not reclassified as a load dependency"))
           (finally
-            (cluster/stop! first-instance))))
+            (boot/stop! first-instance))))
 
       (let [second-instance
-            (cluster/start! {:seon.boot/cluster-name cluster-name
+            (boot/start! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})
             connection (:seon.boot/cluster-connection second-instance)]
         (try
@@ -371,6 +372,6 @@
           (is (restarted-call-present? @connection)
               "a fresh agent ctx acquired and called the prior definition")
           (finally
-            (cluster/stop! second-instance))))
+            (boot/stop! second-instance))))
       (finally
         (test-support/delete-recursively! root)))))

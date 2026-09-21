@@ -2,7 +2,7 @@
   "Native clj-kondo dependency-cache ownership for development tools."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
-            [seon.operator.state :as operator.state]
+            [seon.cluster.process :as operator.process]
             [seon.dev.dependency-digest :as dependency-digest]
             [seon.dev.state :as state]))
 
@@ -64,7 +64,7 @@
                (= contents (::contents recorded)))
         {::status :current ::input-digest digest}
         (let [classpath-result
-              (operator.state/run-process!
+              (operator.process/run-process!
                {:seon.operator.subprocess/argv ["clojure" "-Spath"]
                 :seon.operator.subprocess/directory root
                 :seon.operator.subprocess/deadline-ms population-bound-ms})
@@ -76,7 +76,7 @@
                   (throw (ex-info "Could not derive the project classpath"
                                   classpath-result)))
               result
-              (operator.state/run-process!
+              (operator.process/run-process!
                {:seon.operator.subprocess/argv
                 ["clj-kondo" "--lint" classpath "--parallel" "--copy-configs"
                  "--skip-lint" "--config" "{:output {:analysis true}}"]

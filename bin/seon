@@ -23,4 +23,4 @@ fi
 
 exec bb --config "$SEON_SOURCE_ROOT/bb.edn" --deps-root "$SEON_SOURCE_ROOT" \
   --classpath "$SEON_SOURCE_ROOT/script:$SEON_SOURCE_ROOT/src:$SEON_SOURCE_ROOT/resources" \
-  -m seon.fresh-operator --seon-root "$SEON_OPERATOR_ROOT" "$@"
+  -m seon.operator --seon-root "$SEON_OPERATOR_ROOT" "$@"

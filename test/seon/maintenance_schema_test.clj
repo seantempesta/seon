@@ -22,7 +22,7 @@
     :seon.schedule/id "root/maintenance/footprint-schedule"
     :seon.schedule/expression "0 2 * * *"
     :seon.schedule/zone-id "UTC"
-    :seon.fn/sym 'seon.operator/observe-footprint!}
+    :seon.fn/sym 'seon.maintenance/observe-footprint!}
    {:seon.schedule.task/id "root/maintenance/reap-dead-roots"
     :seon.schedule/id "root/maintenance/reap-dead-roots-schedule"
     :seon.schedule/expression "15 2 * * *"
@@ -32,7 +32,7 @@
     :seon.schedule/id "root/maintenance/rotate-logs-schedule"
     :seon.schedule/expression "30 2 * * *"
     :seon.schedule/zone-id "UTC"
-    :seon.fn/sym 'seon.operator/rotate-logs!}
+    :seon.fn/sym 'seon.maintenance/rotate-logs!}
    {:seon.schedule.task/id "root/maintenance/process-census"
     :seon.schedule/id "root/maintenance/process-census-schedule"
     :seon.schedule/expression "5 * * * *"
@@ -42,7 +42,7 @@
     :seon.schedule/id "root/maintenance/compact-schedule"
     :seon.schedule/expression "0 3 * * 0"
     :seon.schedule/zone-id "UTC"
-    :seon.fn/sym 'seon.operator/collect!}])
+    :seon.fn/sym 'seon.maintenance/collect!}])
 
 (deftest maintenance-maps-are-open-and-components-are-owned
   (let [nominal-at (instant "2026-08-05T02:00:00Z")
@@ -73,7 +73,7 @@
          :seon.maintenance.receipt/task
          [:seon.schedule.task/id "root/maintenance/footprint"]
          :seon.maintenance.receipt/handler
-         [:seon.fn/sym 'seon.operator/observe-footprint!]
+         [:seon.fn/sym 'seon.maintenance/observe-footprint!]
          :seon.maintenance.receipt/request
          [:seon.maintenance.request/id
           "root/maintenance/footprint@1785895200000"]
@@ -100,7 +100,7 @@
             fire-id "maintenance-schema-test/fire"
             ;; The fn row refs its namespace row, and only namespaces the
             ;; canonical population already holds can be referenced.
-            handler 'seon.operator/observe-footprint!
+            handler 'seon.maintenance/observe-footprint!
             receipt-id "maintenance-schema-test/receipt"
             nominal-at (instant "2026-08-05T02:00:00Z")
             observed-at (instant "2026-08-05T02:00:01Z")]
@@ -294,7 +294,7 @@
         error-component
         {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.operator/collection
-         :seon.error/operation 'seon.operator/collect!
+         :seon.error/operation 'seon.maintenance/collect!
          :seon.error/message "Collection did not verify every root."}]
     (testing "the maintenance mirror admits what the public slot admits"
       (doseq [[public-key component-key value]
@@ -370,7 +370,7 @@
                             :seon.operator.cluster-cleanup/collection
                             {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.operator/collection
-         :seon.error/operation 'seon.operator/collect!
+         :seon.error/operation 'seon.maintenance/collect!
                              :seon.error/message "Collection did not finish."})
              row (assoc (maintenance/project-cluster-cleanup-result partial-result)
                         :seon.maintenance.result/id "empty-maintenance/partial")]
@@ -378,7 +378,7 @@
          (let [stored (db/pull @connection '[*]
                               [:seon.maintenance.result/id "empty-maintenance/partial"])]
            (is (false? (:seon.operator.cluster-cleanup/complete? stored)))
-           (is (= 'seon.operator/collect!
+           (is (= 'seon.maintenance/collect!
                   (get-in stored [:seon.maintenance.result/cluster-cleanup-collection :seon.error/operation])))
            (is (nil? (get-in stored [:seon.maintenance.result/cluster-cleanup-collection
                                     :seon.operator.collect/store-id])))))))))

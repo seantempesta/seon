@@ -51,9 +51,9 @@
 ;;; per var, realized at first use, instead of a `requiring-resolve` on every
 ;;; call (AGENTS §2.1).
 (defonce ^:private cluster-start!
-  (delay (requiring-resolve 'seon.cluster/start!)))
+  (delay (requiring-resolve 'seon.cluster.boot/start!)))
 (defonce ^:private cluster-stop!
-  (delay (requiring-resolve 'seon.cluster/stop!)))
+  (delay (requiring-resolve 'seon.cluster.boot/stop!)))
 (defonce ^:private cluster-publication-base!
   (delay (requiring-resolve 'seon.cluster/publication-base!)))
 (defonce ^:private cluster-source-progress
@@ -3409,11 +3409,11 @@
                      run-result (completion-reach-digests run-result))
         completion-file (stage-completion! run-result)]
     (try
-      (let [{live? :seon.fresh-operator/live-process?
-             value :seon.fresh-operator/value}
+      (let [{live? :seon.operator/live-process?
+             value :seon.operator/value}
             ;; `seon.fresh-operator` lives under `script/`: a deliberate late
             ;; dependency of the operator drill, never a load-cycle dodge.
-            ((requiring-resolve 'seon.fresh-operator/live-root-value!)
+            ((requiring-resolve 'seon.operator/live-root-value!)
              operator-root (persistent-results-form (str completion-file)))]
         (if live?
           value
@@ -3580,8 +3580,8 @@
             {:seon.test.run/expected (set (map :seon.test.member/symbol members#))
              :seon.test.run/rows
              (vec (db/q '~run-result-query database# (mapv :db/id members#)))}))
-        {live? :seon.fresh-operator/live-process? facts :seon.fresh-operator/value}
-        ((requiring-resolve 'seon.fresh-operator/live-root-value!) operator-root form)]
+        {live? :seon.operator/live-process? facts :seon.operator/value}
+        ((requiring-resolve 'seon.operator/live-root-value!) operator-root form)]
     (if live?
       (results-from-facts run-id facts)
       (let [held (store/open-store! {:seon.store/dir (str (io/file operator-root "data" "store"))})]
@@ -3618,7 +3618,7 @@
   (let [cause
         (when-let [data (not-empty
                          (dissoc (:seon.error/data failure)
-                                 :seon.fresh-operator/events))]
+                                 :seon.operator/events))]
           (let [text (pr-str data)]
             (if (> (count text) 4000)
               (str (subs text 0 4000) "…")

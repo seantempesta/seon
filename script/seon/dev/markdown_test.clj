@@ -3,7 +3,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.dev.markdown :as md]
-            [seon.operator.state :as operator.state])
+            [seon.cluster.process :as operator.process])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
            [java.util Comparator]))
@@ -233,7 +233,7 @@
         current "15d98da60991b6ded59b15cf0d499a7055a02266"
         stale "10540578248eaa686c1f88a7fe57644ee4c9f993"
         git! (fn [& args]
-               (let [result (operator.state/run-process!
+               (let [result (operator.process/run-process!
                              {:seon.operator.subprocess/argv
                               (into ["git" "-C" (str root)] args)
                               :seon.operator.subprocess/deadline-ms 30000})]

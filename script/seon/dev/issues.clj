@@ -13,7 +13,7 @@
     (list 'do
           '(require 'seon.issue)
           (list 'seon.issue/report
-                (cond-> {:seon.db/db '(seon.db/db (seon.operator/connection "default"))
+                (cond-> {:seon.db/db '(seon.db/db (seon.cluster.boot/connection "default"))
                          :seon.issue/root "."}
                   class-tag (assoc :seon.issue/class class-tag))))))
 
@@ -27,8 +27,8 @@
 (defn run!
   "Query the running operator; print every refusal for --check."
   [root arguments]
-  (let [response ((requiring-resolve 'seon.fresh-operator/live-root-value!) root (pr-str (query-form arguments)))
-        result (:seon.fresh-operator/value response)]
+  (let [response ((requiring-resolve 'seon.operator/live-root-value!) root (pr-str (query-form arguments)))
+        result (:seon.operator/value response)]
     (if (= ["--check"] (vec arguments))
       (prn (dissoc result :seon.issue/entities))
       (if (= "--class" (first arguments))
@@ -36,6 +36,6 @@
           (println (:seon.issue/path entity)))
         (doseq [entity (:seon.issue/entities result)]
           (prn (select-keys entity [:seon.issue/id :seon.issue/title :seon.issue/severity :seon.issue/path])))))
-    (when-not (:seon.fresh-operator/live-process? response)
+    (when-not (:seon.operator/live-process? response)
       (binding [*out* *err*] (println "Issue inspection requires a running operator.")))
     (exit-code result)))

@@ -3,10 +3,11 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.context-blocks-fixture :as fixture]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.operator.state :as operator.state]
+            [seon.cluster.process :as operator.process]
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
@@ -15,7 +16,7 @@
   [root]
   (try
     (support/populate-published-root! root)
-    (let [instance (cluster/start! {:seon.boot/root root
+    (let [instance (boot/start! {:seon.boot/root root
                                      :seon.boot/cluster-name "schema-redeclare-test"})]
       (try
         (let [handle (:seon.turn.loop/cluster instance)
@@ -64,7 +65,7 @@
                (assert (= 4 (db/q '[:find (count ?e) . :where [?e :example/order]]
                                   @connection))))))
           (println "schema-redeclare: seed-adopt-seed-new passed"))
-        (finally (cluster/stop! instance))))
+        (finally (boot/stop! instance))))
     (finally (support/delete-recursively! root))))
 
 (deftest ^{:seon.test/fixture-observation
@@ -76,7 +77,7 @@
         base (System/getProperty "seon.test.published-base")
         argv (cond-> [(str (io/file (System/getProperty "java.home") "bin" "java"))]
                base (conj (str "-Dseon.test.published-base=" base)))
-        result (operator.state/run-process!
+        result (operator.process/run-process!
                 {:seon.operator.subprocess/argv
                  (into argv ["-cp" (System/getProperty "java.class.path")
                              "clojure.main" "-e"

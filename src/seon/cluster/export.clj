@@ -68,7 +68,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.fs :as fs]
-            [seon.operator.state :as operator.state]
+            [seon.cluster.process :as operator.process]
             [seon.schema.edn :as schema.edn])
   (:import [java.nio.file CopyOption Files StandardCopyOption]))
 
@@ -82,7 +82,7 @@
   "Last-resort bound on the clone child, in milliseconds.
 
    The observable this stands in for is the copy child's own exit, which
-   `seon.operator.state/run-process!` already waits on; this value only bounds
+   `seon.operator.process/run-process!` already waits on; this value only bounds
    a child that never exits at all, so an export can never wedge the operator
    (AGENTS.md section 2.3). Unit: milliseconds of total child lifetime.
    Provenance: none measured. A clone's duration scales with store size, and
@@ -131,7 +131,7 @@
   [source ^java.io.File target]
   (if-let [command (clone-command source (.getPath target))]
     (let [result
-          (operator.state/run-process!
+          (operator.process/run-process!
            {:seon.operator.subprocess/argv command
             :seon.operator.subprocess/deadline-ms clone-deadline-ms
             :seon.operator.subprocess/merge-error? true})

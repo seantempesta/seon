@@ -3,7 +3,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [taoensso.timbre :as log])
-  (:import [java.nio.file Files LinkOption NoSuchFileException Path]
+  (:import [java.nio.file Files LinkOption NoSuchFileException Path CopyOption StandardCopyOption]
            [java.nio.file.attribute BasicFileAttributes]
            [java.util.concurrent TimeUnit]))
 
@@ -12,12 +12,33 @@
 (def ^:private ^"[Ljava.nio.file.LinkOption;" no-follow
   (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
 
+(defn write-edn-atomically!
+  "Replace an EDN map with one same-directory atomic rename. Readers see complete values."
+  {:malli/schema [:=> [:cat :string :map] :nil]}
+  [path value]
+  (let [target (.toPath (io/file path))
+        parent (.getParent (.toAbsolutePath target))
+        temporary (Files/createTempFile parent ".seon-edn-" ".tmp"
+                                         (make-array java.nio.file.attribute.FileAttribute 0))]
+    (try
+      (spit (.toFile temporary) (str (pr-str value) "\n"))
+      (Files/move temporary target
+                  (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                          StandardCopyOption/REPLACE_EXISTING]))
+      nil
+      (finally (Files/deleteIfExists temporary)))))
+
 (defn filesystem-space
   "Observe the requested volume without traversing its directory tree."
-  {:malli/schema [:=> [:cat :string] :map]}
+  {:malli/schema [:=> [:cat :string]
+                  [:map [:seon.operator.footprint/root :string]
+                   [:seon.operator.footprint/usable-bytes [:int {:min 0}]]
+                   [:seon.operator.footprint/total-bytes [:int {:min 0}]]
+                   [:seon.operator.footprint/usable-ratio :double]
+                   [:seon.operator.footprint/observed-at :inst]]]}
   [root]
   (let [file (.getAbsoluteFile (io/file root))
-        existing (loop [candidate file]
+        ^java.io.File existing (loop [candidate file]
                    (if (.exists candidate) candidate
                        (recur (.getParentFile candidate))))
         total (.getTotalSpace existing)
@@ -31,7 +52,7 @@
 
 (defn footprint
   "Measure only the requested tree, treating symbolic links as leaves of zero size."
-  {:malli/schema [:=> [:cat :string] :map]}
+  {:malli/schema [:=> [:cat :string] :seon.operator/footprint]}
   [root]
   (letfn [(size-of [^Path path]
             (cond

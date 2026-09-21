@@ -50,8 +50,7 @@
             [seon.test.cache :as test.cache]
             [seon.operator.runtime :as operator.runtime
              :refer [root-store-holder running-instances]]
-            [seon.operator.state :as operator.state]
-            [seon.oversight :as oversight]
+                        [seon.oversight :as oversight]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.data :as render.data]
@@ -242,7 +241,7 @@
         [:div [:dt "Toolkit namespaces"]
          [:dd (str (count (:seon.cluster/toolkit unit)))]]]])))
 
-(declare readiness)
+
 
 (def ^:dynamic ^:private *boot-progress!*
   (constantly nil))
@@ -461,7 +460,7 @@
                         (list 'seon.render.value/artifact-value
                               (list 'seon.render.value/read-artifact
                                     (list 'seon.blob/get
-                                          (list 'seon.operator/connection cluster-name)
+                                          (list 'seon.cluster.boot/connection cluster-name)
                                           content-digest))))
 
                  (not (and artifact-backed? connection))
@@ -636,7 +635,7 @@
         projection-state
         (get-in instance
                 [:seon.sci.eval/ctx :seon.sci.eval/projection-state])
-        ready (when instance (readiness instance))
+        ready (when instance ((requiring-resolve 'seon.cluster.boot/readiness) instance))
         problem-counts
         (into (sorted-map)
               (map (fn [[family rows]] [family (count rows)]))
@@ -891,12 +890,12 @@
         :seon.boot/root cluster-root
         :seon.boot/working-directory working}))))
 
-(defn- warn-low-space!
+(defn warn-low-space!
   [managed-root effective]
   ;; statfs only — the boot path must never pay a recursive directory
   ;; walk (a checkout carrying frozen tmp/ evidence took ~94 s, which is
   ;; the P19 boot-readiness failure of 2026-08-05).
-  (let [footprint (operator.state/filesystem-space managed-root)
+  (let [footprint (fs/filesystem-space managed-root)
         low? (or (< (:seon.operator.footprint/usable-bytes footprint)
                     (:seon.config.maintenance/min-usable-bytes effective))
                  (< (:seon.operator.footprint/usable-ratio footprint)
@@ -926,10 +925,9 @@
                      (:seon.config.maintenance/min-usable-ratio effective)})))))
     footprint))
 
-(defn- write-advertisement!
+(defn write-advertisement!
   [paths advertisement]
-  (spit (:seon.boot/advertisement-file paths)
-        (str (pr-str advertisement) "\n")))
+  (fs/write-edn-atomically! (:seon.boot/advertisement-file paths) advertisement))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The process-root store — opened once, shared by every instance
@@ -944,7 +942,7 @@
   [store-dir]
   (.getCanonicalPath (io/file store-dir)))
 
-(defn- acquire-root-store!
+(defn acquire-root-store!
   "The ONE store at `store-dir`, opened on first use and shared after.
 
   A supplied history policy is creation-fixed for the whole operator root.
@@ -952,11 +950,14 @@
   ([store-dir]
    (acquire-root-store! store-dir ::unspecified-history-policy))
   ([store-dir keep-history?]
+   (acquire-root-store! store-dir keep-history? false))
+  ([store-dir keep-history? destroy?]
    (let [store-key (root-store-key store-dir)
          requested? (not= ::unspecified-history-policy keep-history?)]
      (locking root-store-holder
        (if-let [held (get @root-store-holder store-key)]
-         (let [store (:seon.store/store held)
+         (let [_ (when destroy? (refused! "Cannot destroy a held store." {:seon.store/dir store-key}))
+               store (:seon.store/store held)
                main-connection (:seon.store/connection-object store)
                held-keep-history?
                (get-in @main-connection [:config :keep-history?])]
@@ -971,7 +972,7 @@
            (swap! root-store-holder update-in [store-key ::holders] inc)
            store)
          ; open OUTSIDE the map first: a failed open must leave no entry
-         (let [request (cond-> {:seon.store/dir store-key}
+         (let [request (cond-> {:seon.store/dir store-key :seon.store/destroy? destroy?}
                          requested?
                          (assoc :seon.config.db/keep-history? keep-history?))
                store (store/open-store! request)]
@@ -979,7 +980,7 @@
                   {:seon.store/store store ::holders 1})
            store))))))
 
-(defn- release-root-store!
+(defn release-root-store!
   "Drop one holder; the LAST one releases the store and its flock."
   [store-dir]
   (let [store-key (root-store-key store-dir)]
@@ -1347,7 +1348,7 @@
           (recur waiting)))))
   nil)
 
-(defn- require-admissible-branch!
+(defn require-admissible-branch!
   "Refuse incompatible installed declarations before acquiring the branch projection.
    Config reconciliation checks its own declared function names against the
    program graph; no historical activation roster is required."
@@ -1363,7 +1364,7 @@
           (declaration-changes database projection cluster-name))))))
   nil)
 
-(defn- accrete-schema-population!
+(defn accrete-schema-population!
   "Install the current additive schema population on one branch.
 
   Registration and database installation are separate in Datahike's
@@ -1562,7 +1563,7 @@
 
 (defn- source-refresh-acquisition-bound-ms
   []
-  (operator.state/event-silence-backstop-ms (fs/source-directory) {}))
+  (:seon.config.operator/event-silence-backstop-ms config/defaults))
 
 (defn- source-refresh-holder-view
   [holder]
@@ -1574,7 +1575,7 @@
     (transition)
     (let [bound-ms (source-refresh-acquisition-bound-ms)
           started-ms (System/currentTimeMillis)
-          waiter (assoc (operator.state/current-process-identity)
+          waiter (assoc (cluster.process/current-identity)
                         :seon.operator.lock/command "source publication"
                         :seon.operator.lock/waiting-since (Date. started-ms)
                         :seon.operator.lock/acquisition-timeout-ms bound-ms)]
@@ -1599,7 +1600,7 @@
              :seon.operator.lock/waiter waiter})))
         (let [token (Object.)
               acquired-at (Date.)
-              holder (assoc (operator.state/current-process-identity)
+              holder (assoc (cluster.process/current-identity)
                             ::holder-token token
                             :seon.operator.lock/command "source publication"
                             :seon.operator.lock/phase "request accepted"
@@ -1730,7 +1731,7 @@
      :seon.source/namespace-count namespace-count
      :seon.source/function-count function-count}))
 
-(defn- require-coherent-program!
+(defn require-coherent-program!
   [connection cluster-name]
   (let [currentness (program-currentness (db/db connection))]
     (when-not (:seon.source/coherent? currentness)
@@ -2284,7 +2285,7 @@
   (str (:seon.boot/pid advertisement) "-"
        (inst-ms (:seon.boot/start-instant advertisement))))
 
-(defn- recover-runs!
+(defn recover-runs!
   "Close all prior open turns before arming agents. The writer decides
   which evaluations and effects remain unfinished; nothing is replayed."
   {:malli/schema
@@ -2501,7 +2502,7 @@
                 " committed without its namespace, cluster, or bootstrap run.")
            :seon.error/data {:seon.agent/id agent-id}})))))
 
-(defn- seed-root-agent!
+(defn seed-root-agent!
   "Ensure root and its agent-owned maintenance initialization exist."
   [connection cluster-name process]
   (require-committed!
@@ -2521,7 +2522,7 @@
    {:seon.agent/id root-agent-id
     :seon.boot/population :seon.schedule/root-maintenance}))
 
-(defn- serve!
+(defn serve!
   "Bind the cluster's web view and publish its actual URL and port.
 
   Every bind rewrites the existing PREPL advertisement before returning the
@@ -2622,7 +2623,7 @@
            :where [?error :seon.error/signature ?signature]]
          database signature)))
 
-(defn- commit-fault!
+(defn commit-fault!
   "Commit one escaped Throwable as one durable fact per delivery.
 
   TOTAL, never throws. Returns `[fact outcome previously-reported?]`, deriving
@@ -2859,7 +2860,7 @@
      :conns []
      :io-exec (:seon.flow/executor handle)}))
 
-(defn- arm-agents!
+(defn arm-agents!
   "Arm the cluster's shared graph, fan-out, routing listener and prime.
   The armer acquires agent graphs only for current work or stored schedules.
   Idle agents remain facts until a wake or schedule needs their graph. A
@@ -3011,7 +3012,7 @@
             (:seon.flow/fault-channel fanout))
      :seon.search/completion (:seon.search/completion view)}))
 
-(defn- disarm-agents!
+(defn disarm-agents!
   "Unwind the armed layers of ONE instance, newest first.
   The routing LISTENER goes first so nothing new is routed while the
   graphs unwind. An explicit armer quiescence event then proves every
@@ -3098,471 +3099,6 @@
     (async/close! (:seon.render.web/render-channel view))
     (async/close! (:seon.render.web/runtime-eval-channel view))
     (async/close! (:seon.render.web/pages-channel view)))
-  nil)
-
-(defn- stand-cluster-runtime!
-  [instance publish! compiled-config connection cluster-name config
-   projection-state base-ctx]
-  (schema/call-with-projection-state
-   projection-state
-   (fn []
-     (let [recovery (recover-runs! connection)
-           _ (when (and (map? recovery)
-                        (contains? recovery :seon.error/at)
-                        (contains? recovery :seon.error/layer)
-                        (contains? recovery :seon.error/operation))
-               (throw (ex-info (:seon.error/message recovery) recovery)))
-           instance (publish! (merge instance recovery))
-           instance (publish!
-                     (assoc instance
-                            :seon.boot/config-result
-                            (config/apply-compiled! connection compiled-config)))
-           process (process-identity (:seon.boot/advertisement instance))
-           _ (ensure-cluster-entity! connection cluster-name process)
-           _ (seed-root-agent! connection cluster-name process)
-           search-path (:seon.search/path
-                        (cluster-paths (:seon.boot/root config) cluster-name))
-           instance (publish!
-                     (assoc instance :seon.search/handle
-                            (search/open! connection search-path)))
-           boot-dials (config/effective (db/db connection) cluster-name)
-           arm-request {:seon.flow/commit-fault!
-                        #(commit-fault! connection cluster-name process
-                                        (config/result-caps boot-dials) %)}
-           bare-ctx
-           (if base-ctx
-             (sci.eval/fork-cluster-ctx
-              base-ctx (db/db connection) connection projection-state arm-request)
-             (sci.eval/cluster-ctx
-              (db/db connection) connection projection-state arm-request))
-           ;; The launcher's own graph belongs to this cluster too, but the
-           ;; launcher cannot be a member of the environment its own procs
-           ;; carry. Its graph therefore receives this cluster's environment
-           ;; up to the facts layer; every LATER carrier gets the complete
-           ;; one built immediately below.
-           pre-graph-environment
-           (env/refuse-incomplete-environment!
-            (env/environment
-             {:seon.boot/cluster-name cluster-name
-              :seon.db/connection connection
-              :seon.search/handle (:seon.search/handle instance)
-              :seon.schema/projection
-              (:seon.schema/projection @projection-state)
-              :seon.db/basis-t (:seon.db/basis-t @projection-state)
-              :seon.sci.admit/caps (config/result-caps boot-dials)
-              :seon.config/on-core-error
-              (:seon.config/on-core-error boot-dials)}))
-           work-launcher
-           (flow/start-work-launcher!
-            {:seon.env/environment pre-graph-environment
-             ::flow/configuration
-             (select-keys boot-dials flow/flow-workload-attributes)})
-           ;; Boot's 0->1 constructor. A missing layer refuses HERE with a
-           ;; flat error naming it, so no partial environment is ever handed
-           ;; to a proc, a submission, or a fork.
-           environment
-           (env/refuse-incomplete-environment!
-            (env/boot-environment
-             (assoc pre-graph-environment
-                    :seon.flow/work-launcher work-launcher)))
-           _ (env/replace-environment! projection-state environment)
-           ;; The environment rides the ctx by `assoc` — never through
-           ;; `sci/init` options, which silently drop unknown keys. Every
-           ;; per-turn `sci/fork` and every closure built inside it then
-           ;; carries this cluster's environment across any thread by
-           ;; construction.
-           instance (publish!
-                     (assoc instance :seon.sci.eval/ctx
-                            (-> bare-ctx
-                                (env/carry environment)
-                                (env/carry-state projection-state))))
-           instance (publish!
-                     (assoc instance :seon.flow/work-launcher work-launcher))
-           instance (publish!
-                     (merge instance
-                            (arm-agents! instance connection cluster-name)))
-           dials (config/effective (db/db connection) cluster-name)]
-       (publish! (serve! instance dials))))))
-
-(defn- stand-boot-layers!
-  "Stand the ordered boot layers above the REPL.
-
-  Store → source commit → fork → connection → config are assoc'd
-  as they stand, and the whole value is republished to the registry at every
-  step. The instance a failure carries is exactly what stands: absence marks
-  where boot stopped."
-  [instance publish! compiled-config]
-  (let [config (:seon.boot/config instance)
-        cluster-name (:seon.boot/cluster-name config)
-        keep-history?
-        (get-in compiled-config
-                [:seon.config/effective :seon.config.db/keep-history?])
-        store (acquire-root-store! (:seon.boot/store-dir config) keep-history?)
-        instance (publish! (assoc instance :seon.store/store store))
-        store-id (get-in @(:seon.store/connection-object store)
-                         [:config :store :id])
-        cluster-branch (registry/cluster-branch cluster-name)
-        existing-cluster? (contains? (registry/roster store) cluster-branch)
-        source-base (when-not existing-cluster? (source-base! store))
-        start-permit (gc-guard/try-reachability-permit! store-id :roster)
-        _ (when-let [kind (:seon.error/kind start-permit)]
-            (throw
-             (ex-info
-              (if (= :sweep-in-progress kind)
-                "A reachability sweep is in progress; retry start later."
-                "Reachability publication is currently unavailable; retry start later.")
-              start-permit)))
-        forked
-        (try
-          (if existing-cluster?
-            {:seon.store/branch cluster-branch
-             :seon.cluster/created? false}
-            (registry/ensure-cluster!
-             {:seon.store/store store
-              :seon.boot/cluster-name cluster-name
-              :seon.source/commit-id
-              (:seon.source/commit-id source-base)
-              :seon.schema/projection (:seon.schema/projection source-base)
-              :datahike.gc-guard/reachability-permit start-permit}))
-          (finally
-            (gc-guard/release-reachability-permit! start-permit)))
-        provisional-connection
-        (store/open-branch! store (:seon.store/branch forked))
-        instance (publish!
-                  (assoc instance
-                         :seon.boot/cluster-connection provisional-connection))
-        initial-database @provisional-connection
-        ;; BEFORE the branch's own projection is derived or used: an
-        ;; inadmissible branch must steer the operator, not surface as a
-        ;; projection build failure over facts the branch no longer carries.
-        _ (require-admissible-branch! initial-database cluster-name)
-        initial-projection
-        (or (:seon.schema/projection source-base)
-            (schema/projection-from-database initial-database))
-        initial-projection-state
-        (sci.eval/projection-state initial-database initial-projection)
-        ;; Every branch read receives the projection acquired with that branch.
-        ;; A new fork can reuse current-src's immutable projection because it
-        ;; names the exact commit just forked; a sovereign existing branch
-        ;; derives once from its own database value.
-        _ (schema/call-with-projection-state
-           initial-projection-state
-           #(do
-              (require-coherent-program!
-               provisional-connection cluster-name)
-              (accrete-schema-population!
-               provisional-connection cluster-name)))
-        database @provisional-connection
-        projection
-        (if (= (db/basis-t initial-database) (db/basis-t database))
-          initial-projection
-          (schema/projection-from-database database))
-        projection-state (sci.eval/projection-state database projection)
-        ;; Datahike's writer is a core.async state machine created with the
-        ;; connection. Create the durable cluster connection while its one
-        ;; advanceable projection state is bound, so in-writer transaction
-        ;; functions decode against the same cluster basis as their caller.
-        _ (store/release-branch! provisional-connection)
-        connection
-        (schema/call-with-projection-state
-         projection-state
-         #(store/open-branch! store (:seon.store/branch forked)))
-        instance (publish!
-                  (assoc instance :seon.boot/cluster-connection connection))]
-    (stand-cluster-runtime!
-     instance publish! compiled-config connection cluster-name config
-     projection-state (:seon.sci.eval/ctx source-base))))
-
-(defn start!
-  "Start one cluster instance in this JVM, REPL FIRST, then boot.
-  Order: resolve paths and create directories → open the io-prepl
-  socket server and write the advertisement (real bound port, pid,
-  start-instant — the REPL is live from here NO MATTER WHAT) → open the
-  process-root store (first instance; siblings reuse the held store) →
-  snapshot the already-published `current-src` commit when the cluster branch
-  is absent → registry/ensure-cluster! → store/open-branch! → require
-  one recorded source
-  digest and a coherent program graph (a complete older corpus is
-  sovereign and allowed) → accrete the current schema
-  population → config/apply-compiled! with the shipped defaults → return the complete
-  instance. A later-layer failure THROWS
-  with the DEGRADED INSTANCE in the ex-data under :seon.boot/instance
-  (boot fields absent from the failure point) while the REPL and
-  advertisement survive; the instance stays registered, and the caller
-  stops it through that carried value like any other. Two instances in one JVM share the root store and executors,
-  nothing else. Refuses a second start! for a cluster this JVM already
-  has running."
-  {:malli/schema [:=> [:cat :seon.boot/start-request] :seon.boot/instance]}
-  [request]
-  (let [began (System/nanoTime)
-        config-request
-        (select-keys request
-                     [:seon.config/manifest :seon.config/environment])
-        config
-        (resolve-bootstrap
-         (apply dissoc request (keys config-request)))
-        cluster-name (:seon.boot/cluster-name config)
-        compiled-config
-        (config/compile-manifest
-         (assoc config-request :seon.boot/cluster-name cluster-name))
-        paths (cluster-paths (:seon.boot/root config) cluster-name)
-        repository-root (or (System/getProperty "seon.repository.root")
-                            (System/getProperty "user.dir"))
-        managed-root (operator-root (:seon.boot/root config))
-        claim-here? (not= "true" (System/getProperty "seon.operator.claimed"))
-        _ (require-cluster-target! paths)
-        _ (when claim-here?
-            (operator.state/claim-root! repository-root managed-root nil
-                                        cluster-name))
-        _ (warn-low-space! managed-root (:seon.config/effective compiled-config))
-        server-symbol (server-name cluster-name)]
-    (create-directories! config paths)
-    (when claim-here?
-      (operator.state/mark-root-created! repository-root managed-root))
-    (reserve-cluster! cluster-name)
-    (let [server (volatile! nil)
-          ;; LAYER 0 — the REPL. Its own failure unwinds completely
-          ;; (socket closed, reservation released); once it succeeds,
-          ;; nothing below may take it down.
-          instance
-          (try
-            (let [prepl-server
-                  (clojure.core.server/start-server
-                   {:accept 'seon.cluster/mcp-io-prepl
-                    :args [cluster-name
-                           (:seon.config/effective compiled-config)]
-                    :port (:seon.boot/prepl-port config)
-                    :name server-symbol
-                    :address (:seon.boot/prepl-host config)})
-                  _ (vreset! server prepl-server)
-                  advertisement
-                  (merge
-                   {:seon.boot/cluster-name cluster-name
-                    :seon.boot/prepl-host (:seon.boot/prepl-host config)
-                    :seon.boot/prepl-port (.getLocalPort prepl-server)}
-                   (cluster.process/current-identity))
-                  instance
-                  {:seon.boot/config config
-                   :seon.boot/advertisement advertisement
-                   :seon.boot/prepl-server prepl-server
-                   :seon.boot/executors (root-executors)}
-                  instance
-                  (require-candidate-value
-                   (schema/declaration-projection (schema.edn/packaged-forms))
-                   :seon.boot/instance
-                   instance
-                   "The started cluster instance was refused.")]
-              (write-advertisement! paths advertisement)
-              (swap! running-instances assoc cluster-name instance)
-              instance)
-            (catch Throwable throwable
-              (when @server
-                (clojure.core.server/stop-server server-symbol))
-              (release-reservation! cluster-name)
-              (throw throwable)))
-          ;; the registry always holds the instance AS IT STANDS, so a
-          ;; stop! of the carried value and a stop! of the registered
-          ;; one release the same resources
-          published (volatile! instance)
-          progressed (volatile! (boot-phase instance))
-          _ (*boot-progress!* @progressed)
-          publish! (fn [value]
-                     (vreset! published value)
-                     (swap! running-instances
-                            (fn [instances]
-                              (if (contains? instances cluster-name)
-                                (assoc instances cluster-name value)
-                                instances)))
-                     (let [phase (boot-phase value)]
-                       (when (not= phase @progressed)
-                         (vreset! progressed phase)
-                         (*boot-progress!* phase)))
-                     value)]
-      (try
-        ;; the elapsed measure belongs to boot, not to whoever prints
-        ;; the banner: a caller timing `start!` from outside measures
-        ;; its own require time too
-        (let [stood (stand-boot-layers! instance publish! compiled-config)]
-          (publish! (assoc stood :seon.boot/ready-ms
-                           (quot (- (System/nanoTime) began) 1000000))))
-        (catch Throwable failure
-          ;; LOUD, and the REPL survives: the degraded instance rides the
-          ;; refusal so the caller can diagnose over the live socket and
-          ;; stop it like any other instance.
-          (throw (ex-info
-                  (str "The cluster instance failed above the REPL: "
-                       (ex-message failure))
-                  {:seon.error/kind :seon.boot/refused
-                   :seon.boot/refused true
-                   :seon.error/message
-                   (str "The cluster instance failed above the REPL: "
-                        (ex-message failure))
-                   :seon.boot/offense {:seon.boot/cluster-name cluster-name}
-                   :seon.boot/instance @published}
-                  failure)))))))
-
-(defn- active-instance?
-  [registered instance]
-  (and (map? registered)
-       (identical? (:seon.boot/prepl-server registered)
-                   (:seon.boot/prepl-server instance))))
-
-(defn- claim-stop!
-  [cluster-name instance marker]
-  (loop []
-    (let [instances @running-instances]
-      (if-not (active-instance? (get instances cluster-name) instance)
-        false
-        (if (compare-and-set! running-instances
-                              instances
-                              (assoc instances cluster-name marker))
-          true
-          (recur))))))
-
-(defn readiness
-  "The boot banner, DERIVED from a started instance. Never duplicated.
-
-  Everything here is read back out of the instance and the database it
-  points at, so the banner cannot say something the system does not.
-  That is the whole discipline: a banner assembled from variables the
-  boot path happened to have in hand drifts the first time a layer
-  changes, and a banner nobody can regenerate is a log line rather than
-  a readout.
-
-  Returns ordinary data. A caller that wants one field takes one field."
-  {:malli/schema [:=> [:cat :seon.boot/instance] :seon.boot/readiness]}
-  [instance]
-  (let [connection (:seon.boot/cluster-connection instance)
-        db (some-> connection db/db)
-        served (:seon.render.web/served instance)
-        advertisement (:seon.boot/advertisement instance)
-        agents (if db
-                 (or (db/q '[:find (count ?a) . :where
-                            [?a :seon.agent/id _]] db)
-                     0)
-                 0)
-        found (if db
-                (problems/problems
-                 db {})
-                {})]
-    (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name advertisement)
-             :seon.boot/pid (:seon.boot/pid advertisement)
-             :seon.boot/prepl-port (:seon.boot/prepl-port advertisement)
-             :seon.agent/count agents
-             ;; `{}` when healthy — the same value `problems` derives, so
-             ;; the banner screams exactly when the facts do and nobody
-             ;; maintains a second notion of "fine"
-             :seon.problems/problems found}
-      served (assoc :seon.render.web/url (:seon.render.web/url served))
-      (:seon.render.web/wanted-port served)
-      (assoc :seon.render.web/wanted-port
-             (:seon.render.web/wanted-port served))
-      (:seon.boot/recovered-runs instance)
-      (assoc :seon.boot/recovered-runs
-             (:seon.boot/recovered-runs instance))
-      (:seon.boot/ready-ms instance)
-      (assoc :seon.boot/ready-ms (:seon.boot/ready-ms instance)))))
-
-(defn banner
-  "`readiness` as the block a person reads at a terminal.
-
-  THE URL LEADS, because it is the one thing somebody is about to use.
-  A fallback port is called out on its own line rather than folded into
-  the URL line — a bookmark that stopped working deserves a sentence,
-  not a number somebody has to notice."
-  {:malli/schema [:=> [:cat :seon.boot/readiness] :string]}
-  [{:seon.render.web/keys [url wanted-port]
-    :seon.problems/keys [problems]
-    :as ready}]
-  (str/join
-   "\n"
-   (cond-> [(str "seon " (:seon.boot/cluster-name ready) " ready")
-            (str "  view         " (or url "(not serving)"))]
-     wanted-port
-     (conj (str "  port         " wanted-port
-                " was taken — a bookmark on it will not reach this cluster"))
-     true
-     (into [(str "  repl         " (:seon.boot/prepl-port ready)
-                 "  (pid " (:seon.boot/pid ready) ")")
-            (str "  agents       " (:seon.agent/count ready))
-            (str "  problems     " (if (empty? problems)
-                                     "none"
-                                     (str (count problems) " families — "
-                                          (str/join ", " (sort (map name (keys problems)))))))])
-     ;; only when there WAS wreckage: a zero here is noise on every
-     ;; healthy boot, and noise is what makes a banner unread
-     (pos? (or (:seon.boot/recovered-runs ready) 0))
-     (conj (str "  recovered    " (:seon.boot/recovered-runs ready)
-                " run(s) from a dead process"))
-     (:seon.instrument/instrumented ready)
-     (conj (str "  instrumented " (:seon.instrument/instrumented ready)
-                " vars"))
-     (:seon.boot/ready-ms ready)
-     (conj (format "  boot         %.2fs"
-                   (/ (double (:seon.boot/ready-ms ready)) 1000))))))
-
-(defn stop!
-  "Stop exactly THIS instance, instance-addressed never name-addressed.
-  Unwinds boot in reverse: releases ITS cluster branch connection,
-  drops its hold on the process-root store — the LAST instance out
-  releases the store and with it the lifetime flock, a sibling's hold
-  keeps it open — then closes ITS prepl server socket and deletes ITS
-  advertisement. The database resources go FIRST so a failure to release
-  one restores this exact instance to the registry with its REPL up for
-  diagnosis and a later stop retry. A DEGRADED instance stops the same
-  way: absence marks what was never built, so each layer is released
-  only if it stands. A delayed stop! of an old instance value
-  must not touch a replacement started under the same cluster name (the
-  replacement's socket, advertisement, and registry entry all survive).
-  Idempotent — stopping a stopped instance is a no-op returning nil.
-  Never touches the shared root executors."
-  {:malli/schema [:=> [:cat :seon.boot/instance] :nil]}
-  [instance]
-  (let [config (:seon.boot/config instance)
-        cluster-name (:seon.boot/cluster-name config)
-        marker (Object.)]
-    (when (claim-stop! cluster-name instance marker)
-      (try
-        ;; the armed layers first: nothing new may be derived while the
-        ;; database resources are being released
-        (disarm-agents! instance)
-        (some-> (:seon.flow/work-launcher instance)
-                flow/stop-work-launcher!)
-        (when-let [connection (:seon.boot/cluster-connection instance)]
-          (d/release connection))
-        (when (:seon.store/store instance)
-          (release-root-store! (:seon.boot/store-dir config)))
-        (when-not
-         (clojure.core.server/stop-server (server-name cluster-name))
-          (when-not
-           (.isClosed ^java.net.ServerSocket (:seon.boot/prepl-server instance))
-            (refused!
-             "The cluster's registered prepl server is unavailable."
-             {:seon.boot/cluster-name cluster-name})))
-        (let [advertisement-file
-              (io/file
-               (:seon.boot/advertisement-file
-                (cluster-paths (:seon.boot/root config) cluster-name)))]
-          (when (= (:seon.boot/advertisement instance)
-                   (try
-                     (edn/read-string (slurp advertisement-file))
-                     (catch Throwable _ nil)))
-            (.delete advertisement-file)))
-        (swap! running-instances
-               (fn [instances]
-                 (if (identical? marker (get instances cluster-name))
-                   (dissoc instances cluster-name)
-                   instances)))
-        (catch Throwable failure
-          ;; A resource that failed to release remains the addressed
-          ;; generation. Restoring the exact instance makes stop retryable
-          ;; while its live REPL and registry fence exclude a replacement.
-          (swap! running-instances
-                 (fn [instances]
-                   (if (identical? marker (get instances cluster-name))
-                     (assoc instances cluster-name instance)
-                     instances)))
-          (throw failure)))))
   nil)
 
 (defn read-advertisement

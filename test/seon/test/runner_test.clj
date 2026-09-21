@@ -523,7 +523,7 @@
             (is (nil? (get declarations test-symbol)))
             (is (= [{:seon.test/sym test-symbol
                      :seon.test.runner/destructive-path
-                     [test-symbol 'seon.operator.state/cleanup-root-under-lock!]}]
+                     [test-symbol 'seon.cluster.process/cleanup-root-under-lock!]}]
                    (:seon.test.runner/destructive-platform-tests refusal))
                 "Scratch custody does not exempt a declared destroyer from the first tier.")))
         (println "Canonical platform destroyer check:" (count platform-vars) "tests admitted")))))

@@ -1,6 +1,7 @@
 (ns seon.cluster.bootstrap-resume-child
   "Child JVM stopped while a generated run derives its next entry."
   (:require [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.turn]))
 
 (def ^:private prefix-entries
@@ -34,6 +35,6 @@
                         (:seon.turn/id (:seon.turn.loop/work request)))
                (flush)
                @never)))]
-      (cluster/start! {:seon.boot/root root
+      (boot/start! {:seon.boot/root root
                        :seon.boot/cluster-name cluster-name})
       @never)))

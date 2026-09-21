@@ -20,6 +20,7 @@
             [datahike.api :as d]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.cluster.agent]
             [seon.cluster.source :as source]
             [seon.cluster.process :as cluster.process]
@@ -34,7 +35,7 @@
             [seon.flow :as seon.flow]
             [seon.render.route :as route]
             [seon.fs :as fs]
-            [seon.operator :as operator]
+            [seon.cluster.boot :as operator]
             [seon.program :as program]
             [seon.render.transcript :as transcript]
             [seon.schema :as schema]
@@ -240,7 +241,7 @@
     (try
       (seed-incompatible-sovereign! root cluster-name)
       (let [failure (try
-                      (cluster/start! request)
+                      (boot/start! request)
                       nil
                       (catch Exception error
                         error))
@@ -290,7 +291,7 @@
             (is (str/includes? message "export/import"))
             (is (str/includes? message "preserve")))
           (finally
-            (some-> outer-data :seon.boot/instance cluster/stop!))))
+            (some-> outer-data :seon.boot/instance boot/stop!))))
       (finally
         (delete-recursively! root)))))
 
@@ -469,7 +470,7 @@
   repl-is-live-after-ordered-boot
   (let [root (published-root)]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name "solo"
+      (let [instance (boot/start! {:seon.boot/cluster-name "solo"
                                       :seon.boot/root root})
             advertisement (:seon.boot/advertisement instance)
             answer (prepl-eval (:seon.boot/prepl-host advertisement)
@@ -490,7 +491,7 @@
             (is (= advertisement
                    (cluster/read-advertisement root "solo"))))
           (finally
-            (cluster/stop! instance))))
+            (boot/stop! instance))))
       (finally
         (delete-recursively! root)))))
 
@@ -498,9 +499,9 @@
   two-instances-are-isolated
   (let [root (published-root)]
     (try
-      (let [a (cluster/start! {:seon.boot/cluster-name "a"
+      (let [a (boot/start! {:seon.boot/cluster-name "a"
                                :seon.boot/root root})
-            b (cluster/start! {:seon.boot/cluster-name "b"
+            b (boot/start! {:seon.boot/cluster-name "b"
                                :seon.boot/root root})
             port-of #(get-in % [:seon.boot/advertisement
                                 :seon.boot/prepl-port])]
@@ -511,20 +512,20 @@
             (is (= "\"b\"" (prepl-eval "127.0.0.1" (port-of b) "\"b\""))))
           (testing "a second start! for a running cluster refuses"
             (is (thrown? Exception
-                         (cluster/start! {:seon.boot/cluster-name "a"
+                         (boot/start! {:seon.boot/cluster-name "a"
                                           :seon.boot/root root}))))
           (testing "stopping a leaves b untouched"
-            (cluster/stop! a)
+            (boot/stop! a)
             (is (nil? (cluster/read-advertisement root "a"))
                 "a's advertisement is gone")
             (is (= "\"b\"" (prepl-eval "127.0.0.1" (port-of b) "\"b\"")))
             (is (some? (cluster/read-advertisement root "b"))))
           (testing "stop! is idempotent"
-            (is (nil? (cluster/stop! a)))
-            (is (nil? (cluster/stop! a))))
+            (is (nil? (boot/stop! a)))
+            (is (nil? (boot/stop! a))))
           (finally
-            (cluster/stop! a)
-            (cluster/stop! b))))
+            (boot/stop! a)
+            (boot/stop! b))))
       (finally
         (delete-recursively! root)))))
 
@@ -532,12 +533,12 @@
   stale-advertisements-read-as-absent
   (let [root (published-root)]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name "stale"
+      (let [instance (boot/start! {:seon.boot/cluster-name "stale"
                                       :seon.boot/root root})
             advertisement (:seon.boot/advertisement instance)
             file (io/file (:seon.boot/advertisement-file
                            (cluster/cluster-paths root "stale")))]
-        (cluster/stop! instance)
+        (boot/stop! instance)
         (testing "a wrong start-instant with a live pid reads as nil"
           (.mkdirs (.getParentFile file))
           (spit file
@@ -568,22 +569,22 @@
   ;; value must leave a same-named replacement fully alive
   (let [root (published-root)]
     (try
-      (let [old-instance (cluster/start! {:seon.boot/cluster-name "swap"
+      (let [old-instance (boot/start! {:seon.boot/cluster-name "swap"
                                           :seon.boot/root root})]
-        (cluster/stop! old-instance)
-        (let [replacement (cluster/start! {:seon.boot/cluster-name "swap"
+        (boot/stop! old-instance)
+        (let [replacement (boot/start! {:seon.boot/cluster-name "swap"
                                            :seon.boot/root root})
               port (get-in replacement [:seon.boot/advertisement
                                         :seon.boot/prepl-port])]
           (try
             ;; the delayed second stop of the OLD value
-            (is (nil? (cluster/stop! old-instance)))
+            (is (nil? (boot/stop! old-instance)))
             (is (= "\"alive\"" (prepl-eval "127.0.0.1" port "\"alive\""))
                 "the replacement's REPL survived the stale stop")
             (is (some? (cluster/read-advertisement root "swap"))
                 "the replacement's advertisement survived")
             (finally
-              (cluster/stop! replacement)))))
+              (boot/stop! replacement)))))
       (finally
         (delete-recursively! root)))))
 
@@ -595,13 +596,13 @@
         server-name (str "seon.cluster/" cluster-name)]
     (try
       (let [first-instance
-            (cluster/start! {:seon.boot/cluster-name cluster-name
+            (boot/start! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})]
-        (cluster/stop! first-instance)
+        (boot/stop! first-instance)
         (is (not (contains? (registered-prepl-servers) server-name))
             "stop! releases the clojure.core.server name synchronously")
         (let [replacement
-              (cluster/start! {:seon.boot/cluster-name cluster-name
+              (boot/start! {:seon.boot/cluster-name cluster-name
                                :seon.boot/root root})]
           (try
             (is (contains? (registered-prepl-servers) server-name))
@@ -613,7 +614,7 @@
                             [:seon.boot/advertisement :seon.boot/prepl-port])
                     "\"replacement\"")))
             (finally
-              (cluster/stop! replacement)))))
+              (boot/stop! replacement)))))
       (finally
         (delete-recursively! root)))))
 
@@ -625,7 +626,7 @@
         root-store-key (derived-store-dir root)
         retry-release-calls (atom 0)]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+      (let [instance (boot/start! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root root})
             advertisement (:seon.boot/advertisement instance)
             registered-instances
@@ -637,7 +638,7 @@
                  (throw (ex-info "injected root-store release failure"
                                  {::injected true})))]
               (try
-                (cluster/stop! instance)
+                (boot/stop! instance)
                 nil
                 (catch Throwable failure
                   failure)))]
@@ -657,7 +658,7 @@
           (testing "the failed generation excludes a replacement"
             (when (get @registered-instances cluster-name)
               (is (thrown? Exception
-                           (cluster/start!
+                           (boot/start!
                             {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})))))
           (testing "a later stop retries the remaining release"
@@ -666,7 +667,7 @@
                (fn [held-store]
                  (swap! retry-release-calls inc)
                  (original-release-store! held-store))]
-              (is (nil? (cluster/stop! instance))))
+              (is (nil? (boot/stop! instance))))
             (is (= 1 @retry-release-calls)
                 "the retry reaches the root-store release that failed")
             (is (nil? (get @(var-get (ns-resolve 'seon.cluster
@@ -678,14 +679,14 @@
           (testing "the released name and flock admit a replacement"
             (when (nil? (cluster/read-advertisement root cluster-name))
               (let [replacement
-                    (cluster/start! {:seon.boot/cluster-name cluster-name
+                    (boot/start! {:seon.boot/cluster-name cluster-name
                                      :seon.boot/root root})]
-                (cluster/stop! replacement))))
+                (boot/stop! replacement))))
           (finally
             ;; Keep a red test from leaking a live socket or flock into the
             ;; rest of the suite. Both releases are no-ops after a green retry.
             (try
-              (cluster/stop! instance)
+              (boot/stop! instance)
               (finally
                 (try
                   (original-release-store! (:seon.store/store instance))
@@ -709,7 +710,7 @@
         original-transact! db/transact!
         original-stop flow/stop]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name "stopping"
+      (let [instance (boot/start! {:seon.boot/cluster-name "stopping"
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)]
         (try
@@ -741,7 +742,7 @@
                           ::in-flight-transaction)
             (is (.await pass-entered 5 TimeUnit/SECONDS)
                 "the loop pass reached its transaction boundary")
-            (let [stopped (future (cluster/stop! instance))]
+            (let [stopped (future (boot/stop! instance))]
               (is (.await stop-commanded 5 TimeUnit/SECONDS)
                   "stop! sent Flow's stop command")
               (is (= ::still-stopping
@@ -756,7 +757,7 @@
                   "stop! finishes after the pass publishes completion")))
           (finally
             (.countDown finish-pass)
-            (cluster/stop! instance))))
+            (boot/stop! instance))))
       (finally
         (delete-recursively! root)))))
 
@@ -767,21 +768,21 @@
 (defn- start-refusal
   [request]
   (try
-    (cluster/start! request)
+    (boot/start! request)
     nil
     (catch Throwable failure
       failure)))
 
 (defn- stop-refused-instance!
   [failure]
-  (some-> (ex-data failure) :seon.boot/instance cluster/stop!))
+  (some-> (ex-data failure) :seon.boot/instance boot/stop!))
 
 (deftest ^{:seon.test/long
            "133.791 s pool: fresh physical-store creation plus real starts/reopens under both history policies."}
   operator-root-history-policy-is-creation-fixed
   (let [root (fresh-root-with-history-policy false)
         instance
-        (cluster/start!
+        (boot/start!
          {:seon.boot/root root
           :seon.boot/cluster-name "history-off"
           :seon.config/manifest {:seon.config.db/keep-history? false}})]
@@ -817,7 +818,7 @@
               (finally
                 (stop-refused-instance! failure))))))
       (finally
-        (cluster/stop! instance)
+        (boot/stop! instance)
         (delete-recursively! root)))))
 
 (deftest ^{:seon.test/fixture-observation "The subject is reopening a sovereign older physical-store branch without republishing its program."} ^{:seon.test/long "Restarts a real sovereign cluster from its older program facts."}
@@ -829,7 +830,7 @@
         stale-digest (apply str (repeat 64 "f"))]
     (try
       (let [program-transactions-before
-            (let [instance (cluster/start! request)
+            (let [instance (boot/start! request)
                   connection (:seon.boot/cluster-connection instance)
                   source-eid
                   (db/q '[:find ?source .
@@ -846,9 +847,9 @@
                            [?function :seon.fn/sym ?symbol]
                            [?function :seon.fn/source _ ?tx]]
                          @connection)]
-                (cluster/stop! instance)
+                (boot/stop! instance)
                 program-transactions))
-            restarted (cluster/start! request)]
+            restarted (boot/start! request)]
         (try
           (testing "an older complete corpus is a sovereign cluster world"
             (is (some? (:seon.agent/routing restarted)))
@@ -864,7 +865,7 @@
                           [?function :seon.fn/source _ ?tx]]
                         @(:seon.boot/cluster-connection restarted)))))
           (finally
-            (cluster/stop! restarted))))
+            (boot/stop! restarted))))
       (finally
         (delete-recursively! root)))))
 
@@ -878,7 +879,7 @@
         current-digest
         (:seon.source/digest (cluster/source-snapshot))
         old-world
-        (cluster/start!
+        (boot/start!
          {:seon.boot/cluster-name "old-world"
           :seon.boot/root root})]
     (try
@@ -916,7 +917,7 @@
                         :where [_ :seon.source/digest ?digest]]
                       @old-connection))))
         (testing "future clusters fork the published commit"
-          (let [future (cluster/start!
+          (let [future (boot/start!
                         {:seon.boot/cluster-name "future-world"
                          :seon.boot/root root})]
             (try
@@ -925,9 +926,9 @@
                             :where [_ :seon.source/digest ?digest]]
                           @(:seon.boot/cluster-connection future))))
               (finally
-                (cluster/stop! future))))))
+                (boot/stop! future))))))
       (finally
-        (cluster/stop! old-world)
+        (boot/stop! old-world)
         (delete-recursively! root)))))
 
 
@@ -978,10 +979,10 @@
       (with-redefs [seon.fn/source-roots roots
                        cluster/source-roots (conj roots "config/default.edn")]
            (let [fork (cluster/refresh-source! root)
-                 default (cluster/start! {:seon.boot/root root
+                 default (boot/start! {:seon.boot/root root
                                           :seon.boot/cluster-name "default"})]
              (try
-               (let [beta (cluster/start! {:seon.boot/root root
+               (let [beta (boot/start! {:seon.boot/root root
                                            :seon.boot/cluster-name "beta"})]
                  (try
                    (let [connection (:seon.boot/cluster-connection default)
@@ -1081,8 +1082,8 @@
                                                           cluster-datoms)))))))
                            (d/release-materialized-db source-after))
                          (d/release-materialized-db source-before))))
-                   (finally (cluster/stop! beta))))
-               (finally (cluster/stop! default)))))
+                   (finally (boot/stop! beta))))
+               (finally (boot/stop! default)))))
       (finally (delete-recursively! root)))))
 
 
@@ -1095,7 +1096,7 @@
         start-work-launcher! seon.flow/start-work-launcher!
         arm-agents! (var-get (ns-resolve 'seon.cluster 'arm-agents!))]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+      (let [instance (boot/start! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)]
         ;; ONE attribute on the cluster's EXISTING config entity is a datom,
@@ -1108,7 +1109,7 @@
                      {:tx-data
                       [[:db/add [:seon.config/cluster cluster-name]
                         :seon.config.flow.compute/queue-depth 1]]})
-        (cluster/stop! instance))
+        (boot/stop! instance))
       (with-redefs-fn
         {#'seon.flow/start-work-launcher!
          (fn [request]
@@ -1125,7 +1126,7 @@
                     (config/effective @connection name))])
            (arm-agents! instance connection name))}
         #(let [instance
-               (cluster/start!
+               (boot/start!
                 {:seon.boot/cluster-name cluster-name
                  :seon.boot/root root
                  :seon.config/manifest
@@ -1134,7 +1135,7 @@
              (is (= [[:launcher 37] [:agents 37]] @observed)
                  "selected config settles before launcher install and graph arm")
              (finally
-               (cluster/stop! instance)))))
+               (boot/stop! instance)))))
       (finally
         (delete-recursively! root)))))
 
@@ -1234,7 +1235,7 @@
             instance
             (with-bindings
               {progress-var #(swap! phases conj %)}
-              (cluster/start! {:seon.boot/cluster-name "boot-order"
+              (boot/start! {:seon.boot/cluster-name "boot-order"
                                :seon.boot/root root
                                :seon.config/manifest
                                {:seon.config.flow.compute/queue-depth 11}}))
@@ -1320,7 +1321,7 @@
                   "an agent evaluation error never enters the core-fault family")))
           (testing "a second cluster acquires its own projection from the
                     shared store"
-            (let [sibling (cluster/start!
+            (let [sibling (boot/start!
                            {:seon.boot/cluster-name "twr2"
                             :seon.boot/root root
                             :seon.config/manifest
@@ -1342,9 +1343,9 @@
                          "twr2")))
                     "two clusters in one JVM retain distinct applied configs")
                 (finally
-                  (cluster/stop! sibling)))))
+                  (boot/stop! sibling)))))
           (finally
-            (cluster/stop! instance))))
+            (boot/stop! instance))))
       (finally
         (delete-recursively! root)))))
 
@@ -1359,7 +1360,7 @@
       (spit (derived-store-dir root) "not a store")
       (let [degraded
             (try
-              (cluster/start! {:seon.boot/cluster-name "wreck"
+              (boot/start! {:seon.boot/cluster-name "wreck"
                                :seon.boot/root root})
               (is false "the failed boot must throw")
               nil
@@ -1378,7 +1379,7 @@
                              "\"alive\""))
               "the REPL answers over the wreckage"))
         (testing "the carried instance stops like any other"
-          (is (nil? (cluster/stop! degraded)))
+          (is (nil? (boot/stop! degraded)))
           (is (nil? (cluster/read-advertisement root "wreck")))))
       (finally
         (delete-recursively! root)))))
@@ -1407,15 +1408,8 @@
     (try
       (.mkdirs (io/file cluster-root))
       (let [published (cluster/refresh-source! cluster-root)
-            claim (operator/claim-root!
-                   {:seon.operator/repository-root repository-root
-                    :seon.operator/managed-root managed-root
-                    :seon.boot/cluster-name cluster-name})
-            instance (cluster/start! {:seon.boot/cluster-name cluster-name
+            instance (boot/start! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root cluster-root})]
-        (is (contains? (:seon.operator.claim/clusters claim) cluster-name)
-            (str "the refork target must be exactly claimed: "
-                 (pr-str claim)))
         (try
           (test-support/transacted! (:seon.boot/cluster-connection instance)
                                     [{:seon.agent/id "history-refork-recipient"}
@@ -1430,7 +1424,7 @@
                          (:seon.source/commit-id published)
                          :seon.store/store (:seon.store/store instance)})
                 replacement
-                (cluster/start! {:seon.boot/cluster-name cluster-name
+                (boot/start! {:seon.boot/cluster-name cluster-name
                                  :seon.boot/root cluster-root})]
             (try
               (testing "the old branch was replaced from current-src"
@@ -1452,11 +1446,11 @@
                       0))
                     "the replacement carries the published program graph"))
               (finally
-                (cluster/stop! replacement))))
+                (boot/stop! replacement))))
           (finally
             ;; the composed refork stops it. Idempotent cleanup for a
             ;; failure before that boundary.
-            (cluster/stop! instance))))
+            (boot/stop! instance))))
       (finally
         (delete-recursively! repository-root)))))
 
@@ -1481,10 +1475,6 @@
     (try
       (.mkdirs (io/file cluster-root))
       (let [published (cluster/refresh-source! cluster-root)]
-        (operator/claim-root!
-         {:seon.operator/repository-root repository-root
-          :seon.operator/managed-root managed-root
-          :seon.boot/cluster-name cluster-name})
         (let [opened (store/open-store!
                       {:seon.store/dir (derived-store-dir cluster-root)})]
           (try
@@ -1583,7 +1573,7 @@
                      :seon.test/output (str/join "\n" @child-output)}))))
       (.destroyForcibly process)
       (test-support/await-event! (.onExit process) ::child-exit-after-kill)
-      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+      (let [instance (boot/start! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)
             run-id (bootstrap/run-id "root")]
@@ -1653,7 +1643,7 @@
           (finally
             (schema/call-with-projection
              (schema/projection-from-database @connection)
-             #(cluster/stop! instance)))))
+             #(boot/stop! instance)))))
       (finally
         (when (.isAlive process)
           (.destroyForcibly process)
@@ -1679,7 +1669,7 @@
       ;; a first boot writes the wreckage a kill -9 mid-model-call leaves:
       ;; an open run claimed by a process that will not exist afterwards,
       ;; a live lease, and a dangling :running receipt
-      (let [instance (cluster/start! {:seon.boot/cluster-name "recov"
+      (let [instance (boot/start! {:seon.boot/cluster-name "recov"
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)
             now (java.util.Date.)]
@@ -1708,10 +1698,10 @@
                                   :seon.cluster.eval/ordinal 0
                                   :seon.cluster.eval/source "(+ 1 1)"
                                   :seon.cluster.eval/at now}])
-        (cluster/stop! instance))
+        (boot/stop! instance))
 
       ;; the next boot must settle it, with no lease wait
-      (let [instance (cluster/start! {:seon.boot/cluster-name "recov"
+      (let [instance (boot/start! {:seon.boot/cluster-name "recov"
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)]
         (try
@@ -1769,16 +1759,16 @@
                   "the report names exactly the turns this recovery closed"))
             (is (pos? (:seon.boot/recovery-operations instance))))
           (finally
-            (cluster/stop! instance))))
+            (boot/stop! instance))))
 
       ;; a clean boot commits nothing
-      (let [instance (cluster/start! {:seon.boot/cluster-name "clean"
+      (let [instance (boot/start! {:seon.boot/cluster-name "clean"
                                       :seon.boot/root root})]
         (try
           (is (= 0 (:seon.boot/recovery-operations instance))
               "a store with no wreckage is not written to at boot")
           (finally
-            (cluster/stop! instance))))
+            (boot/stop! instance))))
       (finally
         (delete-recursively! root)))))
 

@@ -47,27 +47,17 @@
     :seon.schedule/expression "0 2 * * *"
     :seon.schedule/zone-id "UTC"
     :seon.schedule.task/id "root/maintenance/footprint"
-    :seon.fn/sym 'seon.operator/observe-footprint!}
-   {:seon.schedule/id "root/maintenance/reap-dead-roots-schedule"
-    :seon.schedule/expression "15 2 * * *"
-    :seon.schedule/zone-id "UTC"
-    :seon.schedule.task/id "root/maintenance/reap-dead-roots"
-    :seon.fn/sym 'seon.operator/reap-dead-roots!}
+    :seon.fn/sym 'seon.maintenance/observe-footprint!}
    {:seon.schedule/id "root/maintenance/rotate-logs-schedule"
     :seon.schedule/expression "30 2 * * *"
     :seon.schedule/zone-id "UTC"
     :seon.schedule.task/id "root/maintenance/rotate-logs"
-    :seon.fn/sym 'seon.operator/rotate-logs!}
-   {:seon.schedule/id "root/maintenance/process-census-schedule"
-    :seon.schedule/expression "5 * * * *"
-    :seon.schedule/zone-id "UTC"
-    :seon.schedule.task/id "root/maintenance/process-census"
-    :seon.fn/sym 'seon.operator/census-processes!}
+    :seon.fn/sym 'seon.maintenance/rotate-logs!}
    {:seon.schedule/id "root/maintenance/compact-schedule"
     :seon.schedule/expression "0 3 * * 0"
     :seon.schedule/zone-id "UTC"
     :seon.schedule.task/id "root/maintenance/compact"
-    :seon.fn/sym 'seon.operator/collect!}])
+    :seon.fn/sym 'seon.maintenance/collect!}])
 
 (defn root-maintenance-seed-call
   "Return initialization data for root's absent maintenance tasks.

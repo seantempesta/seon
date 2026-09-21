@@ -3,7 +3,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [seon.operator.state :as operator.state]
+            [seon.cluster.process :as operator.process]
             [seon.test-support :as test-support])
   (:import [java.nio.file FileSystems StandardWatchEventKinds]
            [java.util.concurrent TimeUnit]))
@@ -36,7 +36,7 @@
 (defn- run-babashka [expression]
   (let [root (System/getProperty "user.dir")
         result
-        (operator.state/run-process!
+        (operator.process/run-process!
          {:seon.operator.subprocess/argv
           ["bb" "--config" (str root "/bb.edn")
            "--deps-root" root "-e" expression]
@@ -96,7 +96,7 @@
       (let [failure
             (future
               (caught
-               #(operator.state/run-process!
+               #(operator.process/run-process!
                  {:seon.operator.subprocess/argv
                   ["/usr/bin/python3" "-c" python
                    (.getPath ready-file) (.getPath go-file)
@@ -129,7 +129,7 @@
 (deftest foreign-process-refuses-an-undeclared-deadline-before-launch
   (let [failure
         (caught
-         #((var-get #'operator.state/run-process!)
+         #((var-get #'operator.process/run-process!)
             {:seon.operator.subprocess/argv
              ["/a/foreign/process/that/must/not/be-launched"]}))]
     (is (= :seon.operator.subprocess/deadline-undeclared
@@ -146,7 +146,7 @@
               (fn [& _]
                 (assoc process-record :out (future @release-capture)))]
               (caught
-               #(operator.state/run-process!
+               #(operator.process/run-process!
                  {:seon.operator.subprocess/argv ["/usr/bin/true"]
                   :seon.operator.subprocess/deadline-ms 100})))]
         (is (= :seon.operator.subprocess/deadline-exceeded

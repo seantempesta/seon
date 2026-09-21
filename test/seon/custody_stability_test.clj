@@ -47,7 +47,7 @@
     ;; Ruling 47 grew the program population to every ctx-resolvable name.
     ;; These ordinary public functions are therefore visible to the derived
     ;; custody census and require the same explicit review as prior members.
-    ["seon.operator/connection" :seon.db/connection]
+    ["seon.cluster.boot/connection" :seon.db/connection]
     ["seon.sci.eval/fork-candidate-ctx" :seon.sci.eval/ctx]
     ;; Reviewed 2026-09-16. `acquire-context!` IS the per-agent context
     ;; acquisition owner: it forks the cluster ctx once per agent and keeps

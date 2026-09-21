@@ -359,7 +359,7 @@
       (let [connection (:seon.db/connection cluster)
             source
             (str
-             "; The situation is clear - this cluster has stale function references that need a JVM restart to fix. The maintenance tasks are failing because the operator functions (`seon.operator/census-processes!`, `seon.operator/observe-footprint!`, etc.) have been removed from the published program graph but are still loaded in the JVM.\n\n"
+             "; The situation is clear - this cluster has stale function references that need a JVM restart to fix. The maintenance tasks are failing because the operator functions (`seon.operator/census-processes!`, `seon.maintenance/observe-footprint!`, etc.) have been removed from the published program graph but are still loaded in the JVM.\n\n"
              "; This is a systemic issue that I can't fix from within the REPL - it requires someone to restart the JVM. Let me note this finding and see if I can do anything else productive.\n\n"
              "; Actually, let me look at this from the bootstrap task perspective - I had a task to define a function called `largest`. Let me focus on that:\n\n"
              "(defn largest\n"

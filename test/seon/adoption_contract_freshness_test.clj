@@ -4,10 +4,11 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.config :as config]
             [seon.db :as db]
             [seon.instrument :as instrument]
-            [seon.operator.state :as operator.state]
+            [seon.cluster.process :as operator.process]
             [seon.schema :as schema]
             [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
@@ -57,7 +58,7 @@
     (write-schemas! [:or :string :int])
     (support/populate-published-root! root)
     (cluster/refresh-source! root)
-    (let [instance (cluster/start! {:seon.boot/root root
+    (let [instance (boot/start! {:seon.boot/root root
                                     :seon.boot/cluster-name "contract-freshness"})
           connection (:seon.boot/cluster-connection instance)]
       (try
@@ -100,7 +101,7 @@
                   (pr-str refused)))
         (println "adoption-contract-freshness: changed contract and refusal retry enforced")
         (finally
-          (cluster/stop! instance))))))
+          (boot/stop! instance))))))
 
 (deftest adopted-contracts-govern-both-sci-and-host-calls
   (let [directory (.getCanonicalPath
@@ -115,7 +116,7 @@
         java (str (io/file (System/getProperty "java.home") "bin" "java"))]
     (.mkdirs (io/file directory))
     (try
-      (let [copied (operator.state/run-process!
+      (let [copied (operator.process/run-process!
                     {:seon.operator.subprocess/argv
                      (into ["cp" "-RP"]
                            (concat
@@ -124,19 +125,19 @@
                                             (.getName ^java.io.File %))
                                          (.listFiles (io/file "."))))
                             [directory]))
-                     :seon.operator.subprocess/deadline-ms operator.state/lifecycle-lock-timeout-ms
+                     :seon.operator.subprocess/deadline-ms 1200000
                      :seon.operator.subprocess/merge-error? true})]
         (is (= 0 (:seon.operator.subprocess/exit copied)) (pr-str copied))
         (when (= 0 (:seon.operator.subprocess/exit copied))
           (let [result
-                (operator.state/run-process!
+                (operator.process/run-process!
                  {:seon.operator.subprocess/argv
                   (into (cond-> [java]
                           base (conj (str "-Dseon.test.published-base=" base)))
                         ["-cp" classpath "clojure.main" "-e"
                          "(do (require 'seon.adoption-contract-freshness-test) (seon.adoption-contract-freshness-test/probe!) (shutdown-agents))"])
                   :seon.operator.subprocess/directory directory
-                  :seon.operator.subprocess/deadline-ms operator.state/lifecycle-lock-timeout-ms
+                  :seon.operator.subprocess/deadline-ms 1200000
                   :seon.operator.subprocess/merge-error? true})]
             (is (= 0 (:seon.operator.subprocess/exit result))
                 (:seon.operator.subprocess/output result))

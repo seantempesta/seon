@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -334,7 +335,7 @@
     (swap! running-instances assoc cluster-name
            {:seon.boot/cluster-connection ::connection})
     (try
-      (with-redefs [cluster/readiness
+      (with-redefs [boot/readiness
                     (fn [_]
                       {:seon.boot/cluster-name cluster-name
                        :seon.problems/problems
@@ -375,7 +376,7 @@
                          :seon.flow/graph ::graph))
            (try
              (with-redefs
-              [cluster/readiness
+              [boot/readiness
                (fn [_] {:seon.boot/cluster-name cluster-name})
                oversight/flow-status
                (fn [database _]

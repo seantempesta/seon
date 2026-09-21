@@ -88,152 +88,29 @@
   [root]
   (.getCanonicalPath (io/file (or root project-root))))
 
-(defn- operator-private
-  [var-symbol & arguments]
-  ;; The fresh operator owns advertisements, process records, process identity,
-  ;; and degraded JVM observation. Resolve its existing derivation lazily so
-  ;; loading the MCP bridge still needs only the tooling classpath.
-  (require 'seon.fresh-operator)
-  (let [function (ns-resolve 'seon.fresh-operator var-symbol)]
-    (when-not function
-      (throw (ex-info "The fresh operator observation function is unavailable."
-                      {:seon.dev.mcp/failure :operator-unavailable
-                       :seon.dev.mcp/var var-symbol})))
-    (apply function arguments)))
-
-(defn- valid-advertisement?
-  [cluster advertisement]
-  (and (map? advertisement)
-       (= cluster (:seon.boot/cluster-name advertisement))
-       (string? (:seon.boot/prepl-host advertisement))
-       (not (str/blank? (:seon.boot/prepl-host advertisement)))
-       (integer? (:seon.boot/prepl-port advertisement))
-       (<= 1 (:seon.boot/prepl-port advertisement) 65535)
-       (integer? (:seon.boot/pid advertisement))
-       (pos? (:seon.boot/pid advertisement))
-       (inst? (:seon.boot/start-instant advertisement))))
-
-(defn- cluster-layer-form
-  []
-  (pr-str
-   '(do
-      (seon.cluster/project-next-prepl-value!
-       {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
-      (into
-     {}
-     (map
-      (fn [[cluster-name instance]]
-        [cluster-name
-         (boolean
-          (and (map? instance)
-               (:seon.sci.eval/ctx instance)
-               (:seon.turn.loop/cluster instance)))])
-      @@(ns-resolve 'seon.cluster (symbol "running-instances")))))))
-
-(defn- cluster-layer-states
-  [observations]
-  (into
-   {}
-   (mapcat
-    (fn [jvm]
-      (when-let [advertisement
-                 (and (:seon.fresh-operator/reachable? jvm)
-                      (:seon.fresh-operator/probe-advertisement jvm))]
-        (try
-          (operator-private 'prepl-value! advertisement
-                            (cluster-layer-form))
-          (catch Throwable _
-            nil))))
-   (:seon.fresh-operator/jvms observations))))
-
-(defn- advertisement-row
-  [layer-states observation]
-  (let [cluster (:seon.fresh-operator/name observation)
-        advertisement (:seon.fresh-operator/advertisement observation)]
-    (cond
-      (not (valid-advertisement? cluster advertisement))
-      {:seon.dev.mcp/root (:seon.fresh-operator/root observation)
-       :seon.dev.mcp/cluster cluster
-       :seon.dev.mcp/path (:seon.fresh-operator/path observation)
-       :seon.dev.mcp/state :invalid
-       :seon.dev.mcp/error
-       "Advertisement lacks a valid cluster, pid, start instant, or prepl endpoint."}
-
-      (not (:seon.fresh-operator/process-alive? observation))
-      {:seon.dev.mcp/root (:seon.fresh-operator/root observation)
-       :seon.dev.mcp/cluster cluster
-       :seon.dev.mcp/path (:seon.fresh-operator/path observation)
-       :seon.dev.mcp/state :stale
-       :seon.dev.mcp/advertisement advertisement}
-
-      :else
-      {:seon.dev.mcp/root (:seon.fresh-operator/root observation)
-       :seon.dev.mcp/cluster cluster
-       :seon.dev.mcp/path (:seon.fresh-operator/path observation)
-       :seon.dev.mcp/state
-       (case (get layer-states cluster)
-         true :alive
-         false :degraded
-         :unknown)
-       :seon.dev.mcp/advertisement advertisement
-       :seon.dev.mcp/source :advertisement})))
-
-(defn- registered-rows
-  [root observations]
-  (into
-   []
-   (comp
-    (filter :seon.fresh-operator/reachable?)
-    (mapcat :seon.fresh-operator/registrations)
-    (filter #(= root (:seon.fresh-operator/root %)))
-    (keep
-     (fn [registration]
-       (let [cluster (:seon.fresh-operator/name registration)
-             advertisement (:seon.fresh-operator/advertisement registration)]
-         (when (valid-advertisement? cluster advertisement)
-           {:seon.dev.mcp/root root
-            :seon.dev.mcp/cluster cluster
-            :seon.dev.mcp/state :degraded
-            :seon.dev.mcp/advertisement advertisement
-            :seon.dev.mcp/source :operator-process-record})))))
-   (:seon.fresh-operator/jvms observations)))
-
 (defn- discovery-rows
   [root]
+  (require 'seon.operator)
   (let [root (canonical-root root)
-        ;; `source-observations` is the status owner's one census:
-        ;; advertisements first, then reconciled process records and live JVM
-        ;; registrations reached through any surviving bootstrap prepl bind.
-        observations (operator-private
-                      'source-observations root
-                      {:seon.fresh-operator/probe-jvms? true})
-        layer-states (cluster-layer-states observations)
-        advertisements (mapv (partial advertisement-row layer-states)
-                             (:seon.fresh-operator/advertisements observations))
-        advertised-identities
-        (into #{}
-              (keep (fn [row]
-                      (when-let [advertisement (:seon.dev.mcp/advertisement row)]
-                        [(:seon.dev.mcp/cluster row)
-                         (:seon.boot/pid advertisement)
-                         (:seon.boot/start-instant advertisement)])))
-              advertisements)
-        registrations
-        (remove
-         (fn [row]
-           (let [advertisement (:seon.dev.mcp/advertisement row)]
-             (contains? advertised-identities
-                        [(:seon.dev.mcp/cluster row)
-                         (:seon.boot/pid advertisement)
-                         (:seon.boot/start-instant advertisement)])))
-         (registered-rows root observations))]
-    (->> (concat advertisements registrations)
-         (sort-by (juxt #(not (contains? #{:alive :degraded :unknown}
-                                         (:seon.dev.mcp/state %)))
-                        :seon.dev.mcp/cluster
-                        #(get-in % [:seon.dev.mcp/advertisement
-                                    :seon.boot/pid])))
-         vec)))
+        advertisements ((ns-resolve 'seon.operator 'advertisements) root)]
+    (mapv
+     (fn [advertisement]
+       (let [cluster (:seon.boot/cluster-name advertisement)
+             observation
+             (try
+               ((ns-resolve 'seon.operator 'prepl-value!) advertisement
+                (pr-str `(do
+                           (~'seon.cluster/project-next-prepl-value!
+                            {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
+                           (~'seon.cluster/mcp-runtime-observation ~cluster))))
+               (catch Exception _ nil))]
+         {:seon.dev.mcp/root root :seon.dev.mcp/cluster cluster
+          :seon.dev.mcp/path (str (io/file root "data/clusters" cluster "prepl.edn"))
+          :seon.dev.mcp/state (if observation
+                               (if (= :observed (:seon.dev.mcp/health observation)) :alive :degraded)
+                               :unknown)
+          :seon.dev.mcp/advertisement advertisement :seon.dev.mcp/source :advertisement}))
+     advertisements)))
 
 (defn- start-remedy
   [root cluster]
@@ -846,7 +723,7 @@
 
 (def tools
   [{:name "eval_clj"
-    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl and retains raw *1/*2 before the cluster-side value projection. It binds no cluster custody; at a development REPL, (seon.operator/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) evaluates through seon.sci.eval/evaluate with the cluster's live shared SCI ctx, admission caps, contracts, print grammar, and time limit: it MUTATES that shared per-cluster ctx, so a debug def enters the agents' world, and it creates NO run or receipts because the run loop owns those facts. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from the fresh operator's advertisements and degraded process-record census on every call; the default session reconnects after JVM replacement."
+    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl and retains raw *1/*2 before the cluster-side value projection. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) evaluates through seon.sci.eval/evaluate with the cluster's live shared SCI ctx, admission caps, contracts, print grammar, and time limit: it MUTATES that shared per-cluster ctx, so a debug def enters the agents' world, and it creates NO run or receipts because the run loop owns those facts. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from the fresh operator's advertisements and degraded process-record census on every call; the default session reconnects after JVM replacement."
     :inputSchema {:type "object"
                   :properties {:code {:type "string" :description "Exactly one Clojure form; wrap an intentional sequence in (do ...)."}
                                :root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}

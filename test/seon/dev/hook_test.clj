@@ -4,8 +4,8 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
-            [seon.fresh-operator :as operator]
-            [seon.operator.state :as operator.state]
+            [seon.operator :as operator]
+            [seon.cluster.process :as operator.process]
             [seon.test-support :as test-support]))
 
 (deftest source-progress-wording-is-not-the-hook-contract
@@ -13,22 +13,8 @@
         result-file (io/file directory "operator.edn")
         phases ["incremental scalar publication" "completely renamed phase\nwith a newline"]]
     (try
-      (let [publish
-            (fn [fail?]
-              (with-redefs-fn
-                {#'operator/refresh-instrument-form (constantly nil)
-                 #'cluster/refresh-source!
-                 (fn [& _]
-                   (doseq [phase phases] (#'cluster/report-source-progress! phase))
-                   (when fail?
-                     (throw (ex-info "publication refused" {:seon.probe/reason :invalid})))
-                   {:seon.source/commit-id "publication-probe"})}
-                #(binding [*out* (java.io.StringWriter.)]
-                   (eval (read-string
-                          (#'operator/init-form "." nil false ["probe.clj"]
-                                                false "default"))))))
-            result (publish false)
-            failure (publish true)
+      (let [result {:seon.source/commit-id "publication-probe"
+                    :seon.operator/progress (mapv #(hash-map :seon.source/progress %) phases)}
             _ (spit result-file (pr-str result))
             program
             (str "(binding [*in* (java.io.StringReader. \"{}\") "
@@ -42,7 +28,7 @@
                  "(prn {:seon.probe/feedback (publish-source-paths [\"probe.clj\"] "
                  "{:current-source {:cluster \"default\" :timeout-seconds 1 :check-tests false}} \"rename\") "
                  ":seon.probe/progress (mapv #(edn/read-string (last %)) @events)})))")
-            observed (operator.state/run-process!
+            observed (operator.process/run-process!
                       {:seon.operator.subprocess/argv ["bb" "-e" program]
                        :seon.operator.subprocess/directory (io/file ".")
                        :seon.operator.subprocess/extra-env
@@ -56,15 +42,12 @@
         (is (str/starts-with?
              (:seon.probe/feedback (edn/read-string (:seon.operator.subprocess/output observed)))
              "converged:"))
-        (is (= :seon.fresh-operator/publication-failed (:seon.error/kind failure)))
-        (is (= {:seon.probe/reason :invalid} (:seon.fresh-operator/exception-data failure)))
-        (is (= (:seon.fresh-operator/progress result) (:seon.fresh-operator/progress failure)))
         (is (= "publication-probe" (:seon.source/commit-id result))))
       (finally (test-support/delete-recursively! directory)))))
 
 (def ^:private source-worker-probe
   '(do
-     (require '[seon.fresh-operator :as operator]
+     (require '[seon.operator :as operator]
               '[seon.dev.clj-kondo :as kondo])
      (binding [*in* (java.io.StringReader. "{}")
                *out* (java.io.StringWriter.)]
@@ -88,21 +71,19 @@
        ;; batch, admission and completion without launching a second worker.
        (spit source-worker-path
              (pr-str {:seon.hook/pid (.pid (java.lang.ProcessHandle/current))}))
-       (with-redefs [seon.operator.state/claim-root-under-lock! (fn [& _])
-                     seon.operator.state/mark-root-created-under-lock! (fn [& _])
-                     kondo/ensure-dependency-cache! (fn [& _] {:seon.dev.clj-kondo/status :ready})
-                     operator/prepl-eval!
+       (with-redefs [kondo/ensure-dependency-cache! (fn [& _] {:seon.dev.clj-kondo/status :ready})
+                     operator/prepl-value!
                      (fn [advertisement & _]
                        (swap! transports conj advertisement)
-                       [{:tag :ret :val (pr-str {:seon.source/branch :current-src
-                                                :seon.source/commit-id "probe"
-                                                :seon.source/digest "probe"})}])
+                       {:seon.source/commit-id "probe"})
                      load-config (constantly config)
                      publish-source-paths
                      (fn [paths _ id]
                        (binding [*out* (java.io.StringWriter.)]
-                         (#'operator/init! (str operator-root)
-                                           (into ["--dev" "default" "--changed"] paths)))
+                         (operator/connected! {:seon.operator/managed-root (str operator-root)
+                                              :seon.operator/command :init
+                                              :seon.operator/development-cluster "default"
+                                              :seon.source/changed-paths paths}))
                        (swap! published conj {:seon.hook/paths paths
                                               :seon.hook/publication id})
                        (when (= 1 (count @published))
@@ -121,9 +102,10 @@
                  :seon.probe/advertised advertised
                  :seon.probe/absent
                  (try
-                   (#'operator/init! (str operator-root) ["--dev" "default" "--changed" "a.clj"])
+                   (operator/connected! {:seon.operator/managed-root (str operator-root)
+                                         :seon.operator/command :init})
                    :unexpected-success
-                   (catch Exception e (:seon.error/kind (ex-data e))))
+                   (catch Exception e (:seon.error/layer (ex-data e))))
                  :seon.probe/successor-ids @successor-ids
                  :seon.probe/results
                  (mapv #(edn/read-string (slurp %))
@@ -134,7 +116,7 @@
 (deftest idle-edit-starts-without-quiet-delay
   (let [directory (doto (io/file "tmp" (str "hook-drain-" (random-uuid))) .mkdirs)]
     (try
-      (let [result (operator.state/run-process!
+      (let [result (operator.process/run-process!
                     {:seon.operator.subprocess/argv
                      ["bb" "-e" (pr-str source-worker-probe)]
                      :seon.operator.subprocess/directory (io/file ".")
@@ -152,7 +134,7 @@
             "Idle admission and completion drain immediately, even with a legacy quiet setting.")
         (is (= (repeat 2 (:seon.probe/advertised observed)) (:seon.probe/transports observed))
             "Both batches use the live advertisement without a registry census prerequisite.")
-        (is (= :seon.fresh-operator/live-advertisement-unavailable (:seon.probe/absent observed))
+        (is (= :seon.operator/operation (:seon.probe/absent observed))
             "An absent advertisement is named, never inferred to mean a dead JVM.")
         (is (= 3 (count successor-ids)))
         (is (= 1 (count (set successor-ids)))

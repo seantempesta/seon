@@ -2438,7 +2438,7 @@
   (test-support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           target 'seon.operator.state/subprocess-remaining-ms
+           target 'seon.cluster.process/subprocess-remaining-ms
            row (db/pull database
                         [:seon.fn/sym :seon.fn/private?
                          {:seon.fn/file [:seon.fn.file/relative-root
@@ -2455,7 +2455,7 @@
        (is (= "src/seon/operator/state.clj"
               (get-in row [:seon.fn/file
                            :seon.fn.file/relative-path])))
-       (is (some #(= "seon.operator.state" (namespace %))
+       (is (some #(= "seon.cluster.process" (namespace %))
                  (:seon.program/callers callers))
            (pr-str callers))))))
 

@@ -13,6 +13,7 @@
             [clojure.test :refer [deftest is testing]]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.config :as config]
             [seon.db :as db]
             [seon.flow :as flow]
@@ -150,7 +151,7 @@
         name "application-proof"]
     (try
       (let [instance
-            (cluster/start! {:seon.boot/root root
+            (boot/start! {:seon.boot/root root
                              :seon.boot/cluster-name name
                              :seon.config/manifest applied})
             connection (:seon.boot/cluster-connection instance)
@@ -224,14 +225,14 @@
                      (ns-resolve 'seon.turn 'max-episode-runs))
                     @connection "root"))))
           (finally
-            (cluster/stop! instance))))
+            (boot/stop! instance))))
       (finally
         (test-support/delete-recursively! root)))))
 
 (deftest no-auth-is-consumed-as-the-credential-alternative
   (let [starts (atom 0)
-        start cluster/start!]
-    (with-redefs [cluster/start!
+        start boot/start!]
+    (with-redefs [boot/start!
                   (fn [& args] (swap! starts inc) (apply start args))]
       (test-support/with-database
        (fn [connection]

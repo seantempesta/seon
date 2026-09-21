@@ -8,6 +8,7 @@
             [seon.db :as db]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
             [seon.turn :as turn]
@@ -385,7 +386,7 @@
                       {:seon.eval.drive/request request})))
     (try
       (let [instance
-            (cluster/start!
+            (boot/start!
              {:seon.boot/cluster-name cluster-name
               :seon.boot/root root
               :seon.config/manifest
@@ -411,7 +412,7 @@
         (throw failure))
       (finally
         (when-let [instance @instance*]
-          (cluster/stop! instance))
+          (boot/stop! instance))
         (when-let [store @store*]
           (when-let [grading-branch @grading-branch*]
             (registry/retire-branch!

@@ -18,6 +18,7 @@
             [datahike.api :as d]
             [seon.db :as db]
             [seon.cluster :as cluster]
+            [seon.cluster.boot :as boot]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.config :as config]
@@ -449,7 +450,7 @@
                        :seon.bootstrap-drive/run-cap run-cap})))
     (cluster/refresh-source! process-root)
     (let [instance
-          (cluster/start!
+          (boot/start!
            {:seon.boot/cluster-name cluster-name
             :seon.boot/root process-root
             :seon.config/manifest
@@ -469,7 +470,7 @@
          []
          (range 1 (inc runs)))
         (finally
-          (cluster/stop! instance))))))
+          (boot/stop! instance))))))
 
 (defn -main
   "Run the requested drives and print each report path with its grade."
