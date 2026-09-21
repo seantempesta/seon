@@ -7289,3 +7289,9 @@ and readers deleted; `config-dial-digest…` resolved; RESET NEEDED).
 offending-value members + convert `issue.clj`'s producers; stops before
 `cluster.clj`/`sci/eval.clj` hunks. Reset batch now = slice 4 + shape rows
 + config digest + error members.
+
+**Ruling ~21:45 (test-system):** a log line carries operation, exception
+and request identities, never a serialized invocation argument (the
+transaction error path logged full projection arguments: >3 GB over four
+runs; the six runner/selection offenders at 13–58 s are re-measured with
+the writes gone). Seam named by the lane; a fork fix is pushed.
