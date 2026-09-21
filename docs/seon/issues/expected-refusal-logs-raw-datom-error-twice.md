@@ -104,3 +104,17 @@ of the existing unbounded invocation-logging class, not a new logging owner.
 The bounded cause, publication identity and incomplete seed are preserved in
 [the authored-shape landing note](../../prds/steward-platform/research/schema-shape-authored-2026-09-23.md).
 The owned scratch root was downed and removed; no foreign logger was edited.
+
+## Writer argument dump removed — 2026-09-23 owner ruling
+
+Fork `006e634ae955c186619adb5f3868cca29d8c97fb`, pushed to
+`seantempesta/datahike/main`, removes writer invocation/argument serialization.
+`writer.cljc:85–103` preserves exception class/message/stack without exception
+data and retains branch/commit plus supplied cluster/test/run/error identities.
+The callback still carries the identical exception and actual objects. The
+retired discriminator and message truncation path are deleted. Maintained-fork
+regression: 13 assertions, zero failures/errors, 36.042 ms. This resolves the
+writer's projection dump; the earlier transaction `log/raise` sites remain a
+separate part of this open issue. The full six-test duration comparison is
+currently refused by the stale exported config contract, as recorded in the
+[test-system landing note](../../prds/steward-platform/research/test-system-fork-2026-09-23.md).

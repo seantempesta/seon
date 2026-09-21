@@ -1233,3 +1233,9 @@ exception type/message/stack, absence of invocation/argument/exception-data
 fields, and identical callback exception. Dependency namespace load passed.
 Fast overlay admission excludes gitlinks (`--paths` accepts first-party files),
 so the fork pin lands before measuring the six on that HEAD.
+
+The final fork pin is **006e634ae955c186619adb5f3868cca29d8c97fb**, pushed to
+`origin/main`. It also retains the run identity from the error map's actual
+`:seon.error/data` → `:seon.error/diagnostic-evidence` path. The final regression
+passed **13 assertions in 36.042 ms**. The same JVM required the owned runner,
+runner-test and selection-test namespaces successfully.
