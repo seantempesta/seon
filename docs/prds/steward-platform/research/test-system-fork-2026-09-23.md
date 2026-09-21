@@ -884,3 +884,38 @@ Fast run **b6ad7885e5ea** recorded **12 tests, 73 assertions, 0 failures,
 
 The explicit test-alias namespace load passed before commit. No cold gate or
 default-cluster operation was run.
+
+### Reach acquisition uses an indexed relation
+
+`runner/reach-refresh` replaces per-entity schema-aware pulls with one
+`db/q` over the same entity IDs and declared reach attributes. Datahike's
+bound entity/attribute lookup uses EAVT (`reference-code/datahike/src/datahike/db/search.cljc:140–147`).
+The installed database schema supplies cardinality when assembling the rows;
+no attribute-type roster or additional cache is introduced. Incremental
+identity selection, deletion handling and reach invalidation remain unchanged.
+The recurring parity regression compares acquired function, test and schema
+rows with the original pull selector, including identity presence. It passed
+in **4777.401 ms**, including first fixture acquisition.
+
+Fast run **9d5265c4e61d** recorded **68 executed, 438 assertions, 14 failures,
+10 errors**. This is not a green selection proof. The unchanged Malli
+function-schema acquisition failures and SCI contract refusals remain;
+the named-selection edit expectations also fail. Reporter intervals:
+
+| Test | Before ms | After ms | Current outcome |
+|---|---:|---:|---|
+| `seon.test.runner-test/no-double-execution` | 5116.566750 | 4868.095 | Malli acquisition error |
+| `seon.test.runner-test/platform-claims-and-original-bounds-govern-bulk` | 30929.636792 | 8776.342 | Malli error and duration failure |
+| `seon.test.runner-test/selection-is-one-function-on-both-hosts` | 13917.317125 | 13034.602 | SCI contract error and duration failure |
+| `seon.test.selection-test/fileless-sci-tests-use-the-same-selection` | 6337.354667 | 2272.113 | SCI contract error |
+| `seon.test.selection-test/named-selection-reuses-green-members-by-reachable-content` | 14137.688250 | 7700.761 | Two selection assertions and duration fail |
+| `seon.test.selection-test/omitted-dirty-callers-use-head-and-carry-recordable-provenance` | 15795.023541 | 4444.378 | Passed |
+| `seon.test-runner-test/gate-completions-travel-as-a-file-not-as-code` | 11834.050834 | 5750.695 | Existing form-size/refusal assertions and duration fail |
+
+The broad selection regression also still performs whole-program reach work:
+a dump including virtual threads found `reach-entry` assembling schema
+dependencies during its 1/10/100 changed-definition measurement loop. That
+test's old 900000 ms declaration is not justification for this work. No new
+long allowance was added to hide these remaining overruns. The snapshot used
+HEAD bytes for the concurrently edited SCI caller, explicitly excluding its
+working-tree changes. The exported base was 30 commits behind HEAD.

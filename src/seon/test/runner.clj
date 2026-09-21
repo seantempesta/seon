@@ -2185,16 +2185,19 @@
                    database [:seon.fn/sym :seon.test/sym :seon.schema/key]))
        _ (when (and (map? ids) (contains? ids :seon.db/read-operation))
            (throw (ex-info "Reach identities unavailable." ids)))
-       pulled (if (seq ids)
-                (db/pull-many database
-                 '[:db/id :seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/keywords
-                   (limit :seon.fn/calls nil) (limit :seon.fn/references nil) :seon.test/sym :seon.test/source
-                   :seon.test/subject
-                   :seon.schema/key :seon.schema/form] ids) [])
-       _ (when (and (map? pulled) (contains? pulled :seon.db/read-operation))
-           (throw (ex-info "Reach rows unavailable." pulled)))
+       facts (if (seq ids)
+               (db/q '[:find ?e ?a ?v :in $ [?e ...] [?a ...]
+                       :where [?e ?a ?v]] database ids reach-attributes) [])
+       _ (when (map? facts)
+           (throw (ex-info "Reach rows unavailable." facts)))
+       by-entity (reduce (fn [rows [entity attribute value]]
+                           (if (= :db.cardinality/many
+                                  (get-in database [:schema attribute :db/cardinality]))
+                             (update-in rows [entity attribute] (fnil conj #{}) value)
+                             (assoc-in rows [entity attribute] value)))
+                         {} facts)
        old-rows (::reach-rows previous {})
-       pulled (mapv (fn [e r] (assoc (or r {}) :db/id e)) ids pulled)
+       pulled (mapv (fn [entity] (assoc (get by-entity entity {}) :db/id entity)) ids)
        changed (filterv #(not= (dissoc (get old-rows (:db/id %)) ::reach-symbol ::reach-leaf ::reach-keys) %) pulled)
        rows (reduce (fn [rs r] (assoc rs (:db/id r) (reach-row r))) old-rows changed)
        schemas (if (seq changed)
