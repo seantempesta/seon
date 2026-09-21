@@ -195,6 +195,16 @@ guarantees are the ones named below: cold `launch!`, `reset!`, and exact
 on a reply from the process it terminates. The lane launcher stays. Recovery if the
 rewrite breaks `default`: `git revert` of the slice, then `bin/seon reset --force`.
 
+**Ruled 2026-09-21 (reset shape, README §7):** reset is one JVM. `bin/seon` terminates the old
+JVM by exact identity and launches one JVM with a destroy flag; that JVM takes the store flock
+first, deletes the store beside the retained lock file before any connection opens, republishes,
+forks, boots and stays. `open-store!` (`store.clj:421`) gains acquire → optionally delete →
+create/open. The guarantee is stated honestly: exclusion holds through delete → republish →
+boot, not across the JVM-replacement gap; losing that race is a clean refusal that deletes
+nothing and kills no one. Two guarantees found while reading are KEPT: the REPL opens before
+store acquisition (AGENTS §1), and the advertisement carries the prepl port AND
+(pid, start-instant) because the unchanged MCP bridge verifies identity against it.
+
 | File | Today | Survives (≈) | Derived from the OS / the JVM instead |
 |---|---:|---:|---|
 | `script/seon/fresh_operator.clj` | 3,727 | ~900: argv, `prepl-eval!` `:1820` / `read-prepl-reply` `:1166` / `prepl-value!` `:1182` / `live-root-value!` `:1609`, `launch!` `:2129`, a readiness wait bounded by the boot bound (one prepl round trip on `cluster/readiness` `cluster.clj:3432`), `reset!`, `help!`, exact termination | process records `:144-243` → `ProcessHandle` (`state.clj:224`, `:1199`); truth/repair `:757-770`, `:1323-1769`, `:3351-3392` → the prepl answers or its bound names the phase; offline readers `:881-1082` → "no JVM running"; phase logs `:3008-3074` → re-run reset; `await-advertisement!` `:2266-2402` (136 lines polling a file) → the readiness value; `source-preflight!` `:330` (clj-kondo in the JVM refuses); `init-form` `:2680` codegen → one `pr-str`'d request map; `publication-output!` `:2804` |

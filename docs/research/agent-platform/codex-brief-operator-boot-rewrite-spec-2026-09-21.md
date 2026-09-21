@@ -46,9 +46,9 @@ seams: `ProcessHandle` (JDK), `clojure.core.server` prepl
    and what `stop!` releases (newest first). No `require-coherent-program!`,
    no `accrete-schema-population!` (B1 deletes them), no search layer.
 3. **Process identity and exclusion.** `(pid, start-instant)` only; the
-   advertisement file holds the prepl port for a cold dialer and nothing else;
+   advertisement file holds the prepl port and `(pid, start-instant)` for a cold dialer and the MCP bridge, nothing else;
    the store `flock` beside the store (`data/store.lock`) is the ONE exclusion,
-   held by `reset` across down → delete → republish → start. No lifecycle lock,
+   held by `reset`'s own JVM through delete → republish → boot (ruled 2026-09-21, README §7 "Reset shape": reset is one JVM; no handoff). No lifecycle lock,
    claim files, process records, phase logs, generation UUID, truth/repair pass.
 4. **The seven drills**, each a `deftest` on a scratch root through the one
    `seon.test/run`: cold start; second concurrent start refused naming the
