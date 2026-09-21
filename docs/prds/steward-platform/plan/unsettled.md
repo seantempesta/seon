@@ -7399,3 +7399,13 @@ runner/selection offenders now under bound (4,473 / 2,640 / 2,722 /
 466 ms) — §2.1 fetch-at-call-time; `config.clj` granted to the lane
 (clean); the fix is one derivation per manifest value carried on the
 projection, and it should also cut the boot's 2,330 ms "config" interval.
+
+**~23:55:** blocker refuted-and-fixed by `schema-shape-authored`
+(`dbb6c4864`): the `:not` child-error came from function attribute
+analysis treating Malli's `:not` constructor as a declared schema key,
+not from shape reconstruction — analysis now selects only declared
+schema keys. (The orchestrator's stated cause was wrong; the lane
+verified before naming it, as the rule requires.) Adoption proof on
+`default` is the orchestrator's next step: reload the changed namespaces
+at the REPL (adoption still does not reload — item 8), then
+`init --dev --changed`, then the platform tier.
