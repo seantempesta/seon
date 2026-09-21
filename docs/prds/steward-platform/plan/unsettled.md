@@ -7104,3 +7104,45 @@ checkable reason). `seon.turn-work-test`'s 200-case property still ran
 after 163 s — a per-case whole-program cost; assigned. The redesign lane
 continues slice 4 with the four sub-second algorithms queued for its
 next stop. Error lane parked.
+
+## RESUME HERE (2026-09-23 ~19:00 local — written before an orchestrator compaction)
+
+**Method, not log.** Everything above this heading is the archive. The
+orchestrator's method (invariant, what "landed" means, the six review
+questions, lane rules, cadence) is one page:
+`~/.claude/projects/-Users-sean-src-seon/memory/project_orchestrator_method_2026_09_23.md`,
+and the laws are in AGENTS.md ("SECONDS, NOT MINUTES", rule 16, §2–§5).
+
+**Direction.** One-JVM redesign
+([plan](one-jvm-publication-redesign-2026-09-22.md)): slices 0–3 landed;
+slice 4 in progress by `one-jvm-redesign` (astra low) with its done
+condition = four algorithms (callers re-linted only on a contract-digest
+change; only the changed namespace reloaded — Vars are indirection; note
+indexing per changed path; the validator reads only touched rows) and the
+docstring rows under one second in the script. Then: reset, platform
+tier, measurement row, hook publication ON (`.claude/seon-hook.edn`
+`:current-source :enabled`), and the build lane on
+[wave 3a](wave-3a-task-family-spec-2026-09-21.md) (read its 2026-09-23
+amendment first; three stops at low effort).
+
+**Lanes.** `one-jvm-redesign` (running, slice 4 tail: lazy SCI base,
+publication serialization for the `force-branch!` race, boot phases
+timed + lazy). `test-system-fork` (running: converting the 18 platform
+offenders, `turn-work` property). `error-family-1a` (parked with session:
+retire the four legacy offending-value members + convert `issue.clj`'s
+22 producers and the fault committer once slice 4 frees those files).
+Default runs at HEAD; hook publication OFF until the edit is sub-second.
+
+**Numbers that matter (script, `b17ad6ef1`):** fork 0.34 s; no change
+1.46 s; first adoption 1.5 s; docstring non-core 12.7 s, core 28.2 s
+(targets: all under 1 s for docstrings). Error write 329 ms. Bare
+`bin/test` works; repeat executes 0. Platform tier green at slice 2.
+
+**Owed proofs by the orchestrator:** bare `bin/test` twice on the quiet
+tree; platform tier at the slice 4 landing; quiet-window boot with no
+core fault printed; complete tier in a quiet window (reds are the
+namespace agents' work).
+
+**Standing rules:** three lanes, disjoint files, low/medium effort;
+verify before naming a cause; rulings here the same turn; pushes at
+checkpoints; explain in library terms only.
