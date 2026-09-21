@@ -282,6 +282,30 @@
         "as do the two- and three-argument arities")
     (is (vector? (checked text 'my.gen.alpha (count text))))))
 
+(deftest refusals-satisfy-the-armed-reply-contract
+  (let [projection (schema/build-projection (schema/registered-schemas))
+        registry (:seon.schema.projection/registry projection)
+        checked (m/-instrument
+                 {:schema (:malli/schema (meta #'reply/sources))
+                  :scope #{:input :output}}
+                 reply/sources {:registry registry})]
+    (doseq [[text bound expected]
+            [["" 1 :seon.cluster.reply/no-forms-error]
+             ["Only prose here." 100 :seon.cluster.reply/no-forms-error]
+             ["(+ 1 2)" 1 :seon.cluster.reply/unreadable-error]
+             ["#foo/bar [1 2]" 100 :seon.cluster.reply/refused-tag-error]
+             ["#=(inc 1)" 100 :seon.cluster.reply/refused-tag-error]]]
+      (let [result (checked text 'user bound)]
+        (is (m/validate expected result {:registry registry}) (pr-str result))
+        (is (inst? (:seon.error/at result)))
+        (is (= 'seon.cluster.reply/sources (:seon.error/operation result)))
+        (is (= text (get-in result [:seon.error/data :seon.cluster.reply/text])))))
+    (doseq [args [[""] ["Only prose here." 'user]]]
+      (is (m/validate :seon.cluster.reply/no-forms-error
+                      (apply checked args) {:registry registry})))
+    (is (= ["[1 2]"]
+           (mapv :seon.cluster.eval/source (checked "[1 2]"))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The class: a comment renders ABOVE the prompt, so it can only be prose
 ;;; the agent wrote ABOVE the form
@@ -331,13 +355,13 @@
   (testing "unbalanced input refuses with a position, and does not hang"
     (let [refused (first (read-errors "(defn f [x]\n  (+ x 1)"))]
       (is (error? refused))
-      (is (= :seon.sci.reader/unreadable (:seon.error/kind refused)))
+      (is (= :seon.sci.reader/form (:seon.sci.reader/unreadable-member refused)))
       (is (pos-int? (get-in refused [:seon.error/data :seon.sci.reader/line]))
           "the reader's own position reaches the agent")))
   (testing "an invalid token inside a structured form is malformed code"
     (let [refused (first (read-errors "(+ 1\n  80s)"))]
       (is (error? refused))
-      (is (= :seon.sci.reader/unreadable (:seon.error/kind refused)))))
+      (is (= :seon.sci.reader/form (:seon.sci.reader/unreadable-member refused)))))
   (testing "read-eval is refused by the reader, not by a blocklist"
     (let [refused (sources "#=(System/exit 1)")]
       (is (error? refused))

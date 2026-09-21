@@ -2246,6 +2246,7 @@
                     (cond-> {::analyzer/sources (update-vals contexts :text)
                              ::analyzer/config-root (str (io/file directory analyzer/config-directory))}
                       cache-root (assoc ::analyzer/cache-root cache-root)))
+          _ (assert-clean-analysis! analysis (first-party-function-symbols analysis))
           values (mapcat #(map kondo.utils/sexpr
                                (:children (kondo.utils/parse-string-all (:text %))))
                          (vals contexts))
@@ -2268,28 +2269,61 @@
                           (get contexts path) (get rows path []) (get findings path []))))
             files))))
 
+(declare report-identities)
+
 (defn caller-files
-  "Files containing direct callers of declarations in the changed files."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :string]] [:set :string]]}
-  [database changed]
-  (let [paths (db/q '[:find [?path ...]
-                      :in $ [?changed ...]
+  "Direct caller files of declarations touched by the committed report.
+
+  Keep selection conservative until complete callability dependencies are
+  declared: arity and privacy changes need caller analysis even without a
+  changed contract. Schema changes also select callers of their consumers."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report] [:set :string]]}
+  [{database :db-after :as report}]
+  (let [identities (report-identities report)
+        _ (when (:seon.error/at identities)
+            (throw (ex-info (:seon.error/message identities) identities)))]
+    (if (empty? identities)
+      #{}
+      (let [schemas (into #{} (keep (fn [[attribute value]]
+                                     (when (= attribute :seon.schema/key) value))) identities)
+            schemas (loop [selected schemas pending schemas]
+                      (if (empty? pending)
+                        selected
+                        (let [parents (db/q '[:find [?key ...] :in $ [?changed ...]
+                                              :where [?schema :seon.schema/references ?changed]
+                                                     [?schema :seon.schema/key ?key]]
+                                            database (vec pending))
+                              _ (when (:seon.error/at parents)
+                                  (throw (ex-info (:seon.error/message parents) parents)))
+                              added (set/difference (set parents) selected)]
+                          (recur (into selected added) added))))
+            referring (if (seq schemas)
+                        (db/q '[:find [?symbol ...] :in $ [?key ...] [?attribute ...]
+                                :where [?arity ?attribute ?key]
+                                       [?function :seon.fn/arities ?arity]
+                                       [?function :seon.fn/sym ?symbol]]
+                              database (vec schemas)
+                              [:seon.fn.arity/input-refs :seon.fn.arity/output-refs :seon.fn.arity/guard-refs])
+                        [])
+            _ (when (:seon.error/at referring)
+                (throw (ex-info (:seon.error/message referring) referring)))
+            symbols (into (set referring) (keep (fn [[attribute value]]
+                                                 (when (= attribute :seon.fn/sym) value))) identities)
+            paths (db/q '[:find [?path ...]
+                      :in $ [?symbol ...]
                       :where
-                      [?file :seon.fn.file/relative-path ?changed]
-                      [?callee :seon.fn/file ?file]
-                      [?callee :seon.fn/sym ?symbol]
                       [?caller :seon.fn/calls ?symbol]
                       [?caller :seon.fn/file ?caller-file]
                       [?caller-file :seon.fn.file/relative-path ?path]]
-                    database (vec changed))]
-    (when (map? paths)
-      (throw (ex-info "Publication could not read the changed declarations' callers." paths)))
-    (set paths)))
+                    database (vec symbols))]
+        (when (map? paths)
+          (throw (ex-info "Publication could not read the changed declarations' callers." paths)))
+        (set paths)))))
 
 (declare database-manifest)
 
 (defn build-manifest
-  "Lint changed files and their direct callers using clj-kondo's namespace cache.
+  "Lint changed files using clj-kondo's namespace cache.
   Without a published manifest, lint every source file once."
   {:malli/schema
    [:=> [:cat [:map
@@ -2314,8 +2348,7 @@
         database (:seon.source/previous-database request)
         requested (set (:seon.source/changed-paths request))
         selected (when (and database supplied-digests)
-                   (or (:seon.fn/changed-paths request)
-                       (into requested (caller-files database requested))))
+                   (or (:seon.fn/changed-paths request) requested))
         previous (or (:seon.fn/previous-manifest request)
                      (when selected (database-manifest database directory roots (vec selected))))
         old-artifacts (:seon.fn.manifest/artifacts previous)
@@ -2345,13 +2378,8 @@
                          (into {} (map (fn [[key form]]
                                          [[:seon.schema/key key] (id/digest 64 [form])])) forms)
                          {})
-        _ (report-index-progress! progress! "analysis caller files")
-        paths (or selected (if (and previous (seq changed))
-                (if-let [database (:seon.source/previous-database request)]
-                  (into changed (caller-files database changed))
-                  (throw (ex-info "Changed source analysis requires the published database."
-                                  {:seon.error/kind ::index-refused :seon.fn/index-refused true})))
-                changed))
+        _ (report-index-progress! progress! "analysis input digests complete")
+        paths (or selected changed)
         result
         (if (and previous (empty? changed))
           previous
@@ -3407,9 +3435,44 @@
                  process (assoc :tx-meta {:seon.db/process process})))
               :seon.fn/population)
              changed-identities (require-committed! (report-identities report)
-                                                     :seon.fn/population)]
+                                                     :seon.fn/population)
+             caller-paths (when (and (:seon.fn/manifest request) (:seon.fn/changed-paths request))
+                            (set/difference (caller-files report) (:seon.fn/changed-paths request)))
+             findings-report
+             (when (seq caller-paths)
+               (report-index-progress! progress! (str "analysis callers: " (count caller-paths) " files"))
+               (let [manifest (:seon.fn/manifest request)
+                     directory (:seon.fn.manifest/root manifest)
+                     database (:db-after report)
+                     artifacts (analyzed-artifacts
+                                (or (db/carried-projection database) projection)
+                                (:seon.fn.manifest/relative-roots manifest) directory
+                                (mapv #(fs/absolute-path directory %) (sort caller-paths))
+                                database
+                                (str (io/file directory analyzer/config-directory ".cache")))
+                     findings (into [] (comp (mapcat :seon.fn.file/rows) (filter :seon.lint/id)) artifacts)
+                     previous (require-committed! (file-rows database (vec caller-paths) :seon.lint/file)
+                                                  :seon.fn/population)
+                     tx-data (require-committed!
+                              (reconcile-tx-in row-shapes database findings
+                                               (mapv program/row-identity previous))
+                              :seon.fn/population)]
+                 ;; This unpublished connection is owned by this population;
+                 ;; nothing can change its database between this diff and write.
+                 (when (seq tx-data)
+                   (report-index-progress! progress! "caller findings transaction")
+                   (require-committed!
+                    (db/transact! connection
+                                  (cond-> {:tx-data tx-data}
+                                    process (assoc :tx-meta {:seon.db/process process})))
+                    :seon.fn/population))))
+             changed-identities (into changed-identities
+                                      (when findings-report
+                                        (require-committed! (report-identities findings-report)
+                                                            :seon.fn/population)))]
          {:seon.reconcile/converged? (empty? changed-identities)
           :seon.reconcile/operations (count changed-identities)
+          :seon.db/transaction-report report
           :seon.reconcile/adopt-identities changed-identities})
        ;; Fresh branches have installed attributes, but their canonical schema
        ;; rows arrive in this transaction. Capture the supplied construction

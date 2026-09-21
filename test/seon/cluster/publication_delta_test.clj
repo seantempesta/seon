@@ -54,7 +54,7 @@
     (.mkdirs (io/file root "src"))
     (try
       (doseq [[file source]
-              {"leaf.clj" "(ns sample.reload.leaf)"
+              {"leaf.clj" "(ns sample.reload.leaf)\n(defn value [] 1)\n(defmacro expanded [] 1)"
                "caller.clj" "(ns sample.reload.caller (:require [sample.reload.leaf]))"
                "outer.clj" "(ns sample.reload.outer (:require [sample.reload.caller]))"
                "other.clj" "(ns sample.reload.other)"}]
@@ -63,17 +63,21 @@
        (fn [connection]
          (support/transacted!
           connection
-          (filterv :seon.ns/name
-                   (seon.fn/rows {:seon.fn/root (.getCanonicalPath root)
-                                  :seon.fn/roots ["src"]})))
+          (seon.fn/rows {:seon.fn/root (.getCanonicalPath root)
+                        :seon.fn/roots ["src"]}))
          (let [selected (cluster/development-namespaces
                          (db/db connection) [[:seon.fn/sym 'sample.reload.leaf/value]])]
+           (is (= #{'sample.reload.leaf 'sample.reload.caller 'sample.reload.outer}
+                  selected)
+               "Ordinary edits retain conservative compile-time dependent reload.")
+           (is (empty? (cluster/development-namespaces (db/db connection) []))))
+         (let [selected (cluster/development-namespaces
+                         (db/db connection) [[:seon.fn/sym 'sample.reload.leaf/expanded]])]
            (is (= #{'sample.reload.leaf 'sample.reload.caller 'sample.reload.outer} selected))
            (is (= ['sample.reload.leaf 'sample.reload.caller 'sample.reload.outer]
                   (cluster/reload-order selected
                                         {'sample.reload.caller #{'sample.reload.leaf}
-                                         'sample.reload.outer #{'sample.reload.caller}})))
-           (is (empty? (cluster/development-namespaces (db/db connection) []))))))
+                                         'sample.reload.outer #{'sample.reload.caller}}))))))
       (finally (support/delete-recursively! root)))))
 
 (deftest reloading-one-file-preserves-unrelated-wrappers

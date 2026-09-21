@@ -1851,7 +1851,7 @@
                       :seon.source/test-input-digest (test.cache/test-input-digest directory inputs)}
             digest (:seon.source/digest snapshot)]
       (let [database (when published (source/database store (:seon.source/commit-id published)))
-            selected (when database (into changed (seon.fn/caller-files database changed)))
+            selected (when database changed)
             previous (when database
                        (seon.fn/database-manifest database (:seon.fn/root roots)
                                                   (:seon.fn/roots roots) (vec selected)))
@@ -2003,21 +2003,26 @@
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.fn.file/identities] [:set :seon.ns/name]]}
   [database identities]
-  (loop [selected (into #{}
+  (let [selected (into #{}
                        (keep (fn [[attribute value]]
                                (case attribute
                                  :seon.ns/name value
                                  (:seon.fn/sym :seon.test/sym) (symbol (namespace value))
-                                 nil))) identities)
-         pending nil]
-    (let [callers (db/q '[:find [?name ...] :in $ [?required ...]
+                                 nil))) identities)]
+    ;; Namespace reload can change compile-time values as well as callable
+    ;; roots. Keep all declared dependents until narrower facts prove safety.
+    (loop [selected selected pending selected visited #{}]
+      (if (empty? pending)
+        selected
+        (let [callers (db/q '[:find [?name ...] :in $ [?required ...]
                          :where [?ns :seon.ns/requires ?required]
                          [?ns :seon.ns/name ?name]]
-                       database (vec (or pending selected)))
+                       database (vec pending))
           _ (when (:seon.error/at callers)
               (refused! "Development namespace dependents could not be read." callers))
-          added (set/difference (set callers) selected)]
-      (if (seq added) (recur (into selected added) added) selected))))
+          visited (into visited pending)
+          added (set/difference (set callers) visited)]
+          (recur (into selected added) added visited))))))
 
 (defn- development-source-refresh!
   {:malli/schema
@@ -2078,7 +2083,8 @@
         projection (schema/projection-from-database database)
         changed-identities (adoption-identities program-identities)
         deleted-identities (filterv #(empty? (db/pull published-database '[*] %)) changed-identities)
-        namespaces (development-namespaces database changed-identities)]
+        namespaces (set/union (development-namespaces previous-database changed-identities)
+                              (development-namespaces database changed-identities))]
     (report-source-progress! "development loaded definitions")
     ;; Clojure reload leaves removed interns behind. Remove only definitions
     ;; whose identity is absent from the published database.

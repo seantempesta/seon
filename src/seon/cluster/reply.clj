@@ -20,6 +20,7 @@
   Splitting is pure. The turn stores the reply and its ordered sources
   before evaluating them."
   (:require [clojure.string :as str]
+            [seon.error.refusal :as error]
             [seon.schema.edn :as schema.edn]
             [seon.sci.reader :as reader]))
 
@@ -43,14 +44,28 @@
         (str "; " line)))))
 
 (defn- refused
-  "The ONE registered flat error value (`:seon.error/value`).
-  Detail rides under `:seon.error/data` rather than beside the message,
-  because the shape is closed and one owner (error.edn) decides it."
+  "Build the reply refusal with its base observation and authored evidence."
+  {:malli/schema
+   [:=> [:cat :qualified-keyword :map :string :map]
+    [:or :seon.cluster.reply/no-forms-error
+     :seon.cluster.reply/unreadable-error
+     :seon.cluster.reply/refused-tag-error]]}
   [kind marker message data]
-  (merge marker
-         {:seon.error/kind kind
-          :seon.error/message message
-          :seon.error/data data}))
+  (error/diagnostic
+   (merge marker
+          {:seon.error/at (java.util.Date.)
+           :seon.error/layer :seon.cluster.reply/source
+           :seon.error/operation 'seon.cluster.reply/sources
+           :seon.error/kind kind
+           :seon.error/message message
+           :seon.error/data data
+           :seon.error/diagnostic-layer :seon.cluster.reply/source
+           :seon.error/diagnostic-operation 'seon.cluster.reply/sources
+           :seon.error/diagnostic-member ::text
+           :seon.error/diagnostic-expected :seon.cluster.reply/sources
+           :seon.error/diagnostic-offending (::text data)
+           :seon.error/diagnostic-cause kind
+           :seon.error/diagnostic-evidence data})))
 
 (defn- parsed-events
   "Read events for `source` from THE ONE reader, or its flat error value.
@@ -321,19 +336,27 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.cluster.reply/text]
-     [:or :seon.cluster.reply/sources :seon.error/value]]
+     [:or :seon.cluster.reply/sources
+      :seon.cluster.reply/no-forms-error
+      :seon.cluster.reply/unreadable-error
+      :seon.cluster.reply/refused-tag-error]]
     [:=> [:cat :seon.cluster.reply/text :seon.ns/name]
-     [:or :seon.cluster.reply/sources :seon.error/value]]
+     [:or :seon.cluster.reply/sources
+      :seon.cluster.reply/no-forms-error
+      :seon.cluster.reply/unreadable-error
+      :seon.cluster.reply/refused-tag-error]]
     [:=> [:cat :seon.cluster.reply/text :seon.ns/name
           :seon.config.eval.result/max-source]
-     [:or :seon.cluster.reply/sources :seon.error/value]]]}
+     [:or :seon.cluster.reply/sources
+      :seon.cluster.reply/no-forms-error
+      :seon.cluster.reply/unreadable-error
+      :seon.cluster.reply/refused-tag-error]]]}
   ([text] (sources text 'user (max 1 (count text))))
   ([text namespace-name]
    (sources text namespace-name (max 1 (count text))))
   ([text namespace-name max-source]
    (let [admission-events (parsed-events text namespace-name max-source)]
-     (if (= :seon.sci.reader/oversize
-            (:seon.error/kind admission-events))
+     (if (some? (:seon.sci.reader/source-bound admission-events))
        (refused ::unreadable {::unreadable text}
                 (:seon.error/message admission-events)
                 (merge {::text text}
@@ -353,8 +376,8 @@
 
              (map? events)
              (let [message (:seon.error/message events)
-                   tag (:seon.sci.reader/tag (:seon.error/data events))]
-               (if (= :seon.sci.reader/refused-tag (:seon.error/kind events))
+                   tag (:seon.sci.reader/refused-token events)]
+               (if tag
                  (refused ::refused-tag
                           (cond-> {} tag (assoc ::refused-tag tag))
                           message {::text text})

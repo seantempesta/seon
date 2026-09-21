@@ -2290,6 +2290,17 @@
                     (assoc @(::kernel/program-snapshot generated) ::acquisition recorded))
             recorded))))))
 
+(defn- acquire-function-from-database!
+  "Acquire the lazy program before its first named invocation."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value
+                      :qualified-symbol]
+                  :qualified-symbol]}
+  [ctx database function-symbol]
+  (acquire! {:seon.sci.eval/ctx ctx :seon.db/db database})
+  (kernel/ensure-function!
+   (assoc ctx ::kernel/install-function! install-function-from-database!)
+   database function-symbol))
+
 (declare cluster-ctx*)
 
 (defn cluster-ctx
@@ -2326,7 +2337,7 @@
                         (schema/projection-from-database db))
          ctx (assoc (build-base-ctx projection)
                     ::bind-result! #'bind-result!
-                    ::kernel/install-function! install-function-from-database!
+                    ::kernel/install-function! acquire-function-from-database!
                     ::custody (cond-> {}
                                 connection (assoc :seon.db/connection connection)
                                 (nil? connection) (assoc :seon.db/db db)))

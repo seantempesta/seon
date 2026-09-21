@@ -4,12 +4,11 @@
             [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.fn :as functions]
-            [seon.fn.analyzer :as analyzer]
             [seon.test-support :as support]))
 
-(deftest ^{:seon.test/long "Canonical fixture builds the complete program once (measured about two minutes); the regression uses real cold/partial clj-kondo and complete-artifact parity."
+(deftest ^{:seon.test/long "Canonical fixtures plus real cold/partial clj-kondo and declaration/finding transactions, including arity/privacy refusals."
            :seon.test/long-ms 600000}
-  lint-files-follow-changes-and-direct-callers
+  lint-direct-callers-after-committed-declaration-changes
   (support/with-database
    (fn [connection]
      (let [root (str "tmp/publication-cache/" (random-uuid))
@@ -44,14 +43,72 @@
              (let [after (functions/build-manifest
                           (assoc request :seon.fn/previous-manifest before
                                          :seon.source/previous-database (db/db connection)))]
-               (is (= ["alpha.clj" "beta.clj"] (sort @observed))
-                   "The caller's caller and unrelated file are not lint inputs.")
+               (let [result (functions/index!
+                (assoc request :seon.db/connection connection
+                               :seon.schema/projection (db/carried-projection (db/db connection))
+                               :seon.source/previous-database (db/db connection)
+                               :seon.fn/previous-manifest before
+                               :seon.fn/manifest after
+                               :seon.fn/changed-paths #{"src/alpha.clj"}))]
+                 (is (not (:seon.error/at result)) (pr-str result)))
+               (is (= ["alpha.clj" "beta.clj"] @observed)
+                   "Declaration changes conservatively lint direct callers, not their callers.")
                (reset! observed [])
                (is (= after (functions/build-manifest
                               (assoc request :seon.fn/previous-manifest after))))
                (is (empty? @observed) "No source change performs zero lint.")
-               (let [complete (functions/build-manifest
-                               (assoc request ::analyzer/cache-root (str root "/complete-resolver")))]
-                 (is (= (:seon.fn.manifest/artifacts complete)
-                        (:seon.fn.manifest/artifacts after)))))))
-         (finally (support/delete-recursively! root)))))))
+               (write! "alpha.clj" "(ns pub.alpha) (defn f \"Changed.\" {:malli/schema [:=> [:cat :number] :number]} [x] x)")
+               (let [changed (functions/build-manifest
+                              (assoc request :seon.fn/previous-manifest after
+                                             :seon.source/previous-database (db/db connection)))
+                     result (functions/index!
+                             (assoc request :seon.db/connection connection
+                                            :seon.schema/projection (db/carried-projection (db/db connection))
+                                            :seon.source/previous-database (db/db connection)
+                                            :seon.fn/previous-manifest after
+                                            :seon.fn/manifest changed
+                                            :seon.fn/changed-paths #{"src/alpha.clj"}))]
+                 (is (not (:seon.error/at result)) (pr-str result))
+                 (is (= ["alpha.clj" "beta.clj"] @observed)
+                     "Only the direct caller is linted after the declaration transaction.")
+                 (is (= #{"src/beta.clj"}
+                        (functions/caller-files (:seon.db/transaction-report result))))))))
+         (finally (support/delete-recursively! root))))))
+  (doseq [[expected source]
+          [[:invalid-arity "(ns pub.alpha) (defn f [x y] (+ x y))"]
+           [:private-call "(ns pub.alpha) (defn- f [x] x)"]]]
+    (support/with-database
+     (fn [connection]
+       (let [root (str "tmp/publication-cache/" (random-uuid))
+             request {:seon.fn/root root :seon.fn/roots ["src"]}
+             alpha (io/file root "src/alpha.clj")
+             beta (io/file root "src/beta.clj")]
+         (try
+           (io/make-parents alpha)
+           (spit alpha "(ns pub.alpha) (defn f [x] x)")
+           (spit beta "(ns pub.beta (:require [pub.alpha :as a])) (defn g [] (a/f 1))")
+           (let [before (functions/build-manifest request)]
+             (support/transacted!
+              connection
+              (functions/reconcile-tx
+               (db/db connection)
+               (vec (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts before))) []))
+             (spit alpha source)
+             (let [database (db/db connection)
+                   changed (functions/build-manifest
+                            (assoc request :seon.fn/previous-manifest before
+                                           :seon.source/previous-database database))
+                   refusal (support/refusal-data
+                            #(functions/index!
+                              (assoc request :seon.db/connection connection
+                                             :seon.schema/projection (db/carried-projection database)
+                                             :seon.source/previous-database database
+                                             :seon.fn/previous-manifest before
+                                             :seon.fn/manifest changed
+                                             :seon.fn/changed-paths #{"src/alpha.clj"})))]
+               (is (true? (:seon.fn/index-refused refusal)) (pr-str refusal))
+               (is (some #(and (= expected (:seon.fn.analyzer/type %))
+                               (= "beta.clj" (.getName (io/file (:seon.fn.analyzer/filename %)))))
+                         (:seon.fn/findings refusal))
+                   (str "Absent specs must not hide caller " expected ": " (pr-str refusal)))))
+           (finally (support/delete-recursively! root))))))))

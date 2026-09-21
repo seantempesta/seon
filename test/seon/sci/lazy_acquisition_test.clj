@@ -42,3 +42,31 @@
          (is (= (db/committed-value-identity changed)
                 (db/committed-value-identity
                  (:seon.db/db (evaluation/acquired-program ctx))))))))))
+
+(deftest ^{:seon.test/long "First named invocation acquires the canonical published SCI program."
+           :seon.test/long-ms 30000}
+  named-invocation-acquires-the-lazy-program-on-first-use
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           ctx (evaluation/cluster-ctx database connection)
+           request {:seon.sci.eval/ctx ctx
+                    :seon.db/db database
+                    :seon.fn/sym 'seon.id/valid?
+                    :seon.sci.eval/args [12 "0123456789ab"]
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
+                    :seon.sci.eval/time-limit-ms 10000
+                    :seon.config/on-core-error :panic}]
+       (is (empty? @(::kernel/installed-functions ctx)))
+       (is (nil? (:seon.db/db (evaluation/acquired-program ctx))))
+       (let [result (kernel/invoke request)]
+         (is (true? (:seon.sci.admit/value result)))
+         (is (= :ok (get-in result [:seon.sci.admit/record :seon.eval/outcome]))))
+       (is (contains? @(::kernel/installed-functions ctx) 'seon.id/valid?))
+       (let [acquired @(::kernel/program-snapshot ctx)
+             environment @(:env ctx)]
+         (is (= (db/committed-value-identity database)
+                (db/committed-value-identity (:seon.db/db acquired))))
+         (is (true? (:seon.sci.admit/value (kernel/invoke request))))
+         (is (identical? acquired @(::kernel/program-snapshot ctx)))
+         (is (identical? environment @(:env ctx))))))))

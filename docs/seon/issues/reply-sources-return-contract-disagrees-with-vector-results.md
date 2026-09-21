@@ -37,3 +37,66 @@ the authored-shape change is made. Publication and reader evidence are in
 [the landing note](../../prds/steward-platform/research/schema-shape-authored-2026-09-23.md).
 The scratch root was shut down and removed; this paragraph preserves the
 bounded diagnostic instead of retaining its oversized disposable log.
+
+
+## Fresh-default reproduction and bounded repair — 2026-09-21
+
+After the authorized fresh reset, `data/clusters/default/logs/seon.log:30`
+recorded signature
+`c839475f6a436b9209438f24b5f424441269a3eb4479cc3cdbdcf35c51c78f06`
+from `seon.turn:3168`. A read-only MCP JVM probe against root
+`/Users/sean/src/seon`, cluster `default`, reproduced the refusal on empty
+and prose-only input. The complete bounded follow-up envelope returned one
+`ret`, 30 ms, cluster alive, `windowed? false`:
+
+```clojure
+(mapv
+ (fn [text]
+   (try
+     (let [v (seon.cluster.reply/sources text 'user 1000)]
+       {:text text :map? (map? v)
+        :sources (when (vector? v) (mapv :seon.cluster.eval/source v))})
+     (catch Throwable t
+       (let [v (get-in (ex-data t)
+                       [:seon.error/data :seon.error/diagnostic-offending])]
+         {:text text :returned-map? (map? v) :keys (vec (keys v))
+          :missing-base (filterv #(not (contains? v %))
+                                [:seon.error/at :seon.error/layer
+                                 :seon.error/operation])}))))
+ ["" "Only prose here." "#foo/bar [1 2]" "[1 2]"])
+```
+
+The first three returned `:returned-map? true` and all three
+`:missing-base` keys. Their actual refused values were maps containing the
+reply marker, legacy kind, message and data. The last input returned
+`{:map? false :sources ["[1 2]"]}`. Thus the vector-member wording describes
+an unsuccessful union arm's explanation, not the parser's actual refusal
+shape. The root defect is the reply adapter's incomplete error construction.
+The underlying `seon.sci.reader/error-value` already constructs the base
+observation; its declared `source-bound` and `refused-token` members also
+replace the retired kind checks still used by this adapter.
+
+The prepared repair uses the existing diagnostic constructor, retains authored
+text and declares the three precise reply errors with their base schema.
+Oversize and refused-tag classification consumes the reader's declared members;
+`#=` is accepted as a refused-token string, never executed. The regression
+checks empty/prose, source bounds, unknown tags, read-eval tags and valid vector
+source under the locally armed public contract, including all arities. Existing
+reader-error assertions use the current `unreadable-member` observation.
+
+Status remains open pending the root's gate and adoption proof. No test JVM,
+operator action, adoption or runtime code mutation ran in this repair lane.
+Required namespaces: `seon.cluster.reply-test`, `seon.sci.reader-test`, and
+`seon.ai-stream-fold-test` (the original empty-stop regression). Root should
+rerun the same bounded form after adoption and observe ordinary turn settlement.
+
+
+RESET NEEDED for the reply marker representation: `:seon.cluster.reply/refused-tag`
+widens from the reader's symbol tag schema to its symbol/string refused-token
+schema so `#=` remains the exact observed string. Its persisted bridge shape may
+change; the root batches this with the other authorized reset changes. An
+alternative retaining the symbol-only attribute would need a distinct string
+error alternative using `:seon.sci.reader/refused-token`, plus corresponding
+producer/output/render consumer changes; do not reuse the symbol-only reply
+error while omitting its required marker. The prepared slice chooses the coherent
+reset rather than expanding that compatibility boundary.
