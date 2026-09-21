@@ -1,6 +1,6 @@
 ---
 type: reference
-status: ready for launch; not launched
+status: implementation running
 created: 2026-09-21
 tags: [agent-platform, operator, boot, implementation]
 ---
@@ -9,7 +9,7 @@ tags: [agent-platform, operator, boot, implementation]
 
 Use one Astra agent at medium effort, alone on `default`, on the shared branch
 `refactor/agent-platform`. No delegation, parallel implementation lane, worktree,
-branch change or push. This is a prepared assignment, not evidence of a launch.
+branch change or push. Launched as native agent `/root/b1b` on 2026-09-21 after the owner’s go-ahead.
 The orchestrator owns integration and default's final replacement.
 
 ## Read first
