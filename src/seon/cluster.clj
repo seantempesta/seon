@@ -1848,7 +1848,9 @@
   (let [snapshot (current-source-snapshot roots)
         digest (:seon.source/digest snapshot)
         published (current-publication store nil)]
-    (if (= digest (:seon.source/digest published))
+    (if (and (= digest (:seon.source/digest published))
+             (not-any? (requiring-resolve 'seon.issue/note-path?)
+                       (:seon.source/changed-paths roots)))
       published
       (let [cached (read-source-artifact root)
             _ (report-source-progress! "published manifest read")
@@ -1905,6 +1907,7 @@
                         {:seon.store/store store :seon.fn/root (:seon.fn/root roots)
                          :seon.source/digest digest :seon.source/populate `populate-source!
                          :seon.source/test-input-digest (:seon.source/test-input-digest snapshot)
+                         :seon.source/changed-paths (or (:seon.source/changed-paths roots) [])
                          :seon.source/progress! report-source-progress!
                          :seon.source/populate-request
                          (cond-> {:seon.fn/manifest manifest :seon.fn/roots (:seon.fn/roots roots)}
@@ -2227,7 +2230,9 @@
            held-store (acquire-root-store! store-dir)
            ;; The publication's own roots, read before any adoption reload can
            ;; re-evaluate the vars that declare them.
-           roots (assoc (publication-roots) :seon.fn/root directory)]
+           roots (assoc (publication-roots) :seon.fn/root directory
+                        :seon.source/changed-paths
+                        (mapv #(fs/relative-path directory %) changed-paths))]
        (try
          (retrying-source-change
           (fn []

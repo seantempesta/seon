@@ -1467,3 +1467,62 @@ line bytes, including their newline; before/after are complete files):
 | `test/seon/fn/unresolved_test.clj` | 0 | 1801 | 0 | 1801 |
 
 Total changed-line bytes: **3839 deleted, 7492 inserted**.
+
+## Slice 4 — changed Markdown paths, 2026-09-23
+
+The existing refresh request now carries its relative changed paths to
+`seon.cluster.source/publish!`. `index-issues!` does no note work for a
+source-only request. A changed note selects its replacement/deletion and
+affected class membership through the existing `seon.issue/index-tx` writer.
+Cold publication and explicit `seon.issue/index!` retain complete indexing.
+A note-only edit can advance the published branch without re-populating
+program rows or writing a source seal; an unchanged note delta does neither.
+No note source or tags are stored. Class membership still derives from
+authored notes: a note-edit request reads the complete notes to resolve
+class tags, but replaces only selected notes and affected classes. That
+O(notes) derivation remains a note-edit cost; source edits do none of it.
+
+Fresh own-root before/after: **12480.248 → 8270.733 ms** for the same
+`my.note` docstring operation, through its advertised prepl. Before spent
+1806.439 ms indexing Markdown and 1720.609 ms adopting unrelated issues;
+after has neither phase. Raw progress is in
+[before](one-jvm-note-paths-before-2026-09-23.edn) and
+[after](one-jvm-note-paths-after-2026-09-23.edn), produced by the existing
+`one-jvm-slice4-adoption-2026-09-22.clj` script. The baseline differs from
+the prior warm 8.17 s row; it is not presented as the same run.
+
+No individual after span exceeded 2 s. Publication reconciliation was
+1744.647 ms, source acquisition 1063.261 ms, adoption reconciliation
+881.282 ms, SCI acquisition 395.691 ms. These still sum above the target:
+source acquisition walks all inputs, reconciliation must be restricted to
+touched rows, and SCI acquisition still installs the program on every
+adoption. The remaining assigned changes are not claimed by this commit.
+The new owner docstring ruling in `unsettled.md` also requires caller lint
+only for contract/arity changes and removal of unnecessary dependent reloads.
+
+Verification: own live publication loaded these changes and converged.
+`clojure -M -e "(require 'seon.cluster 'seon.cluster.source 'seon.issue)"`
+exited 0. Fast run `16228f564898`: 2 tests, 2 assertions, 0 failures,
+1 error. The source-only zero-read regression passed; the changed-note
+regression hit the stale published arity before its assertions, recorded
+in the existing canonical-fixture-contract issue. No green proof is claimed
+for that regression. The orchestrator must publish the widened contract,
+run the two focused regressions, then measure source-only and note-only edits.
+The own scratch JVM was stopped before the fast/load JVMs.
+
+Foreign dirty `test/seon/cluster/source_test.clj`,
+`test/seon/cluster/source_evidence_test.clj` and `test/resources/` were
+preserved and excluded. The formerly foreign fn.clj hunk is now committed
+in HEAD. No test-system files or default cluster were operated.
+
+Exact changed-line UTF-8 bytes (including newlines):
+
+| Path | Before | After | Deleted | Inserted |
+|---|---:|---:|---:|---:|
+| `resources/seon/schemas/seon.source.edn` | 5832 | 5978 | 0 | 146 |
+| `src/seon/cluster.clj` | 172569 | 172923 | 121 | 475 |
+| `src/seon/cluster/source.clj` | 30055 | 30654 | 1011 | 1610 |
+| `src/seon/issue.clj` | 85128 | 87462 | 1057 | 3391 |
+| `test/seon/cluster/publication_notes_test.clj` | 0 | 3527 | 0 | 3527 |
+
+Total: **2189 deleted, 9149 inserted**.

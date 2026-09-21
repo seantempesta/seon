@@ -347,12 +347,14 @@
           (::recorded outcome))))))
 
 (defn- index-issues!
-  [connection source-digest directory]
-  (when (get (:schema (db/db connection)) :seon.issue/id)
+  [connection source-digest directory paths]
+  (when (and (or (nil? paths) (seq paths))
+             (get (:schema (db/db connection)) :seon.issue/id))
     (require-committed!
      ((requiring-resolve 'seon.issue/index!)
-      {:seon.db/connection connection
-       :seon.issue/notes ((requiring-resolve 'seon.issue/notes) directory)})
+      (cond-> {:seon.db/connection connection
+               :seon.issue/notes ((requiring-resolve 'seon.issue/notes) directory)}
+        paths (assoc :seon.source/changed-paths paths)))
      :seon.issue/index-refused "Issue indexing was refused."
      {:seon.source/digest source-digest})))
 
@@ -383,12 +385,15 @@
     directory :seon.fn/root
     source-digest :seon.source/digest
     test-input-digest :seon.source/test-input-digest
+    changed-paths :seon.source/changed-paths
     requested-commit :seon.source/expected-commit-id
     populate :seon.source/populate
     populate-request :seon.source/populate-request
     progress! :seon.source/progress!
     :or {progress! (constantly nil)}}]
   (let [published (current store)
+        note-paths (when (and published changed-paths)
+                     (filterv (requiring-resolve 'seon.issue/note-path?) changed-paths))
         committed (when published
                     (d/commit-as-db (:seon.store/connection-object store)
                                     (:seon.source/commit-id published)))
@@ -401,7 +406,7 @@
                                     "The published source digest could not be read." digest))
                          (= source-digest digest))
                        (finally (d/release-materialized-db committed))))]
-    (if unchanged?
+    (if (and unchanged? (not (seq note-paths)))
       (assoc published :seon.source/digest source-digest :seon.source/built? false)
       (let [projection (schema/declaration-projection)
         input-digest (or test-input-digest
@@ -434,22 +439,26 @@
                                    ::scratch-schema-refused
                                    "the source scratch schema transaction was refused"
                                    {:seon.source/digest source-digest})))
-            (let [population-result (populate-fn
+            (let [population-result (when-not unchanged? (populate-fn
              (cond-> (merge populate-request
                             {:seon.db/connection connection
                              :seon.source/digest source-digest})
                expected-commit
                (assoc :seon.source/previous-database
-                      previous-database)))
-                  _ (progress! "publication issue indexing")
-                  issues (index-issues! connection source-digest (or directory (fs/source-directory)))
+                      previous-database))))
+                  _ (when (or (nil? note-paths) (seq note-paths))
+                      (progress! "publication issue indexing"))
+                  issues (index-issues! connection source-digest (or directory (fs/source-directory)) note-paths)
                   _ (progress! "publication source identity")]
             (require-committed! population-result ::source-population-refused
                                 "The source population was refused." {})
+            (if (and unchanged? (nil? (:seon.db/transaction-report issues)))
+              {:seon.source/built? false}
+              (do
             ;; The source seal is the genesis boundary. Population must first
             ;; install canonical schema/program rows and boot/config process
             ;; facts; the digest and build instant are the final complete fact.
-            (require-committed!
+            (when-not unchanged? (require-committed!
              (db/transact!
               connection
               (cond-> {:tx-data
@@ -462,7 +471,7 @@
                 process (assoc :tx-meta {:seon.db/process process})))
              ::source-seal-refused
              "the source seal transaction was refused"
-             {:seon.source/digest source-digest})
+             {:seon.source/digest source-digest}))
             (progress! "publication branch head")
             (if expected-commit
               ;; The scratch commit is deliberately NOT a parent. Published
@@ -482,17 +491,17 @@
                            "another publisher created current-src first"
                            {:seon.source/branch current-branch
                             :seon.source/commit-id scratch-commit}))))
-            (cond-> {}
-              (and (map? population-result)
-                   (contains? population-result :seon.reconcile/adopt-identities))
+            (cond-> {:seon.source/built? true}
+              (or (contains? population-result :seon.reconcile/adopt-identities)
+                  (:seon.db/transaction-report issues))
               (assoc :seon.reconcile/adopt-identities
-                     (into (:seon.reconcile/adopt-identities population-result)
+                     (into (or (:seon.reconcile/adopt-identities population-result) #{})
                            (when-let [report (:seon.db/transaction-report issues)]
                              (require-committed! (fn/report-identities report)
                                                  ::publish-readback-failed
                                                  "Issue report identities could not be read." {}))))
               (nil? expected-commit)
-              (assoc :seon.program/unresolved-report (unresolved-report! (db/db connection))))))
+              (assoc :seon.program/unresolved-report (unresolved-report! (db/db connection))))))))
             (finally
               (d/release connection))))]
         (let [commit-id
@@ -508,8 +517,7 @@
           (cond-> (merge outcome
                           {:seon.source/branch current-branch
                            :seon.source/commit-id commit-id
-                           :seon.source/digest source-digest
-                           :seon.source/built? true})
+                           :seon.source/digest source-digest})
             expected-commit (assoc :seon.source/expected-commit-id expected-commit))))
         (catch Throwable failure
           (retire-scratch! store scratch)

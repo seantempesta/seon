@@ -43,6 +43,7 @@
               :change-classes [:set :seon.source/change-class],
               :previous-database :seon.db/database-value,
               :path [:string {:min 1}],
+              :changed-paths [:vector :seon.source/path],
               :population
               [:map
                [:seon.db/connection
@@ -57,6 +58,7 @@
               :progress! [:=> [:cat :string] :nil],
               :publish-request
               [:map
+               [:seon.source/changed-paths {:optional true} :seon.source/changed-paths]
                [:seon.source/test-input-digest {:optional true} :seon.source/test-input-digest]
                [:seon.fn/root {:optional true} :seon.fn/root]
                [:seon.source/expected-commit-id {:optional true} :seon.source/expected-commit-id]

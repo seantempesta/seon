@@ -151,3 +151,16 @@ in the error landing note; it does not establish a general adoption fix for ever
 issue. Remaining error-result failures are measured writer latency, recorded
 in the existing publication/writer performance issue and the error landing
 note.
+
+## Changed-note indexing observation — 2026-09-23
+
+Fast run `16228f564898` uses published graph
+`0e3ced090fbd53d22cbcb28b6c6d4f067f4b448a1d1247146f9e5149a832c1e3`,
+21 commits behind HEAD. Its armed `seon.issue/index-tx` refuses the newly
+declared three-argument arity before the changed-note regression executes:
+`seon.issue/index-tx refused argument count at []: expected the declared
+arglists, got an argument count of 3.` The selected snapshot includes
+`src/seon/issue.clj`; the same source loads and publishes through the lane's
+own live JVM. Tally: 2 tests, 2 assertions, 0 failures, 1 error. The other
+regression proves a source-only request never opens the note directory.
+No fixture, wrapper or runner was changed to bypass the published contract.

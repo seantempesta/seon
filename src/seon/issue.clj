@@ -128,6 +128,17 @@
      :seon.issue.parse/created (get fields "created")
      :seon.issue.parse/words (set (words text))}))
 
+(defn note-path?
+  "Whether a repository-relative path names an indexed Markdown issue note."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [path]
+  (let [file (io/file path)
+        name (.getName file)]
+    (boolean
+     (and (#{"docs/seon/issues" "docs/seon/issues/archive"} (.getParent file))
+          (str/ends-with? name ".md")
+          (not (#{"README.md" "index.md" "AGENTS.md"} name))))))
+
 (defn notes
   "Read open and archived Markdown issue notes under the supplied repository."
   {:malli/schema [:=> [:cat :string]
@@ -152,8 +163,10 @@
     (let [dates (note-opened root)]
       (->> (concat (.listFiles directory) (.listFiles (io/file directory "archive")))
            (filter #(and (.isFile ^java.io.File %)
-                         (str/ends-with? (.getName ^java.io.File %) ".md")
-                         (not (contains? #{"README.md" "index.md" "AGENTS.md"} (.getName ^java.io.File %)))))
+                         (note-path? (str "docs/seon/issues/"
+                                          (when (= "archive" (.getName (.getParentFile ^java.io.File %)))
+                                            "archive/")
+                                          (.getName ^java.io.File %)))))
            (sort-by #(.getPath ^java.io.File %))
            (mapv (fn [file]
                    (let [file-name (.getName ^java.io.File file)
@@ -336,11 +349,19 @@
   `:seon.issue/title` is required. An invalid note is also NOT removed: a
   note present on disk but refused leaves its already stored row alone, so a
   prose defect never retracts indexed facts. Only a slug with no note at all
-  is retracted."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:sequential [:map [:seon.issue/path :string] [:seon.issue/text :string]]]]
-                  :seon.db/tx-data]}
-  [database issue-notes]
+  is retracted. A supplied path set limits replacement and deletion to those
+  notes and their affected classes; the complete notes still supply authored
+  class tags, which are never stored as a second population."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value
+                        [:sequential [:map [:seon.issue/path :string] [:seon.issue/text :string]]]]
+                   :seon.db/tx-data]
+                  [:=> [:cat :seon.db/database-value
+                        [:sequential [:map [:seon.issue/path :string] [:seon.issue/text :string]]]
+                        [:maybe [:set :string]]]
+                   :seon.db/tx-data]]}
+  ([database issue-notes] (index-tx database issue-notes nil))
+  ([database issue-notes paths]
   (let [parsed (mapv parse-note issue-notes)
         duplicates (->> parsed (map :seon.issue/id) frequencies
                         (keep (fn [[slug n]] (when (> n 1) slug))) set)
@@ -367,10 +388,13 @@
             (not (contains? #{:blocker :friction :cleanup} severity)) :invalid-severity
             (str/blank? title) :missing-title
             (str/blank? problem) :missing-problem))
+        selected? (fn [note] (or (nil? paths) (paths (:seon.issue/path note))))
         valid (filterv (complement invalid-reason) parsed)
-        admitted (set (map :seon.issue/id valid))
+        admitted (into #{} (comp (filter selected?) (map :seon.issue/id)) valid)
         classes (into {} (mapcat (fn [note]
-                                  (when (contains? (:seon.issue.parse/tags note) "class-kill")
+                                  (when (and (or (by-slug (:seon.issue/id note))
+                                                 (admitted (:seon.issue/id note)))
+                                             (contains? (:seon.issue.parse/tags note) "class-kill"))
                                     (for [tag (:seon.issue.parse/tags note)
                                           :when (str/starts-with? tag "class/")]
                                       [tag (:seon.issue/id note)])))) valid)
@@ -383,8 +407,17 @@
                                                  (update membership class-id (fnil conj []) member)
                                                  membership)))
                                            membership (:seon.issue.parse/tags member)))
-                                 {} valid)
+                                 {} (filter #(or (by-slug (:seon.issue/id %))
+                                                 (admitted (:seon.issue/id %))) valid))
         component-ids (fn [value] (into #{} (map #(if (map? %) (:db/id %) %)) value))
+        selected-entities (into #{} (comp (filter selected?) (map :db/id)) existing)
+        affected-classes
+        (into (into #{} (comp (filter selected?)
+                             (mapcat :seon.issue.parse/tags)
+                             (keep classes)) valid)
+              (keep (fn [row]
+                      (when (some selected-entities (component-ids (:seon.issue/members row)))
+                        (:seon.issue/id row)))) existing)
         results
         (mapv
          (fn [{:seon.issue/keys [id path] :as note}]
@@ -453,10 +486,11 @@
                       (if current
                         (replacement-tx current (merge (apply dissoc current replaced) row))
                         [row]))})))
-         parsed)
+         (filterv #(or (selected? %) (affected-classes (:seon.issue/id %))) parsed))
         ;; `present`, not `admitted`: a note on disk that this index refused
         ;; is still present, so its stored row is left exactly as it was.
-        removed (remove #(contains? present (:seon.issue/id %)) existing)
+        removed (filter #(and (selected? %)
+                              (not (contains? present (:seon.issue/id %)))) existing)
         ;; A VALID slug the database does not hold yet is minted here, so a
         ;; class note may name a member first seen in this same transaction by
         ;; lookup ref. An already stored slug needs no upsert: it re-asserts
@@ -472,19 +506,23 @@
                               removed)))]
     (with-meta tx {:seon.issue/refusals (vec (mapcat :seon.issue/refusals results))
                    :seon.issue/ambiguous (vec (mapcat :seon.issue/ambiguous results))
-                   :seon.issue/unresolved (into (sorted-map) (keep :seon.issue/unresolved) results)})))
+                   :seon.issue/unresolved (into (sorted-map) (keep :seon.issue/unresolved) results)}))))
 
 (defn index!
   "Index notes through the writer and return counts plus citation refusals.
   The request supplies the notes, keeping filesystem reads outside the writer.
   The delta decides: an unchanged note set writes nothing at all, and the
-  diagnostics come from the one derivation that produced it."
+  diagnostics come from the one derivation that produced it. Changed paths
+  select note replacements and their derived class-membership differences."
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
+                             [:seon.source/changed-paths {:optional true} [:vector :string]]
                              [:seon.issue/notes [:sequential [:map [:seon.issue/path :string] [:seon.issue/text :string]]]]]]
                   [:or :map :seon.db/error-result :seon.issue/citations-undeclared-error]]}
-  [{connection :seon.db/connection issue-notes :seon.issue/notes}]
+  [{connection :seon.db/connection issue-notes :seon.issue/notes
+    changed-paths :seon.source/changed-paths}]
   (let [database (db/db connection)
-        delta (index-tx database issue-notes)
+        paths (when changed-paths (set changed-paths))
+        delta (index-tx database issue-notes paths)
         ;; An empty delta is the whole answer: the database already holds every
         ;; fact these notes assert, so there is nothing for the writer to
         ;; serialize. The writer still derives the transaction it commits, so a
@@ -492,7 +530,7 @@
         ;; re-decided at the authority; only the decision to write nothing at
         ;; all is taken here, on a connection its publication holds privately.
         result (when (seq delta)
-                 (db/transact! connection [[:db.fn/call #'index-tx issue-notes]]))]
+                 (db/transact! connection [[:db.fn/call #'index-tx issue-notes paths]]))]
     (if (and (map? result) (:seon.error/at result)
            (:seon.error/layer result) (:seon.error/operation result)) ; debt: database and detector reads still declare generic seon.db/error-result.
 
