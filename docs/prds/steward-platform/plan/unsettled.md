@@ -7357,3 +7357,23 @@ the explicit case) after the untracked test was deleted: 3,304 ms total,
 changed-paths; the hook passes them), JVM instrumentation 366 ms,
 adoption record 112 ms. Platform tier rerun 23:00
 (`tmp/orchestrator/platform-2026-09-23-2300.log`).
+
+### 2026-09-23 ~23:15 — default booted on a mid-edit `fn.clj`; deletion is not a difference
+
+Evidence: `default` (booted by the 22:10 reset) has `seon.fn/build-manifest`
+from item 5 (`d1fa4561d`, committed 22:47) but `seon.fn/database-manifest`
+declared and UNBOUND; the 22:55 `init --dev` reported "development loaded
+definitions 9 ms" (no namespace reloaded) and converged. The reset
+republished and booted from the WORKING TREE while the redesign lane was
+mid-edit in `fn.clj`; the later adoption did not reload the changed
+namespace. Two rules from this: (1) a reset is run only with every lane
+STOPPED and `git status --short -- src test` empty (untracked included);
+(2) an adoption whose report names a changed namespace and whose "loaded
+definitions" phase reloads nothing is a defect to assert against — item 8's
+regression must cover "changed namespace in the report ⇒ reloaded and its
+wrappers re-armed". Also filed (blocker, redesign lane):
+`a-deleted-source-file-is-not-a-publication-difference.md` — the deleted
+untracked test's file row survived an "unchanged" publication and the
+platform tier refuses on it. Recovery on `default`: `(require 'seon.fn
+:reload)` at the REPL, then `init --dev --changed` for both paths, then
+the platform tier.
