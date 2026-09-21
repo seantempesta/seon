@@ -7095,3 +7095,12 @@ Var objects and every dependent sees them; reloading 113 dependents of
 every edit (ruled per changed path, not landed); (4) the reconciliation
 transaction reads more than the touched rows. Done = those four fixed and
 the docstring rows under one second in the script.
+
+## 2026-09-23 ~11:20 local — test-system lane LANDED four: overruns over 5 s FAIL (18 platform offenders recorded as facts); reference query 3,563 → 326 ms; small publication fixtures (two-file publication 4.8 s = the publication seam's number); terminal-event waits bounded at 1 s. Redesign lane: the source fault's message is kept when its record is refused (`064b07fde`)
+
+Offenders are now failures with their measured milliseconds; the lane
+converts each (fix the algorithm in the fixture, or declare long with a
+checkable reason). `seon.turn-work-test`'s 200-case property still ran
+after 163 s — a per-case whole-program cost; assigned. The redesign lane
+continues slice 4 with the four sub-second algorithms queued for its
+next stop. Error lane parked.
