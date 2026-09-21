@@ -7377,3 +7377,15 @@ untracked test's file row survived an "unchanged" publication and the
 platform tier refuses on it. Recovery on `default`: `(require 'seon.fn
 :reload)` at the REPL, then `init --dev --changed` for both paths, then
 the platform tier.
+
+**~23:25 BLOCKER:** adoption of a changed file on `default` fails with
+`:malli.core/child-error {:type :not, :children nil}` at
+`seon.fn/function-value-schema?` (fn.clj:551 ← declared-function-targets
+← analysis-rows-by-file ← analyzed-artifacts): a `:not` schema rebuilt
+from a head-only shape row without its child — a reader `c6db6b358` did
+not convert. `schema-shape-authored` resumed on it (every shape-row →
+schema reconstruction through the one owner, `row-form`; regression
+adopts a file whose contracts reference `:not`/`:maybe`/`:and` registry
+schemas). Until it lands: no adoption on `default`, platform tier
+blocked; the redesign lane's fast runs on the new base may hit the same
+error — read that as this blocker, not as its own red.
