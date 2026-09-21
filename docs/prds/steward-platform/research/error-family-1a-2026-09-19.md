@@ -3833,3 +3833,45 @@ lint still reports the two pre-existing foreign wave-3 plan gitlink citations;
 neither document was edited. This is the completed recording-performance
 slice; the cold gate and the already-recorded retirement remain owed to their
 owners.
+
+
+## Atomic retirement caller boundary — 2026-09-23 resume
+
+Read the existing retirement issue and the data-oriented Clojure, data-modeling
+and Clojure-testing skills end to end. A fresh source search at `b866bb39d`
+finds **309 matching lines in 59 Clojure/schema files**. The exact inventory
+and verbatim restricted source blocks are in
+[error-result-retirement-hunks-2026-09-23.md](error-result-retirement-hunks-2026-09-23.md).
+
+The cluster committer still consumes `data-size`/`data-edn` and size-gates
+staging at lines 2657–2712. SCI evaluation has ten raw-member producers;
+its result preparation caller already supplies the recording inputs.
+Instrumentation also reads the raw contract-problem member; the test runner
+reads raw launch evidence. Those callers and their declared schemas must
+convert with the error owner. `cluster.clj` is concurrently dirty; SCI
+evaluation is explicitly excluded from edits by this assignment even though
+clean. No production retirement was made: the assignment forbids landing a
+retirement whose callers cannot be converted. Additional foreign changes
+appeared in `reference-code/datahike` and an untracked
+`test/seon/test/offenders_test.clj`; both were preserved.
+
+**RESET NEEDED (pending atomic slice, not performed):** remove exactly
+`:seon.error/offending`, `:seon.error/data-edn`, `:seon.error/data-size`,
+`:seon.error/offending-projection`. The already-landed result attributes
+`:seon.error/result-id`, `:seon.error/shown`, and existing
+`:seon.error/data-blob` remain.
+
+Fast tally this resume: **not run; no executable inputs changed**. Writer
+performance is not re-claimed from a new run; the previous measured 329 ms
+write remains the prior slice's evidence. No default operation or worktree.
+After release and the complete atomic cut, cold verification is owed to the
+orchestrator: `bin/test --paths <all retirement files from the linked inventory>
+-- seon.error-result-test seon.error-test seon.error.refusal-test
+seon.instrument-test seon.sci.eval-test seon.issue-test seon.db-test
+seon.test-runner-test seon.cluster.fault-storage-test`. Expand the path list
+and include the other affected reader namespaces when the cut is finalized;
+this is pending scope, not a claimed executable gate for a landed retirement.
+
+Load verification before this documentation commit: `clojure -M -e
+"(require 'seon.error 'seon.error.refusal 'seon.sci.admit) (println :loaded)"`
+exited 0 and printed `:loaded`. `git diff --check` passed. The JVM exited.

@@ -162,3 +162,17 @@ This issue remains the single atomic-retirement follow-up: convert the 22
 issue producers, the fault committer's staging hunk and the other inventoried
 readers, then remove all four legacy declarations and writes together once
 the held sources are released. No producer was partly retired here.
+
+
+## Restricted caller inventory refreshed — 2026-09-23 resume
+
+The issue owner is now clean, but the atomic cut still crosses the dirty
+cluster committer and explicitly restricted SCI evaluation owner. The
+instrumentation and test-system callers also remain reserved by assignment.
+The complete fresh inventory and verbatim cluster/SCI blocks are recorded in
+[the retirement hunk note](../../prds/steward-platform/research/error-result-retirement-hunks-2026-09-23.md).
+It records 309 source lines across 59 files, including readers beyond the
+original issue-producer inventory. No partial retirement was applied. Release
+these caller changes together with the declarations before deleting the four
+legacy members; preserve the existing printer/result preparation and SCI
+binding owners.
