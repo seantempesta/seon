@@ -2,53 +2,17 @@
 	path = reference-code/malli
 	url = https://github.com/seantempesta/malli.git
 	ignore = dirty
-[submodule "reference-code/gemini-mcp"]
-	path = reference-code/gemini-mcp
-	url = https://github.com/RLabs-Inc/gemini-mcp.git
-	ignore = dirty
 [submodule "reference-code/clj-kondo"]
 	path = reference-code/clj-kondo
 	url = https://github.com/seantempesta/clj-kondo.git
-	ignore = dirty
-[submodule "reference-code/nrepl"]
-	path = reference-code/nrepl
-	url = https://github.com/nrepl/nrepl.git
 	ignore = dirty
 [submodule "reference-code/clj-reload"]
 	path = reference-code/clj-reload
 	url = https://github.com/tonsky/clj-reload.git
 	ignore = dirty
-[submodule "reference-code/clojure-mcp"]
-	path = reference-code/clojure-mcp
-	url = https://github.com/bhauman/clojure-mcp.git
-	ignore = dirty
-[submodule "reference-code/claude-agent-sdk-typescript"]
-	path = reference-code/claude-agent-sdk-typescript
-	url = https://github.com/seantempesta/claude-agent-sdk-typescript.git
-	ignore = dirty
-[submodule "reference-code/claude-agent-sdk-demos"]
-	path = reference-code/claude-agent-sdk-demos
-	url = https://github.com/anthropics/claude-agent-sdk-demos
-	ignore = dirty
 [submodule "reference-code/babashka-process"]
 	path = reference-code/babashka-process
 	url = https://github.com/babashka/process
-	ignore = dirty
-[submodule "reference-code/datastar"]
-	path = reference-code/datastar
-	url = https://github.com/starfederation/datastar.git
-	ignore = dirty
-[submodule "reference-code/reveal"]
-	path = reference-code/reveal
-	url = https://github.com/vlaaad/reveal.git
-	ignore = dirty
-[submodule "reference-code/malli-datomic"]
-	path = reference-code/malli-datomic
-	url = https://github.com/Blasterai/malli-datomic
-	ignore = dirty
-[submodule "reference-code/spectomic"]
-	path = reference-code/spectomic
-	url = https://github.com/Provisdom/spectomic
 	ignore = dirty
 [submodule "reference-code/core.async"]
 	path = reference-code/core.async
@@ -58,45 +22,13 @@
 	path = reference-code/rewrite-clj
 	url = https://github.com/clj-commons/rewrite-clj.git
 	ignore = dirty
-[submodule "reference-code/openclaw"]
-	path = reference-code/openclaw
-	url = https://github.com/openclaw/openclaw.git
-	ignore = dirty
 [submodule "reference-code/kaocha"]
 	path = reference-code/kaocha
 	url = https://github.com/lambdaisland/kaocha.git
 	ignore = dirty
-[submodule "reference-code/claude-code-lsps"]
-	path = reference-code/claude-code-lsps
-	url = https://github.com/boostvolt/claude-code-lsps.git
-	ignore = dirty
-[submodule "reference-code/nippy"]
-	path = reference-code/nippy
-	url = https://github.com/taoensso/nippy.git
-	ignore = dirty
-[submodule "reference-code/test.check"]
-	path = reference-code/test.check
-	url = https://github.com/clojure/test.check.git
-	ignore = dirty
-[submodule "reference-code/expectations"]
-	path = reference-code/expectations
-	url = https://github.com/clojure-expectations/expectations.git
-	ignore = dirty
-[submodule "reference-code/obsidian-linter"]
-	path = reference-code/obsidian-linter
-	url = https://github.com/platers/obsidian-linter.git
-	ignore = dirty
 [submodule "reference-code/datahike"]
 	path = reference-code/datahike
 	url = https://github.com/seantempesta/datahike.git
-	ignore = dirty
-[submodule "reference-code/datahike-lmdb"]
-	path = reference-code/datahike-lmdb
-	url = https://github.com/replikativ/datahike-lmdb.git
-	ignore = dirty
-[submodule "reference-code/konserve-lmdb"]
-	path = reference-code/konserve-lmdb
-	url = https://github.com/replikativ/konserve-lmdb.git
 	ignore = dirty
 [submodule "reference-code/datastar-clojure"]
 	path = reference-code/datastar-clojure
@@ -106,241 +38,25 @@
 	path = reference-code/hyperlith
 	url = https://github.com/andersmurphy/hyperlith.git
 	ignore = dirty
-[submodule "reference-code/hermes-agent"]
-	path = reference-code/hermes-agent
-	url = https://github.com/nousresearch/hermes-agent
-	ignore = dirty
-[submodule "reference-code/posh"]
-	path = reference-code/posh
-	url = https://github.com/mpdairy/posh.git
-	ignore = dirty
-[submodule "reference-code/shadow-cljs"]
-	path = reference-code/shadow-cljs
-	url = https://github.com/seantempesta/shadow-cljs.git
-	ignore = dirty
-[submodule "reference-code/openai-node"]
-	path = reference-code/openai-node
-	url = https://github.com/openai/openai-node.git
-	ignore = dirty
-[submodule "reference-code/anthropic-sdk-typescript"]
-	path = reference-code/anthropic-sdk-typescript
-	url = https://github.com/anthropics/anthropic-sdk-typescript.git
-	ignore = dirty
-[submodule "reference-code/cider-nrepl"]
-	path = reference-code/cider-nrepl
-	url = https://github.com/clojure-emacs/cider-nrepl
-	ignore = dirty
-[submodule "reference-code/orchard"]
-	path = reference-code/orchard
-	url = https://github.com/clojure-emacs/orchard
-	ignore = dirty
 [submodule "reference-code/clojurescript"]
 	path = reference-code/clojurescript
 	url = https://github.com/clojure/clojurescript
-	ignore = dirty
-[submodule "reference-code/proximum"]
-	path = reference-code/proximum
-	url = https://github.com/seantempesta/proximum.git
-	ignore = dirty
-[submodule "reference-code/js-genai"]
-	path = reference-code/js-genai
-	url = https://github.com/googleapis/js-genai
-	ignore = dirty
-[submodule "reference-code/java-genai"]
-	path = reference-code/java-genai
-	url = https://github.com/googleapis/java-genai
 	ignore = dirty
 [submodule "reference-code/sci"]
 	path = reference-code/sci
 	url = https://github.com/seantempesta/sci.git
 	ignore = dirty
-[submodule "reference-code/transit-clj"]
-	path = reference-code/transit-clj
-	url = https://github.com/cognitect/transit-clj.git
-[submodule "reference-code/transit-cljs"]
-	path = reference-code/transit-cljs
-	url = https://github.com/cognitect/transit-cljs.git
-[submodule "reference-code/transit-js"]
-	path = reference-code/transit-js
-	url = https://github.com/cognitect/transit-js.git
-[submodule "reference-code/piscina"]
-	path = reference-code/piscina
-	url = https://github.com/piscinajs/piscina
-[submodule "reference-code/tinypool"]
-	path = reference-code/tinypool
-	url = https://github.com/tinylibs/tinypool
-[submodule "reference-code/mvm"]
-	path = reference-code/mvm
-	url = https://github.com/tinylabscom/mvm.git
-[submodule "reference-code/swe-bench"]
-	path = reference-code/swe-bench
-	url = https://github.com/SWE-bench/SWE-bench
-[submodule "reference-code/swe-agent"]
-	path = reference-code/swe-agent
-	url = https://github.com/SWE-agent/SWE-agent
-[submodule "reference-code/commit0"]
-	path = reference-code/commit0
-	url = https://github.com/commit-0/commit0
-[submodule "reference-code/terminal-bench"]
-	path = reference-code/terminal-bench
-	url = https://github.com/laude-institute/terminal-bench
-[submodule "reference-code/mle-bench"]
-	path = reference-code/mle-bench
-	url = https://github.com/openai/mle-bench
-[submodule "reference-code/aider-polyglot"]
-	path = reference-code/aider-polyglot
-	url = https://github.com/Aider-AI/polyglot-benchmark
-[submodule "reference-code/tau2-bench"]
-	path = reference-code/tau2-bench
-	url = https://github.com/sierra-research/tau2-bench
-[submodule "reference-code/gorilla-bfcl"]
-	path = reference-code/gorilla-bfcl
-	url = https://github.com/ShishirPatil/gorilla
-[submodule "reference-code/webarena"]
-	path = reference-code/webarena
-	url = https://github.com/web-arena-x/webarena
-[submodule "reference-code/osworld"]
-	path = reference-code/osworld
-	url = https://github.com/xlang-ai/OSWorld
-[submodule "reference-code/browsergym"]
-	path = reference-code/browsergym
-	url = https://github.com/ServiceNow/BrowserGym
-[submodule "reference-code/inspect-ai"]
-	path = reference-code/inspect-ai
-	url = https://github.com/UKGovernmentBEIS/inspect_ai
-[submodule "reference-code/inspect-evals"]
-	path = reference-code/inspect-evals
-	url = https://github.com/UKGovernmentBEIS/inspect_evals
-[submodule "reference-code/re-bench"]
-	path = reference-code/re-bench
-	url = https://github.com/METR/RE-Bench
-[submodule "reference-code/cybench"]
-	path = reference-code/cybench
-	url = https://github.com/andyzorigin/cybench
-[submodule "reference-code/reitit"]
-	path = reference-code/reitit
-	url = https://github.com/metosin/reitit.git
-[submodule "reference-code/bd3lms"]
-	path = reference-code/bd3lms
-	url = https://github.com/kuleshov-group/bd3lms.git
-[submodule "reference-code/flash"]
-	path = reference-code/flash
-	url = https://github.com/runpod/flash.git
-[submodule "reference-code/runpod-python"]
-	path = reference-code/runpod-python
-	url = https://github.com/runpod/runpod-python.git
-[submodule "reference-code/flash-examples"]
-	path = reference-code/flash-examples
-	url = https://github.com/runpod/flash-examples.git
-[submodule "reference-code/again"]
-	path = reference-code/again
-	url = https://github.com/liwp/again
-[submodule "reference-code/transformers"]
-	path = reference-code/transformers
-	url = https://github.com/huggingface/transformers
-[submodule "reference-code/vllm"]
-	path = reference-code/vllm
-	url = https://github.com/vllm-project/vllm
-[submodule "reference-code/Voyager"]
-	path = reference-code/Voyager
-	url = https://github.com/MineDojo/Voyager.git
-[submodule "reference-code/funsearch"]
-	path = reference-code/funsearch
-	url = https://github.com/google-deepmind/funsearch.git
-[submodule "reference-code/openevolve"]
-	path = reference-code/openevolve
-	url = https://github.com/algorithmicsuperintelligence/openevolve.git
-[submodule "reference-code/ADAS"]
-	path = reference-code/ADAS
-	url = https://github.com/ShengranHu/ADAS.git
-[submodule "reference-code/mem0"]
-	path = reference-code/mem0
-	url = https://github.com/mem0ai/mem0.git
-[submodule "reference-code/letta"]
-	path = reference-code/letta
-	url = https://github.com/letta-ai/letta.git
-[submodule "reference-code/generative_agents"]
-	path = reference-code/generative_agents
-	url = https://github.com/joonspk-research/generative_agents.git
-[submodule "reference-code/SimpleMem"]
-	path = reference-code/SimpleMem
-	url = https://github.com/aiming-lab/SimpleMem.git
-[submodule "reference-code/aero"]
-	path = reference-code/aero
-	url = https://github.com/juxt/aero.git
-[submodule "reference-code/needle"]
-	path = reference-code/needle
-	url = https://github.com/cactus-compute/needle
-[submodule "reference-code/browsecomp-plus"]
-	path = reference-code/browsecomp-plus
-	url = https://github.com/texttron/BrowseComp-Plus
-[submodule "reference-code/deepswe"]
-	path = reference-code/deepswe
-	url = https://github.com/datacurve-ai/deep-swe
 [submodule "reference-code/konserve"]
 	path = reference-code/konserve
 	url = https://github.com/seantempesta/konserve.git
 	ignore = dirty
-[submodule "reference-code/bun"]
-	path = reference-code/bun
-	url = https://github.com/seantempesta/bun.git
-	shallow = true
-[submodule "reference-code/superv.async"]
-	path = reference-code/superv.async
-	url = https://github.com/seantempesta/superv.async.git
-[submodule "reference-code/partial-cps"]
-	path = reference-code/partial-cps
-	url = https://github.com/seantempesta/partial-cps.git
-[submodule "reference-code/persistent-sorted-set"]
-	path = reference-code/persistent-sorted-set
-	url = https://github.com/replikativ/persistent-sorted-set.git
-[submodule "reference-code/datalog-parser"]
-	path = reference-code/datalog-parser
-	url = https://github.com/replikativ/datalog-parser.git
 [submodule "reference-code/babashka"]
 	path = reference-code/babashka
 	url = https://github.com/babashka/babashka.git
-[submodule "reference-code/timbre"]
-	path = reference-code/timbre
-	url = https://github.com/taoensso/timbre.git
 [submodule "reference-code/clojure"]
 	path = reference-code/clojure
 	url = https://github.com/clojure/clojure.git
 	shallow = true
-[submodule "reference-code/tools.deps"]
-	path = reference-code/tools.deps
-	url = https://github.com/clojure/tools.deps.git
-	shallow = true
-[submodule "reference-code/playwright"]
-	path = reference-code/playwright
-	url = https://github.com/microsoft/playwright.git
-	shallow = true
-[submodule "reference-code/pdf.js"]
-	path = reference-code/pdf.js
-	url = https://github.com/mozilla/pdf.js.git
-	shallow = true
-[submodule "reference-code/cheerio"]
-	path = reference-code/cheerio
-	url = https://github.com/cheeriojs/cheerio.git
-	shallow = true
-[submodule "reference-code/sheetjs"]
-	path = reference-code/sheetjs
-	url = https://git.sheetjs.com/sheetjs/sheetjs.git
-	shallow = true
-[submodule "reference-code/mammoth.js"]
-	path = reference-code/mammoth.js
-	url = https://github.com/mwilliamson/mammoth.js.git
-	shallow = true
-[submodule "reference-code/sharp"]
-	path = reference-code/sharp
-	url = https://github.com/lovell/sharp.git
-	shallow = true
-[submodule "reference-code/litellm-clj"]
-	path = reference-code/litellm-clj
-	url = https://github.com/unravel-team/litellm-clj
-[submodule "reference-code/integrant"]
-	path = reference-code/integrant
-	url = https://github.com/weavejester/integrant
 [submodule "reference-code/http-kit"]
 	path = reference-code/http-kit
 	url = https://github.com/seantempesta/http-kit.git
@@ -350,29 +66,10 @@
 [submodule "reference-code/edamame"]
 	path = reference-code/edamame
 	url = https://github.com/borkdude/edamame.git
-[submodule "reference-code/ds4"]
-	path = reference-code/ds4
-	url = https://github.com/antirez/ds4
 [submodule "reference-code/langchain4clj"]
 	path = reference-code/langchain4clj
 	url = https://github.com/nandoolle/langchain4clj.git
 	ignore = dirty
-[submodule "reference-code/integrant-repl"]
-	path = reference-code/integrant-repl
-	url = https://github.com/weavejester/integrant-repl
-[submodule "reference-code/hato"]
-	path = reference-code/hato
-	url = https://github.com/gnarroway/hato.git
-[submodule "reference-code/jsoup"]
-	path = reference-code/jsoup
-	url = https://github.com/jhy/jsoup.git
-[submodule "reference-code/cron-utils"]
-	path = reference-code/cron-utils
-	url = https://github.com/jmrozanec/cron-utils.git
-	ignore = dirty
 [submodule "reference-code/editscript"]
 	path = reference-code/editscript
 	url = https://github.com/juji-io/editscript
-[submodule "reference-code/cytoscape"]
-	path = reference-code/cytoscape
-	url = https://github.com/cytoscape/cytoscape.js.git
