@@ -48,12 +48,6 @@
              (assoc data :seon.source/transaction-result result)))
   result)
 
-(defn- source-file?
-  [filename]
-  (or (str/ends-with? filename ".clj")
-      (str/ends-with? filename ".cljc")
-      (str/ends-with? filename ".edn")))
-
 (defn snapshot
   "The source-tree digest and exact per-file digests of the declared roots."
   {:malli/schema [:=> [:cat :seon.source/digest-request]
@@ -80,7 +74,7 @@
                 entry (if directory?
                         (->> (file-seq root)
                              (filter #(.isFile ^java.io.File %))
-                             (filter #(source-file? (.getName ^java.io.File %)))
+                             (filter #(test.cache/source-file? (.getName ^java.io.File %)))
                              (sort-by #(subs (.getPath ^java.io.File %) prefix)))
                         ;; an explicitly declared file root is one digest
                         ;; entry regardless of extension

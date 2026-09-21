@@ -174,6 +174,31 @@
                (str/starts-with? path (str root "/"))))
          roots)))
 
+(defn source-file?
+  "True for file extensions indexed under a declared source directory.
+  Shared by the publication snapshot and its exported-inventory check."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [filename]
+  (or (str/ends-with? filename ".clj")
+      (str/ends-with? filename ".cljc")
+      (str/ends-with? filename ".edn")))
+
+(defn publication-inputs
+  "Select indexed graph files and non-graph inputs for export verification.
+  Fixtures under graph roots that the source owner does not index are absent
+  from this publication inventory, not falsely reported as missing exports."
+  {:malli/schema [:=> [:cat [:string {:min 1}] [:map-of :string :string]]
+                  [:map-of :string :string]]}
+  [root digests]
+  (let [roots (input-roots root)
+        source-roots (set graph-roots)]
+    (into {}
+          (filter (fn [[path _]]
+                    (or (input-path? roots path)
+                        (and (input-path? source-roots path)
+                             (source-file? path)))))
+          digests)))
+
 (defn widening-path?
   "True when a changed path is a gate input outside the program graph of
   THIS checkout: a file on a declared non-graph classpath root (resources,
@@ -445,8 +470,7 @@
                            (.isFile (io/file base "manifest.edn")))
               (throw (ex-info "Publication exited without its store and manifest."
                               {::base (str base)})))
-            (let [roots (input-roots snapshot)
-                  expected (into {} (filter #(input-path? roots (key %))) (first inputs))
+            (let [expected (publication-inputs snapshot (first inputs))
                   published (:seon.source/relative-file-digests
                              (read-edn (io/file base "build/current-src.edn")))
                   difference (changed-inputs (or published {}) expected)]

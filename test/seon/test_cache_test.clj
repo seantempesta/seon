@@ -39,3 +39,38 @@
                   "reference-code/sci"
                   "reference-code/malli/src/malli/core.cljc"]]
       (is (true? (cache/widening-path? path)) path))))
+
+
+(deftest publication-inventory-includes-the-graph-without-widening-selection
+  (let [published {"src/seon/example.clj" "source-v1"
+                   "src/seon/shared.cljc" "shared-v1"
+                   "test/fixtures/program.edn" "edn-v1"
+                   "test/seon/example_test.clj" "test-v1"
+                   "resources/seon/schemas/example.edn" "schema-v1"
+                   "config/default.edn" "config-v1"
+                   "deps.edn" "deps-v1"}
+        snapshot (assoc published
+                        "docs/example.md" "doc-v1"
+                        "test/fixtures/input.txt" "text-v1"
+                        "test/resources/program.clj.txt" "template-v1"
+                        "test/seon/dev/probe.py" "probe-v1"
+                        "test/seon/html_views.cjs" "browser-v1")
+        expected (cache/publication-inputs "." snapshot)]
+    (is (= published expected))
+    (is (= {:seon.test.cache/changed [] :seon.test.cache/removed []}
+           (cache/changed-inputs published expected)))
+    (testing "source/test changes and deletions remain export mismatches"
+      (let [changed (cache/publication-inputs
+                     "." (-> snapshot
+                             (assoc "src/seon/example.clj" "source-v2")
+                             (dissoc "test/seon/example_test.clj")))]
+        (is (= {:seon.test.cache/changed ["src/seon/example.clj"]
+                :seon.test.cache/removed ["test/seon/example_test.clj"]}
+               (cache/changed-inputs published changed)))))
+    (testing "graph and documentation changes still do not alter widening inputs"
+      (is (= (cache/test-input-digest "." snapshot)
+             (cache/test-input-digest
+              "." (-> snapshot
+                      (assoc "src/seon/example.clj" "source-v2"
+                             "docs/example.md" "doc-v2")
+                      (dissoc "test/seon/example_test.clj"))))))))
