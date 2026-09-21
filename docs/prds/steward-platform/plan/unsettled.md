@@ -7269,3 +7269,23 @@ reads the `:db` head, `versioning.cljc:620`). Offenders: 6 of 18 green;
 6 publication tests wait on slice 4; 6 runner/selection tests resumed
 (two carry real errors — Malli schema acquisition, SCI contract — fixed
 before any duration work; durations by algorithm only).
+
+### 2026-09-23 ~21:40 — schema-shape landed; config landed; error lane resumed
+
+`c6db6b358` (`schema-shape-authored`): shape rows store the authored form,
+references as keywords, no subtree copies; stored shape strings
+72,877,170 → 103,406 bytes, largest form 1,563,264 → 61 chars; fast 7/24
+green; RESET NEEDED. Review: +607 net lines is the wrong shape for a
+deletion — `call_preparation.clj` grew by 124 (named-entry facts derived
+from the compiled registry per database value, "a batch derivation, not a
+cache"); acceptable once, re-read at the cold gate. It left two stale
+expectations in `test/seon/program_test.clj:103` and `:246`
+(`program-shape-regressions-still-expect-expanded-subtrees.md`) —
+OWED to the next free slot (five-minute lane: assert the authored form
+through `row-form`, the stored node is its head only).
+Config item landed by `one-jvm-redesign` (difference transacted, digest
+and readers deleted; `config-dial-digest…` resolved; RESET NEEDED).
+`error-family-1a` resumed on the free files: retire the four legacy
+offending-value members + convert `issue.clj`'s producers; stops before
+`cluster.clj`/`sci/eval.clj` hunks. Reset batch now = slice 4 + shape rows
++ config digest + error members.
