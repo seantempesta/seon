@@ -1,358 +1,433 @@
 ---
 type: plan
-status: first pass (Fable, 2026-09-21) for astra review; clean write follows
+status: implementation specification; acceptance proofs pending
 created: 2026-09-21
 tags: [agent-platform, lane-b1, publication, adoption, operator, clj-kondo, datahike]
 ---
 
 # Lane B1 — one publication path, no mirrors
 
-Grounding read end to end: the writer brief, data pack B1, the publication
-audit, the synthesis, the goals note (§2b, R2/R3/§1s/C6), the preserved draft
-patch, the measurement script, data packs C1 §2 / B4 §8 / A1 (admission seam),
-the instructions audit §3, and the vendored seams named in §3 below. Three
-read-only evaluations against `default` were taken (§1); nothing else was run.
-Every `fn.clj`/`cluster.clj` line is a WORKING-TREE line (the draft patch is
-applied there, as the pack states).
+Owned paths: `src/seon/fn.clj`, `src/seon/fn/*`, `src/seon/program.cljc`, the
+publication sections of `src/seon/cluster.clj` (`:999-1525`, `:1526-2279`),
+`src/seon/cluster/source.clj`, `src/seon/operator.clj`,
+`src/seon/operator/state.clj`, `script/seon/fresh_operator.clj`, `bin/seon`,
+`bin/seon-hook`, `src/seon/id.clj`, `script/seon/dev/mcp.clj`, `bin/mcp-server`, the Seon registration in `.codex/config.toml`, and the input readers of
+`src/seon/test/cache.clj` (`input-paths :45`, `input-roots :154`,
+`gitlink-digests :190`, `toolchain-dependencies :217`). `bin/codex-agent` and
+the lane launcher are NOT in scope (orchestrator ruling: the plan is
+implemented by astra lanes). Source citations use the recorded `209a6652a` working-tree snapshot; dependency lines use clj-kondo `57252e07` and Datahike `006e634a`. `K/` means `reference-code/clj-kondo/src/clj_kondo/`; `D/` means `reference-code/datahike/src/datahike/`. Historical §1 reads are baseline evidence, not fresh runtime or implementation proof.
+
+Evidence: [B1 data pack](../research/data-pack-b1-publication-2026-09-21.md) and [durable rulings](../research/durable-goals-and-rulings-2026-09-21.md) supply the historical measurements and ruled publication sequence. The implementation contract is complete below.
 
 ## 0. For the owner: what was dumb, and the simpler way
 
-**What the code does today.** Editing one file publishes it through seven
-entry points that all reach `seon.cluster/refresh-source!`. That function
-re-lists the whole Git tree twice, hashes every toolchain file and gitlink,
-reads the published rows back out of Datahike into a second copy called a
-"manifest", diffs manifests, runs clj-kondo (after sweeping clj-kondo's own
-cache directory file by file, sometimes running the analysis twice), forks a
-scratch Datahike branch, transacts the declarations, runs a second analysis
-over callers and a second transaction, transacts a "seal" row holding two
-aggregate digests, moves the branch head, retires the scratch, re-derives the
-Malli projection from the new commit, traverses namespace dependents twice,
-reloads, and re-arms by walking every namespace in the JVM. Nine different
-progress mechanisms narrate this; one of them re-parses the JVM's stdout to
-recover a phase name; eighteen declared bounds guard it. The operator that
-sends the request keeps process records, advertisement files, claim files,
-phase logs and a repair pass to reconcile its own copies of facts the OS
-process table and the running JVM already hold. A reset compiles 35,773
-entity maps into a hand-built tempid table (1.6 M `find` calls) and hands
-Datahike 107,049 operations that it then validates entity by entity.
+**What the code does today.** Editing one file reaches
+`seon.cluster/refresh-source!` (`cluster.clj:2174`) through seven entry points.
+It lists the Git tree twice and hashes every toolchain file and gitlink
+(`source-snapshot :1619`, re-observed at `:1832`); reads the published rows
+back out of Datahike into a second copy called a manifest
+(`published-index-rows fn.clj:3149`, `database-manifest :3269`) and diffs
+manifests; sweeps clj-kondo's own cache directory entry by entry and sometimes
+runs the analysis twice (`analyzer.clj:223-286`); forks a scratch branch,
+transacts declarations, lints callers, transacts findings, then transacts a
+seal row holding two aggregate digests (`source.clj:458-471`) and reads the
+head back; re-derives the compiled Malli projection from the new commit
+(`source.clj:151-162`, 248 ms for 1,560 contracts); reloads; re-arms by
+walking every namespace in the JVM (`instrument.clj:898-908`). Nine progress
+mechanisms narrate it and eighteen declared bounds guard it (pack §3c–3d). The
+operator that sends the request keeps process records, advertisement truth,
+claim files, phase logs and a repair pass over copies of facts the OS process
+table and the running JVM already hold (`fresh_operator.clj:144-243`,
+`:757-770`, `:1323-1769`, `:3351-3392`; `state.clj:801-1149`). A reset
+compiles 35,773 entity maps through a hand-built tempid table (≈1.6 M `find`
+calls, `fn.clj:2873`) and hands Datahike 107,049 operations.
 
-**Why that is the wrong shape.** Every layer is a mirror kept beside the
-authority: the manifest beside the rows, the seal digest beside the commit
-id, the scratch branch beside Datahike's own atomic transaction, the cache
-sweep beside clj-kondo's cache, the process records beside `ProcessHandle`,
-the advertisement truth beside the prepl socket, the hook's digest walk beside
-the `:seon.fn.file/digest` rows. Each mirror needs machinery to stay current,
-and that machinery is proportional to the program instead of to the edit.
+**Why that is the wrong shape.** Each layer is a mirror kept beside an
+authority that already answers the question: the manifest beside the rows,
+the seal digest beside the commit id, the cache sweep beside clj-kondo's cache
+plus our own stored namespace-per-file facts, process records beside
+`ProcessHandle`, advertisement "truth" beside the prepl socket, the hook's
+digest walk beside the `:seon.fn.file/digest` rows. Every mirror needs
+machinery to stay current, and that machinery does work proportional to the
+program instead of to the edit. The repeat docstring edit measures 2,723 ms,
+of which 553 ms is re-listing and re-hashing the tree and 248 ms re-deriving
+a projection an immutable value already carries (pack §5).
 
-**The simpler way, as data flow.** One request enters the running JVM over
-its prepl: the changed paths. The JVM hashes only those bytes and compares
-them with the digest rows it already stores (a seek per path). clj-kondo
-lints only the changed files, with its own cache supplying every other
-namespace. The new rows are diffed against the published database VALUE (an
-immutable commit); the diff itself says which contracts changed, so callers
-are selected from it (median 2 files, live) and linted in the same pass. ONE
-Datahike transaction on `current-src` carries declarations and findings; its
-report names the changed identities; exactly those namespaces reload; only
-their Vars re-arm. The commit id is the publication's identity — nothing else
-is written to say "published". A cold start pays one JVM boot and one complete
-analysis; a reset writes rows whose tempid is the row's own identity string.
-Every cost is proportional to the changed declarations and their callers.
+**The simpler way, as data flow.** One request enters the running JVM over its
+prepl: the changed paths. The JVM reads only those bytes, hashes them and
+seeks each path's stored digest in the published commit value (a pull per
+path). clj-kondo lints only the changed files; its own cache supplies every
+other namespace, and the namespaces those files DECLARED (stored facts) are
+the only entries invalidated. The rows for those files are reconciled INSIDE
+Datahike's serial writer on a scratch branch (a branch is a pointer:
+milliseconds), so the diff is decided by the authority, not by a pre-read.
+The writer's transaction report names what changed; callers are selected
+from that report (median 2 files per contracted function, §1), linted with
+the cache now holding the new signatures, and reconciled in a second
+transaction on the same scratch branch; then the head of `current-src` moves
+once. Adoption compares two commit ids, copies exactly the report's
+identities into the development branch through the same writer, reloads
+exactly the affected namespaces, arms exactly the replaced Vars and the
+functions whose contracts reference a changed schema, and records the commit.
+Nothing else is written to say "published"; the commit id is the identity.
+Ordinary edit work follows selected files, their declarations and affected dependencies. Pathless discovery and analyzer-configuration changes inspect their declared input population; reset pays initial analysis and population construction. These separate costs remain visible in measurements.
 
 ## 1. Goal and the numbers that prove it
 
-Live reads this session (`eval_clj`, `jvm`, `read_only`, cluster `default`):
+Historical reads dated 2026-09-21 (`eval_clj`, `jvm`, `read_only`, cluster `default`, commit
+`6ab15cfb-6177-50d4-9ccd-91ef300b2084`; the first three rows are historical reads on the same commit):
 
 | Form (abbreviated) | Value | Decides |
 |---|---|---|
-| `(frequencies (map :a (d/datoms db :eavt)))`, top attributes | 481,655 datoms; `:seon.fn/calls` 76,192 · `/call-arities` 65,764 · `/keywords` 44,282 · `/references` 32,475 (45 % of all datoms are four observation sets); `:keep-history? true`, `:attribute-refs? false` | the reset transaction's work is index insertion of ~480 K datoms with history, not the tempid map (§2b) |
-| caller-file fan-out per contracted function (`:seon.fn/spec` → `:seon.fn/calls` → caller file) | 1,555 contracted; 1,416 with callers; files per callee median **2**, p90 16, p99 56, max 176; 126 over 20 | caller lint after a contract change is bounded by the callee's fan-out, not the program (§2 step 5) |
-| stored `:seon.ns/requires` graph, Kahn removal | 407 ns rows, 398 nodes, 2,535 edges, **0 cycles**, 0 self-edges; 4 macro namespaces, 20 direct dependents | the ordering fallback never fires today; make it a refusal, keep our 25 lines (§2 step 7) |
+| `(frequencies (map :a (d/datoms db :eavt)))` | 481,655 datoms; `:seon.fn/calls` 76,192 · `/call-arities` 65,764 · `/keywords` 44,282 · `/references` 32,475 | this current population census does not measure the cold transaction’s input or index cost; §2b measures those separately |
+| caller files per contracted function (`:seon.fn/spec` → `:seon.fn/calls` → caller file) | 1,555 contracted; files per callee median **2**, p90 16, p99 56, max 176 | caller lint is bounded by the callee's fan-out (§2a step 8) |
+| stored `:seon.ns/requires`, Kahn removal | 398 nodes, 2,535 edges, **0 cycles**; 4 macro namespaces, 20 direct dependents | `reload-order`'s cycle fallback never fires; make it a refusal (§2f) |
+| recorded sample, 20 ms: file rows, fn rows, resolver facts, shared source | **791** file rows · 4,600 fn rows (p50 **6** per file, max 193) · 407 ns rows: 390 with aliases, 284 with refers, 108 with imports, 0 with renames · **23 groups / 49 symbols** share byte-identical `:seon.fn/source` across different symbols (e.g. three `reverse-attribute`s) | pathless discovery examines current declared inputs plus stored paths; a per-file lint reconciles ~6 rows; source text ALONE is not a definition identity (§2g) |
 
-Targets (measured by the committed script rows, §8; "landed" = row moved AND
-platform tier green):
+Targets. "Landed" = the committed script's row moves AND the platform tier is
+green. The script is re-homed to
+`docs/prds/agent-platform/research/measure-publication-path.sh` and its
+`grep` of `init phase=lifecycle elapsed-ms=` rewritten for the one progress
+argument (§2d) in the same commit that deletes the parsed format. Each row
+reports end-to-end request completion THROUGH adoption, with per-phase times
+and work counts (files, rows, datoms, namespaces, Vars).
 
-| Case | Now (latest recorded) | Target | Explained by |
+| Case | Latest recorded (pack §5) | Target | Explained by |
 |---|---|---|---|
-| no change (`adopt-nochange`) | 264 ms | ≤ 100 ms | hash one path, seek one row, compare two commit ids |
-| docstring edit, non-core (`adopt-noncore`) | 2,723 ms | ≤ 700 ms | one clj-kondo file lint with cache (~150–300 ms), diff of ~10 rows, one transaction, one `require :reload` |
-| docstring edit, core (`adopt-core`, `seon.id`) | open | ≤ 1,500 ms | as above plus Clojure's own compile of the reloaded namespace |
-| fork | 0.34 s | < 1 s (unchanged) | `registry/branch!` |
-| first adoption after fork (`adopt-first`) | O(program) `published-index-rows` | ≤ 100 ms | commit-id equality is the answer |
-| from zero (`init-zero`) | 178.8 s | ≤ 60 s | §2b: 15 s analysis (probe `:parallel`), ~1 s row compile, transaction ≤ 10 s after the validator narrows (A2), no seal/readback/activation phases |
+| explicit paths, no change (`adopt-nochange`) | 264 ms | ≤ 100 ms | read one file, one pull, two commit ids compared; zero transactions |
+| pathless discovery, no change | not measured | ≤ 300 ms | 791 stored rows read + hook-walk-class scan (112 ms / 553 files measured, `.claude/seon-hook.edn:34`) |
+| docstring edit, non-core (`adopt-noncore`) | 2,723 ms | ≤ 700 ms | one clj-kondo lint with cache (475 ms today incl. sweep), two writer transactions of ~6 rows, adoption copy of the same rows, one `require :reload`; zero caller lint |
+| docstring edit, core (`adopt-core`, `seon.id`) | open | ≤ 1,500 ms | as above plus Clojure's compile of the reloaded namespace |
+| contract edit | not measured | record phase times and returned caller-file count; no fixed per-file allowance | caller lint proportional to fan-out (median 2) |
+| fork | 0.34 s (landed) | < 1 s | `registry/branch!` (`registry.clj:178`) |
+| first adoption after fork (`adopt-first`) | O(program) | ≤ 100 ms | commit-id equality |
+| from zero (`init-zero`) | 178.8 s | ≤ 60 s | §2b, measured phase by phase before any prediction |
 | boot | 12.8–16.2 s | measured, paid once | — |
 
 ## 2. The data flow
 
-### 2a. One edit, end to end (the centerpiece)
+### 2a. One edit, end to end
 
-Request: `(seon.cluster/refresh-source! {:seon.boot/root R :seon.source/changed-paths P :seon.boot/cluster-name "default" :seon.source/progress! f :seon.source/bounds B})`
-sent over the JVM's io-prepl by whoever asks (hook, `bin/seon`, an agent's
-declared request — C6). `P` may be empty: "re-observe every stored path".
+Request: `(seon.cluster/refresh-source! {:seon.boot/root R :seon.source/changed-paths P :seon.boot/cluster-name "default" :seon.source/progress! f :seon.config.source/phase-bounds-ms B})`
+over the JVM's io-prepl from the hook, `bin/seon`, or an agent's declared
+request (C6). `P` absent means pathless discovery (step 2b).
 
-| # | Step | Data in → out | Where carried | Seam (file:line) | Proportional to |
+| # | Step | Data in → out | Carried | Seam (file:line) | Proportional to |
 |---|---|---|---|---|---|
-| 1 | serialize | takes the publication monitor (`ReentrantLock`, bound from `B`) | JVM | `cluster.clj:1571` `with-source-refresh-monitor!` (kept; its bound becomes `B`'s `:request`) | 1 |
-| 2 | observe | `P` → `{path digest}` by reading only those files; empty `P` → every path with a `:seon.fn.file/relative-path` row (791 live), ~100 ms | value | `source.clj:109` `path-digests` (drop the gitlink branch) | \|P\| |
-| 3 | compare | seek each path's stored digest on the published VALUE `(source/database store commit)`; `changed` = paths whose digest differs or is absent; equal ⇒ return the current commit id, done | value | `source.clj:125` `stored-path-digests`; `source.clj:139` `current` | \|P\| seeks |
-| 4 | lint | clj-kondo over `changed` with `:cache-dir` the project cache; `to-cache` rewrites the changed namespaces' entries, `sync-cache*` loads every used namespace from disk; blocking findings refuse before any write | analysis map | `analyzer.clj:260` `invoke-kondo` (minus the sweep); `impl/cache.clj:65` `to-cache`, `:171` `sync-cache*`; `fn.clj:1093` `assert-clean-analysis!` | \|changed files\| + used namespaces read from cache |
-| 5 | rows | analysis → program rows for those files (`artifact` minus manifest fields), each row with its definition digest (§2g) | vector of rows | `fn.clj:1292` `artifact` → rows only; `fn.clj:600-680` row construction | rows in changed files |
-| 6 | diff | rows vs the published value: per row `normalized-index-row`, `changed-attributes`, exact replacement tx; removed identities = the file's previous identities not in the new rows → `:db/retractEntity`. Output: `tx-data` PLUS `changed-contracts` = identities whose changed attributes include `:seon.fn/spec` or `:seon.schema/form` | values | `fn.clj:3047` `reconcile-tx-in` (returns the pair); `program.cljc:993` `changed-attributes`, `:1027` `exact-replacement-tx-in` | rows in changed files |
-| 7 | callers | `changed-contracts` → schema parents by `:seon.schema/references` fixpoint → functions whose arity refs name them → `:seon.fn/calls` referrers → caller files, minus `changed`; empty on a docstring edit | set of paths | draft `fn.clj:2274-2306` `caller-files`, re-signatured to take `(database changed-contracts)` instead of a report | callee fan-out (median 2 files) |
-| 8 | lint callers | step 4 again over caller files (cache now holds the new arglists); only `:seon.lint/*` rows are kept; diffed against the callers' stored lint rows → more `tx-data` | value | draft `fn.clj:3441-3456` minus its transaction | \|caller files\| |
-| 9 | transact | ONE `db/transact!` on the `current-src` connection: declarations + findings; the writer validates the touched entities; a refusal leaves the head unmoved | report | `db.clj:4578` `transact!`; `writer.cljc:385` | touched entities |
-| 10 | identities | `report-identities` over `:tx-data` (pull of touched entities before and after) | set | `fn.clj:3129` | touched entities |
-| 11 | adopt | cluster row's `:seon.source/commit-id` = new commit? done. Else namespaces = `(development-namespaces db-after identities)` ∪ namespaces of retracted identities; macro/protocol roots expand to dependents once (visited set) | set | `cluster.clj:2001` (draft) minus the union at `:2096` | changed namespaces (+ dependents for the 4 macro namespaces) |
-| 12 | reload | `reload-order` over the stored requires among the set; `require :reload` each; `ns-unmap` retracted identities | JVM | `cluster.clj:1922`, `:1971`, `:2101` | \|namespaces\| |
-| 13 | arm | `instrument/apply!` receives the reloaded namespace set and arms only their interns (A1 owns the change; B1 hands the argument) | JVM | `instrument.clj:927`, `:844` `current-wrapper?` | Vars in reloaded namespaces |
-| 14 | record | one transaction on the cluster: `:seon.source/commit-id` + adoption identities/inputs | cluster branch | `cluster.clj:2138-2148` (kept) | 1 |
+| 1 | serialize | the publication monitor (`ReentrantLock`); its acquisition bound is `B`'s `:request` | JVM | `cluster.clj:1571` `with-source-refresh-monitor!` (kept) | 1 |
+| 2a | capture (explicit `P`) | read each path's bytes ONCE → `{path {bytes digest}}`; directories are gitlinks → pinned commit | value | `source.clj:109` `path-digests` (keeps its directory case) | \|P\| |
+| 2b | discover (no `P`) | declared input roots walked → current path set (`input-roots`, `input-paths` moved into `source.clj`) vs stored `:seon.fn.file/relative-path` rows: added, removed, differing digest | value | `test/cache.clj:45`, `:154` (moved); `source.clj:125` `stored-path-digests` | \|inputs\| ≈ 791 |
+| 3 | compare | seek each captured path's stored digest on the published commit VALUE; `changed` = differing/absent; `removed` = stored, not on disk. Empty ⇒ skip to step 11 with the current commit id | value | `source.clj:125`, `:139` `current`; `versioning.cljc:469` `commit-as-db` | \|P\| pulls |
+| 4 | classify inputs | a changed path under `.clj-kondo/` (config: `K/impl/core.clj:148-156` resolves it outside the namespace cache) ⇒ analysis of EVERY source path; `deps.edn` or a gitlink ⇒ typed refusal `RESET NEEDED` (a loaded dependency cannot reload); otherwise `changed` only | value | `fn.clj:2365-2376` (today's `changed` derivation, minus manifests) | 1 |
+| 5 | invalidate | `forget-namespaces!` for the namespaces the changed and removed files DECLARED (stored `:seon.ns/name` rows by `:seon.fn/file`), all three languages | cache dir | `analyzer.clj:288` (kept); `fn.clj:2388-2395` | changed files |
+| 6 | lint | clj-kondo over the captured bytes through the private mirror (same bytes as the digest and the rows); `sync-cache*` supplies every other namespace from disk; blocking findings refuse BEFORE any write | analysis | `analyzer.clj:403-466` `analyze` (`::sources`); `K/core.clj:242-262`; `K/impl/cache.clj:171` ; `fn.clj:1093` `assert-clean-analysis!` | changed files + used namespaces read from cache |
+| 7 | rows | analysis → program rows for those files, each carrying `:seon.program/definition-digest` (§2g); removed files → their stored identities for retraction | vector | `fn.clj:600-680` `var-row`; `:1292` `artifact` (rows only, no manifest fields) | rows in changed files (p50 6/file) |
+| 8 | transaction 1 | `registry/branch!` scratch from the published commit; `db/transact!` with `[:db.fn/call reconcile]`: the writer hands its CURRENT db to `reconcile-tx-in`, which emits per-row exact replacements and `:db/retractEntity` for removed identities; the final-report validator refuses severed connections | report | `source.clj:229`, `:371` `publish!`; `fn.clj:3413-3431`, `:3047` `reconcile-tx-in`; `program.cljc:993`, `:1027`; `transaction.cljc:1153` (`:db.fn/call`), `:1206-1216` (validator); `db.clj:4123` | touched entities |
+| 9 | callers | from `report :tx-data`: datoms on `:seon.fn/spec`, `:seon.schema/form`, `:seon.fn/arglists`, `:seon.fn/private?`, `:seon.fn/macro?`, namespace binding facts, and retracted `:seon.fn/sym` → schema parents by `:seon.schema/references` fixpoint → functions whose arity refs name them; include namespace resolver changes and before/after call/reference edges for macro, inline, protocol and removal effects → affected caller/reference files minus `changed`. Reconcile final dependency facts, preserving ordinary direct-caller selection where that is the complete affected set. Docstring edit ⇒ empty | set | `fn.clj:2274-2306` `caller-files` (widened attribute set) | callee fan-out |
+| 10 | transaction 2 | caller files captured and linted (cache now holds the new signatures); their COMPLETE rows (calls, call-arities, lint) reconciled through the same `:db.fn/call` on the scratch connection | report | `fn.clj:3436-3467` minus the `:seon.lint/id` filter | caller files |
+| 11 | head | `force-branch!` moves `current-src` to the scratch commit with `:expected-current-commit` set to the prior head and immutable parents; retire scratch only after release. The publisher must hold exclusive write custody for `current-src`; the dependency’s guard is not a cross-writer CAS (`D/versioning.cljc:323-335`). The commit id is the publication | store | `source.clj:495-521`; `versioning.cljc:323` | 1 |
+| 12 | adopt? | cluster row `:seon.source/commit-id` = published commit ⇒ done (this check runs even when step 3 skipped) | cluster branch | `cluster.clj:2049-2051` | 1 |
+| 13 | adoption copy | identities = the two reports' identities (or `changed-identities` by history when the cluster is behind by more than one publication); schema declarations, program rows (`seon.fn/index!` with `:seon.reconcile/adopt-identities`) and issue rows copied into the development branch through ITS writer, agent facts preserved | cluster branch | `cluster.clj:2063-2091`; `source.clj:164` `changed-identities`; `issue.clj:1006` `adopt!` | touched identities |
+| 14 | reload set | roots from BOTH `previous-database` and `db-after` (retracted macros count); macro/protocol roots expand to dependents once; retracted `:seon.fn/sym`s `ns-unmap`ped | set | `cluster.clj:2001-2035` `development-namespaces`; union at `:2096-2097` (kept) | changed namespaces (+ dependents of the 4 macro namespaces) |
+| 15 | reload | `reload-order` over stored requires; `require :reload` each; then verify each reloaded file's on-disk digest equals the published digest, else typed refusal `source-changed-during-adoption` (retry once, `cluster.clj:696`) | JVM | `cluster.clj:1922`, `:1971` | \|namespaces\| |
+| 16 | arm | `instrument/apply!` receives `:seon.instrument/changed-identities` = Vars of reloaded namespaces ∪ the step-9 schema-referrer set; unrelated wrappers keep identity. A1 owns the selection change; before that paired slice the existing broad arming remains; passing an ignored key is not implementation of bounded selection | JVM | `instrument.clj:927` `apply!`, `:844` `current-wrapper?` | changed Vars |
+| 17 | record | ONE transaction on the cluster: `:seon.source/commit-id`, `:seon.test/adoption-identities`, `:seon.test/adoption-inputs`; written only after 13–16 succeed; a failure leaves the prior record | cluster branch | `cluster.clj:2135-2147` (kept) | 1 |
 
-Why step 6's pre-read is legitimate: the published database is an immutable
-COMMIT value (`d/commit-as-db`, `versioning.cljc:469`); nothing can change it
-between the diff and step 9, and the monitor serializes publishers. Why one
-transaction suffices: Datahike's transaction is atomic on the branch
-(`transaction.cljc:1218` `transact-tx-data` builds one report; the writer
-commits or fails it whole), so the scratch branch, `force-branch!`, the
-"another publisher created current-src first" refusal and `retire-branch!`
-(`source.clj:413-521`) exist only to make four transactions look like one.
-The draft's second transaction (`fn.clj:3459-3465`) becomes rows appended to
-the same `tx-data` because the contract change is known from the diff, not
-from the report. What never happens any more: `git ls-files` (twice),
-toolchain hashing, the manifest read-back (`published-index-rows` 21.9 ms +
-`database-manifest`), the second digest re-observation (`cluster.clj:1895`),
-the projection re-derivation (248 ms; A1 carries it on the value), the
-`(all-ns)` arming walk, the seal row, the head readback.
+**Why two transactions and a scratch branch, answered at the writer.**
+Datahike's writer is one serial loop per connection that threads its
+evolving `old` value through every operation (`writer.cljc:130-135,
+145-147`); `transact!` dispatches ONE `arg-map` and delivers ONE report
+(`:390-397`); `transact-tx-data` builds that report from one `tx-data`
+vector and runs the final-report validator once (`transaction.cljc:1218`,
+`:1206-1216`, `:1276`). A `:db.fn/call` function receives the writer's
+current db (`:1153`), so a diff computed inside it is decided by the
+authority — so the existing `reconcile-tx-in` at `fn.clj:3413-3431` remains the decision seam. Immutability of a pre-read value does not prove equality with the writer’s head. The caller set can only be selected from the REPORT of
+transaction 1, and clj-kondo cannot run inside a transaction function:
+`retry-with-tempid` restarts the whole transaction from `initial-es`
+(`:844-853`, `:1291`), so a lint inside the writer could run twice and
+would block the serial writer for hundreds of milliseconds. Therefore the
+ruled shape stands (goals `:282`): transaction 1 → report → caller lint →
+transaction 2 → move the head. The scratch branch is Datahike's own
+pointer (`versioning.cljc:212`), not a mirror; it is what makes a refused
+transaction 2 leave `current-src` unmoved. What IS deleted: the seal row and
+its readback, the manifest and `published-index-rows`, the second
+observation (`cluster.clj:1832`), the projection re-derivation once A1 lands
+(`source.clj:151-162`; until then the 248 ms stays and is counted), the
+`(all-ns)` arming walk once A1 lands, `upsert!`/`populate-upserts!`
+(`source.clj:540-565`, no callers outside the file), and
+`publication-input-digest!` (`:352`).
 
 ### 2b. The reset's cold path
 
-| Phase (measured) | ms | What Datahike/clj-kondo does | Decision |
+| Phase (last measured, pack §5) | ms | What runs | Decision |
 |---|---:|---|---|
-| preparation | 7,760 | loads publication inputs / roots | delete with the snapshot and toolchain layers; expect < 500 |
-| analysis, 381 files | 15,368 | clj-kondo `run!` serial | the tool's cost; probe `:parallel true` (`core.clj:92`); the cache directory is then complete for every later edit |
-| schema population | 2,454 | attribute declarations + canonical schema rows | A1/A2 own the projection; B1 keeps one transaction |
-| program rows + contract rows (11,428) | 4,613 + 24,988 | `program/contract-facts` compiles each Malli contract | A1's compiled-registry seam; B1 hands the carried projection |
-| "population compiled" | 13,226 | `index-tempids` `fn.clj:2873`: `tree-seq` over every nested map × 53 identity attributes ≈ 1.6 M `find`s, `pr-str`-keyed sort; `compile-index-transaction` rewrites refs to string tempids | tempid = `(pr-str (program/row-identity row))` — a pure function of the row, no table; refs to rows are the same string; `:seon.fn/keywords` stays a set inside the entity map (43,934 separate `:db/add` ops die); expect < 1 s |
-| transaction, 107,049 ops | 36,068 | `entity-map->op-vec` → `upsert-eid` (one AVET seek per identity attribute per map, `transaction.cljc:641-715`), `explode`, then per datom `transact-add` → `with-datom-upsert` (unique check, history datom, index insert; `:530-560`); then OUR report validator pulls every touched entity (`db.clj:4123`) | 35,773 maps × (seek + explode) is milliseconds-per-thousand; the datoms (~480 K with history) are the floor Datahike charges; the validator is A2's narrowing. Probe (§6): `d/load-entities` (`writer.cljc:411`, `core.cljc:142` `transact-entities-directly`) with eids allocated as `max-eid + i` skips upsert resolution entirely |
-| issue indexing | 6,124 | `seon.issue/index!` over notes (`issue.clj:511`) | B3's file; 16 ms/note is a finding for B3 |
-| activation seal | 3,440 | the sealed activation closure (`cluster.clj:1316-1353`, span unverified) | ruled deleted (goals §5, "sealed activation-closure roster") |
-| branch-head readback | 4,875 | `unresolved-report!` (`source.clj:501`) = `fn/unresolved-callers` `:1534`, a not-join over 76 K call datoms | answer from the `:seon.fn/unresolved-references` file rows the indexer already writes (`fn.clj:1299-1301`): one query over 791 file rows |
+| preparation | 7,760 | snapshot/toolchain layers | remove repeated aggregate work through §2a steps 2–4; measure remaining discovery and input capture |
+| analysis, 381 files | 15,368 | clj-kondo serial | the tool's cost; `:parallel` is NOT a lever as called today: `parallel-analyze` groups by `:group-id`, which `sources-from-dir` sets to the directory argument (`K/impl/core.clj:367`, `:375-376`), so `:lint ["src"]` is one sequential group; the adapter records a parallel call-record corruption (`analyzer.clj:433-436`). Stays serial unless a probe with per-file groups proves EQUAL normalized definitions, calls, arities and findings |
+| schema population | 2,454 | attribute declarations + schema rows | one transaction; A1/A2 own the projection |
+| program + contract rows (11,428) | 4,613 + 24,988 | `program/contract-facts` (`program.cljc:733`) compiles each contract | A1's compiled registry; B1 hands the carried projection |
+| "population compiled" | 13,226 | `index-tempids` (`fn.clj:2873`, `tree-seq` × 53 identity attributes, `pr-str` sort) + `compile-index-transaction` (`:2899`) | tempid = `(pr-str (program/row-identity row))` for SUBMITTED identified rows only; refs to rows outside the submission stay lookup refs; anonymous component maps stay nested (Datahike allocates them); `:seon.fn/keywords` stays a set in the map. Measure construction independently of the transaction |
+| transaction, 107,049 ops | 36,068 | `entity-map->op-vec` → `upsert-eid` (one AVET seek per identity attribute, `transaction.cljc:641-715`) → per datom `transact-add` (`:786`) with history; then our validator (`db.clj:4123`) | UNATTRIBUTED today. Land nothing on a prediction: the first probe times construction, `upsert`/`explode`, index work, final-report validation and durable commit separately on ONE reset and records counts (ops, effective datoms, owning roots, compiler calls). At reset every row is new, so "narrow to touched rows" gives no speedup by itself; A2 owns removing repeated derivation inside the validator |
+| issue indexing | 6,124 | `seon.issue/index!` (`issue.clj:511`) | B3's file; 16 ms/note recorded as a finding for B3 |
+| "activation seal" | 3,440 | `cluster.clj:1316-1353` is `:seon.config/initialization` readiness, not a roster | NOT a B1 cut; the ruled roster deletion (goals `:387`) has no code here |
+| branch-head readback | 4,875 | `unresolved-report!` (`source.clj:194`) = `fn/unresolved-callers` (`fn.clj:1534`), a not-join over 76 K call datoms | kept as the authority (analysis-time `:seon.fn/unresolved-references` file rows are observations, not "no current definition"); runs on the cold path only — incremental publications are guarded by the writer's severed-connection refusal |
 
-Can identity upsert replace the tempid map? Yes for resolution — Datahike
-resolves a string tempid consistently within one transaction (`:1306-1316`)
-and nested maps by identity (`upsert-eid`) — but a FRESH branch has no
-identity to upsert against, so the string tempid is required for forward
-refs, and the cheap way to mint it is the identity's own print. The
-`retry-with-tempid` restart (`:844-853`, `:1291`) fires only when a tempid
-was allocated before its identity map arrived; ordering identity maps before
-referrers (namespaces, files, schemas, then functions) avoids every restart.
+`d/load-entities` (`writer.cljc:411`, `core.cljc:142`,
+`transaction.cljc:1337` `transact-entities-directly`) imports raw
+`[e a v t added?]` datoms, remaps identifiers and skips the final-report
+validator: it is a diagnostic LOWER BOUND for the probe, labelled
+non-equivalent, never a production switch.
 
 ### 2c. The operator after the cut
 
-| File | Today | Survives (≈ lines) | Derived from the OS / the JVM instead |
+Ruling applied: the cut is process records, advertisement truth and repair.
+The lane launcher stays. The external operator KEEPS cold `launch!`
+(`fresh_operator.clj:2129`), `reset!` (`:3519`), and exact
+`(pid, start-instant)` termination when the JVM cannot answer — `down` can
+never rely on a reply from the process it terminates.
+
+| File | Today | Survives (≈) | Derived from the OS / the JVM instead |
 |---|---:|---:|---|
-| `bin/seon` | 26 | 26 | — |
-| `script/seon/fresh_operator.clj` | 3,727 | ~600: argv parsing, `prepl-eval!` `:1820` / `read-prepl-reply` `:1166` / `prepl-value!` `:1182`, `launch!` `:2129` (the one child JVM), a ~20-line readiness wait for the child (file appears, one prepl round trip, under the boot bound), `reset!`, `help!` | process records (`:144-243`) → `ProcessHandle` (`state.clj:1199`); advertisement truth/repair (`:757-770`, `:1323-1769`, `:3351-3392`) → the prepl answer; offline readers (`:881-1082`) → "no JVM running"; phase logs (`:3008-3074`) → re-run reset; `await-advertisement!` `:2266-2402`; `source-preflight!` `:330-443` (clj-kondo in the JVM refuses); `init-form` `:2680-2802` → one `pr-str`'d request; `publication-output!` `:2804` |
-| `src/seon/operator.clj` | 1,219 | ~500: `start!`/`stop!`/`restart!`, `connection`, `status`, `banner`, `clusters`, `cleanup-cluster!`, `collect!`, `refork!`, `rotate-logs!`, footprint | `publish!` `:551` (entry 5), `reap-dead-roots!` `:373-509`, `census-processes!`, `claim-root!`, `existence`, `lifecycle-lock-bound-ms` `:65`, `projected-delete-ms-per-file` `:919` |
-| `src/seon/operator/state.clj` | 1,627 | ~700: `run-process!` `:76`, the root lifecycle `flock` `:417-800`, `read-advertisement` `:1150`, `observed-property-processes` `:1199`, footprint `:1457-1522`, destructive-path admission `:1541-1627` | claims `:801-1149`; census/truth `:1159-1456` except the two kept; `lifecycle-lock-timeout-ms` 900000 `:413`; `subprocess-cleanup-ms` `:22`; `responsive-advertisement?` `:1262` (a request either answers or its bound names the phase) |
+| `script/seon/fresh_operator.clj` | 3,727 | ~900: argv, `prepl-eval!` `:1820` / `read-prepl-reply` `:1166` / `prepl-value!` `:1182` / `live-root-value!` `:1609`, `launch!` `:2129`, a readiness wait bounded by the boot bound (one prepl round trip on `cluster/readiness` `cluster.clj:3432`), `reset!`, `help!`, exact termination | process records `:144-243` → `ProcessHandle` (`state.clj:224`, `:1199`); truth/repair `:757-770`, `:1323-1769`, `:3351-3392` → the prepl answers or its bound names the phase; offline readers `:881-1082` → "no JVM running"; phase logs `:3008-3074` → re-run reset; `await-advertisement!` `:2266-2402` (136 lines polling a file) → the readiness value; `source-preflight!` `:330` (clj-kondo in the JVM refuses); `init-form` `:2680` codegen → one `pr-str`'d request map; `publication-output!` `:2804` |
+| `src/seon/operator.clj` | 1,219 | ~600: `start!`/`stop!`/`restart!` `:70-96`, `connection :168`, `status :180`, `collect!` `:1112`, `refork!` `:1204`, footprint | `publish!` `:551` (entry 5), `reap-dead-roots!` `:373-509`, `census-processes!` `:250`, `claim-root!` `:230`, `projected-delete-ms-per-file :919` |
+| `src/seon/operator/state.clj` | 1,627 | ~800: `run-process!` `:76`, the root lifecycle `flock` `:436-800` with ITS declared bound (`:413`, a different resource), `read-advertisement :1150`, `observed-property-processes :1199`, `responsive-advertisement? :1262`, footprint `:1457-1522`, destructive-path admission `:1585+` | claims `:801-1149`; census/truth `:1159-1456` except the two kept; `subprocess-cleanup-ms :22` becomes the child-exit bound's declared name |
 
-Process identity is `(pid, start-instant)` from `ProcessHandle`
-(`state.clj:224`, `cluster.clj:2284`); the generation UUID
-(`-Dseon.operator.generation`) is deleted; `-Dseon.operator.root` stays so a
-cold `down` can find the JVM when the file is stale. **One file per root**:
-`<root>/prepl.edn` `{host port pid start-instant}`, written by the JVM when
-its prepl binds (today `cluster-directory/<name>/prepl.edn`,
-`fresh_operator.clj:127`); it has one job — telling a cold dialer which port
-to dial — and is never consulted for health. Commands after the cut: `start`
-(no JVM: `launch!`; JVM: `(seon.operator/start! …)`), `init`, `init NAME`,
-`init --dev`, `status`, `open`, `stop`, `down`, `reset --force`, `logs`,
-`config apply`, `export` (dies with B4's base store) — all but `start`-cold
-and `reset` are one prepl request; `bin/test-check` (53 lines) is the model.
+Process identity is `(pid, start-instant)` (`process.clj:13`,
+`cluster.clj:2284`); the generation UUID (`-Dseon.operator.generation`) is
+deleted; `-Dseon.operator.root` stays for a cold `down`. The prepl belongs
+to a CLUSTER: it is started in boot layer 0 (`cluster.clj:3340-3352`) and
+closed by that instance's `stop!` (`:3517`), so the advertisement file per
+cluster (`write-advertisement! :929`) stays as the one file whose only job
+is to tell a cold dialer the port; it is never consulted for health
+(`responsive-advertisement?` decides that with one round trip). A root-wide address requires a proven owner that outlives a cluster stop; retain cluster advertisements until that owner exists. Commands after the cut: `start` (no JVM: `launch!`; JVM:
+`seon.operator/start!`), `init`, `init NAME`, `init --dev`, `status`,
+`open`, `stop`, `down`, `reset --force`, `logs`, `config apply`; `export`
+dies with B4's base store. All but cold `start`, `down` of an unresponsive
+JVM and `reset` are one prepl request; `bin/test-check` (53 lines) is the
+model.
 
-### 2d. Seven entry points, nine progress mechanisms, eighteen bounds
+### 2d. Entry points, progress, bounds, hook
 
 | Today | After |
 |---|---|
 | entries 1–4 (`bin/seon init` variants, hook) | one prepl request to `refresh-source!` |
-| 5 `operator/publish!` | deleted (the request calls `seon.cluster` directly) |
-| 6 `test.cache/prepare-base!` + `publication-base!` `cluster.clj:2230` | deleted with B4's base store (B1 deletes `publication-base!` once `test/cache.clj:393-395` and `bin/test:1034` stop calling it — seam) |
+| 5 `operator/publish!` `:551` | deleted; the request calls `seon.cluster` directly |
+| 6 `test.cache/prepare-base!` `:379` + `publication-base!` `cluster.clj:2230` | deleted with B4's base store (`test/cache.clj:393-395`, `bin/test:1034` are B4's callers — seam) |
 | 7 `bootstrap_drive.clj:450` | the same request |
-| hook `bin/seon-hook:1486-1665` (200 lines: result files, pending queue, worker pid file, detached worker, `bin/seon` child, stdout re-parse) | ~30 lines: read `prepl.edn`, `prepl-eval!` the request with the edited paths, print `:out` events as they arrive, print the reply; coalescing is the JVM monitor's; `.codex/hooks.json` wiring (26 lines) and the transit-cache diagnostic (`:318-456`, ~130) deleted; the shell-write digest walk (`:1688-1819`, ~90) replaced by sending the request with NO paths (step 2, ~100 ms) |
-| 9 progress mechanisms (pack §3c) | ONE `:seon.source/progress!` argument on the request, threaded through `index!`; the prepl client prints `:out`; `*source-progress!*`, `*boot-progress!*`, `report-index-progress!`, the phase-clock atom, `publication-output!`, `SOURCE_PROGRESS`, `bin/test: SOURCE` all deleted |
-| 18 bound declarations (pack §3d) | one declared config fact `:seon.config.source/phase-bounds-ms` `{:observe :analysis :transaction :reload :arm}` carried on the request as `B`; each phase fails with a typed error naming the phase, the bound and what was in flight; the socket read timeout is their sum; the lifecycle `flock` keeps its own declared acquisition bound (a different resource) |
+| 9 progress mechanisms (pack §3c) | ONE `:seon.source/progress!` argument threaded through `publish!` and `index!`; the prepl client prints `:out` events; `*source-progress!*` (`cluster.clj:90`), `*boot-progress!*` `:247`, `report-index-progress!` `fn.clj:34`, the phase clock `fresh_operator.clj:2755-2790`, `publication-output!`, `SOURCE_PROGRESS` deleted. Foreign reader to convert in the same slice: `test/runner.clj:60` (B4's file, one line) |
+| 18 bound declarations (pack §3d) | publication phases: one config fact `:seon.config.source/phase-bounds-ms` `{:request :observe :analysis :transaction :reload :arm}` carried on the request; each phase fails with a typed error naming the phase, the bound and the work in flight. NOT collapsed (different resources, enforced at their own seams): the lifecycle `flock` bound (`state.clj:413`), child-exit (`:22`), boot readiness, and the prepl socket silence bound (`fresh_operator.clj:81`, `:1820-1853`) — a socket timeout does not cancel admitted work, so the JVM-side phase bound is the one that stops it |
+| hook publication `bin/seon-hook:1486-1665` (result files, pending queue, worker pid file, detached worker, `bin/seon` child, stdout re-parse) | ~40 lines: read the advertisement, `prepl-eval!` the request with the edited paths, print `:out` as it arrives, print the reply. Coalescing: the monitor SERIALIZES; it does not merge paths — so the hook sends each event's paths and an unchanged path costs one pull (step 3). `.codex/hooks.json` (26 lines) STAYS: it is the only Codex trigger, for the lint hooks too. The transit-cache diagnostic `:318-456` (~130) dies with the sweep; the shell-write digest walk `:1688-1819` (~130, 112 ms measured) stays until the pathless request (step 2b) measures ≤ 150 ms on the JVM, then becomes that request |
+| `.claude/seon-hook.edn` `:current-source {:enabled false}` | enabled ONLY after: the owner-coordinated reset that batches §2g; consumer conversion loaded; one live adoption observed in `default`; the `adopt-noncore ≤ 700 ms` row recorded. Then one real hook event (a named-file edit AND a shell-created new file) is observed adopted, and the 2026-09-20 comment block is deleted. The orchestrator ruling "re-enable only when the measured edit is cheap" is this row |
 
-Hook publication is re-enabled (`.claude/seon-hook.edn` `:current-source
-{:enabled true}`) in the commit that lands the `adopt-noncore ≤ 700 ms` row;
-the config's 2026-09-20 comment block is deleted then.
+### 2e. clj-kondo cache correctness
 
-### 2e. The clj-kondo fork change and the agent-evaluation probe
+The cache is clj-kondo's and describes ANALYZED SOURCE, never admitted branch
+facts: `sync-cache` writes entries (`K/impl/cache.clj:171`, `to-cache :65`)
+BEFORE the lints run and before our refusal (`K/core.clj:242-262`), so a
+refused publication has already rewritten the changed namespaces' entries.
+A rejected candidate must not later supply the resolver context for an admitted branch. Database unresolved-name checks do not prove cached arities or metadata are correct. Before the sweep is removed, prove retries and edits to other files after refusal against cache-disabled branch analysis; any correction belongs at clj-kondo’s existing source-ownership/cache-write seam. Cached signature keys are
+`var-def-keys` (`K/impl/core.clj:618-624`: `:arities :fixed-arities
+:varargs-min-arity :private :macro …`), not `:arglist-strs` or `:doc` — a
+docstring edit changes no cached signature, which is why it selects no
+caller. Concurrent `run!`s: publications are serialized by the monitor; the
+hook's prospective lints run `--cache false` (`bin/seon-hook:250-262`).
 
-| Change | Where | Effect |
+| Case | Mechanism (all existing) | Regression |
 |---|---|---|
-| `from-cache-1`: after reading a `:disk` entry, return nil when `(:filename entry)` is a string, not `"<stdin>"`, not a `.jar:` entry, and `(.exists (io/file filename))` is false | `impl/cache.clj:23-36` (~4 lines) | a renamed or deleted source no longer answers from the cache; deletes `discard-obsolete-cache-entries!` `analyzer.clj:223-259`, the second `run!` `:282-286`, `forget-namespaces!` `:288` and the hook diagnostic |
-| `skip-write?` returns true for `"<stdin>"` | `impl/cache.clj:38-53` (1 line; today the `when-not` yields nil for stdin so stdin lints DO write) | an agent form linted from stdin never replaces a namespace's cache entry — the "poisoning" the hook comment at `bin/seon-hook:256-259` describes and the sweep's `"<stdin>"` clause at `analyzer.clj:252` |
+| deleted file | its stored `:seon.ns/name` rows → `forget-namespaces!` (step 5) | lint a caller after deleting the callee file: `unresolved-namespace` |
+| namespace renamed in place | old name from stored rows of that path → forget; new name written by the lint | old name no longer answers |
+| `.clj` ↔ `.cljc` replacement | `forget-namespaces!` deletes all three languages (`analyzer.clj:288-299`) | one entry survives |
+| mirror-backed entry | the mirror keeps the source's absolute path as its tail; `analyzed-source-path` reads it back (`analyzer.clj:318-337`, `:347`) | entry names the checkout path, not `tmp/` |
+| stale `<stdin>` / agent form | agent forms lint with `{:cache false}` and the branch-derived prelude (`analyzer.clj:690-698`) — the adapter's filename is `my/agent.clj`, so `skip-write?` would not protect it (dated 2026-09-21 cache predicate probe) | no entry written by an evaluation |
+| superseded file still on disk | the removed path's rows are retracted (step 7) and its namespaces forgotten | resolution follows the database |
 
-Both land on `origin/seon` of `seantempesta/clj-kondo` (gitlink `57252e07`)
-before the deletion commit. Agent evaluations: `analyze-forms`
-(`analyzer.clj:657`) synthesizes a stub prelude for every referenced program
-function and lints with `:cache false`. With the cache on, `sync-cache*`
-(`cache.clj:171`) supplies file-indexed namespaces; an agent's SCI-only
-definitions have no entry and `load-when-missing` (`:127`) no-ops silently,
-so they would lint `unresolved-var`. Decision: cache ON for `:core` rows,
-prelude restricted to rows with `:seon.schema.admission/source :agent` in the
-referenced namespaces (a small vector), stdin never written (fork change 2).
-The probe (§6) measures per-evaluation cost of `sync-cache*`'s transit reads
-for a form using `seon.db`; if that read exceeds the stub synthesis, the
-prelude stays and the answer is recorded.
+`discard-obsolete-cache-entries!` (`analyzer.clj:223-259`, O(all entries))
+and the second `run!` (`:282-286`) leave only after the six cases pass, including legacy entries with no admitted file row. Stable source ownership must cover a cleaned-up captured-source mirror and a still-existing superseded file; if targeted invalidation is insufficient, repair the dependency seam before deleting the sweep. Agent evaluations keep the prelude and
+`:cache false` until a probe proves EQUAL findings with the cache for: an
+older sovereign branch, a namespace mixing `:core` and `:agent` rows
+(`load-when-missing` `K/impl/cache.clj:127-145` loads a whole namespace or
+nothing), and stdin with an explicit filename.
 
-### 2f. Reload ordering
+### 2f. Reload ordering and arming selection
 
-`reload-order` (`cluster.clj:1922-1945`) and clj-reload's `topo-sort`
-(`parse.clj:163-176`) are the same Kahn ordering. Live: 0 cycles. Keep ours
-(clj-reload is vendored for reading only, not in `deps.edn`; adding a
-dependency for 25 lines is a new edge), and delete the `(first remaining)`
-fallback at `:1944`: an unsatisfiable set becomes a typed refusal naming the
-remaining namespaces — today it reads absence of an order as an order.
-`development-namespaces` keeps the draft's macro/protocol expansion (4 macro
-namespaces, 20 direct dependents live) and runs ONCE on `db-after` from the
-report's identities; retracted identities contribute their namespace by name.
+`reload-order` (`cluster.clj:1922-1946`) is clj-reload's `topo-sort`
+(`parse.clj:163-176`) in 25 lines; live: 0 cycles. Keep ours; delete the
+`(first remaining)` fallback at `:1944` — an unsatisfiable set becomes a typed
+refusal naming the remaining namespaces (today it reads absence of an order as
+an order). Roots come from BOTH databases (a retracted macro or a macro→defn
+change is invisible on the after side alone). Arming selection follows
+schema-reference facts independently of reload: a function whose contract
+references a changed schema key is re-armed even though its namespace did not
+reload (step 16, the step-9 query).
 
-### 2g. The per-definition content digest (D9; C1, B4 and §1s consume it)
+### 2g. The definition identity (B2, B4, C1, D1 consume it)
 
 | Fact | Decision |
 |---|---|
-| attribute | `:seon.program/definition-digest` `[:string {:min 64 :max 64}]`, REQUIRED on every function, test, namespace and schema row (replaces `:seon.program/analyzed-source-digest`, `seon.fn.edn:116`, `seon.test.edn:88`, whose value is the FILE digest, `fn.clj:659-660`; C1 §2). RESET NEEDED |
-| derivation | `(id/digest 64 [source aliases])`: the row's own exact text (`:seon.fn/source` / `:seon.test/source` / `:seon.ns/source`, or `:seon.schema/form`) and the sorted `{alias target-ns}` map of its namespace — the resolver context that makes the same text mean different things; written where the row is built (`fn.clj:600-680`, `:1007-1014` for agent forms). Presence still records "analyzed" (G4) |
-| deletes | the manifest's `declaration-digests` (`fn.clj:1260-1290`, which hashes eleven attributes but not the body); `changed-schema-keys` `:2761` (the diff's `changed-attributes` answers); B4's `definition-digests` `test.clj:646-666` (recomputed from eleven attributes at selection time — a mirror) reads the stored fact; `:seon.fn.file/declaration-digests` schema entries |
-| consumers | §1s acquisition: `sci/eval.clj:912` decides `:jvm` vs interpret by admission; the ruling is digest equality with the core row (B2 converts; B1 supplies the fact). C1: samples keyed `(symbol, definition-digest, branch)`. B4: `changed-definition-symbols` and reach digests compare stored digests |
+| attribute | `:seon.program/definition-digest` `[:string {:min 64 :max 64}]`, REQUIRED on every function, test, namespace and schema row. A NEW key: `:seon.program/analyzed-source-digest` (`seon.program.edn:1-3`, `seon.fn.edn:116`, `seon.test.edn:88`) means "the analyzed input file", and changing a key's meaning is breakage; it is retired at the reset. Presence still records "analyzed" (G4). **RESET NEEDED** |
+| what it hashes | `(seon.id/digest 64 [(seon.schema/canonical-data-string parts)])`, where `parts` carries declaration identity (including namespace), exact definition source, normalized resolver context, and effective declaration metadata. Resolver context uses the existing namespace facts: requires by namespace identity; aliases as local→target namespace; refers/renames as local→target namespace/name; imports as local→target class. Sort unordered collections canonically and exclude branch-local eids. Function/test metadata includes effective contracts, macro/inline/protocol/private/dynamic semantics and inherited test markers (platform, fixtures, observation, long, long-ms, subject) wherever they affect acquisition or execution. Namespace rows include their source and normalized bindings; schema rows include their key and canonical authored form. The shared constructor owns this encoding; consumers never reconstruct it. |
+| equivalence | Equal source, identity, resolver context and effective metadata produce equal digests across file/agent construction and branches. A body edit changes its declaration’s digest, not an unrelated declaration’s. A namespace resolver change may legitimately change every declaration using that context. Exact source conservatively distinguishes doc/format changes; the digest does not claim semantic equivalence. Resolved call/reference observations remain program facts, not a substitute for complete resolver context. |
+| what it excludes | authorship (`:seon.schema.admission/source`), file position, unrelated file bytes and branch-local ids. Macro/inline/protocol dependency content and current dependency reach remain separate acquisition/reload/test obligations; equal declaration digests alone cannot certify an indirect host call under a changed dependency. |
+| where computed | ONE function `program/definition-digest` beside `row-identity` (`program.cljc:323`), called from `var-row` (`fn.clj:600-680`) and `analyzed-form` (`:1007-1014`) — file and agent rows through the same derivation. Namespace and schema row constructors invoke it too; all four declaration families land with the required attribute |
+| acquisition (B2) | B2 verifies the digest and dependency context of the actual installed callable; an adopted-commit fact alone is insufficient after partial reload or agent writes. Retained installation identity distinguishes old callable roots from newer rows. Share a JVM callable only when that equivalence and context/contract isolation are proven; otherwise interpret the supplied definition or report the typed unavailable implementation. Probe indirect JVM caller→changed callee, old/new clusters, candidate arming and concurrent adoption |
+| profiling (C1) | `:seon.profile/digest` = this value, captured when the callable is installed, supplied on the arming request ONLY for changed identities (step 16); an old invocation finishing after redefinition keeps its old key |
+| test selection (B4) | `changed` selects assertion/retraction history for this attribute and compares basis/final identity digests; edit→revert is unchanged, deletion remains an obligation, missing identity evidence is unknown; `definition-digests` (`test.clj:646-666`, eleven attributes recomputed at selection time) reads the stored fact instead; reach, schema and input evidence remain separate inputs |
+| deletes | `declaration-digests` (`fn.clj:1260-1290`), `changed-schema-keys` `:2761`, `:seon.fn.file/declaration-digests` and the manifest keys (`seon.fn.file.edn:20-28`, `seon.fn.manifest.edn:7-13`); the aggregates `:seon.source/digest` and `:seon.source/test-input-digest` (`seon.source.edn:29-35`) once B4 converts `test.clj:900,916,1365,2161`, `test/runner.clj:3639`, `test/fast.clj:30` — B1 stops writing them only in the commit that deletes those reads |
 
-Also dropped as aggregates: `:seon.source/digest` and `:seon.source/test-input-digest`
-seal row (`source.clj:458-471`; the commit id is the identity; B4's
-`runner/program-digest` `runner.clj:2372-2389` and the four `test.clj` reads
-move to per-path `:seon.fn.file/digest` rows and the commit id — B1 stops
-writing, B4 stops reading; the deletion of the schema keys lands after both).
+### 2h. Size
 
-### 2h. Size target
+| File | Before | Target | Reasoning for the gap between audit floor and target |
+|---|---:|---:|---|
+| `src/seon/fn.clj` | 3,494 | 2,300 | caller-less vars (−660, pack §4), manifest family (~370), `index-tempids` → 40 lines, progress, `sha-256`, `backfill-contract-facts!`, `declaration-digests`, `changed-schema-keys`; `index!`'s two transactions and `reconcile-tx-in` stay |
+| `src/seon/fn/analyzer.clj` | 719 | 620 | sweep and second run (−63); prelude stays |
+| `src/seon/program.cljc` | 1,092 | 1,050 | + `definition-digest`; `deletion-row` remnants out |
+| `src/seon/cluster.clj` publication sections | 1,279 | 700 | snapshot/toolchain (~110), artifact trio (34), currentness trio (67), `publication-base!` (49), `require-publication-resources!` (17), two progress mechanisms; adoption stays whole |
+| `src/seon/cluster/source.clj` | 575 | 350 | seal, `publication-input-digest!`, `upsert!`/`populate-upserts!`, aggregate digests; + the ~90 moved input readers |
+| `src/seon/operator.clj` | 1,219 | 600 | §2c |
+| `src/seon/operator/state.clj` | 1,627 | 800 | §2c |
+| `script/seon/fresh_operator.clj` | 3,727 | 900 | §2c; more survives than the audit's ~600 because exact termination and readiness stay |
+| `bin/seon-hook` | 1,987 | 1,500 | publication body ~40; diagnostic −130; digest walk stays until step 2b measures |
+| `src/seon/test/cache.clj` (B1's readers, estimated) | ~120 | 0 | moved (~90) or deleted |
+| `src/seon/id.clj` | 73 | 73 | three `sha-256` copies (`schema.clj:767` already delegates; `test/cache.clj:39`) call it |
+| **total** | **15,912** | **≈ 8,900** | the audit's own floors disagree (§0 "~2,800 production" ⇒ 13,100; its §4 operator table alone ⇒ 11,100); the target dissolves mechanisms the floors kept (manifest, seal, snapshot, tempid table, process records). Aspiration until recounted at one commit; each deletion is charged once |
 
-| File | Before | Floor (audit) | Target | Reasoning for the gap |
-|---|---:|---:|---:|---|
-| `src/seon/fn.clj` | 3,494 | −660 caller-less | 2,000 | plus the manifest family (~370), `index-tempids`/`compile-index-transaction` (~130 → 40), `build-manifest`/`database-manifest`, progress, `sha-256`, `backfill-contract-facts!`, `changed-schema-keys`, `declaration-digests` |
-| `src/seon/fn/analyzer.clj` | 719 | −42, −55 | 600 | sweep, `forget-namespaces!`, stub prelude narrowed to agent rows |
-| `src/seon/program.cljc` | 1,092 | — | 1,000 | `deletion-row`/tombstone remnants only; the row model is right |
-| `src/seon/cluster.clj` publication sections (`:999-1525`, `:1526-2279`) | 1,279 | — | 550 | snapshot/toolchain (`source-snapshot`, `full-source-refresh!` ~110), artifact trio (34), currentness trio (67), `publication-base!` (49), `require-publication-resources!` (17), two progress mechanisms, `retrying-source-change` (the digest race is gone with the second observation) |
-| `src/seon/cluster/source.clj` | 575 | — | 250 | scratch branch, `force-branch!`, seal, `publication-input-digest!`, `upsert!`/`populate-upserts!` (no callers outside the file), `changed-identities`' history fallback stays |
-| `src/seon/operator.clj` | 1,219 | ~500 survive | 500 | as §2c |
-| `src/seon/operator/state.clj` | 1,627 | ~700 | 700 | as §2c |
-| `script/seon/fresh_operator.clj` | 3,727 | ~600 | 600 | as §2c |
-| `bin/seon-hook` | 1,987 | −130, −90, −180 | 1,450 | lint/markdown/docstring/review stay; publication ≈ 30 lines; Codex wiring 8 lines |
-| `src/seon/test/cache.clj` (B1's part: `input-paths`, `gitlink-digests`, `toolchain-dependencies`, `test-input-digest`, `input-roots`) | ~120 | −60 | 0 | the rest is B4's base store |
-| `src/seon/id.clj` | 73 | — | 73 | three `sha-256` copies call it |
-| **total** | **15,839** | ≈ 7,600 | **7,700** | the floor listed layers; the target dissolves mechanisms (manifest, scratch, seal, tempid table, snapshot) |
+Tests: `fn_test.clj` 2,967 (≈800 die with the vars); `operator_test.clj`
+1,441; `dev/fresh_operator_test.clj` 2,206 (41 tests); `dev/fresh_operator_reset_test.clj`
+752; 22 `publication_*`/`source_*` namespaces, 13 holding one `deftest`.
 
 ## 3. Reading list (read before editing)
 
 | Seam | Lines | Guarantee to build on |
 |---|---|---|
-| clj-kondo `run!` | `core.clj:67-107`, `:143`, `:242-262` | `:cache-dir` selects the directory; `sync-cache` runs before the unresolved-var lints; `:parallel` exists |
-| clj-kondo cache | `impl/cache.clj:20-36`, `:38-53`, `:65-81`, `:83-109`, `:127-144`, `:146-200` | one transit file per (lang, ns); `to-cache` overwrites unconditionally; `with-cache` is a file lock with backoff; `load-when-missing` no-ops with no entry |
-| clj-kondo `reg-var!` | `impl/analysis.clj:87-116` | the per-var row: `:private :macro :fixed-arities :varargs-min-arity :doc :defined-by :arglist-strs :row :col :end-row :end-col` |
-| clj-kondo unresolved vars | `impl/linters.clj:1078-1100` | findings come from `:unresolved-vars` per namespace after `sync-cache` |
-| clj-reload ordering | `parse.clj:122-176` | same Kahn; default `on-cycle` throws — read to confirm ours is equivalent, then do not depend on it |
-| Datahike transaction | `db/transaction.cljc:641-715` `upsert-eid`, `:786` `transact-add`, `:844-853` `retry-with-tempid`, `:946-972` `entity-map->op-vec`, `:1153` `:db.fn/call`, `:1218-1330` `transact-tx-data` | identity upsert per map; string tempids resolved within one transaction; a conflicting tempid restarts the transaction; one report per transaction |
-| Datahike per-datom cost | `db/transaction.cljc:530-560` | unique check, history datom, index insert per datom |
-| Datahike versioning | `versioning.cljc:212` `branch!`, `:457` `commit-id`, `:469` `commit-as-db`, `:490` `release-materialized-db` | a branch is a pointer; a commit value is immutable; release what you materialize |
-| Datahike writer | `writer.cljc:385-409`, `:411-419` `load-entities`; `core.cljc:142` `load-entities-with` | serial writer per connection; `load-entities` bypasses entity-map processing (probe) |
-| our writer seam | `db.clj:4578` `transact!`, `:4305-4319` (report validator attached), `:4123` `write-report-validator`, `:1219` `carried-projection` | the validator is A2's narrowing; the projection rides the value |
-| our diff | `fn.clj:3047-3113` `reconcile-tx-in`, `:2992-3045` `normalized-index-row`, `:3129` `report-identities`; `program.cljc:323` `row-identity`, `:993` `changed-attributes`, `:1027` `exact-replacement-tx-in` | the per-row exact replacement already exists; only its call site and outputs change |
-| our rows | `fn.clj:185-225` exact source/span, `:600-680` row construction, `:1292-1335` `artifact` | rows carry `:seon.fn/source`, `:seon.fn/form-span`, `:seon.fn/file` |
-| adoption | `cluster.clj:2037-2155`, `:1922-1979`, `:2001-2035`; `instrument.clj:844-896`, `:898-908` `collect-contracts!` (walks `(all-ns)`) | the reload and re-arm seams; `current-wrapper?` preserves identity |
-| the prepl client | `fresh_operator.clj:1166-1191`, `:1820-1909`; `bin/test-check:1-53` | one form, one terminal value, `:out` events observable, silence bound |
-| process facts | `state.clj:224` `process-start-instant`, `:1199-1223` `observed-property-processes`, `:1150` `read-advertisement` | pid + start instant from the OS; the property names the root |
-| MCP tool | `script/seon/dev/mcp.clj:847-860` | `eval_clj` `jvm` mode binds no custody: `(seon.operator/connection "default")` |
+| Datahike writer | `D/writer.cljc:120-160` loop, `:385-409` `transact!`, `:411-419` `load-entities` | one serial loop per connection threading `old`; one report per `transact!`; import bypasses entity maps AND the validator |
+| Datahike transaction | `D/db/transaction.cljc:641-715` `upsert-eid`, `:786` `transact-add`, `:844-853` `retry-with-tempid`, `:1153` `:db.fn/call`, `:1206-1216` `validate-report`, `:1218-1330` `transact-tx-data`, `:1337` `transact-entities-directly` | identity upsert per map; string tempids resolved within one transaction; a conflicting tempid RESTARTS the transaction; the validator runs once on the final report |
+| Datahike versioning | `D/versioning.cljc:212` `branch!`, `:323` `force-branch!`, `:457` `commit-id`, `:469` `commit-as-db`, `:490` `release-materialized-db`, `:734` `merge!` | a branch is a pointer; a commit value is immutable; release what you materialize |
+| clj-kondo run | `K/core.clj:67-107`, `:242-270` | `sync-cache` before the lints; cache writes precede findings |
+| clj-kondo cache | `K/impl/cache.clj:20-36`, `:38-53`, `:65-81`, `:83-109`, `:127-145`, `:146-200`, `:210-215` | one transit file per (lang, ns); `to-cache` overwrites; `with-cache` is a file lock; `load-when-missing` loads a whole namespace or silently nothing |
+| clj-kondo signatures and grouping | `K/impl/core.clj:148-156` config, `:367`, `:375-399` `parallel-analyze`, `:521-527` stdin, `:618-632` `var-def-keys` | config resolved outside the cache; one group per directory argument; cached keys exclude `:doc`/`:arglist-strs` |
+| clj-kondo `reg-var!` | `K/impl/analysis.clj:87-116` | the per-var analysis row |
+| clj-reload | `parse.clj:122-176` | the same Kahn ordering; default `on-cycle` throws |
+| our writer seam | `db.clj:4578` `transact!`, `:4123` `write-report-validator`, `:4100-4118` arity admission, `:1219` `carried-projection` | the validator is A2's narrowing; the projection rides the value |
+| our diff and rows | `fn.clj:3047-3113` `reconcile-tx-in`, `:2992` `normalized-index-row`, `:3129` `report-identities`, `:3413-3467` `index!`; `program.cljc:323`, `:993`, `:1027` | per-row exact replacement inside the writer already exists |
+| analyzer | `analyzer.clj:403-466` `analyze`, `:288` `forget-namespaces!`, `:505-568` `require-specs`/`namespace-prelude`, `:657` `analyze-forms` | captured bytes through the mirror; branch-derived prelude for agent forms |
+| adoption | `cluster.clj:2037-2156`, `:1922-1979`, `:2001-2035`, `:696`; `instrument.clj:844-896`, `:898-908`, `:927` | reload, changed-source retry, re-arm |
+| the prepl client | `fresh_operator.clj:1166-1191`, `:1609`, `:1820-1910`; `bin/test-check:1-53` | one form, one terminal value, `:out` events, silence bound |
+| process facts | `process.clj:13`, `state.clj:224`, `:1150`, `:1199-1223`, `:1262` | pid + start instant from the OS; the property names the root; the socket answers health |
+| MCP | `script/seon/dev/mcp.clj:847-860`; `.codex/config.toml:2-3` | `eval_clj` `jvm` binds no custody: `(seon.operator/connection "default")` |
+
+### 3a. Development MCP is the first implementation slice
+
+Before attributing a startup failure, record the actual host and toolchain after the owner’s macOS 27 upgrade: `sw_vers`, `uname -m`, `java -version`, `bb --version`, executable resolution and bounded bridge startup output. Compare those observations with the configured MCP command. A stale or stopped JVM is not evidence of an OS regression. This preflight and any repair belong to implementation; the documentation revision launches no tools, JVMs or operator processes.
+
+Repair discovery/registration and total status projection through `script/seon/dev/mcp.clj`, `bin/mcp-server` and `.codex/config.toml` before using missing tools as proof of a stopped runtime. The existing bridge deliberately stays source-independent and discovers endpoints per call (`script/seon/dev/mcp.clj:11-15`); its `execute-runtime-status` at `:764-791` must report a missing/degraded observation explicitly. Keep that boundary while the operator removes redundant process records.
+
+The open evidence is `docs/seon/issues/runtime-status-throws-on-a-map-entry.md`, `seon-mcp-tools-absent-in-codex-lane-again.md`, and `the-supported-mcp-runtime-tools-were-absent-from-a-bounded-lane.md`. Reproduce the map-entry projection through the actual status route, name the throwing owner, and fix it there; do not infer that `enrich-collection-tail-elisions` (`:511-529`) caused the recorded `dissoc` exception. Coordinate B3’s flat-error conversion and B2’s value rendering at their existing owners.
+
+Acceptance is a fresh bounded lane exposing both tools, receiving complete `runtime_status` and `(let [c (seon.operator/connection "default")] {:value (+ 1 1) :basis (seon.db/basis-t (seon.db/db c))})` envelopes, and reconnecting after the owner replaces the JVM. Cover an ordinary map entry, absent cluster, timed-out observation and ambiguous selection. Tool registration cannot be proven by the server’s own tool list. No hand-written replacement transport is introduced. These tool files add an explicitly unpriced repair to §2h; count their net change separately until measured.
 
 ## 4. REPL protocol
 
+Historical abbreviated rows in §1 are observations, not executable forms or promised fresh values. At implementation, retain the exact request/envelope for each measurement. This standalone read provides explicit custody and missing-projection evidence without changing runtime state:
+
+```clojure
+(let [conn (seon.operator/connection "default")
+      db (seon.db/db conn)
+      p (seon.db/carried-projection db)]
+  {:basis (seon.db/basis-t db)
+   :commit (datahike.api/commit-id db)
+   :projection-present? (some? p)
+   :file-rows (seon.db/q '[:find (count ?e) . :where [?e :seon.fn.file/relative-path]] db)
+   :function-rows (seon.db/q '[:find (count ?e) . :where [?e :seon.fn/sym]] db)})
+```
+
+The following change probes are scenarios for the implementation harness; placeholders are not executable evidence. Before running one, write its complete fixture-bound request and assert the named terminal facts. Historical forms remain attributed, never recast as newly executed measurements.
+
 Codex reaches the REPL through `.codex/config.toml` → `bin/mcp-server` →
-`eval_clj` (`jvm`, `read_only` for reads) against `default`, or its scratch
-cluster `bin/seon --root tmp/b1-root start b1` (directory created first,
-downed and deleted after). Before each form: `(require '[datahike.api :as d])`
-and `(def conn (seon.operator/connection "default"))`.
+`eval_clj` (`jvm`, `read_only` for reads) against the owner’s live `default`, or its scratch
+cluster `bin/seon --root tmp/b1-root start b1` (directory created first; a
+fresh cluster seeds agent `root`; downed and deleted after). Bind any aliases and connection locally in the actual submitted form; do not depend on session `def`s. Read-only measurements use `read_only true`; publication, cache-write and fixture mutation probes do not.
 
 | When | Form | Expect |
 |---|---|---|
-| before | the three §1 forms | the recorded values |
-| before | `(time (seon.cluster/refresh-source! "." ["src/my/note.clj"] "default"))` after a docstring edit | ~2.7 s; phases in the `:out` lines |
+| before | the four §1 forms | the recorded values |
+| before | `(time (seon.cluster/refresh-source! "." ["src/my/note.clj"] "default"))` after a docstring edit | ~2.7 s; phases in `:out` |
 | before | `(time (clj-kondo.core/run! {:lint ["src/my/note.clj"] :cache-dir ".clj-kondo/.cache" :config-dir ".clj-kondo"}))` | the tool's one-file cost with cache |
-| probe | `(time (clj-kondo.core/run! {:lint ["src"] :parallel true …}))` on the scratch root | vs 15.4 s serial |
-| probe | `d/load-entities` of the compiled population on a scratch branch, eids `max-eid + i` | vs 36 s |
-| probe | agent form lint: prelude of agent rows + cache on vs today's stub prelude | ms per evaluation |
-| after | `(time (seon.cluster/refresh-source! {…}))` docstring edit | ≤ 700 ms, phases printed once |
-| after | `(count (filter #(str/starts-with? (str %) "seon.fn.index/") …))` | no string tempid table exists; tempids are identity prints |
-| after | `(d/q '[:find (count ?e) . :where [?e :seon.program/definition-digest]] (d/db conn))` | equals the number of fn + test + ns + schema rows |
-| after | `(seon.cluster.source/current store)` vs cluster row `:seon.source/commit-id` | equal after adoption; no `:seon.source/digest` datom exists |
+| probe | reset population on a scratch branch: time construction, `transact!`, validator, commit separately; then `d/load-entities` of the same datoms labelled non-equivalent | the §2b attribution |
+| probe | `run!` over the explicit 381-file list with per-file `:group-id` (needs the fork) vs serial: diff normalized definitions/calls/arities/findings first | fidelity, then time |
+| probe | `path-digests` over every stored path vs the hook's bb walk | ≤ 150 ms retires the walk |
+| probe | agent form: prelude + `:cache false` vs cache on, for a form using `seon.db`, on `default` and on an older fork | equal findings or the prelude stays |
+| after | `(time (seon.cluster/refresh-source! {…}))` docstring edit | ≤ 700 ms; zero caller files; two transactions |
+| after | contract edit on a function with 2 caller files | exactly those 2 files linted; their rows in report 2 |
+| after | `(d/q '[:find (count ?e) . :where [?e :seon.program/definition-digest]] (d/db conn))` | = fn + test + ns + schema rows; `analyzed-source-digest` absent |
+| after | agent evaluates a byte-identical `defn` of a core function; read its row digest and the adopted row's | equal; acquisition binds the JVM root |
+| after | `(seon.cluster.source/current store)` vs the cluster row's `:seon.source/commit-id`; `(d/q '[:find ?d . :where [_ :seon.source/digest ?d]] …)` | equal after adoption; no seal datom |
 
-## 5. The work, ordered as commits (each leaves HEAD loadable)
+## 5. The work, ordered as commits
 
-| # | Commit | Net | Notes |
+Each commit: HEAD loads (`clojure -M -e "(require …)"` for touched
+namespaces), `require :reload` of them on `default` succeeds, and the named
+probe answers. Recovery when it breaks anyway: `bin/seon reset --force`,
+which discards all database facts/history in that store and live private/result objects. Preserve required evidence before recovery; disposability permits loss, it does not imply that no durable data existed. A lane never resets `default`;
+RESET NEEDED items are batched by the orchestrator with hook publication
+paused. Every retirement converts ALL callers, schema consumers and tests in
+the same commit.
+
+| # | Commit | Net | Probe / seam |
 |---|---|---:|---|
-| 1 | clj-kondo fork: `from-cache-1` skips a vanished `:disk` file; `skip-write?` true for `"<stdin>"`; push `origin/seon`; bump gitlink | +5/−0 | prove: lint a file after deleting a sibling; no stale entry |
-| 2 | delete `discard-obsolete-cache-entries!`, second `run!`, `forget-namespaces!`; hook diagnostic `:318-456` | −180 | `clojure -M -e "(require 'seon.fn.analyzer)"` |
-| 3 | delete the caller-less `fn.clj` vars (pack §4) and their `fn_test.clj` sections; `sha-256` copies → `seon.id/sha-256` | ≈ −1,400 | HEAD loads: `(require 'seon.fn 'seon.test.cache 'seon.schema)` |
-| 4 | `reconcile-tx-in` returns `{tx-data changed-contracts}`; `caller-files` takes `(database changed-contracts)`; caller lint rows appended; `index!` incremental branch = one `transact!`; delete `db.fn/call` wrapper and the second transaction | −80 | regression: docstring edit lints zero callers; contract edit lints exactly the direct callers; both in ONE report |
-| 5 | `:seon.program/definition-digest` declared and written; `analyzed-source-digest` retired; `declaration-digests`, `changed-schema-keys`, `:seon.fn.file/declaration-digests` deleted; B4's five `test.clj` reads renamed (presence only) | −60 | **RESET NEEDED**; B4 seam named in the landing note |
-| 6 | manifest dissolved: `build-manifest`/`database-manifest`/`manifest-data`/`artifact-by-path`/`manifest-function-symbols` → rows from analysis; `full-source-refresh!` = observe → compare → lint → rows | ≈ −600 | `adopt-nochange` row measured |
-| 7 | `source/publish!` = one transaction on `current-src`; scratch branch, `force-branch!`, seal row, `publication-input-digest!`, `upsert!`/`populate-upserts!`, `unresolved-report!` readback deleted; unresolved report reads `:seon.fn/unresolved-references` | ≈ −300 | B4 seam: `program-digest`; **RESET NEEDED** (schema keys retired after B4) |
-| 8 | snapshot/toolchain dissolved: `source-snapshot`, `require-publication-resources!`, `test.cache` gitlink/toolchain/test-input-digest, `retrying-source-change`; per-path rows are the inventory | ≈ −250 | `adopt-noncore` row measured |
-| 9 | adoption: commit-id compare first; one `development-namespaces` traversal on `db-after`; `reload-order` refuses on an unsatisfiable set; `instrument/apply!` receives the namespace set (A1 lands the arming change; until then pass and ignore) | −40 | `adopt-first` row measured |
-| 10 | reset cold path: tempid = identity print; keywords inside the map; `index-tempids` deleted; activation seal deleted; `population compiled` measured | −120 | `init-zero` row measured; `load-entities` probe result recorded either way |
-| 11 | one progress argument; one `:seon.config.source/phase-bounds-ms` fact; the 18 declarations and 9 mechanisms deleted; typed phase refusals | ≈ −200 | every phase fails on its bound in a regression with a 1 ms bound |
-| 12 | operator: process records, advertisement truth/repair, offline readers, phase logs, `await-advertisement!`, `source-preflight!`, `init-form` codegen, `publish!`, `reap-dead-roots!`, claims → `ProcessHandle` + one `prepl.edn` per root; every command but cold `start`/`reset` is one request | ≈ −4,800 | `fresh_operator_test`/`operator_test` process-machinery sections deleted; cold start, stop, down, reset drills kept |
-| 13 | hook: publication = ~30 lines over `prepl-eval!`; queue/worker/result files, digest walk, Codex wiring deleted; `:current-source {:enabled true}` | ≈ −480 | live proof: edit → hook → adopted in `default`, browser observed separately |
-| 14 | `publication-base!` + `test.cache` base-store callers (after B4 lands) | −49 | B4 seam |
+| 0 | repair the MCP registration/status boundary in §3a; retain source-independent discovery through operator changes | measured | fresh-lane tool availability, complete status and bounded evaluation |
+| 1 | after §2e’s ownership/refusal probes pass, delete `discard-obsolete-cache-entries!`, the second `run!`, the hook transit diagnostic `:318-456`; regression for the six §2e cases through the real captured-source adapter | −190 | `(require 'seon.fn.analyzer)`; case table green, including rejected-candidate retry and competing analysis |
+| 2 | manifest dissolved: `build-manifest`, `database-manifest`, `manifest-data`, `artifact-by-path`, `manifest-function-symbols`, `replace-manifest-artifacts`, `published-index-rows` → rows from analysis; `full-source-refresh!` = capture → compare → classify → lint → rows; manifest schema keys deleted with their last reader | ≈ −600 | `adopt-nochange` row; `runtime_status` |
+| 3 | caller-less `fn.clj` vars (pack §4) and their `fn_test.clj` sections; three `sha-256` copies → `seon.id/sha-256` (`[bytes]` argument shape at each caller) | ≈ −1,400 | `(require 'seon.fn 'seon.test.cache 'seon.schema)` |
+| 4 | `caller-files` widened to the step-9 attribute set; transaction 2 reconciles complete caller rows; `index!` returns both reports | −20 | regression: docstring edit lints zero callers; contract edit lints exactly the direct callers; arglist/privacy change too |
+| 5 | `:seon.program/definition-digest` declared and written by `program/definition-digest`; `analyzed-source-digest` retired with `fn.clj:1545,1558,2710,2717,2820`, `test.clj:683,1018,1030,1527,1545` (B4 file: presence reads renamed, `definition-digests` deleted), `declaration-digests`, `changed-schema-keys` | −70 | **RESET NEEDED**; digest-equality probe (§4) |
+| 6 | `publish!`: seal row, `publication-input-digest!`, `upsert!`/`populate-upserts!`, aggregate `:seon.source/digest` deleted; `test-input-digest` producers stop only with B4's reads (`test.clj:900,916,1365,2161`, `runner.clj:3639`, `fast.clj:30`) converted in the same commit — B4 seam, stop if held | ≈ −250 | **RESET NEEDED** (schema keys) |
+| 7 | snapshot/toolchain: `source-snapshot`, `current-source-snapshot`, `require-publication-resources!`, the second observation; `input-roots`/`input-paths`/`gitlink-digests`/`toolchain-dependencies` moved into `source.clj`; step-4 classification with its typed refusals | ≈ −200 | `adopt-noncore` row |
+| 8 | adoption: commit-id compare on every request; roots from both databases; `reload-order` refuses; post-reload digest verification replaces the blind retry; `instrument/apply!` receives `:seon.instrument/changed-identities` (A1 owns `apply!`; the producer and A1 consumer land together; existing broad arming remains beforehand) | −40 | `adopt-first` row; a forced reload refusal leaves the prior record |
+| 9 | reset cold path: tempid = identity print for submitted rows, keywords inside the map, `index-tempids` deleted; the §2b attribution probe recorded FIRST | −120 | `init-zero` row and the phase table |
+| 10 | one progress argument; `:seon.config.source/phase-bounds-ms`; the nine mechanisms and the publication-phase bounds deleted; `test/runner.clj:60` converted; script re-homed and its grep rewritten | ≈ −200 | each phase fires as a typed error under a 1 ms bound |
+| 11 | operator: process records, truth/repair, offline readers, phase logs, `await-advertisement!`, `source-preflight!`, `init-form` codegen, `publish!`, `reap-dead-roots!`, claims, generation UUID → `ProcessHandle` + the per-cluster advertisement; every healthy command one request | ≈ −4,500 | cold start, stop, exact `down` of an unresponsive JVM, reset drills kept green |
+| 12 | hook: publication = ~40 lines over `prepl-eval!`; queue/worker/result files deleted; `.codex/hooks.json` untouched | ≈ −350 | live: named-file edit → adopted in `default` (browser observed separately) |
+| 13 | after the reset and the §2d conditions: `:current-source {:enabled true}`, comment block deleted; shell-created file observed | −12 | one real hook event |
+| 14 | `publication-base!` and the `test.cache` base callers (after B4 lands) | −49 | B4 seam |
 
 ## 6. Better than the floor — probes that decide
 
 | Candidate | Probe | Decides |
 |---|---|---|
-| `d/load-entities` for the reset population (skips `upsert-eid`/`explode`/tempids; eids minted `max-eid + i`; our row validation runs BEFORE as Malli on the rows) | time both on a scratch branch of the same store | transaction 36 s → target; if the writer's report validator is the bulk, the answer names A2 |
-| clj-kondo `:parallel true` for the complete analysis | `run!` over `src` both ways | 15.4 s → ? |
-| no scratch branch at all (transact on `current-src`; a refused transaction leaves the head) | count transactions per publication before/after; concurrent publisher regression | deletes `source.clj:413-521` |
-| the hook's path-less request (JVM re-hashes 791 stored paths) vs the bb digest walk | time `path-digests` over every stored path | ≤ 150 ms keeps it; else the walk stays as one function |
-| schema declarations and rows in ONE transaction on reset (Datahike updates `rschema` as schema datoms are added, `transaction.cljc:557-560`) | transact `[attr-decl {row using attr}]` on a scratch branch | collapses the cold path's ordered transactions to one |
+| reload from the CAPTURED bytes (`clojure.lang.Compiler/load` with a `StringReader`, `*file*` bound) instead of `require :reload` re-reading disk | adopt after editing the file between capture and reload | deletes the post-reload digest check and the retry at `cluster.clj:696` |
+| schema declarations and rows in ONE transaction on reset (`rschema` updates as schema datoms are added, `transaction.cljc:539-615`) | transact `[attr-decl {row}]` on a scratch branch | collapses the cold path's ordered transactions |
+| the pathless request replacing the hook's bb walk | `path-digests` over 791 paths | ≤ 150 ms retires `bin/seon-hook:1688-1819` |
+| clj-kondo `:parallel` with per-file groups (fork: `group-id` per explicit file) | fidelity diff, then time | 15.4 s → ? only with equal output |
 
 ## 7. Tests
 
 | Test | Disposition |
 |---|---|
-| `fn_test.clj` sections for `build-artifact`, `rows`, `reconcile-tx`, `plan-file-change`, `artifact-by-path`, `manifest-function-symbols`, `output-path-report`, `backfill-contract-facts!` | die with the vars (≈ 800 lines) |
-| 13 single-`deftest` `publication_*`/`source_*`/`fn/publication_*` namespaces | collapse to `cluster/publication_test.clj` (edit → transaction → adoption, one class each) and `fn/publication_test.clj` (analysis/rows/diff), sharing ONE small fixture program (three files under a fixture root, never `src/`) published once per namespace |
-| the 11 × 600,000 ms, 900,000, 1,200,000 escapes (`publication_{adoption,reuse,export,facet,cache,host}`, `source_nochange`, `fn/publication_test`, `test/publication_test`) | fixture defect: the small fixture removes the bound; `publication_host_test` (real boot) declares 60,000 with the measured 12.8–16.2 s boot as its reason |
-| `boot_test.clj` (6), `cohost_boot_test.clj` (1) | genuinely long: 60,000 each with the measured boot; `fresh_operator_test.clj` (41 tests, 2,206 lines) and `operator_test.clj` (1,441): process-record/advertisement/claim/reap/phase-log drills die with the mechanism; cold start, stop, down, reset, flock drills stay |
-| `publication_toolchain_test.clj` | dies with the toolchain digest |
-| new, one per class | contract change lints exactly its direct callers in the same report; docstring edit lints none; no-change returns the commit id with zero transactions; unsatisfiable reload set refuses; each phase bound fires as a typed error; a vanished source file answers no cache entry (fork) |
-| the lane runs | only tests reaching its change, in-process via `seon.test/check` over `run-owned`; never a suite |
+| `fn_test.clj` sections for the caller-less vars | die with the vars (≈ 800 lines) |
+| 13 single-`deftest` `publication_*`/`source_*`/`fn/publication_*` namespaces | collapse to `cluster/publication_test.clj` (edit → two reports → head → adoption, one class each) and `fn/publication_test.clj` (capture/lint/rows/diff), sharing the canonical base plus ONE small fixture program (three files under a fixture root, never `src/`) published once per namespace |
+| the 600,000 / 900,000 / 1,200,000 ms escapes (`publication_{adoption,reuse,export,facet,cache}`, `source_nochange`, `test/publication_test`) | fixture defect (a complete publication per fixture); the shared base removes the bound; `publication_host_test` (real boot) declares 60,000 with the measured 12.8–16.2 s boot as its reason |
+| `boot_test.clj` (4 × 600,000, 2 × 90,000), `cohost_boot_test.clj` (180,000) | genuinely long: 60,000 each with the measured boot |
+| `dev/fresh_operator_test.clj` (41), `dev/fresh_operator_reset_test.clj` (14), `operator_test.clj` (34) | process-record/advertisement/claim/reap/phase-log drills die with the mechanism; cold start, stop, exact down, reset and flock drills stay, moved in the same slice |
+| `fn/publication_toolchain_test.clj` | dies with the aggregate; the config-change → complete-analysis case takes its place |
+| new, one per class | the §2e six cases; contract change lints exactly its direct callers in report 2; docstring edit lints none; explicit no-change returns the commit id with zero transactions; pathless discovery admits an added file and retracts a removed one; unsatisfiable reload refuses; each phase bound fires typed; a reload refusal leaves the adoption record; byte-identical agent redefinition hashes equal to the core row |
+| the lane runs | only tests reaching its change, in-process through B4’s final `seon.test/run` on the exact supplied program; use currently admitted entry points only until their complete caller-conversion slice; never a suite |
 
 ## 8. Done, landing note, stop rules
 
-**Done** when: HEAD loads (`clojure -M -e "(require 'seon.fn 'seon.fn.analyzer 'seon.cluster 'seon.cluster.source 'seon.operator 'seon.operator.state)"`);
-the measurement script (re-homed to
-`docs/prds/agent-platform/research/measure-publication-path.sh`, same rows)
-prints `adopt-nochange ≤ 100`, `adopt-noncore ≤ 700`, `adopt-core ≤ 1500`,
-`adopt-first ≤ 100`, `fork < 1000`, `init-zero ≤ 60000` ms; the platform
-tier is green; the diff is net-negative by ≥ 8,000 lines; hook publication is
-enabled and one edit is observed adopted in `default`.
+**Done** when: HEAD loads (`clojure -M -e "(require 'seon.fn 'seon.fn.analyzer 'seon.program 'seon.cluster 'seon.cluster.source 'seon.operator 'seon.operator.state)"`);
+the re-homed script prints `adopt-nochange ≤ 100`, `adopt-noncore ≤ 700`,
+`adopt-core ≤ 1500`, `adopt-first ≤ 100`, `fork < 1000`, `init-zero ≤ 60000`
+ms with phase times and work counts; the platform tier is green (orchestrator);
+the disjoint source/script/hook ledger reports progress against the approximate 8,900-line target without dropping a guarantee;
+one live hook adoption is observed in `default` after the coordinated reset.
 
 **Landing note**: `docs/prds/agent-platform/landing/lane-b1.md` — every §4
-form with its value before and after, the script rows, the fork commits, the
-probe answers (§6, either way), the RESET NEEDED commits, and the seams
-handed to A1 (`instrument/apply!` namespace argument; carried projection),
-A2 (validator narrowing; `load-entities` finding), B2 (acquisition by
-`definition-digest`), B3 (`issue/index!` 16 ms/note), B4 (`program-digest`,
-the five digest reads, `publication-base!`).
+form with its value before and after, the script rows, the §2b attribution
+table, the probe answers (§6, either way), the RESET NEEDED commits, and the
+seams handed to A1 (`:seon.instrument/changed-identities`; `source/database`
+carried projection), A2 (validator share of the reset transaction), B2
+(acquisition by canonical definition identity against the actual installed callable and dependency context), B3
+(`issue/index!` 16 ms/note; the digest D1's conflict identity hashes), B4
+(`definition-digests` deletion, the six aggregate reads, `runner.clj:60`,
+`publication-base!`).
 
-**Stop** at: a held file (`git status` first); the seal/aggregate deletion
-before B4 has converted its reads (leave the keys, stop writing); the
-`instrument/apply!` change (A1's file — pass the argument, do not edit);
-an unsettled design — three options in the note: (1) scratch branch kept vs
-direct transaction on `current-src` if the concurrency regression fails;
-(2) `load-entities` vs entity maps if the validator is not the bulk;
-(3) prelude vs cache for agent forms if the transit read cost exceeds stub
-synthesis.
+**Stop** at a held file; aggregate retirement while B4 still reads it; A1’s unlanded arming consumer; or an unproven cache, loaded-callable or publication-custody guarantee. Preserve the existing mechanism while independent reductions continue. Raw import is diagnostic only and cannot replace admitted writes because it is faster. Captured-byte reload and agent-cache substitution are decided by the equivalence probes, not by a line target.

@@ -1,6 +1,6 @@
 ---
 type: plan
-status: first pass (Fable, 2026-09-21) for astra review; clean write follows
+status: implementation specification; proof gates stated below
 created: 2026-09-21
 tags: [agent-platform, lane-b3, errors, tasks, config, effects, env]
 ---
@@ -8,383 +8,434 @@ tags: [agent-platform, lane-b3, errors, tasks, config, effects, env]
 # Lane B3 — one error model, one task family, dials that mean something
 
 Owned: `src/seon/error.clj`, `src/seon/error/refusal.clj`, `src/seon/issue.clj`,
-`src/seon/issue/*`, `src/my/issue.clj`, `src/seon/plan.clj` (lifecycle),
-`src/seon/config.clj`, `src/seon/effect.clj`, `src/seon/search.clj`,
-`src/seon/env.clj`, `src/seon/bootstrap.clj`, `config/default.edn`, the
-`seon.error*`, `seon.issue*`, `seon.plan`, `my.plan*`, `seon.effect`,
-`seon.config*`, `seon.env`, `seon.search` schema resources, the
-`:seon.error/kind` and `:seon.error/class` sites in every file not held by
-another lane. Sources read end to end: the writer brief, data pack B3, the
-errors/issues/config deletion audit, the synthesis, the goals note (§2d, §2e,
-config rows, D1/D2/D3/D6/D8/D12/D13, §1k/§1o/§1q/§1r), the note sweep,
-packs A1 §4d, A2 §9, B2 §7, C1 §3.
+`src/seon/issue/*`, `src/my/issue.clj`, `src/seon/plan.clj`, `src/seon/config.clj`,
+`src/seon/effect.clj`, `src/seon/search.clj`, `src/seon/env.clj`,
+`src/seon/bootstrap.clj`, `config/default.edn`, the 42 schema resources matching
+`seon.error*`, `seon.issue*`, `seon.plan*`, `my.plan*`, `seon.effect*`,
+`seon.config*`, `seon.env*`, `seon.search*` (2,409 lines), and the
+`:seon.error/kind` / `:seon.error/class` sites in every file no other lane holds.
+Source anchors and historical observations refer to HEAD `209a6652a`. Recheck current ownership before implementation; this specification claims no new live proof. B3 also owns surviving `context.clj`, `problems.clj`, `eval.clj`, `background.clj`, `shell/jvm.clj` and `note.clj` code omitted from the earlier ownership table, coordinating B2's terminal-state move and B4's test callers. Their baselines must be counted separately before adding them to §8; no implicit deletion or ownership gap is permitted.
 
 ## 0. For the owner: what was dumb, and the simpler way
 
-**Errors.** Today an error is built by copying itself. `error/diagnostic`
-demands seven `diagnostic-*` keys and 85 % of the time `diagnostic-operation`
-is the `operation` two lines up (`error/refusal.clj:37-74`; 275 sites; a live
-specimen this session had `diagnostic-cause` = `message` verbatim and
-`diagnostic-evidence` = `frame` verbatim). The set of error schemas a boundary
-may return is copied by hand into 14 places (695 lines) and has already
-drifted into six different sets — while `error/facet-keys` (`error.clj:1921`)
-derives the true set from the registry in 15 lines. 799 sites still write a
-`:seon.error/kind` that the live schema does not even store. When a fault is
-recorded, the whole in-memory map is printed to a 55 KB EDN string and stored
-beside the datoms that already say the same thing (live occurrence on
-`default`: `:seon.error/data-size 55201`, `:seon.error/capped? true`); a Malli
-problem path is exploded into three component entities with ordinal datoms
-and 33 predicates/generators (`error.clj:2314-2658`) exist only to check that
-the explosion can be reassembled. The renderer lives in the recorder, so two
-`requiring-resolve` delays break a load cycle the split would not have.
+**Errors.** An error is built by copying itself. The one constructor demands
+seven `diagnostic-*` keys (`error/refusal.clj:37-74`) and 275 sites supply them;
+in the two specimens read the 2026-09-21 evidence collection the "cause" was a verbatim copy of the
+message beside it, and the "evidence" a copy of the frame beside it
+(`effect.clj:677-694` copies its `:seon.error/offending` into `diagnostic-cause`).
+The set of error schemas a boundary may return is copied by hand into 14 places
+(695 lines, six different member sets — pack B3 §4b) while `error/facet-keys`
+(`error.clj:1921`) derives the true set from the registry. 799 sites still write
+a `:seon.error/kind` the live schema does not store (pack §3a). When a fault is
+recorded the recorder prints the map to EDN and stores it beside datoms that say
+the same thing, then explodes a Malli path into component entities and keeps 33
+predicate/generator definitions (`error.clj:2314-2658`) to prove the explosion
+reassembles. On every occurrence it pulls and sums ALL occurrences of the root
+(`error.clj:1538-1552`) to learn whether this is the first. Rendering lives in the
+recorder, so `seon.db` reaches `seon.error` through five lazy delays
+(`db.clj:48-60`) and `seon.error` reaches `seon.sci.eval` through one more
+(`error.clj:37-41`).
 
-The simpler way: an error is one flat map — when, where, who, an optional
-message, the offending value — plus the members its own schema declares. It
-is constructed by one additive function, validated once by the armed wrapper
-against the union the function declared (already landed at
-`instrument.clj:775-808`), recorded as one root per D13 signature with one
-occurrence per (agent, turn), and the offending value is the value renderer's
-shown text plus a `result/e<id>` reference — the same mechanism every
-evaluation result already uses. Nothing is stored that the schema does not
-declare. Work per error is proportional to the declared union of the one
-function that returned it, never to the whole schema population.
+**The simpler way, as data flow.** An error is one flat map: when, where, who,
+an optional message, the members its own declared schema names. The function
+that returns it declares which error schemas it can return, and the armed
+wrapper checks the returned map against exactly those (A1's seam) — through the acquired output validator. Callers do not repeat classification. Broad successful output schemas must still refuse an undeclared error. Recording is a different question:
+identity (D13) needs the set of schemas the observation satisfies, computed
+once per RECORDED error, carried into the writer, hashed. The writer reads the
+one occurrence it increments (one lookup), asks whether the root already has an
+occurrence (one seek), and on a repeat hands the signature to the task writer,
+whose identity upsert makes the call idempotent. When an evaluation owns a result, its offending value is the value renderer's shown text plus that result reference; outside an evaluation, availability is explicit; nothing the schema does not declare is stored.
+Rendering leaves the recorder; each delay retires with its actual caller and require-cycle proof.
 
-**Tasks.** Two lifecycles exist for one noun: `seon.issue` (1,510 lines,
-notes ingested from markdown by a hand-written character scanner that cost
-484 ms per publication) and `seon.plan` (1,887 lines, a per-agent component
-tree with its own reconcile). The database on `default` holds 1,882 issue
-entities, every one from a note path, none with a detector, none assigned —
-the directory and the database are two registries of the same thing. Done is
-decided by re-running a whole-program detector to check one subject.
+**Tasks.** Two lifecycles for one noun: `seon.issue` (1,510 lines; notes read by
+a hand-written character scanner, 1,882 issue rows on `default` from note
+paths, none with a detector, none assigned — probe P3) and `seon.plan` (1,887
+lines; a per-agent component tree with its own reconcile). Done is decided by
+re-running a whole-program detector to check one subject (`issue.clj:1042-1064`).
 
-The simpler way: `seon.task` is one entity — linked facts plus an optional
-agent. One transaction function turns any trigger (a detector finding, a
-recurring fault, a merge conflict, an authored step) into a task identity and
-either wakes the task's agent or creates task and agent together. Done is one
-query. A plan step is a task with a parent. Notes never enter `src/`.
+**The simpler way.** `seon.task` is one entity: linked facts plus an optional
+assigned agent. One transaction function turns a trigger into a task identity
+(detector + subject) and either does nothing new (the task exists) or creates
+it; one transaction function starts it (task + agent + first turn atomically,
+refusing a task with no way to be done); done is a subject-local query written
+by settlement only. A plan step is a task with a parent. Notes never enter `src/`.
 
-**Dials.** 92 config keys; 33 are tuned constants nobody derives from an
-event and 9 stand in for an event the system already publishes (a turn's
-`closed-tx`, a child's exit). Bounds belong to the seam that admits the work;
-a timer beside an event is a guess.
+**Dials.** 96 config dials live (probe P1); 23 are tuned constants nobody derives
+from an event. A bound belongs to the seam that admits the work; a timer beside
+an event the system already publishes is a guess. Each such dial is replaced by
+its event AND a bound at that seam, or it stays until that proof exists.
 
 ## 1. Goal and the numbers that prove it
 
-| Measure | Before (measured) | After (target) | Form |
+| Measure | Before (measured at HEAD / on `default`) | After (target) | Form |
 |---|---|---|---|
-| Owned src lines | 10,972 (`error` 2,790 · `issue`+`plan`+`my` 4,169 · `config` 926 · `effect` 1,053 · `search` 571 · `env` 531 · `bootstrap` 932) | ≈ 2,500 (§8 table) | `wc -l` |
-| Owned schema lines | ≈ 2,400 | ≈ 900 | `wc -l resources/seon/schemas/{seon.error*,seon.issue*,seon.plan,my.plan*,seon.effect,seon.config*,seon.env,seon.search}.edn` |
-| `:seon.error/kind` sites | 799 (306 src) | 0 | `rg -c ':seon.error/kind'` |
-| `:seon.error/class true` | 172 in resources | 0 | `rg -c` |
-| `diagnostic-*` key lines | 2,310 src | 0 | `rg -c ':seon.error/diagnostic-'` |
-| union copies | 14 (695 lines) | 0 | `rg -c ':my.background/error :my.edit/error'` |
-| bytes stored per recorded fault (live) | 55,201 EDN + blob 13,279 + root | datoms of the declared schema + one `result/e<id>` shown text ≤ profile | probe §4.1 |
-| issue/task entities on `default` | 1,882 (all from notes, 0 detector, 0 agent) | only tasks with a live subject (owner audit of 369 notes) | probe §4.2 |
-| done check for one task | whole-program detector run (`detector-rows`, `issue.clj:629`) | one scoped query, O(1 subject) | probe §4.3 |
-| config keys | 92 (86 dials) | 50 | `rg -c ':seon.config' config/default.edn` |
+| owned src lines | 10,972 (`error` 2,790 · `issue`+`plan`+`my` 4,169 · `config` 926 · `effect` 1,053 · `search` 571 · `env` 531 · `bootstrap` 932) | ≈ 2,850 retained in the repository (§8: 2,500 in owned files + 300 moved to `seon.render.error` + 45 moved to `admission`) | `wc -l` |
+| owned schema lines | 2,409 in 42 files | ≈ 1,000 (provisional until §2a's stored shape settles) | `wc -l resources/seon/schemas/{seon.error*,seon.issue*,seon.plan*,my.plan*,seon.effect*,seon.config*,seon.env*,seon.search*}.edn` |
+| `:seon.error/kind` lines | 799 (src 306 · test 443 · script 46 · bin 4) | 0 | `rg -c ':seon.error/kind' src test script bin` |
+| `:seon.error/class true` lines in resources | 172 | 0 | `rg -c ':seon.error/class true' resources` |
+| `:seon.error/diagnostic-` lines in src | 2,431 | 0 | `rg -c ':seon.error/diagnostic-' src` |
+| hand-copied unions | 14 copies / 6 files / 695 lines | 0 | pack §4b table |
+| bytes per recorded fault, specimen entity 41647 | reports `data-size` 55,201; stores 1,062 UTF-8 bytes of `data-edn`; `capped? true`; the occurrence blob entity carries a digest and NO size datom, so blob bytes are unmeasured (probe P2) | declared datoms + one shown text ≤ the agent profile; duplicate EDN removed; complete-rendering blob durability remains an owner decision (§2a) | probe §4.1 |
+| recorded faults on `default` | 2 roots, 2 occurrences (counts 4 and 1) | unchanged semantics, smaller rows | probe P1 |
+| issue/task rows on `default` | 1,882 (`:seon.issue/agent` 0, `:seon.issue/detector` 0 — probe P1 returned nil for both counts) | only tasks with a live subject after the owner's note audit | probe §4.2 |
+| done check for one task | `detector-rows` over the whole program (`issue.clj:629`, called from `done?` `:1058`) | one identity seek + the subject's reaching tests | probe §4.3 |
+| occurrence write | pulls every occurrence of the root (`error.clj:1544-1547`) | one occurrence lookup + one existence seek | probe §4.4 |
+| dials | 96 (`seon.config/dial-attributes`, live) | measure remaining declarations after each §2c event/bound proof; 73 is a conditional target | `(count (seon.config/dial-attributes (seon.db/carried-projection db)))` |
 
-Live probe recorded this session (form and value): `seon.error/facet-keys`
-on a raw `datahike.api/db` value refused — `(seon.db/carried-projection
-(datahike.api/db conn))` is `nil`; the projection rides only `seon.db/db`
-values. The refusal itself carried `diagnostic-cause` = `message` and
-`diagnostic-evidence` = `frame`, the duplication §0 names.
+Historical probes from 2026-09-21, all `eval_clj` mode `jvm`, cluster `default`, `read_only true`:
+
+- **P1** (5 ms): `{:reported 55201 :edn-bytes 1062 :capped? true :root-blob-digest? false :occurrence-count 0 :roots 2 :occurrences-total 2 :issues-with-agent nil :issues-with-detector nil :effect-rows nil :dials 96}` — the form pulled entity 41647's `data-size`/`data-edn`/`capped?`, counted `:seon.error/signature`, `:seon.error.occurrence/id`, `:seon.issue/agent`, `:seon.issue/detector`, `:seon.effect/id` roots with `(count ?e) .`, and counted `dial-attributes`.
+- **P2** (2 ms): the two occurrence components on `default` pulled with `{:seon.error.occurrence/data-blob [*]}` → counts 4 and 1, each blob entity `{:seon.error.occurrence/blob-digest "<64 hex>"}` only — no `:seon.blob/size` on it; the blob was not read and the blob's bytes are reported as unmeasured, never estimated.
+- **P3** is the historical census below (`:issues 1882 :kind-installed? false :largest-error 676197`).
+
+Exact historical forms, 2026-09-21, `eval_clj` JVM mode, `read_only true`, cluster `default`, timeout 10,000 ms; these are evidence from that basis, not fresh observations:
+
+Probe 1, MCP `ret` 3 ms:
+
+```clojure
+(let [db (seon.db/db (seon.operator/connection "default"))] {:basis (seon.db/basis-t db) :projection? (some? (seon.db/carried-projection db)) :kind-installed? (contains? (:schema db) :seon.error/kind) :largest-error (seon.db/q '[:find (max ?n) . :where [_ :seon.error/data-size ?n]] db) :issues (seon.db/q '[:find (count ?e) . :where [?e :seon.issue/id _]] db)})
+;; => {:basis 536870949, :issues 1882, :kind-installed? false,
+;;     :largest-error 676197, :projection? true}
+```
+
+Probe 2, MCP `ret` 4 ms:
+
+```clojure
+(let [db (seon.db/db (seon.operator/connection "default")) ids (seon.db/q '[:find [?e ...] :where [?e :seon.error/data-size 55201]] db)] (mapv (fn [e] (let [r (seon.db/pull db [:seon.error/data-size :seon.error/data-edn :seon.error/capped? :seon.error/data-blob :seon.error.occurrence/data-blob] e)] {:entity e :reported-size (:seon.error/data-size r) :stored-edn-bytes (when-let [s (:seon.error/data-edn r)] (alength (.getBytes s "UTF-8"))) :capped? (:seon.error/capped? r) :blob? (boolean (or (:seon.error/data-blob r) (:seon.error.occurrence/data-blob r)))})) (take 3 ids)))
+;; => [{:blob? true, :capped? true, :entity 41647,
+;;      :reported-size 55201, :stored-edn-bytes 1062}]
+```
+
 
 ## 2. The data flow
 
 ### 2a. One error value
 
+**Durability decision before the stored-shape cut.** The proposed bounded shown text and in-memory result handle do not preserve a complete rendering after restart. The owner must decide whether recorded errors also retain a complete-rendering blob. Until that decision, retain the existing blob storage and readers; every blob deletion in the table and commit 10 is conditional. Duplicate copies can be removed only after the selected durable representation preserves the required evidence. This gate is distinct from evaluation results, whose objects remain in memory only.
+
 | Step | Data | Computed when | Carried where | Proportional to |
 |---|---|---|---|---|
-| construct | `{:seon.error/at :seon.error/layer :seon.error/operation ?message ?offending ?member ?cause + schema members}` | at the refusing function | the return value (or `ex-data` of the one throw at a `:panic` seam) | the one map |
-| validate | declared union of the returning arity | at the armed wrapper after the call (`instrument.clj:775-808`) | the wrapper's `::declared` permission | **declared members only**: `(some #(valid? % v) declared)`, not `facets` over all ~116 keys then intersect (today's `:787`); the all-facets set is computed only on the refusal path for the message |
-| identity | D13 signature (`error.clj:200-225`, unchanged) | at recording | `:seon.error/signature` (identity attribute) | one `id/id` over a 7-tuple |
-| offending | value-renderer shown text + `result/e<id>` | at recording (`prepare`, open decision 21 kept: the constructor stays pure) | `:seon.error/shown`, `:seon.error/result-id` on the occurrence | the render profile, no second bound (`seon.config.error/max-evidence-bytes` deleted) |
-| store | root `{signature layer operation frame exception-class}` + occurrence component `{id count first-at last-at process ?agent ?turn shown result-id}` | one `:db.fn/call commit-call` (`error.clj:1567`) | Datahike; provenance in tx-meta (`transaction.cljc:175`), never on the entity | the datoms the schema declares — no `data-edn`, `data-size`, `capped?`, `dropped-fault-*`, `proc`, `op`, `cid`, `throwable-class`, `steward`, `regressions`, `seon.instrument/*` mirrors |
-| explanation | Malli problem → `:seon.error/path` (a value), `:seon.error/expected-key`, `:seon.error/expected-shape`; the full explain rides the `result/e<id>` | at the wrapper's refusal | the flat value | one problem; `location`/`segment`/`omission`/`key` components and 33 predicate defs deleted |
-| recurrence | occurrence count sum | inside `commit-call` on `:db-before` | `:seon.error.occurrence/count` | `recurrence` (`error.clj:1538`, unchanged) |
-| task | recurring fault → `seon.task/trigger-call` with detector `'seon.error/recurring` and subject `[:seon.error/signature s]` | inside the same transaction as the second occurrence | the task's `:seon.task/errors` ref | one lookup by identity (§2b) |
-| render | `seon.render.error/ai` / `html` (B2) declared ONCE on `:seon.error/base` | at read | schema property | 275 property copies deleted; the pair is found by `extends-schema? :seon.error/base` (probe §6.2) |
+| construct | `{:seon.error/at :seon.error/layer :seon.error/operation ?message + the declared domain members}` | at the refusing function, `at` supplied as data | the return value (or `ex-data` of the one throw at a `:panic` seam) | the one map |
+| validate | the returning arity's DECLARED error alternatives | after the call, in A1's armed wrapper (`instrument.clj:775-808` today) | compiled once at wrapper acquisition (A1: capture the child's declared output permission through Malli's `:gen` option, `core.cljc:2207`) | the declared alternatives; a broad success output must not admit an undeclared error; no classification against the ~116-key population on a successful return |
+| identity | D13 signature: `[layer operation (sorted satisfied schema keys) throwable-class frame expected-key/shape path]` → `id/id … 64` (`error.clj:200-225`) | once per RECORDED error, before the writer, from the complete error and its supplied projection | `:seon.error/signature` on the root | the error-schema population (`facets`, `error.clj:1939`) — paid once per recording, never per return; stated honestly, not hidden in the union check |
+| result | `{:seon.error/shown :seon.error/result-id?}` | before recording, by the caller, through B2's result mechanism with an explicit profile and, when a ctx is supplied, the owning binding (`prepare-result`'s two renders and `blob/put!`, `error.clj:635-668`, are deleted) | the request handed to `recording` | one render under the profile; the handle names the OFFENDING value, not the explanation; after restart the handle is explicitly unavailable and the text remains |
+| store | root `{signature id layer operation frame? exception-class? expected-key? expected-shape? path?}` + occurrence component `{id count first-at last-at process agent? turn? message? shown? result-id?}` + the storable attributes of the schemas the observation satisfies (the existing `diagnostic-attributes` derivation, `error.clj:1601-1611`, kept: it is a projection query, not a hand list) | one `:db.fn/call commit-call` (`error.clj:1567`) | Datahike; transaction provenance in tx-meta (`transaction.cljc:903-922`); `:seon.error.occurrence/process` is the OBSERVED process, declared as such in its docstring | the declared datoms — `data-edn`, `data-size`, `capped?`, `data-blob`, `dropped-fault-*`, `proc`, `op`, `cid`, `throwable-class` (duplicate of `exception-class`), `regressions`, `issue` (the task points at the error, never the reverse) are deleted from `seon.error.edn:103-140` and from `commit-call`'s `evidence` list (`:1621-1630`); `:seon.instrument/fn`/`arm`/`expected` survive as members of their own declared schemas |
+| path | `:seon.error/path` one value | at the wrapper's refusal | `:db.type/any` (A2's fork admission; RESET) — otherwise retain the existing structured representation until A2 supplies equivalent queryable storage | one problem; the `location`/`segment`/`omission`/`key` components and the 33 predicates (`error.clj:2314-2658`) retire only after the replacement preserves the D13 identity and queryable path |
+| occurrence | `count`, `first-at`, `last-at` | inside `commit-call` from the mid-transaction db | the one occurrence `[:seon.error.occurrence/id id]` (already `old`, `:1578`) | one lookup; `recurrence` (`:1538`) and its sum are deleted |
+| repeat → task | the complete task-trigger request for detector `seon.error/recurring`, subject `[:seon.error/signature signature]`, error ref and declared completion inputs | inside the same transaction when the root already has an occurrence: one seek `[:find ?o . :in $ ?s :where [?r :seon.error/signature ?s] [?r :seon.error/occurrences ?o]]` | the task's `:seon.task/errors` ref | one identity upsert; idempotent on every later occurrence |
+| refusal inside the writer | a read that fails inside `commit-call` | — | throws through the transaction-function refusal convention (`turn.clj:305 refuse!`), never a map returned as transaction data | — |
+| render | `seon.render.error/render-ai` / `render-html` (B2's namespace) | at read, through ordinary schema-pair selection | the schema property, declared once on `:seon.error/base`; a composite error still renders the base block plus one block per satisfied schema (§1o) | 275 identical property copies deleted only after §6.2 proves the composite behaviour survives |
 
-The constructor: `(seon.error/error m)` — additive, pure, no id minting, no
-rendering. Input `[:map [:seon.error/layer :qualified-keyword]
-[:seon.error/operation :qualified-symbol] [:seon.error/message {:optional
-true} :string] [:seon.error/offending {:optional true} :seon.schema/value]
-[:seon.error/member {:optional true} :seon.error/member] [:seon.error/cause
-{:optional true} [:or :seon.error/throwable :seon.error/base]]]`, open (the
-schema's own members ride through); output `:seon.error/base`. It `assoc`s
-`:seon.error/at`, and when `:seon.error/cause` is a Throwable, `:seon.error/frame`
-and `:seon.error/exception-class` from it. `diagnostic-member` → `member`;
-`diagnostic-cause` was in practice a keyword kind (`:seon.issue/not-found`)
-— under D3 the schema is the meaning, so it is deleted at the site, and
-`cause` survives only as the wrapped Throwable or upstream error value.
-`diagnostic-layer/operation/offending/expected/evidence` are the base members
-already on the map.
+**The constructor's contract.** `seon.error.refusal/diagnostic` (`refusal.clj:37`)
+keeps its name and stays the one leaf; the pass-through facade `seon.error/diagnostic`
+(`error.clj:304`) is deleted. Input: `[:map [:seon.error/at :seon.error/at]
+[:seon.error/layer :seon.error/layer] [:seon.error/operation :seon.error/operation]
+[:seon.error/message {:optional true} :seon.error/message] [:seon.error/cause
+{:optional true} :seon.error/throwable]]`, open — every domain member rides through
+untouched. It removes nothing; it adds `:seon.error/frame` and
+`:seon.error/exception-class` from a supplied Throwable and nothing else. Output:
+`:seon.error/base`. This is the ONE Var whose output is the base — the arming
+already exempts an arity declared as base (`::base?`, `instrument.clj:800`). It
+broadens no caller's union because the caller's own arity still names its exact
+error schema and the caller's wrapper validates the returned map against that
+declaration: the constructor's base output does not replace a producing caller's exact union. Requiring `at` where it was previously absent is a contract change, so every caller supplies it in the same constructor-conversion slice. A site
+without a Throwable may write the map literal directly (§6.1 probes whether the
+constructor dissolves entirely into `throwable-members`).
 
-Kinds and classes: pure code. `kind` is absent from the live schema (pack
-§3a); 306 src sites drop the key or convert `(:seon.error/kind x)` guards to
-the callee's distinguishing required member (`;; debt:` sites, 195 today,
-each converted or deleted — never a predicate, D12). 172 `:seon.error/class
-true` markers deleted; `error_class_schema_test` deleted.
+**`diagnostic-cause`**: `effect.clj:677-694`
+carries a Throwable in both `:seon.error/offending` and `diagnostic-cause`, and the
+MCP specimen carried the message twice (pack §4a). The rule is therefore
+"delete duplicate labels, never information by prefix": at each of the 275
+sites, a `diagnostic-*` value that copies a sibling member is dropped; one that
+does not is kept under its owning declared member (a Throwable → `:seon.error/cause`
+→ frame/exception-class; a keyword "cause" that named a kind is deleted under
+D3, the schema being the meaning). The landing note counts each disposition.
 
-Union copies: the 14 sites are all pass-throughs (cause-chain walk,
-stored-observation restore, kernel `failure-value`, admit decode, effect
-`request-result`, `seon.db/error-result`). PRD-PF §1.2 admits `:seon.error/base`
-"at a genuinely polymorphic inspection boundary"; the wrapper already exempts
-`::base?` arities (`instrument.clj:800`). Every domain function still names
-its union. The `refusal_test` drift check dies with the mirror. This answers
-pack open question 1: the copies cannot be reconciled because they disagree;
-the boundary they guard never dispatched on the set.
+**Kinds, classes, guards.** `kind` is absent from the live schema (P3
+`:kind-installed? false`): the 799 sites are a pure code cut. D3 rules kind
+and the class markers deleted in ONE cut: the 799 lines (37 src files,
+`cluster.clj` 25 and `fn.clj` 25 among them), the 172 `:seon.error/class true`
+markers, and `error_class_schema_test` land in one commit once the two held
+files are free (§5 commit 4). The 167 `;; debt:` guards (`rg -c ';; debt:' src`)
+are converted per callee union to the callee's declared propagation path — never another repeated guard or predicate; preserve a distinguishing member read only where the function makes a genuine domain decision — in the commit that fixes that callee's union.
 
-Load cycle: `error.clj:40` and `db.clj:52-60` delays exist because
-`seon.error` renders. Everything from `schema-expectation` (`:977`) through
-`index-refusal-prose` (`:2298`) plus `render-*`, `faults-*`, `notice`,
-`log-line` moves to `seon.render.error` (B2); `seon.error` then requires no
-render namespace and `seon.db` requires `seon.error` directly. The
-`schema-expectation` case table (`:977-1000`) is deleted when A1's
-`default-errors` entries land (pack A1 §4d: ten of seventeen already present).
+**Union copies.** Of the 14, the six inside `error.clj` and the two in
+`refusal.clj` are inspection inputs (cause-chain walk, stored-observation
+restore, `refusal`) and become `:seon.error/base` inputs; `kernel.clj:540-574`
+and `admit.clj:576-613` are B2's OUTPUT contracts, `seon.effect.edn:195-458` is
+`:seon.effect/request-result` (an output; §2d), `seon.db.edn:9-30` is A2's
+`:seon.db/error-result`. Output unions are NOT replaced by base: each keeps or
+derives its exact alternatives from the callables it forwards (the producing-contract rule).
+The `refusal_test` drift check dies with the eight inspection copies.
 
-`:panic`/`:record` (§1k): one dial `:seon.config/on-core-error`, read at the
-fault committer (`cluster.clj:2709`, B1) and `db.clj:3228` (A2). B3 changes
-nothing there; `:seon.config.error/escalate-to` and `/recurrence-limit`
-(escalation through the retired steward) are deleted — recurrence opens the
-task (row above) instead of a message to `"root"`.
+**Load cycle.** Functions that move to `seon.render.error` (B2 lands the
+namespace; B3 deletes them from `error.clj` in the same publication):
+`notice :831`, `schema-expectation :977`, `explain-problem :1020`,
+`problem-sentence :1072`, `log-line :1421`, `render-ai :1975`, `render-html :1989`,
+`faults-form :2119`, `index-refusal-prose :2298`, with their private helpers
+(`refusal-text`, `rendered-error-value`, `ai-prose`, `scalar-text`) and the
+`docstring-parts` delay (`error.clj:37-41`). `seon.error` then requires no render
+namespace. `db.clj:48-60` holds FIVE delays into `seon.error`: three prose
+functions (they die when A1's `default-errors` overlay renders the noun
+description — A1-7) and two render pairs; both are A2's to repoint or delete
+after the require graph is read — B3 edits nothing in `db.clj`.
+
+**`:panic`/`:record`** (§1k): the one dial `:seon.config/on-core-error` is read at
+the fault committer (B1's `cluster.clj`) and `db.clj:3228` (A2); B3 changes
+nothing there. `:seon.config.error/escalate-to`, `/recurrence-limit`, `steward`
+(`error.clj:1526`), `message-tx` (`:1553`) and the `recipients` block
+(`:1663-1669`) are deleted: recurrence opens a task, never a message.
 
 ### 2b. One task family
 
-Entity `:seon.task/task` (`resources/seon/schemas/seon.task.edn`, new file,
-replaces `seon.issue.edn`, `seon.issue.citation.edn`, `seon.plan.edn`,
-`my.plan.edn`, `my.plan.item.edn`):
+`resources/seon/schemas/seon.task.edn` (new; replaces `seon.issue.edn`,
+`seon.issue.citation.edn`, `seon.plan.edn`, `my.plan.edn`, `my.plan.item.edn`).
+Observations are values, statements are refs (G2):
 
 | Attribute | Type | Deletion dial | Note |
 |---|---|---|---|
-| `:seon.task/id` | string, identity | — | `seon.task/subject-id` = `seon.issue/subject-id` verbatim (`issue.clj:554-564`, C1 §3) for detected tasks; `id/id` of `[title subject]` for authored |
+| `:seon.task/id` | string, identity | — | detected: `(id/id (into (sorted-map) {:seon.task/detector detector attr value}))` — the exact input keys of `issue/subject-id` (`issue.clj:554-564`) with the key renamed; authored: supplied, or minted once by `(id/id)` — never from the title |
 | `:seon.task/title`, `/problem` | string | — | problem is the instruction text |
-| `:seon.task/severity` | enum blocker/friction/cleanup | — | the one closed-set exception (AGENTS §3); ranks the index |
-| `:seon.task/detector` | ref → `:seon.fn` | optional, sweep | present on detected tasks |
-| `:seon.task/subject` | `[:tuple :qualified-keyword :seon.schema/value]` as a VALUE | — | the observed identity (G2); the ref lives in the typed set below |
-| `:seon.task/functions` `/tests` `/errors` `/namespaces` | `[:set :seon.db/ref]` | optional, sweep | the linked facts; `:seon.render/units` |
-| `:seon.task/agent` | ref, `:seon.wake/listen true`, `:seon.wake/opens-turn? true` | optional | as `:seon.issue/agent` today (`seon.issue.edn:agent`) |
-| `:seon.task/updated-tx` | ref, listened | optional | a repeat trigger asserts `"datomic.tx"` here: the existing agent wakes, no new task, agent or message (D2) |
-| `:seon.task/budget`, `/budget-exhausted-tx`, `/resolved-tx`, `/created-by` | as issue today | — | T1/T4 unchanged |
-| `:seon.task/parent` | ref → task | optional, sweep | a plan step; `:seon.task/needs [:set ref]`, `:seon.task/position :int` |
+| `:seon.task/severity` | enum blocker/friction/cleanup | — | the one closed set (AGENTS §3); ranks the index |
+| `:seon.task/detector` | `:qualified-symbol` VALUE | — | present on detected tasks; a symbol with no `:seon.fn` row is reported positively, never "done" |
+| `:seon.task/subject` | `[:tuple :qualified-keyword :seon.schema/value]` VALUE | — | the installed identity value the detector saw |
+| `:seon.task/tests`, `/functions`, `/namespaces` | `[:set :qualified-symbol]` VALUE | — | retracting a test touches no task datom; a cited symbol with no row is "unknown", never green; append-only after assignment (today's `seon.issue.edn:10` property, kept) |
+| `:seon.task/errors` | `[:set :seon.db/ref]` | optional, sweep | the error root(s); the task points at the error, never the reverse |
+| `:seon.task/agent` | ref, `:seon.wake/listen true`, `:seon.wake/opens-turn? true` | optional | the ASSIGNED agent (D2), asserted exactly once by `start-call`; this is today's `seon.issue.edn:30-33` declaration moved verbatim — the only listened task attribute and not a new one. The RESPONSIBLE agents are derived `fn → ns → :seon.ns/agents`, never stored (goals §5) |
+| `:seon.task/budget`, `/budget-exhausted-tx`, `/resolved-tx`, `/created-by` | as `seon.issue` today | — | T1/T4 unchanged |
+| `:seon.task/parent` | ref → task | optional; writer refuses unrepaired incoming obligations before sweep | a plan step; with `:seon.task/needs [:set ref]` and `:seon.task/position :int` |
 
-Deleted with the note pipeline: `status` (open = no `resolved-tx`, derive or
-die), `opened`, `path`, `keys`, `files` + citation component, `runs`,
-`issues`, `members`, `unresolved`, `commits`. Live evidence: 1,882 issue
-entities ≈ 489 open + 1,398 archived notes — the indexer walks `archive/`
-too (inferred from the count, not verified by path).
+Deleted with the note pipeline: `status` (open = no `resolved-tx`), `opened`,
+`path`, `keys`, `files` + the citation component, `runs`, `issues`, `members`,
+`unresolved`, `commits`, `class`. No `updated-tx`, no additional wake attribute
+(goals §5: "do not put a wake attribute on the task").
 
 | Mechanism | Data | When | Where | Proportional to |
 |---|---|---|---|---|
-| **D2 writer** `seon.task/trigger-call [db request]` | `{detector subject severity title problem ?budget ?created-by}` | inside the caller's transaction (fault committer, detector schedule, merge writer, `my.task/add!`) | `:db.fn/call` | one identity lookup: absent → task + agent (+ first turn, the agent row shape `issue.clj:1093-1230` today, composed from B2's agent creation tx) ; present with agent → `updated-tx` only; present without agent → agent |
-| done `seon.task/done?` | tests verified on current reach (`tests-done-query`, `issue.clj:1028`, kept) OR detector scoped to the ONE subject returns nothing | at settlement | query | detectors take `{:seon.task/subject [a v]}` and add `:in ?subject` — today `done?` re-runs the whole-program detector (`issue.clj:1042-1060`) |
-| settle `seon.task/settle-call [db agent-id]` | tasks of this agent with `done?` → `resolved-tx "datomic.tx"`, budget exhaustion → `budget-exhausted-tx` + root task | turn close | replaces `plan/settle-call` (`plan.clj:952`) + `issue/exhaust-tx` (`:1310`) | the agent's open tasks |
-| test run | the task's stale tests (`stale-issue-tests`, `plan.clj:791`) | turn close, before settle | `seon.test/run-owned` (B4's seam) — `run-issue-tests!` (`plan.clj:823`) is deleted; the 7 `turn.clj` sites (B2 §7) call `seon.task/run-tests!` + `seon.task/settle-call` | stale tests only (reach digest) |
-| detectors | `public-without-doc`, `-contract`, `-reaching-test` (`issue/detect.clj:181,228,285`) | when a root `seon.schedule.task` row fires (`schedule.clj:331 fire-call`) and calls `seon.task/trigger-detector!` | `seon.task` (queries, ~25 lines each) | `generate`/`generate!` (`issue.clj:690,749`) and publication-time minting deleted; findings are rows only through `trigger-call` |
-| template | render pair `seon.task/render-ai` / `render-html` + `:seon.render/units` | at read | the schema property | `issue/opening.clj` (232 lines, dial `:seon.config.render/issue-opening`, three candidates) deleted: the 160-byte namespace picture won the 7-opening trial (goals §2d) |
-| conflict task (D6/D8) | detector `'seon.program/conflict`, subject `[:seon.fn/sym x]`, problem = both sources + basis commit id rendered by `seon.program/history` | the merge writer (B1) | `trigger-call` | fingerprint identity ⇒ one instance |
-| plan step | a task with `parent`/`needs`/`position`, agent = author | `my.task/add!` | same entity | `plan!`/`compile-tree`/`refuse-*` (`plan.clj:1202-1576`, 375 lines) deleted; current step DERIVES as the lowest-position open task with no open `needs` (`derived-frontier`, `plan.clj:265`, kept as one query) |
+| `seon.task/trigger-call [db request]` | detected request: detector + subject + declared task members; authored request: supplied/once-minted id + title/problem + completion inputs | inside the caller's transaction (fault writer, detector run, merge writer, `my.task/add!`) | `:db.fn/call` | one identity lookup: present → `[]` (no new task, agent or notification: D2); absent → the task row. Never creates an agent |
+| `seon.task/start-call [db request]` | `{:seon.task/id task-id}` plus optional `:seon.task/agent existing-agent-id` | inside the starting transaction | `:db.fn/call` | refuses: no task; the task is already assigned; no declared completion evidence (tests/detector for repair work, a declared triggering-message/reply completion relation for conversation, or nonempty derived children for a parent); detector/subject naming no current row; a named agent that does not exist; unavailable completion inputs. Admits: composes B2's agent-creation and first-turn transaction data for a NEW agent, or asserts `:seon.task/agent` on an EXISTING agent (root for a conflict task). The assertion is the first wake |
+| repeat trigger, assigned task | a new occurrence on a linked error root, a new detector finding | inside that transaction | the error's occurrence datoms | no task datom changes; B2 routes the new actionable occurrence through the existing listened message/occurrence owner, then the task read refreshes by its evidence. Continuation alone cannot wake a parked or budget-exhausted agent; prove that case before replacing delivery. Duplicate delivery emits no second occurrence or message |
+| repeat trigger, unassigned task | same | same | — | `[]`; the task waits for `start-call` |
+| duplicate delivery | the same finding submitted twice in one transaction or two | — | identity upsert | one task, one agent, zero notifications; proven by §7's idempotence regression |
+| `seon.task/done?` [db task] | declared completion evidence | at settlement, against ONE database value | pure query | `(tests? ∨ detector?) ∧ (tests? ⇒ every cited symbol has a `:seon.test` row with positive green at current reach — today's `tests-done-query`, `issue.clj:1028-1040`) ∧ (detector? ⇒ the detector's subject-scoped query names nothing)`; a missing test row, missing subject or unresolvable detector is UNKNOWN → not done. For repair tasks carrying both, both obligations hold. Conversation completion requires the accepted reply answering its triggering message; a parent requires a nonempty complete child set. These are declared data relationships, not a stored task kind |
+| `seon.task/settle-call [db agent-id]` | this agent's open tasks | turn close, after the tests ran | replaces `plan/settle-call` (`plan.clj:952`) + `issue/exhaust-tx` (`:1310`) | writes `resolved-tx` when `done?`; `budget-exhausted-tx` + the T4 message to root when the budget is spent |
+| `seon.task/run-tests!` | the task's cited tests whose reach changed | turn close, before settlement, OUTSIDE the transaction | B4's final `seon.test/run` over the task's actual program, with explicit required test identities and recording authority | replaces `plan/run-issue-tests!` (`:823`); never inside a transaction function |
+| detectors | `public-without-doc`, `-contract`, `-reaching-test` (`issue/detect.clj:181,228,285`) | when root's `seon.schedule.task` row fires (`schedule.clj:331 fire-call` claims the fire; the fired function runs the detector) and at publication for the CHANGED declarations | `seon.task` queries taking `{:seon.task/subject [a v]}` and starting from the indexed identity `[?f :seon.fn/sym ?sym]` | the affected declarations; the private-contract detector (3,145 private functions without contracts — goals §2d) is added because private contracts are the first task class; scope by declared provenance, never by name |
+| conflict task (D6/D8) | detector `'seon.program/conflict`, subject = D1's structural conflict identity (competing definitions + basis), assigned to root | D1's merge writer | `trigger-call` + `start-call` with `:seon.agent/id "root"` | one instance per structural conflict; B3 supplies writers that compose on one transaction's current facts, D1 supplies the resolvable conflict subject, immutable source commits and basis. For repeated conflict delivery, the writer starts only an unassigned task; an already assigned root task is retained. Explicit start on an assigned task refuses |
+| plan step | a task with `parent`/`needs`/`position`, `created-by` = the author | `my.task/add!` | the same entity | readiness = open ∧ every declared `needs` exists and is resolved ∧ every child resolved, within the author's tasks; an aggregate parent is done only when its nonempty child set is complete. Preserve missing-edge evidence under retraction; optional sweep cannot silently erase an obligation. Validate new parent AND needs edges, self-links, cycles, author scope and sibling position ties under the declared query-work bound; `plan!`/`compile-tree`/`refuse-*` (`plan.clj:1202-1576`) deleted |
 
-Consequence of merging the plan: `:seon.agent/plan` (`seon.agent.edn:156`,
-a component) is deleted; steps no longer cascade with the agent — agents are
-never retracted (goals §3), so nothing is lost; readers at
+Task retraction refuses while any surviving task still depends on it through `parent`/`needs`, unless the same final transaction explicitly repairs those obligations. This writer decision precedes Datahike's automatic incoming-ref sweep; deleting a target cannot make its dependents ready. Parent-cycle and needs-cycle checks both belong to the task writer.
+
+Consequences: `:seon.agent/plan` (`seon.agent.edn:156`, a component) is
+deleted — agents are never retracted, so nothing cascades; its readers
 `cluster/agent.clj:174,312`, `cluster/status.clj:116`,
-`render/transcript.clj:1244-2136` (B2) become `(seon.task/of-agent db id)`.
-`bootstrap.clj:378-688` reads `plan/ready-subjects` for the generated opening
-— that opening is a retired direction (goals §5 "the old generated-opening
-machinery does not return"); see §6.4.
+`render/transcript.clj:1244-1282,2134-2136` (B2) become `(seon.task/of-agent db id)`.
+`turn.clj` reads issue attributes at `:2050-2051`, `:2689`, `:2724-2725`,
+`:2912-2942`, `:4999` besides the seven `plan/` sites (`:2270,3573,3575,3603,3612,4834,4838`)
+— thirteen sites, B2's file. `bootstrap.clj:378,544-557` reads `plan/ready-subjects`
+for the retired generated opening (§6.4). `my.task` is the thin `my.*` protocol
+over `seon.task` facts (AGENTS §3 layering, as `my.message` over
+`seon.cluster.message`), not a second family: `tasks`, `task`, `add!`, `tests!`,
+`start!`; a manual `complete!` is an owner decision (§8).
 
-`my.task` (replaces `my.issue` + `my.plan`, B2 owns `my/plan.clj`): `tasks`,
-`task`, `add!`, `update!`, `tests!`, `complete!` (authored step with no tests,
-detector or done-query only — T1 governs `start!`, not an agent's own
-sub-steps), `start!`. Each is one request map in, one entity map or declared
-error out, contract naming its union.
+Namespace responsibility is B3's surviving schema/reader work: `:seon.ns/agents` is a many-to-many ref relation, separate from an agent's REPL namespace. Candidate messages use B2's cluster-qualified message owner; D1 records candidate identity/address on the shared task through this same family. Starting candidate work must not also run it on shared. B2/D1 prove inherited unrelated turns/schedules do not advance. Candidate-local completion is evidence; shared repair resolution occurs only with D1's explicit accepted merge. Resume reuses the assigned agent and declared budget transition; B2 exposes stopped/failed graph state as unavailable, never healthy absence. First live contract-coverage work waits for D1's complete merge proof.
 
-Notes: the 369 live notes are audited by the owner against this spec's
-deletion list (§5, §7); survivors become tasks through a one-off
-`script/seon/dev/notes_to_tasks.clj` calling `my.task/add!` once per note,
-deleted after. `bin/issues-index` keeps working over `seon.task/report`.
+Notes: the 369 live notes are audited separately against §8's deletion list;
+survivors become tasks through a one-off `script/seon/dev/notes_to_tasks.clj`
+(one `my.task/add!` per note), deleted after the final reset — not before,
+because a reset before promotion loses them (the final-reset ordering).
 
 ### 2c. Dials
 
-Class A (41): kept, minus `seon.config.error/max-evidence-bytes` (§2a) → 40.
-Class C (43): 33 deleted with declaration, manifest row and readers; 10 with a
-DERIVED reader kept (pack §10 row 6): the seven `:seon.config.ai/*` wire
-passthroughs read through the `:seon.ai/wire` property (`ai.clj:592-639`) and
-`shell/{home,path,lang}` through `:seon.shell/environment` (`shell/jvm.clj:96`)
-— absent-by-default, zero cost; moving them onto the provider descriptor row is
-B2's item. Deleted: `ai.retry/*` (6; one provider, one policy: a failed
-request tries the backup namespace once, then a typed error — B2 converts
-`ai.clj`), `ai/chars-per-token-prior`, `shell/inline-output-bytes`,
+Candidate removals (23 historical declarations), each gated by its consumer and bounded-event proof: `seon.config.ai.retry/*` (6 — one
+provider/failover policy must be preserved through B2's request owner; remove these only after its declared attempt bound replaces the retry mechanism), `ai.backup/timeout-ms` (only after the shared effective deadline preserves both attempts), `ai/chars-per-token-prior`, `shell/inline-output-bytes`,
 `shell/preview-bytes` (one inline cut: `fs/max-inline-bytes`),
-`run/max-episode-runs`, `test/auto-check-cases` (B4 agrees),
-`bootstrap/beyond-closure-token-budget`, `agent/write-refusal-bound`,
-`agent/show-all-settings`, `error/recurrence-limit`, `error/escalate-to`,
-`maintenance/min-usable-ratio`, `web/max-search-results`,
-`render.agent/composition`, `render/issue-opening`, `ai.backup/*` 4 →
-`ai.backup/{endpoint,model,api-key-variable}` stay as the ONE failover row
-(3 kept, `timeout-ms` deleted: the primary's `ai/timeout-ms` bounds both).
+`test/auto-check-cases` (B4 agrees), `bootstrap/beyond-closure-token-budget`,
+`agent/write-refusal-bound`, `agent/show-all-settings`, `error/recurrence-limit`,
+`error/escalate-to`, `error/max-evidence-bytes` (the render profile is the one
+bound), `maintenance/min-usable-ratio`, `web/max-search-results`,
+`render.agent/composition`, `render/issue-opening`, `flow/ping-timeout-ms`,
+`render/coalesce-ms`. Kept although "unread by literal": the seven
+`:seon.config.ai/*` wire passthroughs (`ai.clj:592-639` reads them through the
+`:seon.ai/wire` property) and `shell/{home,path,lang}` (`shell/jvm.clj:96`);
+`run/max-episode-runs` stays and is renamed with B2's commit 8.
 
-Class B — the event each stands for, named (AGENTS §2.3 keeps both halves:
-the bound becomes the composition of the bounds the seam already declares):
+| Dial standing for an event | The event, and the proof each replacement owes |
+|---|---|
+| `agent/turn-completion-backstop-ms` (600 s) | `:seon.turn/closed-tx`; B2 derives the bound from ALL admitted work (every evaluation's `eval/time-limit-ms`, every provider attempt's `ai/timeout-ms`, settlement) — not one evaluation plus one HTTP wait. The key stays B3's until that derivation lands, then is deleted |
+| `operator/event-silence-backstop-ms` (30 s) | guards the operator's prepl exchanges too (`fresh_operator.clj:81-98`, `prepl-eval!` `:1822`), not only B4's worker pool; B1 owns its bounded admission; NOT deleted on B4's behalf |
+| `shell/termination-grace-ms` (1 s) | `Process.onExit` after `destroyForcibly` (`shell/jvm.clj:331-332`); stays until the shell owner proves tree termination and output-drain completion under the remaining bound — an exhausted execution budget cannot also promise cleanup time |
+| `flow/ping-timeout-ms` (20 ms) | proc replies; `flow/ping` (`flow.clj:136-142`) returns only responders within its default 1,000 ms — the dial is deleted and the caller reports expected-minus-responding procs as missing replies |
+| `render/coalesce-ms` (16) | the SSE feed's own channel readiness (`render/web.clj:2048-2056,2653-2672`); B2 removes the sleep and verifies slow-consumer delivery; B3 deletes the row after — the sliding buffer is not browser readiness and is not claimed to be |
+| `seon.effect/time-limit-ms` (per-request override) | handler completion under the capability's declared bound carried on admission; removing a shorter request override changes behaviour — deferred to the owner (§8) |
+| `seon.test-support/event-backstop-seconds`, `seon.test/time-limit-ms` | B4's terminal facts; `seon.test/long-ms` is a declared duration allowance, not an event |
 
-| Dial | Event | Bound after |
-|---|---|---|
-| `agent/turn-completion-backstop-ms` (600 s) | `:seon.turn/closed-tx` datom | sum of the turn's admitted evaluation `eval/time-limit-ms` + `ai/timeout-ms` |
-| `operator/event-silence-backstop-ms` (30 s) | worker exchange | dies with the worker pool (B4) |
-| `shell/termination-grace-ms` (1 s) | `Process.onExit` completion | remaining `shell/time-limit-ms`, then `destroyForcibly` |
-| `flow/ping-timeout-ms` (20 ms) | proc reply | `flow/ping` own default 1000 ms (`flow.clj:136-142`); dial deleted |
-| `render/coalesce-ms` (16) | the SSE consumer's readiness | `(sliding-buffer 1)` newest-only, no timer (B2 converts `render/web`; B3 deletes the row) |
-| `seon.effect/time-limit-ms` (per-request override) | handler completion | the capability's own declared bound (`fs`/`web`/`shell`/`background` dials) |
-| `seon.test-support/event-backstop-seconds`, `seon.test/time-limit-ms` | terminal test facts | B4 |
-| `seon.test/long-ms` | — | NOT an event dial: the brief rules it the only way up; audit misclassified |
-
-`seon.env`: `defrecord`, `defonce` class pin, `environment?`,
-`environment-state?`, `environment-state` (atom), `replace-environment!`,
-two generators, `print-method` (`env.clj:36-115`) deleted; the environment is
-a namespaced map with `:seon.env/environment [:map …]` (drop the `:fn`
-wrapper) and one render pair. The atom's nine readers (`db.clj:1851,4388`,
-`cluster.clj:3178`, `sci/eval.clj:152-2854`) are the "projection-state"
-seam: A1 lands the projection carried on the database value, B2 lands the
-environment bound into the SCI ctx at `fork-for-turn`; B3 lands the value
-type and stops at those files if held. `effect.clj:42` `*request-context*`
-(16 reads, all internal) becomes the first argument of `request*`; the
-`my.*` capability functions declare `:seon.env/environment` and receive it
-through call preparation (vocabulary: "supplied defaults"), so the far side
-of a Flow hop carries the frame as data — which `with-request-context`
-(`effect.clj:488-518`) already rebuilds from data.
+**`seon.env`** (`env.clj:36-115`): `defrecord Environment`, the `defonce` class
+pin, `environment?`, `environment-state?` (asserts `IAtom`, `:74`),
+`environment-state` (`:81`), `replace-environment!` (`:107`),
+`advance-projection!` (`:134`), two generators and the `print-method` are
+deleted; the environment is a namespaced map, `:seon.env/environment [:map …]`,
+one render pair. Its consumers, ALL outside B3: `db.clj:1851,4388`,
+`cluster.clj:2111,3178`, `sci/eval.clj:152,157,174,647,2206,2849,2854`,
+`test/runner.clj:1513`. **`effect/*request-context*`** (`effect.clj:42`; 16
+reads in `effect.clj`, and FIVE outside: `shell/jvm.clj:401,492`,
+`instrument.clj:161,232`, `sci/eval.clj:2909`): one environment is captured at
+evaluation/request admission and passed through supplied defaults, handler
+arguments and Flow request data; `request*` (`:788`) takes it as its first
+argument; `with-request-context` (`:488`) is deleted only after the last
+outside reader is converted. Paired cut: A1 (`instrument.clj`), A2 (`db.clj`),
+B1 (`cluster.clj`), B2 (`sci/eval.clj`, `shell/jvm.clj`), B4 (`runner.clj`).
 
 ### 2d. Effects, search, blob
 
 | Item | Decision | Evidence |
 |---|---|---|
-| synchronous effect rows | not written; a row is opened only for `:seon.effect/background? true` and for capabilities declaring write-back provenance (`my.edit`: `:seon.effect/file`, `/form-span`, `/program`) | readers outside `effect.clj`: `background.clj:36-125`, `edit/jvm.clj:73-74`, `turn.clj:1732` (recovery stamps: only background rows can be open across a restart), `turn.clj:2002` (per-turn ordinals — B2 converts to the evaluation's shown text). Live `default`: 0 effect rows, so no RESET consequence |
+| synchronous effect rows | a row is written only for `:seon.effect/background? true` and for capabilities declaring write-back provenance (`my.edit`: `:seon.effect/file`, `/form-span`) | readers: `background.clj:36-125`, `edit/jvm.clj:73-74`, `turn.clj:1732` (recovery stamps), `turn.clj:2002-2003` (per-turn ordinals — B2 converts to the evaluation's shown text). **RESET NEEDED** regardless of `default`'s 0 rows (P1) |
+| `:seon.effect/request-result` (`seon.effect.edn:195-458`) | an OUTPUT union: derived from the forwarded capability handlers' declared outputs, not replaced by base | the producing-contract rule |
 | `receipt-state`, `payload-face`, `receipt-identities` (`effect.clj:53-72`) | deleted with the retired spelling | vocabulary |
-| `reach-rules`/`capabilities` (`:142-169`) | kept; bound declared as the recursive rule's work over `:seon.fn/calls` reported as an elision | one caller `test/accretion.clj:98` |
-| `seon.search` | deleted whole: `derived/lucene`, `IndexHandle`, atoms, lock, `index-step` proc, cluster wiring (`cluster.clj:789,796,2859-2867,2911,2923-2924,2990,3022,3094-3099,3133-3137`, B1's held file), `:seon.search/handle` env member, `seon.search.edn`, `search_test` | `search/search` has zero src callers (pack §8) |
-| `tokens` + `similar-identities` (`search.clj:123-167`, pure) | moved to `seon.schema.admission` (A1's file; paired commit, stop if held) | sole caller `admission.clj:332` |
-| `blob/verify-stored!` (`blob.clj:149-176`) | handed to A2 with this note: it re-reads the whole blob to verify konserve against the digest computed on the way in (`:121-148`) | A2 owns `blob.clj` |
+| `reach-rules`/`capabilities` (`:142-169`) | kept; the query already takes a root; measure the reached work under program growth before adding any elision — none is added on assumption | the producing-contract rule2; sole caller `test/accretion.clj:98` |
+| `seon.search` | deleted whole: `derived/lucene`, the handle, atoms, lock, `index-step` proc, cluster wiring (`cluster.clj:72,789,796,2859-2867,2911,2923-2924,2990,3022,3094-3099,3133-3137` — held), `:seon.search/handle` env member, `seon.search.edn`, `search_test`, in ONE commit with its callers | `search/search` has zero src callers (pack §8) |
+| `tokens` + `similar-identities` (`search.clj:123-167`, 45 pure lines) | moved to `seon.schema.admission` (A1's file; paired commit) | sole caller `admission.clj:332` |
+| `blob/verify-stored!` (`blob.clj:149-176`) | handed to A2 with the correct citation: the staging digest is computed at `staged-write` (`blob.clj:179-183`); the re-read is what may be redundant; A2 states the guarantee being trusted | the producing-contract rule2 |
 
 ## 3. Reading list
 
 | Read | Guarantees |
 |---|---|
-| `reference-code/malli/src/malli/error.cljc:44-172` `default-errors` | keyed by `::m/missing-key`, `::m/limits`, predicate symbols and (pack A1) `:int :string :keyword …`; only `:vector :sequential :map :set :tuple :and :or :fn` absent — A1's fork entries |
-| `error.cljc:288-306` `error-message` | ten-step fallback; `{:unknown false}` returns nil |
-| `error.cljc:374-390` `humanize` | shaped like the VALUE, not a sentence; `:wrap`/`:resolve` options |
-| `reference-code/malli/src/malli/core.cljc:2659-2665` `explain`; `:1015-1022` `:or` explainer | a failing `:or` carries every branch's problems — why the wrapper validates the declared union, not all facets |
-| `reference-code/datahike/src/datahike/db/transaction.cljc:175`, `:321-359` | user `:db/txInstant` in tx-meta wins; the report carries `:tx-meta` — provenance never on the entity |
-| `transaction.cljc:868-880` | `:db/retractEntity` / `:db.fn/retractEntity` are the deletion grammar; sweep semantics per the datahike skill |
-| `reference-code/datahike/src/datahike/schema.cljc:167-168` `:db/tupleType`; `pull_api.cljc:16` `+default-limit+ 1000` | homogeneous ordered tuple exists; pull cuts silently at 1,000 (fork default changes it) — `recurrence` pulls `:limit nil` |
-| `reference-code/clojure/src/clj/clojure/core.clj:4924,4933`; `core_print.clj:473` | `ex-info`/`ex-data`; `Throwable->map` `:trace` = the `:seon.error/frame` tuple |
-| `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:136-142` | `ping` default `timeout-ms 1000` |
-| `reference-code/konserve/src/konserve/core.cljc:634,658` | `bget`/`bget-range` stream by key — content address is the verification |
-| `src/seon/error.clj:200-225` signature, `:1538` recurrence, `:1567` commit-call, `:1683` recording, `:1753` commit-tx, `:1921` facet-keys | the landed D13 pieces; keep byte-for-byte except the stored member list |
-| `src/seon/instrument.clj:775-808` | declared-union validation at the wrapper (A1's file; the declared-only probe §6.1 is a request to A1) |
-| `src/seon/issue.clj:554-564`, `:1028-1040` | `subject-id` verbatim; `tests-done-query` |
-| `src/seon/plan.clj:265-305` `derived-frontier` | the one plan query worth keeping |
-| `src/seon/schedule.clj:331` `fire-call` | the existing mechanism that runs detectors on root's schedule |
-| `src/seon/call_preparation.clj:14-70` | supplied defaults: how `my.*` receives the environment |
-| `src/my/program.clj:238-262` | the read idiom a detector follows; already calls `subject-id` |
+| `reference-code/malli/src/malli/core.cljc:996-1022` `:or` explainer; `:2207` `:gen` option; `:2626-2648` retained Schema cache | `:or` short-circuits validators; explanation accumulates failed branches until one succeeds — reuse the compiled explainer, never `explain` per call; `:gen` receives each child schema when its callable is built (A1's wrapper probe) |
+| `reference-code/malli/src/malli/error.cljc:44-172` `default-errors`; `:288-306` `error-message`; `:374-390` `humanize` | keyed by `::m/missing-key`, predicate symbols and scalar types; ten-step fallback; `humanize` is shaped like the VALUE, not a sentence — Seon's one-line grammar (goals §2e) is composed from it, not replaced |
+| `reference-code/datahike/src/datahike/db/transaction.cljc:903-922` tx-meta expansion; `:1231` default instant; `:998-1015` incoming-ref sweep + component cascade; `:1020-1039` tuple type/size (max eight); `:1153-1154` mid-transaction db | provenance lives in declared tx-meta attributes; a tuple cannot hold a long mixed Malli path (hence `:db.type/any`); a `:db.fn/call` sees the mid-transaction db, not a frozen pre-read |
+| `reference-code/datahike/src/datahike/pull_api.cljc:16,315,323` | default 1,000 cut, `:limit nil` bypasses it — removing the limit does not make a scan cheap; the recorder stops scanning instead |
+| `reference-code/clojure/src/clj/clojure/core.clj:4924,4933`; `core_print.clj:473` | `ex-info`/`ex-data`; `Throwable->map` `:trace` is a VECTOR of frames; `:seon.error/frame` stores the top one |
+| `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:136-142` | `ping` returns the procs that replied within `timeout-ms` (default 1,000) — partial replies, not readiness |
+| `src/seon/error.clj:200-225` signature, `:1567-1681` `commit-call`, `:1683-1751` `recording`, `:1921-1953` `facet-keys`/`facets` | the landed D13 pieces: identity semantics are kept; bytes change where location components disappear |
+| `src/seon/instrument.clj:775-808` | today's after-call union check (A1's file): what the declared-only validation replaces |
+| `src/seon/issue.clj:554-564` `subject-id`; `:1028-1064` done | the identity derivation carried into `seon.task`; the tests-vs-detector `cond` the new `done?` makes a conjunction |
+| `src/seon/plan.clj:265-305` `derived-frontier` | handles children and missing foreign dependencies — the invariants the parent/needs readiness query must keep |
+| `src/seon/schedule.clj:331` `fire-call` | claims one nominal fire idempotently; it does not run the detector — the fired function does |
+| `src/seon/call_preparation.clj:14-70` | supplied defaults: how `my.*` receives the environment as data |
+| `src/my/program.clj:238-262` | the read idiom a detector follows; `:262` calls `issue/subject-id` today |
 
 ## 4. REPL protocol
 
-`eval_clj` mode `jvm`, cluster `default`, `read_only true`. `conn` =
+`eval_clj` mode `jvm`, cluster `default`, `read_only true` for reads. `conn` =
 `(seon.operator/connection "default")`; `db` = `(seon.db/db conn)` (a raw
-`datahike.api/db` value carries no projection — measured this session).
+`datahike.api/db` value carries no projection — `carried-projection` is nil on it).
+
+The table names acceptance scenarios. Implementation supplies complete canonical-fixture forms with concrete task/error identities in the landing script; it must not execute an abbreviated request.
 
 | # | Before | After |
 |---|---|---|
-| 4.1 fault shape | `(datahike.api/pull db '[* {(:seon.error/occurrences :limit 2) [*]}] [:seon.error/signature s])` — today: `:seon.error/data-size 55201`, `:seon.error/capped? true`, `seon.instrument/actual` a 7.7 KB print-node string | the same pull returns only declared attributes; `:seon.error/shown` ≤ the agent profile; `(count (keys occurrence))` ≤ 10 |
-| 4.2 tasks | `(count (d/q '[:find [?e ...] :where [?e :seon.issue/id _]] db))` = 1,882; `:seon.issue/agent` 0; `:seon.issue/detector` 0 | `(seon.task/report db)` lists tasks with a live subject only; `(count …:seon.task/path…)` refused (attribute gone) |
-| 4.3 done cost | `(time (seon.issue/done? db [:seon.issue/id x]))` — runs `detector-rows` over the program | `(time (seon.task/done? db [:seon.task/id x]))` — one scoped query, ≤ 10 ms |
-| 4.4 trigger | — | `(seon.db/transact! conn [[:db.fn/call #'seon.task/trigger-call {…}]])` twice: second returns only the `updated-tx` datom |
-| 4.5 constructor | `(error/diagnostic {…12 keys…})` | `(seon.error/error {:seon.error/layer :x/y :seon.error/operation 'a/b :seon.error/message "m" :x/member 1})` → 5-key map; returned through an armed function whose contract names `:x/y-error` passes; through one that does not → the wrapper's refusal |
-| 4.6 unions | `(count (seon.error/facet-keys (seon.db/carried-projection db)))` | unchanged count; `(rg -c ':my.background/error :my.edit/error' src resources)` = 0 |
-| 4.7 dials | `(count (seon.config/dial-attributes projection))` = 86 | 50 |
-| 4.8 env | `(instance? clojure.lang.IAtom (:seon.sci.eval/projection-state cluster))` true | `(map? (seon.env/of ctx))` true, no atom in the env schema |
+| 4.1 fault shape | `(seon.db/pull db '[* {(:seon.error/occurrences :limit nil) [*]}] [:seon.error/signature s])` → `data-size 55201`, `data-edn` 1,062 bytes, `capped? true`, blob digest | the same pull returns only declared attributes; `:seon.error.occurrence/shown` ≤ the agent profile; no `data-*`, no blob ref |
+| 4.2 tasks | P1: 1,882 `:seon.issue/id`, 0 with agent, 0 with detector | `(seon.task/report db)` lists tasks with a live subject; `(seon.db/pull db [:seon.issue/path] e)` refused: attribute gone |
+| 4.3 done cost | `(time (seon.issue/done? db [:seon.issue/id x]))` runs `detector-rows` over the program | `(time (seon.task/done? db [:seon.task/id x]))` — one identity seek + the subject's tests; report the ms and the datoms visited, not only elapsed |
+| 4.4 recorder | two same-signature observations in two turns: `commit-call` pulls all occurrences twice | the second write reads only its own occurrence and one existence seek; the occurrence query returns the intended two occurrence identities, `:seon.task/id` for `'seon.error/recurring` present exactly once |
+| 4.5 trigger/start | — | `trigger-call` twice with one request → second returns `[]`; `start-call` on a task with neither tests nor detector → typed refusal; `start-call` twice → second refuses the existing assignment; repeated trigger retains the same task/agent |
+| 4.6 constructor | the existing seven-key constructor request | `(error.refusal/diagnostic {:seon.error/at (java.util.Date.) :seon.error/layer :x/y :seon.error/operation 'a/b :x/member 1})` → 4-key map; returned through an armed function declaring `:x/y-error` passes; through one declaring only `:x/z-error` → the wrapper's refusal |
+| 4.7 dials | `(count (seon.config/dial-attributes (seon.db/carried-projection db)))` = 96 | remaining count with each removal's event/bound proof; 73 only if all 23 pass |
+| 4.8 env | `(instance? clojure.lang.IAtom (:seon.sci.eval/projection-state cluster))` true | `(map? (seon.env/of ctx))` true; no atom in `seon.env.edn` |
 
-Every commit's debug probe: `runtime_status` on `default` answers healthy; a
-fault query (4.1) returns; `/agent/root` renders.
+Every commit's debug probe: `runtime_status` on `default` healthy; probe 4.1 or
+4.2 returns; `/agent/root` renders. Adoption is `bin/seon init --dev default
+--changed <paths>` after shell writes; the landing note names whether each proof
+exercised a hot-reloaded Var or in-place adoption.
 
 ## 5. The work, ordered as commits
 
-Each leaves HEAD loadable (`clojure -M -e "(require 'seon.error 'seon.task
-'seon.config 'seon.effect 'seon.env)"`) and `default` hot-reloadable. Held
-files (`cluster.clj`, `fn.clj` dirty today) stop the slice at the file.
+Each commit loads HEAD (`clojure -M -e "(require …)"` over the namespaces it
+TOUCHES, named per row) and hot-reloads on `default`. A held file defers the
+commit that needs it; the completion criterion never shrinks to "unheld files".
+Only the orchestrator may recover a broken `default` with `bin/seon reset --force` —
+loses recorded turns, results, tasks and in-memory objects; reseeds root.
 
-| # | Commit | Net | RESET |
-|---|---|---|---|
-| 1 | `seon.error/error` constructor added; `diagnostic` facade (`error.clj:304`) and leaf (`refusal.clj:37-74`) converted to call it; 99 owned construction sites converted; `diagnostic-*` keys dropped at those sites | −900 | no |
-| 2 | 14 union copies → `:seon.error/base`; `refusal_test` drift check deleted; `seon.effect.edn:195-458` → `[:or :seon.schema/value :seon.error/base]` | −650 | no |
-| 3 | `:seon.error/class true` markers (172) and `error_class_schema_test` deleted; `:seon.error/kind` sites in owned files (5) and every unheld file converted; `;; debt:` guards in owned files converted to the callee's required member | −300 | no |
-| 4 | Renderer moved: `error.clj:977-1100, 1112-1500, 1863-1920, 1966-2310` → `seon.render.error` (B2 lands the namespace; B3 deletes from `error.clj` in the same publication); `error.clj:40`, `db.clj:52-60` delays deleted; dead prose builders and their tests deleted | −1,200 (moved 300) | no |
-| 5 | Stored shape: `seon.error.edn` fact/occurrence reduced to the §2a member list; `location`/`segment`/`omission`/`key`/`projection`/`evidence`/`basis` resources and `error.clj:2314-2658` deleted; `prepare` stores shown text + `result-id`; `max-evidence-bytes` dial deleted | −700 | **RESET NEEDED** |
-| 6 | `seon.task`: schema, `trigger-call`, `done?`, `settle-call`, `run-tests!`, detectors as scoped queries, render pair, `of-agent`, `report`; `my.task`; `turn.clj`'s 7 sites repointed (B2 agrees or stop); `seon.issue`, `issue/*`, `my.issue`, `seon.plan`, `my.plan`, `seon.issue*.edn`, `seon.plan.edn`, `my.plan*.edn`, `:seon.agent/plan` deleted; `notes_to_tasks.clj` script added | −3,600 | **RESET NEEDED** |
-| 7 | Detector schedule rows for root (`seon.schedule.task`); recurring fault → `trigger-call` in `commit-call`; `recurrence-limit`/`escalate-to`/`steward` (`error.clj:1526`, `:2112`, `:2178`) deleted | −120 | no (rows seeded at reset) |
-| 8 | Dials: 33 class-C declarations, rows, readers deleted; 5 class-B rows deleted with their event conversions (B2/B4 seams named per row); `seon.env` value type; `effect.clj` context argument | −450 src, −300 schema | **RESET NEEDED** (config attributes retired) |
-| 9 | Effects: synchronous rows dropped, `receipt`/`face` spellings deleted, `seon.effect.edn` receipt entity narrowed to background + provenance | −350 | no (0 live rows) |
-| 10 | `seon.search` deleted; `tokens`/`similar-identities` into `seon.schema.admission` (A1 paired); `:seon.search/handle` env member and cluster wiring (B1 paired) | −620 | no |
-| 11 | `seon.bootstrap` cut to `seed-tx` + `supervision-tx` (§6.4 decides) | −800 | no |
+| # | Commit | Requirers proven to load | Net | RESET |
+|---|---|---|---|---|
+| 1–3 | ONE constructor/caller slice: replace the seven-key input with supplied `at` and declared members, convert all 275 construction sites (94 owned, five A2 blob sites, the remaining cross-owner sites), preserve each distinct cause, and retire the facade/old keys only with the last caller. Requiring `at` is a breaking input change, not accretion. Prepare the edits by owner, publish/commit them together; a held caller defers this slice | every touched namespace, including `seon.error.refusal seon.error seon.effect seon.config seon.plan seon.issue seon.env seon.bootstrap` and the coordinated callers | provisional −1,540 across disjoint spans | no stored-shape change yet |
+| 4 | THE kind/class cut, one commit when `cluster.clj`/`fn.clj` are free: 799 `kind` lines, 172 markers, `error_class_schema_test`; propagation-only guards disappear; a genuine domain decision reads its declared distinguishing member | `seon.turn seon.schema seon.fn seon.cluster seon.db seon.cluster.message seon.cluster.agent seon.schema.edn seon.agent seon.cluster.prompt` + the 27 smaller files | −300 | no |
+| 5 | eight inspection unions → `:seon.error/base`; `refusal_test` drift check deleted; output unions untouched | `seon.error seon.error.refusal` | −320 | no |
+| 6 | renderer moved by FUNCTION (§2a list) into B2's `seon.render.error`; `error.clj:37-41` delay deleted; dead prose builders (`:1304` etc., alive only through `error_test`) deleted | `seon.error seon.render.error seon.db` | −1,000 (300 moved) | no |
+| 7 | `seon.task` ADDED: schema, `trigger-call`, `start-call`, `done?`, `settle-call`, `run-tests!` (B4's `run`), scoped detectors incl. private-contract, render pair, `of-agent`, `report`; `my.task`; no caller yet | `seon.task my.task` | +450 | new optional attributes alone need no reset; incompatible task retirement below is **RESET NEEDED** |
+| 8 | callers converted while `seon.issue`/`seon.plan` still load: `turn.clj` thirteen sites (B2), `cluster/agent.clj:174,239-240,312,359`, `cluster/status.clj:116`, `render/transcript.clj` (B2 deletes it), `bootstrap.clj:38,378,544-557`, `my/program.clj:262`, `seon/note.clj:72-108`, `my/{agent,note}.clj` request schemas, `render/value.clj:52,78,358-361`, `instrument.clj:540,578`, `error/refusal.clj:9,91`, `script/seon/dev/issues.clj`; C1 starts directly against the new task writer after this slice | each file's namespace | −250 | no |
+| 9 | retirement: `seon.issue`, `issue/*`, `my.issue`, `seon.plan`, `my.plan` (B2 pairs), the five schema resources, `:seon.agent/plan`, note indexing (`cluster/source.clj:340-349,388-392`, `cluster.clj:1842,2062,2090-2091` — B1's held file), `notes_to_tasks.clj` added | `seon.cluster seon.cluster.source seon.cluster.agent seon.turn seon.bootstrap` | −3,900 | **RESET NEEDED** |
+| 10 | after the §2a durability decision, stored error shape: `seon.error.edn` fact/occurrence reduced to §2a; `location`/`segment`/`omission`/`key`/`projection`/`evidence`/`basis` resources + `error.clj:2314-2658` deleted; `prepare-result` deleted, `recording` takes prepared `shown`/`result-id`; `max-evidence-bytes` deleted | `seon.error seon.cluster seon.db` | −800 | **RESET NEEDED** |
+| 11 | recorder proportional: `recurrence`, `steward`, `message-tx`, `recipients`, `escalate-to`, `recurrence-limit` deleted; one lookup + one seek; `trigger-call` on repeat; refusals throw | `seon.error` | −150 | no |
+| 12 | dials: only declarations/rows/readers whose §2c replacement proof passes; `seon.env` value type; `effect.clj` context argument (paired with A1/A2/B1/B2/B4 rows in §2c) | `seon.config seon.env seon.effect` + the paired lanes' files | −450 src, −300 schema | **RESET NEEDED** |
+| 13 | effects: synchronous rows dropped, retired spellings deleted, `seon.effect.edn` narrowed | `seon.effect seon.background seon.turn` | −350 | **RESET NEEDED** |
+| 14 | `seon.search` deleted with its cluster wiring (B1's file) and `admission.clj` receives `tokens`/`similar-identities` (A1's file) | `seon.schema.admission seon.cluster` | −620 (45 moved) | no |
+| 15 | `seon.bootstrap` cut to `seed-tx` + `supervision-tx` (§6.4 decides) | `seon.bootstrap seon.cluster.agent seon.sci.eval` | −800 | no |
+
+The orchestrator batches incompatible stored-shape RESET boundaries (9, 10, 12, 13 can be one
+reset); lanes never restart `default`.
 
 ## 6. Better than the floor — probes first
 
 | # | Candidate | Probe that decides |
 |---|---|---|
-| 6.1 | Wrapper validates the DECLARED union only (`some` over ≤ 5 validators) instead of `facets` over all ~116 then `intersection` (`instrument.clj:787`) | A1 seam: count validator calls per returned error before/after with `mi/-f->original` counters; expect ≈ 116 → ≤ 5 |
-| 6.2 | One render pair on `:seon.error/base` instead of 275 property copies across 53 resources | `seon.render` candidate selection: does it follow `:and` extension (`internal/extends-schema?`)? If not, B2 adds the one clause; else nothing to do. `rg -c 'seon.error/render-ai' resources` → 1 |
-| 6.3 | `:seon.error/path` as one `:db.type/any` value (A2's fork admission) instead of a tuple family | if A2's admission lands first, store the vector; else store `:seon.error/shown` only and keep the path on the `result/e<id>` — no component either way |
-| 6.4 | `seon.bootstrap` (932): the generated opening (`situation`, `next-entry`, intent acquisition, `beyond-closure-budget`) is the retired direction; `help`/`dir`/`doc` are `seon.sci.eval`'s (`:1194`, `:1222`, `:1467`) | `cluster/agent.clj:359` (B2) — is `bootstrap/situation` reached by a live turn on `default`? If the system turn 0 opening (`turn.clj:2191`) is the path, delete to `seed-tx` + `supervision-tx` (≈ 120). Three options if not: keep as is / move the opening into `seon.task/render-ai` / delete and let the namespace picture open |
+| 6.1 | the constructor dissolves: sites write the map literal; one `throwable-members` derives frame/exception-class | count the 275 sites that carry a Throwable; use the smallest form that preserves the full declared diagnostics and all callers; the fraction of Throwable sites is descriptive, not an arbitrary threshold for a new API |
+| 6.2 | one render pair on `:seon.error/base` instead of 275 property copies | render an error satisfying two declared schemas through ordinary pair selection; the base block AND each schema's block must appear (§1o); only then delete the identical copies — no special error dispatch clause |
+| 6.3 | `:seon.error/path` as `:db.type/any` | A2 round-trips a mixed path longer than eight elements through the fork admission; if it lands, store it; otherwise retain the current path representation; shown text alone does not preserve structural identity/queryability |
+| 6.4 | `seon.bootstrap` (932): `situation`/`next-entry`/intent acquisition are the retired generated opening; `help`/`dir`/`doc` are `sci/eval.clj:1565,1597` and the injection at `:254-267,2010` | is `bootstrap/situation` (`cluster/agent.clj:359`) reached by a live turn on `default` now that `turn/system-turn` (`turn.clj:2103`) stores the opening? A trace on one turn decides; three options in §8 if it is |
+| 6.5 | detectors run at publication for changed declarations only, root's schedule only sweeps | measure detector work under one unrelated declaration change: visited datoms must not grow with the program |
 
 ## 7. Tests
 
 | File | Lines | Disposition |
 |---|---|---|
-| `error_class_schema_test` 182, `search_test` 218, `error_write_timing_test` 182 (60 s bound on one write), `error/refusal_test` 90 (mirror check), `issue_test` 455, `issue_generate_test` 195, `issue_settlement_test` 349, `issue_deletion_test` 92, `issue/detect_test` 197, `my/plan_test` 607, `plan_test` 45, `plan_completion_test` 72, `bootstrap_test` 470, `bootstrap_drive_test` 84 | 3,238 | **delete**; replaced by `seon.task_test` (trigger idempotence, done as a query, scoped detector, settle) ≈ 150 and `error_test` reduced |
-| `error_test` 1,437 (47 deftests) | | keep constructor, signature, recurrence, recording classes; delete prose blocks (`:763-841`), union, `diagnostic-*` and predicate tests → ≈ 350 |
+| `error_class_schema_test` 182, `search_test` 218, `error_write_timing_test` 182 (60 s escape on one write), `error/refusal_test` 90, `issue_test` 455, `issue_generate_test` 195, `issue_settlement_test` 349, `issue_deletion_test` 92, `issue/detect_test` 197, `my/plan_test` 607, `plan_test` 45, `plan_completion_test` 72, `bootstrap_test` 470, `bootstrap_drive_test` 84 | 3,238 | delete; replaced by `seon.task_test` ≈ 200: trigger idempotence, duplicate delivery, start refusals (no evidence · assigned task · missing subject), assigned-agent reuse, done under a retracted test (unknown, not done), scoped detector, dependency cycle refusal, settle |
+| `error_test` 1,437 (47 deftests) | | keep the classes: declared/undeclared return, sorted-map input, signature invariance, repeated occurrence writes (one lookup), recording; delete prose blocks (`:763-841`), union, `diagnostic-*` and predicate tests → ≈ 400 |
 | `returned_error_test` 62, `blob_error_test` 18, `blob_threshold_test` 16, `background_test` 51, `my/{fs,web,edit,background}_test` | | keep |
-| `error_result_test` 160 | | keep; `long-ms 60000` (`:99-101`) removed — one bounded admission |
-| `config_functions_test` 32 `long-ms 20000` ("measured 13.05 s; the symbol query is 4.70 ms") | | algorithm defect in `require-functions!` (`config.clj:737`): one query over `:seon.fn/sym` with `:in $ [?sym ...]`, bound removed |
-| `config_application_test` 254 `:seon.test/long` (real cluster) | | genuinely long: keep with a number and reason |
-| `config_test` 702, `effect_test` 1,032, `env_test` 384 | | collapse to the surviving mechanisms: manifest difference, request with a carried context, env as a map; ≈ 600 total |
-| `my/test_test` `long-ms 300000` | | B4's (base-context acquisition O(program)) |
+| `error_result_test` 160, `long-ms 60000` no reason (`:99-101`) | | measure; if the cost is base acquisition (B4's 3,996 ms) the escape goes with B4's fixture; otherwise the number and reason are declared |
+| `config_functions_test` 32, `long-ms 20000` ("13.05 s; the symbol query is 4.70 ms") | | `require-functions!` (`config.clj:737-780`) already uses one query; the escape stays with its number until A2/B4 measure the fixture/writer cost it names |
+| `config_application_test` 254, `:seon.test/long` without `-ms` (`:147`) | | a reason without a number is a refusal: measure and declare, or split |
+| `config_test` 702, `effect_test` 1,032, `env_test` 384 | | collapse to the surviving mechanisms: manifest difference, request with a carried context, env as a map; ≈ 600 |
+| `my/test_test` 78, `long-ms 300000` | | B4's |
 
-Test lines: ≈ 8,900 → ≈ 1,900. The lane runs only reaching tests in-process
-(`seon.test/check`), never a suite.
+Test lines ≈ 8,900 → ≈ 2,100 (provisional). The lane runs only the tests
+reaching its change, in process through B4's `seon.test/run`; never a suite.
 
 ## 8. Done, size target, landing note, stop rules
 
 | File | Before | Floor (audit) | Target | Why the gap |
 |---|---:|---:|---:|---|
-| `error.clj` + `refusal.clj` | 2,790 | ≈ 900 | **550** (+300 in `seon.render.error`, B2) | rendering leaves; evidence-cap machinery (`:372-465`, `:594-668`) dissolves into the value renderer; predicates gone |
-| `issue`+`issue/*`+`my.issue`+`plan`+`my.plan` | 4,169 | ≈ 3,660 | **530** (`seon.task` 450 + `my.task` 80) | one entity, one writer, done as a query, no note pipeline, no tree reconcile |
-| `config.clj` | 926 | — | **650** | 146 diagnostic lines → 40; `require-functions!` one query |
-| `effect.clj` | 1,053 | ≈ 800 | **500** | sync rows, dynamic var, ceremony, retired spellings |
-| `search.clj` | 571 | 0 | **0** | 45 lines to admission |
+| `error.clj` + `refusal.clj` | 2,790 | ≈ 900 | **550** (+300 in `seon.render.error`) | rendering leaves; EDN/blob/cap machinery dissolves into the value renderer; predicates gone; `facets` stays for D13 |
+| `issue`+`issue/*`+`my.issue`+`plan`+`my.plan` | 4,169 | ≈ 3,660 | **530** (`seon.task` 450 + `my.task` 80), conditional on §2b's start/done/plan guarantees | one entity, two writers, done as a query, no note pipeline, no tree reconcile |
+| `config.clj` | 926 | — | **650** | 146 diagnostic lines → 40 |
+| `effect.clj` | 1,053 | ≈ 800 | **500** | sync rows, dynamic var, retired spellings |
+| `search.clj` | 571 | 0 | **0** (+45 in `admission`) | |
 | `env.clj` | 531 | ≈ 465 | **150** | record/atom/predicates/print-method gone |
-| `bootstrap.clj` | 932 | — | **120** (§6.4) | retired opening generator |
-| **owned src** | **10,972** | ≈ 6,900 | **≈ 2,500** | |
+| `bootstrap.clj` | 932 | — | **120**, conditional on §6.4 | |
+| **owned files** | **10,972** | ≈ 6,900 | **≈ 2,500 original owned scope / at least 2,850 retained, plus newly assigned surviving files** | moved code is charged to its destination; repository net deletion reported separately in the landing note |
 
-Done: every §1 row measured on `default` after a fresh reset with the §4
-forms; `rg -c ':seon.error/kind\|:seon.error/diagnostic-\|:seon.error/class true' src test script bin resources` = 0 in unheld files; HEAD loads.
+Done: every §1 target measured after the orchestrator's fresh reset with exact self-contained §4 acceptance forms recorded at implementation; `rg -c ':seon.error/kind|:seon.error/diagnostic-|:seon.error/class true'
+src test script bin resources` = 0 everywhere (not "unheld files"); HEAD loads.
 
-Landing note: `docs/prds/agent-platform/landing/lane-b3.md` — the §4 forms
-with values, `wc -l` per file, the held-file list, RESET commits, and the
-deletion list the owner audits the 369 notes against (`seon.issue` note
-attributes, `issue/opening`, `seon.search`, `seon.plan` component, the 33
-dials, the 9 event dials, `diagnostic-*`, `kind`/`class`).
+Landing note `docs/prds/agent-platform/landing/lane-b3.md`: the §4 forms with
+values, `wc -l` per file, held-file list, RESET commits, and **the exact deletion
+list the note audit consumes**: `seon.issue` note attributes (`status opened path
+keys files runs issues members unresolved commits class` + the citation component),
+`issue/opening.clj`, `issue/detect.clj`'s minting, `seon.search` whole,
+`seon.plan`/`my.plan*` and `:seon.agent/plan`, the 23 dials of §2c, the
+`diagnostic-*` keys, `kind`/`class`, `data-edn`/`data-size`/`capped?`/`data-blob`/
+`dropped-fault-*`/`proc`/`op`/`cid`/`throwable-class`/`regressions`/`issue`/
+`resolved-tx` on errors, the `location`/`segment`/`omission`/`key`/`projection`/
+`evidence`/`basis` error resources, `receipt`/`face` spellings, `seon.env`'s
+record and atom, `*request-context*`.
 
-Stop at: a held file (`cluster.clj`, `fn.clj` today); the B2 seams
-(`seon.render.error`, `turn.clj` 7 sites, `my/plan.clj`, `:seon.agent/plan`
-readers, `render/web` coalesce, `ai.clj` retry); the A1 seams
-(`instrument.clj` declared-only validation, `admission.clj` move, `default-errors`
-entries); the A2 seams (`:db.type/any`, `blob.clj`); the B4 seam
-(`run-owned` for `run-tests!`); an unsettled design (§6.4; the `-cause`
-deletion if the reviewer wants it kept; the retry-policy deletion).
+Stop at: a held file (`cluster.clj`, `fn.clj` today); A1 (wrapper declared-only
+validation, `admission.clj`, `default-errors` overlay, `instrument.clj:161,232`);
+A2 (`:db.type/any`, `db.clj` delays and env readers, `blob.clj`, c8's 56 guards);
+B1 (note indexing in `cluster/source.clj`/`cluster.clj`, search wiring,
+operator silence); B2 (`seon.render.error`, the thirteen `turn.clj` sites and
+the routed-problem block `turn.clj:2397-2613` it hands to the task family,
+`my/plan.clj`, `:seon.agent/plan` readers, result preparation, `render/web`
+coalesce, `ai.clj` retry, `sci/eval.clj:2909`, `shell/jvm.clj:401,492`);
+B4 (`seon.test/run`, `runner.clj:1513`); C1 (waits for the task writer; no issue adapter);
+D1 (conflict identity and sources).
 
-Not settled here: whether `:seon.error/cause` as a ref to a recorded
-upstream error earns its datom or the message suffices (three options in the
-landing note); whether the plan step's manual `complete!` survives T1 (kept
-for agent-owned steps only); whether the conflict task's two sources are
-rendered from branches by commit id or copied as text (rendered, by B1's
-`seon.program/history`).
+Deferred to the owner (three-option notes in the landing note): (1) manual
+`complete!` for authored substeps — recommended: query-completed substeps only,
+a parent done when its children are; else a declared completion fact; else keep
+`:seon.agent/plan` until decided; (2) the per-request `seon.effect/time-limit-ms`
+override — delete (one bound per capability) or keep as an explicit narrowing;
+(3) whether the conflict task's two sources are rendered by commit id through
+`seon.program/history` (recommended) or copied as text.

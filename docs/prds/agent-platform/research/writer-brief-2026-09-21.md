@@ -1,6 +1,6 @@
 ---
 type: reference
-status: brief for the Fable writers and the astra reviewers, 2026-09-21; deleted at the clean write
+status: historical writer brief; integrated plans own current instructions
 created: 2026-09-21
 tags: [agent-platform, brief]
 ---

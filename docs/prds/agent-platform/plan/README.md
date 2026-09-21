@@ -1,271 +1,266 @@
 ---
 type: plan
-status: first pass (Fable, 2026-09-21) for astra review, then the clean write; the owner reads this personally
+status: integrated implementation plan; proof gates precede dependent cuts
 created: 2026-09-21
-tags: [plan, agent-platform, cut, refactor, namespace-agents, profiling, size-target]
+tags: [plan, agent-platform, refactor, namespace-agents]
 ---
 
-# Agent platform — from where the system is to where the owner wants it
+# Agent platform
 
-Every number below names its source. Short tags: **[brief]** [the writer brief](WRITER-BRIEF-2026-09-21.md) · **[syn]** [synthesis](../research/synthesis-2026-09-21.md) · **[goals]** [durable goals and rulings](../research/durable-goals-and-rulings-2026-09-21.md) · **[instr]** [instructions and process audit](../research/instructions-and-process-audit-2026-09-21.md) · **[arch]** [architecture docs verification](../research/architecture-docs-verification-2026-09-21.md) · **[a-malli]** [Malli audit](../research/deletion-audit-malli-2026-09-21.md) · **[a-dh]** [Datahike audit](../research/deletion-audit-datahike-2026-09-21.md) · **[a-pub]** [publication audit](../research/deletion-audit-publication-operator-2026-09-21.md) · **[a-test]** [test-system audit](../research/deletion-audit-test-system-2026-09-21.md) · **[a-sci]** [SCI/turn/render audit](../research/deletion-audit-sci-turn-render-2026-09-21.md) · **[a-err]** [errors/tasks/config audit](../research/deletion-audit-errors-issues-config-2026-09-21.md) · **[p-a1]**…**[p-c1]** the seven data packs ([a1](../research/data-pack-a1-malli-2026-09-21.md), [a2](../research/data-pack-a2-datahike-2026-09-21.md), [b1](../research/data-pack-b1-publication-2026-09-21.md), [b2](../research/data-pack-b2-sci-turn-render-2026-09-21.md), [b3](../research/data-pack-b3-errors-tasks-config-2026-09-21.md), [b4](../research/data-pack-b4-test-system-2026-09-21.md), [c1](../research/data-pack-c1-profiling-2026-09-21.md)) · **[sweep]** [issue-note lifecycle sweep](../research/issue-notes-lifecycle-sweep-2026-09-21.md) · **[refcode]** [reference-code usage audit](../../../research/agent-platform/reference-code-usage-audit-2026-09-21.md) · **[wc]** measured in this session with `wc -l` at `215447c46`. Where a pack corrects an audit, the pack's number is used.
+Build the system that can improve its own program: query a real defect, give an
+agent a bounded task on an isolated candidate, verify its change against the
+combined program, accept it explicitly, and write the accepted definitions back.
+The work removes duplicate machinery while building that complete loop.
 
-## 0. For the owner
+This directory contains the integrated plan and implementation specifications.
+Each spec states its design directly: the data flow, dependency source, ordered
+changes, probes and acceptance conditions. Research and review history are outside
+this directory. These are implementation instructions, not claims that the code
+has already changed. The [proposed shared instructions](AGENTS-rewrite-2026-09-21.md)
+remain a replacement proposal until the implementation transition.
 
-**What we were doing that was dumb.** Every audit found the same shape: a fact already held by a library or by the database, a copy of that fact kept beside it, machinery to keep the copy fresh, and tests to police the machinery's cost [syn §1]. Four examples, with their numbers.
+## 1. What becomes simpler
 
-1. *The read that re-runs itself.* Before every agent turn the system asks "is this retained read still current?" `src/seon/db.clj:1102-1144` answers it three ways in a row: replay an index pattern, compare Datahike's own revision counters, and — when those two do not settle it — **run the query again and compare digests** (`replay-read`, `:971`). Datahike already keeps a per-attribute revision on every committed transaction (`query.cljc:2568-2590`) and compares it in `source-context-unchanged?` (`:2963-2976`) [p-a2 §2]. The two extra arms are ~405 lines with **zero** production callers and **zero** tests outside `db.clj` [p-a2 §3]. Nothing would notice if they were gone. The third arm is the worst algorithm available: it does the work to decide whether to do the work.
-2. *Six hundred and sixty lines that nobody calls.* `seon.fn/build-artifact`, `rows`, `reconcile-tx`, `plan-file-change` and their helpers have **0** production references and are kept alive by roughly 700–900 lines of tests (`rows` alone has 782 test mentions) [a-pub §1; p-b1 §4]. The live path is `reconcile-tx-in` (`fn.clj:3047`). The tests do not prove the product; they prove the dead code still works.
-3. *Time escapes.* 128 tests declare they may exceed the five-second bound, for a granted total of **18.9 hours** [a-test §2a; p-b4 §4]. Read one by one: 72 are algorithm defects (work proportional to the whole program inside a fixture), 18 are process machinery, 31 copy a sibling's declaration, and **7** are genuinely long — 0.1 % of the budget. Folding the copies back in, **78 %** of the budget belongs to the machinery that runs other JVMs [a-test §2b]. One file grants 28 tests thirty minutes each — 12.5 hours — and is the regression suite for the launcher this plan deletes. A ten-minute test proves "an unchanged digest performs zero transactions"; the measured no-change publication is **264 ms** [a-pub §5; p-b1 §5]. And 38 tests declare a reason without a number, so the runner silently keeps the 5 s default; they pass only because declared-long tests are excluded from ordinary selection [a-test §2c] — the check reads the absence of a signal as health.
-4. *Process records beside the operating system.* ~450 lines write and repair EDN "process records" and claim files, and ~400 more derive a "cluster truth" from advertisement files and repair it when it drifts — while `ProcessHandle/allProcesses` already yields every JVM with its root and start instant (`state.clj:1199-1223`) and the prepl already answers whether it is alive (`:1262-1298`) [a-pub §1, §4]. The operator is 6,599 lines; ~1,800 do what an operator does.
-5. *The history ruled deleted and never cut.* The turn PRD (§15) ruled that nothing assembles an agent's history but the walk over its stored evaluations. `src/seon/render/transcript.clj` (legacy spelling) is still **2,443** lines of hand-assembled views at HEAD; four architecture pages state it is gone [arch, cross-file finding 2].
+The expensive pattern is repeated reconstruction. A dependency already maintains
+an answer; Seon copies it, recomputes it, and adds mechanisms to keep the copy fresh.
+Tests then protect those mechanisms rather than the behavior the user needs.
 
-Two more of the same shape decide the order of this plan. The compiled Malli generation — every schema and every contract — is rebuilt from stored rows at every acquisition instead of being read from the database value that already carries it: **3,996 ms of the 4,648 ms** fixture base, 248 ms per newly materialized commit on the edit path, and a whole-population compile per arming pass; nine separate derivations, 43 call sites [a-malli §2–3; p-a1 §1, §4b]. And the process holds **4.2 GB** because Datahike's node cache, bounded by node count rather than bytes, held ~47 copies of the database's 81 MB of string content [goals §2b, "Derived state"].
+The change is to compute at the producing boundary and carry the answer into the
+next operation. A database branch is a pointer, but creating an entire environment
+is additional work. A compiled schema is reusable, but a changed schema must still
+invalidate its dependents. Avoiding repeated work requires both facts to be explicit.
 
-**Why it happened.** Proof was defined as a green run, so a mechanism that made the run green earned its place regardless of what it cost or duplicated; the instructions then normalized the cost — "60–150 s under the lifecycle lock" written into the standing file beside the law that says ten seconds requires the owner's authorization [instr §1.3 F2], a schedule that forecast 47–75 lane-days before the first live agent [goals §7], and a working file that spent 26 % of its 1,321 lines on lane choreography [instr §1]. Mechanisms were built beside the tools instead of on them: a second cache beside clj-kondo's, a second store beside Datahike's branches, a second scheduler beside core.async.flow, six run paths beside one [syn §1; a-test §1c].
-
-**The simpler way, as data flow.** The rule is one sentence: *compute a fact once, where it is made; carry it on the immutable value it belongs to; make every later step read the transaction report, never the program.*
-
-| Concern | What is computed | When | Where it is carried | Why it is proportional to the change |
-|---|---|---|---|---|
-| Program facts | one clj-kondo analysis of the changed files, one transaction of the difference | on each edit (a reset pays the whole analysis once) | `current-src`'s commit; the transaction report names every changed identity | callers are re-linted only when a contract datom is in the report; only the report's namespaces are reloaded; only wrappers whose contract changed are re-armed [a-pub §3, §6] |
-| The compiled schema generation | compiled once at publication | when the commit is written | on the database value (`seon.db/carried-projection`, `db.clj:1219`) and every branch forked from it | a fork is a pointer to the same value; nothing recompiles [p-a1 §1] |
-| Isolation for a task or a test | a Datahike `branch!` plus a `sci/fork` | when work starts | the branch head and the forked ctx | measured 37 ms per test fixture, 0.002 ms per warm `sci/fork` [a-test §4; p-b2 §2.5] |
-| Read currency | per-attribute revision comparison | before each agent turn | Datahike's cache context on the value | nothing re-executes [p-a2 §2] |
-| Tests | the set of tests reaching the changed functions, from stored `:seon.fn/calls` edges | on request, in the cluster's JVM | recorded result facts; unchanged green is reused, not rerun | selection is a Datalog read; one subprocess remains, for boot from zero [a-test §1c, §5] |
-| Errors | one flat map validated at the armed wrapper against the function's declared union; recurrence = a content hash | at the boundary | the error entity, occurrences as components | no stamps, no copies of the union [a-err §1.6; p-b3 §9] |
-| Profiling | two `nanoTime` reads and a `LongAdder` per armed call (40 ns measured), flushed on a bound as facts keyed by (symbol, definition digest, branch) | continuously | aggregate rows; bottlenecks are a Datalog query over `:seon.fn/calls`; a finding becomes a task | no sampling thread, no second store [p-c1 §8; syn §8.5] |
-
-Everything in §4 is one of those rows applied to one area, and every deletion there is the copy that the row makes unnecessary.
-
-## 1. Where we are
-
-| Measure | Value | Source |
+| Today’s unnecessary work | Integrated design | Guarantee retained |
 |---|---|---|
-| `src/` · `test/` · `resources/seon/schemas/` | 90,162 lines in 109 files · 98,985 in 299 · 14,256 | [brief; wc] |
-| `docs/` after today's deletions | 237,714 lines in 950 `.md` files; of these `docs/prds/steward-platform` 125,419 and `docs/prds/context-generation` 78,937 are still present; live issue notes 22,193 | [wc] |
-| `AGENTS.md` | 1,321 lines; 827 product law, 351 lane choreography, 44 anecdote, 4 sentences contradicting its own laws | [instr §1] |
-| Live JVM (`default`) | 4.2 GB resident; the node cache's ~47 copies of 81 MB of strings | [goals §2b] |
-| Publication | no change **264 ms**; repeat docstring edit **2.7 s** (first 4.3 s); boot to ready **5.6 s**; reset: **13.2 s** final population compile + **36.1 s** transaction of 107,049 datoms inside a 178.8 s cold publication | [p-b1 §5; p-b4 §0b] |
-| Fixture fork | **37 ms** p50 after four O(program) steps were removed (from 188,908 ms); one remains: `projection-from-database` at **3,996 ms** of the 4,648 ms first acquisition | [a-test §4] |
-| Hook publication | `:current-source {:enabled false}`, `:check-tests false`, `:schema-admission {:enabled false}` — two of three disabled because of multi-lane editing | [instr §3] |
-| Error models | two at once: 799 `:seon.error/kind` sites (306 src, 443 test, 46 script, 4 bin) and 183 `:seon.error/class` markers beside the ruled base model; the attribute is absent from the live schema, so all 799 are dead writes and reads | [p-b3 §3] |
-| Linking facts | `:seon.test/subject` on 0 of 2,157 tests; `:seon.test/reach` on 0; responsible agents on 2 of 411 namespaces; no per-function content digest (the row digest is the FILE's digest); `:seon.test/platform` HAS landed on 110 rows | [p-b4 §0b; p-c1 §2; goals §2d] |
-| Contracts | 16 of 3,161 private functions carry one; 352 private `seon.db` read consumers uncontracted; 1,570 armed Vars of 5,191 functions | [goals §2a; p-c1 §8] |
-| Process machinery | `bin/test` 1,107 · `bin/seon-hook` 1,987 · `bin/codex-agent` 573 · `bin/_test-slot` 165 · `fresh_operator.clj` 3,727 · `test/runner.clj` 4,967 | [instr §0; a-pub; a-test §1] |
-| `reference-code/` | 109 submodules, 21.27 GB; 12 on the classpath, 8 read for design, 15 cited only by history, **74 uncited (20.96 GB, `bun` alone 15 GB)** | [refcode §1–2] |
-| Issue notes | 369 live after the sweep (61 blocker, 279 friction, 29 cleanup); 120 archived today | [sweep §0, §5] |
+| Reconstruct projections and preparation plans from program facts at acquisition or call time | Carry the admitted projection; update only changed declarations and their dependency closure | An older cluster continues to use its own contracts and definitions |
+| Ask whether a read is current by rerunning it | Use Datahike dependency revisions; narrow wildcard producers where their semantics permit | A broad or unknown dependency never becomes falsely current |
+| Multiple publication, manifest, operator and cache paths | Analyze changed inputs with clj-kondo, transact on an unpublished branch, use its report for caller analysis, then publish and adopt | A refused publication leaves the published head unchanged |
+| Repeated test-host boot, full-program fixtures and duplicate result selection | One request uses an explicit execution program and canonical carried fixture; reuse each member’s valid recorded green | The actual candidate runs, unknown evidence executes or refuses, destructive work stays isolated |
+| Per-turn program scans and independently assembled history views | Retain unchanged SCI contexts; apply a verified program transition only when needed; render stored evaluations through their pairs | Private objects survive turns and historical prompt bytes remain unchanged |
+| Error stamps, copied unions and parallel task lifecycles | Declared error data and one task writer/settlement path | Missing completion evidence is visible; repeats do not create duplicate agents |
+| Profiling and merge proposals that infer more than they observe | Inclusive observations by exact definition; test the proposed combined program before writer-side acceptance | No invented self time, stale-head merge, or untested file export |
 
-## 2. Where we want to be
+[A1](lane-a1-projection-carried.md), [A2](lane-a2-datahike-one-answer.md),
+[B1](lane-b1-one-publication-path.md), [B2](lane-b2-walk-flow-fork.md),
+[B3](lane-b3-errors-tasks-dials.md), [B4](lane-b4-tests-in-process.md),
+[C1](lane-c1-wrapper-profiling.md) and [D1](lane-d1-isolation-merge-writeback.md)
+own the exact mechanisms and their source-backed proofs.
 
-**The mission, in the owner's words** [goals §1]: "The entire program graph is in the database and it's queryable and we know every function and call edge and what each input and output is and what tests exist … make it easy to refactor and impossible to cause certain software failures (like removing a function that's still in use, or allowing a function to be used if it's violating the schemas)." "The goal is to get to the point where the system can improve itself." "It was always supposed to be a single JVM and we pay the cost of startup once. We pay the cost of indexing once and then it's incremental."
+## 2. Acceptance: the complete loop
 
-**The target loop** [goals §1]: a task is an entity — instructions, namespace, subject, a set of tests that define done, a budget. Starting it creates an agent with its first turn open in the same transaction. The agent works on a forked branch and forked ctx until every test in the set verifies on the current reach; it may add tests, never remove them. A finished batch merges its changed program entities into the shared branch; the merge gate runs exactly the tests whose reach changed; approved entities are written back to their files by exact span. Signals derived from facts open tasks: red tests, uncontracted and untested functions, recurring errors, missing render pairs, profiling findings, a user's unanswered message. A namespace's agents are the engineers responsible for all of it.
+1. **Reliable development access.** The operator and MCP status/evaluation surfaces
+   reach the selected root and cluster and report unavailable observations explicitly.
+   The host REPL remains usable while implementation changes the system.
+2. **One program authority.** File indexing and agent definitions use the same
+   declaration analysis and transaction construction. Every declaration has an analysis
+   digest; definition identity includes the resolver context that gives its source meaning.
+3. **Cheap change.** Unchanged adoption compares commit ids. Explicit source requests
+   inspect their admitted inputs. Schema, analysis, validation and arming work follows
+   the changed declarations plus their required dependents, not an unrelated full scan.
+4. **Independent execution.** An old ordinary cluster, a new development cluster and
+   an existing candidate keep their own program and contracts across another cluster’s
+   reload. Datahike branching alone does not prove JVM/SCI isolation.
+5. **Honest tests.** One `seon.test/run` request selects from the execution program,
+   runs its definitions, records actual completion and exposes its recorded tally.
+   An unchanged member reuses green only with matching per-member evidence.
+6. **Real tasks.** Trigger identity resolves at the writer; starting establishes a
+   valid done condition, agent and first turn. The agent sees tests/detector or reply
+   obligations every turn. Budget exhaustion is recorded and resumable.
+7. **Gated acceptance.** Explicit merge validates the combined program, requires the
+   task’s tests and every test reaching changed functions, and refuses missing coverage
+   by name. The writer admits only the tested shared head. Conflicts become root tasks.
+8. **Verified export.** Stage changed files outside the live checkout, verify old
+   file bases and exact spans, then reanalyze with the canonical resolver. Equivalent
+   declaration facts, callable proof and accepted evidence precede installation.
+9. **A live demonstration.** Two candidates perform bounded real work, an invalid
+   candidate refuses, a same-identity conflict reaches root, and accepted work survives
+   export/reindex. Only then start the namespace-agent contract campaign.
 
-### 2a. Functionality targets (deduplicated from [goals §2]; each has an acceptance condition)
+The five laws remain: values carry their world; facts over inference; bounded and
+event-driven execution; total honest boundaries; one mechanism improved in place.
+AI presentation elides only at the render functions/value renderer. HTML never clips.
+Tests use real Datahike, real SCI and the contracts the cluster arms.
 
-| # | Target | Acceptance | Lane |
-|---|---|---|---|
-| T1 | Every function, private included, carries a complete Malli contract and is armed | arming covers private; an uncontracted function is a positive finding fact at publication; newly asserted uncontracted identities are refused | A1, agents |
-| T2 | Every function's output contract names the errors it can return | the wrapper refuses a returned error satisfying none of the declared schemas (landed `796a76314`); the declared union is checked against the body-derived set | B3 |
-| T3 | The compiled generation is carried, never rebuilt | arming an unchanged generation performs **zero** named-declaration compilations, counted at the seam; fixture base loses its 3,996 ms step | A1 |
-| T4 | Read currency is one mechanism | Datahike's cache context; no replay, no index-pattern walker | A2 |
-| T5 | A pull never silently cuts; heterogeneous values store natively | fork default limit nil; `:db.type/any` admitted (zero indexed EDN attributes exist) | A2 |
-| T6 | The write validator reads only the report's datoms | arity and render-target checks bounded by the transaction, never O(program) | A2 |
-| T7 | An edit is program facts in ≤ 1 s; no change is two commit ids compared | docstring edit ≤ 1,000 ms (from 2,723); no-change ≤ 300 ms; measurement-script row moves | B1 |
-| T8 | One publication entry point, one adoption path, no file mirrors of database state | `refresh-source!` over the prepl; `current-src.edn`, `ready.edn`, manifests, test-base store gone | B1 |
-| T9 | The operator is a prepl client | one child JVM for cold boot and `reset --force`; every other command is a form the live JVM evaluates | B1 |
-| T10 | Every function row carries its own content digest | derived from `:seon.fn/source`; two functions in one file have different digests | B1 |
-| T11 | An agent's fork is `sci/fork` plus its private objects, once | no per-turn snapshot of every namespace binding; `:sci/generation` alone discriminates the private layer | B2 |
-| T12 | The history is the walk over stored evaluations through the declared pair | the hand-assembled views are deleted; HTML never clips; the walk's distance cut is a query-work elision | B2 |
-| T13 | Bounded execution is core.async.flow's | the turn transform is `:compute` with `:compute-timeout-ms`; no work launcher, no per-turn watchdog thread | B2 |
-| T14 | One error model | 0 `:seon.error/kind` sites, 0 `:seon.error/class` markers, 0 hand-copied unions, 0 inline error guards; recurrence identity content-derived (landed) | B3 |
-| T15 | One task family, trigger → task at the writer | `seon.task` replaces `seon.issue` and the plan lifecycle; `start!` refuses while `:seon.task/agent` exists; done is a query written by settlement | B3 |
-| T16 | Tests run in the cluster's JVM through one path | `seon.test/check` over `run-owned`; the platform tier is the one subprocess; `bin/test` ≤ 100 lines | B4 |
-| T17 | Every test carries a bound and fails over it | default 5 s; a reason without a number is a refusal; the 128 escapes are converted or deleted | B4 |
-| T18 | Selection derives from `:seon.fn/calls` and recorded green; unchanged green is reused | zero executions on an unchanged request; no mtimes, no file lists | B4 |
-| T19 | Profiling on the armed wrapper, keyed by definition digest and branch | ≤ 5 % overhead on an armed call; bottleneck chains are a query; findings open tasks | C1 |
-| T20 | Isolated candidate per task; gated merge; write-back by exact span | candidate writes leave main unchanged; the merge gate = the reaching tests; the indexer reproduces written files byte for byte; a same-identity conflict opens a task for root | D1 |
-| T21 | The first live namespace agent closes contract coverage on one namespace | on a fork, through `run-owned`, with the uncontracted functions and their reaching tests as the task's linked facts; merged through D1's gate | after B3+B4 |
-| T22 | Agents see their tests and results every turn; budget exhaustion is loud and resumable | the opening names the tests; each turn appends one evaluation of what passed and failed; a typed outcome on the task | B2, B3 |
+## 3. Shared contracts
 
-### 2b. Size targets
+These are the interfaces that let the specifications compose. Their owning spec
+contains the exact data shape and producer/consumer changes; consumers do not invent
+parallel facts or a second derivation.
 
-The audits' floors sum to ≈ 19,800 src lines deleted (≈ 70 K src) and ≈ 13,600 test lines [syn §2]. The owner's norm is a codebase ten times smaller than conventional software [brief]. The targets below go past the floor by **dissolution**: an area gets smaller than "delete the duplicates" when the mechanism a duplicate protected is itself removed (no worker pool ⇒ no slots, no checkouts, no wire protocol, no confirmation stage, no watchdog ⇒ no tests for any of them). A reviewer checks each target with `wc -l`.
-
-| Area (files) | Today | Audit floor | **Target** | What dissolves beyond the floor |
-|---|---:|---:|---:|---|
-| A1 Malli — `schema.clj`, `schema/{admission,edn}.clj`, `instrument.clj`, `call_preparation.clj`, `test/arm.clj`, `fn/schema_shape.clj` | 8,274 | ~6,700 | **6,070** | plans in the snapshot (no plan cache, no `contract-t`), supplier matching by compiled-form equality (no shape-row reads), the second compiled-cache holder deleted, `m/-instrument`'s own arity dispatch hosting the declared-error check — the spec's four probes [A1 spec §6, §8] |
-| A2 Datahike — `db.clj`, `schema/datahike.clj`, `cluster/{store,registry}.clj`, `blob.clj`, `seon.db.edn` | 7,196 | 5,456 | **5,000** | the population plumbing, the read-evidence writer arms, read-side validation and the eight holders dissolve the code around the audited spans too (contracts, docstrings, schema keys, the `::read-projection` delay); ~45 more if the fork's own `source-context-unchanged?` is made public [A2 spec §8, §6.2] |
-| B1 publication/operator — `fn.clj`, `fn/*`, `program.cljc`, `cluster.clj` (publication), `cluster/source.clj`, `operator*.clj`, `id.clj` | 12,402 src · 3,727 script · 1,987 hook | ~9,600 src | **8,000 src · ≤ 700 script · ≤ 1,500 hook** | nine progress mechanisms → one argument; seventeen bounds → one per phase; the manifest value; offline readers; process records; advertisement repair [a-pub §1–4] |
-| B2 SCI/turn/render — `sci/*`, `turn.clj`, `run.clj`, `cluster/{agent,wake,message,prompt}.clj`, `flow.clj`, `oversight.clj`, `render.clj`, `render/*`, `print.cljc`, `repl.clj`, `ai.clj`, `my/*` (not `my/issue`) | 33,353 | ≈ 28,550 | **24,500** (`turn.clj` 3,300 · `render/web.clj` 2,300 · `sci/eval.clj` 2,400 · `flow.clj` 600 · `render/ns.clj` 480 · `render/transcript.clj` 0) | one turn function, one bind of first-party Vars, one history, one delivery; the routed-problem block leaves for B3; the since-diff is one query; the render proc's retention goes with per-tab render [B2 spec §9] |
-| B3 errors/tasks/config — `error*.clj`, `issue*.clj` + `plan.clj` + `my/{issue,plan}.clj` → `task.clj` + `my/task.clj`, `config.clj`, `effect.clj`, `search.clj`, `env.clj`, `bootstrap.clj` | 10,972 | ≈ 6,900 | **≈ 2,500** (`error.clj` 550 · task family 530 · `config.clj` 650 · `effect.clj` 500 · `env.clj` 150 · `bootstrap.clj` 120 · `search.clj` 0) | rendering leaves the recorder; the evidence-cap machinery dissolves into the value renderer; one task entity, one writer, done as a query, no note pipeline, no tree reconcile; the retired opening generator [B3 spec §8] |
-| B4 test system — `test.clj`, `test/*` (not `arm.clj`, `accretion.clj`), `test_support.clj`, `bin/test*`, `seon.test*.edn` | 8,077 src · 1,123 fixture · 1,373 shell · 1,203 schema = 11,776 | ≈ 6,300 | **≤ 3,300** (`runner.clj` ≤ 1,100 · `test.clj` ≤ 700 · fixture ≤ 450 · shell ≤ 160 · schemas ≤ 800) | one `run`; observed reach deletes the 305-line reach-digest index; recording without claims, workers, staged writes is ~200 lines; the fixture is the hosting cluster's connection and ctx, so no base clone and no hold protocol [B4 spec §9] |
-| remainder of `src/` (`fs*`, `shell/*`, `web/*`, `schedule.clj`, `maintenance.clj`, `reconcile.cljc`, `edit*`, `context.clj`, `problems.clj`, `background.clj`, `eval/*`, `bootstrap_drive.clj`, …) | ~10,900 | — | **8,000** | the 179 inline error guards (~700 lines repo-wide), retired vocabulary, `problems.clj` duplicates of `turn.clj` names [a-sci §4; p-b2 §9-A] |
-| **`src/` total** | **90,162** | **≈ 70,000** | **≤ 55,000** | the six landed specs' targets (A1 6,070 · A2 ~4,700 src · B2 24,500 · B3 ~2,500 · B4 ~1,800 · C1 +240) plus B1's 8,000 and the remainder's 7,500 sum to ≈ 55,300 before B1's spec and the agents' work |
-| `test/` | 98,985 | ~94,300 | **≤ 68,000 at the cut; ≤ 45,000 after the hoisting task class** | the landed specs alone remove ≈ 31,000: B2 ~17,700 (seven turn namespaces → three classes; cache, package, launcher, history suites), B4 ~7,000 (process suites, two runner suites → two class files), A1 ~2,200, A2 ~1,470; B1 and B3 add ~2,400; then the 46-lines-per-test setup hoisted by agents [A1 §7; A2 §7; B2 §7; B4 §9; a-test §3d] |
-| `resources/seon/schemas/` | 14,256 | — | **≤ 11,000** | 264-line union in `seon.effect.edn`, 156 class markers, the worker/claim families in `seon.test*.edn`, ~180 lines of class-C dials, the replay/digest keys in `seon.db.edn` [p-b3 §3–5; a-dh §8] |
-| `AGENTS.md` | 1,321 | — | **≤ 250** | the laws, the vocabulary, one page of state; mechanism prose re-homed to `docs/seon/architecture/` and the skills [instr §1.4]; a first draft is at [AGENTS-rewrite-2026-09-21.md](AGENTS-rewrite-2026-09-21.md) (548 lines, still over the target) |
-| `docs/` | 237,714 | — | **≤ 35,000** | the two old programs (204,356 lines) and the brief deleted at the clean write; issue notes stay until promoted to `seon.task` rows |
-| `reference-code/` | 109 · 21.27 GB | — | **20 · ≤ 0.2 GB** | 74 uncited and 15 history-only submodules unvendored [refcode §1–2] |
-
-## 3. The laws that decide every design
-
-1. **Values carry their world** — the projection, the database value, the profile travel with the computation; never a dynamic var, atom or registry fetched at call time (AGENTS.md §2.1).
-2. **Facts over inference; derive or die** — a question the database cannot answer is a data-model defect; no hand list, naming convention or regex; every mirror is derived, checked, or dated (AGENTS.md §2.2).
-3. **Bounded, event-driven, both halves** — every execution surface carries its declared bound at the admitting seam; a bound firing is a bug report, never a retry; absence of signal is never health (AGENTS.md §2.3).
-4. **Total, honest boundaries** — every function carries a contract; errors are flat values validated by the wrapper; one clipping spot (AI render functions and the value renderer); HTML never clips (AGENTS.md §2.4).
-5. **One mechanism, accreted in place; seconds, not minutes** — no second path, cache, constant or noun; a fork is a pointer; an edit costs the change; anything over ten seconds needs the owner's authorization (AGENTS.md §2.5 and "How we work here").
-
-## 4. The work
-
-Ownership seams are the brief's [brief, "Decisions"]. A1 and A2 meet at `seon.db/carried-projection` (`db.clj:1219`). Each lane's spec lives at `lane-<x>.md` in this directory. As this pass is written six have landed — [A1](lane-a1-projection-carried.md), [A2](lane-a2-datahike-one-answer.md), [B2](lane-b2-walk-flow-fork.md), [B3](lane-b3-errors-tasks-dials.md), [B4](lane-b4-tests-in-process.md), [C1](lane-c1-wrapper-profiling.md) — and their rows quote the spec; B1 is being written in parallel and its row is summarized from the audit and pack, marked **spec pending**. D1 is defined here.
-
-### A1 — the projection is read, never rebuilt ([spec](lane-a1-projection-carried.md), landed)
-
-| | |
-|---|---|
-| Deletes | per-call `supplied-projection` and its 70-line member union, the `boot-wrapper`/`bootstrap` second population, the dead `contract-digest`, the per-wrapper recompile and the arity scan (`instrument.clj`); `derive-projection-from-database` and `projection-from-rows` collapsed to a ≈40-line loader; the classpath fallback and its 158-line diagnostic (`schema.clj:929-1085`) with `schema/edn.clj`'s process-global population cache; whole-population `assert-config-display!`; twelve Datalog queries, the plan cache and the prepared-symbol queries in `call_preparation.clj`; the raw-form fingerprint walker; `schema/admission.clj`'s file-reading and second form walker plus its child-JVM `-main`; `sha-256`/`byte-array?` copies; 5 benchmark deftests; 14 refusal-grammar tests → 2; 9 idempotence tests → 3; 5 "resolves once" tests; the Datalog-structure tests of call preparation [spec §5, §7] |
-| Builds | the wrapper closes over its generation at arm time and reads `(mr/schema registry sym)`; `projection-from-database` returns the carried value (a refusal when absent, once B1 names the boot loader); config admission per declaration in `register!`; plans derived from the compiled contract inside the call-preparation snapshot; fingerprint = normalized `m/ast` (RESET); admission pure over the carried forms; Malli's own error table with a 13-entry noun overlay as data; one class regression: an unchanged generation arms with zero compiles [spec §5] |
-| Numbers | seam acquisition 589 ms warm / 3,996 ms cold → a metadata read; `create-base` 4,648 → < 700 ms; arming compiles → **0** (counted); per-call wrapper work 11 items → 5; call-preparation queries per plan 12 → 0; A1 src 8,274 → ≈ 6,070; A1 tests 7,233 → ≈ 5,000 [spec §1, §8] |
-| Fork | `malli/error.cljc:44-172`: `default-errors` gains `:vector :sequential :map :set :tuple :and :or :fn` in Malli's grammar; Seon's noun grammar is a data overlay, no `case` [spec A1-7] |
-| Depends on | nothing; every other lane reads this seam. Names for their owners: 7 boot callers (B1/A2), 8 dead `or` fallbacks, 22 running-code sites that start reading the carried value untouched, 7 guard sites whose union lives in `db.clj` (A2). Leaves `arm-var!` clean for C1 [spec §5b, §5c] |
-
-### A2 — three answers become one ([spec](lane-a2-datahike-one-answer.md), landed)
-
-| | |
-|---|---|
-| Deletes | read-currency arms (a) and (c): index-pattern walkers, `replay-read`, `stable-value`/`read-result-digest`, the read-request/result/digest keys of `seon.db.edn` (−405); the EDN-string codec, every decode/encode walker and the declaration-population plumbing (−410); the multi-arity `diff` family (−330, zero production callers); `total-pull-selector` (−70); pulled-form inference and read-side validation (−182); `jdk-integers->long`; the 56 inline error-shape checks; the 8 load-cycle holders; `store.clj`'s redundant config policy, the never-released `file-lock-generator`, the `contains?` liveness answer; `registry.clj`'s pre-reads the library already refuses, the filestore directory walk, `dry-run!`'s control-flow exception; one `blob.clj` unwrapper; the tests of each, nine duplicate classes to one member, `error_write_timing_test` whole [spec §5, §7] |
-| Builds | currency = equality of the read's per-attribute revision with the connection's cache context (Datahike's own `source-context-unchanged?` predicate); values stored as `:db.type/any`; a pull is complete or refuses under the fork's resource bound, reported as an elision; the validator reads the report's datoms grouped by entity, arity edges checked against indexed facts, render targets as facts on the schema row; `active-connection` as the one liveness answer; one new regression per class (currency by revision, validator proportional to the report, liveness during a drain, fresh-store fixture time) [spec §2, §7] |
-| Numbers | `read-evidence-current?` over 435 retained reads 114.9 ms → ≤ 5 ms; EDN-encoded attributes 23 → 0; validator work per program write from 65,764 call-arity datoms + 1,684 arity rows + 3,337 parsed forms → proportional to the report; `with-fresh-database` 4,648 → tens of ms; owned lines 7,196 → **5,000** (floor 5,456) [spec §1, §8] |
-| Fork | datahike: `:db.type/any` in the value set, refused with `:db/index`/`:db/unique`/cardinality-many; `+default-limit+` nil; `versioning/branch-commit-id`; `:datahike.gc/plan-only?`; Integer→Long only if the probe shows it reaching the writer. konserve: `:size` in `k/keys` metadata and a `store-base` accessor [spec §5 f1–f6] |
-| Depends on | A1 (`:seon.schema/render-ai`/`render-html` as schema-row facts live in A1's file); B1 (`:seon.fn/calls` `:db/index` and arity bounds as facts); B3 (the constructor the 56 sites convert to); B2 (`turn.clj:2030`, `wake.clj:422` one-line edits). Two RESETs: currency attributes removed, 23 attributes change type. Unsettled in the spec: why 413 of 435 retained reads plan `:all` [spec §6.1] |
-
-### B1 — one publication path, one operator request (spec pending)
-
-| | |
-|---|---|
-| Deletes | the manifest value and `database-manifest` (~115); the 660 caller-less `fn.clj` lines and their tests (~700–900); `discard-obsolete-cache-entries!` and the second clj-kondo run; `program-prelude` stubs (probe first); `current-src.edn`/`ready.edn`/`program-currentness` (~100); the test-base store with its GC and liveness files (~200, with B4); the aggregate `test-input-digest` (per-path rows replace it, with B4's reads); process records, claim files, advertisement truth/repair, phase logs, offline readers (~1,140); six of seven publication entry points and `publication-base!`; the hook's cache diagnostic (~130), session-digest walk (~90), worker/queue/result files (~180); eight of nine progress mechanisms; sixteen of seventeen bounds; three `sha-256` copies [a-pub §1–4; p-b1 §3–4] |
-| Builds | `refresh-source!` as THE request: changed paths → digest difference → clj-kondo lint with its own cache → transaction of the difference → report names identities → callers linted only on a contract datom (the preserved draft's algorithm, landed inside the publication's transaction sequence per the ruling "the transaction report is the seam") → reload the report's namespaces → re-arm changed wrappers; the projection the publisher holds carried onto the commit it writes; **the per-function content digest** on every `:seon.fn` row, derived from `:seon.fn/source` (RESET); hook publication re-enabled once the edit is sub-second |
-| Numbers | docstring edit 2,723 → ≤ 1,000 ms; no change 264 → ≤ 300 ms (held); complete publication 178.8 s → ≤ 60 s (tempid map O(rows × 53 identity attributes) replaced by Datahike's identity upsert); `fresh_operator.clj` 3,727 → ≤ 700; operator 6,599 → ≤ 1,800; every row of the measurement script re-recorded |
-| Fork | clj-kondo `impl/cache.clj:23-36`: `from-cache-1` skips a `:disk` entry whose recorded `:filename` no longer exists (~3 lines) |
-| Depends on | A1 (carried projection replaces `source/database`'s rebuild); coordinates with B4 on the test-base store and the four `test-input-digest` reads |
-
-### B2 — the walk is the history; flow is the launcher; the fork is the context ([spec](lane-b2-walk-flow-fork.md), landed)
-
-| | |
-|---|---|
-| Deletes | the per-turn binding snapshot (`base-bindings`, `same-program-root?`, the diff in `regenerate-agent-context!`), the two kernel mirror atoms, `installation-covers-program-change?`, `::print-session`; 7,725 `copy-var*` root copies per acquisition; 272 lines of doc/dir assembly; the candidate ctx fork; the work launcher (704), the capacity observer, the turn backstop (252) and its caller; the relaying mailbox proc and `CountedSlidingBuffer`; the three turn siblings, delimiter repair, schema-change machinery, declaration-shape duplicates, hand-rolled optimistic concurrency; the whole history assembler (2,443); packages, per-tab registration, the drain await, the render proc's retention, the invocation cache and its consumers (~900); the namespace page ladder (440); the debug page's parallel derivations (750); the namespace-candidate scan; `*walk-context*`; 15 delays + 7 inline `requiring-resolve`; `seon.run`; ~17,000 test lines (seven turn namespaces → three classes; cache, package, launcher and history suites whole) [spec §5, §7] |
-| Builds | first-party functions bound as the JVM `Var` objects themselves (one 8.6 ms walk, never repeated; a reload or re-arm is visible immediately through `Var.invoke`); `fork-for-turn` = `sci/fork` + re-intern of the private Vars by `:sci/generation`; the turn as one function with one source selector, run as one flow proc whose in-port is the wake channel and whose deadline is flow's `:compute-timeout-ms`, reported on `::flow/error` to the fault committer; the history as the walk through the evaluation schema's pair; per-tab whole-view render on a `(dropping-buffer 1)` tap, brotli-streamed by the SDK's own profile (nothing vendored); one AI text + one full HTML view per namespace page; the since-diff as one `db/since`; the load order `print → render.value → repl → render → render.walk → sci.* → prompt/context → turn → cluster.agent → render.web` [spec §2, §5, §2h] |
-| Numbers | private-layer discovery per turn: a 5,326-binding walk × 2 → `sci/fork` (0.002–0.02 ms) + N private Vars; ctx atoms per agent 5 → 1; procs per agent 3 → 2; history render paths 4 → 1; `requiring-resolve` in owned files 22 → 0; owned src 33,353 → **24,500**; owned tests ~37,700 → **~20,000** [spec §1, §9] |
-| Fork | the sci change is **withdrawn** — arming never runs against a fork once program rows install at the base. core.async `flow/impl.clj:257-261` (3 lines): `:compute-timeout-ms` applies the futurized `.get` for any workload, so the paid call stays `:io`; fallback without the fork stated [spec §2b] |
-| Depends on | A1 (carried projection at `sci/eval.clj`'s ten rebuild sites); B3 for `effect.clj:991`, `bootstrap.clj:816,863,871`, the seven `plan/settle-call`/`run-issue-tests!` sites, the two config key names and the error render split; B4's fixture for the turn-test collapse. Two RESETs: the `:seon.render/request-error` key and the opening's bytes |
-
-### B3 — one error model, one task family, dials that mean something ([spec](lane-b3-errors-tasks-dials.md), landed)
-
-| | |
-|---|---|
-| Deletes | all 799 `:seon.error/kind` sites (pure code; the attribute is not in the live schema) and 172 `:seon.error/class` markers with their test; the `diagnostic-*` ceremony at 275 sites (2,310 key lines); the 14 drifted union copies (695 lines, six different member sets); the stored EDN copy of every recorded error (a live occurrence: 55,201 bytes beside the datoms that say the same), the path/segment/omission components and the 33 predicates and generators that reassemble them; the renderer from the recorder (300 lines move to `seon.render.error`, B2) and the two load-cycle delays; dead prose builders; the 195 `;; debt:` guards in owned files; the note-ingestion pipeline, `seon.issue`, `issue/*`, `my.issue`, `seon.plan`, `my.plan`, the plan's tree reconciler and the `:seon.agent/plan` component (1,882 issue entities on `default`: every one from a note path, none with a detector or agent); Lucene whole; `seon.env`'s record, atom and predicates; `*request-context*`; synchronous effect rows and the retired `receipt`/`face` spellings; 33 class-C dials with rows and readers, 5 class-B rows with their event conversions; `bootstrap.clj` to `seed-tx` + `supervision-tx` (probe §6.4); ~7,000 test lines [spec §2, §5, §7] |
-| Builds | `(seon.error/error m)`: one additive pure constructor; the wrapper validates the DECLARED union only (A1 seam); the offending value is the value renderer's shown text + `result/e<id>`; recurrence identity unchanged (D13 landed); `:seon.error/base` at the 14 pass-through boundaries, every domain function still naming its union; **`seon.task`** as one entity (linked facts, optional agent, `parent`/`needs`/`position` for a plan step) with **the D2 writer** `trigger-call`: one identity lookup inside the caller's transaction — absent → task + agent + first turn; present with agent → `updated-tx` wakes it; done = tests verified on current reach OR the detector scoped to the ONE subject returns nothing; `settle-call` at turn close; detectors as scoped queries fired from root's schedule rows; a recurring error opens its task in the same transaction as the second occurrence; a conflict task from the merge writer; `my.task`; the 369 notes promoted once by a throwaway script; each class-B dial replaced by the event it stood for [spec §2a–2c] |
-| Numbers | owned src 10,972 → **≈ 2,500** (`error.clj` 2,790 → 550; task family 4,169 → 530; `bootstrap.clj` 932 → 120); owned schema ≈ 2,400 → ≈ 900; `kind` 799 → 0; `diagnostic-*` 2,310 → 0; union copies 14 → 0; bytes per recorded fault 55 KB EDN + 13 KB blob → the declared datoms + shown text; done check: a whole-program detector run → one scoped query ≤ 10 ms; config keys 92 → 50 [spec §1, §8] |
-| Fork | none |
-| Depends on | A1 (`default-errors` entries, declared-only validation at the wrapper, `admission.clj` for `similar-identities`); A2 (`:db.type/any` for the explanation path, `blob.clj`); B2 (`seon.render.error`, the seven `turn.clj` sites, `my/plan.clj`, `:seon.agent/plan` readers, `render/web` coalesce, `ai.clj` retry); B4 (`run-owned` for `run-tests!`); B1 (`cluster.clj` search wiring, held today). Three RESETs: the error shape, the task family, the retired config attributes |
-
-### B4 — the test system is the runtime ([spec](lane-b4-tests-in-process.md), landed)
-
-| | |
-|---|---|
-| Deletes | worker pool, checkouts, exchange, wire protocol, claim protocol, staged results, watchdog and thread dumps, confirmation stage, packing, ambient drift, the 305-line reach-digest index, the `arm.clj` duplicate (−2,900 of `runner.clj`); `run`, `run-owned`, `check`, `check-in-process` and two private selectors → one function; `seon.test.fast`, `bounds.clj`, `cache.clj`, `selection.clj` whole (the ~90 lines of input roots move to B1's `cluster/source.clj`); `bin/test` to ≤ 100, `bin/test-fast` and `bin/_test-slot` whole; the fixture's base clone, hold protocol and file-backed roots (`test_support.clj` 1,123 → ≤ 450); the process families in five `seon.test*.edn` schemas plus 14 shapes of `seon.test.edn` (RESET); `:seon.test/subject` (0 rows; E2 forbids the annotation); ten test files that prove the machinery (−6,600 in commit 1 alone) [spec §5, §9] |
-| Builds | **the in-process test request**: `(seon.test/run request)` — basis = last green run; changed = `since` over per-function content digests; reached = AVET lookup of each changed symbol in `:seon.test/reach`, the set the armed wrappers **observed executing** on the last run (static `gate-sets` only as the first-run seed); green unreached members answered from the record; the rest run serially on a branch + ctx fork of the hosting cluster under `(or long-ms 5000)`; one transaction per member records counts, failures, observed reach and basis; the tally is a query; `bin/test-check` (53 lines, no JVM) and `my.test` are one-line callers; `bin/test --platform` boots one scratch JVM for the 110 declared platform rows; a `:seon.test/long` without `long-ms` does not publish [spec §2, §6] |
-| Numbers | tests selected for a one-function change: **1,827 of 2,157 today for every seed probed** (the static graph is saturated) → the observed set, expected tens; selection 134–293 ms → ≤ 20 ms; first fixture acquisition 4,648 → ~40 ms; JVMs per gate 4+ → 0 (1 for platform); granted budget 68,105,085 → ≤ 1,500,000 ms, every declaration numbered; `runner.clj` 4,967 → ≤ 1,100; `test.clj` 2,182 → ≤ 700; area (src + shell + schemas) 11,776 → **≤ 3,300**; corpus in the area 10,080 → ≤ 3,000 [spec §1, §9] |
-| Fork | none |
-| Depends on | A1 (the 3,996 ms base step); B1 (content digests for `changed`, `:seon.test/subject` lifting removed from the indexer, `cluster/source.clj:287-293`); C1 (the wrapper's observation is the reach — until it lands, selection falls back to the static seed and says so); B3/B2 for five foreign call sites of the one function |
-
-### C1 — profiling on the armed wrapper ([spec](lane-c1-wrapper-profiling.md), landed)
-
-| | |
-|---|---|
-| Deletes | nothing; the one net-positive lane, budgeted at **≤ 240 src, ≤ 130 test** lines [spec §8] |
-| Builds | a `deftype` cell (`LongAdder` count and total, `LongAccumulator` max) per armed definition, allocated at arming and keyed by (symbol, content digest) — a redefinition starts a new row; per-branch cells chosen by the custody binding the turn already establishes (`seon.db/*conn*`, 12 ns), host work in a `host` cell never transacted; two `nanoTime` reads around the call in both wrappers; **the flush joins the turn's own close transaction** — `sumThenReset` over touched cells, one entity per (symbol, digest) whose `[count total max]` tuple is REPLACED per window, every earlier window kept by Datahike's history; rolling average = a history query; self time = total minus callees over `:seon.fn/calls`; `my.program/profile` as a one-hop chain read; a window over the `:slow-ms` dial (2,000 ms, the owner's law) opens ONE task per symbol through the D2 writer inside the same transaction; JFR as the independent check [spec §0, §2, §5] |
-| Numbers | unwrapped 174.7 ns, armed 1,136.8 ns; the sample done right +40 ns, done wrong (map of cells, boxed locals) **+624 ns** — forbidden by construction; custody attribution +12 ns; flush floor 300 identity upserts 12.95 ms first / 6.03 ms second; callees of 300 symbols over 40,812 edges 7.87 ms; acceptance: sampled − unwrapped ≤ 60 ns, custody − sampled ≤ 20 ns, flush ≤ 30 ms inside the close transaction [spec §1] |
-| Fork | none |
-| Depends on | A1-3 (the clean outer fn; lands on today's anyway and reports both numbers); B1 (`:seon.fn/digest`, form-scoped — until then the file digest over-splits windows, never merges); B3 (the D2 writer; `seon.issue/subject-row` upserts by the same identity until then); one RESET for the new attributes. Unsettled: provider and effect waits rank as slow self time — the effect owner samples its own crossing (recommended) [spec §8] |
-
-### D1 — isolation, merge gate, write-back (defined here from [goals §2f] and the isolation research; spec pending)
-
-| | |
-|---|---|
-| Deletes | `bin/seon init NAME` as a separate fork path once a task fork is the same `branch!`; any second "changed entities" derivation |
-| Builds | a candidate per task = `branch!` from the shared branch's commit + `sci/fork` (the fixture already does exactly this); **changed program entities since the fork basis** as a pure projection over `since` (edit three entities on a fork ⇒ exactly those three); **the merge gate**: exact replacement through `seon.program` into the shared branch, admitted only when the task's tests and every test reaching a changed function are green on the proposed combined program in-process (B4's request), refusing an identity no test reaches BY NAME; a durable acceptance record (base, proposed definitions, selected tests, results, tested head); a same-identity conflict opens a conflict task for root with both sources and the basis (D6), fingerprinted so only one arises; **write-back**: accepted definitions to their files by `:seon.fn/file` + form span through the effect boundary, gated on the ordinary indexer reproducing the written bytes byte for byte, then a path-limited commit; C6: no agent ever shells out to change its own system |
-| Numbers | fork ≤ 50 ms; changed-entities projection proportional to the fork's datoms; merge gate executes only the reaching set; write-back round-trip digest equality proven on the first merged namespace |
-| Fork | datahike `versioning/merge!` (`:734`) is read first; a Seon merge is exact replacement over `seon.program`, not a Datahike three-way merge |
-| Depends on | B1 (form spans, content digest, the indexer as the write-back oracle), B2 (the fork ctx and private objects), B4 (the in-process request), B3 (the task and conflict-task writers) |
-
-### Dependency order
-
-| Step | Lanes | Why this order |
+| Contract | Producer → consumers | Required behavior |
 |---|---|---|
-| 1 | **A1**, with **A2** alongside | every seam reads the carried projection; A2's currency and codec cuts touch nothing A1 owns; both meet at `carried-projection` |
-| 2 | **B1, B2, B3, B4** after A1 lands | each reads the carried value; B1↔B4 share the test-base store and digest reads; B2↔B3 share seven call sites — the specs name the exact seams and the second lane to arrive stops at them |
-| 3 | **C1** after A1 + B1 | needs the clean wrapper and the content digest; its observation is also B4's reach (B4 commit 7 waits on it) |
-| 4 | **D1** after B1 + B2 + B4 + B3's writers | the gate is B4's request; write-back is B1's indexer in reverse |
-| 5 | **the first live namespace agent** after B3 + B4 (D1 for its merge) | contract coverage on one namespace, through `run-owned` on a fork |
-| 6 | **agent work**: the second task class (hoisting the repeated test setup — 46 lines per deftest, the `:seon.audit/poison` probe at 7 sites, the 12-row provider table in two files, five `delete-recursively!` copies [p-b4 §6]) and the contract campaign (3,145 private functions, 352 uncontracted `seon.db` readers, 288 untested public functions [goals §2d]) | these are the namespace agents' first real work by ruling; no human lane is launched at them |
+| Carried projection | A1 construction with A2/B1 database acquisition → every read, validator, wrapper and fixture | Raw, materialized, temporal and forked values receive the correct immutable projection before reconstruction fallbacks disappear |
+| `:seon.program/definition-digest` | B1 canonical declaration analysis → A1, B2, B4, C1, D1 | Source, qualified identity, complete normalized resolver context and effective semantic metadata define identity; position, branch identity and authorship do not; dependency/input evidence remains separate |
+| Changed declaration report | B1 unpublished transaction → caller lint, A1 arming, A2 validation, B2 adoption | Report-based invalidation; schema references, aliases, macros and external inputs participate where they can change meaning |
+| Validator facts | A1 render-property facts and B1 effective arity/default facts → A2 | Producers and every consumer land together; narrowing work preserves complete final-entity/component validation |
+| Declared errors | B3 constructor/contracts → A1 wrappers, A2/B2 callers and composed renderer | Input failure prevents entry, output failure rejects the value; forwarding boundaries derive precise unions; no general error predicate |
+| Execution request | B4 → B3 task tests and D1 merge gate | Immutable execution database/commit, matching projection/context and explicit durable recording custody; a candidate is never silently replaced with current-src |
+| Observation | Existing A1 wrapper with C1/B4 execution input → profile and diagnostic reach | Capture installed definition identity; carry execution scope into owned child work; completion waits for that work; host/unattributed work is explicit |
+| Task transitions | B3 trigger/start/settlement → B2 loop, C1 findings, D1 conflicts | Trigger and start remain distinct operations; repeated/new occurrences use the existing wake route; missing subject, test or detector cannot close work |
+| Candidate acceptance | D1 using B1/B2/B3/B4 → shared branch and export | Actual combined-program execution, immutable evidence lineage, atomic tested-head admission, retained evidence after scratch cleanup |
 
-Lane concurrency within a step is the owner's decision after this plan [brief].
+**Selection is conservative.** Current call/reference dependencies and required test
+obligations govern selection and destructive-host classification. Past observed reach
+is diagnostic; absence on an earlier execution path cannot prove changed code irrelevant.
+A missing/incomplete graph is unknown and must widen or refuse, never exclude silently.
+A later unrelated green cannot cover an older member’s untested change.
 
-## 5. The pipeline and gates
+**Isolation includes loaded behavior.** A wrapper closing over one cluster’s schema
+cannot validate another cluster merely because both call the same JVM Var. Capturing
+one JVM root also does not freeze its indirect calls. A1/B2 prove the full reachable
+execution boundary before removing context-specific selection or candidate isolation.
 
-**How a lane works** [brief, "What every spec must contain"]. It opens its spec's owner section and reads the reference-code blocks listed there before editing (verified `file:line` at the current gitlinks; the packs carry them). It records the before-numbers in the REPL (`eval_clj`, mode `jvm`, `read_only`, against `default`; a scratch cluster only when a probe must mutate; never a restart of `default`). It probes the spec's "better than the floor" candidates first and takes the smaller cut when a probe shows one, saying so with evidence. It lands ordered, net-negative, path-limited commits, each leaving HEAD loadable (`clojure -M -e "(require …)"` for the touched namespaces), fork commits pushed before the deletion they enable, RESET NEEDED marked where a stored shape changes. It runs only the tests reaching its change, in process, through `seon.test/check` or `run-owned` — never a suite, never a cold gate. It stops at a held file, at an unsettled design (three options in the landing note), and at a seam another lane has not landed.
+**Timeout includes exit.** A Future timeout only reports a late result. B2/B4 retain
+termination, cleanup and no-overlap guarantees; arbitrary host work does not acquire
+SCI interruption merely by being called from SCI.
 
-**What "landed" means.** The numbers the spec names have moved, measured on the REPL and pasted as exact forms and values; HEAD loads after every commit; the reaching tests are green in process; the landing note exists at `docs/prds/agent-platform/landing/lane-<x>.md` with the commit list, `git diff --stat` per commit, RESET NEEDED with its commit, every guard site's disposition, every citation whose line moved corrected. A green run alone lands nothing.
+## 4. Ownership and order
 
-**Integration, by the orchestrator.** One boot from zero per integration step, on the measurement script (`docs/prds/steward-platform/research/measure-publication-path-2026-09-22.sh` until it moves with the docs), recording its rows; one reset per step with every pending schema change batched (fingerprints, content digest, ordered explanation, `:db.type/any`); the platform tier once; **no full suite** — the reaching set for the integrated change plus the platform tier is the proof, and a red outside that set is the namespace agents' work by ruling [goals §3, "Fix the highest value first"].
+| Spec | Owns | Main reduction or feature |
+|---|---|---|
+| [A1 — projections and contracts](lane-a1-projection-carried.md) | Schema/projection construction, Malli integration, instrumentation, supplied-default preparation, schema shape | Compiled values acquired once and retained correctly; name-based supplied defaults |
+| [A2 — Datahike and storage](lane-a2-datahike-one-answer.md) | `seon.db`, bridge, store/registry, blobs, Datahike/konserve seams | One currency mechanism, report-scoped validation, complete pulls, native values only after comparator/history proof |
+| [B1 — publication and operator](lane-b1-one-publication-path.md) | Analyzer/program facts, publication/adoption, operator/hook, identity; **MCP evaluation/status tool and server first** | One analysis/publication path, exact definition identity, reachable and honest development tools |
+| [B2 — agent execution and rendering](lane-b2-walk-flow-fork.md) | SCI, turns, agent graphs, history, AI/HTML rendering and delivery | Stable candidate behavior, one turn path, one history and changed-view delivery |
+| [B3 — errors, tasks and configuration](lane-b3-errors-tasks-dials.md) | Error/task writers, config/effect/environment, bootstrap; **surviving source remainder** | One task family, precise errors, event-based dials; no source remainder without an owner |
+| [B4 — tests](lane-b4-tests-in-process.md) | Selection, execution, fixture, evidence/recording, thin launcher | One run authority, per-member reuse and real execution-program isolation |
+| [C1 — profiling](lane-c1-wrapper-profiling.md) | Inclusive measurements and their query surface | Definition-scoped observations through the wrapper, no separate timer or database per call |
+| [D1 — candidates and export](lane-d1-isolation-merge-writeback.md) | Candidate acquisition, combined-program validation, acceptance, conflicts, write-back | A real self-improvement path composed from the existing owners |
 
-**The astra review lens** [brief]. First: is the data processed at the right time and place — is anything computed per call that belongs at construction, per turn that belongs at publication, per program that belongs to the change? Second: errors in citations, counts and ordering. A reviewer improves the algorithm before it corrects the prose.
+B3’s remainder includes filesystem/shell/web support, scheduling/maintenance,
+reconciliation, editing/context/problem helpers, evaluation drivers, background work
+and development-cache support unless an explicit owner above already holds the seam.
+Ownership is responsibility to classify and preserve surviving behavior, not permission
+to bulk-delete those files. B1 retains operator/bootstrap publication custody; B2
+retains evaluation and rendering behavior. Convert overlapping callers in one slice.
 
-**The fresh implementation session** starts from this plan and the specs only; the research directory and the brief are deleted at the clean write, so nothing a lane needs may live only there.
+The implementation order is by usable interfaces, not whole-lane barriers:
 
-## 6. What this plan never does
+| Step | Coherent slice | Exit condition |
+|---|---|---|
+| 1 | B1 development-tool preflight; orchestrator prepares the authorized fresh baseline | Status and one bounded evaluation answer; recorded boot/publication measurements; required evidence preserved |
+| 2 | A1/A2/B1 projection constructors and B1 definition identity; B3 constructor contract | Every consumer has real inputs before any fallback or public constructor is retired |
+| 3 | A1/A2/B1 validator producers, publication reports, affected arming and input observation | Incremental behavior and refusal preserve the published head and complete validation |
+| 4 | B1/B2/A1 independent execution; B4 carried fixture and final request | Old/new/candidate definitions remain independent; named execution program actually runs |
+| 5 | B2/B3 task/render lifecycle and B4 caller conversion | One settlement path and test request; every retired name converted in the same loadable slice |
+| 6 | C1 observation using installed contracts; B4 diagnostic observation interface | Correct attribution, bounded overhead, explicit concurrency limits and refusal-safe recording |
+| 7 | D1 combined-program gate, explicit acceptance and staged export | Invalid/stale/conflicting proposals refuse; accepted definitions round-trip with durable evidence |
+| 8 | First bounded namespace-agent tasks, then repeated-fixture-setup work | Real repair through the complete loop; surviving issues promoted only after required resets |
 
-- Never a second cache, analysis path, registry, renderer, feed, retry, scheduler, run path, or noun.
-- Never a tuned timeout without the observable event it stands in for; never a bound that is not part of the seam's contract.
-- Never a migration: every stored-shape change is a reset, and database data is disposable.
-- Never a hand-maintained list, a naming convention, or a regex in production code.
-- Never a general error predicate, a kind stamp, a class marker, or a copy of the error union.
-- Never a worker JVM for anything but boot from zero and destructive drills.
-- Never a schedule, a lane-day, or a date as a promise; never a green run as proof.
-- Never a lane at a bulk-tier red class, a placeholder test entity, a task with no way to decide done, or a shell command taught to an agent for changing its own system.
-- Never a rebuild of the projection from rows in running code; never a pre-read the authority re-decides.
-- Never a worktree for structural edits; never a revert of a shared file.
+At most three editing assignments run concurrently; exact file ownership decides what
+can overlap. No slice removes a safety mechanism before its replacement passes the
+specific proof in its spec. A retirement and all callers are one commit.
 
-## 7. Open decisions for the owner
+## 5. Measurements and size
 
-Only what the audits and packs could not settle; the brief's decisions are not re-opened. Recommendation first.
+The following are recorded baselines from the 2026-09-21 investigations, not a fresh
+measurement of the stopped development system. Specs retain exact forms, source
+revisions and measurement boundaries. Repeat the relevant case before implementation.
 
-| # | Decision | Options (priced) | Recommendation |
-|---|---|---|---|
-| 1 | **The write-back gate** (goals §6 #1): what admits a merged definition to disk? | (a) reaching tests green in the candidate + platform tier once per integration — cheapest, proven by B4; (b) (a) + the task's cited tests, re-run on the combined program — one extra selection; (c) (b) + a human approval before the commit — a queue, and the owner in the loop for every merge | **(b)**; (c) only for `src/seon/db.clj` and `schema.clj` until the first ten merges have been read |
-| 2 | **Observed reach over the static call graph** (B4 spec §8): ruling E2 says coverage is the stored call graph; the graph is saturated — any seed reaches 1,827 of 2,157 tests, so "run only the reaching tests" has been a full run | (a) `:seon.test/reach` = the functions the armed wrappers observed executing on the test's last run (one observation shared with C1's profiler); the static walk remains the first-run seed and the "unknown" floor — precise, proportional, 40 ns per armed call; (b) keep static reach and prune hub edges by a declared marker — a hand list, banned; (c) keep static reach and accept 85 % runs — D9 unmet | **(a)**; E2's "no annotation" holds — the observation is recorded by the runner, never declared by the author |
-| 3 | **`seon.bootstrap`'s generated opening** (goals §6 #23; B3 spec §6.4): 932 lines of `situation`/`next-entry`/intent acquisition; the ruled path is system turn 0 evaluating the opening forms; the 160-byte namespace picture won the seven-opening trial | (a) delete to `seed-tx` + `supervision-tx` (≈ 120 lines) and let the namespace picture open — zero mechanism; (b) move the opening into `seon.task/render-ai` — the task's own pair, ~200 lines kept; (c) keep as is — the retired direction survives | **(a)**, after B3's probe shows no live turn on `default` reaches `bootstrap/situation` |
-| 4 | **Where platform-tier results live** (B4 spec §8; goals §6 #6): the platform JVM boots a scratch cluster | (a) recorded on the scratch cluster it ran on, tally printed, root downed; "last green" across clusters is a query (E1) — zero mirrors; (b) copy the run entity into `default` afterwards — a mirror; (c) run the platform tier against `default` — destroys the development root, refused by `host` | **(a)** |
-| 5 | **What a profiling finding is** (C1 spec §8): a window whose self time crosses a declared `:slow-ms` dial (2,000 ms, the owner's "couple of seconds"), or the top-N by self time per window | (a) the dial — one config fact with a default, a task only when the law is broken, zero tasks on a healthy window; (b) top-N — a constant too, and N tasks every window whether or not anything is slow; (c) both — two mechanisms | **(a)**; and every armed call is counted (40 ns), never sampled every Nth |
-| 6 | **Provider and effect waits in the profile** (C1 spec §8): wall-clock self time ranks a provider wait as the slowest function | (a) the one effect owner `seon.effect/request!` samples its crossing into its own row and the detector excludes the function the config declares as the effect executor — a config fact, not a name; (b) CPU time through `ThreadMXBean` — microseconds per call, rejected by cost; (c) accept one permanent task per waiting seam closed by "under the dial for k windows" — a constant | **(a)** |
-| 7 | **The four keeperless issue classes** (sweep §6): `class/p1`, `p2`, `p3`, `absence-as-health` hold 40 open notes with no class-kill statement | (a) the owner rules one sentence per class and the 40 fold into four keepers, then into four `seon.task` rows — four sentences; (b) they stay as query tags and 40 individual tasks are minted at B3's promotion — no ruling, 40 agents' worth of context | **(a)** |
-| 8 | **Agent-facing adoption** (goals §6 #19): does `my.edit` request in-process adoption, or does `my.test/check` adopt the changed `src` namespaces before selecting? | (a) `my.test/check` adopts what it needs — one request, the agent never names adoption; (b) `my.edit` adopts on write — every edit pays it, even mid-thought; (c) an explicit `my.adopt` — a new surface | **(a)** |
-| 9 | **Merging `steward-platform` into `main`** (goals §6 #22) | (a) merge at the first integration checkpoint after A1 lands — `main` gets a loadable, smaller tree; (b) merge only after D1 — `main` stays six weeks behind | **(a)** |
-| 10 | **The first namespace for the first live agent** (goals §6 #14–15): by evidence `seon.render.web` (28 citations, 130 functions), `seon.cluster` (37), `seon.sci.eval` (32) | the owner picks; contract coverage is the task class either way | `seon.render.web` after B2 shrinks it — the most public surface with the most uncontracted private functions |
+| Case | Recorded evidence | Interpretation |
+|---|---|---|
+| Source / tests / schemas | 90,162 / 98,985 / 14,256 lines in the writer’s baseline | Separate accounting scopes; no combined total disguises moved code |
+| Projection acquisition | 3,996 ms inside a 4,648 ms fixture-base acquisition | The repeated reconstruction is the optimization target, not a larger timeout |
+| Warm fixture branch | 37 ms p50 | Does not price full candidate environment/context construction |
+| Explicit no-change publication / repeated docstring edit | 264 ms / 2,723 ms | Different from a pure unchanged-adoption commit-id comparison |
+| Retained-read plans | 413 of 435 broad plans; 407 wildcard pulls | Producer shape limits the benefit of an attribute-revision comparator |
+| Profiling microprobe | Approximately 40 ns timing-only increment; another attempted shape added 624 ns | Neither number proves final armed overhead, child-work attribution or concurrent recording |
+| Text-matched long-test allowances | 68,105,085 ms across 128 declarations | A source inventory, not measured runtime; indexed declarations must drive conversion |
 
-Settled by the brief, the packs or a landed spec and therefore not listed: read currency (one mechanism), pull limit (nil), `:db.type/any`, the walk's distance elision, the 5 s default bound (B4: no test pays a base after its commit 5), the platform tier as the one subprocess, `:seon.test/subject` deleted (B4; E2), `:seon.test/platform` kept as a declared fact (B4; 110 rows), `seon.run` folded into `my.turn` (B2 commit 13), the sci fork change withdrawn (B2 §2a), Malli's error grammar with a Seon noun overlay (A1-7), `seon.plan` and `seon.issue` into one `seon.task` with a plan step as a task with a parent (B3 §2b), `:seon.error/base` at the 14 pass-through boundaries with every domain function still naming its union (B3 §2a), the result mechanism at the recorder (B3 §2a keeps goals #21), profiling counts every call and flushes in the turn's close transaction (C1), override scope (C3), merge collision (D6), worker claim granularity (dissolved by one JVM), `:seon.fn/sym` as a symbol (installed), the callee tuple, write admission in the fork (`73afe782`), prompt whole-unit selection.
+The ambition remains aggressive: **source ≤55,000 lines; tests ≤68,000 after the cut
+and ≤45,000 after agents remove repeated setup; schemas ≤11,000; docs ≤35,000;
+shared instructions ≤250 lines.** These are targets, not a proven sum of lane estimates.
+Maintained correctness and a complete self-improvement loop decide acceptance.
 
-## 8. What is deleted from the repository
+Each spec owns its measured before/after scope and target. Before a cut, derive
+mutually exclusive path/span sets: separate src, schemas, fixtures, tests and shell;
+charge moved code once at its destination and include new profiling/merge code.
+Do not sum overlapping `fn/*`, `my/*`, error conversions or transferred render code.
+If an essential guarantee raises a target, state the mechanism and cost instead of
+claiming the previous target was achieved. Compact lines are not a code reduction.
 
-| Kind | What | Count / lines | Source |
-|---|---|---|---|
-| Docs | `docs/prds/steward-platform/` and `docs/prds/context-generation/` after the goals note has been checked against every spec; `docs/prds/agent-platform/research/` and the brief at the clean write; `docs/TRANSFER_PROMPT.md` shrunk to owner working style, session start and the sweep; `docs/seon/reference/{driving-codex-agents,codex-cli-hooks-2026-09-17,claude-code-hooks-2026-09-17}.md`; the `clojurescript` and `codex-lanes` skills; 22 superseded handover lines from the memory index | 204,356 + 6,279 lines; 391 → ~150; 3 files; 2 skills | [wc; instr §2–5] |
-| Code, by lane | A1 ~2,200 · A2 ~2,200 · B1 ~4,400 src + ~3,000 script + ~500 hook · B2 ~8,900 · B3 ~8,500 · B4 ~7,000 src + fixture + ~1,200 shell · C1 +240 · remainder ~1,500 | **≈ 35,000 src** (90,162 → ≤ 55,000) | §2b; the six landed specs' targets sum to their rows there |
-| Tests | process-machinery suites, tests of every deleted mechanism, duplicate classes to one member, four turn namespaces, benchmarks as deftests, tests pinning private helpers rewritten | ≈ 39,000 at the cut (98,985 → ≤ 60,000); the hoisting task class continues | §2b; [a-test §6b; a-sci §5; a-malli §4] |
-| Process machinery | `bin/codex-agent`, `bin/test-fast`, `bin/_test-slot`, `.codex/hooks.json`, `.codex/agents/*.toml`, the `--paths` overlay and contamination proof in `bin/test`, `SEON_CODEX_LANE` and its three consumers, `tmp/orchestrator` (1.2 GB), `tmp/test-runs` (1.8 GB), `tmp/head-wt` | ~2,000 shell lines; 3 GB of exhaust | [instr §3] |
-| `reference-code/` | the 74 uncited submodules (20.96 GB, `bun` first) and the 15 history-only ones (0.14 GB); every `seantempesta` fork among them is already on a remote branch; the surviving 20 are the 12 on the classpath and the 8 read for design, each named in `docs/seon/architecture/` with the seam an agent reads there | 89 submodules, 21.10 GB | [refcode §2–3] |
-| Issue notes | the 369 survivors are audited against each spec's deletion list at the spec's landing; a note whose subject is deleted closes `superseded` with the commit; the rest are promoted to `seon.task` rows by B3 and the directory is then a render of those rows, not a registry | 369 → the promoted set | [sweep; a-err §2.4] |
-| Schemas | `:seon.error/class` markers (156 lines), the `seon.effect.edn` union (264), `seon.test*` worker/claim families, class-C dials (~180), `seon.db.edn` replay/digest keys (~60), `seon.plan.edn`'s union, the ordinal/count/omission predicates' references | ≈ 3,000 (14,256 → ≤ 11,000) | [p-b3 §3–5; a-dh §8; a-err §1.4] |
-| After the reset | `tmp/` and `target/` wiped; `data/store` destroyed and republished from zero with every batched schema change; the measurement script's rows re-recorded | — | [goals §3, "Resets are the recovery"] |
+B1’s operation targets distinguish explicit no-change, non-core edit, core edit and
+whole-program initialization. Measure visited inputs, compilations, transactions,
+reloads and wrapper replacements as well as elapsed time. Boot/indexing above ten
+seconds still needs owner authorization; a named slow path is not an explanation.
+
+## 6. Implementation proof and recovery
+
+Before a Clojure change, read the listed dependency source and probe the owning seam.
+Use the canonical database population, explicit projection/environment, real SCI and
+armed contracts. A publication regression uses a small complete fixture program.
+Run the tests reaching the change through the currently installed authority; convert
+the authority and all callers before using the new API. No full-suite wait is the
+implementation strategy. Retain platform/destructive isolation where its proof requires it.
+
+Every commit leaves HEAD loadable and the host REPL reachable. Live verification
+names hot reload, new fork or in-place adoption, and checks the actual program identity.
+A browser-facing change includes observed paint. The orchestrator performs isolated
+boot/platform proof for integration; lanes never reset `default`.
+
+Record exact forms/results, timing/work counts, commit ids, touched paths, line deltas
+and remaining proof limits in the owning landing note. A passing test is necessary
+for its behavior, but does not prove speed, adoption, UI delivery or a deletion’s safety.
+
+Before reset, preserve evidence and inputs needed for reconstruction. Database data is
+disposable, but turns, tasks, results and private objects are lost unless reproduced.
+After recovery, reconnect the tools and verify the fresh system; a reset does not
+prove every intermediate commit was usable. Sweep only disposable roots without live
+holders, never follow symlinks, and leave other assignments’ source edits intact.
+
+**Host preflight:** the owner upgraded to macOS 27 before this revision. The recorded
+old JVM is absent and its advertisement stale; no startup attempt has established an
+OS regression. B1 records the actual host/JDK/Babashka environment and startup result
+before attributing any failure. Platform recovery is separate from this document revision.
+
+## 7. Decisions and proof gates
+
+The plan does not reopen settled guarantees: explicit merge; task tests plus current
+reaching tests; name-based supplied defaults; no silent pull truncation; no migration;
+private objects in memory; conservative selection; no shell-based product self-modification.
+Engineering proof gates belong at the operation they block, not in a chronology.
+
+| Gate | Default path | What requires a decision or proof before changing it |
+|---|---|---|
+| Publication authority | Unpublished branch → transaction report → caller findings → guarded publication | A direct-to-current-src shortcut needs equivalent writer/concurrency proof and a changed owner ruling; otherwise do not implement it |
+| Shared JVM behavior | Preserve existing context-specific validation and isolation | A1/B2’s two-generation and indirect-call probes decide whether a cheaper binding is sound; a failed probe retains the existing guarantee |
+| Native heterogeneous storage | Preserve the declared codec until the fork supports it | A2 proves ordering, equality, retraction, history, reconnect and shape restrictions before type reset |
+| Destructive tests | Preserve isolated immutable-snapshot execution | Prefer one isolated host mechanism serving platform and destructive work; prove confinement before reducing isolation, or retain the existing host until then |
+| Error payload durability | Keep declared data and distinguish shown text from live objects | B3 presents the conflicting complete-rendering-blob requirement explicitly; do not silently remove durable evidence or serialize arbitrary live results |
+| Profiling-driven tasks | Expose inclusive measurements with honest concurrent semantics | Choose a detector only after measurement supports its meaning; no inferred self time or invented window threshold |
+| Candidate base updates | Preserve independent program and private objects | B2 verifies replacement-fork versus in-place updates; unsupported JVM interop is a typed boundary, not a fallback to another cluster’s code |
+| First real namespace | Query surviving contract gaps and coverage after the cuts | Owner selects a bounded subject from current evidence, not an old citation ranking |
+| Shared Git branch | Keep current branch separation | Owner chooses the merge checkpoint; no automatic push or main merge follows from a document edit |
+
+A failed proof stops only its dependent production cut. It does not justify abandoning
+independent, already grounded work. Where a new design decision creates broad changes,
+bring three concrete options with guarantees and costs before editing production.
+
+## 8. Documentation and issue retirement
+
+The implementation plans are the current design, not an audit log. Incorporate a
+correction into its owning section; keep reproducible historical evidence in research
+or landing material outside `plan/`. The writer brief is background research, not a
+second set of implementation instructions. Architecture explains mechanisms and links
+directly to the specs; the proposed instructions hold durable working laws.
+
+Retire old authorities only after their still-binding rules, probe forms and acceptance
+conditions have a surviving home. Preserve the publication measurement script before
+removing its old directory. Update incoming links in the same slice. Do not delete a
+research directory that still supplies the only evidence for a claim.
+
+The issue audit classified 369 notes: 165 subjects proposed for deletion, 95 defects
+proposed to dissolve, 70 surviving defects, 26 standing class notes and 13 undecided.
+These are planning classifications, **not 260 resolved defects**. Recheck each subject
+at the corresponding code landing; close with the verified commit, preserve surviving
+evidence, and promote real tasks only after required resets. B1 owns development-tool
+defects; B3 owns the previously unassigned remainder. Existing notes stay until that
+work actually establishes their fate.
+
+Dependency removal follows current usage, not the old count target. Recompute references
+after document/code retirements, inspect local fork changes and verify their remote
+preservation before unvendoring. Keep the lane tooling needed for implementation until
+a working replacement owns its job. The preparatory session also performs the owner-authorized fresh database index,
+disposable tmp/build cleanup and platform verification, recorded outside this directory
+in the fresh-start landing note. It then switches to `refactor/agent-platform`.
+Source refactoring and task promotion begin in the subsequent implementation session.
