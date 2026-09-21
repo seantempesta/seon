@@ -19,6 +19,14 @@
             [seon.test-support :as test-support]
             [seon.test.runner :as runner]))
 
+(deftest environment-retains-the-database-projection
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (db/carried-projection (db/db connection))
+           environment (test-support/environment "carried-projection" connection)]
+       (is (some? projection))
+       (is (identical? projection (:seon.schema/projection environment)))))))
+
 (deftest ^{:seon.test/platform
            "Moving part: the one test bracket every other test forks through."}
   failed-base-construction-retries-without-caller-interruption
@@ -184,7 +192,10 @@
 ;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md);
 ;; seon.test.runner/verify-platform-tier-carries-no-destructive-drill! refuses
 ;; the tier when this declaration drifts back.
-(deftest ^{:seon.test/fixture-observation "The assertions compare physical store bytes and private backend paths during simultaneous fixture acquisitions."} simultaneous-fixture-bases-never-open-the-published-store
+(deftest ^{:seon.test/fixture-observation "The assertions compare physical store bytes and private backend paths during simultaneous fixture acquisitions."
+           :seon.test/long "Copy one published store and acquire two independently reidentified copies concurrently; hash every published file before and after both private writes to prove byte preservation."
+           :seon.test/long-ms 10000}
+  simultaneous-fixture-bases-never-open-the-published-store
   (let [root (str "tmp/fixture-base-isolation/" (random-uuid))
         begin (java.util.concurrent.CountDownLatch. 1)
         written (java.util.concurrent.CountDownLatch. 2)
@@ -204,7 +215,7 @@
                   (let [base @resource
                         connection (::test-support/connection base)
                         configuration (::test-support/configuration base)
-                        projection (schema/projection-from-database @connection)]
+                        projection (db/carried-projection (db/db connection))]
                     (schema/call-with-projection
                      projection
                      (fn []

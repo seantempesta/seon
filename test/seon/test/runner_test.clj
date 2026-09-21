@@ -61,7 +61,7 @@
                          {:seon.test.runner/task-namespace "seon.test.runner-test"
                           :seon.test.runner/task-symbols [target]}
                          {:seon.db/db database :seon.db/connection connection :seon.sci.eval/ctx ctx
-                          :seon.schema/projection (schema/projection-from-database database)
+                          :seon.schema/projection (db/carried-projection database)
                           :seon.test/class-loader (clojure.lang.RT/baseLoader)
                           :seon.db/custody-request {:seon.db/connection connection}})
                recorded (runner/commit-results!

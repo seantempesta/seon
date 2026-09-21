@@ -731,7 +731,9 @@
        connection
        (assoc :seon.db/connection connection
               :seon.schema/projection
-              (schema/projection-from-database (db/db connection))))))))
+              (let [database (db/db connection)]
+                (or (db/carried-projection database)
+                    (schema/projection-from-database database)))))))))
 
 (defn await-event!
   "Await one channel, latch, future, or watched reference with a loud backstop.

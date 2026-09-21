@@ -831,3 +831,33 @@ and turn-work-test completed without a load error. The load command's slot
 helper was accidentally sourced by zsh and refused its Bash substitution;
 the subsequent single JVM load completed, but is not claimed slot-protected.
 Both fast runs used the launcher's slot normally. No lane JVM remains.
+
+### Accepted-offender follow-up: retain the compiled projection
+
+`test-support/environment` now reads `db/carried-projection` before acquiring
+stored declarations. The simultaneous-store test uses the projection that
+`create-base` already acquired, and the both-host test hands the carried
+projection to `run-task!`. These are the same database values, not projections
+shared across unrelated databases. The new identity regression verifies the
+environment retains the exact projection object (41.826 ms including its fork).
+
+Final local fast execution: **21 tests, 168 assertions, 1 failure, 0 errors**.
+The failure compares current schema keys with the stale exported population;
+the existing fixture-contract issue owns that boundary. Recording then refused
+with “The live process answered with a prepl reply this operator cannot read.”
+This run therefore supplies local reporter intervals, not durable result facts.
+
+| Test | Before ms | After ms | Decision |
+|---|---:|---:|---|
+| `seon.flow-configuration-test/every-built-graph-proc-declares-a-specific-workload` | 11876.568208 | 2537.603 | Use the carried projection; retain 5000 ms bound. |
+| `seon.test-support-test/simultaneous-fixture-bases-never-open-the-published-store` | 6542.267291 | 6339.881 | Remove duplicate acquisition; declare 10000 ms for three physical store copies and two complete file-hash comparisons. |
+
+The physical-byte assertion requires visiting every published file: a branch
+pointer cannot establish that concurrent independent store opens preserved all
+source bytes. The declaration names that work, not its observed slowness.
+The both-host test's remaining operations will be measured with its selection
+class; no after-duration is claimed for it yet.
+
+The **4793.213 ms** two-file publication remains explicitly **the publication
+seam's measurement for the orchestrator and redesign lane**. It is not a
+fixture-only duration and this lane does not widen a fixture bound to justify it.
