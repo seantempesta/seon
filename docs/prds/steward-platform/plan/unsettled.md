@@ -7389,3 +7389,13 @@ adopts a file whose contracts reference `:not`/`:maybe`/`:and` registry
 schemas). Until it lands: no adoption on `default`, platform tier
 blocked; the redesign lane's fast runs on the new base may hit the same
 error — read that as this blocker, not as its own red.
+
+**~23:35 (test-system):** `26edc7b82` accepted (reach rows through
+requested identities and their references). Five of the six
+runner/selection offenders now under bound (4,473 / 2,640 / 2,722 /
+3,133 / 543 ms). The sixth (`selection-is-one-function-on-both-hosts`,
+15.2 s) compiles config **35 times** during namespace initialization
+(6,283 ms, 3,429 ms of it rebuilding projections; SCI construction itself
+466 ms) — §2.1 fetch-at-call-time; `config.clj` granted to the lane
+(clean); the fix is one derivation per manifest value carried on the
+projection, and it should also cut the boot's 2,330 ms "config" interval.
