@@ -186,8 +186,8 @@
   [path]
   (input-path? (input-roots ".") path))
 
-(defn- gitlink-digests
-  "Hash pinned gitlink identities; recorded snapshot pins win over the live index."
+(defn gitlink-digests
+  "Hash Git pins; recorded snapshot pins take precedence over the live index."
   {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
   [root]
   (let [recorded (io/file root "dependency-pins.txt")

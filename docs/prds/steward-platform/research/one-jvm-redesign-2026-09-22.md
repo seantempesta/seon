@@ -1951,3 +1951,110 @@ the own archive/root and disposable thread sample were removed. Foreign
 edits in the testing skill, selection tests, `test_support.clj`, and turn-work
 tests were preserved. The orchestrator still owes the cold proof for the
 accepted validator commits and attribution of the two exact refusals above.
+
+## Slice 4, remaining item 2 — per-path publication input facts
+
+RESET NEEDED before partial requests against a pre-cut publication: a
+complete publication now writes every input path/digest as a file row. The
+new namespace/file relation uses the existing `:seon.fn/file` attribute.
+No merged-schema pseudo-path is written. The own cold publication contains
+**788/788 matching input digests**, zero missing paths, and **403 analysis
+files** selected by declaration refs. [Coverage query](one-jvm-input-row-coverage-2026-09-23.clj),
+[coverage result](one-jvm-input-row-coverage-2026-09-23.edn).
+
+`source/path-digests` reads the request paths only and calls the released
+`test.cache/gitlink-digests` for directory pins. `source/stored-path-digests`
+uses unique file lookup refs: Datahike selects AVET for bound indexed
+attribute/value (`reference-code/datahike/src/datahike/db/search.cljc:150`).
+The existing `fn/index!` transaction includes changed external file rows and
+retracts removed inputs through the existing exact replacement. Analysis
+files are selected through `:seon.fn/file`, never by file-row presence.
+The new request data uses existing attributes; no new cache or attribute.
+
+With a publication present, an empty changed-path request reads no files.
+The real prepl probe took **482.739 ms**, `built? false`, head unmoved, hash
+requests `[[]]`: [result](one-jvm-input-rows-no-change-2026-09-23.edn).
+The first cold root was built before the final empty-request correction;
+[the live probe](one-jvm-input-row-live-2026-09-23.clj) re-evaluates precisely
+`full-source-refresh!` from the edited source. The measured `my.note` edit
+then uses real publication and in-place adoption, not a simulated writer.
+
+One-file before **6174.993 ms**, after **7826.353 ms**. This is not an
+end-to-end speedup claim. Pre-publication verification fell from **497.843
+ms to 0.212 ms**; source build fell from **926.705 to 665.008 ms**, but
+other spans rose. No after span exceeds 2 s. The source-build span still
+includes the whole stored-artifact read; manifest validation/database
+projection, artifact replacement/write and program acquisition remain
+O(program), owned by item 5. Caller selection remains before contract
+comparison (item 6). Post-adoption snapshot remains O(program) until item 4.
+The shared library cache is unchanged. Cold complete analysis was **10328
+ms**, complete population **132864 ms** for 108442 operations; cold init
+including JVM/cache startup and exit was **274394 ms** (authorized once).
+
+| Completed phase | after ms |
+|---|---:|
+| request | 1.246 |
+| request accepted | 2.199 |
+| bootstrap configuration | 181.986 |
+| store acquisition | 0.790 |
+| source build | 665.008 |
+| published manifest read | 164.175 |
+| published manifest validation | 360.055 |
+| published database acquisition | 0.484 |
+| analysis started | 17.042 |
+| analysis input inventory | 80.820 |
+| analysis caller files | 729.263 |
+| analysis selected files | 215.966 |
+| analysis replace artifacts | 97.667 |
+| analysis manifest complete | 16.855 |
+| analysis complete | 0.750 |
+| findings in analyzed files: 0; added=0; resolved=0 | 0.212 |
+| branch publication started: 1 inputs | 209.412 |
+| program rows started | 211.472 |
+| contract projection started: 3336 schemas, 3 functions | 0.135 |
+| contract projection complete | 1.958 |
+| contract rows: 1/5 | 9.410 |
+| contract rows: 2/5 | 6.922 |
+| contract rows: 3/5 | 5.254 |
+| contract rows: 4/5 | 0.491 |
+| contract rows: 5/5 | 50.198 |
+| development reconciliation transaction | 619.272 |
+| program rows complete | 0.186 |
+| publication source identity | 57.852 |
+| publication branch head | 75.954 |
+| branch publication complete | 905.852 |
+| development changed program rows | 730.718 |
+| development reconciliation transaction | 1040.944 |
+| development loaded definitions | 5.862 |
+| development JVM instrumentation | 567.394 |
+| development source verification | 580.073 |
+| development adoption record | 209.840 |
+| development cluster converged | 2.638 |
+
+The test-input aggregate remains because `seon.test` admission and
+provenance still read it. File-backed publication decides from per-path
+rows at both the refresh and publication seams. The existing explicit
+digest-only low-level publication API (artifact installation and direct
+publication tests) retains its contract; the stored-manifest identity
+check remains until item 5 removes that mirror.
+
+Exact changed-line UTF-8 bytes for the owned code, schema and tests: **3229 deleted, 14553 added** (`git diff --unified=0`, newline included).
+The new no-change regression uses a private physical canonical store to
+assert the real branch head; its first run passed its assertions but cost
+6.100 s including fixture setup. It now declares `:seon.test/long-ms 10000`
+with that reason. Other new tests are below 5 s.
+
+Foreign boundary: shell lint briefly refused the concurrently edited
+`test/seon/fn/schema_shape_test.clj:84:70` with `Unmatched bracket: unexpected )`.
+The own archive excluded that edit. Fast snapshots used HEAD for the named
+foreign dirty callers (`src/seon/issue/detect.clj`, test runner/selection
+tests); no foreign file or session was edited. `src/seon/instrument.clj`
+is currently dirty in the schema-shape lane and remains untouched here.
+
+Final fast run `4e66d8f05168`: **5 executed, 17 assertions, 0 failures,
+0 errors**. The private-store test cost 8.386 s inside its declared 10 s;
+the remaining tests were below 5 s. The explicit namespace require passed
+in a fresh HEAD-plus-owned-files archive after the live root was down:
+`(require 'seon.cluster 'seon.cluster.source 'seon.fn 'seon.test.cache)`.
+The fast snapshot and load archive exclude the active schema-shape edits.
+The orchestrator's cold gate is still owed.

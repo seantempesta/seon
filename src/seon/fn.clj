@@ -294,6 +294,7 @@
   (let [namespace-name (::analyzer/name entry)
         {:keys [aliases refers imports requires]} context]
     (cond-> {:seon.ns/name namespace-name
+             :seon.fn/file [:seon.fn.file/relative-path (::analyzer/filename entry)]
              :seon.ns/source (exact-source contexts entry)}
       (::analyzer/doc entry) (assoc :seon.ns/doc (::analyzer/doc entry))
       (true? (:seon.ns/context-relevant? (::analyzer/meta entry)))
@@ -2245,6 +2246,8 @@
               [:seon.fn/root {:optional true} :string]
               [:seon.fn/previous-manifest {:optional true} :seon.fn.manifest/manifest]
               [:seon.source/previous-database {:optional true} :seon.db/database-value]
+              [:seon.source/relative-file-digests {:optional true} :seon.source/relative-file-digests]
+              [:seon.source/changed-paths {:optional true} :seon.source/changed-paths]
               [::analyzer/cache-root {:optional true} :string]
               [:seon.schema.projection/forms {:optional true} :map]]]
     :seon.fn.manifest/manifest]}
@@ -2253,14 +2256,34 @@
         _ (report-index-progress! progress! "analysis input inventory")
         directory (fs/absolute-path (fs/source-directory) (or (:seon.fn/root request) "."))
         roots (:seon.fn/roots request)
-        files (source-files directory roots)
+        previous (:seon.fn/previous-manifest request)
+        old-artifacts (:seon.fn.manifest/artifacts previous)
+        supplied-digests (:seon.source/relative-file-digests request)
+        database (:seon.source/previous-database request)
+        analysis-paths (when (and previous supplied-digests)
+                         (db/q '[:find [?path ...]
+                                 :where [?declaration :seon.fn/file ?file]
+                                        [?file :seon.fn.file/relative-path ?path]] database))
+        _ (when (:seon.error/at analysis-paths)
+            (throw (ex-info (:seon.error/message analysis-paths) analysis-paths)))
+        files (if (and previous supplied-digests)
+                (into []
+                      (comp (distinct)
+                            (filter #(contains? supplied-digests %))
+                            (map #(rooted-file directory %)))
+                      (concat analysis-paths
+                              (filter #(let [file (rooted-file directory %)]
+                                         (and (source-file? file)
+                                              (containing-root directory roots file)))
+                                      (:seon.source/changed-paths request))))
+                (source-files directory roots))
         relative-roots (mapv (partial fs/relative-path directory) roots)
         files-by-path (into (sorted-map)
                             (map #(vector (fs/relative-path directory (.getCanonicalPath ^java.io.File %))
                                           (.getCanonicalPath ^java.io.File %))) files)
-        input-digests (update-vals files-by-path current-file-digest)
-        previous (:seon.fn/previous-manifest request)
-        old-artifacts (:seon.fn.manifest/artifacts previous)
+        input-digests (if supplied-digests
+                        (select-keys supplied-digests (keys files-by-path))
+                        (update-vals files-by-path current-file-digest))
         old-digests (into {} (map (juxt :seon.fn.file/relative-path :seon.fn.file/digest)) old-artifacts)
         changed (into #{} (filter #(not= (get old-digests %) (get input-digests %)))
                       (concat (keys old-digests) (keys input-digests)))
@@ -3138,7 +3161,19 @@
                 (if-let [identities (:seon.reconcile/adopt-identities request)]
                   (published-index-rows source-database (vec identities))
                   (published-index-rows source-database))
-                (desired-rows request progress!))]
+                (let [declarations (desired-rows request progress!)
+                      file-paths (into #{} (map :seon.fn.file/relative-path)
+                                       (get-in request [:seon.fn/manifest :seon.fn.manifest/artifacts]))
+                      paths (:seon.fn/changed-paths request)
+                      inputs (:seon.source/relative-file-digests request)]
+                  (into declarations
+                        (keep (fn [[path digest]]
+                                (when (and (not (file-paths path))
+                                           (or (nil? paths) (paths path)))
+                                  {:seon.fn.file/relative-path path
+                                   :seon.fn.file/digest digest
+                                   :seon.schema.admission/source :core})))
+                        inputs)))]
      (if (and (map? rows)
               (contains? rows :seon.error/at)
               (contains? rows :seon.error/layer)
@@ -3186,6 +3221,13 @@
                                  previous-database attribute))))
                    (filter #(get (:schema previous-database) %)
                            program/identity-attributes))))
+             previous-identities
+             (if-let [inputs (:seon.source/relative-file-digests request)]
+               (into previous-identities
+                     (comp (remove #(contains? inputs %))
+                           (map #(vector :seon.fn.file/relative-path %)))
+                     (:seon.fn/changed-paths request))
+               previous-identities)
              projection (schema/handed-projection)
              _ (report-index-progress! progress! "development reconciliation transaction")
              report

@@ -162,6 +162,7 @@
            [:seon.source/previous-database
             {:optional true} :seon.source/previous-database]
            [:seon.source/database {:optional true} :seon.source/database]
+           [:seon.source/relative-file-digests {:optional true} :seon.source/relative-file-digests]
            [:seon.fn/changed-paths {:optional true} :seon.fn/changed-paths]
            [:seon.fn/previous-manifest {:optional true} :seon.fn.manifest/manifest]
            [:seon.fn/roots {:optional true} :seon.fn/roots]

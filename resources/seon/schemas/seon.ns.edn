@@ -14,6 +14,7 @@
             :seon.render/html seon.render.ns/render-html,
             :seon.render/form seon.render.ns/namespace-form}
            [:seon.ns/name :seon.ns/name]
+           [:seon.fn/file {:optional true} :seon.fn/file]
            [:seon.ns/context-relevant? {:optional true} :seon.ns/context-relevant?]
            [:seon.schema.admission/source
             {:optional true}

@@ -106,6 +106,36 @@
   [request]
   (:seon.source/digest (snapshot request)))
 
+(defn path-digests
+  "Read only the named files; directory inputs use the recorded Git pins."
+  {:malli/schema [:=> [:cat :string [:vector :string]]
+                  :seon.source/relative-file-digests]}
+  [directory paths]
+  (let [pins (when (some #(.isDirectory (io/file directory %)) paths)
+               (test.cache/gitlink-digests directory))]
+    (into {}
+          (keep (fn [path]
+                  (let [file (io/file directory path)]
+                    (cond
+                      (.isFile file)
+                      [path (schema/sha-256 [(Files/readAllBytes (.toPath file))])]
+                      (get pins path) [path (get pins path)]))))
+          paths)))
+
+(defn stored-path-digests
+  "Seek each named input by its unique file identity in one database value."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :string]]
+                  :seon.source/relative-file-digests]}
+  [database paths]
+  (into {}
+        (keep (fn [path]
+                (let [row (db/pull database [:seon.fn.file/digest]
+                                   [:seon.fn.file/relative-path path])]
+                  (when (:seon.error/at row)
+                    (throw (ex-info (:seon.error/message row) row)))
+                  (when-let [digest (:seon.fn.file/digest row)] [path digest]))))
+        paths))
+
 (defn current
   "The published source branch and commit ID, or nil before publication."
   {:malli/schema [:=> [:cat :seon.store/store]
@@ -346,6 +376,7 @@
     directory :seon.fn/root
     source-digest :seon.source/digest
     test-input-digest :seon.source/test-input-digest
+    input-digests :seon.source/relative-file-digests
     changed-paths :seon.source/changed-paths
     requested-commit :seon.source/expected-commit-id
     populate :seon.source/populate
@@ -362,12 +393,15 @@
                                     (:seon.source/commit-id published)))
         unchanged? (when committed
                      (try
+                       (if input-digests
+                         (= (select-keys input-digests changed-paths)
+                            (stored-path-digests committed changed-paths))
                        (let [digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
                                           committed)]
                          (when (map? digest)
                            (refuse! ::publish-readback-failed
                                     "The published source digest could not be read." digest))
-                         (= source-digest digest))
+                         (= source-digest digest)))
                        (finally (d/release-materialized-db committed))))]
     (if (and unchanged? (not (seq note-paths)))
       (assoc published :seon.source/digest source-digest :seon.source/built? false)

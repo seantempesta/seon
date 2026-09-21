@@ -1450,7 +1450,8 @@
     previous :seon.fn/previous-manifest
     paths :seon.fn/changed-paths
     prior-database :seon.source/previous-database
-    classes :seon.source/change-classes}]
+    classes :seon.source/change-classes
+    inputs :seon.source/relative-file-digests}]
   (let [forms (schema.edn/packaged-forms)]
     (schema/call-with-forms
      forms
@@ -1494,6 +1495,7 @@
                       :seon.db/process
                       [:seon.db.process/id boot-process-identity]}
                manifest (assoc :seon.fn/manifest manifest)
+               inputs (assoc :seon.source/relative-file-digests inputs)
                (or classes prior-database)
                (assoc :seon.source/previous-database (or prior-database (db/db connection)))
                previous (assoc :seon.fn/previous-manifest previous)
@@ -1614,16 +1616,8 @@
                        (when-not (identical? token (::holder-token current))
                          current))))))))))
 
-(def ^:private schema-declaration-path
-  "The one repository path whose content IS the merged schema declaration set.
-
-  The snapshot writes the declaration digest under this entry instead of the
-  individual resource files, and the incremental publication reads the same
-  name to route a changed resource to the schema owner. One name, one spot."
-  "resources/seon/schemas")
-
 (defn source-snapshot
-  "Snapshot `roots` plus the merged schema declaration set.
+  "Snapshot the declared roots and individual publication input files.
 
   The zero-arity reads the declared `source-roots`; a publication hands the
   roots it captured at its own entry (`publication-roots`)."
@@ -1636,21 +1630,17 @@
   ([roots directory]
   (let [tree-snapshot
         (source/snapshot {:seon.source/roots roots :seon.fn/root directory})
-        schema-digest (schema.edn/declaration-digest)
         input-roots (test.cache/input-roots directory)
-        inputs (test.cache/input-digests directory)
-        external (into {} (filter (fn [[path _]] (test.cache/input-path? input-roots path)))
-                       inputs)
+        external (test.cache/toolchain-dependencies directory input-roots)
         file-digests
         (into (sorted-map)
-              (assoc (merge (:seon.source/relative-file-digests tree-snapshot) external)
-                     schema-declaration-path schema-digest))
+              (merge (:seon.source/relative-file-digests tree-snapshot) external))
         ;; Producer pins and analyzer configuration identify the publication
         ;; even when no Clojure file changed. Documentation remains outside
         ;; the gate's declared input inventory.
         digest (id/digest 64 [file-digests])]
     {:seon.source/digest digest
-     :seon.source/test-input-digest (test.cache/test-input-digest directory inputs)
+     :seon.source/test-input-digest (test.cache/test-input-digest directory file-digests)
      :seon.source/relative-file-digests (into (sorted-map) file-digests)})))
 
 (defn- current-source-snapshot
@@ -1844,13 +1834,41 @@
 (defn- full-source-refresh!
   "One publication path: reconcile changed artifacts on the current lineage."
   [root store roots]
-  (let [snapshot (current-source-snapshot roots)
-        digest (:seon.source/digest snapshot)
-        published (current-publication store nil)]
-    (if (and (= digest (:seon.source/digest published))
-             (not-any? (requiring-resolve 'seon.issue/note-path?)
-                       (:seon.source/changed-paths roots)))
+  (let [published (current-publication store nil)
+        committed (when published
+                    (d/commit-as-db (:seon.store/connection-object store)
+                                    (:seon.source/commit-id published)))]
+    (try
+      (let [directory (:seon.fn/root roots)
+            requested-paths (:seon.source/changed-paths roots)
+            input-roots (test.cache/input-roots directory)
+            requested (filterv #(or (test.cache/input-path? input-roots %)
+                                    (and (test.cache/input-path? (set (:seon.source/roots roots)) %)
+                                         (some (partial str/ends-with? %) [".clj" ".cljc" ".edn"])))
+                               requested-paths)
+            partial? (some? committed)
+            observed (if partial?
+                       (source/path-digests directory requested)
+                       (:seon.source/relative-file-digests (current-source-snapshot roots)))
+            paths (if partial? requested
+                      (vec (into (set (keys observed))
+                                 (when committed
+                                   (db/q '[:find [?path ...]
+                                           :where [_ :seon.fn.file/relative-path ?path]] committed)))))
+            prior (if committed (source/stored-path-digests committed paths) {})
+            changed (into #{} (filter #(not= (get prior %) (get observed %))) paths)]
+    (if (and committed (empty? changed)
+             (not-any? (requiring-resolve 'seon.issue/note-path?) requested-paths))
       published
+      (let [stored (when partial?
+                     (into {} (db/q '[:find ?path ?digest
+                                      :where [?file :seon.fn.file/relative-path ?path]
+                                             [?file :seon.fn.file/digest ?digest]] committed)))
+            inputs (if partial? (merge (apply dissoc stored requested) observed) observed)
+            snapshot {:seon.source/relative-file-digests inputs
+                      :seon.source/digest (id/digest 64 [(into (sorted-map) inputs)])
+                      :seon.source/test-input-digest (test.cache/test-input-digest directory inputs)}
+            digest (:seon.source/digest snapshot)]
       (let [cached (read-source-artifact root)
             _ (report-source-progress! "published manifest read")
             valid? (valid-source-manifest? (:seon.fn/manifest cached))
@@ -1866,16 +1884,13 @@
                 manifest (seon.fn/build-manifest
                           (cond-> {:seon.fn/root (:seon.fn/root roots)
                                    :seon.fn/roots (:seon.fn/roots roots)
-                                   :seon.source/progress! report-source-progress!}
+                                   :seon.source/progress! report-source-progress!
+                                   :seon.source/relative-file-digests inputs
+                                   :seon.source/changed-paths (vec changed)}
                             previous
                             (assoc :seon.fn/previous-manifest previous
                                             :seon.source/previous-database database)))
                 _ (report-source-progress! "analysis complete")
-                changed (into #{} (keep (fn [[path value]]
-                                         (when (not= value (get (:seon.source/relative-file-digests cached) path)) path)))
-                              (:seon.source/relative-file-digests snapshot))
-                changed (into changed (remove #(contains? (:seon.source/relative-file-digests snapshot) %))
-                              (keys (:seon.source/relative-file-digests cached)))
                 prior-artifacts (into {} (map (juxt :seon.fn.file/relative-path identity))
                                       (:seon.fn.manifest/artifacts previous))
                 paths (when previous
@@ -1894,9 +1909,11 @@
                                              (findings manifest))
                 classes (when paths
                           (cond-> #{:program}
-                            (contains? changed schema-declaration-path) (conj :schema-resource)
+                            (some #(str/starts-with? % "resources/seon/schemas/") changed) (conj :schema-resource)
                             (contains? changed config/default-manifest-path) (conj :config)))
-                _ (when-not (= snapshot (current-source-snapshot roots))
+                _ (when-not (= observed
+                               (if partial? (source/path-digests directory requested)
+                                   (:seon.source/relative-file-digests (current-source-snapshot roots))))
                     (refused! "Source changed during publication; retry."
                               {:seon.source/digest-before digest}))
                 _ (report-source-progress! (str "branch publication started: "
@@ -1906,10 +1923,12 @@
                         {:seon.store/store store :seon.fn/root (:seon.fn/root roots)
                          :seon.source/digest digest :seon.source/populate `populate-source!
                          :seon.source/test-input-digest (:seon.source/test-input-digest snapshot)
-                         :seon.source/changed-paths (or (:seon.source/changed-paths roots) [])
+                         :seon.source/changed-paths (vec (into changed requested-paths))
+                         :seon.source/relative-file-digests inputs
                          :seon.source/progress! report-source-progress!
                          :seon.source/populate-request
-                         (cond-> {:seon.fn/manifest manifest :seon.fn/roots (:seon.fn/roots roots)}
+                         (cond-> {:seon.fn/manifest manifest :seon.fn/roots (:seon.fn/roots roots)
+                                  :seon.source/relative-file-digests inputs}
                            database (assoc :seon.source/previous-database database)
                            paths (assoc :seon.fn/previous-manifest previous
                                         :seon.fn/changed-paths paths
@@ -1918,6 +1937,7 @@
             (write-source-artifact! root (source-artifact result manifest snapshot))
             result)
           (finally (when database (d/release-materialized-db database))))))))
+      (finally (when committed (d/release-materialized-db committed))))))
 
 (defn reload-order
   "Namespaces ordered so each one's required namespaces reload first.

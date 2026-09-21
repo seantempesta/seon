@@ -1184,17 +1184,6 @@
         (delete-recursively! root)))))
 
 
-(deftest current-source-digest-names-the-merged-schema-declarations
-  (let [schema-path "resources/seon/schemas"]
-    (is (= (schema.edn/declaration-digest)
-           (get (:seon.source/relative-file-digests (cluster/source-snapshot))
-                schema-path))
-        "the ancestor hashes the merged schema declaration set"))
-  (is (not-any? #{"resources/seon/bootstrap.edn"} cluster/source-roots)
-      "generated openings have no authored bootstrap resource")
-  (is (not-any? #{"resources" "resources/seon/schemas"} cluster/source-roots)
-      "schema directory organization is not part of the ancestor digest"))
-
 (deftest ^{:seon.test/long
            "Publishes real source edits to cover complete fallback and incremental branch agreement."}
   incremental-source-refresh-preserves-agreement-across-real-edits

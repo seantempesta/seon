@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, wave/publication-velocity]
 ---
@@ -77,3 +77,12 @@ The changed-Git-pin case needs the existing pin reader in
 changed. The lane requested release of the pin-reader seam rather than
 copying Git/snapshot parsing into publication; that file is outside its
 assigned ownership.
+
+## Resolution
+
+The item-2 population/read cut writes individual input file rows and uses
+indexed per-path reads. The own-root proof finds 788 input digests, 788
+stored matches, no missing paths, and no merged-schema pseudo-row. The
+existing pin reader was released and exposed with its caller. RESET NEEDED
+for old publications before partial requests; the landing note carries the
+complete span table and remaining ordered work.

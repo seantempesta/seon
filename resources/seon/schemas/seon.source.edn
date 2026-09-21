@@ -51,6 +51,7 @@
                [:seon.source/digest :seon.source/digest]],
               :populate-request
               [:map
+               [:seon.source/relative-file-digests {:optional true} :seon.source/relative-file-digests]
                [:seon.source/change-classes {:optional true} :seon.source/change-classes]
                [:seon.fn/manifest
                 {:optional true}
@@ -58,6 +59,7 @@
               :progress! [:=> [:cat :string] :nil],
               :publish-request
               [:map
+               [:seon.source/relative-file-digests {:optional true} :seon.source/relative-file-digests]
                [:seon.source/changed-paths {:optional true} :seon.source/changed-paths]
                [:seon.source/test-input-digest {:optional true} :seon.source/test-input-digest]
                [:seon.fn/root {:optional true} :seon.fn/root]
