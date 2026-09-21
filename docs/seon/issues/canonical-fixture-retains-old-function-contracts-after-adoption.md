@@ -184,3 +184,14 @@ arglists, got an argument count of 3.` The selected snapshot includes
 own live JVM. Tally: 2 tests, 2 assertions, 0 failures, 1 error. The other
 regression proves a source-only request never opens the note directory.
 No fixture, wrapper or runner was changed to bypass the published contract.
+
+## Concurrent publication observation — 2026-09-23
+
+Fast snapshot at `064b07fde` uses the same graph 25 commits behind HEAD.
+`seon.cluster.publication-concurrency-test/concurrent-publications-return-one-committed-head`
+is refused by `seon.cluster.source/publish!` before its writer because the
+fixture's `:seon.source/publish-request` still requires the removed
+`:seon.source/activation`. Tally: 1 test, 1 assertion, 0 failures, 1 error.
+The own-root live changed-file concurrency probe passed against the current
+published schema. No retired activation field was reintroduced into the
+request to satisfy the stale fixture.

@@ -1612,3 +1612,49 @@ Exact changed-line UTF-8 bytes:
 | `test/seon/cluster/fault_message_test.clj` | 0 | 1634 | 0 | 1634 |
 
 Total: **29 deleted, 2002 inserted**.
+
+## Slice 4 — serialize every source head move, 2026-09-23
+
+`source/publish!` and `source/record-results!` now invoke the existing
+`cluster/with-source-refresh-monitor!` before reading the head. Runtime Var
+resolution avoids the existing cluster/source namespace dependency cycle.
+Refresh already holds this reentrant monitor, so its nested publication
+uses the same lock and holder report. The monitor's existing acquisition
+bound remains; result recording no longer has a retry loop, retry counter,
+or separate retry deadline. No new lock, cache or tuned constant was added.
+Datahike's `force-branch!` contract explicitly requires exclusive writes
+(`reference-code/datahike/src/datahike/versioning.cljc:323–334`); the existing
+expected-head refusal remains intact for explicitly stale requests.
+
+[The live concurrent refresh script](one-jvm-concurrent-refresh-2026-09-23.clj)
+ran in the own scratch prepl: two changed-file requests produced
+[one head and two consistent replies](one-jvm-concurrent-refresh-2026-09-23.edn),
+one built and one unchanged, in 8745 ms combined.
+The next one-file edit measured **7343.350 ms**, versus 7702.651 ms before;
+[raw progress](one-jvm-serialized-publication-after-2026-09-23.edn).
+No span exceeds 2 s. Serialization itself adds no whole-program traversal;
+remaining digest walks and reconciliation still dominate the aggregate.
+
+The direct-publication regression uses the canonical private store and
+two concurrent requests. The existing evidence regression now runs an
+actual concurrent completion writer and publication instead of mocking
+reentrant head moves and asserting retries. Fast iteration remains blocked
+at the stale fixture's required activation field: 1 test, 1 assertion,
+0 failures, 1 error, before the publication writer. This is recorded in
+the existing fixture-contract issue; no green canonical concurrency tally
+is claimed. The orchestrator must refresh its base and run both
+`seon.cluster.publication-concurrency-test` and
+`seon.cluster.source-evidence-test`. Source and both test namespaces load.
+
+The prior source_evidence_test edits were committed at `bf3b5df9f` and the
+path was clean before this edit. Current foreign test_support, turn_backstop
+and test-system landing-note edits are excluded. The scratch JVM was downed
+before namespace loading. Exact UTF-8 changed-line bytes:
+
+| Path | Before | After | Deleted | Inserted |
+|---|---:|---:|---:|---:|
+| `src/seon/cluster/source.clj` | 30654 | 28296 | 2846 | 488 |
+| `test/seon/cluster/source_evidence_test.clj` | 11304 | 8655 | 4306 | 1657 |
+| `test/seon/cluster/publication_concurrency_test.clj` | 0 | 1614 | 0 | 1614 |
+
+Total: **7152 deleted, 3759 inserted**.

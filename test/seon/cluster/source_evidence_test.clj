@@ -2,14 +2,15 @@
     seon.cluster.source-evidence-test
   "Publication evidence and races, using the source suite's canonical store helpers."
   (:require [clojure.test :refer [deftest is]]
-            [datahike.api :as d]
             [seon.cluster.source-test :as source-fixture]
             [seon.cluster.source :as source]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
-            [seon.test.runner :as runner]))
+            [seon.test.runner :as runner]
+            [seon.test-support :as support])
+  (:import [java.util.concurrent CountDownLatch]))
 
-(deftest ^{:seon.test/long "Publish two fixture files, record three completions, and verify bounded branch-head retries."
+(deftest ^{:seon.test/long "Publish two fixture files, record completions and serialize concurrent result recording with source publication."
            :seon.test/long-ms 10000}
   latest-test-evidence-survives-rebuilding-from-an-older-base
   (#'source-fixture/with-store
@@ -104,63 +105,30 @@
                                   :seon.test.run/provenance run
                                   :seon.test/run-basis-t (:seon.test.run/basis-t run)
                                   :seon.test/run-at (:seon.test.run/at run))
-                commit-results! runner/commit-results!
-                advanced (atom nil)
-                attempts (atom 0)
-                recorded
-                (with-redefs [runner/commit-results!
-                              (fn [connection completed]
-                                (let [result (commit-results! connection completed)]
-                                  (when (and (= (:seon.test.run/id run)
-                                                (get-in completed [:seon.test.run/provenance :seon.test.run/id]))
-                                             (= 1 (swap! attempts inc)))
-                                    (reset! advanced
-                                            (#'source-fixture/upsert opened (:seon.source/commit-id changed)
-                                                    @#'source-fixture/digest-c [])))
-                                  result))]
-                  (source/record-results! opened completion))]
-            (is (= 2 @attempts) "the stale attempt is reapplied once to the new head")
-            (is (= 1 (:seon.test/pass-count (first recorded))))
-            (is (empty? (#'source-fixture/scratch-branches opened)))
-            (let [recorded-db (source/database opened
-                                               (:seon.source/commit-id (source/current opened)))]
-              (is (= #{(:seon.source/commit-id @advanced)}
-                     (d/parent-commit-ids recorded-db))
-                  "the successfully recorded evidence descends from the competing publication")
-              (is (= @#'source-fixture/digest-c (db/q '[:find ?digest .
-                                      :where [_ :seon.source/digest ?digest]]
-                                    recorded-db)))
-              (is (= run (dissoc (db/pull recorded-db '[*]
-                                         [:seon.test.run/id (:seon.test.run/id run)]) :db/id)))
-              (let [next-run (runner/provenance recorded-db)
-                    next-completion (assoc completion
-                                           :seon.test.run/provenance next-run
-                                           :seon.test/run-basis-t (:seon.test.run/basis-t next-run)
-                                           :seon.test/run-at (:seon.test.run/at next-run))
-                    conflicts (atom 0)
-                    recorded
-                    (with-redefs [runner/commit-results!
-                                  (fn [connection completed]
-                                    (let [result (commit-results! connection completed)
-                                          ordinal (when (= (:seon.test.run/id next-run)
-                                                           (get-in completed [:seon.test.run/provenance :seon.test.run/id]))
-                                                    (swap! conflicts inc))]
-                                      (when (and ordinal (<= ordinal 3))
-                                        (let [before (:seon.source/commit-id (source/current opened))
-                                              published (#'source-fixture/upsert opened before
-                                                                (if (= 1 ordinal) @#'source-fixture/digest-a @#'source-fixture/digest-b) [])]
-                                          (is (= (= 3 ordinal)
-                                                 (= before (:seon.source/commit-id published)))
-                                              "A and B move the head; repeating B with empty rows leaves it unchanged")))
-                                      result))]
-                      (source/record-results! opened next-completion))
+                start (CountDownLatch. 1)
+                ready (CountDownLatch. 2)
+                recording (future
+                            (.countDown ready)
+                            (support/await-event! start "concurrent recording start")
+                            (source/record-results! opened completion))
+                publication (future
+                              (.countDown ready)
+                              (support/await-event! start "concurrent publication start")
+                              (#'source-fixture/publish opened @#'source-fixture/digest-c))]
+            (try
+              (support/await-event! ready "both source writers entered")
+              (.countDown start)
+              (let [recorded (support/await-event! recording "result recording completed")
+                    _ (support/await-event! publication "publication completed")
                     final-db (source/database opened
                                               (:seon.source/commit-id (source/current opened)))]
                 (is (= 1 (:seon.test/pass-count (first recorded))) (pr-str recorded))
-                (is (= 3 @conflicts)
-                    "two changed seals conflict; the third, unchanged B seal needs no retry")
-                (is (= @#'source-fixture/digest-b (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
-                                     final-db)))
+                (is (= @#'source-fixture/digest-c
+                       (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] final-db)))
                 (is (number? (db/q '[:find ?run . :in $ ?id :where [?run :seon.test.run/id ?id]]
-                                   final-db (:seon.test.run/id next-run))))
-                (is (empty? (#'source-fixture/scratch-branches opened)))))))))))
+                                   final-db (:seon.test.run/id run))))
+                (is (empty? (#'source-fixture/scratch-branches opened))))
+              (finally
+                (.countDown start)
+                (doseq [request [recording publication]]
+                  (when-not (realized? request) (future-cancel request)))))))))))
