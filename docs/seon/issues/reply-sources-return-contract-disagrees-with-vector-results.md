@@ -100,3 +100,18 @@ error alternative using `:seon.sci.reader/refused-token`, plus corresponding
 producer/output/render consumer changes; do not reuse the symbol-only reply
 error while omitting its required marker. The prepared slice chooses the coherent
 reset rather than expanding that compatibility boundary.
+
+
+## Schema admission correction — 2026-09-21
+
+Reset after `846bfd0f4` refused `:seon.cluster.reply/no-forms-error` because
+its only non-base required member was boolean. Evidence:
+`data/operator/operations/jvm-c73f5e94-e96f-444e-b359-c92b01237187.log`;
+`seon.schema.internal/assert-error-declaration!` requires actual domain evidence.
+The helper now carries the exact authored `:seon.cluster.reply/text` at the
+error boundary, and no-forms requires it (including the legitimate empty string).
+The armed regression checks those exact bytes and verifies that removing them
+invalidates the no-forms error even when its boolean marker remains. The complete
+projection build exercises structural error declaration admission before boot;
+namespace loading or Malli value validation alone is insufficient. No validation
+or boot was run by this bounded repair; root owns the pending proof.

@@ -298,6 +298,11 @@
       (let [result (checked text 'user bound)]
         (is (m/validate expected result {:registry registry}) (pr-str result))
         (is (inst? (:seon.error/at result)))
+        (is (= text (:seon.cluster.reply/text result)))
+        (when (= :seon.cluster.reply/no-forms-error expected)
+          (is (false? (m/validate expected (dissoc result :seon.cluster.reply/text)
+                                  {:registry registry}))
+              "the boolean marker cannot replace authored reply evidence"))
         (is (= 'seon.cluster.reply/sources (:seon.error/operation result)))
         (is (= text (get-in result [:seon.error/data :seon.cluster.reply/text])))))
     (doseq [args [[""] ["Only prose here." 'user]]]

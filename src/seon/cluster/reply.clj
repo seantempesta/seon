@@ -53,7 +53,8 @@
   [kind marker message data]
   (error/diagnostic
    (merge marker
-          {:seon.error/at (java.util.Date.)
+          {::text (::text data)
+           :seon.error/at (java.util.Date.)
            :seon.error/layer :seon.cluster.reply/source
            :seon.error/operation 'seon.cluster.reply/sources
            :seon.error/kind kind
