@@ -397,6 +397,15 @@ invokes that symbol. The [graph-fidelity issue](../../../seon/issues/call-graph-
 records source-matched examples where keyword joins add non-lexical call edges;
 static-plus-declared reach is not measured execution reach.
 
+Actual dispatch owners declare `:seon.fn/invokes`, a set of qualified attribute
+keywords whose function values they invoke. Canonical file and agent declaration
+analysis retain that metadata, and the shared dependency query follows those
+declarations. Merely reading a function-valued attribute, recording an operation
+symbol, or mentioning a renderer key creates no invocation dependency. Exact
+replacement must remove a withdrawn declaration as well as install a new one.
+Keep lexical calls, references and declared dispatch distinguishable when explaining
+selection. This declaration does not claim to solve arbitrary higher-order flow.
+
 Before B4 narrows selection, prove both sides with the real analyzer and canonical
 publication: a genuinely dispatched configured handler remains a dependency, while
 an error operation symbol creates no invocation edge merely because another function

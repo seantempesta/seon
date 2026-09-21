@@ -117,12 +117,16 @@ comparison is per test against its own basis.
 
 ### 2b. Observed reach — what it is and what it misses
 
-B1's graph-fidelity gate precedes precision claims. Current `:seon.fn/calls` combines
-lexical calls with declared edges inferred from keyword/function-value relations;
-therefore even “calls-only” reverse reach is not lexical-only or observed execution.
-Descriptive operation symbols must not become invocation dependencies solely through
-attribute co-occurrence. Retain real callable dependencies and explain selection
-paths; do not prune common functions simply because many tests depend on them.
+B1's graph-fidelity gate precedes precision claims. `:seon.fn/calls` combines
+lexical calls with callable dependencies declared by actual dispatch owners through
+`:seon.fn/invokes`; therefore even “calls-only” reverse reach is not lexical-only
+or observed execution. Descriptive operation symbols and mere readers of
+function-valued attributes create no invocation dependency. Retain real callable
+dependencies and explain selection paths; do not prune common functions simply
+because many tests depend on them. Prove an ordinary leaf, a genuinely shared
+function and an unchanged green request through the canonical execution authority
+before starting the four refactor cuts. A missing dynamic edge remains an explicit
+coverage limitation, never evidence that its tests are unaffected.
 
 | Source | What it captures | What it misses |
 |---|---|---|
