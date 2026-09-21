@@ -83,15 +83,21 @@ retires a definition still executable in another SCI fork. Missing identity is
 unknown. A file digest is not a temporary substitute.
 
 Attribution comes from per-context installation, not from custody lookup
-(README §3, A1-2): each cluster's SCI context holds its own wrapper over the
-original callable, so the cell lives in that wrapper's closure and belongs to
-that cluster by construction — no `*conn*` read, no per-connection map, no
-custody lookup on the call path (the 12 ns figure and its non-reproducibility
-become moot). The JVM Var's own wrapper is the development cluster's cell and
-serves host callers; its observations are that cluster's. A context generation
-that is released releases its cells with it. Shared JVM roots keep the
-callable/contract evidence A1/B2 guarantee. No process-global connection
-registry exists.
+(README §3, A1-2, B2 §2a): an interpreted row's wrapper is installed in one
+SCI context, so its cell lives in that wrapper's closure and belongs to that
+context by construction — no per-connection map, no custody lookup on the
+profiling path (the 12 ns figure and its non-reproducibility become moot).
+**The JVM Var's own wrapper is the HOST cell, attributed to no cluster**: a
+copied compiled function still calls its JVM callees (Codex's `copy-var*`
+probe), so candidate work that reaches JVM paths lands in host cells, and the
+read reports host work separately rather than charging it to the development
+cluster. B4's per-member reach observation needs an execution scope, which
+already exists: `seon.db/call-with-custody` binds `*conn*` for a test body
+(`db.clj:365-387`); the wrapper inserts `(symbol, digest)` into the bound
+scope's set when one is bound — the ruled custody elision, not a registry.
+Profiling totals read no scope. A context generation that is released
+releases its cells with it. Shared JVM roots keep the callable/contract
+evidence A1/B2 guarantee. No process-global connection registry exists.
 
 B4's observation must include the test identity/version, applicable fixture work
 and owned asynchronous work while excluding recorder execution. A thread-local

@@ -105,7 +105,7 @@ is diagnostic; absence on an earlier execution path cannot prove changed code ir
 A missing/incomplete graph is unknown and must widen or refuse, never exclude silently.
 A later unrelated green cannot cover an older member’s untested change.
 
-**Isolation includes loaded behavior.** Reuse functions whose definitions and executable dependencies match the loaded runtime; interpret context-specific redefinitions and their affected callers in the cluster or agent's SCI context. B2 §2a owns this rule. A copied JVM callable retains JVM call paths, so matching its own digest alone does not make an overridden callee safe. Per-context wrappers preserve direct contract ownership but do not establish indirect-call isolation or attribution. Compute eligibility at acquisition/change from the program graph and declared dispatch edges; retain the focused direct/indirect and adoption proof before deleting safeguards. No per-call full-program scan is required.
+**Isolation includes loaded behavior.** Reuse functions whose definitions and executable dependencies match the loaded runtime; interpret context-specific redefinitions and their affected callers in the cluster or agent's SCI context. B2 §2a owns this rule as five steps: `overridden` = rows whose stored source or namespace bindings differ from the JVM's loaded commit, plus a fork's private redefinitions; `affected` = their reverse closure over `:seon.fn/calls` and declared `:seon.fn/invokes`, computed at acquisition or change (313 ms for fifteen seeds over 34,363 edges); both are interpreted from stored source and armed per context; everything else binds the JVM copy. **A contract-only difference is not an override**: the body is reused and the context's own wrapper applies its contract, which is what keeps the contract-coverage task class from interpreting whole caller closures. A copied JVM callable retains JVM call paths, so matching its own digest alone does not make an overridden callee safe (Codex's `copy-var*` probe, astra feedback note). Per-context wrappers preserve direct contract ownership; the JVM Var wrapper's profiling cell is the **host** cell, attributed to no cluster. An affected caller that cannot be interpreted is an owner decision (§7). Every override reports its interpreted-closure size; a core leaf's is a quarter to two fifths of the program (`seon.db/q` 1,116 of 4,603 functions). No per-call full-program scan is required. Evidence: [loaded reuse note](../../../research/agent-platform/loaded-reuse-bounded-completion-store-fixtures-2026-09-21.md).
 
 **Timeout includes exit.** A Future timeout only reports a late result. B2/B4 retain
 termination, cleanup and no-overlap guarantees; arbitrary host work does not acquire
@@ -172,7 +172,8 @@ waits on it. Each step is one loadable slice with every caller converted.
 | 1.1 | B3's constructor and declared error contracts, additive (`seon.error.refusal/diagnostic` keeps its name; `at` supplied; no key retired yet) | A1's wrapper output check, A2's guard conversions, every later caller slice |
 | 1.2 | B1 writes `:seon.program/definition-digest` on every declaration row, additive beside the old key (RESET batch 1 marker) | A1 arming identity, B2 acquisition, B4 selection, C1, D1 |
 | 1.3 | A1-1/1b: wrappers read the retained contract; per-context installation of the original (§3 above); the per-call scan and classpath population go with their callers | B2's context work, C1's hook point |
-| 1.4 | A1-3 with the boot-site one-liners in A2/B1/B2/B4: the projection is a read; `load-projection` for the cold constructors only | every reconstruction fallback |
+| 1.4 | A1-3 with the boot-site one-liners in A2/B1/B2/B4: the projection is a read; `load-projection` for the cold constructors only; A1-12 deletes the ambient transport (`call-with-projection*`, `handed-projection`, the registration delta) once A2 c2 removes the in-writer decode that binds a projection state | every reconstruction fallback; the last dynamic-var authority |
+| 1.4b | A1-13: the schema-shape family leaves with A1-1b and A1-6 (no surviving reader); A1-7's fingerprint normaliser is withdrawn; RESET batch 1 | ≈ 30 K datoms, one RESET item |
 | 1.5 | B1: manifest, caller-less vars, snapshot/toolchain, seal, one-transaction-per-report publication; `cluster.clj`/`fn.clj` become free | B3's kind cut (held files), A2's c6 inputs |
 | 1.6 | A2 c1/c3–c6 with B3's guards (c8) and the validator narrowed to report datoms; B3 commit 4 (kind/class, one commit) | reset batch 1 |
 | 2.x | B2 context/turn/history/delivery, A2 c2 after the `:db.type/any` proof, B4 fixture on the open store and the one `run` | Cut 3 callers |
@@ -210,7 +211,11 @@ Maintained correctness and a complete self-improvement loop decide acceptance.
 
 **What this plan does and does not achieve on size, stated plainly.** The sum of the
 specs' own targets is ≈55,000 source lines: a 40 % cut, not the tenfold norm the owner
-named. The largest surviving files after the cut are still `turn.clj` (≈3,700),
+named. The [deep review](../../../research/agent-platform/deep-review-wins-2026-09-21.md)
+added nine mechanism deletions (ambient projection transport, the schema-shape family,
+the lifecycle lock, the hook as one request, call preparation, the provider error
+classifier, the database owner's parser pre-checks, candidate-as-handle, a refusing
+Malli `:report`) worth ≈ 5,000 further lines, so the honest sum is ≈ 50,000. The largest surviving files after the cut are still `turn.clj` (≈3,700),
 `render/web.clj` (≈2,500), `sci/eval.clj` (≈2,500) and `fn.clj` (≈2,300). A
 tenfold result (10,000–15,000 lines) is not reachable by deleting mirrors alone; it
 needs a second dissolution pass over the surviving mechanisms — the turn loop, the
@@ -289,7 +294,10 @@ Engineering proof gates belong at the operation they block, not in a chronology.
 | Gate | Default path | What requires a decision or proof before changing it |
 |---|---|---|
 | Publication authority | Unpublished branch → transaction report → caller findings → guarded publication | A direct-to-current-src shortcut needs equivalent writer/concurrency proof and a changed owner ruling; otherwise do not implement it |
-| Shared JVM behavior | Per-context wrapper installation over the original callable (§3); the JVM Var armed once for the development cluster | The confirmation probe (two clusters, different contracts, direct/indirect/host calls) runs before the per-call scan is deleted; a failed probe keeps the scan and reports the case |
+| Shared JVM behavior | Per-context wrapper installation over the original callable plus the five-step eligibility rule (§3); the JVM Var armed once as the host wrapper | The confirmation probe (two clusters, different contracts, direct/indirect/host calls, a changed callee under an unchanged caller) runs before the per-call scan is deleted; a failed probe keeps the scan and reports the case |
+| An affected caller that SCI cannot interpret | Refuse the override in that context, naming the caller | Owner may instead admit with a typed `bypassing-callers` set the agent sees every turn; best-effort JVM fallback is rejected (silent bypass) |
+| Candidate shape | D1's candidate is a branch plus a handle hosted by the development JVM (`graph-definition` is a pure function of agent id and handle; measured cluster start ≈ 25 s versus a pointer plus a fork) | The 2026-09-19 ruling says "separate candidate clusters"; the owner decides whether branch + handle satisfies it, or a cluster per task stands, or a cluster only when a candidate must outlive the hosting JVM |
+| Bounded completion | Two declared bounds (`time-limit`, then the same bound after `cancel true`), then abandon-and-disarm with the live thread recorded (B2 §2b) | Keeping the 252-line observer is the fallback; an unbounded second wait is rejected |
 | Native heterogeneous storage | Preserve the declared codec until the fork supports it | A2 proves ordering, equality, retraction, history, reconnect and shape restrictions before type reset |
 | Destructive tests | Preserve isolated immutable-snapshot execution | Prefer one isolated host mechanism serving platform and destructive work; prove confinement before reducing isolation, or retain the existing host until then |
 | Error payload durability | Keep declared data and distinguish shown text from live objects | B3 presents the conflicting complete-rendering-blob requirement explicitly; do not silently remove durable evidence or serialize arbitrary live results |

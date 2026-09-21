@@ -194,6 +194,7 @@ one batched reset; the old code keeps running on `default` until then.
 | c8 | seon | after B3's constructor lands: the 56 inline `(and (map? x) (inst? (:seon.error/at x)) …)` checks → the callee's declared error union (D12: no predicate); `transaction-result` one seek per distinct `:e`; `*receipt*` (`:157`, `:3342-3350`) renamed WITH `sci/eval.clj:2908` (B2) in one commit; the `datoms` output contract made one shape after the §6.5 probe | — | — | armed `(seon.db/datoms db :eavt eid)`; a refused write renders |
 | c2 | seon | after f1: bridge mixed-type `:or` → `{::value-type :db.type/any}`; delete the codec and population plumbing (§2 b); `wake.clj:422-427` codec calls → identity WITH ref resolution kept (B2, same commit or STOP) | — | **RESET** (23 attributes change type; evidence shapes) | probe E; a page renders a `:seon.render/ai` value |
 | c7 | seon | after §6.4: delete `jdk-integers->long` (`:3235-3258`) if Integers never reach the writer, or move the coercion to where Seon builds the admitted value | — | — | transact `(int 1)` and reread after reconnect |
+| c13 | seon | **the read seams stop re-deciding Datahike's parser** (deep review win 7): `query-call-valid?`/`query-guard-message` (`:1960-1993`), `query-input-shape-error`/`query-input-position`/`aligned-query-arguments`/`missing-query-error`/`malformed-query-pattern-error`/`query-attribute-error`/`query-variable-attributes`/`query-find-attributes` (`:1865-1993`, `:1493-1610`), `lookup-ref-error`/`unknown-attribute-error`/`attribute-observation`/`registered-attribute-candidates` (`:1386-1466`), `missing-pull-selector-error` `:2055`, `pull-call-valid?` `:2400-2412`, `datoms-call-valid?` `:2615-2627` — ≈ 450 lines. `normalize-q-input`, the parser and the attribute check refuse the same inputs with typed `ex-info`; `q` already ends in `(catch Throwable cause (dependency-error ::q cause))`, which becomes the ONE translation, carrying Datahike's `:type`/`:error` in `:seon.error/cause`. The `:fn` guards leave the Malli contracts of `q`/`pull`/`datoms`; shape is still refused by the wrapper. Probe first: a table of the eight pre-checked inputs — Datahike throws on each, or that pre-check stays and is named | — | — | the eight-input table; a refused query renders its operation, layer and Datahike's diagnostic |
 | t1–t5 | seon | §7, interleaved with c1, c3–c6, c2 | | | |
 
 ## 6. Better than the floor — probes the lane runs first
@@ -249,9 +250,10 @@ The lane runs only the tests reaching its change, in-process, never a suite.
 | c8 guards/receipt | −110 | 0 | after B3 |
 | c2 codec (after §6.2) | −340 | +5 | −230 `db.clj`, −110 bridge |
 | c7 integers (after §6.4) | −24 | 0 | |
-| **total** | **−1,699** | **+100** | **7,196 → ≈ 5,600** |
+| c13 parser pre-checks | −450 | +10 | conditional on the eight-input table |
+| **total** | **−2,149** | **+110** | **7,196 → ≈ 5,150** |
 
-**Target ≤ 5,600** across the six owned files, checkable with `wc -l`. The 5,000-line stretch target needs additional proven dissolution; it is not a reason to drop codec, validator or custody guarantees. Cross-owner moves count at their destination. Fork and
+**Target ≤ 5,150** across the six owned files, checkable with `wc -l`. The 5,000-line stretch target needs additional proven dissolution; it is not a reason to drop codec, validator or custody guarantees. Cross-owner moves count at their destination. Fork and
 test line changes are reported separately in the landing note.
 
 **Done** = §1's after-column measured (probes A–G; the fresh-boot baseline where
