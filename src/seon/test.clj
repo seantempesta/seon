@@ -1093,6 +1093,9 @@
             (into {} (keep (fn [[test-symbol _]]
                              (when-let [[run-eid member] (get latest test-symbol)]
                                (when (and (green? member)
+                                          (not (reached test-symbol))
+                                          (or (nil? supplied-basis)
+                                              (= supplied-basis (one run-eid :seon.test.run/basis-t)))
                                           (not= digest (one run-eid :seon.test.run/program-digest)))
                                  [test-symbol (one run-eid :seon.test.run/basis-t)]))))
                   reuse-candidates)

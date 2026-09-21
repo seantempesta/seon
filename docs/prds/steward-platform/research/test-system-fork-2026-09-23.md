@@ -932,3 +932,32 @@ The parity regression now acquires the complete index through an `as-of`
 value and compares its selected rows with the original pull selector.
 Run **6ac7a28556dd** recorded **1 test, 4 assertions, 0 failures, 0 errors**;
 reporter duration **4718.540 ms** including initial fixture acquisition.
+
+### Select before deriving reuse evidence
+
+`seon.test/select` previously requested reach digests for green members even
+when `reached` already prohibited their reuse. It now excludes those members,
+and members with a different explicitly requested basis, before acquisition.
+The named-selection regression observes the real `runner/reach-digests` calls
+and proves the changed function's reaching test is absent from those requests.
+The runner also walks schema dependencies once from the requested test's keys;
+it no longer constructs a transitive closure for every installed schema first.
+
+The existing 1/10/100-definition measurement, using the canonical database,
+reported **5198.634 / 5052.171 / 3438.956 ms**. The preceding run measured
+**18954.686 ms** for one definition before it was stopped. These are measured
+selection operations, not a claim that the full regression meets its bound.
+Run **ca092fdd7fcf** recorded **11 tests, 103 assertions, 9 failures, 3 errors**.
+Indexed-row parity passed in **4577.818 ms**. Named reuse's semantic assertions,
+including the new acquisition assertion, passed; its **9198.621 ms** duration
+failed. The omitted-caller test also passed its semantic assertions but failed
+its duration at **6974.017 ms**. Fileless SCI acquisition errored at the
+`seon.instrument/compiled-wrapper` contract boundary and took **17130.972 ms**.
+The complete selection history took **79971.829 ms**, with assertion and
+contract failures; its pre-existing 900000 ms declaration does not settle
+the algorithm problem. It still admits and records the entire canonical test
+population repeatedly. These remaining failures are not green proof.
+
+All runs used HEAD-plus-owned-paths snapshots. The exported publication was
+37 commits behind HEAD; this fact alone does not establish the cause of a
+contract failure. No default cluster or cold gate was operated.

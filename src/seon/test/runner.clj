@@ -2167,8 +2167,8 @@
               ::reach-keys (into (set (:seon.fn/keywords row)) (reach-keywords spec)))
    schema-key (assoc ::reach-leaf (id/digest 64 [schema-key (reach-canonical form)])
                      ::reach-keys (reach-keywords form)))))
-(defn- reach-schema-keys [rows schemas seed]
-  (loop [pending [seed] seen #{}]
+(defn- reach-schema-keys [rows schemas seeds]
+  (loop [pending (vec seeds) seen #{}]
     (if-let [k (peek pending)]
       (if (seen k)
         (recur (pop pending) seen)
@@ -2204,16 +2204,6 @@
        schemas (if (seq changed)
                  (into {} (keep (fn [[e row]] (when-let [k (:seon.schema/key row)] [k e]))) rows)
                  (::reach-schemas previous {}))
-       changed-schema-keys (into #{} (keep :seon.schema/key) changed)
-       schema-closures (if (and previous (empty? changed-schema-keys))
-                         (::reach-schema-closures previous)
-                         (reduce-kv
-                         (fn [closures k _]
-                           (if (and (get closures k)
-                                    (not (some (get closures k) changed-schema-keys)))
-                             closures
-                             (assoc closures k (reach-schema-keys rows schemas k))))
-                         (::reach-schema-closures previous {}) schemas))
        tokens (into (set (map :db/id changed))
                     (mapcat (fn [r] (for [v [r (get old-rows (:db/id r))]
                                          :let [s (or (:seon.test/sym v) (:seon.fn/sym v))
@@ -2227,7 +2217,7 @@
   (assoc (or previous {})
     ::reach-basis basis ::reach-rows rows
     ::reach-symbols (if (seq changed) (into {} (keep (fn [[e r]] (when-let [s (::reach-symbol r)] [s e]))) rows) (::reach-symbols previous {}))
-    ::reach-schemas schemas ::reach-schema-closures schema-closures
+    ::reach-schemas schemas
     ::reach-digests kept
     ::reach-updated (count changed) ::reach-invalidated (- (count (::reach-digests previous)) (count kept)))))
 (defn- reach-entry [index test-symbol]
@@ -2248,8 +2238,7 @@
                   seen))
         entities (into #{} (keep symbols) names)
         keyword-seeds (reduce into #{} (map #(get-in rows [% ::reach-keys]) entities))
-        schema-keys (reduce into #{}
-                            (map #(get (::reach-schema-closures index) % #{%}) keyword-seeds))
+        schema-keys (reach-schema-keys rows schemas keyword-seeds)
         node-parts (mapv (fn [name] [name (get-in rows [(get symbols name) ::reach-leaf]
                                                   :seon.error/unknown)]) (sort names))
         schema-parts (mapv (fn [key] [key (get-in rows [(get schemas key) ::reach-leaf])])

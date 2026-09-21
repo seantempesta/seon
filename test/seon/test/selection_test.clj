@@ -109,7 +109,15 @@
        (support/transacted! connection
          [[:db/add [:seon.fn/sym (fixture-symbol "leaf")]
            :seon.fn/source "(defn leaf [] 3)"]])
-       (let [changed (select!)]
+       (let [acquire runner/reach-digests
+             requested (atom #{})
+             changed (with-redefs [runner/reach-digests
+                                  (fn [database symbols]
+                                    (swap! requested into symbols)
+                                    (acquire database symbols))]
+                       (select!))]
+         (is (not (@requested (fixture-symbol "direct")))
+             "A test already reaching changed code cannot reuse green; do not derive its reach digest.")
          (is (= #{(fixture-symbol "direct")}
                 (set (map :seon.test/sym (:seon.test.run/members changed)))) (pr-str changed))
          (is (= #{(fixture-symbol "unrelated")}
