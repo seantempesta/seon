@@ -2045,7 +2045,7 @@
           [:vector :string]
           [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]]]
     :nil]}
-  [held-store instance published changed-paths roots]
+  [held-store instance published changed-paths _roots]
   (let [connection (:seon.boot/cluster-connection instance)
         cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
         cluster-ref [:seon.cluster/name cluster-name]
@@ -2136,12 +2136,6 @@
                         (not (pos? (or (:seon.instrument/instrumented result) 0)))))
            (refused! "Development JVM instrumentation did not restore contracts."
                      result)))))
-    (report-source-progress! "development source verification")
-    (when-not (= (:seon.source/digest published)
-                 (:seon.source/digest (current-source-snapshot roots)))
-      (refused! "Source changed during development adoption; the next edit must converge it."
-                {:seon.source/commit-id (:seon.source/commit-id published)
-                 :seon.error/diagnostic-cause ::source-changed-during-adoption}))
     ;; This fact means indexing, reload and instrumentation succeeded. SCI
     ;; acquires this database on first use; it does no work during adoption.
     (report-source-progress! "development adoption record")

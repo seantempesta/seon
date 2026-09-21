@@ -2058,3 +2058,69 @@ in a fresh HEAD-plus-owned-files archive after the live root was down:
 `(require 'seon.cluster 'seon.cluster.source 'seon.fn 'seon.test.cache)`.
 The fast snapshot and load archive exclude the active schema-shape edits.
 The orchestrator's cold gate is still owed.
+
+## Slice 4, remaining item 4 — adoption compares commit identities
+
+Deleted the post-adoption filesystem snapshot. The existing entry check
+compares the cluster row’s `:seon.source/commit-id` with the publication;
+reconciliation and loaded definitions must succeed before the existing
+adoption transaction records that commit. The existing lifecycle lock
+serializes publication/adoption. No new check, cache or mechanism.
+
+Before: **7826.353 ms**, with **580.073 ms** in post-adoption snapshot
+verification. After: **11707.899 ms** for the reverse docstring edit in
+`my.note`, with **zero source snapshot calls**. This is not an overall
+speedup claim. No individual after span exceeds 2 s, but the sum exceeds
+the owner’s 10 s bound; that path is not repeated before deleting the
+remaining O(program) manifest work in item 5.
+
+[The live probe](one-jvm-adoption-commit-live-2026-09-23.clj) re-evaluates
+the two edited entry definitions in the own-root host and asserts zero
+whole-tree snapshots around real publication/adoption. [Raw result](one-jvm-adoption-commit-after-2026-09-23.edn).
+
+| Completed phase | after ms |
+|---|---:|
+| request | 2.646 |
+| request accepted | 3.690 |
+| bootstrap configuration | 366.272 |
+| store acquisition | 1.054 |
+| source build | 1251.159 |
+| published manifest read | 293.726 |
+| published manifest validation | 778.911 |
+| published database acquisition | 0.510 |
+| analysis started | 28.323 |
+| analysis input inventory | 190.291 |
+| analysis caller files | 1301.277 |
+| analysis selected files | 443.236 |
+| analysis replace artifacts | 168.897 |
+| analysis manifest complete | 31.074 |
+| analysis complete | 1.581 |
+| findings in analyzed files: 0; added=0; resolved=0 | 0.569 |
+| branch publication started: 1 inputs | 430.765 |
+| program rows started | 434.024 |
+| contract projection started: 3336 schemas, 3 functions | 0.194 |
+| contract projection complete | 2.327 |
+| contract rows: 1/5 | 17.953 |
+| contract rows: 2/5 | 13.812 |
+| contract rows: 3/5 | 9.901 |
+| contract rows: 4/5 | 0.518 |
+| contract rows: 5/5 | 83.803 |
+| development reconciliation transaction | 1134.876 |
+| program rows complete | 0.335 |
+| publication source identity | 73.141 |
+| publication branch head | 94.305 |
+| branch publication complete | 1439.373 |
+| development changed program rows | 1046.801 |
+| development reconciliation transaction | 1343.393 |
+| development loaded definitions | 8.751 |
+| development JVM instrumentation | 500.701 |
+| development adoption record | 208.517 |
+| development cluster converged | 1.193 |
+
+Exact production changed-line UTF-8 bytes: **490 deleted, 55 added**.
+Fast run `79c3ba60f67e`: **4 executed, 13 assertions, zero failures or
+errors**. The private-store test retains its declared 10 s fixture bound.
+`(require 'seon.cluster)` passed in the HEAD-plus-owned-files archive with
+no live own-root JVM concurrent with that load or fast run. The own host
+was started only after both exited. Foreign shape/instrumentation edits
+remain excluded; the orchestrator owns the cold proof.
