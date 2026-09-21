@@ -1585,3 +1585,30 @@ excluded. Exact UTF-8 changed-line bytes:
 | `test/seon/sci/lazy_acquisition_test.clj` | 0 | 2116 | 0 | 2116 |
 
 Total: **7401 deleted, 5583 inserted**.
+
+## Slice 4 — preserve a refused core fault's message, 2026-09-23
+
+The last-resort `commit-fault!` tuple now carries the source's message
+instead of nil. Flow's existing committer hands that fact and the recording
+outcome to `emit-core-fault!`; no second error normalizer or writer was added.
+Throwable fallback includes its class. The error lane's recording code is
+untouched. The existing message-loss issue is resolved by the regression.
+
+Fast run `34dfd601d3b6`: **1 test, 12 assertions, 0 failures/errors**,
+3.100 s. The real preparation refusal retains map, flow Throwable and bare
+Throwable messages in printed output. Live own-root one-file edit after the
+change: **7702.651 ms**, versus 7683.081 ms before; this error-only change
+has no expected publication speed effect. [Raw progress](one-jvm-fault-message-after-2026-09-23.edn).
+No phase exceeds 2 s; the remaining aggregate costs are unchanged from the
+SCI entry above. The scratch JVM was downed before the namespace-load proof.
+Foreign `test/seon/test_support.clj` and `test/seon/turn_backstop_test.clj`
+edits were preserved and excluded. Orchestrator cold proof remains owed.
+
+Exact changed-line UTF-8 bytes:
+
+| Path | Before | After | Deleted | Inserted |
+|---|---:|---:|---:|---:|
+| `src/seon/cluster.clj` | 171440 | 171779 | 29 | 368 |
+| `test/seon/cluster/fault_message_test.clj` | 0 | 1634 | 0 | 1634 |
+
+Total: **29 deleted, 2002 inserted**.

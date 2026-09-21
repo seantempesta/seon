@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 created: 2026-09-22
 tags: [fault-committer, errors, boot, class, silence-on-failure]
@@ -87,3 +87,15 @@ owner must resolve or measure that boundary before the boot claim is green.
 No timeout was increased. `down` found no live child and a free store flock;
 the isolated root was removed. The original last-resort message-loss defect
 remains outside the bounded recording correction.
+
+## Resolution — 2026-09-23
+
+`commit-fault!` now returns the source message in its last-resort fact,
+alongside the recording refusal in the existing outcome position. Map,
+flow-wrapped Throwable and bare Throwable inputs all retain their message;
+Throwable fallback also names its class. `emit-core-fault!` prints both
+through its existing output. Fast run `34dfd601d3b6`: 1 test, 12 assertions,
+0 failures/errors, 3.100 s. The canonical fixture deliberately names an
+absent cluster, making the real recording preparation refuse before a fact
+exists. No preparation or writer is mocked. This closes message loss, not
+every possible recording refusal's independent cause.

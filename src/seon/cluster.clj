@@ -2703,7 +2703,12 @@
       ;; `error/commit-tx` is total. This last-resort shape is only for a
       ;; failure before its fact exists, so no content signature is available
       ;; for Flow to collapse honestly.
-      [nil failure false])))
+      (let [cause (if (instance? Throwable fault) fault (::flow.core/ex fault))
+            message (or (:seon.error/message fault)
+                        (when (instance? Throwable cause)
+                          (str (.getName (class cause)) ": " (ex-message cause)))
+                        (str fault))]
+        [{:seon.error/message message} failure false]))))
 
 (defn- single-line-fault-text
   [value]
