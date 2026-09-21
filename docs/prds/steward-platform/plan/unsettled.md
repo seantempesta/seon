@@ -7409,3 +7409,11 @@ verified before naming it, as the rule requires.) Adoption proof on
 `default` is the orchestrator's next step: reload the changed namespaces
 at the REPL (adoption still does not reload — item 8), then
 `init --dev --changed`, then the platform tier.
+
+**Ruling ~00:00 (test-system, `config/defaults` recompiled at
+`config.clj:644`):** option 2, narrowly — the shipped default manifest is
+a program constant: a plain `def` of the compiled value at namespace
+load; no atom/delay/memoize/cache; cluster config stays explicitly
+carried; callers reading `defaults` where cluster config was meant are
+listed, not converted in this slice. Table stands at 11 within bound,
+1 duration red (this one), 6 awaiting slice 4.
