@@ -6,7 +6,7 @@ description: "Mine the deleted Seon CLJS pod through Git history (AGENTS.md:247-
 # Historical CLJS pod quarry
 
 The CLJS build is off and the pod is deleted. Current Seon is CLJ/JVM only
-(`docs/prds/sci-execution-runtime/plan/README.md:345-351`). Current agent
+(`docs/archive/prds/sci-execution-runtime/plan/README.md:345-351`). Current agent
 evaluation belongs to `src/seon/sci/eval.clj`; current web rendering belongs to
 `src/seon/render/web.clj`.
 
@@ -51,7 +51,7 @@ understanding.
 Read these only as quarry:
 
 The retained research record is
-`docs/prds/archive/agent-fsm/research/cljs-async-await-2026-06-28.md`. Use Git
+`docs/archive/prds/pre-2026-09/agent-fsm/research/cljs-async-await-2026-06-28.md`. Use Git
 history when the question requires deleted source, for example
 `git log --all -- path/to/deleted/file` followed by `git show REV:path`.
 

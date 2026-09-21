@@ -166,7 +166,7 @@ implementation need. Do not recreate the retired `seon.db` pod facade.
 - **Don't `memoize` on a db value** — `=` on a DB compares the EAVT index and
   can fault index nodes from durable storage on a cache hit
   (`reference-code/datahike/src/datahike/db.cljc:703-715`;
-  `docs/prds/archive/agent-fsm/research/datahike-primer.md` §5).
+  `docs/archive/prds/pre-2026-09/agent-fsm/research/datahike-primer.md` §5).
   Measure before caching.
 - **Use `d/history` only when historical additions and retractions are the
   query subject.**

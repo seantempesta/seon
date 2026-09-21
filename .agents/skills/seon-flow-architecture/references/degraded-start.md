@@ -31,7 +31,7 @@ Start diagnosis with the exception's `:seon.boot/instance`. If another
 The double deref is intentional: `#'.../running-instances` is a Var whose
 value is the registry atom
 (`src/seon/cluster.clj:185-211`;
-`docs/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md`
+`docs/archive/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md`
 §6).
 
 Read absence from the bottom upward:
@@ -102,7 +102,7 @@ still fails. For boot-sensitive proof, use a lane-owned operator root with no
 live advertisements. The verified filesystem shape is a directory under
 repository-local `tmp/` whose code/config entries are symlinks to the current
 checkout and whose `data/` is its own
-(`docs/prds/sci-execution-runtime/research/checkpoint-audit-2026-07-29.md`
+(`docs/archive/prds/sci-execution-runtime/research/checkpoint-audit-2026-07-29.md`
 “Isolation and apparatus”; the existing
 `tmp/seam-reaudit4-operator-root` demonstrates the layout).
 
@@ -127,7 +127,7 @@ Use the same `--root` option with `status`, `logs scratch-name`, and
 `stop scratch-name` so discovery and cleanup stay inside that root. A
 custom-root cluster is intentionally invisible to the default MCP discovery
 path
-(`docs/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md`
+(`docs/archive/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md`
 §1).
 
 ## 4. Fall back to an isolated in-memory JVM

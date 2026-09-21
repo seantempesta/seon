@@ -167,7 +167,7 @@ someone genuinely asserts the false.
 **No seam may act on a pre-read or a mirror that its authority will
 re-decide: derive at the authority, or hand it the decision** (owner
 law, 2026-08-29; the five-class synthesis in
-`docs/prds/sci-execution-runtime/research/class-root-cause-synthesis-2026-08-29.md`
+`docs/archive/prds/sci-execution-runtime/research/class-root-cause-synthesis-2026-08-29.md`
 is the evidence — hand-rostered fixtures vs the config compiler,
 existence pre-reads vs the writer's upsert, a reply pipe vs the
 process's own exit, a lint cache vs canonical analysis: one disease).
@@ -358,7 +358,7 @@ or cache for the compiled defaults.
 
 Fetch-at-call-time is also the recurring performance killer: the same
 defect that reads stale state also recomputes a projection on every call. Grounding:
-[seon-env PRD](docs/prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md);
+[seon-env PRD](docs/archive/prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md);
 open members are tagged `class/p1` in `docs/seon/issues/`.
 
 ### 2.2 Facts over inference
@@ -774,8 +774,8 @@ writing.
 | render profile | The presentation policy applied by the value renderer once at evaluation time; the evaluation stores the resulting shown text. History never clips again; HTML renders the live object without presentation clipping, or saved text after restart ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `resources/seon/schemas/seon.render.profile.edn`) | cap, window, separate result storage bound |
 | elision value | ordinary data describing omitted count, path, next offset, and requery identity (`resources/seon/schemas/seon.print.edn` ↔ `src/seon/print.cljc`) | ellipsis, truncation marker |
 | `:seon.fn/external-sink`, `:seon.fn/projection-boundary` | queryable program-graph leaf facts; `seon.fn/output-path-report` derives projected/bypass/unresolved paths (`resources/seon/schemas/seon.fn.edn` ↔ `src/seon/fn.clj`) | sink roster, output allowlist |
-| **[TARGET] root maintenance portfolio** | root's declared scheduled reclamation/inspection/repair tasks ([design](docs/prds/sci-execution-runtime/research/scheduler-mining-and-gc-design-2026-08-04.md)); update this row when the owners land | maintenance daemon |
-| **[TARGET] `my.branch`** | agent-facing branch/history functions over database branches — git vocabulary without claiming to be git ([PRD](docs/prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)); update this row when it lands | my.git, my.repo |
+| **[TARGET] root maintenance portfolio** | root's declared scheduled reclamation/inspection/repair tasks ([design](docs/archive/prds/sci-execution-runtime/research/scheduler-mining-and-gc-design-2026-08-04.md)); update this row when the owners land | maintenance daemon |
+| **[TARGET] `my.branch`** | agent-facing branch/history functions over database branches — git vocabulary without claiming to be git ([PRD](docs/archive/prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)); update this row when it lands | my.git, my.repo |
 | private layer | The agent's defs and atoms as actual objects in its persistent SCI context, isolated from the base and other agents, lost on JVM restart. Installed functions, schemas, and tests are durable program facts ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); agent acquisition: `src/seon/cluster/agent.clj:636`; SCI isolation: `reference-code/sci/src/sci/core.cljc:345`) | `:seon.def/*`, session image, restored defs |
 | **[TARGET]** evaluation entity | One `:seon.eval` entity per branch/turn/ordinal identity, carrying source and outcome evidence including shown text, out, error, and read evidence. Its actual result stays in memory; identity derives through `seon.id/evaluation` ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/id.clj:55`) | `:seon.cluster.eval`, `:seon.cluster.run.form/*`, frozen form entity, receipt, `form-identity` |
 | the agent's history | The walk rendering `(seon.eval/of-agent db agent)` (`src/seon/eval.clj:9`) in chronological turn order and ordinal through the evaluation schema's pair, from stored shown text. All turns are shown by default; previous prompt bytes remain unchanged until compaction ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/repl.clj:213`) | transcript, transcript entries, session units, run-form facts |

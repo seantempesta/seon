@@ -18,7 +18,7 @@ alternative was rejected.
 ## Use the ruling ledger
 
 The authoritative ruling index is
-`docs/prds/sci-execution-runtime/plan/README.md`. Follow its numbered rulings
+`docs/archive/prds/sci-execution-runtime/plan/README.md`. Follow its numbered rulings
 and current ladder rather than copying old implementation shapes from
 the Git-history quarry (`AGENTS.md:247-254`).
 
@@ -38,14 +38,14 @@ from one blueprint. Database facts say which agents and work exist; each graph
 derives its own eligible episode when woken.
 
 Plan ruling: the 2026-07-28 agents-are-flows ruling at
-`docs/prds/sci-execution-runtime/plan/README.md:475-500`.
+`docs/archive/prds/sci-execution-runtime/plan/README.md:475-500`.
 
 Current proof:
 
 - three-proc blueprint at `src/seon/cluster/agent.clj:286-318`;
 - derive-all armer at `src/seon/cluster/agent.clj:435-484`; and
 - measured parked-proc cost in
-  `docs/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`.
+  `docs/archive/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`.
 
 This replaced the central-loop model, not merely its namespace.
 
@@ -61,9 +61,9 @@ Seon therefore refuses missing or `:mixed` workloads in `var-process`
 warning or production metric: an unclassified proc cannot enter a graph.
 
 Plan rulings: workload derivation at
-`docs/prds/sci-execution-runtime/plan/README.md:256-269` and the
+`docs/archive/prds/sci-execution-runtime/plan/README.md:256-269` and the
 agents-are-flows propagation decision at
-`docs/prds/sci-execution-runtime/plan/README.md:490-500`.
+`docs/archive/prds/sci-execution-runtime/plan/README.md:490-500`.
 
 This replaced the old willingness to accept core.async's fail-closed default
 and discover the thread cost under scale.
@@ -80,7 +80,7 @@ an interrupted receipt is evidence for the next agent decision, not authority
 for an automatic retry.
 
 Plan ruling 23:
-`docs/prds/sci-execution-runtime/plan/README.md:889-899`.
+`docs/archive/prds/sci-execution-runtime/plan/README.md:889-899`.
 
 This replaced replay/retry machinery whose exactly-once claim could not be
 proved across external effects.
@@ -101,7 +101,7 @@ Current examples are the sliding agent wake at
 
 Plan ruling: the channel-versus-database boundary commissioned by the
 agents-are-flows decision at
-`docs/prds/sci-execution-runtime/plan/README.md:475-500`.
+`docs/archive/prds/sci-execution-runtime/plan/README.md:475-500`.
 
 This replaced both extremes: committing high-churn partial presentation state
 as durable history and routing recovery-critical work only through ephemeral
@@ -119,7 +119,7 @@ Current derivation is explicit in the routing map and armer at
 `docs/seon/architecture/data-model.md`.
 
 Plan ruling: presence-not-kinds decision 2 at
-`docs/prds/sci-execution-runtime/plan/README.md:451-467`.
+`docs/archive/prds/sci-execution-runtime/plan/README.md:451-467`.
 
 This replaced object-style taxonomies and stored lifecycle flags that could
 disagree with the database or live process.
@@ -138,7 +138,7 @@ Current examples:
   suppresses equal bytes (`src/seon/render/web.clj:553-600,631-735`).
 
 Plan ruling 19 derives reactivity from render input and display-fact presence:
-`docs/prds/sci-execution-runtime/plan/README.md:961-981`.
+`docs/archive/prds/sci-execution-runtime/plan/README.md:961-981`.
 
 This replaced stored counters, status flags, notification queues, and render
 snapshots that required reconciliation.
@@ -158,7 +158,7 @@ Do not add `-v2`, compatibility namespaces, parallel registries, second feeds,
 or side-channel delivery. Delete the superseded path in the same conversion.
 
 Plan law L17:
-`docs/prds/sci-execution-runtime/plan/README.md:1615-1616`.
+`docs/archive/prds/sci-execution-runtime/plan/README.md:1615-1616`.
 
 This replaced “temporary” duplication that preserved both models and made
 tests unable to identify the real owner.

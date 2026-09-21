@@ -86,7 +86,7 @@ Use these terms precisely:
   but not on JDK 26.0.1. Native and other critical sections can still pin.
 
 The probes and JDK conditions are recorded in
-`docs/prds/sci-execution-runtime/research/workload-scheduling-truth-2026-07-29.md`.
+`docs/archive/prds/sci-execution-runtime/research/workload-scheduling-truth-2026-07-29.md`.
 Never generalize “parking is free” into “all blocking is free”: parked tasks
 still consume application-level admission and retain their live state.
 
@@ -127,7 +127,7 @@ The fixed platform pool and virtual threads holding a lifetime semaphore both
 ran in four waves; releasing the CPU permit for the blocking segment matched
 the one-wave unbounded virtual-thread case. Read the probe output and
 interpretation in
-`docs/prds/sci-execution-runtime/research/workload-scheduling-truth-2026-07-29.md`.
+`docs/archive/prds/sci-execution-runtime/research/workload-scheduling-truth-2026-07-29.md`.
 The result does not say “virtual threads make work faster.” It shows that a
 lifetime-wide logical gate preserves the same bottleneck as fixed workers when
 most admitted work is parked. Releasing the CPU permit at an explicit blocking
@@ -138,7 +138,7 @@ JDK 26, `-Xmx512m`; its idle section used one-proc graphs sharing the default
 executors. It measured about 8.5 KB and one virtual thread per parked proc,
 8.3 MB for 1,000 graphs, and 21.6 ms to start those graphs. Use the full
 method and caveats in
-`docs/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`; do not
+`docs/archive/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`; do not
 turn those host measurements into universal constants.
 
 ## What a capability boundary changes

@@ -11,7 +11,7 @@ Keep one `seon.ai` HTTP owner and represent hosted targets as provider descripto
 rows (`src/seon/ai.clj:339-408,1040-1086`). Re-open the linked primary source
 before editing a row or wire shape. The
 verified baseline and source inventory are in
-`docs/prds/sci-execution-runtime/research/llm-provider-research-2026-08-03.md`.
+`docs/archive/prds/sci-execution-runtime/research/llm-provider-research-2026-08-03.md`.
 
 ## Working rules
 
@@ -89,4 +89,4 @@ listener, Anthropic cache toggles, and Malli-to-JSON-Schema call are useful
 examples. Its assistant loop, atom-backed memory, static model presets,
 retry/circuit-breaker state, and tool registry duplicate Seon mechanisms and
 must not be integrated. The source-by-source judgment is in
-`docs/prds/sci-execution-runtime/research/llm-provider-research-2026-08-03.md`.
+`docs/archive/prds/sci-execution-runtime/research/llm-provider-research-2026-08-03.md`.

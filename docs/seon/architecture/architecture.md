@@ -186,4 +186,4 @@ repository behavior and settled vocabulary belong to `AGENTS.md`.
 - [[roadmap]] — rulings, current implementation state, and work order.
 - [[datahike-primer]] — the source-grounded database-value and transaction
   mindset.
-- `docs/seon/vision/` — the product premise and longer horizon.
+- `docs/archive/vision/` — the product premise and longer horizon.
