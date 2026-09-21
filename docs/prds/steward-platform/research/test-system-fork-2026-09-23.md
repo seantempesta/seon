@@ -1239,3 +1239,55 @@ The final fork pin is **006e634ae955c186619adb5f3868cca29d8c97fb**, pushed to
 `:seon.error/data` → `:seon.error/diagnostic-evidence` path. The final regression
 passed **13 assertions in 36.042 ms**. The same JVM required the owned runner,
 runner-test and selection-test namespaces successfully.
+
+### Empty result recording performs no reach derivation — 2026-09-23
+
+The shared recorder refused before execution because its loaded config declaration
+still referenced removed `:seon.config/applied-manifest-digest`. Per the assignment's
+explicit fallback, a detached HEAD worktree at `f0e2fa7c8` linked `reference-code`
+and used a private copy of the existing export. `seon.cluster.export/reidentify!`
+rewrote that copy's store identity before opening it. No publication or shared
+process operation occurred. This got through source admission in the test JVM.
+
+Run **c1390e43daee**, same six original bodies through the preserved focused
+patch: **14 assertions, 1 duration failure, 5 errors**; log **17,047 bytes**.
+Five bodies now refuse at `seon.config/compile-manifest` called by the canonical
+`seed-cluster!` helper: its returned `:seon.config/compiled` map has effective,
+desired-row and resolved-attributes entries, while the exported declaration still
+requires retired `:seon.config/applied-manifest-digest` (also in desired-row).
+The complete exception identifies an output-contract failure. Those short setup
+refusals are not successful test timings, nor evidence that log writes explained
+the previous duration. The covered-member correction remains unexecuted beyond
+this setup. The orchestrator has been asked to refresh the exported base; no
+retired key or replacement production schema was inserted into the fixture.
+
+The omitted-caller body reached all assertions and took **6,832.831 ms**
+(previous six-test measurement **15,086.699 ms**). A focused operation split,
+run **2992c9f3ccef**, measured **10,137.423 ms**, of which `commit-results!`
+took **4,483.187 / 2,467.469 ms**. Its EMPTY test sets still called
+`reach-digests`, costing **2,851.197 / 1,207.137 ms**. `reach-entries` built
+rows for the entire program before discovering there were no requested members.
+The two-file manifest took **608.841 ms**, overlay check **46.175 ms**, and
+projection acquisition **416.290 ms**. Timings are inclusive; nested values
+must not be added together.
+
+`src/seon/test/runner.clj:2260` now returns the empty map before acquiring any
+reach state when the requested vector is empty. Both digest and membership
+callers use that one seam. No cache or allowance was added. The existing
+omitted-caller regression asserts both empty results and still verifies real
+HEAD bytes and idempotent durable provenance.
+
+Run **f338c6166d5c**: **1 executed, 10 assertions, zero failures/errors**;
+**3,054 ms** between reporter begin/end events, below the unchanged 5-second
+bound. Manifest **491.431 ms**, overlay check **37.128 ms**, projection
+**376.596 ms**; empty digest calls **0.299 / 0.013 / 0.010 ms**; recording
+**275.041 / 67.536 ms**. The [operation-measurement patch](test-system-omitted-cost-2026-09-23.patch)
+reproduces the split around the unchanged original test body. Required namespace
+load also passed in the final writer-regression JVM.
+
+Remaining decision boundary: a matching published schema is needed to execute
+the five config-dependent bodies. The existing
+[fixture contract issue](../../../seon/issues/canonical-fixture-retains-old-function-contracts-after-adoption.md)
+owns this exact boundary. Cold proof and full six-test remeasurement remain owed.
+The disposable measurement source and worktree were removed after their JVMs
+exited; summaries and complete config-refusal envelopes remain under `tmp/`.

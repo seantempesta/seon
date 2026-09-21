@@ -2262,6 +2262,8 @@
  Result-only transactions invalidate nothing. A cache retains only one basis;
  older or different branch values derive independently and never replace it."
  [database test-symbols]
+ (if (empty? test-symbols)
+   {}
  (try
  (let [holder (reach-cache database)
        configuration (:config database)
@@ -2297,7 +2299,7 @@
     :seon.error/diagnostic-offending test-symbols
     :seon.error/diagnostic-cause :seon.test/reach-digest-unavailable
     :seon.error/diagnostic-evidence {:seon.test/syms test-symbols}
-    :seon.test/unknown "reach digest"}))))
+    :seon.test/unknown "reach digest"})))))
 
 (defn reach-digests
   "Derive equality keys from the tested database's incremental reach index."

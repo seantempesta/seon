@@ -195,3 +195,21 @@ fixture's `:seon.source/publish-request` still requires the removed
 The own-root live changed-file concurrency probe passed against the current
 published schema. No retired activation field was reintroduced into the
 request to satisfy the stale fixture.
+
+## Config declaration retirement blocks the six-test measurement — 2026-09-23
+
+Run `c1390e43daee` used HEAD `f0e2fa7c8` and the exported base
+`0e3ced090fbd53d22cbcb28b6c6d4f067f4b448a1d1247146f9e5149a832c1e3`
+(69 commits behind), with a private copied/reidentified store in the expressly
+authorized HEAD worktree. Five assigned runner/selection bodies refuse in
+canonical `seed-cluster!`: `seon.config/compile-manifest` now returns the current
+`:seon.config/compiled` map without `:seon.config/applied-manifest-digest`, but
+its carried output contract still requires that retired key, including under
+`:seon.config/desired-row`. Complete envelopes identify the function, output
+check and both paths. The sixth body, which does not seed config, executes.
+The shared recorder separately fails loading its old config declaration against
+the changed packaged resource; the private recorder avoids that loaded-state
+boundary but cannot turn an old exported declaration into the current one.
+A refreshed orchestrator export is required before claiming the five bodies
+or covered-member correction pass. No old attribute was restored and no host
+schema was substituted for the database's declarations.

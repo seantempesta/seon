@@ -1,0 +1,27 @@
+diff --git a/test/seon/test/offenders_test.clj b/test/seon/test/offenders_test.clj
+new file mode 100644
+--- /dev/null
++++ b/test/seon/test/offenders_test.clj
+@@ -0,0 +1,22 @@
++(ns seon.test.offenders-test
++  (:require [clojure.test :refer [deftest]]
++            [seon.test.selection-test :as selection]
++            [seon.test.runner] [seon.test-support] [seon.schema] [seon.fn]))
++
++(deftest omitted-caller
++  (let [measurements (atom {})
++        symbols '[seon.fn/build-manifest seon.test.selection/assert-complete-overlay!
++                  seon.test.runner/commit-results! seon.test-support/with-database
++                  seon.schema/projection-from-database seon.test.runner/reach-digests
++                  seon.test.runner/program-digest]
++        replacements (into {} (map (fn [sym]
++                                     (let [v (requiring-resolve sym) f @v]
++                                       [v (fn [& args]
++                                            (let [start (System/nanoTime)]
++                                              (try (apply f args)
++                                                   (finally
++                                                     (swap! measurements update sym (fnil conj [])
++                                                            (/ (double (- (System/nanoTime) start)) 1e6))))))])) symbols))]
++    (try
++      (with-redefs-fn replacements #((:test (meta #'selection/omitted-dirty-callers-use-head-and-carry-recordable-provenance))))
++      (finally (println "OPERATION TIMES" @measurements)))))

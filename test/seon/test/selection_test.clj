@@ -508,6 +508,8 @@
                                          :seon.test/run-basis-t (:seon.test.run/basis-t run)
                                          :seon.test/run-at (:seon.test.run/at run)
                                          :seon.test.runner/results []}
+                   _ (is (= {} (runner/reach-digests database [])))
+                   _ (is (= {} (runner/reach-memberships database [])))
                    recorded (runner/commit-results! connection completion)]
                (is (vector? recorded) (pr-str recorded))
                (is (vector? (runner/commit-results! connection completion))
