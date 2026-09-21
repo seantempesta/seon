@@ -123,24 +123,18 @@
         request-shape
         (get-in facts [:seon.fn/arities 0 :seon.fn.arity/arguments 1
                        :seon.fn.argument/schema])
-        desired-entry
-        (some #(when (= :seon.reconcile/desired
-                        (:seon.schema.map-entry/key-keyword %))
-                 %)
-              (:seon.schema.shape/entries request-shape))
-        desired-shape (:seon.schema.shape.entry/schema desired-entry)
+        desired-shape
+        (schema-shape/shape-row (m/schema (:seon.reconcile/desired forms)))
         element-shape
         (get-in desired-shape [:seon.schema.shape/children 0
                                :seon.schema.shape.child/schema])]
-    (is (= [:map
-            [:seon.reconcile/desired [:vector [:map]]]
-            [:seon.reconcile/process [:string {:min 1}]]
-            [:seon.reconcile/adopt-identities
-             {:optional true}
-             [:set [:vector :any]]]]
-           (schema-shape/row-form request-shape)))
-    (is (= [:vector [:map]] (schema-shape/row-form desired-shape)))
-    (is (= [:map] (schema-shape/row-form element-shape)))
+    (is (= :seon.reconcile/request (schema-shape/row-form request-shape)))
+    (is (= ":seon.reconcile/request" (:seon.schema.shape/form request-shape)))
+    (is (nil? (:seon.schema.shape/entries request-shape)))
+    (is (= [:vector :map] (schema-shape/row-form desired-shape)))
+    (is (= "[:vector]" (:seon.schema.shape/form desired-shape)))
+    (is (= :map (schema-shape/row-form element-shape)))
+    (is (= ":map" (:seon.schema.shape/form element-shape)))
     (is (nil? (:seon.schema.shape/entries element-shape)))))
 
 (deftest positional-and-map-entry-contracts-have-distinct-addresses
@@ -257,15 +251,21 @@
                                                 :seon.fn.arity/arguments]))
         composed-rest (first (get-in composed [:seon.fn/arities 0
                                                :seon.fn.arity/arguments]))]
-    (is (= "[:* :string]"
+    (is (= [:* :string]
+           (schema-shape/row-form (:seon.fn.argument/rest-tail-schema repeated-rest))))
+    (is (= "[:*]"
            (get-in repeated-rest
                    [:seon.fn.argument/rest-tail-schema
                     :seon.schema.shape/form])))
+    (is (= :string
+           (schema-shape/row-form (:seon.fn.argument/rest-element-schema repeated-rest))))
     (is (= ":string"
            (get-in repeated-rest
                    [:seon.fn.argument/rest-element-schema
                     :seon.schema.shape/form])))
-    (is (= "[:alt :cat [:cat :int]]"
+    (is (= [:alt :cat [:cat :int]]
+           (schema-shape/row-form (:seon.fn.argument/rest-tail-schema composed-rest))))
+    (is (= "[:alt]"
            (get-in composed-rest
                    [:seon.fn.argument/rest-tail-schema
                     :seon.schema.shape/form])))
