@@ -160,6 +160,14 @@ not each trigger a full integration cycle. This is a concentrated refactor, not 
 multi-day sequence of small patches. If the evidence makes that scope infeasible,
 bring the concrete scope/time tradeoff to the owner before extending it.
 
+Assign models by the work: `gpt-5.6-sol` at low effort for fully specified
+conversions, deletions and caller updates; `gpt-6-astra` at low effort for bounded
+repairs that still require diagnosis; Astra at medium for architectural decisions
+and cut review. New assignments set the model and effort explicitly. A clear spec
+includes owned paths, the replacement seam, every caller to convert and concrete
+acceptance checks; Sol should not have to invent a missing design. No high-effort
+implementation lanes. The orchestrator owns integration and reviews each cut.
+
 ## 5. Measurements and size
 
 The following are recorded baselines from the 2026-09-21 investigations, not a fresh
