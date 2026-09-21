@@ -5,7 +5,7 @@
   attribute. A selected manifest is a sparse overlay. The caller may pass one
   more explicit, typed environment map; compilation applies exactly the
   precedence defaults → overlay → environment, validates every declared key,
-  and derives one canonical effective map, digest, and desired row.
+  and derives one canonical effective map and desired row.
 
   Runtime consumers read only the database row. Omission from a sparse overlay
   inherits the shipped decision; it does not retract a defaulted optional
@@ -21,8 +21,7 @@
             [seon.schema.edn :as schema.edn]
             [malli.core :as m]
             [malli.registry :as mr]
-            [seon.schema.internal :as internal])
-  (:import [java.nio.charset StandardCharsets]))
+            [seon.schema.internal :as internal]))
 
 (schema.edn/load! {})
 
@@ -46,19 +45,13 @@
   database row; the marker itself is never stored."
   :seon.config/absent)
 
-(defn- short-digest
-  [digest]
-  (when digest
-    (subs digest 0 (min 12 (count digest)))))
-
 (defn render-ai
   "`:seon.render/ai` — the bounded decision face of one effective config."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
   (when-let [cluster (:seon.config/cluster unit)]
     (str
-     "Configuration " cluster " · manifest "
-     (short-digest (:seon.config/applied-manifest-digest unit)) ".\n"
+     "Configuration " cluster ".\n"
      "Model " (:seon.config.ai/model unit)
      " (thinking " (name (:seon.config.ai/thinking unit))
      ", max " (:seon.config.ai/max-tokens unit) " output tokens); "
@@ -76,8 +69,6 @@
     [:article {:class "seon-family-entry seon-config-entry"}
      [:h3 (str "Configuration " cluster)]
      [:dl
-      [:div [:dt "Manifest digest"]
-       [:dd [:code (:seon.config/applied-manifest-digest unit)]]]
       [:div [:dt "Model"] [:dd (:seon.config.ai/model unit)]]
       [:div [:dt "Thinking"]
        [:dd (name (:seon.config.ai/thinking unit))]]
@@ -609,21 +600,12 @@
          :seon.error/data {::explanation
           ((schema/projection-explainer projection :seon.config/effective) effective)}})
        nil))
-      (let [digest
-            (schema/sha-256
-             [(.getBytes
-               ^String (schema/canonical-data-string effective)
-               StandardCharsets/UTF_8)])]
-        {:seon.config/effective effective
-         :seon.config/applied-manifest-digest digest
-         :seon.config/initialization initialization
-         :seon.config/resolved-attributes (set (keys decisions))}))))
+      {:seon.config/effective effective
+       :seon.config/initialization initialization
+       :seon.config/resolved-attributes (set (keys decisions))})))
 
 (defn compile-manifest
-  "Compile settings and a desired row for the explicitly named cluster.
-
-  The digest covers only effective config, so equal configs in distinct
-  clusters have the same digest."
+  "Compile settings and a desired row for the explicitly named cluster."
   {:malli/schema
    [:=> [:cat :seon.config/compile-request] :seon.config/compiled]}
   [request]
@@ -653,9 +635,7 @@
     (let [compiled (compile-settings request)]
       (assoc compiled :seon.config/desired-row
              (assoc (:seon.config/effective compiled)
-                    :seon.config/cluster cluster-name
-                    :seon.config/applied-manifest-digest
-                    (:seon.config/applied-manifest-digest compiled))))))
+                    :seon.config/cluster cluster-name)))))
 
 (defn defaults
   "Compile the zero-overlay shipped defaults into one effective config."
@@ -770,8 +750,10 @@
                        [:vector :map] :seon.reconcile/request] :seon.db/tx-data]}
   [database projection desired request]
   (require-functions! database desired)
-  (conj (population-transaction-data projection database desired)
-        [:db.fn/call #'reconcile/reconcile-call request]))
+  (let [tx-data (reconcile/plan database request)
+        rows (filterv map? tx-data)
+        replacements (zipmap rows (population-transaction-data projection database rows))]
+    (mapv #(get replacements % %) tx-data)))
 
 (defn apply-compiled!
   "Exact-reconcile one already-compiled desired config row."
@@ -803,8 +785,7 @@
         {::reconcile/desired desired
          ::reconcile/process managing-process-identity
          ::reconcile/adopt-identities identities}
-        ;; The digest covers config dials, not initialization rows or later
-        ;; hand edits. Exact reconciliation must still observe those facts.
+        ;; Both config dials and initialization rows are compared as facts.
         operations (count (reconcile/plan database request))
         result
         (if (zero? operations)

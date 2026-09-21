@@ -94,9 +94,7 @@
               [:map {:seon.db/attributes true
                      :seon.render/ai 'seon.config/render-ai
                      :seon.render/html 'seon.config/render-html}
-               [:seon.config/cluster :seon.config/cluster]
-               [:seon.config/applied-manifest-digest
-                :seon.config/applied-manifest-digest]]
+               [:seon.config/cluster :seon.config/cluster]]
               effective-entries))
       forms)))
 

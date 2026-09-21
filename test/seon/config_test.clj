@@ -235,6 +235,37 @@
              (is (= committed-basis (:max-tx @connection))
                  "an identical config and population write no transaction")))))))
 
+(deftest config-writer-submits-only-the-fact-difference
+  (test-support/with-database
+   (fn [connection]
+     (let [request {:seon.db/connection connection :seon.boot/cluster-name "difference"}
+           _ (config/apply! request)
+           original @#'config/reconcile-call
+           transactions (atom [])
+           changed (assoc request :seon.config/manifest
+                          {:seon.config.flow.compute/queue-depth 23})]
+       (with-redefs-fn
+         {#'config/reconcile-call
+          (fn [database projection desired request]
+            (let [tx-data (original database projection desired request)]
+              (swap! transactions conj tx-data)
+              tx-data))}
+         #(do
+            (is (false? (:seon.reconcile/converged? (config/apply! changed))))
+            (let [basis (:max-tx @connection)]
+              (is (true? (:seon.reconcile/converged? (config/apply! changed))))
+              (is (= basis (:max-tx @connection))))))
+       (is (= 1 (count @transactions)))
+       (let [tx-data (first @transactions)
+             rows (filter map? tx-data)]
+         (is (= [[:db.fn/retractAttribute [:seon.config/cluster "difference"]
+                   :seon.config.flow.compute/queue-depth]]
+                (filterv vector? tx-data)))
+         (is (= 1 (count rows)))
+         (is (= #{:db/id :seon.config/cluster :seon.config.flow.compute/queue-depth}
+                (set (keys (first rows)))))
+         (is (= 23 (:seon.config.flow.compute/queue-depth (first rows)))))))))
+
 (deftest converged-apply-uses-carried-projection-and-remains-exact
   (test-support/with-database
    (fn [connection]
@@ -276,7 +307,6 @@
            "a real exact read observes convergence without rebuilding")
        (is (= basis (:max-tx @connection)))
        (let [compiled (config/compile-manifest {:seon.boot/cluster-name "default"})
-             digest (:seon.config/applied-manifest-digest compiled)
              queue-depth (get-in compiled [:seon.config/effective
                                           :seon.config.flow.compute/queue-depth])]
          (let [edited (db/transact!
@@ -290,9 +320,6 @@
                             [:seon.config.flow.compute/queue-depth]
                             [:seon.config/cluster "default"])))
                "the hand edit committed before reconciliation"))
-         (is (= digest (:seon.config/applied-manifest-digest
-                        (db/pull @connection [:seon.config/applied-manifest-digest]
-                                 [:seon.config/cluster "default"]))))
          (is (false? (:seon.reconcile/converged? (config/apply! request)))
              "the same manifest repairs a hand edit")
          (is (= queue-depth (:seon.config.flow.compute/queue-depth
@@ -302,7 +329,7 @@
                                {(first process-identity) (second process-identity)})]
            (is (false? (:seon.reconcile/converged?
                         (config/apply-compiled! connection changed)))
-               "initialization can change while the dial digest stays equal")
+               "initialization changes even when the dials stay equal")
            (is (= (second process-identity)
                   (:seon.db.process/id
                    (db/pull @connection [:seon.db.process/id] process-identity))))))))))
@@ -433,8 +460,8 @@
     (is (not (contains? effective :seon.config.error/escalate-to)))
     (is (not (contains? row :seon.config.error/escalate-to)))
     (is (not-any? nil? (vals row)))
-    (is (not= (:seon.config/applied-manifest-digest baseline)
-              (:seon.config/applied-manifest-digest absent)))
+    (is (not= (:seon.config/effective baseline)
+              (:seon.config/effective absent)))
     (testing "a required entry cannot be removed"
       (let [data
             (test-support/refusal-data
@@ -445,7 +472,7 @@
         (is (= :seon.config.flow.compute/queue-depth
                (::config/key data)))))))
 
-(deftest canonical-digest-is-independent-of-map-construction-order
+(deftest effective-config-is-independent-of-map-construction-order
   (let [left
         (config/compile-manifest
          {:seon.boot/cluster-name "default" :seon.config/manifest
@@ -461,9 +488,8 @@
           :seon.boot/cluster-name "other"})]
     (is (= (:seon.config/effective left)
            (:seon.config/effective right)))
-    (is (= (:seon.config/applied-manifest-digest left)
-           (:seon.config/applied-manifest-digest right))
-        "cluster identity is not part of the effective-config digest")))
+    (is (= (dissoc (:seon.config/desired-row left) :seon.config/cluster)
+           (dissoc (:seon.config/desired-row right) :seon.config/cluster)))))
 
 (deftest sparse-file-reading-does-not-compile-a-second-time
   (let [directory (io/file "tmp/config-test")

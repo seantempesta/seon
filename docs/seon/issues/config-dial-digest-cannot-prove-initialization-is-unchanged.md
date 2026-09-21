@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, config, wave/config-application-contract, wave/boot-velocity]
 ---
@@ -32,3 +32,12 @@ now explicit; the measured 2330 ms config-labelled interval includes process
 and root seeding, search acquisition and minimal SCI construction AFTER the
 config result was published. It does not establish 2330 ms config reconciliation.
 See [the landing note](../../prds/steward-platform/research/one-jvm-redesign-2026-09-22.md).
+
+
+Owner ruling: compare the desired facts with the current database; do not
+use the digest to skip initialization or hand-edit repair. The config writer
+now submits only that difference and the applied-manifest digest and its
+readers are deleted. RESET NEEDED. The armed fast run was refused at recording
+admission by the pre-reset host's old config schema; see the dated landing
+note for the exact refusal and remaining generic reconciliation acquisition
+cost. This resolves the design decision, not a claim of a quiet-run gate.

@@ -2160,3 +2160,86 @@ reported the store flock free. The own source/load archives were removed
 after that exit. No default or foreign root was operated. This checkpoint
 adds evidence only; the last production load/fast proof remains the item 4
 proof above. Production bytes changed here: **0**.
+
+
+## Free-file continuation: algorithm audit before edits to the spans
+
+The 11,707.899 ms row is iteration evidence under concurrent lane load;
+the orchestrator's quiet run remains the landing row. These are intervals
+between progress callbacks, not timings of functions with matching names.
+
+* **"branch publication complete", 1439.373 ms:** the callback is emitted
+  before `write-source-artifact!` in `full-source-refresh!`. The following
+  interval serializes and atomically writes the **entire manifest** with
+  `pr-str`, releases the publication database values, enters adoption and
+  acquires its published projection. `source/database` unconditionally calls
+  `schema/projection-from-database`; that derives all schema rows, function
+  contracts and function source rows. Both the manifest serialization and
+  projection acquisition are O(program), not work required by three changed
+  functions. The interval ends at "development changed program rows"; it
+  does not establish a 1439 ms Datahike branch commit.
+* **"development changed program rows", 1046.801 ms:** from that callback
+  through the next "development reconciliation transaction" callback,
+  `seon.fn/index!` derives `program/shapes-in` from its six entity roots,
+  calls `published-index-rows` on the changed identities, checks duplicate
+  identities and probes for any existing namespace/function/test row.
+  Identity selection is scoped. However, portable-reference conversion
+  wildcard-pulls each referenced entity before extracting its identity;
+  compiled arities lead to schema-shape rows, including the large expanded
+  forms being removed by the schema-shape lane. Thus selected rows do not
+  imply selected **bytes**. The three unbound existence queries select from all namespace/function/test
+  identities instead of seeking one changed identity. The shape-owner read
+  itself is bounded by six entity schemas, not all declarations. Pulling
+  complete shared shape values merely to obtain their identities is
+  unnecessary. The actual reconciliation transaction begins
+  only after this interval. Required held-file changes: omit the fresh-store existence probe when an
+  explicit previous database is supplied, and seek a referenced entity's identity before
+  recursively reading identity-less owned children.
+
+No modification to either audited span is claimed by this audit.
+
+
+## Config: the writer submits the fact difference
+
+`apply-compiled!` already compared the desired config and initialization
+through `reconcile/plan` and returned without a transaction for an empty
+plan. Its writer callback nevertheless first submitted **every desired row**
+and only then recomputed the plan. It now computes the plan against the
+writer's database, resolves lookup refs/tempids in only the changed maps,
+and submits that exact difference. The existing initialization and direct
+hand-edit repair regressions remain; the added regression observes the real
+writer callback and requires one dial retraction plus one three-key map
+(identity, db/id, changed dial), followed by an unchanged basis on reapply.
+
+Deleted the applied-manifest digest computation, writer, renderer display,
+attribute and entity/compiled schema entries. No production reader remains.
+**RESET NEEDED: `:seon.config/applied-manifest-digest` removed.** Historical
+parity evidence and foreign-held fixture docstrings are not runtime readers;
+the latter still need their digest wording retired by their owning lane.
+
+The generic `reconcile/plan` still enumerates installed identity facts and
+historical first assertions before selecting the config process's population
+(`src/seon/reconcile.cljc`, `current-identity-facts`,
+`first-assertion-transactions`, `process-by-transaction`). That is O(program
+history), not O(config). This commit fixes the submitted transaction, not
+that acquisition cost. Its existing process provenance is sufficient to
+select candidate entities by config process transaction refs first, then
+check first assertion only for those candidates and explicitly adopted
+identities. No stored digest or new cache is needed for that follow-up.
+
+Fast command: `bin/test-fast --paths src/seon/config.clj
+src/seon/schema/edn.clj resources/seon/schemas/seon.config.edn
+test/seon/config_test.clj -- seon.config-test`. Run `e054d77fdb5b` was refused
+**before test execution** by `seon.test.runner/record-snapshot!`:
+`Missing schema reference :seon.config/applied-manifest-digest from namespace
+seon.config.` The recording host still has the old generated config entity
+schema. It is not a test red or a green tally; the orchestrator's reset/cold
+proof is owed. No test-system file or default process was modified.
+
+An explicit `(require 'seon.config 'seon.schema.edn 'seon.config-test)`
+passed in a clean HEAD-plus-owned-paths source archive, after the fast JVM
+exited. No live scratch root exists during these JVM runs. There is no new
+publication span table: no publication measurement was run through a stale
+schema. The prior 11,708 ms row remains iteration evidence only.
+
+Exact changed-line UTF-8 bytes (production plus regression): **2635 deleted, 2744 added**.

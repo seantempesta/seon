@@ -6,7 +6,6 @@
               :dial :boolean,
               :optional :boolean,
               :per-agent :boolean,
-              :applied-manifest-digest [:re "^[0-9a-f]{64}$"],
               :apply-request
               [:map
                [:seon.db/connection :seon.db/connection]
@@ -34,8 +33,6 @@
               :compiled
               [:map
                [:seon.config/effective :seon.config/effective]
-               [:seon.config/applied-manifest-digest
-                :seon.config/applied-manifest-digest]
                [:seon.config/desired-row :seon.config/entity]
                [:seon.config/resolved-attributes
                 [:set :qualified-keyword]]],
