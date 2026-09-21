@@ -7061,3 +7061,22 @@ lazy config/agent graphs. The orchestrator's script is re-measuring at
 rows are what matter). Error lane parked; test-system lane on the 5 s
 bound; its fn.clj hunk is now the only foreign change there and commits
 at its next stop.
+
+## 2026-09-23 ~10:30 local — MEASURED at `b17ad6ef1` (slice 4 in progress, under two lanes' load): fork 0.34 s, first adoption 1.5 s, no change 1.46 s, non-core docstring **12.7 s**, core docstring **28.2 s**
+
+| Case | yesterday | slice 2 | slice 4 (`b17ad6ef1`) | target |
+|---|---:|---:|---:|---:|
+| Fork against the running cluster | 27 s (JVM) | 0.96 s | **0.34 s** | < 1 s |
+| First adoption after fork | 149 s | 2.3 s | **1.5 s** | ≈ no change |
+| No change | 149 s | 1.6 s | **1.46 s** | < 1 s |
+| Docstring, non-core (`my.note`) | 483 s | 73 s | **12.7 s** | ≤ 5 s |
+| Docstring, core (`seon.id`, 25 dependents) | 419 s | 97 s | **28.2 s** | ≤ 5 s |
+
+Remaining spans (non-core / core): "analysis selected files" up to
+5.8 s for 26 files (clj-kondo does 381 files in 10 s, so 26 files should
+be ~1 s — is the cache supplying dependencies, or is config/cache
+reloaded per call?), reconciliation transaction 1–2.2 s, issue indexing
+1.7 s (ruled per changed path), changed issues 1.6 s, JVM instrumentation
+1.4 s (re-arm of the changed wrappers — for 25 dependents legitimately
+more), source build 1.1 s. Handed to the redesign lane at its next stop
+with the rest of slice 4.
