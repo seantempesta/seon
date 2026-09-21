@@ -1496,7 +1496,7 @@
    (gate-sets-in database function-symbols false)))
 
 (defn unresolved-callers
-  "Report named calls with no current definition, including external names.
+  "Report calls into indexed namespaces with no current function definition.
    The analyzed population count makes an empty observation explicit. Missing
    names are evidence; this query does not invent target definitions. Recorded
    test reach to absent names is reported separately as stale historical evidence."
@@ -1508,6 +1508,9 @@
                      :where [?entity ?attribute ?caller]
                             [?entity :seon.program/analyzed-source-digest]
                             [?entity :seon.fn/calls ?callee]
+                            [(namespace ?callee) ?namespace-name]
+                            [(clojure.core/symbol ?namespace-name) ?namespace]
+                            [_ :seon.ns/name ?namespace]
                             (not-join [?callee] [_ :seon.fn/sym ?callee])]
                    database [:seon.fn/sym :seon.test/sym])
         stale (db/q '[:find ?test ?callee
@@ -2982,15 +2985,18 @@
     [:or :seon.reconcile/adopt-identities :seon.error/value]]}
   [{before :db-before after :db-after datoms :tx-data}]
   (let [attributes (vec (set/union (set (db/identity-attributes before))
-                                  (set (db/identity-attributes after))))]
-    (loop [pending (seq (into #{} (map :e) datoms)) identities #{}]
-      (if-let [entity (first pending)]
-        (let [rows [(db/pull before attributes entity)
-                    (db/pull after attributes entity)]]
-          (if-let [refusal (some #(when (:seon.error/at %) %) rows)]
-            refusal
-            (recur (next pending) (into identities (mapcat seq) rows))))
-        identities))))
+                                  (set (db/identity-attributes after))))
+        entities (into #{} (map :e) datoms)
+        identities (fn [database]
+                     (db/q '[:find ?attribute ?value
+                             :in $ [?entity ...] [?attribute ...]
+                             :where [?entity ?attribute ?value]]
+                           database entities attributes))
+        previous (identities before)
+        current (identities after)]
+    (or (when (:seon.error/at previous) previous)
+        (when (:seon.error/at current) current)
+        (into (set previous) current))))
 
 (defn published-index-rows
   "Read compiled rows with portable program refs and complete owned components."

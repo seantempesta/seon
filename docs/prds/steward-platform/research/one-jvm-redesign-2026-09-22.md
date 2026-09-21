@@ -1352,3 +1352,118 @@ existing projection to schema-row construction; the protected writer's
 whole-program work remains separately named. No timing assertion was added.
 Foreign dirty error/database/test-system paths stayed at HEAD in the snapshot.
 The scratch cluster was downed before either fast run.
+
+
+## Slice 4 — publication difference, 2026-09-23
+
+This is a coherent partial item-2 landing, not completion of slice 4. Activation
+removal is `3c0b47dfe` (RESET NEEDED). The remaining Markdown indexing behavior
+and ownership of lazy SCI acquisition need the rulings described below.
+
+**Measured on this lane's scratch root and advertised prepl:** one-file
+publication plus adoption **24,013.698 → 12,450.319 → 8,171.094 ms**. The last
+step carries the already-computed test-input digest into publication, avoiding
+a second whole-repository digest walk; ordinary warm-up also changed timings,
+so the entire improvement is not attributed to that edit. No-change is
+**756.691 ms**, with commit `6ab07210-eb86-57de-a3b6-07248cdbd51b` unchanged.
+The target of 5 s for a one-file edit is **not met**. The exact phases and
+changed-wrapper identities are in [one-file data](one-jvm-publication-delta-2026-09-23.edn)
+and [no-change data](one-jvm-publication-nochange-2026-09-23.edn).
+Only `my.note` reloaded; its three wrappers changed.
+
+The existing seams now receive their already-derived inputs:
+
+- `populate-source!` passes the held projection to `seon.fn/index!`;
+  `schema-row-changes` calls `schema/canonical-schema-rows` with that projection.
+  No new projection/cache owner is introduced.
+- `seon.fn/report-identities` queries identity datoms for the report's affected
+  entity ids against before and after, instead of a pull per entity.
+- Publication deletes its final `db/deletion-error` whole-program comparison.
+  The writer already checks affected retracted identities in
+  `seon.db/write-deletion-error` (`src/seon/db.clj:4017`) and seeks surviving
+  referrers through AVET in `removed-definition-error` (`:3923`). That protected
+  owner was read, not edited. Deletion still refuses at the transaction authority.
+- Findings comparison receives only rows from replaced file artifacts.
+- `source-snapshot` carries the existing `:seon.source/test-input-digest`;
+  `source/publish!` uses it, retaining the inventory fallback for direct callers.
+- The unresolved report joins callee namespace to `:seon.ns/name`, without a
+  namespace roster. Datahike supports `namespace` at
+  `reference-code/datahike/src/datahike/query.cljc:612` and qualified Clojure
+  function resolution at `:1129`. The result is 124 unresolved calls over
+  6,697 analyzed declarations, rather than the historical 42,767 library entries.
+
+**Algorithmic costs remaining:** all phases in the final one-file trace are
+below 2 s, but their sum still exceeds the target. Snapshot acquisition hashes
+source plus the test inventory (943 ms initially; stability walks 526/507 ms).
+`test.cache/input-digests` hashes all enumerated files before its caller filters
+to declared roots: filter-before-hash is the simple remaining solution in the
+protected test-system owner, not a reason to add a cache. Published database
+projection acquisition is 278 ms and still reads the stored declaration world.
+The carried projection avoids the redundant index reconstruction; it does not
+claim every projection acquisition has disappeared. Publication reconciliation
+and report extraction together take 1,467 ms; adoption reconciliation 633 ms.
+Source identity/adoption record transactions cost 250/303 ms. The existing
+writer validates each actual transaction; no extra writer or bypass is added.
+Artifact persistence plus adoption entry takes 644 ms. SCI acquisition takes
+408 ms; no new interpreter cache was added.
+
+The whole unresolved report took **3,080.291 ms on a new database value**,
+versus 7.397 ms on a repeat of the prior value. It scans all program calls and
+recorded reach because its public request asks for the whole report. Incremental
+publication already omits this report; cold publication still includes it.
+The indexed-namespace clause fixes correctness/noise, not all query cost.
+
+Markdown indexing remains **728.880 ms**, O(all notes + citation population),
+including issue Git history. Stored rows omit full source and tags; the
+publication's changed program identities cannot recover those authored inputs.
+The [existing issue now contains three priced options](../../../seon/issues/issue-indexing-at-publication-costs-13-seconds.md):
+remove incremental Markdown indexing and use its explicit owner (recommended),
+pass changed Markdown paths, or store canonical authored note facts. No choice
+was silently made. Lazy SCI acquisition also crosses explicitly excluded
+`src/seon/sci/eval.clj`; ownership was requested, with no edits there.
+Core-fault fallback, branch-publication serialization and boot timing/laziness
+remain outstanding and are not claimed by this commit.
+
+**Verification:** selected fast run `d93d8f6b33d5`: 16 executed, 80 assertions,
+0 failures, 0 errors. It includes the exact wrapper set, namespace reload set,
+report identities including retractions/history, findings delta, unresolved
+callee namespace/declaration, and schema convergence. Report-identity regression
+uses fresh synthetic symbols: fixed names were themselves indexed test
+references and correctly prevented deletion. Schema convergence fell from
+19.57 s to 5.048 s with the handed projection. The new unresolved regression
+took 20.543 s (two analyses/writes/reports), with a declared long-test bound
+and reason; this remains performance debt, not acceptable steady-state work.
+
+The broader `seon.turn-test` run was stopped before the edited settlement
+regression. A protected `turn.clj:2091` diagnostic lacks `:seon.error/at`; a
+subsequent writer rejection expanded the complete projection into a 432 MiB
+log. The [issue and bounded evidence](../../../seon/issues/writer-rejection-prints-the-complete-program-projection.md)
+name that boundary. No green tally is claimed for that run.
+`clojure -M -e "(require 'seon.cluster 'seon.cluster.source 'seon.fn)"`
+loaded successfully. The orchestrator still owes the cold gate and fresh
+measurement-script row. The retained fast base is 15 commits behind the
+snapshot and predates activation deletion, as previously documented.
+
+**Shared-tree boundary:** the foreign `seon.fn/declared-reference-edges` hunk
+was preserved and excluded from this commit through selected-hunk staging.
+The live measurement archive excluded it; the file-level fast snapshot
+included it. Dirty `src/seon/test/runner.clj`, `test/seon/fn_test.clj` and
+other foreign paths remained outside this commit. No protected schema, error,
+database, interpreter or test-system implementation was edited.
+
+Exact UTF-8 bytes for code/schema/tests (deleted/inserted counts are changed
+line bytes, including their newline; before/after are complete files):
+
+| Path | Before | After | Deleted | Inserted |
+|---|---:|---:|---:|---:|
+| `src/seon/cluster.clj` | 172013 | 172569 | 861 | 1417 |
+| `src/seon/cluster/source.clj` | 30240 | 30055 | 372 | 187 |
+| `src/seon/fn.clj` | 147191 | 147522 | 553 | 884 |
+| `resources/seon/schemas/seon.source.edn` | 5640 | 5832 | 0 | 192 |
+| `test/seon/cluster/publication_delta_test.clj` | 6006 | 6368 | 799 | 1161 |
+| `test/seon/cluster/publication_findings_test.clj` | 1763 | 1902 | 574 | 713 |
+| `test/seon/cluster_test.clj` | 24502 | 24475 | 347 | 320 |
+| `test/seon/turn_test.clj` | 118029 | 118513 | 333 | 817 |
+| `test/seon/fn/unresolved_test.clj` | 0 | 1801 | 0 | 1801 |
+
+Total changed-line bytes: **3839 deleted, 7492 inserted**.

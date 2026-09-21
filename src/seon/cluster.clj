@@ -118,18 +118,14 @@
   nil)
 
 (defn- report-analysis-warnings!
-  "Summarize durable findings; the manifest retains the complete queryable rows."
-  {:malli/schema [:=> [:cat [:maybe :seon.fn.manifest/manifest]
-                       :seon.fn.manifest/manifest] :nil]}
-  [previous manifest]
-  (let [finding-values (fn [value]
-                         (into #{} (comp (mapcat :seon.fn.file/rows)
-                                         (filter :seon.lint/id))
-                               (:seon.fn.manifest/artifacts value)))
-        current (finding-values manifest)
-        before (when previous (finding-values previous))]
+  "Report finding differences only for the files this publication replaced."
+  {:malli/schema [:=> [:cat [:maybe [:vector :seon.lint/finding]]
+                       [:vector :seon.lint/finding]] :nil]}
+  [previous findings]
+  (let [current (set findings)
+        before (when previous (set previous))]
     (report-source-progress!
-     (str "findings: " (count current)
+     (str "findings in analyzed files: " (count current)
           (if previous
             (str "; added=" (count (set/difference current before))
                  "; resolved=" (count (set/difference before current)))
@@ -1215,7 +1211,7 @@
        (comparable (select-keys current (keys desired))))))
 
 (defn- schema-row-changes
-  [db forms]
+  [db projection]
   (into
    []
    (keep
@@ -1239,7 +1235,7 @@
                     pulled))]
         (when-not (schema-row-converged? (:schema db) desired current)
           desired))))
-   (schema/canonical-schema-rows forms)))
+   (schema/canonical-schema-rows projection (:seon.schema.projection/forms projection))))
 
 (defn- instruction-row-changes
   [db rows]
@@ -1420,7 +1416,7 @@
                (db/transact! connection {:tx-data process-rows})
                {:seon.boot/population :seon.db/processes})))
           (let [schema-rows (when publish-schema-rows?
-                              (schema-row-changes (db/db connection) forms))]
+                              (schema-row-changes (db/db connection) projection))]
             (when (seq schema-rows)
               (require-committed!
                (db/transact! connection
@@ -1495,6 +1491,7 @@
                   (report-source-progress! "program rows started")
                   (let [result (seon.fn/index!
              (cond-> {:seon.db/connection connection
+                      :seon.schema/projection (schema/handed-projection)
                       :seon.db/process
                       [:seon.db.process/id boot-process-identity]}
                manifest (assoc :seon.fn/manifest manifest)
@@ -1642,8 +1639,9 @@
         (source/snapshot {:seon.source/roots roots :seon.fn/root directory})
         schema-digest (schema.edn/declaration-digest)
         input-roots (test.cache/input-roots directory)
+        inputs (test.cache/input-digests directory)
         external (into {} (filter (fn [[path _]] (test.cache/input-path? input-roots path)))
-                       (test.cache/input-digests directory))
+                       inputs)
         file-digests
         (into (sorted-map)
               (assoc (merge (:seon.source/relative-file-digests tree-snapshot) external)
@@ -1653,6 +1651,7 @@
         ;; the gate's declared input inventory.
         digest (id/digest 64 [file-digests])]
     {:seon.source/digest digest
+     :seon.source/test-input-digest (test.cache/test-input-digest directory inputs)
      :seon.source/relative-file-digests (into (sorted-map) file-digests)})))
 
 (defn- current-source-snapshot
@@ -1871,7 +1870,6 @@
                             (assoc :seon.fn/previous-manifest previous
                                             :seon.source/previous-database database)))
                 _ (report-source-progress! "analysis complete")
-                _ (report-analysis-warnings! previous manifest)
                 changed (into #{} (keep (fn [[path value]]
                                          (when (not= value (get (:seon.source/relative-file-digests cached) path)) path)))
                               (:seon.source/relative-file-digests snapshot))
@@ -1885,6 +1883,14 @@
                                       (when (not= artifact (get prior-artifacts (:seon.fn.file/relative-path artifact)))
                                         (:seon.fn.file/relative-path artifact))))
                               (:seon.fn.manifest/artifacts manifest)))
+                findings (fn [value]
+                           (into []
+                                 (comp (filter #(or (nil? paths) (paths (:seon.fn.file/relative-path %))))
+                                       (mapcat :seon.fn.file/rows)
+                                       (filter :seon.lint/id))
+                                 (:seon.fn.manifest/artifacts value)))
+                _ (report-analysis-warnings! (when previous (findings previous))
+                                             (findings manifest))
                 classes (when paths
                           (cond-> #{:program}
                             (contains? changed schema-declaration-path) (conj :schema-resource)
@@ -1898,6 +1904,7 @@
                 result (source/publish!
                         {:seon.store/store store :seon.fn/root (:seon.fn/root roots)
                          :seon.source/digest digest :seon.source/populate `populate-source!
+                         :seon.source/test-input-digest (:seon.source/test-input-digest snapshot)
                          :seon.source/progress! report-source-progress!
                          :seon.source/populate-request
                          (cond-> {:seon.fn/manifest manifest :seon.fn/roots (:seon.fn/roots roots)}

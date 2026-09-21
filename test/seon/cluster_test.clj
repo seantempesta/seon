@@ -53,7 +53,7 @@
         (is (= refusal missing-process-rows)
             "process identities are not rebuilt from error-map entries")))))
 
-(deftest ^{:seon.test/long "Compare the complete canonical schema population under both namespace-map printing modes; measured 19.57 s rebuilding projections. The supplied-projection correction belongs to the next publication performance cut."
+(deftest ^{:seon.test/long "Compare the complete canonical schema population under both namespace-map printing modes; the supplied projection removes the former 19.57 s reconstruction. Full schema comparison remains proportional to the population."
            :seon.test/long-ms 30000}
   schema-row-convergence-uses-the-stores-own-semantics
   (test-support/with-database
@@ -82,7 +82,7 @@
             "a genuinely different cardinality-many value is still a change")
         (doseq [namespace-maps? [false true]]
           (binding [*print-namespace-maps* namespace-maps?]
-            (let [delta (changes database (:seon.schema.projection/forms (schema/handed-projection)))]
+            (let [delta (changes database (schema/handed-projection))]
               (is (= [] delta)
                   (str "canonical schema bytes converge with namespace-map printing "
                        namespace-maps?)))))))))

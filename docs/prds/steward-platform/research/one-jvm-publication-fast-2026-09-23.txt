@@ -1,0 +1,93 @@
+bin/test: snapshot differences from HEAD 9c02384c81830cd7c401ab52937e8894b2f7e555:
+bin/test:   M	resources/seon/schemas/seon.source.edn
+bin/test:   M	src/seon/cluster.clj
+bin/test:   M	src/seon/cluster/source.clj
+bin/test:   M	src/seon/fn.clj
+bin/test:   M	test/seon/cluster/publication_delta_test.clj
+bin/test:   M	test/seon/cluster/publication_findings_test.clj
+bin/test:   M	test/seon/cluster_test.clj
+bin/test:   M	test/seon/turn_test.clj
+bin/test:   A test/seon/fn/unresolved_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=5
+bin/test: overlay graph 0e3ced090fbd53d22cbcb28b6c6d4f067f4b448a1d1247146f9e5149a832c1e3 age= 15 commits behind HEAD
+bin/test: caller src/seon/test/runner.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: caller test/seon/fn_test.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: PHASE test-slot elapsed-seconds=0
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/test-runs/run.8SG60y
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-20T23:55:29.997102Z pid= 39465 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-20T23:55:32.735980Z worker= test-fast mode= :panic namespaces= 4 program-namespaces= 109 registered= 1476 instrumented= 1476 program-armable= 1473
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-20T23:55:43.415095Z TIER named 16 tests
+bin/test: 2026-09-20T23:55:43.415910Z BEGIN namespace seon.cluster.publication-delta-test
+
+Testing seon.cluster.publication-delta-test
+bin/test: 2026-09-20T23:55:43.437162Z BEGIN test seon.cluster.publication-delta-test/changed-declarations-reload-their-namespace-and-dependents
+bin/test: 2026-09-20T23:55:47.265994Z END test seon.cluster.publication-delta-test/changed-declarations-reload-their-namespace-and-dependents
+bin/test: 2026-09-20T23:55:47.266404Z BEGIN test seon.cluster.publication-delta-test/reloading-one-file-preserves-unrelated-wrappers
+bin/test: 2026-09-20T23:55:48.513615Z END test seon.cluster.publication-delta-test/reloading-one-file-preserves-unrelated-wrappers
+bin/test: 2026-09-20T23:55:48.513819Z BEGIN test seon.cluster.publication-delta-test/transaction-report-identities-select-only-changed-program-rows
+bin/test: 2026-09-20T23:55:52.404708Z END test seon.cluster.publication-delta-test/transaction-report-identities-select-only-changed-program-rows
+bin/test: 2026-09-20T23:55:52.404856Z END namespace seon.cluster.publication-delta-test
+bin/test: 2026-09-20T23:55:52.404960Z BEGIN namespace seon.fn.unresolved-test
+
+Testing seon.fn.unresolved-test
+bin/test: 2026-09-20T23:55:52.425475Z BEGIN test seon.fn.unresolved-test/unresolved-calls-require-an-indexed-callee-namespace
+bin/test: 2026-09-20T23:56:12.968771Z END test seon.fn.unresolved-test/unresolved-calls-require-an-indexed-callee-namespace
+bin/test: 2026-09-20T23:56:12.969323Z END namespace seon.fn.unresolved-test
+bin/test: 2026-09-20T23:56:12.969427Z BEGIN namespace seon.cluster.publication-findings-test
+
+Testing seon.cluster.publication-findings-test
+bin/test: 2026-09-20T23:56:12.985312Z BEGIN test seon.cluster.publication-findings-test/publication-reports-finding-count-and-delta-without-a-roster
+bin/test: 2026-09-20T23:56:13.599056Z END test seon.cluster.publication-findings-test/publication-reports-finding-count-and-delta-without-a-roster
+bin/test: 2026-09-20T23:56:13.599159Z END namespace seon.cluster.publication-findings-test
+bin/test: 2026-09-20T23:56:13.599255Z BEGIN namespace seon.cluster-test
+
+Testing seon.cluster-test
+bin/test: 2026-09-20T23:56:13.619743Z BEGIN test seon.cluster-test/a-commit-tx-request-without-the-evidence-bound-names-the-key
+bin/test: 2026-09-20T23:56:13.913715Z END test seon.cluster-test/a-commit-tx-request-without-the-evidence-bound-names-the-key
+bin/test: 2026-09-20T23:56:13.914017Z BEGIN test seon.cluster-test/a-core-fault-commits-with-the-dial-its-cluster-config-carries
+bin/test: 2026-09-20T23:56:15.803714Z END test seon.cluster-test/a-core-fault-commits-with-the-dial-its-cluster-config-carries
+bin/test: 2026-09-20T23:56:15.803850Z BEGIN test seon.cluster-test/a-dropped-storage-facet-refuses-reopening-the-branch-in-place
+bin/test: 2026-09-20T23:56:15.992739Z END test seon.cluster-test/a-dropped-storage-facet-refuses-reopening-the-branch-in-place
+bin/test: 2026-09-20T23:56:15.992862Z BEGIN test seon.cluster-test/a-source-change-during-analysis-takes-the-one-publication-retry
+bin/test: 2026-09-20T23:56:15.996352Z END test seon.cluster-test/a-source-change-during-analysis-takes-the-one-publication-retry
+bin/test: 2026-09-20T23:56:15.996406Z BEGIN test seon.cluster-test/an-added-index-adopts-in-place-instead-of-forcing-a-refork
+bin/test: 2026-09-20T23:56:16.675353Z END test seon.cluster-test/an-added-index-adopts-in-place-instead-of-forcing-a-refork
+bin/test: 2026-09-20T23:56:16.675608Z BEGIN test seon.cluster-test/an-incompatible-declaration-refuses-naming-the-changed-property
+bin/test: 2026-09-20T23:56:16.790979Z END test seon.cluster-test/an-incompatible-declaration-refuses-naming-the-changed-property
+bin/test: 2026-09-20T23:56:16.791163Z BEGIN test seon.cluster-test/boot-recovery-refuses-an-unreadable-open-turn-query
+bin/test: 2026-09-20T23:56:16.854849Z END test seon.cluster-test/boot-recovery-refuses-an-unreadable-open-turn-query
+bin/test: 2026-09-20T23:56:16.855036Z BEGIN test seon.cluster-test/initialization-orders-provider-rows-before-the-models-naming-them
+bin/test: 2026-09-20T23:56:17.143892Z END test seon.cluster-test/initialization-orders-provider-rows-before-the-models-naming-them
+bin/test: 2026-09-20T23:56:17.144087Z BEGIN test seon.cluster-test/initialization-readiness-surfaces-a-refused-read-instead-of-absence
+bin/test: 2026-09-20T23:56:17.238756Z END test seon.cluster-test/initialization-readiness-surfaces-a-refused-read-instead-of-absence
+bin/test: 2026-09-20T23:56:17.238886Z BEGIN test seon.cluster-test/process-identity-set-building-refuses-an-unreadable-query
+bin/test: 2026-09-20T23:56:17.291718Z END test seon.cluster-test/process-identity-set-building-refuses-an-unreadable-query
+bin/test: 2026-09-20T23:56:17.291938Z BEGIN test seon.cluster-test/schema-row-convergence-uses-the-stores-own-semantics
+bin/test: 2026-09-20T23:56:22.339587Z END test seon.cluster-test/schema-row-convergence-uses-the-stores-own-semantics
+bin/test: 2026-09-20T23:56:22.339740Z END namespace seon.cluster-test
+
+Ran 16 tests containing 80 assertions.
+0 failures, 0 errors.
+{:seon.test/sym seon.cluster-test/a-commit-tx-request-without-the-evidence-bound-names-the-key, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster-test/a-core-fault-commits-with-the-dial-its-cluster-config-carries, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster-test/a-dropped-storage-facet-refuses-reopening-the-branch-in-place, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster-test/a-source-change-during-analysis-takes-the-one-publication-retry, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster-test/an-added-index-adopts-in-place-instead-of-forcing-a-refork, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster-test/an-incompatible-declaration-refuses-naming-the-changed-property, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster-test/boot-recovery-refuses-an-unreadable-open-turn-query, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster-test/initialization-orders-provider-rows-before-the-models-naming-them, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster-test/initialization-readiness-surfaces-a-refused-read-instead-of-absence, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster-test/process-identity-set-building-refuses-an-unreadable-query, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster-test/schema-row-convergence-uses-the-stores-own-semantics, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster.publication-delta-test/changed-declarations-reload-their-namespace-and-dependents, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster.publication-delta-test/reloading-one-file-preserves-unrelated-wrappers, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster.publication-delta-test/transaction-report-identities-select-only-changed-program-rows, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.cluster.publication-findings-test/publication-reports-finding-count-and-delta-without-a-roster, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+{:seon.test/sym seon.fn.unresolved-test/unresolved-calls-require-an-indexed-callee-namespace, :seon.test.run/basis-t 536870996, :seon.test.run/program-digest "25312df807f8cdd2425f3f04e004b07583ab2aa053f700dc2268edacea01d4e0", :seon.test.run/input-digest "eca380233e9b74096fefb6f7684799d0c45fe9c7652f5724a3bbd33d686c5493"}
+
+Recorded 16 executed, 0 unchanged; 80 assertions.
+0 failures, 0 errors.
+bin/test-fast: 16 executed, 0 unchanged; run d93d8f6b33d5

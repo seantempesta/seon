@@ -382,6 +382,7 @@
   [{:keys [:seon.store/store :seon.db/process]
     directory :seon.fn/root
     source-digest :seon.source/digest
+    test-input-digest :seon.source/test-input-digest
     requested-commit :seon.source/expected-commit-id
     populate :seon.source/populate
     populate-request :seon.source/populate-request
@@ -403,7 +404,8 @@
     (if unchanged?
       (assoc published :seon.source/digest source-digest :seon.source/built? false)
       (let [projection (schema/declaration-projection)
-        input-digest (publication-input-digest! (or directory (fs/source-directory)))
+        input-digest (or test-input-digest
+                         (publication-input-digest! (or directory (fs/source-directory))))
           populate-fn (resolve-population populate source-digest)
           expected-commit (or requested-commit (:seon.source/commit-id published))
           scratch (scratch-branch)]
@@ -461,11 +463,6 @@
              ::source-seal-refused
              "the source seal transaction was refused"
              {:seon.source/digest source-digest})
-            (when expected-commit
-              (when-let [refusal (db/deletion-error previous-database (db/db connection))]
-                (refuse! ::source-deletion-refused
-                         (:seon.error/message refusal)
-                         (:seon.error/data refusal))))
             (progress! "publication branch head")
             (if expected-commit
               ;; The scratch commit is deliberately NOT a parent. Published

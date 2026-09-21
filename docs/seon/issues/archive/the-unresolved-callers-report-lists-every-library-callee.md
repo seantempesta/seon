@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-22
 tags: [program-graph, publication, reporting, class, absence-as-signal]
@@ -39,3 +39,25 @@ reports zero unresolved callers into `clojure.core`.
 `seon.fresh-operator` (a `script/` namespace, not a program input) and the
 17 `seon.cluster.source-test` names are the real entries to read once the
 noise is gone.
+
+## Slice 4 implementation and evidence — 2026-09-23
+
+`seon.fn/unresolved-callers` now joins the callee symbol's namespace to
+`:seon.ns/name` before reporting the missing function. The canonical regression
+`seon.fn.unresolved-test/unresolved-calls-require-an-indexed-callee-namespace`
+proves both sides: an indexed namespace's missing function is reported and
+vanishes after declaration; external `clojure.core` calls are excluded.
+The selected fast run `d93d8f6b33d5` passed 16 tests / 80 assertions.
+
+The scratch publication has 6,697 analyzed declarations and reports 124
+unresolved calls, rather than the historical 42,767 library-dominated entries.
+A query on a newly acquired post-publication database took 3,080.291 ms. A
+repeat on the same prior value took 7.397 ms; that repeat is not a cold query
+cost. This is still O(program calls + recorded test reach), appropriate only
+when asking for the whole report. Incremental publication already omits the
+whole report; cold publication includes it.
+
+The regression took 20.543 s after the fixture was acquired, versus 50.036 s
+when it was first. Its two synthetic declaration analyses, two writes and two
+whole-program reports remain a performance finding, with an explicit long-test
+bound and reason. The fast result is not the orchestrator's cold proof.

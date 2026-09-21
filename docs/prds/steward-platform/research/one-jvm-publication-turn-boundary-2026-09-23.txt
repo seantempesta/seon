@@ -1,0 +1,41 @@
+Run stopped after writer diagnostic expanded projection data.
+Original bytes: 447372993
+SHA-256: 8c212c7ad3fc7e4ce7d07f6fd8ba0f4338bb8cef279e0afb3e260c0b034a458e
+First 37 lines, each limited to 4000 bytes for this evidence excerpt:
+bin/test: snapshot differences from HEAD 9c02384c81830cd7c401ab52937e8894b2f7e555:
+bin/test:   M	resources/seon/schemas/seon.source.edn
+bin/test:   M	src/seon/cluster.clj
+bin/test:   M	src/seon/cluster/source.clj
+bin/test:   M	src/seon/fn.clj
+bin/test:   M	test/seon/turn_test.clj
+bin/test: end snapshot differences
+bin/test: PHASE snapshot elapsed-seconds=7
+bin/test: overlay graph 0e3ced090fbd53d22cbcb28b6c6d4f067f4b448a1d1247146f9e5149a832c1e3 age= 15 commits behind HEAD
+bin/test: caller src/seon/test/runner.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: caller test/seon/cluster/publication_delta_test.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: caller test/seon/cluster/publication_findings_test.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: caller test/seon/fn_test.clj uses HEAD bytes in this snapshot; checkout edits are excluded
+bin/test: PHASE test-slot elapsed-seconds=0
+bin/test-fast: selected snapshot /Users/sean/src/seon/tmp/test-runs/run.qIWugs
+WARNING: Using incubator modules: jdk.incubator.vector
+bin/test: PACKAGED TEST PROJECTION ACQUIRED at= 2026-09-20T23:57:31.896717Z pid= 41184 role= test-fast
+bin/test: CONTRACTS ARMED at= 2026-09-20T23:57:35.682339Z worker= test-fast mode= :panic namespaces= 1 program-namespaces= 109 registered= 1476 instrumented= 1476 program-armable= 1473
+WARNING: reset! already refers to: #'clojure.core/reset! in namespace: seon.fresh-operator, being replaced by: #'seon.fresh-operator/reset!
+bin/test: 2026-09-20T23:57:51.594532Z TIER named 34 tests
+bin/test: 2026-09-20T23:57:51.595732Z BEGIN namespace seon.turn-test
+
+Testing seon.turn-test
+bin/test: 2026-09-20T23:57:51.622448Z BEGIN test seon.turn-test/a-frozen-run-holds-exactly-one-evaluation-per-ordinal-and-no-form-entity
+bin/test: 2026-09-20T23:57:56.505030Z END test seon.turn-test/a-frozen-run-holds-exactly-one-evaluation-per-ordinal-and-no-form-entity
+bin/test: 2026-09-20T23:57:56.505511Z BEGIN test seon.turn-test/a-history-read-refusal-cannot-suppress-declaration-divergence
+bin/test: 2026-09-20T23:57:57.020856Z END test seon.turn-test/a-history-read-refusal-cannot-suppress-declaration-divergence
+bin/test: 2026-09-20T23:57:57.021151Z BEGIN test seon.turn-test/a-refused-generated-form-records-its-refusal
+clojure.test/report is not a multimethod, some reporting functions have been disabled.
+
+FAIL in (a-refused-generated-form-records-its-refusal) (turn_test.clj:236)
+an appended form whose evaluation is refused never stays bare
+{:seon.eval/shown "#:seon.error{:at #inst \"2026-09-20T23:58:26.593-00:00\", :layer :seon.instrument/invocation, :operation seon.error/diagnostic, :message \"seon.error/diagnostic refused observation at [:seon.error/at]: expected the required key :seon.error/at with a value satisfying should be an inst, got a map missing :seon.error/at. Fix: Supply :seon.error/at with a value satisfying should be an inst. Called from seon.turn (turn.clj:2091).\", :signature \"7ddf8284168ba9927df5ff6e45abb214a3e91d6d15d3c3a5a4134bab85b11de2\", :data #:seon.error{:id \"7ddf8284168ba9927df5ff6e45abb214a3e91d6d15d3c3a5a4134bab85b11de2\"}}", :seon.cluster.eval/error "seon.error/diagnostic refused observation at [:seon.error/at]: expected the required key :seon.error/at with a value satisfying should be an inst, got a map missing :seon.error/at. Fix: Supply :seon.error/at with a value satisfying should be an inst. Called from seon.turn (turn.clj:2091).", :seon.cluster.eval/source "(seon.db/q '[:find ?id :where [_ :seon.turn/id ?id]])"}
+expected: (str/includes? (str (:seon.eval/shown settled)) "generated-read-depends-on-turns")
+actual: (not (str/includes? "#:seon.error{:at #inst \"2026-09-20T23:58:26.593-00:00\", :layer :seon.instrument/invocation, :operation seon.error/diagnostic, :message \"seon.error/diagnostic refused observation at [:seon.error/at]: expected the required key :seon.error/at with a value satisfying should be an inst, got a map missing :seon.error/at. Fix: Supply :seon.error/at with a value satisfying should be an inst. Called from seon.turn (turn.clj:2091).\", :signature \"7ddf8284168ba9927df5ff6e45abb214a3e91d6d15d3c3a5a4134bab85b11de2\", :data #:seon.error{:id \"7ddf8284168ba9927df5ff6e45abb214a3e91d6d15d3c3a5a4134bab85b11de2\"}}" "generated-read-depends-on-turns"))
+bin/test: 2026-09-20T23:58:30.094035Z END test seon.turn-test/a-refused-generated-form-records-its-refusal
+bin/test: 2026-09-20T23:58:30.094190Z BEGIN test seon.turn-test/a-refused-turn-write-is-bounded-and-commits-exactly-one-fault

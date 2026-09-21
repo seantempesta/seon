@@ -57,6 +57,7 @@
               :progress! [:=> [:cat :string] :nil],
               :publish-request
               [:map
+               [:seon.source/test-input-digest {:optional true} :seon.source/test-input-digest]
                [:seon.fn/root {:optional true} :seon.fn/root]
                [:seon.source/expected-commit-id {:optional true} :seon.source/expected-commit-id]
                [:seon.db/process {:optional true} :seon.db/ref]
@@ -77,6 +78,7 @@
               :roots [:vector [:string {:min 1}]],
               :snapshot
               [:map
+               [:seon.source/test-input-digest {:optional true} :seon.source/test-input-digest]
                [:seon.source/digest :seon.source/digest]
                [:seon.source/relative-file-digests :seon.source/relative-file-digests]],
               :upsert-row

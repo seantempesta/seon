@@ -11,34 +11,38 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
-(deftest transaction-report-identities-select-only-changed-program-rows
+(deftest ^{:seon.test/long "Two declaration analyses and three canonical writer transactions, including deletion validation and history readback; the former refused deletion run measured 6.22 s."
+           :seon.test/long-ms 15000}
+  transaction-report-identities-select-only-changed-program-rows
   (support/with-database
    (fn [connection]
-     (let [before (db/db connection)
-           changed (support/program-fn-row before 'my.note/report-changed "(defn report-changed [] 1)")
-           other (support/program-fn-row before 'my.note/report-other "(defn report-other [] 2)")
+     (let [changed-symbol (symbol "my.note" (str "report-changed-" (id/id)))
+           other-symbol (symbol "my.note" (str "report-other-" (id/id)))
+           before (db/db connection)
+           changed (support/program-fn-row before changed-symbol (pr-str (list 'defn (symbol (name changed-symbol)) [] 1)))
+           other (support/program-fn-row before other-symbol (pr-str (list 'defn (symbol (name other-symbol)) [] 2)))
            _ (support/transacted! connection [changed other])
            report (support/transacted! connection
-                                           [{:seon.fn/sym 'my.note/report-changed
+                                           [{:seon.fn/sym changed-symbol
                                              :seon.fn/doc "Changed documentation"}])
            identities (seon.fn/report-identities report)
            rows (seon.fn/published-index-rows (:db-after report) (vec identities))]
-       (is (= #{[:seon.fn/sym 'my.note/report-changed]} identities))
+       (is (= #{[:seon.fn/sym changed-symbol]} identities))
        (is (= identities (into #{} (keep program/row-identity) rows)))
        (is (= "Changed documentation" (:seon.fn/doc (first rows))))
        (let [removed (support/transacted! connection
-                                             [[:db/retractEntity [:seon.fn/sym 'my.note/report-changed]]])
+                                             [[:db/retractEntity [:seon.fn/sym changed-symbol]]])
              identities (seon.fn/report-identities removed)]
-         (is (contains? identities [:seon.fn/sym 'my.note/report-changed]))
+         (is (contains? identities [:seon.fn/sym changed-symbol]))
          (is (empty? (seon.fn/published-index-rows (:db-after removed)
-                                                  [[:seon.fn/sym 'my.note/report-changed]])))
+                                                  [[:seon.fn/sym changed-symbol]])))
          (let [history-report {:db-before (:db-before report)
                                :db-after (:db-after removed)
                                :tx-data (vec (d/datoms
                                               (d/since (d/history (:db-after removed))
                                                        (db/basis-t (:db-before report))) :eavt))
                                :tempids {}}]
-           (is (= #{[:seon.fn/sym 'my.note/report-changed]}
+           (is (= #{[:seon.fn/sym changed-symbol]}
                   (into #{} (filter #(= :seon.fn/sym (first %)))
                         (seon.fn/report-identities history-report)))
                "catch-up history includes retractions across both transactions")))))))

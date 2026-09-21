@@ -16,18 +16,19 @@
       (io/make-parents file)
       (spit file "(ns pub.sample) (defn chosen [unused] 1)")
       (let [before (functions/build-manifest request)
-            findings (filter :seon.lint/id (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts before)))
+            findings (filterv :seon.lint/id (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts before)))
             _ (spit file "(ns pub.sample) (defn chosen [used] used)")
-            after (functions/build-manifest (assoc request :seon.fn/previous-manifest before))]
+            after (functions/build-manifest request)
+            remaining (filterv :seon.lint/id (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts after)))]
         (is (= 1 (count findings)))
         (is (= :unused-binding (:seon.lint/type (first findings))))
         (is (= [:seon.fn/sym 'pub.sample/chosen] (:seon.lint/fn (first findings))))
         (with-bindings {#'cluster/*source-progress!* #(swap! output conj %)}
-          (#'cluster/report-analysis-warnings! before after)
-          (#'cluster/report-analysis-warnings! after after)
-          (#'cluster/report-analysis-warnings! nil before))
-        (is (= ["findings: 0; added=0; resolved=1"
-                "findings: 0; added=0; resolved=0"
-                "findings: 1; delta unavailable: no corresponding previous manifest"]
+          (#'cluster/report-analysis-warnings! findings remaining)
+          (#'cluster/report-analysis-warnings! remaining remaining)
+          (#'cluster/report-analysis-warnings! nil findings))
+        (is (= ["findings in analyzed files: 0; added=0; resolved=1"
+                "findings in analyzed files: 0; added=0; resolved=0"
+                "findings in analyzed files: 1; delta unavailable: no corresponding previous manifest"]
                @output)))
       (finally (support/delete-recursively! root)))))

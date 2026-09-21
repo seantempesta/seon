@@ -1319,7 +1319,9 @@
         (is (nil? (db/pull @connection [:db/id]
                            [::turn/id "moving-run"])))))))
 
-(deftest settlement-keeps-unresolved-call-and-require-names-as-values
+(deftest ^{:seon.test/long "Canonical turn creation, four evaluation settlements and runtime declaration analysis exercise the real writer and unresolved-call report. The two-analysis publication regression measured 20.54 s; this integration test includes additional settlement transactions."
+           :seon.test/long-ms 60000}
+  settlement-keeps-unresolved-call-and-require-names-as-values
   ;; Source observations survive independently of whether a declaration row
   ;; currently exists. Resolution is a query; settlement never fabricates it.
   (support/with-database
@@ -1432,11 +1434,12 @@
                       :seon.program/row row}))
             report (seon.fn/unresolved-callers @connection)]
         (is (not (:seon.error/kind result)) (pr-str result))
-        (is (some #{{:seon.program/identity
-                     [:seon.fn/sym
-                      'my.macro-caller/unresolved-caller]
-                     :seon.fn/callee 'missing.target/nope}}
-                  (:seon.program/unresolved-callers report)))))))
+        (is (not-any? #(= 'missing.target/nope (:seon.fn/callee %))
+                      (:seon.program/unresolved-callers report))
+            "a namespace without a program row is outside the unresolved-call report")
+        (is (= #{'missing.target/nope}
+               (:seon.fn/calls (db/pull @connection [:seon.fn/calls]
+                                      [:seon.fn/sym 'my.macro-caller/unresolved-caller]))))))))
 
 (deftest receipt-transitions-preserve-one-terminal-outcome
   (let [start-tx (ns-resolve 'seon.turn 'receipt-start-tx)

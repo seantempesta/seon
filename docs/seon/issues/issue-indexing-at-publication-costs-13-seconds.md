@@ -73,3 +73,37 @@ rows, citations, class membership and later edits. The whole-entity writer
 validation and issue transaction remain unchanged. Detailed measurements and
 the verification boundary live in
 [adoption-margin-2026-09-17](../../prds/steward-platform/research/adoption-margin-2026-09-17.md).
+
+## Slice 4 decision boundary — 2026-09-23
+
+The current `publish!` forks the previous published commit, so the older
+“still open: complete build” description above no longer describes incremental
+publication. On the lane's scratch cluster, the unchanged Markdown index cost
+728.880 ms in an 8,171.094 ms one-file publication plus adoption. It still reads
+all Markdown notes, runs `git log` over the issue directory, resolves citations
+against the program, and derives class membership over all notes. It is
+O(notes + program), even for a docstring.
+
+The stored issue row does not retain tags or full note text; `:seon.issue/problem`
+is an extracted section. Documentation is outside the source digest by explicit
+policy. The publication transaction's changed program identities therefore
+cannot identify every changed Markdown input or reproduce class membership.
+No new cache or remembered roster was added. Three concrete choices:
+
+1. **Recommended: remove Markdown indexing from incremental code publication.**
+   Keep cold population and explicit `seon.issue/index!`; keep code-derived
+   issue reconciliation scoped to changed identities. Small deletion, no schema
+   change, saves the measured 729 ms. Give up opportunistic Markdown refresh
+   on an unrelated source edit; the explicit operation already exists.
+2. **Pass changed note paths to the existing issue owner.** Extend its request
+   and caller to admit changed/deleted notes and recompute affected classes.
+   Preserves incremental Markdown updates, but requires an explicit Markdown
+   change source and class-member input; program identities alone do not supply
+   either. Medium cross-caller change, no performance claim yet.
+3. **Declare full note source and tags as canonical issue facts.** Query affected
+   citations/classes from that value and reconcile selected identities. Larger
+   schema and ingestion change, RESET NEEDED; retains automatic citation
+   derivation but adds durable authored facts. No source cache is justified.
+
+The lane requested the ruling before changing this behavior. Evidence:
+[publication phases](../../prds/steward-platform/research/one-jvm-publication-delta-2026-09-23.edn).
