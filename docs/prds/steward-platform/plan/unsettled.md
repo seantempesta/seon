@@ -7200,3 +7200,12 @@ expansion from the registry facts; reset. Queued for the `src/seon/fn/`
 owner after slice 4 (it also shrinks every publication transaction).
 Method that found it in three minutes: `jmap -histo:live`, then
 `jmap -dump:live` + `ParseHeapDump.sh <abs path> org.eclipse.mat.api:suspects`.
+
+**Lanes at ~20:15:** `one-jvm-redesign` (slice 4: input-digest rows,
+verification → commit-id compare, manifest read deleted, caller lint on
+contract change only, changed-namespace reload, config difference);
+`test-system-fork` (platform offenders); `schema-shape-authored` (new:
+authored shape forms, references as keywords; protected on
+`instrument.clj`/`fn.clj`). `error-family-1a` parked. Next slot when one
+lands: the wave 3a build lane. Orchestrator owes: reset, platform tier,
+measurement row, hook publication ON — at the slice 4 landing.
