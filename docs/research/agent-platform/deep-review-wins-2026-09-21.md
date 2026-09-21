@@ -79,15 +79,25 @@ and the indexer, as README §5 already says.
    the cuts survivable, but every "tests reaching my change" claim in the specs
    is unmeasured until the platform tier runs once.
 
-## 4. Decisions that are the owner's
+## 4. Owner decisions — all ruled 2026-09-21
 
-| # | Decision | Recommended first | Alternatives, with cost |
+| # | Decision | Ruling | Rejected |
 |---|---|---|---|
-| D-a | Candidate shape (win 8) | branch + handle hosted by the development JVM: ms per candidate, one web/prepl, faults on the candidate branch; gives up a separate prepl/port per candidate | cluster per task as ruled 2026-09-19: ≈ 25 s per candidate, a lifecycle per task, the second web port; or a handle now and a cluster only when a candidate must outlive the hosting JVM (two shapes, the concern §2.5 names) |
-| D-b | An affected caller that cannot be interpreted in SCI | refuse the override in that context, naming the caller (conservative; matches "must not bypass") | admit the override with a typed `bypassing-callers` set the agent sees (weaker, agent can proceed); interpret best-effort and record JVM fallback (rejected: silent bypass) |
-| D-c | The hook when no JVM is live (win 4) | refuse with the exact `bin/seon start` command | keep Babashka clj-kondo as a no-JVM fallback (keeps ≈ 300 lines and two lint paths); skip lint silently (absence-as-health, rejected) |
-| D-d | `:seon.ai/error-class` (win 6) | delete the enum; status, exception class, `sent?` are the members | keep the enum as a derived read-time projection (no datom); keep as is |
-| D-e | Bounded completion (concerns note §2) | two declared bounds then abandon-and-disarm, the fact records the live thread | keep the 252-line observer; an unbounded second wait (rejected by Codex's finding) |
+| D-a | Candidate shape (win 8) | branch + handle hosted by the cluster's JVM; a cluster stays the unit of a shared program and agent population, candidates merge back to its branch (primitives measured live: branch 74.65 ms, open 25.62 ms, fork 0.021 ms) | cluster per task (≈ 25 s each); two shapes |
+| D-b | An affected caller that cannot be interpreted in SCI | refuse the override in that context, naming the host-bound caller; any first-party namespace may be overridden when its closure interprets cleanly; no roster. 15 of 109 source namespaces carry host-defining forms, mostly platform plumbing; agents' new functions over data have no compiled callers | typed `bypassing-callers` set; best-effort JVM fallback |
+| D-c | The hook when no JVM is live (win 4) | refuse with the exact `bin/seon start` command; one lint path | Babashka fallback; silent skip |
+| D-d | `:seon.ai/error-class` (win 6) | one declared error schema per failure extending `:seon.error/base`, each with its render pair; `seon.ai/complete`'s union names them; the enum and the retry ladder leave | keep the enum; read-time projection |
+| D-e | Bounded completion (concerns note §2) | two declared bounds, the second waiting on the body's own exit signal (Codex: a cancelled Future reports done while the body runs), then abandon-and-disarm with the live thread recorded | the 252-line observer; an unbounded second wait |
+
+Codex's REPL verification (`repl-verification-deep-review-2026-09-21.md`) also
+corrected two of my claims and they stand corrected in the plan: a
+contract-only change still needs its affected callers interpreted, because a
+compiled caller bypasses the context's wrapper (the cost is install-time and
+interpreted execution in that context, not a per-turn scan); and Datahike
+returns an empty relation for an uninstalled query attribute, so Seon's
+unknown-attribute check stays and win 7's 450 lines are conditional.
+The design-ideas ledger is held by a concurrent Codex edit; these five rulings
+are recorded here and in README §7 until that file is free.
 
 ## 5. Forms and values (read-only, `eval_clj` jvm, cluster `default`)
 
