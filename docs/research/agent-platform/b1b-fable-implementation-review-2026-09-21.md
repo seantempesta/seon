@@ -1,17 +1,21 @@
 ---
 type: reference
-status: prepared; await implementation review milestone
+status: ready for review at 076827cc9
 created: 2026-09-21
 tags: [agent-platform, operator, boot, review]
 ---
 
 # Fable review of the operator and boot implementation
 
-Review the implementation on `refactor/agent-platform`, starting after
-`04fd7ed88`. First record the exact committed tip you reviewed and read the
+Review the implementation on `refactor/agent-platform`, range
+`04fd7ed88..076827cc9`. First record the exact committed tip you reviewed and read the
 implementation landing note. Source may still be changing: review committed
 bytes, preserve all uncommitted work, and do not edit implementation files.
-The orchestrator will identify the review milestone and available drill results.
+The first scratch boot reached readiness after publication and in-process repair:
+no missing layers, one root agent, 9,154 ms for that boot, and HTTP GET `/` = 200.
+This is not a completed cold-reset proof. The eight canonical drills, MCP restoration,
+platform checkpoint and replacement of default remain pending. The implementation
+lane continues those proofs while you review this fixed commit.
 
 Read the integrated B1b specification end to end, README §4/§6/§7, and
 `docs/research/agent-platform/b1b-implementation-brief-2026-09-21.md`.
