@@ -12,6 +12,38 @@
 (def ^:private ^"[Ljava.nio.file.LinkOption;" no-follow
   (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
 
+(defn filesystem-space
+  "Observe the requested volume without traversing its directory tree."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [root]
+  (let [file (.getAbsoluteFile (io/file root))
+        existing (loop [candidate file]
+                   (if (.exists candidate) candidate
+                       (recur (.getParentFile candidate))))
+        total (.getTotalSpace existing)
+        usable (.getUsableSpace existing)]
+    {:seon.operator.footprint/root (.getPath file)
+     :seon.operator.footprint/usable-bytes usable
+     :seon.operator.footprint/total-bytes total
+     :seon.operator.footprint/usable-ratio
+     (if (pos? total) (/ (double usable) (double total)) 0.0)
+     :seon.operator.footprint/observed-at (java.util.Date.)}))
+
+(defn footprint
+  "Measure only the requested tree, treating symbolic links as leaves of zero size."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [root]
+  (letfn [(size-of [^Path path]
+            (cond
+              (Files/isSymbolicLink path) 0
+              (not (Files/exists path no-follow)) 0
+              (Files/isDirectory path no-follow)
+              (with-open [children (Files/newDirectoryStream path)]
+                (reduce + 0 (map size-of (iterator-seq (.iterator children)))))
+              :else (Files/size path)))]
+    (assoc (filesystem-space root) :seon.operator.footprint/file-bytes
+           (size-of (.toPath (io/file root))))))
+
 (defn- destructive-canonical-path [path]
   (.getCanonicalPath (io/file path)))
 

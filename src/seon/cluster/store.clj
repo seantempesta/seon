@@ -22,7 +22,6 @@
             [clojure.test.check.generators :as gen]
             [seon.db :as db]
             [seon.fs :as fs]
-            [seon.operator.state :as operator.state]
             [seon.operator.runtime :refer [held-flocks]]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -148,7 +147,7 @@
   One derivation — no other code builds this path."
   {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/lock-file]}
   [store-dir]
-  (operator.state/store-lock-path store-dir))
+  (str (canonical-path store-dir) ".lock"))
 
 (defn datahike-configuration
   "The creation configuration for a cluster store.
@@ -406,7 +405,7 @@
      {::root target
       ::targets [target]
       ::file-bytes (long (or (:seon.operator.footprint/file-bytes
-                              (operator.state/footprint target))
+                              (fs/footprint target))
                              0))
       ::operation "seon.cluster.store/create-store!"})
     (fs/delete-recursively! target target))
@@ -436,6 +435,7 @@
   `release-store!`."
   {:malli/schema [:=> [:cat [:map
                              [:seon.store/dir :seon.store/dir]
+                             [:seon.store/destroy? {:optional true} :boolean]
                              [:seon.config.db/keep-history?
                               {:optional true}
                               :boolean]]]
@@ -463,6 +463,21 @@
 
                :else held)]
     (try
+      ;; Destruction is admitted only while this exact sibling lock is held,
+      ;; before even the first database-exists? call can open the store.
+      (when (:seon.store/destroy? request)
+        (when (java.nio.file.Files/isSymbolicLink (.toPath (io/file store-dir)))
+          (refuse! ::symbolic-store-target
+                   "Destructive store acquisition refuses a symbolic store directory."
+                   {::dir store-dir}))
+        (let [target (admit-destructive-path!
+                      {::root dir ::target dir
+                       ::declared-root (declared-operator-root)})]
+          (log-deletion! {::root dir ::targets [target]
+                          ::file-bytes (:seon.operator.footprint/file-bytes
+                                        (fs/footprint target))
+                          ::operation "seon.cluster.store/open-store!"})
+          (fs/delete-recursively! dir target)))
       (let [probe-configuration (datahike-configuration dir)
             exists? (d/database-exists? probe-configuration)
             complete? (and exists? (genesis-complete? dir))
