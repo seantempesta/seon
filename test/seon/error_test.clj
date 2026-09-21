@@ -214,7 +214,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (def ^:private process "test-cluster-4242-1753650000000")
 

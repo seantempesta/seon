@@ -12,7 +12,7 @@
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
 
-(def ^:private caps (config/result-caps (config/defaults)))
+(def ^:private caps (config/result-caps config/defaults))
 
 (defn- render-request
   [database ctx value]

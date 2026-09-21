@@ -62,7 +62,7 @@
   [cluster body]
   (let [context-channel
         (test-support/render-context-channel
-         (render/agent-render-profile (config/defaults)))
+         (render/agent-render-profile config/defaults))
         render-channel (async/chan (async/sliding-buffer 1))
         runtime-eval-channel (async/chan (async/sliding-buffer 1))
         pages-channel (async/chan (async/sliding-buffer 1))

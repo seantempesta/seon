@@ -93,7 +93,7 @@
               :seon.render/value namespace-entity
               :seon.render/output :seon.render/ai
               :seon.sci.admit/caps
-              (config/result-caps (config/defaults))
+              (config/result-caps config/defaults)
               :seon.sci.eval/time-limit-ms 5000
              :seon.config/on-core-error :record}
              :seon.render/ai :seon.render/ai)]
@@ -106,7 +106,7 @@
                  :seon.render/value namespace-entity
                  :seon.render/output :seon.render/form
                  :seon.sci.admit/caps
-                 (config/result-caps (config/defaults))
+                 (config/result-caps config/defaults)
                  :seon.sci.eval/time-limit-ms 5000
                  :seon.config/on-core-error :record}
                 :seon.render/form :seon.render/form)))

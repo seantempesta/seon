@@ -343,7 +343,7 @@
                         :seon.cluster.eval/source
                         "(clojure.test/deftest fileless-selection (clojure.test/is (string? (seon.id/id))))"
                         :seon.cluster.eval/ns [:seon.ns/name 'seon.test.selection-test]
-                        :seon.sci.admit/caps (config/result-caps (config/defaults))
+                        :seon.sci.admit/caps (config/result-caps config/defaults)
                         :seon.sci.eval/time-limit-ms 10000
                         :seon.config/on-core-error :panic})
            _ (when-not (:seon.program/row evaluation)

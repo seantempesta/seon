@@ -58,7 +58,7 @@
                  (evaluation/evaluate
                   {:seon.sci.eval/ctx ctx
                    :seon.cluster.eval/source source
-                   :seon.sci.admit/caps (config/result-caps (config/defaults))
+                   :seon.sci.admit/caps (config/result-caps config/defaults)
                    :seon.sci.eval/time-limit-ms 2000
                    :seon.config/on-core-error :panic}))
            directory (run "(dir my.agent)")
@@ -253,7 +253,7 @@
                     {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                      :seon.db/connection connection :seon.agent/id "documentation"
                      :seon.cluster.eval/source source
-                     :seon.sci.admit/caps (config/result-caps (config/defaults))
+                     :seon.sci.admit/caps (config/result-caps config/defaults)
                      :seon.sci.eval/time-limit-ms 10000
                      :seon.config/on-core-error :panic}))
              documentation (:seon.sci.admit/value (run "(doc my.message/send)"))

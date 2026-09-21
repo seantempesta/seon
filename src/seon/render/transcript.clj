@@ -893,7 +893,7 @@
                     (config/effective database cluster-name))]
     (if (and (map? effective) (nil? (and (:seon.error/at effective) (:seon.error/layer effective) (:seon.error/operation effective)))) ;; debt: seon.config/effective declares :seon.error/value, directly or through its result union.
       effective
-      (config/defaults))))
+      config/defaults)))
 
 (def ^:private history-run-selector
   [:seon.turn/id

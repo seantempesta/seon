@@ -60,7 +60,7 @@
      :calls (fn [] @calls)}))
 
 (def ^:private caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (def ^:private packaged-projection
   (delay (schema/declaration-projection

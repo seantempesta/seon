@@ -25,7 +25,7 @@
             [seon.test-support :as support]))
 
 (def ^:private caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (defn- unit
   [raw]

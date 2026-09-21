@@ -377,7 +377,7 @@
            request {:seon.db/db database
                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                     :seon.render.walk/lookup agent-eid
-                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 5000
                     :seon.config/on-core-error :record}
            history (walk/history request)]
@@ -442,7 +442,7 @@
            request {:seon.db/db database
                     :seon.db/connection connection
                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
-                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 5000
                     :seon.config/on-core-error :record
                     :seon.render/value saved
@@ -584,7 +584,7 @@
      ;; {:seon.cluster/name …} row is refused by write admission, and
      ;; discarding that refusal is what left this fixture inert.
      (support/seed-cluster! connection "reverse-render-fixture")
-     (let [effective (config/defaults)
+     (let [effective config/defaults
            caps (config/result-caps effective)
            ctx (support/fork-cluster-ctx connection)
            fault (error/normalize
@@ -636,7 +636,7 @@
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            projection (schema/projection-from-database database)
-           effective (config/defaults)
+           effective config/defaults
            request {:seon.db/db database
                     :seon.db/connection connection
                     :seon.sci.eval/ctx ctx
@@ -699,7 +699,7 @@
            alias-ref (db/pull database '[:db/id] [::identity-alias "aliased-reference"])
            unidentified {:db/id (get-in written [:tempids "unidentified"])}
            plan-ref {:db/id (get-in written [:tempids "plan"])}
-           effective (config/defaults)
+           effective config/defaults
            request {:seon.db/db database
                     :seon.db/connection connection
                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
@@ -765,10 +765,10 @@
                         :seon.eval/shown shown}])
            request {:seon.db/db (db/db connection) :seon.db/connection connection
                     :seon.agent/id "root" :seon.sci.eval/ctx (:ctx context)
-                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
                     :seon.config/on-core-error :record
-                    :seon.render/profile (render/agent-render-profile (config/defaults))}
+                    :seon.render/profile (render/agent-render-profile config/defaults)}
            calls (atom {:directory 0 :render 0})
            directory sci.eval/directory-value
            render-directory repl/render-directory-ai]
@@ -821,10 +821,10 @@
                   :seon.message/content "Recorded effect"}])))))
      (let [request {:seon.db/db (db/db connection) :seon.db/connection connection
                     :seon.agent/id "root" :seon.sci.eval/ctx (:ctx context)
-                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
                     :seon.config/on-core-error :record
-                    :seon.render/profile (render/agent-render-profile (config/defaults))}
+                    :seon.render/profile (render/agent-render-profile config/defaults)}
            calibration-var (requiring-resolve 'seon.cluster.prompt/agent-calibration)
            calibration @calibration-var
            effects @#'transcript/ledger-effects
@@ -941,7 +941,7 @@
      :seon.agent/id "outline-probe"
      :seon.cluster/name "debug-outline"
      :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
-     :seon.sci.admit/caps (config/result-caps (config/defaults))
+     :seon.sci.admit/caps (config/result-caps config/defaults)
      :seon.sci.eval/time-limit-ms 5000
      :seon.config/on-core-error :record}))
 

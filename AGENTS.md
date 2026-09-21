@@ -349,6 +349,13 @@ chain (`src/seon/db.clj:901`). Database values carry their projection state
 (seon.schema.datahike/storable-attribute-in? projection :seon.agent/id)
 ```
 
+The shipped default manifest is a program constant: `seon.config/defaults`
+is an immutable value compiled once when its namespace loads, and rebuilt
+when adoption reloads that namespace after code or resource changes. It is
+not cluster configuration; cluster consumers still receive their effective
+configuration explicitly. This exception permits no atom, delay, memoization,
+or cache for the compiled defaults.
+
 Fetch-at-call-time is also the recurring performance killer: the same
 defect that reads stale state also recomputes a projection on every call. Grounding:
 [seon-env PRD](docs/prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md);

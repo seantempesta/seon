@@ -103,7 +103,7 @@
                                         :seon.db/db @connection
                                         :seon.sci.eval/time-limit-ms 10000
                                         :seon.sci.eval/agent-ctx agent-ctx
-                                        :seon.render/profile (render/agent-render-profile (config/defaults)))))]
+                                        :seon.render/profile (render/agent-render-profile config/defaults))))]
                (is (str/includes? html "<ul class=\"seon-help"))
                (is (= (count (:seon.help/lines instructions))
                       (count (re-seq #"<li>" html))))
@@ -114,7 +114,7 @@
                    (first (transcript/history-entries
                            {:seon.db/db @connection :seon.agent/id "juniper"
                             :seon.render.transcript/selected-run-id (:seon.turn/id opened)
-                            :seon.sci.admit/caps (config/result-caps (config/defaults))})))))
+                            :seon.sci.admit/caps (config/result-caps config/defaults)})))))
            (println "REPL-GRAMMAR-HELP-BYTES" (alength (.getBytes expected "UTF-8"))))
          (finally
            (doseq [channel [(:seon.cluster.wake/channel handle)

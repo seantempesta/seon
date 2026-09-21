@@ -85,7 +85,7 @@
    :seon.sci.admit/caps caps
    :seon.sci.eval/ctx ctx
    :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
-   :seon.render/profile (render/agent-render-profile (config/defaults))
+   :seon.render/profile (render/agent-render-profile config/defaults)
    :seon.config/on-core-error :panic})
 
 (deftest prompt-prices-the-exact-retained-history
@@ -210,7 +210,7 @@
   ;; coordinate and a requery form, never a character offset inside a form.
   (let [calibration (tokens/prior-calibration 3.2)
         units (planted-units)
-        profile (assoc (render/agent-render-profile (config/defaults))
+        profile (assoc (render/agent-render-profile config/defaults)
                        :seon.render.profile/id ::composition-profile)
         selection (prompt/select units 200 calibration "walker" profile)
         retained (:seon.render.history/units selection)
@@ -249,7 +249,7 @@
     (let [calibration (tokens/prior-calibration 3.2)
           units (planted-units)
           selection (prompt/select units 1 calibration "walker"
-                                 (render/agent-render-profile (config/defaults)))]
+                                 (render/agent-render-profile config/defaults))]
       (is (= 1 (count (:seon.render.history/units selection))))
       (is (= (:seon.render.history/bytes (last units))
              (:seon.render.history/bytes
@@ -266,7 +266,7 @@
            units (vec (:seon.render.history/entries acquired))
            calibration (tokens/prior-calibration 3.2)
            selection (prompt/select units 1000000 calibration "walker"
-                                 (render/agent-render-profile (config/defaults)))]
+                                 (render/agent-render-profile config/defaults))]
        (is (seq units))
        (is (nil? (:seon.print/elision selection)) "nothing was dropped")
        (is (= (count units) (count (:seon.render.history/units selection))))
@@ -281,7 +281,7 @@
   (let [calibration (tokens/prior-calibration 3.2)
         units (planted-units)
         selection (prompt/select units 1000000 calibration "walker"
-                                 (render/agent-render-profile (config/defaults)))]
+                                 (render/agent-render-profile config/defaults))]
     (doseq [unit (:seon.render.history/units selection)]
       (is (= (tokens/estimate (:seon.render.history/bytes unit) calibration)
              (:seon.ai.tokens/estimate unit))))
@@ -340,7 +340,7 @@
         unit (history-unit 0 (str "my.agents.walker=> (long-one)\n"
                                   (apply str (repeat 4000 \y))))
         selection (prompt/select [unit] 1 calibration "walker"
-                                 (render/agent-render-profile (config/defaults)))
+                                 (render/agent-render-profile config/defaults))
         text (prompt/compose selection)]
     (is (str/includes? text (:seon.render.history/bytes unit))
         "the rendered unit crosses composition whole, under any budget")

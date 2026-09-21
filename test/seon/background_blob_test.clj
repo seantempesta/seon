@@ -119,7 +119,7 @@
              :seon.cluster.eval/ordinal 0
              :seon.boot/cluster-name "default"
              :seon.flow/work-launcher launcher
-             :seon.sci.admit/caps (config/result-caps (config/defaults))
+             :seon.sci.admit/caps (config/result-caps config/defaults)
              :seon.config/on-core-error :record
              :seon.effect/counter (atom -1)}]
         (try

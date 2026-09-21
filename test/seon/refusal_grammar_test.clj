@@ -98,7 +98,7 @@
                        'example/guard
                        "[:=> [:cat :int] :int [:fn {:error/message \"arguments and result must agree\"} clojure.core/map?]]"
                        (schema/handed-projection) :panic
-                       (config/result-caps (config/defaults)) identity)
+                       (config/result-caps config/defaults) identity)
               refusal (support/refusal-data #(wrapped 7))
               text (error/render-ai (assoc unit :seon.render/value refusal))]
           (is (str/includes? text "Input: [7]" ) text)

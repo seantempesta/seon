@@ -18,7 +18,7 @@
   suite's roots and bounds over it. A hand-rostered map of the three dials
   this suite reads is a shape the declared contract forbids."
   [root]
-  (assoc (config/defaults)
+  (assoc config/defaults
          :seon.config.fs/working-root (str root)
          :seon.config.fs/roots [(str root)]
          :seon.config.fs/max-read-bytes (* 64 1024 1024)

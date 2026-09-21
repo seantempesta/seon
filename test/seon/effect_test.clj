@@ -221,7 +221,7 @@
     :seon.cluster.eval/ordinal 3
     :seon.boot/cluster-name "default"
     :seon.flow/work-launcher launcher
-    :seon.sci.admit/caps (config/result-caps (config/defaults))
+    :seon.sci.admit/caps (config/result-caps config/defaults)
     :seon.config/on-core-error :record
     ;; Handed explicitly, exactly as `seon.sci.eval` hands it: a DETACHED
     ;; handler rebuilds this frame from the submission, and without it any
@@ -817,7 +817,7 @@
          :seon.cluster.eval/ordinal 3
          :seon.cluster.eval/at (Date.)}))
       (let [ctx (test-support/fork-cluster-ctx connection)
-            effective (config/defaults)
+            effective config/defaults
             evaluation
             (sci.eval/evaluate
              {:seon.cluster.eval/source

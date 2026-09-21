@@ -745,7 +745,7 @@
                   :seon.sci.eval/ctx ctx
                   :seon.db/db @connection
                   :seon.sci.admit/caps
-                  (config/result-caps (config/defaults))
+                  (config/result-caps config/defaults)
                   :seon.sci.eval/time-limit-ms 1000
                   :seon.config/on-core-error :panic})
                 record (:seon.sci.admit/record evaluation)]

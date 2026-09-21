@@ -39,7 +39,7 @@
                          {:seon.schema.admission/source :core}))
            first-generation (generation "FIRST")
            second-generation (generation "SECOND")
-           effective (assoc (config/defaults) ::environment-value "carried")
+           effective (assoc config/defaults ::environment-value "carried")
            overrides (shell-private 'environment-overrides)]
        (is (= "carried" (get (overrides first-generation effective) "FIRST")))
        (is (nil? (get (overrides first-generation effective) "SECOND")))
@@ -63,7 +63,7 @@
 (defn- effective
   [root overrides]
   (merge
-   (config/defaults)
+   config/defaults
    {:seon.config.fs/working-root (str root)
     :seon.config.fs/roots [(str root)]
     :seon.config.shell/time-limit-ms 5000

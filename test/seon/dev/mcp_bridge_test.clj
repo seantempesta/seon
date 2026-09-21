@@ -762,7 +762,7 @@
         marker @(ns-resolve 'seon.cluster 'mcp-projection)
         server (clojure.core.server/start-server
                 {:name name :accept 'seon.cluster/mcp-io-prepl
-                 :args [name (seon.config/defaults)]
+                 :args [name seon.config/defaults]
                  :address "127.0.0.1" :port 0})]
     (try
       (with-redefs [seon.cluster/mcp-valf

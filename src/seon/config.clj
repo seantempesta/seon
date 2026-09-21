@@ -537,12 +537,35 @@
     (long (.availableProcessors (Runtime/getRuntime)))
     decision))
 
+(defn- settings-projection
+  "Compile the config declarations with their Malli references.
+
+  Loading shipped config must not resolve predicates belonging to unrelated
+  program declarations while their namespaces are still loading."
+  {:malli/schema [:=> [:cat] :seon.schema/projection]}
+  []
+  (let [forms (schema.edn/packaged-forms)
+        registry (mr/composite-registry (m/default-schemas)
+                                        (mr/fast-registry forms))
+        projection {:seon.schema.projection/forms forms
+                    :seon.schema.projection/registry registry}
+        roots #{:seon.config/effective :seon.config/manifest}]
+    (loop [pending roots seen #{}]
+      (if-let [schema-key (first pending)]
+        (let [seen (conj seen schema-key)
+              references (when-let [form (get forms schema-key)]
+                           (schema/direct-references projection form))]
+          (recur (into (disj pending schema-key) (remove seen) references) seen))
+        (schema/declaration-projection (select-keys forms seen))))))
+
 (defn- compile-settings
-  [request]
-  (let [projection (schema/declaration-projection (schema.edn/packaged-forms))
-        forms (:seon.schema.projection/forms projection)
-        {:seon.config/keys [decisions initialization]}
-        (admitted-default-document projection (default-document))
+  {:malli/schema
+   [:=> [:cat :seon.schema/projection :map :map]
+    [:map
+     [:seon.config/effective :seon.config/effective]
+     [:seon.config/resolved-attributes [:set :qualified-keyword]]]]}
+  [projection document request]
+  (let [decisions (dissoc document initialization-key)
         manifest (validate-layer projection (or (:seon.config/manifest request) {}))
         environment
         (validate-layer projection (or (:seon.config/environment request) {}))
@@ -601,7 +624,6 @@
           ((schema/projection-explainer projection :seon.config/effective) effective)}})
        nil))
       {:seon.config/effective effective
-       :seon.config/initialization initialization
        :seon.config/resolved-attributes (set (keys decisions))})))
 
 (defn compile-manifest
@@ -632,16 +654,23 @@
          :seon.error/data {::key :seon.boot/cluster-name
                 :seon.error/diagnostic-operation 'seon.config/compile-manifest}})
        nil))
-    (let [compiled (compile-settings request)]
-      (assoc compiled :seon.config/desired-row
+    (let [document (default-document)
+          projection (schema/declaration-projection (schema.edn/packaged-forms))
+          initialization (admit-initialization projection (get document initialization-key []))
+          compiled (compile-settings projection document request)]
+      (assoc compiled
+             :seon.config/initialization initialization
+             :seon.config/desired-row
              (assoc (:seon.config/effective compiled)
                     :seon.config/cluster cluster-name)))))
 
-(defn defaults
-  "Compile the zero-overlay shipped defaults into one effective config."
-  {:malli/schema [:=> [:cat] :seon.config/effective]}
-  []
-  (:seon.config/effective (compile-settings {})))
+(def defaults
+  "The immutable shipped default configuration, compiled at namespace load.
+
+  This program constant is rebuilt when the namespace reloads. Cluster
+  configuration remains explicit data supplied by the caller."
+  (:seon.config/effective
+   (compile-settings (settings-projection) (default-document) {})))
 
 (defn- desired-tempid
   [config-identity]

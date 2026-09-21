@@ -33,7 +33,7 @@
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}])
 
-(def ^:private caps (config/result-caps (config/defaults)))
+(def ^:private caps (config/result-caps config/defaults))
 
 (defn- request
   [connection]

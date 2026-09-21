@@ -27,7 +27,7 @@
              (str "Canonical fixture's compiled registry is missing " attribute)))))))
 
 (defn- request [connection source]
-  (let [dials (config/defaults)]
+  (let [dials config/defaults]
     {:seon.error/source source
      :seon.error/id (id/id)
      :seon.error/at (java.util.Date.)
@@ -120,7 +120,7 @@
                 (measured :agent-context #(sci.eval/fork-for-turn {:seon.sci.eval/ctx base
                                          :seon.db/db (db/db connection)
                                          :seon.agent/id "error-result-agent"})))
-           dials (config/defaults)
+           dials config/defaults
            profile (render/agent-render-profile dials)
            evaluation (sci.eval/evaluate
                        {:seon.cluster.eval/source source

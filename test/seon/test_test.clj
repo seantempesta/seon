@@ -29,7 +29,7 @@
                             {:seon.sci.eval/ctx ctx :seon.cluster.eval/source source
                              :seon.db/db (db/db connection)
                              :seon.cluster.eval/ns [:seon.ns/name 'selection.check]
-                             :seon.sci.admit/caps (config/result-caps (config/defaults))
+                             :seon.sci.admit/caps (config/result-caps config/defaults)
                              :seon.sci.eval/time-limit-ms 120000 :seon.config/on-core-error :panic})
                _ (when-not (:seon.program/row evaluation)
                    (throw (ex-info (str "SCI fixture declaration was not admitted: "
@@ -112,7 +112,7 @@
                         :seon.cluster.eval/source
                         "(clojure.test/deftest bounded-test (loop [] (recur)))"
                         :seon.cluster.eval/ns [:seon.ns/name 'seon.test-test]
-                        :seon.sci.admit/caps (config/result-caps (config/defaults))
+                        :seon.sci.admit/caps (config/result-caps config/defaults)
                         :seon.sci.eval/time-limit-ms 10000
                         :seon.config/on-core-error :panic})
            result (sci.eval/run-test
@@ -140,7 +140,7 @@
                        {:seon.sci.eval/ctx ctx
                         :seon.cluster.eval/source source
                         :seon.cluster.eval/ns [:seon.ns/name 'seon.test-test]
-                        :seon.sci.admit/caps (config/result-caps (config/defaults))
+                        :seon.sci.admit/caps (config/result-caps config/defaults)
                         :seon.sci.eval/time-limit-ms 10000
                         :seon.config/on-core-error :panic})
            declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]

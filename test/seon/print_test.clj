@@ -40,7 +40,7 @@
      :seon.print/table? table?}))
 
 (def ^:private admission-caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (defn- admitted-node
   [value]

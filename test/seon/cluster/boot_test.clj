@@ -1273,7 +1273,7 @@
                     :seon.config/on-core-error :record
                     :seon.agent/id "root"
                     :seon.sci.admit/caps
-                    (config/result-caps (config/defaults))})
+                    (config/result-caps config/defaults)})
                   ;; The shipped bootstrap episode is the GENERATED OPENING,
                   ;; not a hand-authored worked episode: `6aca09cce`
                   ;; ("Use the system-turn generator for seeded agent

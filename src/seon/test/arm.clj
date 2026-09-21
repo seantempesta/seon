@@ -150,7 +150,7 @@
   That the effective config fails its own key's schema is a separate defect,
   filed there; the arming path must not be the thing that discovers it."
   []
-  (let [decisions (config/defaults)
+  (let [decisions config/defaults
         caps (config/result-caps decisions)]
     (when (contains? caps :seon.config/error-key)
       (throw

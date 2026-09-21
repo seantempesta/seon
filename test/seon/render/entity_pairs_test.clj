@@ -36,8 +36,8 @@
            ctx (support/fork-cluster-ctx connection)
            request {:seon.db/db database :seon.sci.eval/ctx ctx
                     :seon.render/value entity
-                    :seon.render/profile (render/agent-render-profile (config/defaults))
-                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.render/profile (render/agent-render-profile config/defaults)
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 5000
                     :seon.config/on-core-error :panic
                     :seon.render/distance 1
@@ -120,9 +120,9 @@
                     :seon.render/output :seon.render/html
                     :seon.render/distance 2
                     :seon.render/profile
-                    (render/agent-render-profile (config/defaults))
+                    (render/agent-render-profile config/defaults)
                     :seon.sci.admit/caps
-                    (config/result-caps (config/defaults))
+                    (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 5000
                     :seon.config/on-core-error :panic}
            namespace-units

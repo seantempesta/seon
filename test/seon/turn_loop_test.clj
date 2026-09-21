@@ -438,7 +438,7 @@
                 :seon.cluster.eval/ns [:seon.ns/name starting-ns]
                 :seon.sci.eval/ctx ctx
                 :seon.sci.admit/caps
-                (config/result-caps (config/defaults))
+                (config/result-caps config/defaults)
                 :seon.sci.eval/time-limit-ms 2000
                 :seon.config/on-core-error :panic
                 :seon.boot/cluster-name cluster-name
@@ -473,7 +473,7 @@
                 resumed-namespace
                 (fold-namespace @connection run-id
                                 (fold-evaluations @connection run-id) 1)
-                defaults (config/defaults)
+                defaults config/defaults
                 channel (async/chan 1)
                 cluster (merge defaults
                                {:seon.db/connection connection
@@ -602,7 +602,7 @@
                     :seon.config.eval/time-limit-ms 2000
                     :seon.config/on-core-error :record
                     :seon.sci.admit/caps
-                    (config/result-caps (config/defaults))
+                    (config/result-caps config/defaults)
                     :seon.config.error/recurrence-limit 3
                     :seon.config.message/max-chain 8})]
        (config/apply! {:seon.db/connection connection
@@ -744,7 +744,7 @@
                   :seon.sci.eval/ctx
                   (test-support/fork-cluster-ctx connection)
                   :seon.sci.admit/caps
-                  (config/result-caps (config/defaults))
+                  (config/result-caps config/defaults)
                   :seon.sci.eval/time-limit-ms 2000
                   :seon.config/on-core-error :panic
                   :seon.boot/cluster-name cluster-name
@@ -959,7 +959,7 @@
           :seon.config.error/escalate-to escalate-to
           :seon.db.process/id process
           :seon.config.error/recurrence-limit 3
-          :seon.sci.admit/caps (config/result-caps (config/defaults))})
+          :seon.sci.admit/caps (config/result-caps config/defaults)})
          @connection now agent-id nil process nil nil
          {:seon.error/kind :seon.turn.phase/prompt
           :seon.error/message "injected prompt failure"
@@ -1472,7 +1472,7 @@
   shape production never produces; this crosses `seon.sci.eval/evaluate`,
   the one constructor of the value `settle!` declares."
   [connection ctx size]
-  (let [decisions (config/defaults)]
+  (let [decisions config/defaults]
     (sci.eval/evaluate
      {:seon.cluster.eval/source
       (str "(def probe-staged-def (apply str (repeat " size " \"m\")))")
@@ -1621,7 +1621,7 @@
                       :seon.cluster/name "loop-batch-refused"
                       :seon.sci.eval/ctx ctx
                       :seon.db.process/id process})
-            decisions (config/defaults)
+            decisions config/defaults
             evaluate
             (fn [ordinal]
               (sci.eval/evaluate

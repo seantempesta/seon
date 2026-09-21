@@ -37,7 +37,7 @@
                        :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                        :seon.config.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
                        :seon.config/on-core-error :record
-                       :seon.sci.admit/caps (config/result-caps (config/defaults))
+                       :seon.sci.admit/caps (config/result-caps config/defaults)
                        :seon.config.error/recurrence-limit 3
                        :seon.config.message/max-chain 8})
              request {:seon.agent/id agent-id}
@@ -99,7 +99,7 @@
                      :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                      :seon.config.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
                      :seon.config/on-core-error :record
-                     :seon.sci.admit/caps (config/result-caps (config/defaults))
+                     :seon.sci.admit/caps (config/result-caps config/defaults)
                      :seon.config.error/recurrence-limit 3
                      :seon.config.message/max-chain 8})
            report (turn/turn

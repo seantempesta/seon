@@ -54,7 +54,7 @@
                     :seon.db/db database
                     :seon.db/connection connection
                     :seon.agent/id "preview-batch-agent"})
-           defaults (config/defaults)
+           defaults config/defaults
            channel (async/chan 1)
            cluster (merge defaults
                           {:seon.db/connection connection
@@ -238,7 +238,7 @@
                     :seon.db/db database
                     :seon.db/connection connection
                     :seon.agent/id "profile-once-agent"})
-           defaults (config/defaults)
+           defaults config/defaults
            channel (async/chan 1)
            cluster (merge defaults
                           {:seon.db/connection connection

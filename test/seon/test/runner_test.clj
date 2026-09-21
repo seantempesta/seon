@@ -37,7 +37,7 @@
                         :seon.cluster.eval/source
                         "(clojure.test/deftest custody-observation (clojure.test/is (= \"both-hosts\" (:seon.cluster/name (seon.db/pull (seon.db/db) [:seon.cluster/name] [:seon.cluster/name \"both-hosts\"])))))"
                         :seon.cluster.eval/ns [:seon.ns/name 'seon.test.runner-test]
-                        :seon.sci.admit/caps (config/result-caps (config/defaults))
+                        :seon.sci.admit/caps (config/result-caps config/defaults)
                         :seon.sci.eval/time-limit-ms 120000 :seon.config/on-core-error :panic})
            _ (when-not (:seon.program/row evaluation)
                (throw (ex-info "SCI test declaration did not produce a program row." evaluation)))

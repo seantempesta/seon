@@ -1735,7 +1735,7 @@
               ;; `or` here would carry the refusal into `result-caps` and
               ;; `commit-tx` instead of the shipped decisions it means.
               effective (if (contains? read-effective :seon.config/error-key)
-                          (config/defaults)
+                          config/defaults
                           read-effective)
               caps (config/result-caps effective)
               recurrence-limit

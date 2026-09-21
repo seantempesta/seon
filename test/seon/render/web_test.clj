@@ -73,7 +73,7 @@
   (delay (support/environment "seon.render.web-test")))
 
 (def ^:private caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (def ^:private process
   "This suite's run-holder identity. The web service REQUIRES one —
@@ -150,7 +150,7 @@
                   :seon.render.web/completion completion
                   :seon.render.web/root-agent-id agent-id
                   ::web/profile
-                  (render/agent-render-profile (config/defaults))}
+                  (render/agent-render-profile config/defaults)}
             handle (support/cluster-handle
                     {:seon.db/connection connection
                      :seon.cluster/name "web-test"
@@ -202,7 +202,7 @@ handle))}}
                            :seon.sci.eval/ctx ctx
                            :seon.config.eval/time-limit-ms
                            (:seon.config.eval/time-limit-ms
-                            (config/defaults))
+                            config/defaults)
                            :seon.config/on-core-error :record
                            :seon.db.process/id process
                            :seon.render.web/pages-mult pages-mult
@@ -1800,7 +1800,7 @@ handle))}}
                             [{:seon.ns/name namespace-name :seon.ns/source huge}])
        (let [database @connection
              ctx (support/fork-cluster-ctx connection)
-             profile (render/agent-render-profile (config/defaults))
+             profile (render/agent-render-profile config/defaults)
              request {:seon.db/db database
                       :seon.sci.eval/ctx ctx
                       ;; THE VALUE IS THE STRING ITSELF, so the bound under
@@ -1810,7 +1810,7 @@ handle))}}
                       :seon.render/profile profile
                       :seon.render.call/id [::ai-bound namespace-name]
                       :seon.sci.admit/caps
-                      (config/result-caps (config/defaults))
+                      (config/result-caps config/defaults)
                       :seon.sci.eval/time-limit-ms 20000
                       :seon.config/on-core-error :record}
              ai (render/render-ai request)
@@ -1966,7 +1966,7 @@ handle))}}
           :seon.sci.admit/caps caps
           :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
           :seon.config.eval/time-limit-ms
-          (:seon.config.eval/time-limit-ms (config/defaults))
+          (:seon.config.eval/time-limit-ms config/defaults)
           :seon.config/on-core-error :record
           :seon.db.process/id process
           :seon.render.web/pages-mult

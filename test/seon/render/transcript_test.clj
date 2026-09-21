@@ -511,7 +511,7 @@
           (is (str/includes? html "eval-result")))
         (testing "and the AI context generation boundary cuts it, once"
           (let [tight (assoc (render/agent-render-profile
-                              (config/defaults))
+                              config/defaults)
                              :seon.render.profile/token-budget 64)
                 cut (render/render-ai
                      (assoc request
@@ -1189,7 +1189,7 @@
                      :seon.ns/name 'my.agents.one-grammar
                      :seon.cluster/name "one-grammar"}))
      (let [database @connection
-           defaults (config/defaults)
+           defaults config/defaults
            channel (async/chan 1)
            base (support/fork-cluster-ctx connection)
            forked (sci.eval/fork-for-turn

@@ -179,7 +179,7 @@
   "This suite's `:seon.config.web/*` overlay, applied through the production
   path.
 
-  It used to be `(assoc (seon-config/defaults) …)` written straight in as a
+  It used to be `(assoc seon-config/defaults …)` written straight in as a
   config ROW, which write admission refuses: only `compile-manifest` can
   compute `:seon.config/applied-manifest-digest`, so the row landed nothing
   and every dial below stayed at its shipped default."
@@ -201,7 +201,7 @@
   effective map written as a config ROW is refused, because only
   `compile-manifest` can compute `:seon.config/applied-manifest-digest`."
   [base-url]
-  (merge (seon-config/defaults) (web-manifest base-url)))
+  (merge seon-config/defaults (web-manifest base-url)))
 
 (defn- exact-blob
   [connection digest size]
@@ -237,7 +237,7 @@
    :seon.cluster.eval/ordinal 0
    :seon.boot/cluster-name "default"
    :seon.sci.admit/caps
-   (seon-config/result-caps (seon-config/defaults))
+   (seon-config/result-caps seon-config/defaults)
    :seon.config/on-core-error :record
    :seon.effect/counter (atom -1)})
 

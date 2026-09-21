@@ -25,7 +25,7 @@
            run (fn [source]
                  (evaluation/evaluate
                   {:seon.sci.eval/ctx ctx :seon.cluster.eval/source source
-                   :seon.sci.admit/caps (config/result-caps (config/defaults))
+                   :seon.sci.admit/caps (config/result-caps config/defaults)
                    :seon.sci.eval/time-limit-ms 10000
                    :seon.config/on-core-error :panic}))
            runtime-source (transcript/render-runtime-ai

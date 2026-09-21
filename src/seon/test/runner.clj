@@ -122,7 +122,7 @@
 
 (defn- report-options
   ([]
-   (let [configuration (config/defaults)]
+   (let [configuration config/defaults]
     (assoc (select-keys configuration
                         [:seon.print/length :seon.print/level])
            :seon.render/profile

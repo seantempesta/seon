@@ -23,9 +23,9 @@
             [seon.test-support :as support]))
 
 (def ^:private render-profile
-  (seon.render/agent-render-profile (config/defaults)))
+  (seon.render/agent-render-profile config/defaults))
 
-(def ^:private caps (config/result-caps (config/defaults)))
+(def ^:private caps (config/result-caps config/defaults))
 
 (def ^:private fixture-a 'seon.render-simplification.fixture-a)
 (def ^:private fixture-b 'seon.render-simplification.fixture-b)

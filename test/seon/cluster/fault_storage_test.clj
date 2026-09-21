@@ -108,7 +108,7 @@
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name cluster-name})
       (let [projection (schema/projection-from-database @connection)
-            caps (config/result-caps (config/defaults))
+            caps (config/result-caps config/defaults)
             commit-fault! (var-get (ns-resolve 'seon.cluster 'commit-fault!))
             source (fault-source)
             ;; Establish the comparison point after the same collector policy
@@ -208,7 +208,7 @@
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name cluster-name})
       (let [projection (schema/projection-from-database @connection)
-            caps (config/result-caps (config/defaults))
+            caps (config/result-caps config/defaults)
             commit-fault! (var-get (ns-resolve 'seon.cluster 'commit-fault!))
             source (lossy-fault-source)
             [fact outcome] (schema/call-with-projection

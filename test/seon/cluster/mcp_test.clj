@@ -98,8 +98,8 @@
                        (fn [value _]
                          (reset! observed
                                  (identical? projection (db/carried-projection value)))
-                         (config/defaults))]
-           (is (= 42 (get-in (projected cluster-name (config/defaults) 42)
+                         config/defaults)]
+           (is (= 42 (get-in (projected cluster-name config/defaults 42)
                             [:seon.dev.mcp/value])))
            (is (true? @observed)
                "the config read receives the projection carried by its database"))
@@ -108,7 +108,7 @@
 
 (deftest nested-bulk-is-bounded-by-the-shared-value-window
   (let [cluster-name "mcp-nested-window-test"
-        effective (config/defaults)
+        effective config/defaults
         oversized-string
         (apply str
                (repeat (inc (:seon.config.eval.result/max-string effective))
@@ -122,7 +122,7 @@
 
 (deftest sci-evaluations-project-the-repl-text-face
   (let [cluster-name "mcp-text-face-test"
-        effective (config/defaults)
+        effective config/defaults
         evaluation (sci-evaluation effective "(vec (range 50000))")
         result (projected cluster-name effective evaluation true false)
         face (:seon.dev.mcp/value result)]
@@ -138,7 +138,7 @@
 
 (deftest sci-top-level-strings-use-the-shared-value-window
   (let [cluster-name "mcp-top-level-string-window-test"
-        effective (config/defaults)
+        effective config/defaults
         evaluation (sci-evaluation effective
                                     "(apply str (repeat 1048576 \\x))")
         result (projected cluster-name effective evaluation true false)
@@ -152,7 +152,7 @@
 
 (deftest ordinary-mcp-results-always-use-the-explicit-mcp-profile
   (let [cluster-name "mcp-unconditional-fit-test"
-        effective (assoc (config/defaults)
+        effective (assoc config/defaults
                          :seon.config.eval.result/blob-threshold 1000000)
         text (apply str (repeat 36 \x))
         result (projected cluster-name effective (observed-query-shape))
@@ -176,7 +176,7 @@
 
 (deftest sci-artifact-size-ignores-evaluation-envelope-bulk
   (let [cluster-name "mcp-small-sci-value-test"
-        effective (config/defaults)
+        effective config/defaults
         evaluation
         (assoc (sci-evaluation effective "42")
                :seon.sci.eval/internal-detail (apply str (repeat 5000 \x)))
@@ -192,7 +192,7 @@
 (defn- jvm-exceptions-retain-the-root-location-and-flat-error
   [connection]
   (let [cluster-name "mcp-jvm-exception-face-test"
-        effective (config/defaults)
+        effective config/defaults
         inline-ceiling (:seon.config.eval.result/blob-threshold effective)
         dependency-frame
         ['malli.core$_map_schema$reify__1 'invoke "core.cljc" 1289]
@@ -280,7 +280,7 @@
 
 (deftest jvm-nil-deref-is-a-flat-error-value
   (let [cluster-name "mcp-jvm-nil-deref-test"
-        effective (config/defaults)
+        effective config/defaults
         deref-frame
         ['clojure.core$deref_future 'invokeStatic "core.clj" 2314]
         serving-frame
@@ -315,7 +315,7 @@
         face
         (:seon.dev.mcp/value
          (projected
-          cluster-name (config/defaults)
+          cluster-name config/defaults
           {:via [{:type 'clojure.lang.ExceptionInfo
                   :message message
                   :at dependency-frame}]
@@ -399,7 +399,7 @@
   [connection]
   (let [cluster-name "mcp-value-test"
         value (vec (range 2000))
-        effective (config/defaults)
+        effective config/defaults
         storeless (projected cluster-name effective value)]
     (is (true? (:seon.dev.mcp/windowed? storeless)))
     (is (false? (:seon.dev.mcp/retrievable? storeless)))
@@ -430,7 +430,7 @@
 (defn- stored-strings-page-by-character-offset
   [connection]
   (let [cluster-name "mcp-string-page-test"
-        effective (config/defaults)
+        effective config/defaults
         value (apply str (take 4975 (cycle "abcdefghijklmnopqrstuvwxyz")))
         page-size (:seon.print/width (print/default-options))]
     (config/apply! {:seon.db/connection connection
@@ -464,7 +464,7 @@
 (defn- retrievable-artifacts-have-an-identified-no-history-root
   [connection]
   (let [cluster-name "mcp-durable-artifact-test"
-        effective (config/defaults)
+        effective config/defaults
         value (vec (range 3000))]
     (config/apply! {:seon.db/connection connection
                     :seon.boot/cluster-name cluster-name})
@@ -519,7 +519,7 @@
 (defn- ordinary-value-artifacts-drill-from-the-result-root
   [connection]
   (let [cluster-name "mcp-sci-value-test"
-        effective (config/defaults)
+        effective config/defaults
         value (assoc (vec (range 2000)) 1999 2999)
         nested-value {:alpha value :omega 42}]
     (config/apply! {:seon.db/connection connection

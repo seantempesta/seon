@@ -8,7 +8,7 @@
             [seon.test-support :as test-support]))
 
 (def ^:private caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (defn transaction-result-shape
   "The observable native shape of one committed empty transaction."

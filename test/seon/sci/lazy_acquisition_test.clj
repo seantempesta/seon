@@ -18,7 +18,7 @@
                                             :seon.db/db database
                                             :seon.agent/id "lazy-acquisition"}))
            request {:seon.sci.eval/ctx fork
-                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 10000
                     :seon.config/on-core-error :panic
                     :seon.cluster.eval/source "(+ 1 2)"}]

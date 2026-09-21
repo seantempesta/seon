@@ -933,7 +933,7 @@
                 :seon.cluster.eval/ns [:seon.ns/name 'seon.test-runner-test]
                 :seon.sci.eval/ctx ctx
                 :seon.sci.admit/caps
-                (config/result-caps (config/defaults))
+                (config/result-caps config/defaults)
                 :seon.sci.eval/time-limit-ms 5000
                 :seon.config/on-core-error :panic
                 :seon.db/db (db/db connection)

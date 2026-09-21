@@ -40,8 +40,8 @@
      (let [namespace-name 'seon.render-simplification.fixture-a
            _ (seed-shown! connection namespace-name "one")
            ctx (support/fork-cluster-ctx connection)
-           profile (render/agent-render-profile (config/defaults))
-           caps (config/result-caps (config/defaults))
+           profile (render/agent-render-profile config/defaults)
+           caps (config/result-caps config/defaults)
            calls (atom {})
            checks (atom 0)
            read-current? db/read-evidence-current?
@@ -142,10 +142,10 @@
            request (fn []
                      {:seon.db/db (db/db connection) :seon.db/connection connection
                       :seon.agent/id "root" :seon.sci.eval/ctx ctx
-                      :seon.sci.admit/caps (config/result-caps (config/defaults))
+                      :seon.sci.admit/caps (config/result-caps config/defaults)
                       :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
                       :seon.config/on-core-error :record
-                      :seon.render/profile (render/agent-render-profile (config/defaults))})
+                      :seon.render/profile (render/agent-render-profile config/defaults)})
            invoke kernel/invoke
            calls (atom 0)]
        (with-redefs [kernel/invoke

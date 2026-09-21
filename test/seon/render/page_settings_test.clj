@@ -98,7 +98,7 @@
                  {:seon.sci.eval/ctx base :seon.db/db @connection
                   :seon.db/connection connection :seon.agent/id "juniper"}))
            request {:seon.sci.eval/ctx ctx :seon.agent/id "juniper"
-                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 10000 :seon.config/on-core-error :panic}
            evaluate (fn [source]
                       (evaluation/evaluate (assoc request :seon.db/db @connection

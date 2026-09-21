@@ -517,7 +517,7 @@
                                                :seon.config.error/max-evidence-bytes
                                                (or (:seon.config.error/max-evidence-bytes arm-request)
                                                    (:seon.config.error/max-evidence-bytes
-                                                    (config/defaults))))))]
+                                                    config/defaults)))))]
         (with-meta wrapped
           (assoc (meta wrapped) interpreted-original original))))))
 
@@ -979,13 +979,13 @@
           :seon.error/diagnostic-offending :seon.instrument/missing-projection
           :seon.error/diagnostic-cause ::missing-projection
           :seon.error/diagnostic-evidence nil})
-        (let [defaults (delay (config/defaults))
-              caps (or caps (config/result-caps @defaults))
+        (let [defaults config/defaults
+              caps (or caps (config/result-caps defaults))
               policy (cond-> {:seon.config/on-core-error mode
                               :seon.sci.admit/caps caps
                               :seon.config.error/max-evidence-bytes
                               (or max-evidence-bytes
-                                  (:seon.config.error/max-evidence-bytes @defaults))}
+                                  (:seon.config.error/max-evidence-bytes defaults))}
                        (and (= :record mode) commit-fault!)
                        (assoc :seon.flow/commit-fault! commit-fault!))
               contracts (collect-contracts! caps)

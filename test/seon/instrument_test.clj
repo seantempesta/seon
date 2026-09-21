@@ -817,26 +817,22 @@
      (let [names [(gensym "policy-first-") (gensym "policy-second-")]
            candidates (mapv #(intern 'seon.instrument-test % identity) names)
            projection (schema/handed-projection)
-           defaults (mi/-f->original config/defaults)
-           acquisitions (atom 0)]
+           defaults config/defaults]
        (try
          (doseq [candidate candidates]
            (alter-meta! candidate assoc :malli/schema [:=> [:cat :int] :int]))
-         (with-redefs [config/defaults (fn [] (swap! acquisitions inc) (defaults))]
            (instrument/apply! {:seon.config/on-core-error :panic
                                :seon.schema/projection projection})
-           (is (= 1 @acquisitions)
-               "one acquisition supplies all host wrappers, including missing caps")
            (let [roots (mapv deref candidates)
                  policy (:seon.instrument/policy (meta (first roots)))
                  request (assoc policy :seon.schema/projection projection)]
-             (is (pos? (:seon.config.error/max-evidence-bytes policy)))
+             (is (= (:seon.config.error/max-evidence-bytes defaults)
+                    (:seon.config.error/max-evidence-bytes policy)))
              (is (every? #(= policy (:seon.instrument/policy (meta %))) roots))
              (doseq [candidate candidates]
                (is (= 7 (candidate 7)))
                (is (thrown? Exception (candidate "not an integer"))))
              (instrument/apply! request)
-             (is (= 1 @acquisitions) "supplied policy needs no defaults")
              (is (every? true? (map identical? roots (map deref candidates)))
                  "the same acquired policy preserves wrappers")
              (doseq [changed [(update request :seon.config.error/max-evidence-bytes inc)
@@ -845,13 +841,12 @@
                (instrument/apply! request)
                (let [before (mapv deref candidates)]
                  (instrument/apply! changed)
-                 (is (= 1 @acquisitions))
                  (is (every? false? (map identical? before (map deref candidates)))
                    "changed captured policy cannot reuse the previous closure")
                (doseq [candidate candidates]
                  (is (= (dissoc changed :seon.schema/projection)
                         (:seon.instrument/policy (meta @candidate))))))))
-           (let [effective (defaults)
+           (let [effective defaults
                  caps (config/result-caps effective)
                  arm-request (select-keys effective [:seon.config.error/max-evidence-bytes])]
              (doseq [function-symbol ['my.agents.policy/first 'my.agents.policy/second]]
@@ -860,13 +855,11 @@
                               projection :panic caps identity arm-request)]
                  (is (= 9 (wrapped 9)))
                  (is (thrown? Exception (wrapped "not an integer")))))
-             (is (= 1 @acquisitions)
-                 "interpreted bulk callers carry their already acquired limit")
-             (instrument/wrap-interpreted
-              'my.agents.policy/standalone "[:=> [:cat :int] :int]"
-              projection :panic caps identity)
-             (is (= 2 @acquisitions)
-                 "a standalone interpreted arm acquires its omitted limit once")))
+             (let [wrapped (instrument/wrap-interpreted
+                            'my.agents.policy/standalone "[:=> [:cat :int] :int]"
+                            projection :panic caps identity)]
+               (is (= 9 (wrapped 9)))
+               (is (thrown? Exception (wrapped "not an integer")))))
          (finally
            (doseq [name names] (ns-unmap 'seon.instrument-test name))))))))
 
@@ -969,7 +962,7 @@
         candidate-name (symbol (str "cold-contract-" (random-uuid)))
         candidate (intern 'seon.instrument-test candidate-name identity)
         contract [:=> [:cat :seon.agent/id] :seon.agent/id]
-        caps (config/result-caps (config/defaults))
+        caps (config/result-caps config/defaults)
         arm (fn []
               (#'instrument/arm-var! candidate contract projection projection caps)
               {:seon.instrument/contract-digest

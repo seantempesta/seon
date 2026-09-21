@@ -29,11 +29,11 @@
                     :seon.agent/id "root"
                     :seon.turn/id "context-probe"
                     :seon.sci.eval/ctx ctx
-                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
                     :seon.config/on-core-error :record
                     :seon.render/distance 1
-                    :seon.render/profile (render/agent-render-profile (config/defaults))}]
+                    :seon.render/profile (render/agent-render-profile config/defaults)}]
        (with-open [executor (Executors/newVirtualThreadPerTaskExecutor)]
          (let [context-result (.submit executor
                                        ^Callable (fn []
@@ -226,7 +226,7 @@
                basis (seon.db/basis-t (seon.db/db connection))
                _ (seon.cluster/project-next-prepl-value! {:seon.dev.mcp/read-only? true})
                terminal (seon.cluster/mcp-valf
-                         "cold-page-mcp-test" (seon.config/defaults)
+                         "cold-page-mcp-test" seon.config/defaults
                          (seon.db/q '[:find ?id . :where [_ :seon.agent/id ?id]]
                                     (seon.db/db connection))
                          false channels)]
@@ -242,7 +242,7 @@
              (clojure.test/is (= invokes-before @calls))
              (clojure.test/is (= roots-before @roots) "zero root reacquisitions"))
            (seon.cluster/project-next-prepl-value!)
-           (seon.cluster/mcp-valf "cold-page-mcp-test" (seon.config/defaults) 3 false channels)
+           (seon.cluster/mcp-valf "cold-page-mcp-test" seon.config/defaults 3 false channels)
            (seon.test-support/await-event!
             cache [:unspecified-mcp-return-invalidates]
             #(empty? (:seon.render.web/calls %)))

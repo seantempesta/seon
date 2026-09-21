@@ -7,14 +7,14 @@
             [seon.test-support :as support]))
 
 (def ^:private caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (deftest one-pass-derives-one-profile-for-every-page-unit
   (support/with-database
     (fn [connection]
       (let [effective-calls (atom 0)
             observed-profiles (atom [])
-            effective (config/defaults)
+            effective config/defaults
             expected-profile (render/agent-render-profile effective)
             handle {:seon.cluster/name "web-performance-test"
                     :seon.db/connection connection

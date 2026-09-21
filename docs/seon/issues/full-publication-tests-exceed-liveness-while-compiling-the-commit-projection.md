@@ -192,7 +192,6 @@ assertion. The ordinary object and nested-value tests retain their default
 five-second bound. See the per-test table and final tally in the
 [error landing note](../../prds/steward-platform/research/error-family-1a-2026-09-19.md).
 
-
 ## Documentation-only report validation — 2026-09-23
 
 The redesign lane's isolated five-entity docstring write ran full arity checks
@@ -217,3 +216,20 @@ caller already carries a projection. This is repeated whole-population work,
 not evidence for raising the test bound. The timed original-test patch and
 per-test results are in the test-system landing note. Config ownership was
 requested; no config, shared process or publication fixture was changed.
+
+## Config constant removes repetition; first namespace loading remains
+
+Owner subsequently ruled that shipped defaults are one immutable program
+constant, compiled at namespace load. Test-system run `10c7914dcd7c` measures
+both-host selection at **10075.075 ms**, still failing its 5000 ms bound.
+Settings compilation is now one explicit manifest call (**2.800 ms**) with
+one supplied declaration projection (**97.099 ms**), instead of 35 redundant
+compilations. `load-core-namespaces!` remains **5794.833 ms**; SCI base
+construction is **547.255 ms**. Its query at `src/seon/sci/eval.clj:1311` loads
+the entire published core namespace population, including tests, on the first
+SCI acquisition. The largest namespace load is `seon.db-test`, **955.328 ms**.
+
+This establishes the next operation to address; it does not authorize moving
+the test clock or adding an allowance. The six publication fixtures remain
+with the redesign lane. Full timing, compiler parity and the final original
+18-offender table are in the test-system landing note.

@@ -9,7 +9,7 @@
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as support]))
 
-(def ^:private caps (config/result-caps (config/defaults)))
+(def ^:private caps (config/result-caps config/defaults))
 (def ^:private agent-id "render-walk-agent")
 (def ^:private agent-namespace 'my.agents.render-walk)
 

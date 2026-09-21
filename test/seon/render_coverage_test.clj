@@ -31,7 +31,7 @@
 (def ^:private request-edn "#:my.fs{:path \"README.md\"}")
 (def ^:private result-edn "#:my.fs{:content \"rendered content\"}")
 (def ^:private blob-digest (apply str (repeat 64 "a")))
-(def ^:private caps (config/result-caps (config/defaults)))
+(def ^:private caps (config/result-caps config/defaults))
 
 (defn- render-request
   [database ctx value]
@@ -153,7 +153,7 @@
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            value (pulled database [:seon.config/cluster cluster-name])
-           profile (render/agent-render-profile (config/defaults))
+           profile (render/agent-render-profile config/defaults)
            web-call-id [:web :config]
            web-captured (atom {})
            before-web (db/basis-t database)

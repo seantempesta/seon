@@ -73,7 +73,7 @@
   "The shipped defaults — the real document, not a fixture of it. A
   suite that invents its own dial map cannot catch a default that
   stopped being derivable."
-  (delay (config/defaults)))
+  (delay config/defaults))
 
 (deftest the-shipped-cluster-has-a-primary-and-configured-backup
   (let [targets (ai/targets (seon.schema/handed-projection) @dials)]

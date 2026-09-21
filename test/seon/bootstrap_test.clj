@@ -31,7 +31,7 @@
    :seon.db/connection connection
    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
    :seon.render.walk/lookup [:seon.agent/id agent-id]
-   :seon.sci.admit/caps (config/result-caps (config/defaults))
+   :seon.sci.admit/caps (config/result-caps config/defaults)
    :seon.sci.eval/time-limit-ms 5000
    :seon.config/on-core-error :record
    :seon.render/output :seon.render/form
@@ -111,7 +111,7 @@
                      {:seon.sci.admit/value situation
                       :seon.sci.admit/interrupt-fn (fn [])
                       :seon.sci.admit/caps
-                      (config/result-caps (config/defaults))
+                      (config/result-caps config/defaults)
                       :seon.config/on-core-error :record}))]
           (support/transacted!
                   connection
@@ -201,7 +201,7 @@
                (bootstrap/situation @connection agent-id)
                :seon.sci.admit/interrupt-fn (fn [])
                :seon.sci.admit/caps
-               (config/result-caps (config/defaults))
+               (config/result-caps config/defaults)
                :seon.config/on-core-error :record}))
             episode
             (walk/ordered-episode

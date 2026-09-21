@@ -340,7 +340,7 @@
             result
             (config/apply!
              {:seon.db/connection connection
-              :seon.config/manifest (config/defaults)
+              :seon.config/manifest config/defaults
               :seon.boot/cluster-name "fixture-proof"})
             after
             (db/q

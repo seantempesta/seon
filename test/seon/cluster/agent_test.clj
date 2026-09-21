@@ -50,7 +50,7 @@
 (def ^:private shipped-eval-time-limit-ms
   ;; Ordinary finite evaluation must stay ordinary under scheduler load.
   ;; A shorter fixture-only limit changes the tested disposition.
-  (delay (:seon.config.eval/time-limit-ms (config/defaults))))
+  (delay (:seon.config.eval/time-limit-ms config/defaults)))
 
 (set! *warn-on-reflection* true)
 
@@ -101,7 +101,7 @@
                      :seon.config.flow.io/concurrency 2)})
             context-channel
             (test-support/render-context-channel
-             (render/agent-render-profile (config/defaults)))
+             (render/agent-render-profile config/defaults))
             stream-channel (async/chan (async/sliding-buffer 1))
             render-channel (async/chan (async/sliding-buffer 1))
             runtime-eval-channel (async/chan (async/sliding-buffer 1))
@@ -199,7 +199,7 @@
           :seon.config.eval.result/max-nodes 256)
    :seon.config.eval/time-limit-ms @shipped-eval-time-limit-ms
    :seon.config.agent/turn-completion-backstop-ms
-   (:seon.config.agent/turn-completion-backstop-ms (config/defaults))
+   (:seon.config.agent/turn-completion-backstop-ms config/defaults)
    :seon.config/on-core-error :panic
    :seon.config.error/recurrence-limit 3
    :seon.config.message/max-chain 16}))
@@ -1074,7 +1074,7 @@
             message-id "install-gate-chain-message"
             namespace-name 'my.agents.install-gate-chain
             timeout-ms (:seon.config.agent/turn-completion-backstop-ms
-                        (config/defaults))
+                        config/defaults)
             gate-var (ns-resolve 'seon.turn 'gate-function-install)
             events (database-events connection)]
         (test-support/transacted!

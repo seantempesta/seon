@@ -85,7 +85,7 @@
      (:seon.config.render.agent/composition effective)}))
 
 (def ^:private default-agent-profile
-  (delay (agent-render-profile (config/defaults))))
+  (delay (agent-render-profile config/defaults)))
 
 (defn request-projection
   "The schema projection one render request asks its selection questions of.

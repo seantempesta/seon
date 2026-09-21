@@ -38,7 +38,7 @@
     [:=> [:cat] :seon.config/effective]
     [:=> [:cat :seon.config/manifest] :seon.config/effective]]}
   ([]
-   (config/defaults))
+   config/defaults)
   ([manifest]
    (:seon.config/effective
     (config/compile-manifest {:seon.boot/cluster-name "default" :seon.config/manifest manifest}))))
@@ -665,7 +665,7 @@
   and the error dial come from the shipped decisions."
   ([ctx source] (agent-value ctx source nil))
   ([ctx source namespace-name]
-   (let [decisions (config/defaults)]
+   (let [decisions config/defaults]
      (:seon.sci.admit/value
       (sci.eval/evaluate
        (cond-> {:seon.cluster.eval/source source
@@ -697,7 +697,7 @@
   cluster's identity — connection, name, process, SCI ctx — is never
   defaulted: those are the caller's world."
   [handle]
-  (let [decisions (config/defaults)]
+  (let [decisions config/defaults]
     (merge {:seon.agent/context-state (atom {})
             :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
             :seon.render/context-channel (async/chan (async/sliding-buffer 1))

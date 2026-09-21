@@ -9,7 +9,7 @@
 (defn- run-in [ctx source time-limit-ms]
   (eval/evaluate {:seon.sci.eval/ctx ctx
                   :seon.cluster.eval/source source
-                  :seon.sci.admit/caps (config/result-caps (config/defaults))
+                  :seon.sci.admit/caps (config/result-caps config/defaults)
                   :seon.sci.eval/time-limit-ms time-limit-ms
                   :seon.config/on-core-error :panic}))
 

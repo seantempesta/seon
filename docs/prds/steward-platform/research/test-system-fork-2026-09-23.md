@@ -1428,7 +1428,7 @@ the process table showed no scratch JVM, and the root was deleted. The
 records this foreign verification boundary. No boot before/after improvement
 or sixth-test improvement is claimed.
 
-### Original 18 offenders: latest established measurements at this stop
+### Original 18 offenders: final measurements for the config-constant slice
 
 These are dated measurements from the runs recorded above, not a new suite run.
 Publication refusal durations are deliberately not presented as after results.
@@ -1447,9 +1447,89 @@ Publication refusal durations are deliberately not presented as after results.
 | `flow-configuration-test/every-built-graph-proc-declares-a-specific-workload` | 11876.568 | 2537.603 | pass |
 | `test-runner-test/gate-completions-travel-as-a-file-not-as-code` | 11834.051 | 3274.513 | pass |
 | `test-support-test/simultaneous-fixture-bases-never-open-the-published-store` | 6542.267 | 6339.881 | within declared 10000 ms; three physical copies and two full file-hash comparisons |
-| `test.runner-test/no-double-execution` | 5116.567 | 4472.982 | pass |
-| `test.runner-test/platform-claims-and-original-bounds-govern-bulk` | 30929.637 | 2639.568 | pass |
-| `test.runner-test/selection-is-one-function-on-both-hosts` | 13917.317 | — | latest 15220.769 ms; duration failure |
-| `test.selection-test/fileless-sci-tests-use-the-same-selection` | 6337.355 | 2722.371 | pass after first SCI acquisition |
-| `test.selection-test/named-selection-reuses-green-members-by-reachable-content` | 14137.688 | 3133.237 | pass |
-| `test.selection-test/omitted-dirty-callers-use-head-and-carry-recordable-provenance` | 15795.024 | 543.164 | pass |
+| `test.runner-test/no-double-execution` | 5116.567 | 4452.159 | pass |
+| `test.runner-test/platform-claims-and-original-bounds-govern-bulk` | 30929.637 | 2625.914 | pass |
+| `test.runner-test/selection-is-one-function-on-both-hosts` | 13917.317 | — | latest 10075.075 ms; duration failure |
+| `test.selection-test/fileless-sci-tests-use-the-same-selection` | 6337.355 | 2671.323 | pass after first SCI acquisition |
+| `test.selection-test/named-selection-reuses-green-members-by-reachable-content` | 14137.688 | 3086.924 | pass |
+| `test.selection-test/omitted-dirty-callers-use-head-and-carry-recordable-provenance` | 15795.024 | 492.542 | pass |
+
+### Shipped defaults are an immutable program constant
+
+Owner ruling after `04da80fe9`: option 2, narrowly. The shipped manifest is a
+resource of the program. `config/defaults` is now a plain `def`, compiled when
+`seon.config` loads and recomputed when that namespace reloads. There is no
+atom, delay, memoization or cache behind this value. Cluster configuration
+still travels through existing explicit inputs. AGENTS.md §2.1 records this
+exception. Config was clean immediately before editing. Every executable
+zero-argument call was converted in the same slice; the renderer's indirect
+Var invocation became a dereference. Instrumentation no longer delays an
+acquisition of this constant, and its regression retains policy equality,
+wrapper reuse, changed-policy and interpreted-wrapper assertions.
+
+The first eager-load attempt exposed why a complete schema projection cannot
+belong to this constant: `config/compile-settings` reached
+`schema/compilable-form` → `seon.test.runner` → `seon.cluster.source` →
+`seon.fn` → `seon.test.accretion`, while `seon.effect` was still loading.
+The complete refusal was `namespace 'seon.effect' not found` at
+`seon/test/accretion.clj:1:1`. No loader exception or deferred default value
+was added. `src/seon/config.clj:540` now follows Malli references from the two
+config composites, using `schema/direct-references` (`src/seon/schema.clj:818`)
+and Malli's existing reference walker (`:60–78`). Only those declarations enter
+`schema/declaration-projection`. This is a derivation from canonical forms,
+not a schema roster. Explicit `compile-manifest` still acquires the complete
+projection once and validates initialization entities against it; the shared
+settings compiler receives that projection and document as arguments.
+
+The reproducible [fresh-load measurement](test-system-config-load-2026-09-23.clj)
+observed **one projection construction, 108 schemas, 9.366 ms**, and 79 effective
+defaults. Config namespace loading, including its other required namespaces,
+took **1437.165 ms** after schema was loaded. This is not a boot-config interval.
+The earlier scratch-boot classpath failure remains the boot measurement boundary;
+no shared/default process was operated or adoption proof claimed.
+
+The original-test operation measurement, run **10c7914dcd7c**, reports:
+
+| Operation during both-host selection | Before | After |
+|---|---:|---:|
+| Settings compilation | 35 calls / 6282.947 ms | 1 explicit manifest compile / 2.800 ms |
+| Declaration projection construction | 35 calls / 3428.804 ms | 1 / 97.099 ms |
+| Load published JVM namespaces | 10780.097 ms | 5794.833 ms |
+| SCI base construction | 466.425 ms | 547.255 ms |
+| Complete test | 15220.769 ms | **10075.075 ms — still fails 5000 ms** |
+
+The settings timing excludes its supplied projection, whereas the old compiler
+constructed that projection internally; the projection row reports that work
+separately. The constant was already compiled at namespace load, so the remaining
+compile is the test's explicit cluster manifest. Timings are inclusive where
+operations nest; do not add them. The largest remaining namespace loads were
+`seon.db-test` **955.328 ms**, `seon.cluster.store-transact-test` **242.472 ms**,
+and `seon.flow-test` **163.876 ms**. `src/seon/sci/eval.clj:1311` still loads the
+whole published core namespace population inside first SCI acquisition. Moving
+that work outside the measured body or widening its bound was not part of this
+constant ruling and was not done. The sixth test's requested under-bound result
+is therefore **not achieved**; this is the next bounded decision, not a green
+claim about the config slice.
+
+The full two-namespace iteration recorded **34 executed / 370 assertions /
+4 failures / 2 errors**. Besides the assigned duration failure, the pre-existing
+unacquired task, publication-fixture eligibility and complete-population selection
+failures remain the same issue classes linked above. The temporary timing
+wrappers were removed. The new maintained config parity regression passed
+**1 test / 2 assertions**, zero failures/errors, in **211.150 ms** (run
+**86f36a2f0f57**); the final armed rerun after the compiler contract change also
+passed, run **bf694745ede5**. A `clojure -M:test` load required all **84 changed
+namespaces**, including the converted callers, successfully.
+
+Cluster-config fallback callers found and deliberately not redesigned:
+
+- `src/seon/render/transcript.clj:896`: `agent-config` promises the agent's
+  cluster configuration but returns shipped defaults when that read is absent
+  or refused.
+- `src/seon/sci/eval.clj:1738`: `record-acquisition-refusals!` replaces a refused
+  database config read with shipped defaults before choosing error limits.
+
+Their call syntax changed with the constant; their existing fallback behavior
+did not. Fast overlays explicitly excluded foreign edits in `src/seon/cluster.clj`,
+`src/seon/fn.clj`, and `test/seon/cluster/publication_delta_test.clj`; those
+callers used HEAD bytes. No publication test, foreign hunk, or session was edited.

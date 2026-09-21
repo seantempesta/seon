@@ -14,7 +14,7 @@
             [seon.test-support :as test-support]))
 
 (def ^:private caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (def ^:private floor-producers
   #{'seon.render.value/render-ai

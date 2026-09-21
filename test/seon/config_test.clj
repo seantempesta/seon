@@ -119,7 +119,7 @@
           "(when-not (contains? (seon.schema/registered-schemas) "
           ":seon.ai.model/provider-id) "
           "(throw (ex-info \"packaged schema missing\" {}))) "
-          "(seon.config/defaults) "
+          "seon.config/defaults "
           "(println :fresh-config-ready) "
           "(shutdown-agents)")]
         process

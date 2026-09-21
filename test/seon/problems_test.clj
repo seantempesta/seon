@@ -33,7 +33,7 @@
 (def ^:private now #inst "2026-07-27T21:00:00.000-00:00")
 
 (def ^:private caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (defn- with-db
   [body]

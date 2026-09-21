@@ -13,7 +13,7 @@
             [seon.test-support :as test-support]))
 
 (def ^:private caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (def ^:private custody-output-schema-keys
   #{:seon.store/store

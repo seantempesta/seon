@@ -15,7 +15,7 @@
 (deftest pulled-fault-concern-uses-the-entity-pair
   (support/with-database
    (fn [connection]
-     (let [effective (config/defaults)
+     (let [effective config/defaults
            caps (config/result-caps effective)
            ctx (support/fork-cluster-ctx connection)
            _ (support/transacted! connection [{:seon.agent/id "fault-render-agent"}

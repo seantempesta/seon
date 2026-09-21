@@ -208,7 +208,7 @@
               (str "(seon.search/search "
                    (pr-str (list 'quote request)) ")")
               :seon.sci.admit/caps
-              (config/result-caps (config/defaults))
+              (config/result-caps config/defaults)
               :seon.sci.eval/time-limit-ms 5000
               :seon.config/on-core-error :panic})
             result (:seon.sci.admit/value evaluation)]

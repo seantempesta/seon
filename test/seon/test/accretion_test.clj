@@ -234,7 +234,7 @@
                "fixture.candidate/red-test"]
               :seon.sci.eval/time-limit-ms 2000
               :seon.sci.admit/caps
-              (config/result-caps (config/defaults))
+              (config/result-caps config/defaults)
               :seon.config/on-core-error :panic})
             candidate (:seon.test.accretion/candidate-ctx result)
             results (:seon.test.accretion/results result)
@@ -300,7 +300,7 @@
               :seon.test.accretion/gate-set
               ["fixture.custody/reads-its-own-cluster"]
               :seon.sci.eval/time-limit-ms 2000
-              :seon.sci.admit/caps (config/result-caps (config/defaults))
+              :seon.sci.admit/caps (config/result-caps config/defaults)
               :seon.config/on-core-error :panic})
             gate (first (:seon.test.accretion/results result))]
         (is (= "fixture.custody/reads-its-own-cluster"
@@ -340,7 +340,7 @@
                 :seon.test.accretion/gate-set []
                 :seon.sci.eval/time-limit-ms 2000
                 :seon.sci.admit/caps
-                (config/result-caps (config/defaults))
+                (config/result-caps config/defaults)
                 :seon.config/on-core-error :panic}))
             check-request
             (fn [candidate row]
@@ -351,7 +351,7 @@
                :seon.test.accretion/seed 424242
                :seon.sci.eval/time-limit-ms 2000
                :seon.sci.admit/caps
-               (config/result-caps (config/defaults))
+               (config/result-caps config/defaults)
                :seon.config/on-core-error :panic})
             bad
             (candidate-request

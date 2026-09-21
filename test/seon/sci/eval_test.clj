@@ -43,7 +43,7 @@
             [seon.test-support :as test-support]))
 
 (def ^:private caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (deftest overrides-follow-current-admission-and-survive-lost-own-file-coordinates
   (test-support/with-database
@@ -2053,7 +2053,7 @@
     "(java.io.File. \"/etc/passwd\")"]))
 
 (deftest generated-sources-compose-fork-guard-and-admission
-  (let [time-limit-ms (:seon.config.eval/time-limit-ms (config/defaults))
+  (let [time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
         check
         (tc/quick-check
          100

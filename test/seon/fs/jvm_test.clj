@@ -32,7 +32,7 @@
   defaults are compiled here and only the dials this suite varies are
   changed, so a new config member never silently drops out of coverage."
   [root]
-  (assoc (config/defaults)
+  (assoc config/defaults
          :seon.config.fs/working-root (str root)
          :seon.config.fs/roots [(str root)]
          :seon.config.fs/max-read-bytes (* 64 1024 1024)

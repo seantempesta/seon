@@ -7,7 +7,7 @@
             [seon.test-support :as support]))
 
 (def ^:private caps
-  (config/result-caps (config/defaults)))
+  (config/result-caps config/defaults))
 
 (deftest data-response-reads-the-presentation-window-per-request
   (support/with-database

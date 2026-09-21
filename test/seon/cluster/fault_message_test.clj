@@ -20,7 +20,7 @@
                                              fault (::async.flow/ex fault))))
                    [fact outcome reported?]
                    (#'cluster/commit-fault! connection "absent-fault-cluster"
-                    "fault-message-test" (config/result-caps (config/defaults)) fault)
+                    "fault-message-test" (config/result-caps config/defaults) fault)
                    output (java.io.StringWriter.)]]
        (is (not= ::flow/committed outcome))
        (is (false? reported?))

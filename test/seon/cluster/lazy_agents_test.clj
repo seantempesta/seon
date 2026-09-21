@@ -29,6 +29,6 @@
         [[:db.fn/call #'message/inbound-tx
           {:seon.agent/id "waiting" :seon.message/inbound-content "Please inspect this."
            :seon.config.eval.result/max-string
-           (:seon.config.eval.result/max-string (config/defaults))}]])
+           (:seon.config.eval.result/max-string config/defaults)}]])
        (is (= #{"root" "waiting"}
               (#'agent/agents-to-arm (db/db connection) candidates)))))))

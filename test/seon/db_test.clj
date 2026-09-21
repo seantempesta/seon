@@ -1025,7 +1025,7 @@
 (deftest nested-native-reports-admit-bounded-reference-identities
   (test-support/with-database
    (fn [connection]
-     (let [effective (config/defaults)
+     (let [effective config/defaults
            request
            {:seon.sci.admit/value
             {:probe/report (db/transact! connection [])}

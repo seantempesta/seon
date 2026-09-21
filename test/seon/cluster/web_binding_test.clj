@@ -32,7 +32,7 @@
                       :seon.render.web/latest-packages (atom {})
                       :seon.render.web/render-channel render
                       :seon.render.web/fault-channel faults}}
-           dials (assoc (config/defaults) :seon.config.web/port 0)]
+           dials (assoc config/defaults :seon.config.web/port 0)]
        (.mkdirs (.getParentFile file))
        (try
          (with-open [first-server

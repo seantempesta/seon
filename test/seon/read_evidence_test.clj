@@ -26,7 +26,7 @@
                :seon.agent/id "juniper"
                :seon.cluster.eval/source "(seon.db/q '[:find [(pull ?m [:seon.message/content]) ...] :where [?m :seon.message/to [:seon.agent/id \"juniper\"]] (not [?m :seon.message/from])])"
                :seon.cluster.eval/ns [:seon.ns/name 'user]
-               :seon.sci.admit/caps (config/result-caps (config/defaults))
+               :seon.sci.admit/caps (config/result-caps config/defaults)
                :seon.sci.eval/time-limit-ms 5000
                :seon.config/on-core-error :panic}))
            evidence (db/read-evidence @captured)

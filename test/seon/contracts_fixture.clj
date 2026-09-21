@@ -33,7 +33,7 @@
   (largest-customer order-rows))")
 
 (defn request [connection ctx source]
-  (let [effective (config/defaults)]
+  (let [effective config/defaults]
     {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
      :seon.db/connection connection :seon.agent/id "contracts-plan"
      :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]

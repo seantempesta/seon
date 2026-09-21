@@ -12,7 +12,7 @@
            base {:seon.db/db @connection
                  :seon.sci.eval/ctx ctx
                  :seon.render/value 7
-                 :seon.sci.admit/caps (config/result-caps (config/defaults))
+                 :seon.sci.admit/caps (config/result-caps config/defaults)
                  :seon.sci.eval/time-limit-ms 2000
                  :seon.config/on-core-error :panic
                  :seon.render/output :seon.render/ai

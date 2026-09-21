@@ -242,7 +242,7 @@
   [unit]
   (let [profile (or (:seon.render/profile unit)
                     (@render-agent-render-profile
-                     (@config-defaults)))
+                     @@config-defaults))
         root (or (:seon.repl/handle unit) (:seon.render.value/root unit))
         root (when (and (qualified-symbol? root) (= "result" (namespace root))) root)]
     (cond

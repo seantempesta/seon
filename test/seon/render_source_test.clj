@@ -14,7 +14,7 @@
             [seon.sci.eval :as eval]
             [seon.test-support :as support]))
 
-(def ^:private caps (config/result-caps (config/defaults)))
+(def ^:private caps (config/result-caps config/defaults))
 
 (defn authored-source
   "A source-producing fixture whose contract is indexed like any producer."
@@ -33,7 +33,7 @@
 
   The structural members and the shipped dials are the fixture's; only the
   cluster's own identity and this suite's pinned channel and limit are the
-  caller's. This used to be `(merge (config/defaults) …)` — a SECOND
+  caller's. This used to be `(merge config/defaults …)` — a SECOND
   mechanism for the same shape (§2.5), and one that pours every effective
   config dial into the handle rather than the members
   `:seon.turn.loop/cluster` declares, so a renamed dial would leave the
@@ -78,7 +78,7 @@
                     :seon.render/namespace 'my.agents.memory-preview
                     :seon.render/ai 'seon.render-source-test/database-source
                     :seon.render/output :seon.render/ai
-                    :seon.render/profile (render/agent-render-profile (config/defaults))
+                    :seon.render/profile (render/agent-render-profile config/defaults)
                     :seon.render.call/id [:memory-preview]
                     :seon.render/captured-calls calls
                     :seon.render/captured-invocations invocations

@@ -267,7 +267,7 @@
                       (into-array StackTraceElement
                                   [(StackTraceElement. "reset.observed_only$absent"
                                                        "invokeStatic" "observed_only.clj" 9)])))
-           defaults (config/defaults)
+           defaults config/defaults
            recording (error/recording
                       (db/db connection)
                       (merge (select-keys defaults [:seon.config.error/recurrence-limit
