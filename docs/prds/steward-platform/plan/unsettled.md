@@ -7303,3 +7303,12 @@ stopped correctly — the retirement is one atomic slice and waits for the
 slice 4 landing; parked again. `test-system-fork` pushed the Datahike
 fork fix for the writer log (`e1491ed72`, pinned). `schema-shape-authored`
 resumed on the two owed `program_test` expectations only.
+
+**Ruling ~22:05 (caller lint order):** transact the changed declarations
+on the unpublished branch, select callers from that transaction report
+(re-lint only where a referenced declaration's contract digest changed),
+transact the findings, then move the head — the report is the seam.
+`01314ffb2` (config difference) and `6e8cadca1` (findings through changed
+file refs) accepted; `fn.clj`/`instrument.clj` released to the redesign
+lane. Fast-run recording is refused on the pre-reset host's old config
+schema for every lane: the reset is due as soon as `src` is quiet.
