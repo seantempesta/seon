@@ -134,22 +134,31 @@ Ownership is responsibility to classify and preserve surviving behavior, not per
 to bulk-delete those files. B1 retains operator/bootstrap publication custody; B2
 retains evaluation and rendering behavior. Convert overlapping callers in one slice.
 
-The implementation order is by usable interfaces, not whole-lane barriers:
+Implementation is four substantial cuts. The specs define responsibilities inside
+those cuts; they are not eight sequential projects or a queue of per-function fixes.
+Preparation first proves dependency selection using the real analyzer and recorded
+test authority: an ordinary leaf change selects its actual dependent tests, a shared
+function change selects the wider justified set, and an unchanged green request
+executes no tests. Explain selected paths and distinguish lexical calls, callable
+dependencies and descriptive symbols before trusting a selective gate. Sample leaf,
+intermediate and shared functions; broad shared-function samples do not establish an
+average for ordinary edits.
 
-| Step | Coherent slice | Exit condition |
+| Cut | Coherent removal and replacement | Exit condition |
 |---|---|---|
-| 1 | B1 development-tool preflight; orchestrator prepares the authorized fresh baseline | Status and one bounded evaluation answer; recorded boot/publication measurements; required evidence preserved |
-| 2 | A1/A2/B1 projection constructors, B1 definition identity and graph fidelity; B3 constructor contract | Every consumer has real inputs before any fallback or public constructor is retired |
-| 3 | A1/A2/B1 validator producers, publication reports, affected arming and input observation | Incremental behavior and refusal preserve the published head and complete validation |
-| 4 | B1/B2/A1 independent execution; B4 carried fixture and final request | Old/new/candidate definitions remain independent; named execution program actually runs |
-| 5 | B2/B3 task/render lifecycle and B4 caller conversion | One settlement path and test request; every retired name converted in the same loadable slice |
-| 6 | C1 observation using installed contracts; B4 diagnostic observation interface | Correct attribution, bounded overhead, explicit concurrency limits and refusal-safe recording |
-| 7 | D1 combined-program gate, explicit acceptance and staged export | Invalid/stale/conflicting proposals refuse; accepted definitions round-trip with durable evidence |
-| 8 | First bounded namespace-agent tasks, then repeated-fixture-setup work | Real repair through the complete loop; surviving issues promoted only after required resets |
+| 1 | Program facts, publication and contracts: A1/B1 with A2 validator inputs and B3 constructor contract; remove redundant construction/publication paths with all callers | Faithful dependencies and definition identity; carried compiled contracts; incremental work and refused publication preserve the published head |
+| 2 | Database and execution: A2/B2 with A1 acquisition and B4 execution inputs; remove repeated database/context reconstruction and duplicate execution machinery | Complete validation; old/new/candidate definitions remain independent; private objects survive turns; named execution program actually runs |
+| 3 | Tasks, rendering and tests: B2/B3/B4; remove parallel settlement, history and test-request paths with all callers | One task settlement, history renderer and test authority; per-member reuse, actual termination and observed browser behavior |
+| 4 | Profiling, acceptance and export: C1/D1 with B4 evidence; complete the composed self-improvement path | Honest observations; invalid/stale/conflicting candidates refuse; a real accepted repair survives export and reindex |
 
 At most three editing assignments run concurrently; exact file ownership decides what
 can overlap. No slice removes a safety mechanism before its replacement passes the
-specific proof in its spec. A retirement and all callers are one commit.
+specific proof in its spec. A retirement and all callers are one commit. Remove the
+superseded machinery in the same cut; do not keep dual implementations through an
+extended migration. Small loadable commits may record progress inside a cut; they do
+not each trigger a full integration cycle. This is a concentrated refactor, not a
+multi-day sequence of small patches. If the evidence makes that scope infeasible,
+bring the concrete scope/time tradeoff to the owner before extending it.
 
 ## 5. Measurements and size
 
@@ -189,9 +198,13 @@ seconds still needs owner authorization; a named slow path is not an explanation
 Before a Clojure change, read the listed dependency source and probe the owning seam.
 Use the canonical database population, explicit projection/environment, real SCI and
 armed contracts. A publication regression uses a small complete fixture program.
-Run the tests reaching the change through the currently installed authority; convert
-the authority and all callers before using the new API. No full-suite wait is the
-implementation strategy. Retain platform/destructive isolation where its proof requires it.
+During a cut, run focused regressions through the currently installed authority;
+convert the authority and all callers before using the new API. The orchestrator
+runs affected integration and platform checks at the completed cut. A full-suite
+run belongs to final integration or a concrete cross-cut failure that warrants it,
+never every edit, function conversion or small commit. Unknown selection evidence
+must be repaired or explicitly widen that checkpoint, never silently skip coverage.
+Retain platform/destructive isolation where its proof requires it.
 
 Every commit leaves HEAD loadable and the host REPL reachable. Live verification
 names hot reload, new fork or in-place adoption, and checks the actual program identity.

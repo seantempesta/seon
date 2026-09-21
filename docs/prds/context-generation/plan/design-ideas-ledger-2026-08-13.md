@@ -1077,6 +1077,24 @@ numerically and a bare cross-citation is a defect to fix on sight.
     evaluation entity; `situation`, `generation-complete`, the forms family,
     and `live-processes` are deleted; no `:db.fn/cas` exists or is needed.
 
+## 2026-09-21 — concentrated agent-platform refactor
+
+The owner requires correct dependency-based test selection before implementation
+and rejects a multi-day sequence of small changes followed by whole-suite runs.
+Execute the integrated refactor in three or four substantial cuts (the maintained
+[agent-platform plan](../../agent-platform/plan/README.md) chooses four). Remove
+superseded mechanisms and convert their callers together. Focused regressions guide
+work inside a cut; affected integration and platform checks belong at completed-cut
+checkpoints, with the full suite reserved for final integration or a concrete failure
+that warrants it. This overrides per-small-commit cold-gate cadence for this refactor.
+An elapsed-time commitment must not be invented; bring a concrete scope/time tradeoff
+before work expands into the prolonged incremental process the owner rejected.
+
+Shared-function selection counts do not establish the average for ordinary edits.
+Before trusting selective execution, prove actual leaf/shared dependency paths and
+unchanged-request reuse, separating calls from diagnostic symbols and unresolved
+dispatch. Missing evidence must never count as an unaffected test.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 ### 2026-09-19 owner clarification — plural responsibility and reusable context
