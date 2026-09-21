@@ -2519,3 +2519,59 @@ completed without an exception; the next fast run verifies the report and
 reload changes separately. The latest base still advertises `2c3e6b2247…`;
 `3c552f3bc` fixes the live export request, and a new explicit preparation is
 needed to exercise that fix. No prior red is relabelled green here.
+
+## Report selection draft and wrapper decision — 2026-09-23
+
+Focused fast `b950ee2b7df0`, HEAD `838708cc8` plus the four owned paths:
+**4 tests, 6 assertions, 0 failures, 3 errors**. The base remains
+`2c3e6b2247…` (six commits behind at admission). Exact errors:
+
+- `lint-callers-only-after-a-committed-contract-change` and namespace reload
+  selection: `seon.fn/analyzed-artifacts refused database at []: expected a
+  set, got nil.`
+- `transaction-report-identities-select-only-changed-program-rows`:
+  `seon.fn/published-index-rows refused argument count at []: expected the
+  declared arglists, got an argument count of 3.`
+
+The unchanged existing wrapper-set regression passed. These three errors
+match the exported old declarations already inspected above, not the shape
+lane's `:not` child-error. The report-driven caller and namespace selection
+changes remain **uncommitted drafts**, not accepted implementation or measured
+performance. The draft also checks analysis errors before parsing malformed
+source. The last test-only edit adds the previously missing assertion that
+the docstring transaction was admitted; it is linted but not rerun.
+Production namespaces load at this HEAD with the drafts; clj-kondo reports
+zero errors (48 warnings, principally existing shadowed names). The
+configuration lane's `838708cc8` is committed and no foreign edits are included.
+
+There is one literal item-8 contract decision before changing instrumentation:
+`compiled-wrapper` (`src/seon/instrument.clj:735`) closes over `original`
+and its projection-cache key includes that callable; `arm-var!` (`:860`)
+also closes over it. `require :reload` replaces that callable even when the
+contract digest is identical. Reinstalling the old wrapper would execute
+old code. Current measured instrumentation is 76 ms for this edit, and the
+accepted regression expects precisely the three reloaded function wrappers
+to change, with every unrelated wrapper identical.
+
+Three choices, with implementation costs rather than invented time savings:
+
+1. **Recommended: preserve the accepted wrapper-set semantics.** New callable
+   means a new wrapper; unchanged contract means reuse Malli compilation
+   through the existing projection cache. Cost: split compilation from
+   callable binding in `compiled-wrapper` and test both new behavior and
+   compilation reuse. Gives up literal wrapper identity across reload.
+2. Skip reload for docstring-only edits. Cost: declaration comparison and
+   metadata update semantics, plus separate body/macro/protocol regressions.
+   Preserves wrappers for documentation edits but adds a source classification
+   decision and still requires new wrappers for body edits.
+3. Keep wrappers stable through a mutable callable target. Cost: new mutable
+   indirection and lifecycle ownership in every armed function. Preserves
+   wrapper identity, but introduces state and is contrary to the deletion
+   preference; not recommended.
+
+AGENTS.md §2.5 says to stop before production edits when guarantees cannot be
+stated simply and bring three options. This question concerns that literal
+identity guarantee, not permission to run tests or a request to wait for a
+foreign fix. No instrumentation edit has been made for these options. The
+source projection's remaining 248 ms and analysis's 475 ms are independent
+performance work; none of these choices promises to remove those costs.
