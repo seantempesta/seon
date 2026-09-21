@@ -22,9 +22,9 @@
  :key [:qualified-keyword {:seon.db/identity true}],
 
  ;; Ref to the registered `:seon.schema/key` row whose `:seon.schema/shape`
- ;; IS the value contract. Joining through the shape (not the spelling) is
- ;; what makes an equal inline declaration converge on the same P12
- ;; content-addressed fingerprint.
+ ;; names the supplied value contract. Only that authored schema name matches;
+ ;; an inline structural copy or differently named alias requests no default.
+ ;; Shape fingerprints include the name and its referenced definition.
  :schema :seon.db/ref,
 
  ;; Ref to the supplier's `:seon.fn/sym` row. The symbol is DATA: it is

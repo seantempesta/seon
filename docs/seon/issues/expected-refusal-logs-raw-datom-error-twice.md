@@ -93,3 +93,14 @@ of a caller's transaction, not fork faults — replace `log/raise` with a
 plain `throw` of the same `ex-info` at those sites and let the writer's
 classified face be the one log. Gate it on our own falsifier, as the note's
 Expected section already requires.
+
+## Authored-shape scratch observation — 2026-09-23
+
+The scratch Juniper installer refused `agent-already-running` and emitted the
+complete `encode-call-output-in` projection inside writer invocation data,
+including all function contracts and schema forms. The scratch log grew to
+674,642,724 bytes; the diagnostic was unreadable. This is live evidence
+of the existing unbounded invocation-logging class, not a new logging owner.
+The bounded cause, publication identity and incomplete seed are preserved in
+[the authored-shape landing note](../../prds/steward-platform/research/schema-shape-authored-2026-09-23.md).
+The owned scratch root was downed and removed; no foreign logger was edited.

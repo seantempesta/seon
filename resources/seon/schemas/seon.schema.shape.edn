@@ -1,7 +1,9 @@
 #:seon.schema.shape{:fingerprint
                     [:and {:seon.db/identity true} :seon.source/digest],
                     :normalization-revision :string,
-                    :form :string,
+                    :required-map-entries [:vector [:tuple :qualified-keyword :seon.schema/value]],
+                    :supplied-map-entries [:vector [:tuple :qualified-keyword :qualified-keyword :seon.source/digest]],
+                    :form [:string {:description "Authored node: a leaf or vector head, with operands and properties in their own rows/attribute. A local recursive registry retains its authored scope without child rows. Registry references remain names, never expanded definitions."}],
                     :comparison [:enum :exact :structural-only],
                     :type :keyword,
                     :properties :string,

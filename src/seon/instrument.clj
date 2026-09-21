@@ -711,11 +711,10 @@
                       :seon.instrument.explanation/value-location
                       (observation-location caps (:in problem))
                       :seon.instrument.explanation/expected-shape
-                      (schema-shape/fingerprint
-                       (:seon.schema.shape/form
-                        (schema-shape/normalized-form (:schema problem)
-                          (:seon.schema.projection/forms projection)
-                          (schema/predicate-functions-in projection))))
+                      (:seon.schema.shape/fingerprint
+                       (schema-shape/normalized-form (:schema problem)
+                         (:seon.schema.projection/forms projection)
+                         (schema/predicate-functions-in projection)))
                       :seon.instrument.explanation/actual
                       (error/project-observation caps (:value problem))
                       :seon.instrument.explanation/humanization-unavailable
@@ -723,11 +722,10 @@
                    (:errors explanation))]
         (assoc base :seon.instrument/check check
                :seon.error/expected-shape
-               (schema-shape/fingerprint
-                (:seon.schema.shape/form
-                 (schema-shape/normalized-form contract
-                   (:seon.schema.projection/forms projection)
-                   (schema/predicate-functions-in projection))))
+               (:seon.schema.shape/fingerprint
+                (schema-shape/normalized-form contract
+                  (:seon.schema.projection/forms projection)
+                  (schema/predicate-functions-in projection)))
                :seon.error/location (observation-location caps [])
                :seon.instrument/explanations
                {:seon.instrument.explanations/count (count items)

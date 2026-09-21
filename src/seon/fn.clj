@@ -2530,6 +2530,7 @@
              schema-forms function-contracts
              {:seon.schema/validate-render-contracts? true}))
         _ (report-index-progress! progress! "contract projection complete")
+        schema-forms (schema-shape/prepare-forms projection)
         compile-options (:seon.schema.projection/compile-options projection)
         predicate-functions (schema/predicate-functions-in projection)
         schema-keys (set (keys schema-forms))

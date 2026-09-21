@@ -36,6 +36,7 @@
   (:require [clojure.test.check.generators :as gen]
             [datahike.core :as datahike]
             [malli.core :as m]
+            [malli.registry :as mr]
             [seon.db :as db]
             [seon.env :as env]
             [seon.error.refusal :as error]
@@ -349,6 +350,45 @@
     [?function :seon.fn/arities ?arity]
     [?function :seon.fn/sym ?sym]])
 
+(defn- named-entry-facts
+  "Required map entries derive from this database's already compiled registry.
+  The projection's attribute index selects candidates; no schema population scan."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] :map]}
+  [database index]
+  (let [projection (db/carried-projection database)
+        registry (:seon.schema.projection/registry projection)
+        by-key (into {} (map (juxt :seon.call-preparation/key identity)) (vals index))
+        parents (into #{} (mapcat #(get (:seon.schema.projection/shape-index projection) %))
+                      (keys by-key))]
+    (reduce
+     (fn [facts parent]
+       (let [compiled (m/deref-all (mr/schema registry parent))]
+         (if (= :map (m/type compiled))
+           (reduce
+            (fn [facts [key properties child]]
+              (if (:optional properties)
+                facts
+                (let [candidate (get by-key key)]
+                  (cond-> (update facts :seon.schema.shape/required-map-entries conj [parent key])
+                    (and candidate (= (m/form child) (:seon.call-preparation/schema-key candidate)))
+                    (update :seon.schema.shape/supplied-map-entries conj
+                            [parent key (:seon.call-preparation/shape candidate)])))))
+            facts (m/children compiled))
+           facts)))
+     {:seon.schema.shape/required-map-entries []
+      :seon.schema.shape/supplied-map-entries []}
+     (sort parents))))
+
+(def ^:private prepared-named-entry-query
+  '[:find ?sym ?entry-key ?fingerprint
+    :in $ [[?schema-key ?entry-key ?fingerprint]]
+    :where
+    [?argument-shape :seon.schema.shape/type ?schema-key]
+    [?argument :seon.fn.argument/schema ?argument-shape]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?function :seon.fn/arities ?arity]
+    [?function :seon.fn/sym ?sym]])
+
 (defn- prepared-symbols
   "Every identity in this cluster whose contract could be prepared.
 
@@ -364,12 +404,13 @@
   shape matches while its keyword does not is admitted here and rejected
   by the plan's own two-part join. Over-including costs one cached empty
   plan; under-including would silently skip preparation."
-  [database index]
+  [database index named-entries]
   (let [fingerprints (vec (keys index))]
     (if (empty? fingerprints)
       #{}
       (let [positional (db/q database prepared-positional-query fingerprints)
-            entries (db/q database prepared-entry-query fingerprints)]
+            entries (concat (db/q database prepared-entry-query fingerprints)
+                            (db/q database prepared-named-entry-query named-entries))]
         (into (if (and (map? positional) (contains? positional :seon.error/at) (contains? positional :seon.error/layer) (contains? positional :seon.error/operation)) ;; debt: seon.db/q passes seon.db generic :seon.error/value
  #{} (set positional))
               (comp (filter (fn [[_ entry-key fingerprint]]
@@ -454,11 +495,14 @@
             (into {}
                   (map (fn [[_ candidate]]
                          [(:seon.call-preparation/shape candidate) candidate]))
-                  admitted)]
+                  admitted)
+            named-facts (named-entry-facts database fingerprint-index)]
+        (merge named-facts
         {:seon.schema/projection projection
          :seon.call-preparation/supplied-defaults admitted
          :seon.call-preparation/prepared-symbols
-         (prepared-symbols database fingerprint-index)
+         (prepared-symbols database fingerprint-index
+                           (:seon.schema.shape/supplied-map-entries named-facts))
          :seon.call-preparation/validators
          (into {}
                (comp (remove second)
@@ -468,7 +512,7 @@
          :seon.call-preparation/refusals (into [] (keep second) compiled)
          :seon.call-preparation/basis-t
          (newest-row-transaction database (row-attributes))
-         :seon.call-preparation/checked-through-t (db/basis-t database)}))))
+         :seon.call-preparation/checked-through-t (db/basis-t database)})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Basis comparison — the correctness boundary; the listener is the optimizer
@@ -585,7 +629,7 @@
     [?shape :seon.schema.shape/fingerprint ?fingerprint]])
 
 (def ^:private argument-shape-query
-  '[:find ?order ?index ?form
+  '[:find ?order ?index ?shape
     :in $ ?sym
     :where
     [?function :seon.fn/sym ?sym]
@@ -593,24 +637,16 @@
     [?arity :seon.fn.arity/order ?order]
     [?arity :seon.fn.arity/arguments ?argument]
     [?argument :seon.fn.argument/index ?index]
-    [?argument :seon.fn.argument/schema ?shape]
-    [?shape :seon.schema.shape/form ?form]])
+    [?argument :seon.fn.argument/schema ?shape]])
 
 (defn- argument-validators
-  [database current sym]
-  (let [projection (:seon.schema/projection current)]
-    (into {}
-          (map (fn [[order rows]]
-                 [order
-                  (mapv (fn [[_ _ form]]
-                          (m/validator
-                           (schema/compilable-form
-                            (schema-shape/row-form
-                             {:seon.schema.shape/form form})
-                            (schema/predicate-functions-in projection))
-                           (:seon.schema.projection/compile-options projection)))
-                        (sort-by second rows))]))
-          (group-by first (db/q database argument-shape-query sym)))))
+  [database _current sym]
+  (into {}
+        (map (fn [[order rows]]
+               [order (mapv (fn [[_ _ entity]]
+                              (m/validator (schema-shape/compiled-in database entity)))
+                            (sort-by second rows))]))
+        (group-by first (db/q database argument-shape-query sym))))
 
 (def ^:private map-entry-query
   ;; REQUIRED keys of a top-level argument map only. Selection joins BOTH the
@@ -649,6 +685,32 @@
     [?entry :seon.schema.shape.entry/optional? false]
     [?entry :seon.schema.map-entry/key-keyword ?entry-key]])
 
+(def ^:private named-map-entry-query
+  '[:find ?order ?index ?entry-key ?fingerprint
+    :in $ ?sym [[?schema-key ?entry-key ?fingerprint]]
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?argument :seon.fn.argument/index ?index]
+    [?argument :seon.fn.argument/rest? false]
+    [?argument :seon.fn.argument/schema ?shape]
+    [?shape :seon.schema.shape/type ?schema-key]])
+
+(def ^:private required-named-map-entry-query
+  '[:find ?order ?index ?entry-key
+    :in $ ?sym [[?schema-key ?entry-key]]
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?argument :seon.fn.argument/index ?index]
+    [?argument :seon.fn.argument/rest? false]
+    [?argument :seon.fn.argument/schema ?shape]
+    [?shape :seon.schema.shape/type ?schema-key]])
+
 (defn supplied-map-entries
   "Return [arity-order argument-index key] for declared supplied map entries.
 
@@ -665,8 +727,16 @@
       rows
       (let [declared (into #{} (map (fn [[entry-key _ fingerprint _]] [entry-key fingerprint])) rows)
             fingerprints (vec (distinct (map #(nth % 2) rows)))
+            index (into {} (map (fn [[key schema-key fingerprint supplier]]
+                                  [fingerprint {:seon.call-preparation/key key
+                                                :seon.call-preparation/schema-key schema-key
+                                                :seon.call-preparation/shape fingerprint
+                                                :seon.call-preparation/supplier-symbol supplier}])) rows)
+            facts (named-entry-facts database index)
             entries (if (seq fingerprints)
-                      (db/q database map-entry-query sym fingerprints) [])]
+                      (concat (db/q database map-entry-query sym fingerprints)
+                              (db/q database named-map-entry-query sym
+                                    (:seon.schema.shape/supplied-map-entries facts))) [])]
         (if (and (map? entries) (contains? entries :seon.error/at) (contains? entries :seon.error/layer) (contains? entries :seon.error/operation)) ;; debt: seon.db/q passes seon.db generic :seon.error/value
 
           entries
@@ -785,7 +855,9 @@
             positional (when (seq fingerprints)
                          (db/q database positional-query sym fingerprints))
             entries (when (seq fingerprints)
-                      (db/q database map-entry-query sym fingerprints))
+                      (concat (db/q database map-entry-query sym fingerprints)
+                              (db/q database named-map-entry-query sym
+                                    (:seon.schema.shape/supplied-map-entries current))))
             positional-slots-by-arity
             (reduce (fn [acc [order position rest? fingerprint]]
                       (let [candidate (get index fingerprint)]
@@ -826,7 +898,9 @@
                    acc)))
              positional-slots-by-arity
              (group-by (fn [[order position _]] [order position])
-                       (db/q database required-map-entry-query sym)))
+                       (concat (db/q database required-map-entry-query sym)
+                               (db/q database required-named-map-entry-query sym
+                                     (:seon.schema.shape/required-map-entries current)))))
             validators (when (some #(> (count (:slots %)) 1)
                                    (vals slots-by-arity))
                          (argument-validators database current sym))

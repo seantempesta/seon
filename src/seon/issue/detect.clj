@@ -8,19 +8,17 @@
   responsible for the finding. `seon.issue/generate` turns those subjects into
   issue entities whose identity is the detector plus the subject identity, so
   running a detector twice upserts the same entities."
-  (:require [seon.db :as db]
+  (:require [malli.registry :as mr]
+            [seon.schema.internal :as internal]
+            [seon.db :as db]
             [seon.fn :as fn]))
 
 (defn- declared-keys
   "The attribute keys one entity-map schema declares, from its stored shape."
   [database entity]
-  (into #{}
-        (keep :seon.schema.map-entry/key-keyword)
-        (get-in (db/pull database
-                         '[{:seon.schema/shape
-                            [{:seon.schema.shape/entries [:seon.schema.map-entry/key-keyword]}]}]
-                         entity)
-                [:seon.schema/shape :seon.schema.shape/entries])))
+  (let [key (:seon.schema/key (db/pull database '[:seon.schema/key] entity))
+        registry (:seon.schema.projection/registry (db/carried-projection database))]
+    (into #{} (map first) (internal/entity-entries (mr/schema registry key)))))
 
 (defn- component-values
   "Every entity that is the value of an attribute declared `:seon.db/component`."

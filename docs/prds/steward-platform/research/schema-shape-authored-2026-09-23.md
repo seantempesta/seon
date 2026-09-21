@@ -1,11 +1,11 @@
 ---
 type: research
-status: blocked
+status: complete
 created: 2026-09-23
 tags: [schema-shape, class/stored-derived, wave/publication-velocity]
 ---
 
-# Authored schema shapes — reader evidence and baseline
+# Authored schema shapes — implementation and measurements
 
 Read end to end: the owning issue
 `docs/seon/issues/the-index-cache-retains-4gb-of-expanded-schema-shape-forms.md`,
@@ -13,51 +13,10 @@ Read end to end: the owning issue
 `resources/seon/schemas/seon.schema.shape.edn`; also read AGENTS.md §2.2
 and “SECONDS, NOT MINUTES” and the requested reader ranges.
 
-## Initial protected-hunk finding (superseded by owner ruling)
-
-`src/seon/instrument.clj:714–718` computes an explanation's expected-shape
-fingerprint from only `(:seon.schema.shape/form (normalized-form ...))`.
-`src/seon/instrument.clj:726–730` repeats that operation for the complete
-contract's expected-shape identity. Both discard everything except the
-normalized form before calling the one-argument fingerprint function.
-
-The current fingerprint implementation (`src/seon/fn/schema_shape.clj:144–150`)
-hashes only its argument's canonical data string. With authored references
-preserved, changing a referenced definition leaves that argument unchanged.
-For example, authored `:example/value` remains `:example/value` whether its
-registry definition is `:string` or `:int`. These diagnostic identities must
-use the same dependency-aware fingerprint operation as stored shape rows.
-The two protected call sites must therefore retain and supply the reference
-identity inputs instead of selecting and hashing only the authored form.
-No ambient registry or additional cache is an acceptable workaround.
-
-The requested call-preparation reader is present at
-`src/seon/call_preparation.clj:588–613`: its query selects only the form
-string, then constructs a form-only row for `row-form`. It will need the
-owned-path change to reconstruct structural children from the database.
-
-## Verification boundary
-
-Stopped at the assignment's explicit protected-hunk boundary. No production
-files changed; neither protected file was edited, and `default` was not
-operated. No scratch root, JVM, tests, or measurements were started. The
-issue's 65 MB total and 1,395,278-character maximum are historical evidence,
-not measurements from this assignment. Before/after scratch-root numbers,
-size regressions, HEAD-load proof, and implementation commit remain owed.
-This note is not a landed implementation or a performance claim.
-
-RESET NEEDED when the new stored shape representation lands. No reset was
-performed. Resume requires the two protected instrumentation hunks to be
-released or changed by their owning lane in coordination with this slice.
-
-## Owner ruling and resumed investigation
-
-The owner released the clean instrumentation/function files and authorized
-the two instrumentation hunks if needed, with an immediate pre-edit status
-check. Dependency-aware fingerprinting belongs in `seon.fn.schema-shape`;
-callers must not implement it. The initial note landed as `7b481dc72` after
-the required namespace-load command exited zero. The prior protection is
-not a current blocker.
+The owner accepted documentation commits `7b481dc72` and `a0437899f`,
+released the clean instrumentation/function hunks, and chose named-reference
+matching for supplied defaults. The original protected-hunk stop and three
+semantic options are preserved in those commits; neither is a current blocker.
 
 ### Dependency ledger
 
@@ -78,52 +37,6 @@ not a current blocker.
 - Datahike's node cache is count-bounded:
   `reference-code/datahike/src/datahike/index/persistent_set.cljc:463–466`.
 
-### Additional reader and semantic decision
-
-The complete production reader search found an additional direct structural
-reader: `src/seon/issue/detect.clj:14–23` pulls entries from
-`:seon.schema/shape` without resolving a reference. The schema population
-currently constructs that shape by compiling the schema KEY
-(`src/seon/program.cljc:839–845`). Preserving that authored keyword removes
-the expanded entry rows the detector currently expects. Leaving this reader
-unchanged would make its declared-key result empty. An ownership extension
-for this reader and its regression has been requested.
-
-Call preparation also uses stored shape equality as semantic equivalence.
-`resources/seon/schemas/seon.call-preparation.edn:23–27` explicitly promises
-that an equal inline declaration and named declaration converge on the same
-fingerprint. `src/seon/call_preparation.clj:321–349` and `:573–585` implement
-the matching through fingerprint joins. Authored `:example/value` and
-inline `:int` necessarily have different authored identities even when the
-registry defines `:example/value` as `:int`.
-
-The three choices submitted under the owner design gate are:
-
-1. **Require named references for supplied defaults (recommended smallest
-   constraint).** Match authored identity; retain no second comparison.
-   Cost: update the matching contract and regressions. Give up supplying a
-   default to an equivalent inline schema or differently named alias.
-2. **Preserve inline equivalence.** Derive comparison through the compiled
-   registry, carried with the database's existing derivation, without a new
-   stored identity or cache. Cost: convert the structural/matching readers
-   and extend the regression scope. Give up the direct stored-fingerprint
-   join as the complete matching proof.
-3. **Retain expanded identity semantics.** Continue treating equivalent
-   authored spellings as identical while reducing stored strings. Cost:
-   revise the assignment's fingerprint rule. Give up authored identity.
-
-Production edits await this genuine behavior decision, not foreign breakage
-or the superseded protected-file claim.
-
-### Scratch baseline progress
-
-Only `tmp/schema-shape-root` was operated. Initial `start schema-shape`
-refused because no `current-src` branch existed; MCP status reported its
-advertisement stale and health unknown. The subsequent root-scoped `init`
-performed a fresh canonical publication. Its progress measured 107,705
-population items in 121,388 ms between program population compilation and
-population completion. That is baseline publication work, not attribution
-of all elapsed time to shape strings. No `default` operations occurred.
 
 ### Measured baseline and live semantic probe
 
@@ -166,33 +79,213 @@ Exact measurement form (also the repeatable after-measurement):
    (seon.db/datoms database :aevt :seon.schema.shape/form)))
 ```
 
-The following production-owner probe completed in 2 ms and returned
-`{:named-authored :probe/value :inline-authored :int
-:same-stored-fingerprint true}`. It verifies the behavior decision rather
-than inferring it from the old schema comment:
+## Accepted implementation (2026-09-23)
 
-```clojure
-(let [forms {:probe/value :int}
-      options {:registry (malli.registry/composite-registry
-                          forms (malli.core/default-schemas))}
-      named (malli.core/schema :probe/value options)
-      inline (malli.core/schema :int options)]
-  {:named-authored (malli.core/form named)
-   :inline-authored (malli.core/form inline)
-   :same-stored-fingerprint
-   (= (:seon.schema.shape/fingerprint
-       (seon.fn.schema-shape/shape-row named forms))
-      (:seon.schema.shape/fingerprint
-       (seon.fn.schema-shape/shape-row inline forms)))})
+The owner accepted option 1: supplied defaults match the declared schema
+NAME only. Inline structural copies and differently named aliases are not
+requests for a default. The earlier documentation commits preserve the investigation and ruling.
+
+The encoder now stores keyword references and vector heads. Ordered
+entry/child rows store the operands, and properties have their existing
+attribute. Local recursive registry forms remain one authored scope with no
+redundant child rows. `expand-schema-form` and `expand-entry-form` are deleted.
+Fingerprinting includes the authored definition and recursively derived
+reference fingerprints; unrelated definitions do not move identity.
+
+`prepare-forms` derives the reference fingerprints once for publication and
+carries them in the immutable forms value. It walks Malli's retained compiled
+references, without recompiling each referenced definition. There is no new
+cache. Readers use the compiled registry carried by the database projection;
+argument validators remain part of the existing call-preparation plan.
+Named map entry facts derive into the existing preparation snapshot.
+Instrumentation consumes the fingerprint returned by the owning normalizer.
+The issue detector resolves named schemas through that same carried registry.
+
+The first authored scratch publication exposed repeated definition traversal
+in `reference-fingerprints` for each root. A thread sample of its one JVM
+showed `schema/direct-references` beneath `shape-row` and `fn/add-contract-facts`.
+The batch derivation and compiled-reference walk remove that repetition.
+The canonical encoding regression fell from 6.286 seconds to 2.25 seconds;
+the final test uses the ordinary five-second bound, with no extended allowance.
+
+### Isolation and verification boundaries
+
+Fast iterations used HEAD plus the explicitly selected paths only. The
+snapshot reported foreign dirty callers in `src/seon/cluster.clj`,
+`src/seon/sci/eval.clj`, `src/seon/test/runner.clj`,
+`test/seon/test/runner_test.clj`, and `test/seon/test/selection_test.clj`
+at different iterations; their HEAD bytes were tested. None of their edits
+was changed or included. `src/seon/fn.clj` became clean after the other lane
+landed `aa61d3285`; an immediate status check preceded the single owned
+batch-preparation line. Instrumentation has only the two authorized hunks.
+No other lane's session was operated. A later recorder refusal required the
+explicitly authorized worktree described below.
+
+The fast fixture's published graph predates this representation change. The
+size regression therefore encodes its complete real schema and function
+population through the current writer. A separate regression writes and
+reads actual new shape rows through the canonical fixture and armed contracts.
+Live scratch datom measurements are the independent stored-size evidence.
+Cold/platform gates remain the orchestrator's responsibility.
+
+RESET NEEDED: existing expanded shape rows and fingerprints must be rebuilt.
+No migration and no operation on `default` were performed.
+
+### Canonical contract audit
+
+`inline-default-contracts` traversed the canonical compiled function contracts,
+including test declarations, against the actual supplied-default rows. It
+found zero inline copies, but 26 formerly equivalent slots in 23 functions
+using different names. The 21 database functions (23 slots) use `:seon.db/db`
+instead of the supplied schema `:seon.db/database-value`. The two message
+functions (three slots) use `:my.message/to` instead of `:seon.agent/id`;
+excluding inferred self-recipients is intentional. This proves former
+eligibility, not caller intent. None is owned by this assignment.
+
+| Function | Declaration | Authored name |
+|---|---|---|
+| `seon.agent/archived?` | `src/seon/agent.clj:33` | `:seon.db/db` |
+| `seon.agent/effective-settings` | `src/seon/agent.clj:117` | `:seon.db/db` |
+| `seon.agent/identity` | `src/seon/agent.clj:11` | `:seon.db/db` |
+| `seon.agent/open?` | `src/seon/agent.clj:47` | `:seon.db/db` |
+| `seon.agent/settings` | `src/seon/agent.clj:75` | `:seon.db/db` |
+| `seon.ai/agent-setting-attributes` | `src/seon/ai.clj:325` | `:seon.db/db` |
+| `seon.bootstrap/beyond-closure-budget` | `src/seon/bootstrap.clj:379` | `:seon.db/db` |
+| `seon.bootstrap/help-value` | `src/seon/bootstrap.clj:22` | `:seon.db/db` |
+| `seon.bootstrap/situation` | `src/seon/bootstrap.clj:103` | `:seon.db/db` |
+| `seon.cluster.message/decline` | `src/seon/cluster/message.clj:692` | `:my.message/to` |
+| `seon.cluster.message/send` | `src/seon/cluster/message.clj:627` | `:my.message/to` |
+| `seon.eval/of-agent` | `src/seon/eval.clj:9` | `:seon.db/db` |
+| `seon.plan/blocked` | `src/seon/plan.clj:552` | `:seon.db/db` |
+| `seon.plan/current` | `src/seon/plan.clj:536` | `:seon.db/db` |
+| `seon.plan/ready` | `src/seon/plan.clj:574` | `:seon.db/db` |
+| `seon.plan/ready-subjects` | `src/seon/plan.clj:586` | `:seon.db/db` |
+| `seon.plan/steps` | `src/seon/plan.clj:563` | `:seon.db/db` |
+| `seon.render.data/entity-observation` | `src/seon/render/data.clj:204` | `:seon.db/db` |
+| `seon.render.value/transacted` | `src/seon/render/value.clj:30` | `:seon.db/db` |
+| `seon.repl/frame` | `src/seon/repl.clj:50` | `:seon.db/db` |
+| `seon.sci.eval/directory-value` | `src/seon/sci/eval.clj:1565` | `:seon.db/db` |
+| `seon.sci.eval/documentation-value` | `src/seon/sci/eval.clj:1597` | `:seon.db/db` |
+| `seon.turn/turns-left` | `src/seon/turn.clj:2742` | `:seon.db/db` |
+
+Filed together in
+[default alias eligibility](../../../seon/issues/default-eligibility-matched-differently-named-schema-aliases.md).
+The platform tier was not run; its canonical contracted helpers were included
+in this audit. Two separately identified program tests retain obsolete
+expanded-string expectations:
+[stale program regressions](../../../seon/issues/program-shape-regressions-still-expect-expanded-subtrees.md).
+
+### Stored after measurement and live readers
+
+Fresh authored publication: commit
+`6ab09443-7b2d-55ed-91e7-39c3e61726d8`, digest
+`866179978d163678cdb744efdcd46b72435ae25af66d87bdb8713d6ef0d4e503`.
+A new `schema-shape` fork on the same owned scratch root returned the
+following actual datom measurement in **121 ms**:
+
+| Stored shape forms | Before | After |
+|---|---:|---:|
+| Rows | 4,372 | 5,139 |
+| Characters | 72,877,056 | 103,406 |
+| UTF-8 bytes | 72,877,170 | 103,406 |
+| Largest form, characters | 1,563,264 | 61 |
+
+That is a 99.858% reduction in shape-form bytes. This measures stored strings,
+not a post-reset heap claim. The after publication contains the pre-batch
+encoder; the subsequent batch optimization preserves row identity/contents.
+The final fast regression separately measures the complete current encoder:
+6,610 unique shapes, 112,211 bytes, maximum 446 bytes (whole contract roots
+included in that encoder check, unlike the publication's argument/return roots).
+
+The MCP JVM reader proof reconstructed `:seon.db/connection` from its stored
+row, resolved it through the carried registry and accepted the actual scratch
+connection. Call preparation admitted five defaults with zero refusals,
+derived 130 named map entries and 470 prepared symbols, and returned the
+expected `[0 0 :seon.db/connection]` for the existing connection probe.
+The named-map reader was hot-reloaded after correcting `m/entries` to
+`m/children`; Malli documents the latter's triples at
+`reference-code/malli/src/malli/core.cljc:2595`. The combined audit/snapshot
+probe completed in 300 ms, and the stored-reader/plan probe in 167 ms.
+
+### Live fixture boundary
+
+Juniper installation was attempted through the existing live installer on
+this scratch cluster only. It exceeded the 10-second MCP evaluation bound.
+The agent row exists, but `:example/order` was not installed, so this is
+**not a successful Juniper seed or platform proof**. The log reports the
+already-filed `seon.cluster.reply/sources` map-versus-vector contract refusal
+(signature `73e324b026fd14e51cc9adc1d1bc4a6115ad2356c549face29b3ddb24b068df0`),
+then `run transition refused: agent-already-running`. Its writer log also
+printed a very large complete projection. These foreign boundaries are
+recorded in the existing reply-contract and raw-writer-log issues; no foreign
+code was edited. Stored-size and direct reader measurements completed before
+this attempted seed and do not depend on it.
+
+The root was shut down with `bin/seon --root tmp/schema-shape-root down`;
+the operator reported all recorded JVMs stopped and the store flock free.
+
+### Final verification isolation
+
+After the successful six-test run `ed4a3f4a8e56` (21 assertions), the added
+named-map regression initially expected a connection default in the old
+published fixture. That base refuses the connection supplier; the fresh
+scratch publication admitted it. The regression now asserts the canonical
+`[:my.agent/settings-request :seon.agent/id]` entry, which the fixture does
+admit. This is distinct from the live connection proof above.
+
+The next run `2aa8a7aee206` was refused before execution because the shared
+recorder saw `:seon.config/compiled` referencing the concurrently removed
+`:seon.config/applied-manifest-digest` resource declaration. The foreign dirty
+files were `resources/seon/schemas/seon.config.edn`, `src/seon/config.clj`,
+and `src/seon/schema/edn.clj`; none was edited by this lane.
+
+Per the owner's explicit isolation instruction, created
+`tmp/schema-shape-wt` at HEAD `2d6511b82`, linked `reference-code`, and applied
+only this slice's source/resource/test changes. The first worktree attempt
+correctly refused because its recording authority had no `current-src`.
+Copied the existing immutable exported canonical store into the worktree's
+own `data/store` using filesystem copy-on-write; the base publication itself
+was not rebuilt or changed. Linked the existing published-base catalog for
+selection. The resulting fast run records into this disposable isolated
+store, not `default`. No cold gate or baseline preparation was run.
+
+The copied store was reidentified through
+`seon.cluster.export/reidentify!`, the same seam used by
+`seon.test-support/create-base`; opening an un-reidentified copy correctly
+refused with a store identity mismatch. This changed only the disposable copy.
+
+Final fast run **`d01dd44188d4`**: **7 executed, 0 unchanged, 24 assertions,
+0 failures, 0 errors**. Program digest
+`85952d271e32c24912c56fb95d83f56bb6031994beac7ace01721e54bd6a9444`;
+input digest `6618c7b3d3edc7e7e82a1f42abf844024b08ca4cc352fb86e372c9bf3c8e5ceb`.
+All tests used the ordinary five-second bound; canonical encoding took
+0.680 seconds and the database reconstruction regression 1.772 seconds.
+
+Exact invocation (from the isolated worktree):
+
+```sh
+bin/test-fast --paths \
+  src/seon/fn/schema_shape.clj src/seon/fn.clj \
+  src/seon/call_preparation.clj src/seon/instrument.clj \
+  src/seon/issue/detect.clj \
+  resources/seon/schemas/seon.schema.shape.edn \
+  resources/seon/schemas/seon.call-preparation.edn \
+  test/seon/fn/schema_shape_test.clj -- seon.fn.schema-shape-test
 ```
 
-There is no after number: no production change has been made pending the
-behavior decision. No test result or completed optimization is claimed.
+The implementation slice touches those eight paths, this landing note, the
+new alias-eligibility and stale-program-regression issues, and observation
+updates to the existing reply-contract and raw-writer-log issues. The extra
+production reader is `src/seon/issue/detect.clj`; without its registry lookup,
+named schema roots would incorrectly appear to declare no attributes.
 
-Cleanup completed through `bin/seon --root tmp/schema-shape-root down`:
-the operator reported all recorded JVMs stopped and the store flock free.
-The assignment's scratch directory was then deleted without following
-symlinks. The required namespace-load command exited zero again before
-the evidence commit. No owned shell or scratch JVM remains. Markdown lint
-reported two unrelated stale Datahike gitlink citations in the wave-3a and
-wave-3bc specifications; those documents were left untouched.
+The required namespace-load command is the pre-commit and post-commit check:
+
+```sh
+clojure -M -e "(require 'seon.fn.schema-shape 'seon.call-preparation)"
+```
+
+The isolated worktree, its recording-store copy, and the scratch root are
+removed after verification. The shared published base and foreign edits are
+preserved. RESET NEEDED for the implementation commit containing this note; cold/platform
+proof is owed by the orchestrator. The pre-commit namespace-load command exited zero.

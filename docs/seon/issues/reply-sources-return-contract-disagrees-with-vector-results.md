@@ -24,3 +24,16 @@ Owner: reply parsing and its declared output contract. Acceptance: the same
 existing malformed/empty-stop regression completes under armed contracts,
 with parser results and declared member shape agreeing. Do not suppress the
 return check or infer the intended shape from this error alone.
+
+## Authored-shape scratch observation — 2026-09-23
+
+Re-observed during the owned scratch cluster's ordinary boot and Juniper
+installer. `seon.cluster.reply/sources` refused a vector member under its map
+contract from `seon.turn` at `turn.clj:3168`, signature
+`73e324b026fd14e51cc9adc1d1bc4a6115ad2356c549face29b3ddb24b068df0`.
+Juniper installation then reported `agent-already-running`; its agent row
+exists but example schema installation did not complete. No attribution to
+the authored-shape change is made. Publication and reader evidence are in
+[the landing note](../../prds/steward-platform/research/schema-shape-authored-2026-09-23.md).
+The scratch root was shut down and removed; this paragraph preserves the
+bounded diagnostic instead of retaining its oversized disposable log.
