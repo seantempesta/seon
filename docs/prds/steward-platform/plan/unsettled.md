@@ -7258,3 +7258,14 @@ convert or file). Baseline on its root: 72.9 MB of shape strings, largest
 1.56 M chars. `one-jvm-redesign`: `src/seon/test/cache.clj` was clean and
 is granted for `gitlink-digests` (pin digests read, never `deps.edn`
 rehashed on an unrelated edit); baseline 6,175 ms at `db0cd21be`.
+
+### 2026-09-23 ~21:00 — test-system checkpoint
+
+Accepted `e5ba00888` (program shapes read once from the carried
+projection), `0064ca27c` (turn-work property >163 s → 4.46 s; exhaustive
+states 12.6 → 3.9 s; cases immutable, one preparation), `9e28fcf34`
+(physical fixture copies the published head; Datahike `fork-database`
+reads the `:db` head, `versioning.cljc:620`). Offenders: 6 of 18 green;
+6 publication tests wait on slice 4; 6 runner/selection tests resumed
+(two carry real errors — Malli schema acquisition, SCI contract — fixed
+before any duration work; durations by algorithm only).
