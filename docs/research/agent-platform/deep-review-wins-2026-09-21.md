@@ -89,6 +89,15 @@ and the indexer, as README §5 already says.
 | D-d | `:seon.ai/error-class` (win 6) | one declared error schema per failure extending `:seon.error/base`, each with its render pair; `seon.ai/complete`'s union names them; the enum and the retry ladder leave | keep the enum; read-time projection |
 | D-e | Bounded completion (concerns note §2) | two declared bounds, the second waiting on the body's own exit signal (Codex: a cancelled Future reports done while the body runs), then abandon-and-disarm with the live thread recorded | the 252-line observer; an unbounded second wait |
 
+Second round, same day, four more re-examined and ruled: the operator and boot
+are rewritten from the data flow (≈ 9,000 → ≈ 900, B1 §2c); every function
+stays contracted and armed with the wrapper optimised to ≤ 2× bare (A1 §1);
+additive context keeps exactly one currency mechanism (README §7); the merge
+gate stays the reaching set, sized by the measured distribution — tests
+reaching a function p50 24, p75 268, p90 598, p95 1,257, max 1,779, over
+4,603 functions and 2,158 tests (2.6 s query); 433 functions are reached by
+no test.
+
 Codex's REPL verification (`repl-verification-deep-review-2026-09-21.md`) also
 corrected two of my claims and they stand corrected in the plan: a
 contract-only change still needs its affected callers interpreted, because a

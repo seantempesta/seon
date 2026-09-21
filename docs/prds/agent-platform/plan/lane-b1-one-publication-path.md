@@ -179,11 +179,21 @@ non-equivalent, never a production switch.
 
 ### 2c. The operator after the cut
 
-Ruling applied: the cut is process records, advertisement truth and repair.
-The lane launcher stays. The external operator KEEPS cold `launch!`
-(`fresh_operator.clj:2129`), `reset!` (`:3519`), and exact
-`(pid, start-instant)` termination when the JVM cannot answer — `down` can
-never rely on a reply from the process it terminates.
+**Ruled 2026-09-21: the operator and boot are REWRITTEN from the data flow, not cut.**
+`script/seon/fresh_operator.clj` (3,727), `src/seon/operator/state.clj` (1,627),
+`src/seon/operator.clj` (1,219) and the boot sections of `src/seon/cluster.clj`
+(`stand-boot-layers!`/`stand-cluster-runtime!`/`start!`, `:3187-3560`) carry no agent
+semantics: they are one launcher, one prepl client and one boot sequence. The
+replacement is written new from this spec's §2a–§2d tables (≈ 900 lines: argv →
+`launch!` when no advertisement answers, else one `prepl-eval!` request; `reset!` as
+down → delete → republish → start under the store lock; `start!` as the ordered
+layers store → branch → connection → projection → context → graphs → prepl → web,
+each publishing its readiness) and the old files are deleted in the same slice,
+with their tests replaced by one drill per lifecycle transition. The surviving
+guarantees are the ones named below: cold `launch!`, `reset!`, and exact
+`(pid, start-instant)` termination when the JVM cannot answer — `down` never relies
+on a reply from the process it terminates. The lane launcher stays. Recovery if the
+rewrite breaks `default`: `git revert` of the slice, then `bin/seon reset --force`.
 
 | File | Today | Survives (≈) | Derived from the OS / the JVM instead |
 |---|---:|---:|---|
@@ -385,7 +395,7 @@ the same commit.
 | 8 | adoption: commit-id compare on every request; roots from both databases; `reload-order` refuses; post-reload digest verification replaces the blind retry; `instrument/apply!` receives `:seon.instrument/changed-identities` (A1 owns `apply!`; the producer and A1 consumer land together; existing broad arming remains beforehand) | −40 | `adopt-first` row; a forced reload refusal leaves the prior record |
 | 9 | reset cold path: tempid = identity print for submitted rows, keywords inside the map, `index-tempids` deleted; the §2b attribution probe recorded FIRST | −120 | `init-zero` row and the phase table |
 | 10 | one progress argument; `:seon.config.source/phase-bounds-ms`; the nine mechanisms and the publication-phase bounds deleted; `test/runner.clj:60` converted; script re-homed and its grep rewritten | ≈ −200 | each phase fires as a typed error under a 1 ms bound |
-| 11 | operator: process records, truth/repair, offline readers, phase logs, `await-advertisement!`, `source-preflight!`, `init-form` codegen, `publish!`, `reap-dead-roots!`, claims, generation UUID → `ProcessHandle` + the per-cluster advertisement; every healthy command one request | ≈ −4,500 | cold start, stop, exact `down` of an unresponsive JVM, reset drills kept green |
+| 11 | operator and boot REWRITTEN (§2c ruling): the new launcher, prepl client, `reset!` and boot sequence land as new files from the §2 tables; `fresh_operator.clj`, `operator/state.clj`, `operator.clj` and `cluster.clj:3187-3560` are deleted in the same slice with `dev/fresh_operator_test.clj`, `dev/fresh_operator_reset_test.clj` and `operator_test.clj`, replaced by one drill per transition (cold start, second start refused, stop, exact `down` of an unresponsive JVM, reset, start-during-reset, reset-during-start) | ≈ −8,700 + ≈ 900 new | every drill green on a scratch root; `default` restarted through the new operator once by the orchestrator |
 | 12 | hook: publication = ~40 lines over `prepl-eval!`; queue/worker/result files deleted; `.codex/hooks.json` untouched | ≈ −350 | live: named-file edit → adopted in `default` (browser observed separately) |
 | 13 | after the reset and the §2d conditions: `:current-source {:enabled true}`, comment block deleted; shell-created file observed | −12 | one real hook event |
 | 14 | `publication-base!` and the `test.cache` base callers (after B4 lands) | −49 | B4 seam |

@@ -291,6 +291,25 @@ reaching tests; name-based supplied defaults; no silent pull truncation; no migr
 private objects in memory; conservative selection; no shell-based product self-modification.
 Engineering proof gates belong at the operation they block, not in a chronology.
 
+Four of them were re-examined with the owner on 2026-09-21 and stand, with numbers:
+
+- **Every function contracted and armed, in every context** (§1j reaffirmed): the
+  wrapper is optimised (A1 §1: 1,157 ns → ≤ 2× bare), never disarmed.
+- **Additive context with one currency mechanism** (A2 c1, B2 commit 5): the prefix
+  never changes because evaluations are immutable facts and a changed read is APPENDED,
+  never rewritten; detecting the change is Datahike's own per-attribute revision
+  comparison (0.7 ms for 435 reads); the other two arms and the replay leave. That is
+  the whole mechanism; nothing simpler keeps provider cache hits.
+- **The merge gate is the reaching set** (C2 reaffirmed), sized by the measured
+  distribution on `default`: tests reaching a function are p50 **24**, p75 268, p90 598,
+  p95 1,257, max 1,779; 2,256 of 4,603 functions are reached by fewer than 20 tests and
+  337 by more than 1,000. The average merge runs tens of tests in process (37 ms fixture,
+  5 s bound); a core change runs the suite, as the owner wants. **433 functions are
+  reached by no test** — the first detector's population.
+- **The operator and boot are rewritten, not cut** (B1 §2c): ≈ 9,000 lines of lifecycle
+  plumbing replaced by ≈ 900 written from the data-flow tables, old files deleted in the
+  same slice, revertable by `git revert`.
+
 | Gate | Default path | What requires a decision or proof before changing it |
 |---|---|---|
 | Publication authority | Unpublished branch → transaction report → caller findings → guarded publication | A direct-to-current-src shortcut needs equivalent writer/concurrency proof and a changed owner ruling; otherwise do not implement it |
