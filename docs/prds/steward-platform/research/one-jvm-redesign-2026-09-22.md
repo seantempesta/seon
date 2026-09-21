@@ -2242,4 +2242,140 @@ exited. No live scratch root exists during these JVM runs. There is no new
 publication span table: no publication measurement was run through a stale
 schema. The prior 11,708 ms row remains iteration evidence only.
 
-Exact changed-line UTF-8 bytes (production plus regression): **2635 deleted, 2744 added**.
+Exact changed-line UTF-8 bytes (production plus regression; excludes diff markers, includes line endings): **2586 deleted, 2693 added**.
+
+
+## Item 5 free-file hunk: previous findings from file refs
+
+`source/file-rows` binds requested paths to file identities, then follows
+`:seon.fn/file` or `:seon.lint/file` and selects existing program identities.
+`published-index-rows` supplies the existing portable-row conversion. The
+publication warning delta now acquires previous findings through that query;
+it no longer scans the prior manifest to select its findings. A file digest
+row without a declaration ref does not become an analysis input. The added
+regression requires the three `my.note` declarations, excludes an unrelated
+schema input, and checks empty/missing selections.
+
+This is the free-file part of item 5, not deletion of the stored manifest.
+`build-manifest` still requires the prior artifacts for its capability and
+known-function checks. Deleting its producer in cluster.clj before converting
+those consumers would make a warm edit a complete analysis or change the
+checks' semantics. The prior database equivalence probe is the grounding for
+that conversion.
+
+Fast run `7974e8b92309` again stopped at `record-snapshot!` before any test
+executed, with the exact missing applied-manifest-digest schema refusal
+recorded above. The published base is 65 commits behind the tested HEAD.
+This is no runtime/timing proof; no additional publication was attempted.
+The quiet-run span table is owed after reset, with the previous 11,708 ms
+row retained as iteration evidence rather than a landing result.
+
+### Exact held-owner edits to carry forward together
+
+The following replacement chunks are **not independently landable**. They
+must be connected to caller analysis on the unpublished branch before its
+head is published. During this turn `c6db6b358` committed the previously held
+shape edits; this lane has not modified fn.clj or instrument.clj.
+
+In `seon.fn/index!`, retain the existing transaction report on the result:
+
+```diff
+          {:seon.reconcile/converged? (empty? changed-identities)
+           :seon.reconcile/operations (count changed-identities)
++          :seon.db/transaction-report report
+           :seon.reconcile/adopt-identities changed-identities})
+```
+
+In `seon.fn/caller-files`, accept the changed function symbols from that
+report instead of treating every declaration in a changed file as a changed
+contract. Replace its query and input expression with:
+
+```clojure
+(db/q '[:find [?path ...]
+        :in $ [?symbol ...]
+        :where
+        [?caller :seon.fn/calls ?symbol]
+        [?caller :seon.fn/file ?caller-file]
+        [?caller-file :seon.fn.file/relative-path ?path]]
+      database (vec changed))
+```
+
+If called from cluster/source.clj, change `defn- caller-files` to
+`defn caller-files` in that same cut. The contract's second argument becomes
+`[:set :qualified-symbol]`; its
+name/docstring must state changed contract symbols. Empty symbols means zero
+caller files. Contract change includes changed referenced schema definitions,
+not just a changed `:seon.fn/spec` string: use the before/after projections'
+contract and referenced definitions, as `instrument/current-wrapper?` already
+does. A docstring-only transaction supplies no changed contract symbols.
+
+In `build-manifest`, replace the pre-analysis caller expansion binding with
+`paths changed`. Do not apply this alone: after `index!` returns its report,
+read callers only for changed contracts and lint those files before moving
+the branch head. The already-existing `analyzed-artifacts` function is the
+partial clj-kondo seam; its `defn-` must become a contracted public `defn`
+if the cluster population caller owns that second analysis. No second cache,
+full source walk, or publication of a partially checked head is involved.
+Caller findings must replace the previous findings in those files, including
+retracting findings that disappeared; unchanged caller declaration rows must
+not be reasserted merely because they were linted.
+
+For item 5's remaining fn.clj conversion, the required replacement boundaries
+are `build-manifest`, `manifest-data`/`assert-capability-contracts!`, and the
+previous-row consumers in `desired-rows`/`index!`:
+
+* Read only selected file/declaration/finding rows from the previous database;
+  remove generated `:seon.fn/arities` before comparing authored declarations.
+  Use the existing `declaration-digests` function on those rows. Keep the
+  database value available for handler/call lookups outside the selected files.
+* Delete the all-file `analysis-paths` query and all-artifact known-symbol
+  inventory for a partial request. Partial inputs are the explicit changed
+  paths; clj-kondo supplies namespace resolution from its own cache.
+* Compare schema resource changes against the carried projection's forms;
+  do not hash every form on an ordinary source edit. Complete manifest
+  derivation remains only at explicit offline export, whose existing
+  `manifest.edn` protocol still has test-system consumers.
+* Resolve referenced entities' identity attributes before wildcard-pulling
+  their contents in `published-index-rows`. Only identity-less components
+  require recursive row conversion. Skip index!'s unbound existing-program
+  query when `previous-database` is supplied.
+
+These larger replacement bodies have not been fabricated as an untested
+patch: the capability checks and offline export consumers must be converted
+in the same loading commit. There is no required instrument.clj hunk for the
+free-file finding selection. The current `current-wrapper?` already compares
+contract plus referenced definitions; item 8 still needs its wrapper-set
+regression after namespace reload selection changes.
+
+### Caller-analysis ordering decision
+
+The requested **actual transaction report** exists after the changed rows
+are transacted. Today all lint runs before that transaction and the report
+is reduced to identities. The concrete choices are:
+
+1. **Recommended: use the actual report on the existing unpublished scratch
+   branch.** Analyze changed files, transact their declarations, then analyze
+   caller files only for changed contracts and transact their finding delta
+   before `force-branch!`. Docstring edit: one file lint, no caller transaction.
+   Contract edit: one extra partial clj-kondo call plus at most one finding
+   transaction; failed caller analysis never moves current-src. No new cache
+   or retained report is required.
+2. Compare changed analysis with the immutable previous database **before**
+   the transaction. Keeps one population transaction and one combined result,
+   but changes the explicit ruling that the actual report selects callers.
+3. Obtain a speculative Datahike `with` report, lint callers, then transact.
+   Preserves a report-shaped selection before publication, but validates the
+   changed declarations twice and needs a new first-party seam; largest cost
+   and least deletion. Not recommended.
+
+No measured time is assigned to an unimplemented option. The next cut needs
+option 1's ordering confirmed or the report requirement explicitly changed;
+this note records the dependency instead of installing an unused callback.
+
+Free-file changed-line UTF-8 bytes, production plus regression: **221 deleted, 2151 added** (without diff markers, including line endings).
+
+An explicit `(require 'seon.cluster 'seon.cluster.source
+'seon.cluster.publication-inputs-test)` passed in the source archive with
+only the selected files overlaid. This proves loading, not the unexecuted
+regression. The archive was removed after its JVM exited; no scratch host
+or shell is retained.

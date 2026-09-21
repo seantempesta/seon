@@ -128,7 +128,7 @@
           (if previous
             (str "; added=" (count (set/difference current before))
                  "; resolved=" (count (set/difference before current)))
-            "; delta unavailable: no corresponding previous manifest"))))
+            "; delta unavailable: no previous publication"))))
   nil)
 
 (defn socket-server?
@@ -1905,8 +1905,11 @@
                                        (mapcat :seon.fn.file/rows)
                                        (filter :seon.lint/id))
                                  (:seon.fn.manifest/artifacts value)))
-                _ (report-analysis-warnings! (when previous (findings previous))
-                                             (findings manifest))
+                previous-findings (when database
+                                    (source/file-rows database (vec paths) :seon.lint/file))
+                _ (when (:seon.error/at previous-findings)
+                    (refused! "Published findings could not be read." previous-findings))
+                _ (report-analysis-warnings! previous-findings (findings manifest))
                 classes (when paths
                           (cond-> #{:program}
                             (some #(str/starts-with? % "resources/seon/schemas/") changed) (conj :schema-resource)

@@ -136,6 +136,24 @@
                   (when-let [digest (:seon.fn.file/digest row)] [path digest]))))
         paths))
 
+(defn file-rows
+  "Read declarations or findings through their file refs, only for the named paths."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value [:vector :string]
+          [:enum :seon.fn/file :seon.lint/file]]
+    [:or :seon.program/rows :seon.error/value]]}
+  [database paths file-attribute]
+  (let [identities (db/q '[:find ?attribute ?value
+                          :in $ [?path ...] ?file-attribute [?attribute ...]
+                          :where
+                          [?file :seon.fn.file/relative-path ?path]
+                          [?entity ?file-attribute ?file]
+                          [?entity ?attribute ?value]]
+                        database paths file-attribute program/identity-attributes)]
+    (if (:seon.error/at identities)
+      identities
+      (fn/published-index-rows database (vec identities)))))
+
 (defn current
   "The published source branch and commit ID, or nil before publication."
   {:malli/schema [:=> [:cat :seon.store/store]
