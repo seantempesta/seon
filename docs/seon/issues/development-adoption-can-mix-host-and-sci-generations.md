@@ -7,6 +7,18 @@ tags: [issue, runtime, schema, class/p1]
 
 # Development adoption can mix host and SCI generations
 
+## 2026-09-21 copied-root boundary
+
+The agent-platform second review proposed per-context wrappers over copied JVM
+roots. A live five-millisecond probe shows the same copied caller returns
+`:old`, then `:new` after only its JVM callee is replaced. Root copying does
+not freeze indirect calls. Exact form and source grounding:
+[Astra feedback](../../prds/agent-platform/research/astra-feedback-on-fable-2026-09-21.md).
+The owner confirms loaded reuse for matching runtime functions and SCI
+redefinition for cluster/agent overrides. B2 §2a now requires matching
+executable dependencies too, and context-local installation of affected callers.
+This is a plan correction; implementation and the composed isolation proof remain.
+
 Extracted on 2026-09-08 from the instrumentation ownership issue: stable
 JVM wrappers and projection-local contracts do not make source reload atomic.
 The following dated evidence remains a separate adoption-owner obligation.

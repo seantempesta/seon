@@ -105,21 +105,7 @@ is diagnostic; absence on an earlier execution path cannot prove changed code ir
 A missing/incomplete graph is unknown and must widen or refuse, never exclude silently.
 A later unrelated green cannot cover an older member’s untested change.
 
-**Isolation includes loaded behavior — resolved by construction, then confirmed.** A
-wrapper is a pure function of (retained contract, original callable, policy). Each
-cluster's SCI context installs its own wrapper over the ORIGINAL loaded function under
-that cluster's carried projection, at the seam interpreted rows already use
-(`install-function-contract!`, `src/seon/sci/eval.clj:695`, which binds a per-context
-root through `sci/bind-root!`); SCI's root copy takes the value at copy time
-(`reference-code/sci/src/sci/core.cljc:112-140`), so a context never inherits another
-cluster's wrapper. The JVM Var root is armed once, for the development cluster and
-host callers. A cluster's calls therefore validate against its own contracts and an
-older cluster keeps its copied roots across another cluster's reload, without the
-per-call projection scan (A1-2) or a two-generation gate. The probe confirms rather
-than decides: two clusters with different contracts, one direct and one indirect SCI
-call each, and one host call. Capturing a root still does not freeze its indirect
-JVM calls; a changed dependency is B1's reload and re-arm obligation, not an
-isolation claim.
+**Isolation includes loaded behavior.** Reuse functions whose definitions and executable dependencies match the loaded runtime; interpret context-specific redefinitions and their affected callers in the cluster or agent's SCI context. B2 §2a owns this rule. A copied JVM callable retains JVM call paths, so matching its own digest alone does not make an overridden callee safe. Per-context wrappers preserve direct contract ownership but do not establish indirect-call isolation or attribution. Compute eligibility at acquisition/change from the program graph and declared dispatch edges; retain the focused direct/indirect and adoption proof before deleting safeguards. No per-call full-program scan is required.
 
 **Timeout includes exit.** A Future timeout only reports a late result. B2/B4 retain
 termination, cleanup and no-overlap guarantees; arbitrary host work does not acquire
