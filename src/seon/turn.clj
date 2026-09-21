@@ -3582,6 +3582,17 @@
 
 (declare settle-batch-refusal!)
 
+(defn- settlement-refused?
+  "A writer refusal may carry the canonical flat error without a legacy kind."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [outcome]
+  (boolean
+   (or (:seon.error/kind outcome)
+       (and (map? outcome)
+            (inst? (:seon.error/at outcome))
+            (qualified-keyword? (:seon.error/layer outcome))
+            (qualified-symbol? (:seon.error/operation outcome))))))
+
 (defn- settle-batch!
   "Settle every evaluated form and all turn side effects in one transaction."
   [cluster requests]
@@ -3629,7 +3640,7 @@
            connection (:seon.blob/staged-writes transaction)
            (fn [] (db/transact!
                    connection {:tx-data (:seon.db/tx-data transaction)}))))]
-    (if (:seon.error/kind outcome)
+    (if (settlement-refused? outcome)
       (settle-batch-refusal! cluster requests prepared outcome)
       {:prepared prepared :outcome outcome})))
 
@@ -3665,11 +3676,11 @@
         (when ordinal
           (receipt-settle-tx
            database
-            {:seon.turn/id run-id
-             :seon.cluster.eval/ordinal ordinal
-             :seon.eval/shown (pr-str value)
-             :seon.cluster.eval/error (:seon.error/message value)
-             :seon.error/kind (:seon.error/kind value)}))]
+            (cond-> {:seon.turn/id run-id
+                     :seon.cluster.eval/ordinal ordinal
+                     :seon.eval/shown (pr-str value)
+                     :seon.cluster.eval/error (:seon.error/message value)}
+              (:seon.error/kind value) (assoc :seon.error/kind (:seon.error/kind value)))))]
     {:seon.error/value value
      :seon.db/tx-data
      (into [] cat
@@ -3705,15 +3716,15 @@
         receipts
         (mapv
          (fn [entry]
-           (-> (:seon.turn.loop/receipt entry)
+           (cond-> (-> (:seon.turn.loop/receipt entry)
                ;; `evaluation-terminal-data` already projected and staged the
                ;; durable def values. Re-projecting raw in-memory defs here
                ;; discarded those values and made a refused definition
                ;; unrestorable on the next turn.
-               (dissoc :seon.program/row :seon.turn/form-facts)
+               (dissoc :seon.program/row :seon.turn/form-facts :seon.error/kind)
                (assoc :seon.eval/shown serialized
-                      :seon.cluster.eval/error (:seon.error/message value)
-                      :seon.error/kind (:seon.error/kind value))))
+                      :seon.cluster.eval/error (:seon.error/message value)))
+             (:seon.error/kind value) (assoc :seon.error/kind (:seon.error/kind value))))
          prepared)
         transaction
         ;; Same writer decision as `refusal-terminal-data`: the batch's
@@ -3729,7 +3740,7 @@
                  (vec (receipt-settle-batch-tx receipts)))
                (:seon.db/tx-data recording))}
         outcome (db/transact! connection transaction)]
-    (when (:seon.error/kind outcome)
+    (when (settlement-refused? outcome)
       (throw
        (ex-info "Batch refusal settlement was refused."
                 {:seon.error/kind :seon.turn.loop/terminal-refusal-settlement-refused
@@ -3787,14 +3798,14 @@
                      connection
                      {:tx-data (:seon.db/tx-data transaction)})))))
         outcome (commit prepared)]
-    (if-not (:seon.error/kind outcome)
+    (if-not (settlement-refused? outcome)
       (assoc prepared :seon.turn.loop/outcome outcome)
       (let [refusal
             (refusal-terminal-data
              cluster (db/db connection) now agent-id run-id process ordinal
              (:seon.turn.loop/receipt prepared) outcome)
             refused (commit refusal)]
-        (when (:seon.error/kind refused)
+        (when (settlement-refused? refused)
           (throw
            (ex-info "Terminal refusal settlement was refused."
                     {:seon.error/kind :seon.turn.loop/terminal-refusal-settlement-refused
@@ -4804,11 +4815,11 @@
                 outcome (:outcome settlement)
                 prepared (:prepared settlement)
                 last-prepared (peek prepared)]
-            (if (or (:seon.error/kind outcome)
+            (if (or (settlement-refused? outcome)
                     (:refused-outcome settlement))
               (report :error (count gated)
                       (or (:refused-outcome settlement)
-                          (when (:seon.error/kind outcome) outcome)))
+                          (when (settlement-refused? outcome) outcome)))
               (do
                 (sci.eval/install-evaluated-rows!
                  {:seon.sci.eval/ctx base-ctx

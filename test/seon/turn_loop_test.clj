@@ -1608,7 +1608,8 @@
                      [0 1])))
 
 (deftest a-refused-batch-settlement-closes-the-turn-and-the-agent-turns-again
-  (with-database
+  (doseq [failure-mode [:throw :returned-refusal]]
+   (with-database
     (fn [connection]
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name "loop-batch-refused"})
@@ -1650,8 +1651,15 @@
                           (fn [conn staged-writes commit-roots!]
                             (vswap! attempts inc)
                             (if (= 1 @attempts)
-                              (throw (ex-info "the batch commit went away"
-                                              {:seon.test/commit-broke true}))
+                              (if (= :throw failure-mode)
+                                (throw (ex-info "the batch commit went away"
+                                                {:seon.test/commit-broke true}))
+                                (let [refusal (db/transact! conn
+                                                {:tx-data [{:db/id [:seon.agent/id "agent-a"]
+                                                            :seon.agent/id 42}]})]
+                                  (is (inst? (:seon.error/at refusal)) (pr-str refusal))
+                                  ;; Kind is optional; keep the real writer's diagnostic.
+                                  (dissoc refusal :seon.error/kind)))
                               (publish conn staged-writes commit-roots!)))]
               ((private-loop-fn 'settle-batch!) cluster requests))
             database @connection
@@ -1664,9 +1672,15 @@
                     [?evaluation :seon.cluster.eval/ordinal ?ordinal]
                     [?evaluation :seon.cluster.eval/error ?error]]
                   database "run-1")]
-        (is (= :seon.turn.loop/phase-failed
-               (:seon.error/kind (:refused-outcome settled)))
-            "a host failure in the batch commit is a refused phase")
+        (if (= :throw failure-mode)
+          (is (= :seon.turn.loop/phase-failed
+                 (:seon.error/kind (:refused-outcome settled)))
+              "A host failure in the batch commit is a refused phase.")
+          (do
+            (is (nil? (:seon.error/kind (:refused-outcome settled))))
+            (is (inst? (:seon.error/at (:refused-outcome settled))))
+            (is (string? (:seon.db.write.attempt/request-id (:refused-outcome settled)))
+                "The writer's original refusal is retained, including its request identity.")))
         (is (= #{0 1} (into #{} (map first) evaluations))
             "every begun ordinal settled, so no form can execute twice")
         (is (inst? (closed-at connection))
@@ -1681,4 +1695,4 @@
                  @connection
                  {:seon.agent/id "agent-a"
                   :seon.db.process/id process})))
-            "AND THE AGENT TAKES ITS NEXT TURN")))))
+            "AND THE AGENT TAKES ITS NEXT TURN"))))))
