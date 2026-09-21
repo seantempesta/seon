@@ -2729,8 +2729,11 @@
              (contains? issue-budget :seon.error/operation))
       issue-budget
       (or issue-budget
-          (:seon.config.run/max-episode-runs
-           (ai/agent-overlay database agent-id))
+          (db/q '[:find ?value . :in $ ?id
+                  :where [?agent :seon.agent/id ?id]
+                         [?agent :seon.agent/settings ?settings]
+                         [?settings :seon.config.run/max-episode-runs ?value]]
+                database agent-id)
           (db/q '[:find ?value .
                   :where [?config :seon.config/cluster _]
                          [?config :seon.config.run/max-episode-runs ?value]]

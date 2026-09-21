@@ -1022,3 +1022,47 @@ selection fixture experiment was removed; its population changes did not
 produce a valid improvement. The existing named-selection duration remains
 unresolved. This run's combined tally was **26 tests, 151 assertions,
 4 failures, 3 errors**; no full selection pass is claimed.
+
+### Turn-work: immutable cases and the requested setting only
+
+The 200-case property previously remained running after **163000 ms**. One
+measured old case spent **1264 ms** admitting a complete configuration,
+**338 ms** writing state, and **60 ms** deriving work. Repeating configuration
+and durable store commits tested work the pure derivation does not require.
+
+The fixture now writes the agent's bound once through
+`seon.agent/update-settings-call`, then derives each isolated case with
+Datahike `with`, retaining Seon's `write-report-validator`. Datahike's writer
+uses this same evaluator (`reference-code/datahike/src/datahike/writing.cljc:872–889`);
+the final-report callback runs in `db/transaction.cljc:1206–1225`.
+The property still has 200 cases, the same seed and all its assertions.
+A real-writer parity test checks the result, unchanged ancestor basis and
+identical carried projection. The exhaustive table still commits its states.
+
+The production read `turn/max-episode-runs` now queries only the requested
+agent setting through its component ref instead of acquiring all settings
+with `ai/agent-overlay`; issue-budget, agent override and cluster default
+retain their precedence.
+
+| Test | Before ms | After ms |
+|---|---:|---:|
+| `situation-totality-property` | >163000, incomplete | 4457.36 |
+| `the-derivation-is-total-over-every-state` | 12612.460 | 3939.94 |
+| `generated-state-agrees-with-the-writer` | new parity regression | 620.53 |
+| `only-a-turn-whose-reply-came-from-a-model-attempt-answers` | refused retired error fixture | 1774.61 |
+
+The last test now uses `seon.error/recording` rather than a hand-written
+retired error-kind entity. One generated case measured **64.235583 ms**
+preparation (once), **40.504917 ms** state transactions and **21.711625 ms**
+derivation. Intermediate property runs measured **5500.855**, **4545.159**,
+and **5278.902 ms**; only the middle one passed. The final measurements above
+include the narrower production query. All **14 turn-work and cost tests**
+passed in `a44830cc2fd1`; the combined run's selection failures are recorded
+above. The default 5000 ms bound remains, with no long-test declaration.
+
+The final namespace load completed successfully with `clojure -M:test`.
+The shared shell hook temporarily refused even `git status` for foreign
+`test/seon/fn/schema_shape_test.clj:84:70`; the next status succeeded without
+any edit to that file. Markdown checking reports two foreign stale Datahike
+gitlink citations in the wave-3a and wave-3bc plan documents. Neither boundary
+was bypassed or edited. The orchestrator still owns cold proof.

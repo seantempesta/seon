@@ -73,6 +73,15 @@ mutating property trial; pure trials may share an immutable database
 value. A fixture's successful population does not prove live boot,
 adoption, or browser behavior.
 
+Pure derivation properties may use immutable Datahike `with` values from the
+canonical fixture. Retain Seon's final-report validator in transaction metadata:
+Datahike's writer calls the same `core/with` evaluator
+(`reference-code/datahike/src/datahike/writing.cljc:872–889`), which invokes
+that validator (`reference-code/datahike/src/datahike/db/transaction.cljc:1206–1225`).
+`seon.turn-work-cost-test` compares generated state with the real writer's
+derivation and checks that the prepared database is unchanged
+(`test/seon/turn_work_cost_test.clj`). This does not prove durable publication.
+
 ## Events and refusals
 
 Use `seon.test-support/await-event!` for a channel, latch, future, or watched reference.

@@ -1,28 +1,17 @@
 (ns seon.turn-work-test
-  "Sealed acceptance draft for the resume derivation (N3, C8).
+  "Acceptance tests for the agent's next-work derivation.
 
-  DRAFT FOR ORCHESTRATOR SEAL (drafted 2026-07-27). The implementation
-  lane makes these green by implementing `seon.turn` ONLY —
-  schemas and tests are byte-sealed.
-
-  The acceptance surface is EXHAUSTIVE, not sampled. `next-agent-work`'s
-  domain is small and enumerable — the run's custody and plan state
-  crossed with the trigger's answeredness — so every state is
-  constructed as real committed facts in a real in-memory database and
-  checked against an independently written expectation. A random walk
-  would visit some of these; enumeration visits all of them, and
-  totality is the property that matters most for a derivation that
-  replaces a recovery procedure.
-
-  Each state is one fresh database (per-trial isolation by
-  construction). The crash-walk rows of n3-plan §9.3 are named in the
-  state table rather than tested twice: every row IS one of these
-  states, and the comment on each row says which."
+  The table compares committed canonical states with independent expectations.
+  The property derives isolated immutable Datahike values through the same
+  transaction evaluator and report validator, preserving transaction order.
+  Neither fixture shares mutated state between cases."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [datahike.api :as d]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.agent :as my.agent]
             [seon.turn :as turn]
             [seon.schema]
@@ -46,7 +35,8 @@
    :seon.error/data {:seon.fn.analyzer/findings
                      [{:seon.fn.analyzer/level :error}]}})
 
-(defn- with-database [body]
+(defn- with-database
+  [body]
   (support/with-database
    (fn [connection]
       (support/transacted! connection [{:seon.agent/id agent-id}])
@@ -137,6 +127,74 @@
   [connection limit]
   (support/apply-config! connection "default"
                          {:seon.config.run/max-episode-runs limit}))
+
+(defn- generated-database
+  "Derive an immutable case through Datahike's transaction evaluator.
+  The canonical report validator remains armed. Trigger-before, opening,
+  and settlement retain distinct transaction bases; no store write is needed
+  to exercise next-agent-work's pure read."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [::planned? :boolean] [::closed? :boolean]
+                        [::triggered? :boolean] [::trigger-first? :boolean]
+                        [::lint-ordinal {:optional true} [:enum 0 1]]
+                        [::receipts [:vector [:enum 0 1]]]]]
+                  :seon.db/database-value]}
+  [database {::keys [planned? closed? triggered? trigger-first?
+                       lint-ordinal receipts]}]
+  (let [projection (db/carried-projection database)
+        validator (#'db/write-report-validator projection)
+        apply-state (fn [database rows]
+                      (:db-after (d/with database rows
+                                   {:datahike/validate-report validator})))
+        message {:seon.message/id message-id
+                 :seon.message/to [:seon.agent/id agent-id]
+                 :seon.message/content "do the thing"}
+        database (if trigger-first? (apply-state database [message]) database)
+        database
+        (apply-state database
+          (turn/open-tx
+            (cond-> {:seon.turn/id run-id
+                     :seon.turn/agent [:seon.agent/id agent-id]
+                     :seon.turn/opened-tx "datomic.tx"
+                     :seon.turn.work/situation :call}
+              (and triggered? trigger-first?)
+              (assoc :seon.turn/trigger [:seon.message/id message-id]))))]
+    (apply-state database
+     (cond-> [(model-attempt run-id now)]
+       planned?
+       (conj [:db/add [:seon.turn/id run-id]
+              :seon.turn/reply-size (long (count digest))])
+       planned?
+       (into (map (fn [ordinal]
+                    {:seon.cluster.eval/id (str run-id "-" ordinal)
+                     :seon.cluster.eval/run [:seon.turn/id run-id]
+                     :seon.cluster.eval/ordinal ordinal
+                     :seon.cluster.eval/at now
+                     :seon.cluster.eval/source (str "(+ " ordinal " 1)")})
+                  (range 2)))
+       true
+       (into (map (fn [ordinal]
+                    {:seon.cluster.eval/id (str run-id "-" ordinal)
+                     :seon.cluster.eval/run [:seon.turn/id run-id]
+                     :seon.cluster.eval/ordinal ordinal
+                     :seon.cluster.eval/at now
+                     :seon.eval/shown (if (= ordinal lint-ordinal)
+                                        (pr-str lint-refusal) "1")})
+                  receipts))
+       (and triggered? (not trigger-first?)) (conj message)
+       closed? (conj [:db/add [:seon.turn/id run-id]
+                      :seon.turn/closed-tx "datomic.tx"])))))
+
+(defn- configure-agent-bound!
+  "Admit only the agent's turn bound through the settings writer."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.config.run/max-episode-runs]
+                  :seon.db/transaction-report]}
+  [connection limit]
+  (support/transacted!
+   connection
+   {:tx-data [[:db.fn/call #'my.agent/update-settings-call agent-id
+               {:seon.config.run/max-episode-runs limit}]]
+    :tx-meta {:seon.db/user [:seon.agent/id agent-id]}}))
 
 (defn- add-outside-trigger!
   [connection id at]
@@ -322,12 +380,8 @@
   (doseq [{::keys [label build expect]} states]
     (with-database
       (fn [connection]
-        ;; EVERY ROW CONFIGURES THE TURN DIAL. The bound is fail-closed on
-        ;; an absent dial — with no `:seon.config.run/max-episode-runs`
-        ;; fact, no wake opens a turn at all, which is the shipped
-        ;; configuration's business and not this table's subject. The
-        ;; capped rows below set their own smaller dial over this one.
-        (configure-cap! connection 100)
+        ;; The table needs this agent's bound, not a complete cluster manifest.
+        (configure-agent-bound! connection 100)
         (build connection)
         (let [db (db/db connection)
               derived (turn/next-agent-work db request)]
@@ -479,7 +533,11 @@
   ;; run that would answer it. Enumeration proves the table; generation
   ;; guards the CLASS, which is what makes this the one choke-point
   ;; regression for the situation enum.
-  (let [check
+  (with-database
+   (fn [prepared]
+    (configure-agent-bound! prepared 3)
+    (let [prepared (db/db prepared)
+          check
         (tc/quick-check
          200
          (prop/for-all
@@ -489,23 +547,11 @@
            trigger-first? gen/boolean
            lint-ordinal (gen/elements [nil 0 1])
            receipts (gen/vector-distinct (gen/elements [0 1]) {:max-elements 2})]
-          (with-database
-            (fn [connection]
-              (configure-cap! connection 3)
-              (when trigger-first? (add-trigger! connection))
-              (open-run! connection {:planned? planned?
-                                     :triggered? (and triggered?
-                                                      trigger-first?)})
-              (when (and triggered? (not trigger-first?))
-                (add-trigger! connection))
-              (doseq [ordinal receipts]
-                (terminal-receipt!
-                 connection ordinal
-                 (if (= ordinal lint-ordinal)
-                   (pr-str lint-refusal)
-                   "1")))
-              (when closed? (close-run! connection))
-              (let [db (db/db connection)
+              (let [db (generated-database
+                        prepared (cond-> {::planned? planned? ::closed? closed?
+                                    ::triggered? triggered? ::trigger-first? trigger-first?
+                                    ::receipts receipts}
+                            (some? lint-ordinal) (assoc ::lint-ordinal lint-ordinal)))
                     derived (turn/next-agent-work db request)
                     situation (:seon.turn.work/situation derived)
                     answered-closed? (and closed? triggered? trigger-first?)]
@@ -531,10 +577,10 @@
                        (and (not (contains? (set receipts) ordinal))
                             (= ordinal
                                (first (remove (set receipts)
-                                              (range 2))))))))))))
+                                              (range 2))))))))))
          :seed 2026072829)]
     (is (true? (:result check))
-        (str "situation totality failed: " (pr-str check)))))
+        (str "situation totality failed: " (pr-str check)))))))
 
 (deftest answeredness-is-the-turns-own-transaction
   ;; THE CLASS: answeredness used to be a stored reference from the run
@@ -603,17 +649,20 @@
         (is (zero? (turn/latest-answering-turn-t (db/db connection)
                                                  agent-id))))
       (testing "a turn whose only attempt failed answers nothing"
-        (support/transacted!
-                connection
-                ;; `:seon.error/at` is a REQUEST key seon.error/recording reads,
-                ;; not an installed attribute: the writer decides which datoms
-                ;; an occurrence gets.
-                [{:seon.error/id "provider-failure"
-                  :seon.error/kind :seon.ai/no-credential
-                  :seon.error/message "no credential"}
-                 {:seon.turn/id "failed-run" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
-                 (assoc (model-attempt "failed-run" now)
-                        :seon.ai.attempt/error [:seon.error/id "provider-failure"])])
+        (let [recording
+              (error/recording
+               (support/cluster-handle {:seon.db.process/id process})
+               (db/db connection)
+               {:seon.error/at now :seon.error/layer ::provider
+                :seon.error/operation 'seon.turn-work-test/model-attempt
+                :seon.error/message "no credential"}
+               now {})]
+          (support/transacted!
+           connection
+           (into (:seon.db/tx-data recording)
+                 [{:seon.turn/id "failed-run" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
+                  (assoc (model-attempt "failed-run" now)
+                         :seon.ai.attempt/error (:seon.error/ref recording))])))
         (is (= [message-id]
                (mapv :seon.message/id
                      (turn/unanswered-triggers (db/db connection) agent-id)))

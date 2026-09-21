@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, performance, seon.turn-work-test]
 ---
@@ -34,3 +34,22 @@ queue's terminal-event change does not repair this separate algorithm.
 
 Evidence and verification boundaries:
 [test-system landing](../../prds/steward-platform/research/test-system-fork-2026-09-23.md).
+
+## Resolution — 2026-09-23
+
+The property prepares the canonical database and admits one agent setting once.
+Each of its unchanged 200 cases derives an immutable Datahike `with` value
+with Seon's final-report validator. Trigger, opening and settlement retain
+their transaction order. A separate regression compares this with the real
+writer and checks that the ancestor database and carried projection survive.
+The exhaustive table continues to use the real writer for every state.
+
+`turn/max-episode-runs` now queries the one agent setting it needs rather than
+reading the complete agent overlay. Issue-budget and cluster-default priority
+are unchanged. Run `a44830cc2fd1`: property **4457.36 ms**, exhaustive table
+**3939.94 ms**, writer parity **620.53 ms**; all pass the default 5000 ms bound.
+One measured case: settings preparation **64.235583 ms** (once), state
+transactions **40.504917 ms**, derivation **21.711625 ms**. Earlier intermediate
+property measurements of **5500.855** and **5278.902 ms** failed the bound;
+they are not claimed as passes. All 14 turn-work and cost tests passed in the
+final run. No long-test allowance or reduced case count was introduced.
