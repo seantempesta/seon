@@ -25,14 +25,13 @@ cluster. `bin/issues-index --check` prints the indexer's refusal report and
 exits nonzero when citations or note metadata cannot be resolved. It no
 longer validates a second hand-maintained schedule.
 
-`bin/seon init` indexes the folder at source publication; development
-adoption copies those exact published facts by identity. Issue notes are NOT
-part of the source digest: a note owns no program facts, so editing one
-never re-identifies `current-src` and never rebuilds the program graph
-(`src/seon/cluster.clj:1685`, `src/seon/cluster/source.clj:94`). The
-publication's issue owner indexes the folder when the source digest changes.
-An unchanged source digest returns the existing commit without any writes;
-issue-only indexing is an explicit `seon.issue/index!` operation.
+Cold and explicit publication index the folder. Incremental publication uses
+`:seon.source/changed-paths`: source-only edits do no Markdown indexing,
+while changed issue-note paths select the notes to index. Issue notes are not
+part of the program source digest; a note-only request can update issue facts
+without rebuilding program rows. An unchanged source digest with no selected
+note changes returns the stored commit without writes. `seon.issue/index!`
+remains the explicit full-index operation.
 Ordinary older clusters retain their chosen publication.
 
 Query directly with:
