@@ -7318,3 +7318,21 @@ schema for every lane: the reset is due as soon as `src` is quiet.
 namespace's other 2 failures + 3 errors are documented in its note for the
 post-reset platform tier). Lane closed; slot held free during the reset.
 Reset of `default` started 22:10 (`tmp/orchestrator/reset-2026-09-23-2210.log`).
+
+### 2026-09-23 ~22:25 — reset done; platform tier running
+
+`bin/seon reset --force` on the quiet `src`: 325 s total (republish 260 s,
+refork/start/adopt the rest); `default` pid 10562 alive on the new store.
+Republish spans (`tmp/orchestrator/reset-2026-09-23-2210.log`):
+"program population compiled: 30320 entities" 117 s, "analysis selected
+files" 16.2 s (clj-kondo complete), "publication preparation" 8.4 s,
+"issue indexing" 6.2 s, "branch head" 4.7 s, "program rows started" 4.2 s.
+**Finding (queued, not critical path):** 117 s to compile 30 K entities
+into transaction data is ~4 ms per entity — O(n²) or a per-entity registry
+walk; the cold path is authorized to be slow only for clj-kondo's complete
+analysis and the one big Datahike transaction, not for our compilation.
+Explain by algorithm after slice 4 (redesign lane or the first namespace
+agent). Platform tier launched 22:22 as the orchestrator's cold gate
+(`tmp/orchestrator/platform-2026-09-23-2220.log`); fast-run recording for
+all lanes is unblocked by the reset. Note: the MCP exception projection on
+the new JVM returned a proper class + message for a `No such var` fault.
