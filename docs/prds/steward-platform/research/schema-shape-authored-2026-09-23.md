@@ -37,7 +37,6 @@ semantic options are preserved in those commits; neither is a current blocker.
 - Datahike's node cache is count-bounded:
   `reference-code/datahike/src/datahike/index/persistent_set.cljc:463–466`.
 
-
 ### Measured baseline and live semantic probe
 
 Fresh scratch publication: commit
@@ -289,3 +288,61 @@ The isolated worktree, its recording-store copy, and the scratch root are
 removed after verification. The shared published base and foreign edits are
 preserved. RESET NEEDED for the implementation commit containing this note; cold/platform
 proof is owed by the orchestrator. The pre-commit namespace-load command exited zero.
+
+## Adoption blocker follow-up — 2026-09-23
+
+The reported `:malli.core/child-error` for `:not` is reproducible without
+any shape rows. `malli.registry/schema` of `:not` in Malli's default registry
+returns an `IntoSchema`, not a compiled `Schema`. Passing that constructor
+to `seon.fn/function-value-schema?` reaches `m/options`, which compiles it
+with nil children (`reference-code/malli/src/malli/core.cljc:2561`).
+The resulting exception has `{:type :not :children nil :min 1 :max 1}`.
+Ordinary literal maps such as `{:not :a-database}` in
+`test/seon/db_test.clj:2163` supplied this key to the declaration scanner.
+
+`declared-function-targets` now selects keys present in the projection's
+authored schema forms before looking them up in its compiled registry.
+This derives the declaration domain from its authority and preserves
+declared function-valued attributes; it does not classify constructor
+instances or maintain a special-key roster.
+
+Reader inventory: `schema.clj:2771` builds projections from
+`:seon.schema/form` and `:seon.fn/spec`, not shape-node strings.
+`fn.clj` uses those projections for analysis and incremental publication.
+`cluster.clj:1861` delegates analysis to `build-manifest`; its projection
+acquisition delegates to `schema/projection-from-database`.
+`instrument.clj` fingerprints already compiled contracts through the shape
+owner. `call_preparation.clj:647` uses `schema-shape/compiled-in`.
+A full `src/seon` search found no shape-form decoder outside
+`schema_shape.clj`; its `row-form` and `database-form` remain the one
+reconstruction owner. No reader conversion was indicated by this evidence.
+
+The regression adds literal `:not`, `:maybe`, `:and`, and `:or` keys beside
+a positively asserted declared renderer attribute. It also checks all four
+operators reconstruct their authored children from head-only rows.
+The publication regression uses the canonical fixture, publishes a file
+whose named contracts include the canonical nonblank-string (`:and` and
+`:not`) and print-options (nested `:maybe`) declarations, then adopts its
+changed source containing those literal keys and an `:or` return contract.
+It asserts the stored source and both reconstructed contract forms.
+
+Verification boundary: fast run `f6dddeb1a686`, using advertised zero-commits-
+behind base `2c3e6b2247cac0040d447ba7d278b304206e14c6ae39920d0fa8e79a94f0e7be`,
+refused both publication tests before analysis: the fixture's stored
+`seon.fn/analyzed-artifacts` contract expects a set at argument `database`,
+while the checked-out declaration accepts nil or a database value.
+This is the existing
+[canonical fixture contract issue](../../../seon/issues/canonical-fixture-retains-old-function-contracts-after-adoption.md).
+The shared export/cache owner was concurrently edited and was not changed.
+No worktree could repair stale facts already present in the selected export;
+no cold export preparation, instrumentation bypass, or default operation was
+performed. This follow-up changes no stored schema and adds no RESET NEEDED
+requirement beyond the original shape-storage reset above.
+
+Final fast run `067c0fafd159`: 3 tests, 11 assertions, 0 failures,
+2 errors at that same stale-contract boundary. The focused constructor and
+reconstruction regression passed all 9 assertions in 157 ms. Command:
+`bin/test-fast --paths src/seon/fn.clj test/seon/fn/publication_test.clj -- seon.fn.publication-test`.
+Pre-commit load of `seon.fn`, `seon.fn.schema-shape`, and
+`seon.call-preparation` exited zero. Full adoption and cold/platform proof
+remain owed after the fixture export carries the current contracts.

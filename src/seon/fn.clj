@@ -563,12 +563,13 @@
   Consumers are joined by the attribute they use; no callable-key roster."
   [projection values first-party-functions]
   (let [registry (:seon.schema.projection/registry projection)
+        forms (:seon.schema.projection/forms projection)
         maps (filter map? (mapcat #(tree-seq coll? seq %) values))
         attributes (into #{} (keep (fn [k]
                                     (when-let [node (mr/schema registry k)]
                                       (when (or (= :seon.fn/sym k)
                                                 (function-value-schema? node #{})) k))))
-                         (into #{} (mapcat keys) maps))]
+                         (into #{} (comp (mapcat keys) (filter #(contains? forms %))) maps))]
     (reduce
      (fn [targets value]
        (if (map? value)
