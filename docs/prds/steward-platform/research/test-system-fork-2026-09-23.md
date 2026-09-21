@@ -961,3 +961,46 @@ population repeatedly. These remaining failures are not green proof.
 All runs used HEAD-plus-owned-paths snapshots. The exported publication was
 37 commits behind HEAD; this fact alone does not establish the cause of a
 contract failure. No default cluster or cold gate was operated.
+
+### Completion transport uses the smallest input proving the threshold
+
+`gate-completions-travel-as-a-file-not-as-code` now derives its result count
+from the JVM's 65536-byte method threshold and a result row's printed size,
+instead of constructing 2000 results. It still proves exact EDN round-trip,
+that the sent form excludes result data, and that the sent form stays identical
+when the staged payload's size changes. The independent absent-definition
+write checks one transported result and queries that no synthetic definitions
+were fabricated. The old 1024-byte assertion was an arbitrary form-length
+limit, not the JVM threshold or a proof of constant size.
+
+Before **11834.051 ms**; final measured run **3274.513 ms**, all semantic
+assertions and the unchanged 5000 ms bound passed. An earlier first-use run
+was **5448.810 ms**, so this does not establish a worst-case latency guarantee.
+The writer's unclassified-refusal log still serializes transaction arguments:
+`reference-code/datahike/src/datahike/writer.cljc:105–114,152–161` recognizes
+the retired error-kind marker, whereas the recorder's missing-definition
+exception carries `:seon.test/symbols`. That logging boundary remains outside
+this fixture change; no logging suppression or retired marker was added.
+
+Run **849f54d2bc0b** locally completed **46 tests, 216 assertions, 3 failures,
+11 errors**, then recording failed on immutable report-line disagreement and
+an unreadable prepl reply. These are local measurements, not recorded proof.
+The same run measured the six publication offenders below. All six refused
+before publication because the exported `:seon.source/publish-request`
+requires retired `:seon.source/activation`; these are refusal durations,
+not successful after measurements:
+
+| Test | Before ms | Refusal ms |
+|---|---:|---:|
+| `source-test/incremental-first-party-publication-retains-complete-scalar-rows` | 7250.634 | 4814.141 |
+| `source-test/incremental-publication-does-not-change-an-existing-cluster` | 6276.569 | 2780.170 |
+| `source-test/incremental-upsert-derives-scalar-safety-from-the-installed-schema` | 5963.102 | 2450.895 |
+| `source-test/incremental-upsert-records-source-identity-on-the-expected-commit` | 5704.520 | 2777.880 |
+| `source-lineage-test/existing-clusters-remain-on-their-chosen-source-commit` | 11080.855 | 2642.989 |
+| `source-lineage-test/stale-incremental-upsert-preserves-the-newer-publication` | 8986.838 | 2406.790 |
+
+The exact contract boundary is tracked in
+[`canonical-fixture-retains-old-function-contracts-after-adoption`](../../../seon/issues/canonical-fixture-retains-old-function-contracts-after-adoption.md).
+The earlier successful **4793 ms** two-file publication remains evidence for
+the orchestrator's redesign lane; the test lane has not optimized or claimed
+ownership of that publication seam.

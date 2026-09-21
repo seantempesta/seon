@@ -1543,7 +1543,9 @@
   ;; so the form is O(1) in the number of results.
   (test-support/with-database
     (fn [connection]
-      (let [results (synthetic-results 2000)
+      (let [method-limit 65536
+            smallest-row-bytes (count (pr-str (first (synthetic-results 1))))
+            results (synthetic-results (inc (quot method-limit smallest-row-bytes)))
             run-result {:seon.test.run/id "staged-completion-regression"
                         :seon.test.run/at at
                         :seon.test.runner/results results
@@ -1553,12 +1555,14 @@
         (try
           (let [form (#'runner/persistent-results-form (str file))
                 staged (#'runner/staged-completion file)]
-            (is (> (count (pr-str run-result)) 65536)
+            (is (> (count (pr-str run-result)) method-limit)
                 "the completion itself exceeds the JVM method-code ceiling")
-            (is (< (count form) 1024)
-                (str "the sent form must stay O(1); it was " (count form)
-                     " bytes"))
-            (is (not (str/includes? form "case-1999"))
+            (is (< (count form) method-limit)
+                "the sent form itself stays below the method-size threshold")
+            (spit file (pr-str (assoc run-result :seon.test.runner/results [])))
+            (is (= form (#'runner/persistent-results-form (str file)))
+                "changing the completion size leaves the sent form identical")
+            (is (not (str/includes? form (name (:seon.test/sym (peek results)))))
                 "no result travels inside the sent form")
             (is (str/includes? form (str file))
                 "the sent form names the staged completion's absolute path")
@@ -1566,17 +1570,21 @@
                 "the staged file reads back as the exact completion")
             (is (= at (:seon.test/run-at staged))
                 "instants survive the EDN round trip")
-            (is (= [(-> results first :seon.test/sym)]
-                   (:seon.test/symbols
-                    (runner/commit-results!
+            (let [refused (runner/commit-results!
                      connection
                      (assoc (select-keys staged
                                          [:seon.test.runner/results
                                           :seon.test/run-basis-t
                                           :seon.test/run-at])
+                            :seon.test.runner/results [(first (:seon.test.runner/results staged))]
                             :seon.test.run/provenance
-                            (runner/provenance @connection)))))
-                "transported results cannot fabricate absent program definitions"))
+                            (runner/provenance @connection)))]
+              (is (inst? (:seon.error/at refused))
+                  "recording the absent definitions returns an error map")
+              (is (empty? (db/q '[:find [?symbol ...] :in $ [?symbol ...]
+                                  :where [_ :seon.test/sym ?symbol]]
+                                (db/db connection) (mapv :seon.test/sym results)))
+                  "transported results cannot fabricate absent program definitions")))
           (finally
             (io/delete-file file true)))))))
 
