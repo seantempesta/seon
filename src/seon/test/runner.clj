@@ -2132,11 +2132,12 @@
                 nil))
 
 (defn- program-fact
-  [pulled]
-  (let [row (program/canonical-row (dissoc pulled :db/id))
+  {:malli/schema [:=> [:cat :seon.program/shapes [:maybe :map]] [:maybe :map]]}
+  [row-shapes pulled]
+  (let [row (program/canonical-row row-shapes (dissoc pulled :db/id))
         [attribute] (program/row-identity row)]
     (when (and attribute
-               (get row (:seon.program/source-attribute (program/shape attribute))))
+               (get row (:seon.program/source-attribute (program/shape row-shapes attribute))))
       (walk/postwalk
        (fn [value]
          (cond
@@ -2358,11 +2359,14 @@
         _ (doseq [rows [old-rows current-rows]]
             (when (and (map? rows) (contains? rows :seon.error/at) (contains? rows :seon.error/layer) (contains? rows :seon.error/operation))
               (throw (ex-info "Cannot read tested program rows." rows))))
+        row-shapes (when (seq entities)
+                     (program/shapes-in (or (db/carried-projection database)
+                                            (schema/handed-projection))))
         differences
         (into []
               (keep (fn [[old-row current-row]]
-                      (let [old (program-fact old-row)
-                            current (program-fact current-row)]
+                      (let [old (program-fact row-shapes old-row)
+                            current (program-fact row-shapes current-row)]
                         (when (not= old current)
                           [(program/row-identity (or current old)) current]))))
               (map vector old-rows current-rows))]

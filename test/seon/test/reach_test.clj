@@ -1,8 +1,24 @@
 (ns seon.test.reach-test
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
+            [seon.program :as program]
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
+
+(deftest program-digest-uses-the-databases-program-shapes
+  (support/with-database
+   (fn [connection]
+     (let [before (runner/program-digest (db/db connection))]
+       (support/transacted!
+        connection
+        [[:db/add [:seon.fn/sym 'seon.id/id] :seon.fn/doc "Changed fixture documentation."]
+         [:db/add [:seon.fn/sym 'seon.id/digest] :seon.fn/doc "Another changed declaration."]])
+       (let [after (with-redefs [program/shapes
+                                #(throw (ex-info "Program digest read authored resources." {}))]
+                     (runner/program-digest (db/db connection)))]
+         (is (string? before))
+         (is (string? after) (pr-str after))
+         (is (not= before after)))))))
 
 (deftest indexed-reach-rows-retain-the-pulled-facts
   (support/with-database

@@ -1004,3 +1004,21 @@ The exact contract boundary is tracked in
 The earlier successful **4793 ms** two-file publication remains evidence for
 the orchestrator's redesign lane; the test lane has not optimized or claimed
 ownership of that publication seam.
+
+### Program digest reads carried shapes once
+
+A thread sample during selection found `program-fact` calling the authored
+program-shape reader for each changed row. That reader computes declaration
+stamps from schema resource files. The runner now derives `program/shapes-in`
+once from the database's carried projection and supplies it to both old and
+current row comparisons. It no longer reads every schema resource per row.
+The regression changes two declarations and refuses any call to the authored
+reader during the digest comparison.
+
+Run **a44830cc2fd1** measured this regression at **2215.63 ms**, and indexed
+reach-row parity at **4362.93 ms**, both passing the unchanged 5000 ms bound.
+This does not establish that every selection test meets its bound. The broad
+selection fixture experiment was removed; its population changes did not
+produce a valid improvement. The existing named-selection duration remains
+unresolved. This run's combined tally was **26 tests, 151 assertions,
+4 failures, 3 errors**; no full selection pass is claimed.
