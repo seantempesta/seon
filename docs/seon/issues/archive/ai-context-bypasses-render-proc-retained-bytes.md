@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, performance, class/n9, wave/render-context-cache]
+resolution: Both halves are gone at HEAD: seon.cluster.prompt/prompt now acquires one retained walk (src/seon/cluster/prompt.clj:383-392) instead of a fresh uncached one, and the volatile basis= prefix and txInstant tail are no longer emitted (zero hits for basis= in src/seon/render/walk.clj and src/seon/render.clj).
 ---
 
 # Give AI context rendering the retained-bytes render path

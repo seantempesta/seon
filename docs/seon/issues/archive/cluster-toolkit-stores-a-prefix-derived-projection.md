@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, render, class/n7, wave/context-derivation]
+resolution: Both prohibited shapes are gone: src/seon/cluster/instruction.clj:31-57 selects namespaces by the declared :seon.ns/context-relevant? fact rather than a 'my.' name prefix, and derives the set from the supplied database value on every call; no durable toolkit roster is written (seed-rows at :59 installs only the getting-started instruction text).
 ---
 
 # Derive namespace context without a stored `my.*` roster

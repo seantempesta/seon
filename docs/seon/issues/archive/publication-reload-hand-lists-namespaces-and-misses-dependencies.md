@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, runtime, operator, class/n3, wave/operator-launch-concurrency]
+superseded-by: class-loaded-artifacts-lack-source-identity.md
 ---
 
 # Publication's live-JVM reload hand-lists namespaces and misses dependencies

@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, operator, render, database, class/n4, wave/directory-claims]
+superseded-by: class-mutable-resources-lack-explicit-root-and-lifetime.md
 ---
 
 # Render adversarial roots outlive their fault experiment

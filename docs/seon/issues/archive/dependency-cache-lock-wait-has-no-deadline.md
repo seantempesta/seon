@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, test, operator, class/n4, wave/test-fixture]
+superseded-by: class-mutable-resources-lack-explicit-root-and-lifetime.md
 ---
 
 # Bound dependency-cache preparation before the test coordinator starts

@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, web, performance, class/n9, wave/namespace-page-performance]
+superseded-by: class-local-updates-recompute-global-projections.md
 ---
 
 # Attribute the seven-second core namespace-page derivation

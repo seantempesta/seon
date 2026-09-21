@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, wave/sci-eval-context-owner]
+resolution: install-loaded-first-party-namespaces! no longer exists; install-first-party-namespaces! (src/seon/sci/eval.clj:1327) now wraps every host Var with sci/copy-var* at :1378 and :1396, so a value-position read no longer receives a raw clojure.lang.Var.
 ---
 
 # Bind first-party namespaces so value-position reads deref

@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, web, class/n11, wave/transcript-deletion]
+superseded-by: class-readerless-duplicate-mechanisms-survive-cuts.md
 ---
 
 # Delete the separate agent transcript assembler

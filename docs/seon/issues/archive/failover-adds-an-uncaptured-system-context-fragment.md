@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, ai, render, class/n11, wave/provider-context]
+superseded-by: class-readerless-duplicate-mechanisms-survive-cuts.md
 ---
 
 # Route failover context through the captured rendered history

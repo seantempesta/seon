@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, runtime, class/n1, wave/operator-status-face]
+superseded-by: class-outward-values-bypass-total-render-contract.md
 ---
 
 # A boot refusal prints one ~9,000-character line that repeats itself four times

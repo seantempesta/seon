@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, runtime, test, class/n2, wave/causal-episode]
+resolution: The subject harness tmp/context-mvp-drive.clj no longer exists; no drive predicate by that name survives in the tree.
 ---
 
 # Make the Context MVP drive prove its semantic exit

@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, class/n13, wave/schema-form-extraction]
+resolution: The cited src/seon/cluster/loop.clj is deleted; every current (drop 2 ...) over a Malli form is guarded by (map? (second value)) at src/seon/schema.clj:131 and :310, which is the shape-based extraction this note asked for.
 ---
 
 # Extract Malli map entries by shape, not position

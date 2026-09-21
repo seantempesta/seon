@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, operator, database, class/n9, wave/publication-velocity]
+superseded-by: class-local-updates-recompute-global-projections.md
 ---
 
 # Complete source publication takes ~70 s against the ten-second law

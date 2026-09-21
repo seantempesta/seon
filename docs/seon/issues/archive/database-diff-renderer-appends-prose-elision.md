@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, database, class/n1, wave/strict-repl-display]
+superseded-by: class-outward-values-bypass-total-render-contract.md
 ---
 
 # Database diff rendering still appends a prose elision

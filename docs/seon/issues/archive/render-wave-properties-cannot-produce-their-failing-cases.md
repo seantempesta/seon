@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, test, class/n2, wave/render-property-premise]
+resolution: None of the five named properties exists at HEAD: zero hits for p1-membership-is-complete-or-loudly-elided or p5-shared-instruction-leaves in test/; test/seon/render/walk_test.clj now holds four ordinary deftests (:54, :84, :139, :179), including the connection-truncation regression the note asked for.
 ---
 
 # The render wave's seeded properties cannot produce their failing cases

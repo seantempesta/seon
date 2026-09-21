@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, test, render, class/n11, wave/evolving-session-phases]
+resolution: src/my/run.clj no longer exists; the whole my.run namespace (and its walkthrough/largest-usage generator) was deleted, so the duplicated :seon.test/usage declaration has no producer. Verified 2026-09-21: zero hits for my.run or my/run in src/ and resources/.
 ---
 
 # Opening walkthrough replicates a usage test

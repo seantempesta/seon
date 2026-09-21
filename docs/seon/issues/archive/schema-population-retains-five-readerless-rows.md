@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, schema, class/n11, wave/schema-population-deletion]
+resolution: The schema monolith resources/seon/schema.edn was deleted and split under resources/seon/schemas/; all named rows are gone. Verified 2026-09-21: zero hits for :seon.cluster.loop/evaluation, :seon.render.data/window, :seon.render.block/band and :seon.render/literal in src/ and resources/.
 ---
 
 # Delete five readerless schema rows left by completed cuts

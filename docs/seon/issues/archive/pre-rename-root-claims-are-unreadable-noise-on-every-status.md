@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, operator, class/n1, wave/operator-lock-scope-follow-up]
+superseded-by: class-outward-values-bypass-total-render-contract.md
 ---
 
 # Pre-rename root claims are unreadable noise on every `status`

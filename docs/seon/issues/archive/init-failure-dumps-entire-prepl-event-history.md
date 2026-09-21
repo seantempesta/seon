@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, operator, render, class/n1, wave/operator-status-face]
+superseded-by: class-outward-values-bypass-total-render-contract.md
 ---
 
 # A failed `bin/seon init` dumps the entire prepl event history instead of the cause

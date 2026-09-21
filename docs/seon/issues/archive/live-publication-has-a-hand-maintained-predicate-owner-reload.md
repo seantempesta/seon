@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, schema, operator, class/n3, wave/publication-provenance]
+superseded-by: class-loaded-artifacts-lack-source-identity.md
 ---
 
 # Derive predicate-owner readiness before live source publication

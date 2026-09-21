@@ -130,3 +130,24 @@ foreign modified-uncommitted `src/seon/cluster.clj` boundary.
 UNVERIFIABLE-WITHOUT-GATE (`seon.render-simplification-test`, `seon.render.value-test`, `seon.sci.eval-test`). Audited HEAD `7e35df213` has the per-node Throwable boundary (`src/seon/render/value.clj:360-368`) and outward path census (`src/seon/fn.clj`, output-path-report); it also still chooses declared map renderers at `src/seon/render/value.clj:271-289`. The live disposable SCI pull recorded in `an-entity-pull-returns-a-sentence-instead-of-its-attributes.md` returned an opaque ExceptionInfo projection string, with a nil database complaint, instead of the requested value. This is concrete bad MCP output, but the live JVM was undergoing adoption and its exact loaded generation was not established; it is NOT a confirmed failure of all audited-HEAD rendering or an attribution to a concurrent editor. Need the named armed tests and a read-only projection with explicit database/SCI custody. Keep blocker pending result-render verification. The narrower bad-output evidence remains in that member note, not only in chat.
 
 surface: context-generation
+
+## Folded members — 2026-09-21
+
+The four operator/logging leaves this note's 2026-09-15 slice named as
+"remaining" are archived (`status: superseded`, `superseded-by` this note);
+full evidence stays at `archive/<name>.md`.
+
+| Member (in `archive/`) | Claim | Current file:line |
+|---|---|---|
+| `boot-refusal-has-no-render-producer.md` | A boot refusal prints one ~9,000-character line carrying the same message four times, a 50-frame trace, and the whole `:seon.boot/instance` (sockets, executors, connection) | `script/seon/fresh_operator.clj` refusal printing |
+| `database-diff-renderer-appends-prose-elision.md` | The database diff's AI renderer emits an English elision tail instead of the shared elision value | `src/seon/db.clj:3044` (`render-diff-ai`), prose at `:3067-3068` |
+| `init-failure-dumps-entire-prepl-event-history.md` | A failed `bin/seon init` prints the complete prepl event vector plus a trace, burying the cause | `script/seon/fresh_operator.clj:2680` (`init-form`) and its error printer |
+| `pre-rename-root-claims-are-unreadable-noise-on-every-status.md` | `bin/seon status` prints one `record unreadable …` refusal per stale root claim before any output, training readers to skim past refusals | `bin/seon status` root-claim reader |
+
+`expected-refusal-logs-raw-datom-error-twice.md` carries `class/n1` but is NOT
+folded. Its subject is the vendored Datahike fork's own transaction/writer
+logging seam (`reference-code/datahike/src/datahike/db/transaction.cljc`,
+`writer.cljc`) emitting a raw `#datahike/Datom` entry beside the bounded writer
+face. That output never crosses `seon.render`, so the one total render
+construction this note owns cannot own it; it is a fork logging decision and
+stays open separately.

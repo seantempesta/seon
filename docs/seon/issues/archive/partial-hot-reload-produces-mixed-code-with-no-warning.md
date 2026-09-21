@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, runtime, operator, class/n3, wave/general]
+superseded-by: class-loaded-artifacts-lack-source-identity.md
 ---
 
 # Partial hot reload leaves a live JVM running mixed old and new code

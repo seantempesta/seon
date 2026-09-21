@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, blob, render, performance, class/n11, wave/eval-scale-economics]
+superseded-by: class-readerless-duplicate-mechanisms-survive-cuts.md
 ---
 
 # Route exact context captures through the blob owner

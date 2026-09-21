@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, schema, render, test, class/n11, wave/error-class-contract]
+superseded-by: class-readerless-duplicate-mechanisms-survive-cuts.md
 ---
 
 # Reconcile the error-class catalog with declared schemas and renderers

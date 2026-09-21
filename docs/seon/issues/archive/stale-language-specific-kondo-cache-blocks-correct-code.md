@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, test, class/n3, wave/dev-tooling-face-hygiene]
+superseded-by: class-loaded-artifacts-lack-source-identity.md
 ---
 
 # A stale language-specific clj-kondo cache entry blocks correct code

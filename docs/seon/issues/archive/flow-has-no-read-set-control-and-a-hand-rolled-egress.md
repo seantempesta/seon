@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, flow, class/n11, wave/flow-protocol]
+superseded-by: class-readerless-duplicate-mechanisms-survive-cuts.md
 ---
 
 # Adopt flow's read-set control and sanctioned egress

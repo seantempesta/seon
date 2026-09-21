@@ -1,8 +1,9 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, flow, performance, class/n9, wave/render-package-economics]
+superseded-by: class-local-updates-recompute-global-projections.md
 ---
 
 # Skip unchanged renderer invocations in the package proc
