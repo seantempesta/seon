@@ -1103,3 +1103,114 @@ exported publication's age alone does not establish the cause of every error.
 The named and omitted-caller durations remain algorithm work, not reasons for
 new allowances. The **4793 ms** successful two-file publication remains the
 orchestrator's evidence for the publication owner.
+
+### Six owned tests: complete refusals, 2026-09-23 continuation
+
+Read the replacement AGENTS.md and the clojure-testing, data-oriented-clojure,
+Datahike and REPL skills end to end. No publication test was changed.
+The focused namespace invokes the six original test bodies under the same
+fast reporter and contracts; it is a measurement script, not six additional
+permanent regressions. Snapshots excluded the dirty `src/seon/cluster.clj`
+caller and announced that its HEAD bytes were used. Foreign files were untouched.
+
+The complete SCI evaluation maps disproved an evaluation refusal: both had
+`:seon.eval/outcome :ok`, the expected Var and no `:seon.program/row`.
+`acquire!` had discarded SCI's generation when replacing the environment.
+Installing `(sci/fork generated)` preserves definition provenance. The existing
+fileless assertions then passed; the both-host test reached execution.
+The dependency boundaries and correctness result are in
+[the generation issue](../../../seon/issues/sci-acquisition-drops-definition-generation.md).
+
+The complete nested-run exception data was:
+
+```clojure
+{:type :malli.core/invalid-schema
+ :message :malli.core/invalid-schema
+ :data {:schema :seon.test/time-limit-ms :form :seon.test/time-limit-ms}}
+```
+
+The failing function was `seon.test.runner/duration-failures`: the loaded
+host reporter used a schema absent from the older fixture's projection.
+Reporter options now carry their supplied projection into that function.
+The two host-only nested-run fixtures retain their entering host projection;
+the SCI execution fixture carries the reporter options separately from its
+database custody. No missing schema is silently substituted in the database.
+
+Claim assertions also counted inherited results from every run: **60 reports**
+instead of two, and **290 completed members** instead of four. They now scope
+by run identity and include both admitted and covered members, following the
+same two relations as `runner/execution-members`. The first scoped attempt
+missed covered members and returned nil; that correction was made after the
+run below and still requires the next focused execution.
+
+Run **ac51f1a8b816**: **8 tests, 79 assertions, 8 failures, 1 error**.
+Both-host and fileless semantic assertions passed, as did both duration
+reporter regressions. Six duration failures remain. The two remaining count
+failures are the covered-member correction above. The platform claim test
+also exhausted its existing 20-second execution deadline while expected
+refusals serialized full projection arguments into the writer log. That bound
+was not widened. These results are not a green six-test proof.
+
+| Original test | Baseline ms | Latest ms |
+|---|---:|---:|
+| `runner-test/no-double-execution` | 5116.567 | 26119.140 |
+| `runner-test/platform-claims-and-original-bounds-govern-bulk` | 30929.637 | 30307.987 |
+| `runner-test/selection-is-one-function-on-both-hosts` | 13917.317 | 58060.672 |
+| `selection-test/fileless-sci-tests-use-the-same-selection` | 6337.355 | 13030.504 |
+| `selection-test/named-selection-reuses-green-members-by-reachable-content` | 14137.688 | 20871.426 |
+| `selection-test/omitted-dirty-callers-use-head-and-carry-recordable-provenance` | 15795.024 | 15086.699 |
+
+These are failed bounds, not improvements. The focused measurement source is
+preserved as [an applicable test patch](test-system-six-offenders-2026-09-23.patch).
+Apply it, run the `seon.test.offenders-test` namespace through `bin/test-fast
+--paths` with the selected implementation/test paths, then remove that
+disposable file. The complete missing-row evaluation envelopes and Malli
+exception data were read; the summaries above name their actual values.
+
+### Decision: writer invocation logging
+
+Four completed focused logs contained over **3 GB** of writer output before
+cleanup. `datahike.writer/expected-refusal-face` at `writer.cljc:105–114`
+recognizes retired `:seon.error/kind` or native `:error`. The claim/report
+writer throws the complete flat Seon error and its declared execution refusal,
+which has neither marker. The writer therefore logs the complete invocation
+and arguments (`:158–161`), including the projection passed to
+`seon.schema.datahike/encode-call-output-in`. This is the existing
+[writer logging issue](../../../seon/issues/expected-refusal-logs-raw-datom-error-twice.md),
+whose working-tree note is held by another lane and was not edited here.
+The original callback still delivers the refusal correctly; serialization
+cost also caused the platform claim fixture's 20-second deadline to expire.
+Completed raw logs were deleted only after extracting summaries and checking
+that no process held those exact files. No run root or foreign log was swept.
+
+Three concrete choices, before changing the dependency's diagnostic policy:
+
+1. **Recommended:** log the operation and complete exception, omitting the
+   invocation and argument vector. One small maintained-fork slice and its
+   existing writer regression. Exception data, stack and callback remain
+   complete; raw input arguments no longer appear automatically. The
+   [reviewable draft](test-system-writer-log-proposal-2026-09-23.patch) is not
+   applied or tested.
+2. Extend the existing refusal classifier to recognize flat Seon errors.
+   One fork slice, retaining raw unexpected-failure logging, but it must define
+   which application error maps are expected; classifying every flat core fault
+   as a short refusal would lose its exception stack from the log.
+3. Keep the logger and remove projection arguments from the transaction bridge,
+   carrying the projection with the writer's database instead. This requires a
+   coordinated database/schema bridge change and does not bound other large
+   invocation arguments.
+
+A separate thread sample found SCI's first acquisition loading core namespaces
+whose top-level defaults call `config/compile-settings`, then rebuild the
+complete declaration projection. Named selection and omitted-caller setup still
+need their operation splits; no causal attribution is made solely from their
+total durations. No new cache or long-test allowance was added.
+
+The direct `clojure -M:test` namespace load succeeded. A subsequent duration-only
+fast snapshot was refused **before tests** by `runner/record-snapshot!`:
+`:seon.config/compiled` could not resolve `:seon.config/applied-manifest-digest`.
+The recorder returned the complete missing-reference envelope. Concurrent edits
+currently hold `src/seon/config.clj`, its resource and `src/seon/schema/edn.clj`;
+none was included or edited. This is an additional verification boundary,
+not a result for either duration regression. The last executed duration
+regressions passed in `ac51f1a8b816`.

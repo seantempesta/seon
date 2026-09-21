@@ -1,0 +1,39 @@
+diff --git a/test/seon/test/offenders_test.clj b/test/seon/test/offenders_test.clj
+new file mode 100644
+index 000000000..2ddfd9ec8
+--- /dev/null
++++ b/test/seon/test/offenders_test.clj
+@@ -0,0 +1,33 @@
++(ns seon.test.offenders-test
++  "Focused measurement of the six assigned platform regressions."
++  (:require [clojure.test :refer [deftest]]
++            [clojure.java.io :as io]
++            [seon.test.runner-test :as runner]
++            [seon.test.selection-test :as selection]))
++
++(defn- observe! [v]
++  (try
++    ((:test (meta v)))
++    (catch Throwable failure
++      (spit (io/file (System/getProperty "seon.test.source-root") "tmp"
++                     (str "test-system-envelope-" (:name (meta v)) ".edn"))
++            (pr-str (Throwable->map failure)))
++      (throw failure))))
++
++(deftest no-double-execution
++  (observe! #'runner/no-double-execution))
++
++(deftest both-hosts
++  (observe! #'runner/selection-is-one-function-on-both-hosts))
++
++(deftest fileless
++  (observe! #'selection/fileless-sci-tests-use-the-same-selection))
++
++(deftest platform-claims
++  (observe! #'runner/platform-claims-and-original-bounds-govern-bulk))
++
++(deftest named-selection
++  (observe! #'selection/named-selection-reuses-green-members-by-reachable-content))
++
++(deftest omitted-caller
++  (observe! #'selection/omitted-dirty-callers-use-head-and-carry-recordable-provenance))

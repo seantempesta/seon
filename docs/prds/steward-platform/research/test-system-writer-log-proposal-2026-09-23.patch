@@ -1,0 +1,48 @@
+--- a/src/datahike/writer.cljc
++++ b/src/datahike/writer.cljc
+@@ -156,9 +156,8 @@
+                                         ;; throwable, invocation, or tx args.
+                                         (log/error :datahike/write-rejected face)
+                                         (log/error :datahike/write-error
+-                                                   {:invocation invocation
+-                                                    :error e
+-                                                    :args args}))
++                                                   {:op op
++                                                    :error e}))
+                               ;; take a guess that a NPE was triggered by an invalid connection
+                               ;; short circuit on errors
+                                       #?(:cljs (put! callback e)
+--- a/test/datahike/test/writer_error_test.clj
++++ b/test/datahike/test/writer_error_test.clj
+@@ -142,7 +142,7 @@
+              {:backend :self
+               :write-fn-map
+               {'unexpected-op
+-               (fn [_]
++               (fn [_ _argument]
+                  (throw (ex-info "unexpected writer failure"
+                                  {:type :test/unexpected-writer-failure})))}}}]
+     (binding [trove/*log-fn* log-fn]
+@@ -157,7 +157,7 @@
+                     (let [error (take-with-timeout
+                                  (writer/dispatch! (:writer @conn)
+                                                    {:op 'unexpected-op
+-                                                    :args []}))]
++                                                    :args [(apply str (repeat 10000 "invocation-argument"))]}))]
+                       (is (instance? Throwable error)))
+                     (finally
+                       (try (d/release conn) (catch Throwable _)))))
+@@ -180,8 +180,11 @@
+             (str "expected refusal emitted " (count output) " stderr characters"))
+         (is (= 1 (count unexpected-events)))
+         (is (instance? Throwable (:error unexpected-payload)))
+-        (is (map? (:invocation unexpected-payload)))
+-        (is (= [] (:args unexpected-payload)))))))
++        (is (= :test/unexpected-writer-failure
++               (:type (ex-data (:error unexpected-payload)))))
++        (is (= 'unexpected-op (:op unexpected-payload)))
++        (is (not (contains? unexpected-payload :invocation)))
++        (is (not (contains? unexpected-payload :args)))))))
+ 
+ (deftest final-report-validation-is-atomic-and-preserves-composition
+   (doseq [history? [true false]]

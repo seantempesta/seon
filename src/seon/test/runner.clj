@@ -127,6 +127,7 @@
                         [:seon.print/length :seon.print/level])
            :seon.render/profile
            (render/agent-render-profile configuration)
+           :seon.schema/projection (schema/handed-projection)
            :seon.test/time-limit-ms
            (get-in (schema.edn/packaged-forms) [:seon.test/time-limit-ms 1 :default]))))
   ([supplied]
@@ -358,9 +359,9 @@
 
 (defn- duration-failures
   "Turn an observed body overrun into ordinary, durably recorded assertion evidence."
-  {:malli/schema [:=> [:cat :seon.test/var :seon.test/elapsed-ms :seon.test/time-limit-ms]
+  {:malli/schema [:=> [:cat :seon.test.runner/report-options :seon.test/var :seon.test/elapsed-ms :seon.test/time-limit-ms]
                   [:vector :seon.test/duration-failure]]}
-  [test-var elapsed ordinary]
+  [_options test-var elapsed ordinary]
   (let [metadata (meta test-var)
         declaration (program/test-markers metadata (meta (:ns metadata)))
         reason (:seon.test/long declaration)
@@ -384,7 +385,7 @@
     (report-event! options default-report reported-signatures failure))
   (when (= :end-test-var (:type event))
     (when-let [started (get-in @capture [::results (event-symbol event) ::started-nanos])]
-      (doseq [failure (duration-failures (:var event)
+      (doseq [failure (duration-failures options (:var event)
                                        (/ (double (- (get-in @capture [::results (event-symbol event) ::ended-nanos])
                                                      started)) 1e6)
                                        (:seon.test/time-limit-ms options))]

@@ -5,7 +5,8 @@
             [seon.test.runner :as runner]))
 
 (deftest duration-bound-requires-both-the-allowance-and-its-reason
-  (let [ordinary (:seon.test/time-limit-ms (#'runner/report-options))
+  (let [options (#'runner/report-options)
+        ordinary (:seon.test/time-limit-ms options)
         namespace-name (symbol (str "duration.probe." (id/id)))
         namespace-object (create-ns namespace-name)
         probe (intern namespace-object 'probe (fn []))
@@ -16,19 +17,19 @@
                            {:seon.test/long "Explained work without an allowance"}
                            {:seon.test/long " " :seon.test/long-ms long-limit}]]
         (alter-meta! probe #(merge (dissoc % :seon.test/long :seon.test/long-ms) declaration))
-        (let [[failure] (#'runner/duration-failures probe elapsed ordinary)]
+        (let [[failure] (#'runner/duration-failures options probe elapsed ordinary)]
           (is (= :fail (:type failure)))
           (is (= {:seon.test/time-limit-ms ordinary} (:expected failure)))
           (is (= {:seon.test/elapsed-ms elapsed} (:actual failure)))))
       (alter-meta! probe assoc :seon.test/long "Two bounded database operations"
                    :seon.test/long-ms long-limit)
-      (is (empty? (#'runner/duration-failures probe (double long-limit) ordinary)))
-      (is (= long-limit (get-in (first (#'runner/duration-failures probe (double (inc long-limit)) ordinary))
+      (is (empty? (#'runner/duration-failures options probe (double long-limit) ordinary)))
+      (is (= long-limit (get-in (first (#'runner/duration-failures options probe (double (inc long-limit)) ordinary))
                                [:expected :seon.test/time-limit-ms])))
       (alter-meta! probe dissoc :seon.test/long :seon.test/long-ms)
       (alter-meta! namespace-object assoc :seon.test/long "Namespace-scoped bounded work"
                    :seon.test/long-ms long-limit)
-      (is (empty? (#'runner/duration-failures probe elapsed ordinary)))
+      (is (empty? (#'runner/duration-failures options probe elapsed ordinary)))
       (finally (remove-ns namespace-name)))))
 
 (deftest overrun-is-captured-and-reported-as-an-assertion-failure

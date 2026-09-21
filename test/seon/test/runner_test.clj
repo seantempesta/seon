@@ -24,7 +24,8 @@
             [seon.test-support :as test-support]))
 
 (deftest selection-is-one-function-on-both-hosts
-  (test-support/with-database
+  (let [report-options (#'runner/report-options)]
+   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "both-hosts")
      (test-support/transacted! connection
@@ -38,6 +39,8 @@
                         :seon.cluster.eval/ns [:seon.ns/name 'seon.test.runner-test]
                         :seon.sci.admit/caps (config/result-caps (config/defaults))
                         :seon.sci.eval/time-limit-ms 120000 :seon.config/on-core-error :panic})
+           _ (when-not (:seon.program/row evaluation)
+               (throw (ex-info "SCI test declaration did not produce a program row." evaluation)))
            declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)
            target (symbol "seon.test.runner-test" "custody-observation")]
        (is (map? declaration) (pr-str evaluation))
@@ -60,7 +63,8 @@
          (let [executed (#'runner/run-task!
                          {:seon.test.runner/task-namespace "seon.test.runner-test"
                           :seon.test.runner/task-symbols [target]}
-                         {:seon.db/db database :seon.db/connection connection :seon.sci.eval/ctx ctx
+                         {::runner/report-options report-options
+                          :seon.db/db database :seon.db/connection connection :seon.sci.eval/ctx ctx
                           :seon.schema/projection (db/carried-projection database)
                           :seon.test/class-loader (clojure.lang.RT/baseLoader)
                           :seon.db/custody-request {:seon.db/connection connection}})
@@ -78,7 +82,7 @@
                                  [?member :seon.test.member/pass-count ?pass]
                                  [?member :seon.test.member/fail-count ?fail]
                                  [?member :seon.test.member/error-count ?error]]
-                        (db/db connection) (:seon.test.run/id provenance) target)))))))))
+                        (db/db connection) (:seon.test.run/id provenance) target))))))))))
 
 (deftest a-cold-worker-does-not-arm-its-base-around-host-test-bodies
   (test-support/preserving-instrumentation-state
@@ -214,7 +218,8 @@
            (remove-ns (ns-name probe-ns))))))))
 
 (deftest no-double-execution
-  (test-support/with-database
+  (let [host-projection (schema/handed-projection)]
+   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "claim-authority")
      (test-support/transacted! connection
@@ -276,7 +281,9 @@
                              :seon.test.member/claim-tx claim
                              :seon.test.run/terminated? terminated?
                              :seon.test.runner/results results})
-               second-results (runner/run-vars! (mapv requiring-resolve (rest symbols)) {})
+               second-results (schema/call-with-projection
+                               host-projection
+                               #(runner/run-vars! (mapv requiring-resolve (rest symbols)) {}))
                second-completion (completion other-run parent-row (claim-t second-claim) second-results false)]
            (is (= 1 (count (filter #(= :seon.test.member/claim-tx (:a %)) (:tx-data first-claim)))))
            (is (= 3 (count (filter #(= :seon.test.member/claim-tx (:a %)) (:tx-data second-claim)))))
@@ -285,7 +292,12 @@
              (is (vector? recorded) (pr-str recorded)))
            (is (nil? (:db/id (db/pull (db/db connection) [:db/id] [:seon.test/sym (nth symbols 2)])))
                "Completion never recreates a deleted program row.")
-           (is (= 2 (db/q '[:find (count ?report) . :where [?report :seon.test.report/id]] (db/db connection)))
+           (is (= 2 (db/q '[:find (count-distinct ?report) . :in $ ?id [?membership ...]
+                            :where [?run :seon.test.run/id ?id]
+                                   [?run ?membership ?member]
+                                   [?member :seon.test.member/failures ?report]]
+                          (db/db connection) (:seon.test.run/id other-run)
+                          [:seon.test.run/members :seon.test.run/covered-by]))
                "Seven identical errors share one report; passes have no reports.")
            (is (= :seon.test/claim-conflict
                   (:seon.test/execution-refusal (db/transact! connection [[:db.fn/call runner/claim-member
@@ -302,7 +314,8 @@
            (let [reclaimed (claim! (assoc (claim-request other-run parent-row)
                                           :seon.test.run/dead-workers
                                           [(select-keys child-row [:seon.db.process/pid :seon.db.process/start-instant])]))
-                 result (runner/run-var! (requiring-resolve first-symbol))
+                 result (schema/call-with-projection
+                         host-projection #(runner/run-var! (requiring-resolve first-symbol)))
                  late (completion run child-row (claim-t first-claim) [result] true)
                  accepted (completion other-run parent-row (claim-t reclaimed) [result] true)]
              (is (not= (claim-t first-claim) (claim-t reclaimed)))
@@ -317,11 +330,16 @@
                                              (update-in accepted [:seon.test.runner/results 0 :seon.test/pass-count] inc)))))
              (is (empty? (filter #(= :seon.test.member/claim-tx (:a %))
                                  (:tx-data (claim! (claim-request run parent-row))))))
-             (is (= 4 (db/q '[:find (count ?member) . :where [?member :seon.test.member/completed-tx]]
-                            (db/db connection)))))))))))
+             (is (= 4 (db/q '[:find (count-distinct ?member) . :in $ ?id [?membership ...]
+                             :where [?run :seon.test.run/id ?id]
+                                    [?run ?membership ?member]
+                                    [?member :seon.test.member/completed-tx]]
+                            (db/db connection) (:seon.test.run/id other-run)
+                            [:seon.test.run/members :seon.test.run/covered-by])))))))))))
 
 (deftest platform-claims-and-original-bounds-govern-bulk
-  (test-support/with-database
+  (let [host-projection (schema/handed-projection)]
+   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "platform-claim")
      (test-support/transacted! connection
@@ -382,7 +400,8 @@
            (is (= :seon.test.runner/worker-exchange-bound
                   (:seon.test/execution-refusal (refused (assoc (request run other) :seon.test.run/deadline
                                                   (java.util.Date. (inc (inst-ms deadline))))))))
-           (let [result (runner/run-var! (requiring-resolve platform))
+           (let [result (schema/call-with-projection
+                         host-projection #(runner/run-var! (requiring-resolve platform)))
                  recorded (runner/commit-results!
                            connection {:seon.test.run/provenance run
                                        :seon.test/run-basis-t (:seon.test.run/basis-t run)
@@ -395,8 +414,11 @@
              (is (empty? (filter #(= :seon.test.member/claim-tx (:a %))
                                  (:tx-data (test-support/transacted!
                                             connection [[:db.fn/call runner/claim-member (request run other)]])))))
-             (is (= 1 (db/q '[:find (count ?member) . :where [?member :seon.test.member/completed-tx]]
-                            (db/db connection)))))))))))
+             (is (= 1 (db/q '[:find (count ?member) . :in $ ?id
+                             :where [?run :seon.test.run/id ?id]
+                                    [?run :seon.test.run/members ?member]
+                                    [?member :seon.test.member/completed-tx]]
+                            (db/db connection) (:seon.test.run/id run))))))))))))
 
 (deftest ^{:seon.test/fixture-observation
            "Verifies refusal before published-root/fresh-store acquisition and graph selection; no expensive fixture is acquired."}

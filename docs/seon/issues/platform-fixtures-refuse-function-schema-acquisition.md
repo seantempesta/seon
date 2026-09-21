@@ -28,3 +28,20 @@ publication and recorder regressions under contracts. The small publication
 fixture work is separately assigned to the test-system lane. See the
 [landing note](../../prds/steward-platform/research/test-system-fork-2026-09-23.md)
 for the independent duration failures and exact baseline selection.
+
+## Nested runner identity established — 2026-09-23
+
+The complete exception in both `no-double-execution` and
+`platform-claims-and-original-bounds-govern-bulk` identifies
+`:seon.test/time-limit-ms` as both `:schema` and `:form` in Malli's
+`:malli.core/invalid-schema` data. The failing function is the loaded
+`seon.test.runner/duration-failures`; its named input declaration is absent
+from the older fixture projection. This is not an unresolved identity inferred
+from a stack.
+
+The reporter now carries its projection in its existing report options. Host
+nested-run fixtures retain the entering host projection, while the SCI test
+carries reporter options separately from database custody. The named schema
+error disappeared in `ac51f1a8b816`, and both duration regressions passed.
+The publication members of this issue remain open and are not modified by
+this correction.
