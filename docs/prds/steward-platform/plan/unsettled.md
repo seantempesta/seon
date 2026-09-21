@@ -7336,3 +7336,15 @@ agent). Platform tier launched 22:22 as the orchestrator's cold gate
 (`tmp/orchestrator/platform-2026-09-23-2220.log`); fast-run recording for
 all lanes is unblocked by the reset. Note: the MCP exception projection on
 the new JVM returned a proper class + message for a `No such var` fault.
+
+**~22:35:** platform tier refused at the coordinator in 13 s: the reset
+published the working tree, including the test-system lane's untracked
+`test/seon/test/offenders_test.clj`, so the published program lists a test
+the HEAD snapshot cannot load (`runner.clj:4741`; retained root
+`tmp/test-runs/run.VJMSfK`). Lesson for the working edge: a reset
+publishes the WORKING TREE; run it only when `git status` shows no
+untracked program or test namespace, or have the lanes commit first.
+Lane resumed to commit or delete the file; platform tier rerun after.
+`test-system-fork` landed `d480242c1` (Datahike fork pin `006e634a`) and
+`e9725fc4c` (omitted-caller 10.1 → 3.05 s); its five setup-blocked tests
+were waiting on the export the reset just refreshed.
