@@ -49,25 +49,28 @@ drills are pending, not executed during this documentation assignment.
 
 ## 1. Goal, size and ownership
 
-| New/reworked file | Planning estimate, not a ceiling | Responsibility |
+| New/reworked file | Measured target, not a ceiling | Responsibility |
 |---|---:|---|
 | `bin/seon` | ~80 | argv, canonical root, validation, help; invoke the one client |
 | `script/seon/operator.clj` | ~400 | `seon.operator`: launch, exact-process down/reset, advertisement discovery, prepl transport, terminal result |
 | `src/seon/cluster/boot.clj` | ~420 | minimal REPL-first entry, request functions, explicit layer sequence, readiness and reverse release |
 | Existing owners and tools | measure separately | store's destructive option; maintenance/filesystem moves; MCP/test-check/hook callers and contracts |
 
-The ~900 estimate describes the three replacement files only. It excludes tests and
-surviving behavior moved to existing owners. Record actual `wc -l` and net additions,
-deletions and moves separately; correctness outranks an arbitrary target.
+The ≈900 measured target covers the three replacement files, not tests or behavior
+moved to existing owners. The landing note reports actual `wc -l` per new file and
+explains any overrun; the right design wins over the count (README §7, `1cff03d6a`).
+Record net additions, deletions and moves separately; charge moves where they land.
 Old measured files: O 3,727; S`operator.clj` 1,219; T 1,627.
 The boot deletion must include `stand-cluster-runtime!` at C:3103 and the end of
 `stop!` at C:3566; the brief's 3187–3560 range cuts both functions incorrectly.
 Retain unrelated publication, agent/turn, rendering and recovery implementations.
 
 Owned implementation paths include the three files above, their replaced files,
-S`cluster/store.clj`, S`cluster/process.clj`, S`operator/runtime.clj`, S`fs.clj`,
+S`cluster/store.clj`, S`cluster/process.clj`, `resources/seon/operator/runtime.clj`, S`fs.clj`,
 S`maintenance.clj`, S`schedule.clj`, relevant schema resources and exact callers,
 `script/seon/dev/mcp.clj`, `bin/test-check`, `bin/seon-hook` and operator tests.
+The holder stays at `resources/seon/operator/runtime.clj:1`, outside indexed source,
+so process-root holdings survive program reload (C:806).
 Coordinate these paths with A2/B3/B4 before the cut; no changes to another lane's
 uncommitted work. This document authorizes no implementation or process operation.
 
@@ -272,7 +275,7 @@ stay in fixtures, not a production pause API (S`fs.clj:293`; testing skill).
 | 3 `stop-instance` | Named stop awaits work completion and releases only its resources; sibling remains usable. A delayed old-instance stop leaves replacement alive. Failed DB release retains lock and diagnostic access. |
 | 4 `down-unresponsive` | SIGSTOP the owned scratch JVM; down succeeds by exact identity plus actual exit, without a REPL reply. Wrong start-instant cannot kill a live process. Unknown identity refuses. |
 | 5 `reset-one-jvm` | Seed distinguishable data, reset; replacement deletes before connecting, republishes/forks/boots and stays. Old data absent, new program usable, lock file retained, symlink target intact. Invalid force/root/config causes no destruction. |
-| 6 `start-during-reset` | Pause winning reset after lock acquisition and before deletion, then again before ready; competing cold start refuses in both intervals, winner completes. |
+| 6 `start-during-reset` | Run the winner IN the test JVM: call `open-store!` with `:seon.store/destroy? true` on the scratch store and hold its real sequence after lock acquisition, before deletion, under fixture control. Keep the winning boot in that JVM for the before-ready interval too. In each interval launch the competing cold start as a real child; it refuses, then release the fixture hold and let the winner complete. No child pause or production pause API. |
 | 7 `reset-loses-replacement-race` | Reset captures/stops old I; another start acquires before reset replacement. Reset child refuses, never deletes and never kills/reselects winner. This is the precise reset-during-start race; no claim that explicit force-reset can never stop an already selected booting process. |
 | 8 `same-lock-through-reset-boot` | Two actual processes compete; put a sentinel at deletion entry, observe loser never enters it. Winner retains identical FileLock/channel from destructive admission through ready. Kill winner, await its actual exit, prove a fresh process acquires the same retained lock file. Checking `.isValid` alone is insufficient. |
 

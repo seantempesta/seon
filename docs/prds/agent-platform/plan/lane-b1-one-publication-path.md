@@ -269,13 +269,17 @@ reload (step 16, the step-9 query).
 | `src/seon/program.cljc` | 1,092 | 1,050 | + `definition-digest`; `deletion-row` remnants out |
 | `src/seon/cluster.clj` publication sections | 1,279 | 700 | snapshot/toolchain (~110), artifact trio (34), currentness trio (67), `publication-base!` (49), `require-publication-resources!` (17), two progress mechanisms; adoption stays whole |
 | `src/seon/cluster/source.clj` | 575 | 350 | seal, `publication-input-digest!`, `upsert!`/`populate-upserts!`, aggregate digests; + the ~90 moved input readers |
-| `src/seon/operator.clj` | 1,219 | 600 | §2c |
-| `src/seon/operator/state.clj` | 1,627 | 430 | §2c; the lifecycle `flock` dissolves into the store's |
-| `script/seon/fresh_operator.clj` | 3,727 | 900 | §2c; more survives than the audit's ~600 because exact termination and readiness stay |
+| `bin/seon` | 26 | ≈ 80 | B1b §1: argv, root validation and the one client |
+| `script/seon/operator.clj` | 6,573 retired across the three old operator files | ≈ 400 | B1b §1: replaces `fresh_operator.clj` (3,727), `operator.clj` (1,219) and `operator/state.clj` (1,627); no surviving old-file targets |
+| `src/seon/cluster/boot.clj` | 464 relocated/replaced from `cluster.clj:3103–3566` | ≈ 420 | B1b §1: REPL-first sequence and reverse release; these lines are separate from the publication sections above |
 | `bin/seon-hook` | 1,987 | ≈ 670 | one request (≈ 150) + patch reconstruction (220, until payloads carry the file) + the review batch (≈ 300); publication body ~40 inside the 150 |
 | `src/seon/test/cache.clj` (B1's readers, estimated) | ~120 | 0 | moved (~90) or deleted |
 | `src/seon/id.clj` | 73 | 73 | three `sha-256` copies (`schema.clj:767` already delegates; `test/cache.clj:39`) call it |
-| **total** | **15,912** | **≈ 7,700** | the audit's own floors disagree (§0 "~2,800 production" ⇒ 13,100; its §4 operator table alone ⇒ 11,100); the target dissolves mechanisms the floors kept (manifest, seal, snapshot, tempid table, process records, the lifecycle lock, the hook's second lint path). Aspiration until recounted at one commit; each deletion is charged once |
+| **total** | **≈ 16,402** | **≈ 6,663** | Sum of the scoped rows: prior 15,912 plus the 26-line launcher and 464-line boot span previously omitted. The three replacement files target ≈900; record actual `wc -l` per new file and explain overruns. The right design wins over the count (README §7). |
+
+Maintenance/filesystem moves are charged to the owners where they land, not counted
+as net deletions here; tool conversions and other existing-owner changes are measured
+separately under B1b §1. Recount the scoped totals at landing; each line is charged once.
 
 Tests: `fn_test.clj` 2,967 (≈800 die with the vars); `operator_test.clj`
 1,441; `dev/fresh_operator_test.clj` 2,206 (41 tests); `dev/fresh_operator_reset_test.clj`
