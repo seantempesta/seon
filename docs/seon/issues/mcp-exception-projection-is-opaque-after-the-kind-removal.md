@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: blocker
 tags: [issue, dev, mcp, error, wave/dev-mcp, wave/error-class-contract, class/tools]
 ---
@@ -54,3 +54,26 @@ and `at`. Follow-up for the sweep: the reported frame is the projection
 site (`seon.cluster/mcp-io-prepl` :511), not the throw's first first-party
 frame; the legacy `:seon.error/diagnostic-*` member names remain until the
 sweep's family conversion.
+
+## Recurrence — 2026-09-23, `default` at `03bbf7eb0` (reopened)
+
+A jvm-mode probe whose body threw a `NullPointerException` returned the
+fallback again, now with the constructor's own refusal as the cause:
+
+```
+seon.error/operation seon.cluster/mcp-projection-error
+seon.dev.mcp/projection-offending-class clojure.lang.PersistentArrayMap
+seon.error/diagnostic-cause "seon.error.refusal/diagnostic refused argument 0 (0-based) at [:seon.error/message]: expected a string, got a string. Fix: Supply a string at [:seon.error/message]. Called from seon.cluster (cluster.clj:356)."
+```
+
+The same envelope came back when the form returned a `pr-str` string, so
+the refused value is the projection's own error map. Two defects: the
+diagnostic built at `cluster.clj:356` fails its own `:seon.error/message`
+contract (an explanation rendered from the wrong member, or a schema at
+that key that is not `:string`); and the evaluation fault is erased, which
+is the absence-as-signal class. Wrapping the probe in `try` and returning
+`(str t)` was the only way to see the exception. The regression named
+above (a thrown `ex-info` in jvm mode projects as the declared error value
+carrying class, message and the offending value as a `result/e<id>`
+reference) is still owed; it must also construct this fallback diagnostic
+and assert it validates.
