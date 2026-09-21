@@ -105,10 +105,21 @@ is diagnostic; absence on an earlier execution path cannot prove changed code ir
 A missing/incomplete graph is unknown and must widen or refuse, never exclude silently.
 A later unrelated green cannot cover an older member’s untested change.
 
-**Isolation includes loaded behavior.** A wrapper closing over one cluster’s schema
-cannot validate another cluster merely because both call the same JVM Var. Capturing
-one JVM root also does not freeze its indirect calls. A1/B2 prove the full reachable
-execution boundary before removing context-specific selection or candidate isolation.
+**Isolation includes loaded behavior — resolved by construction, then confirmed.** A
+wrapper is a pure function of (retained contract, original callable, policy). Each
+cluster's SCI context installs its own wrapper over the ORIGINAL loaded function under
+that cluster's carried projection, at the seam interpreted rows already use
+(`install-function-contract!`, `src/seon/sci/eval.clj:695`, which binds a per-context
+root through `sci/bind-root!`); SCI's root copy takes the value at copy time
+(`reference-code/sci/src/sci/core.cljc:112-140`), so a context never inherits another
+cluster's wrapper. The JVM Var root is armed once, for the development cluster and
+host callers. A cluster's calls therefore validate against its own contracts and an
+older cluster keeps its copied roots across another cluster's reload, without the
+per-call projection scan (A1-2) or a two-generation gate. The probe confirms rather
+than decides: two clusters with different contracts, one direct and one indirect SCI
+call each, and one host call. Capturing a root still does not freeze its indirect
+JVM calls; a changed dependency is B1's reload and re-arm obligation, not an
+isolation claim.
 
 **Timeout includes exit.** A Future timeout only reports a late result. B2/B4 retain
 termination, cleanup and no-overlap guarantees; arbitrary host work does not acquire
@@ -136,6 +147,12 @@ retains evaluation and rendering behavior. Convert overlapping callers in one sl
 
 Implementation is four substantial cuts. The specs define responsibilities inside
 those cuts; they are not eight sequential projects or a queue of per-function fixes.
+Preparation is limited to the capabilities agents need to perform the refactor:
+correct test execution and recorded reuse, usable JVM/SCI REPLs, real database
+reads and writes with carried contracts, and core boot/runtime access. It does not
+require making every legacy test or feature green before replacing its mechanism.
+Record unrelated failures for their owning cut. An unavailable core capability or
+unsound test verdict remains a blocker; an unrelated old expectation does not.
 Preparation first proves dependency selection using the real analyzer and recorded
 test authority: an ordinary leaf change selects its actual dependent tests, a shared
 function change selects the wider justified set, and an unchanged green request
@@ -159,6 +176,22 @@ extended migration. Small loadable commits may record progress inside a cut; the
 not each trigger a full integration cycle. This is a concentrated refactor, not a
 multi-day sequence of small patches. If the evidence makes that scope infeasible,
 bring the concrete scope/time tradeoff to the owner before extending it.
+
+**Order inside the cuts.** The specs' stop rules describe producer→consumer seams;
+this is the one order that satisfies all of them, so no lane waits on a lane that
+waits on it. Each step is one loadable slice with every caller converted.
+
+| Step | Slice | Frees |
+|---|---|---|
+| 1.1 | B3's constructor and declared error contracts, additive (`seon.error.refusal/diagnostic` keeps its name; `at` supplied; no key retired yet) | A1's wrapper output check, A2's guard conversions, every later caller slice |
+| 1.2 | B1 writes `:seon.program/definition-digest` on every declaration row, additive beside the old key (RESET batch 1 marker) | A1 arming identity, B2 acquisition, B4 selection, C1, D1 |
+| 1.3 | A1-1/1b: wrappers read the retained contract; per-context installation of the original (§3 above); the per-call scan and classpath population go with their callers | B2's context work, C1's hook point |
+| 1.4 | A1-3 with the boot-site one-liners in A2/B1/B2/B4: the projection is a read; `load-projection` for the cold constructors only | every reconstruction fallback |
+| 1.5 | B1: manifest, caller-less vars, snapshot/toolchain, seal, one-transaction-per-report publication; `cluster.clj`/`fn.clj` become free | B3's kind cut (held files), A2's c6 inputs |
+| 1.6 | A2 c1/c3–c6 with B3's guards (c8) and the validator narrowed to report datoms; B3 commit 4 (kind/class, one commit) | reset batch 1 |
+| 2.x | B2 context/turn/history/delivery, A2 c2 after the `:db.type/any` proof, B4 fixture on the open store and the one `run` | Cut 3 callers |
+| 3.x | B3 task family and settlement, B4 launcher retirement, B2 renderer moves; reset batch 2 | C1, D1 |
+| 4.x | C1 on the final wrapper; D1 lifecycle, merge, export; the demonstration | the first namespace agent |
 
 Assign models by the work: `gpt-5.6-sol` at low effort for fully specified
 conversions, deletions and caller updates; `gpt-6-astra` at low effort for bounded
@@ -189,6 +222,16 @@ and ≤45,000 after agents remove repeated setup; schemas ≤11,000; docs ≤35,
 shared instructions ≤250 lines.** These are targets, not a proven sum of lane estimates.
 Maintained correctness and a complete self-improvement loop decide acceptance.
 
+**What this plan does and does not achieve on size, stated plainly.** The sum of the
+specs' own targets is ≈55,000 source lines: a 40 % cut, not the tenfold norm the owner
+named. The largest surviving files after the cut are still `turn.clj` (≈3,700),
+`render/web.clj` (≈2,500), `sci/eval.clj` (≈2,500) and `fn.clj` (≈2,300). A
+tenfold result (10,000–15,000 lines) is not reachable by deleting mirrors alone; it
+needs a second dissolution pass over the surviving mechanisms — the turn loop, the
+web page and the indexer as one function each — which this plan schedules as the
+namespace agents' work after D1, on a codebase whose contracts, tests and graph make
+that pass safe. Any claim of a tenfold reduction before that pass is false.
+
 Each spec owns its measured before/after scope and target. Before a cut, derive
 mutually exclusive path/span sets: separate src, schemas, fixtures, tests and shell;
 charge moved code once at its destination and include new profiling/merge code.
@@ -213,6 +256,22 @@ run belongs to final integration or a concrete cross-cut failure that warrants i
 never every edit, function conversion or small commit. Unknown selection evidence
 must be repaired or explicitly widen that checkpoint, never silently skip coverage.
 Retain platform/destructive isolation where its proof requires it.
+
+**Commits inside a cut are not test-gated** (owner, 2026-09-21: "this is not meant
+to be a fix one thing, run the entire test suite and have it take forever. We are
+breaking shit temporarily and ripping out a lot of bad code; if the plans are good we
+repair it and write better tests to replace the garbage we were testing before").
+Static reach is nearly saturated on the live graph (after the dispatch declarations
+`seon.db/transact!` still selects 1,398 tests, `seon.id/symbol-in` 1,286;
+`seon.id/valid?` 18), so "run the tests reaching my change" on `schema.clj` or
+`db.clj` is the suite, at hours per commit. Therefore: a commit's gate is that HEAD
+loads and the named REPL probe answers on `default`; a deleted mechanism's tests are
+deleted in the same commit, never repaired first; the replacement's tests are written
+at the END of the cut, one regression per behaviour class, on the canonical fixture
+with real SCI and armed contracts; the orchestrator runs the platform tier once per
+cut and the reaching selection once at the cut's end through the request that exists
+by then. Breakage between steps of a cut is expected and named in the landing note;
+the REPL stays up so it can be seen. No lane runs a suite, ever.
 
 Every commit leaves HEAD loadable and the host REPL reachable. Live verification
 names hot reload, new fork or in-place adoption, and checks the actual program identity.
@@ -244,7 +303,7 @@ Engineering proof gates belong at the operation they block, not in a chronology.
 | Gate | Default path | What requires a decision or proof before changing it |
 |---|---|---|
 | Publication authority | Unpublished branch → transaction report → caller findings → guarded publication | A direct-to-current-src shortcut needs equivalent writer/concurrency proof and a changed owner ruling; otherwise do not implement it |
-| Shared JVM behavior | Preserve existing context-specific validation and isolation | A1/B2’s two-generation and indirect-call probes decide whether a cheaper binding is sound; a failed probe retains the existing guarantee |
+| Shared JVM behavior | Per-context wrapper installation over the original callable (§3); the JVM Var armed once for the development cluster | The confirmation probe (two clusters, different contracts, direct/indirect/host calls) runs before the per-call scan is deleted; a failed probe keeps the scan and reports the case |
 | Native heterogeneous storage | Preserve the declared codec until the fork supports it | A2 proves ordering, equality, retraction, history, reconnect and shape restrictions before type reset |
 | Destructive tests | Preserve isolated immutable-snapshot execution | Prefer one isolated host mechanism serving platform and destructive work; prove confinement before reducing isolation, or retain the existing host until then |
 | Error payload durability | Keep declared data and distinguish shown text from live objects | B3 presents the conflicting complete-rendering-blob requirement explicitly; do not silently remove durable evidence or serialize arbitrary live results |
@@ -272,16 +331,21 @@ research directory that still supplies the only evidence for a claim.
 
 The issue audit classified 369 notes: 165 subjects proposed for deletion, 95 defects
 proposed to dissolve, 70 surviving defects, 26 standing class notes and 13 undecided.
-These are planning classifications, **not 260 resolved defects**. Recheck each subject
-at the corresponding code landing; close with the verified commit, preserve surviving
-evidence, and promote real tasks only after required resets. B1 owns development-tool
-defects; B3 owns the previously unassigned remainder. Existing notes stay until that
-work actually establishes their fate.
+These are planning classifications, **not 260 resolved defects**. Owner ruling
+(2026-09-21): keep only the notes whose subject will still exist. Class A (165, the
+subject itself is deleted by a spec) is deleted now — its one-line claim and location
+survive in the audit table, which the lane spec's tests section inherits. Class B (95,
+the defect is dissolved by a spec) stays until that spec lands, then closes with the
+verified commit. Classes C, D and E stay; C is grouped by lane in the audit so the
+implementing lane inherits each defect. B1 owns development-tool defects; B3 owns the
+previously unassigned remainder. No bulk promotion of notes to tasks: a task is
+created when an agent takes a note up, never for the directory.
 
-Dependency removal follows current usage, not the old count target. Recompute references
-after document/code retirements, inspect local fork changes and verify their remote
-preservation before unvendoring. Keep the lane tooling needed for implementation until
-a working replacement owns its job. The preparatory session also performs the owner-authorized fresh database index,
+Dependency removal is done: 89 unreferenced or history-only repositories were unvendored
+on 2026-09-21 after the usage audit and a remote-preservation check (20 remain; see
+`docs/seon/architecture/reference-code.md`). Recompute usage after the clean write and
+remove any repository the surviving documents no longer cite. Keep the lane tooling
+needed for implementation until a working replacement owns its job. The preparatory session also performs the owner-authorized fresh database index,
 disposable tmp/build cleanup and platform verification, recorded outside this directory
 in the fresh-start landing note. It then switches to `refactor/agent-platform`.
 Source refactoring and task promotion begin in the subsequent implementation session.

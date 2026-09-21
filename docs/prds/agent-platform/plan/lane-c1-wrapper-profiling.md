@@ -82,12 +82,16 @@ finishing after redefinition keeps its old identity; rearming never globally
 retires a definition still executable in another SCI fork. Missing identity is
 unknown. A file digest is not a temporary substitute.
 
-Custody attribution does not solve A1/B2 contract isolation. Shared JVM roots
-must retain the callable/contract evidence those owners guarantee. Reuse
-existing custody; adding `seon.db/*conn*` merely to measure plumbing can change
-formerly refused reads and therefore is not part of this feature. Host work
-without custody has volatile observations only, no durable routing guarantee.
-No process-global connection registry retains released connections.
+Attribution comes from per-context installation, not from custody lookup
+(README §3, A1-2): each cluster's SCI context holds its own wrapper over the
+original callable, so the cell lives in that wrapper's closure and belongs to
+that cluster by construction — no `*conn*` read, no per-connection map, no
+custody lookup on the call path (the 12 ns figure and its non-reproducibility
+become moot). The JVM Var's own wrapper is the development cluster's cell and
+serves host callers; its observations are that cluster's. A context generation
+that is released releases its cells with it. Shared JVM roots keep the
+callable/contract evidence A1/B2 guarantee. No process-global connection
+registry exists.
 
 B4's observation must include the test identity/version, applicable fixture work
 and owned asynchronous work while excluding recorder execution. A thread-local
@@ -160,12 +164,18 @@ and report examined datoms; filtering by `txInstant` alone does not prove
 work proportional to the requested interval. Prefer two cumulative observations
 for arithmetic, measuring their retrieval separately. No rolling-average cache.
 
-Automatic findings use a declared evidence predicate and positive done condition.
-Existing operation-bound violations supply definite evidence through their
-current error/task owner. A large total across many calls or an IO wait does not
-prove a slow function. There is no default 2000 ms profiling dial, self-time
-subtraction, top-N task threshold or k-window closure rule. Additional criteria
-remain an owner choice after inclusive evidence is useful.
+Automatic findings, decided (2026-09-21, second-perspective review; the owner's
+intent "surface automatic issue creation for agents to profile and fix" is met
+by the criterion that is already a fact): a declared operation bound that fired
+— an evaluation over its `time-limit`, a test over its declared bound, an effect
+over its deadline, a publication phase over its bound — is definite evidence and
+opens a task through B3's writer with the profile observation attached as
+occurrence evidence. Ranking by inclusive total and mean is a READ
+(`my.program/profile`) that root and the namespace agents consult to open tasks
+by judgment. A large total across many calls or an IO wait does not prove a slow
+function, so there is no 2000 ms dial, no self-time subtraction, no top-N task
+threshold and no k-window rule. A further automatic criterion needs measured
+evidence and an owner decision.
 
 When a criterion is authorized, derive findings once outside the serial writer
 where possible. B3 `trigger-call` rechecks evidence/current digest and resolves
@@ -254,7 +264,6 @@ Returned value (MCP renders query relations as arrays):
 ```
 
 Envelope: one `ret`, namespace `user`, 1337 ms, cluster state `alive`, `windowed? false`; no error/out event. Times are ns/call. This probes the proposed low-level shapes, not a completed `deftype` wrapper, multi-thread contention or stable causal overhead. The historical raw forms for 40.09/623.96/12.43 ns were not supplied by the original notes, so exact reproduction is unavailable. JDK sources verify implementation semantics, not those timings. The history example proves duplicate suppression; it does not measure rolling-query performance.
-
 
 For implementation, first repeat this baseline, then benchmark the actual
 installed wrapper with profiling disabled/enabled on the same acquired program.

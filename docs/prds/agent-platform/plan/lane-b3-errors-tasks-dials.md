@@ -106,12 +106,11 @@ Probe 2, MCP `ret` 4 ms:
 ;;      :reported-size 55201, :stored-edn-bytes 1062}]
 ```
 
-
 ## 2. The data flow
 
 ### 2a. One error value
 
-**Durability decision before the stored-shape cut.** The proposed bounded shown text and in-memory result handle do not preserve a complete rendering after restart. The owner must decide whether recorded errors also retain a complete-rendering blob. Until that decision, retain the existing blob storage and readers; every blob deletion in the table and commit 10 is conditional. Duplicate copies can be removed only after the selected durable representation preserves the required evidence. This gate is distinct from evaluation results, whose objects remain in memory only.
+**Durability is already ruled; the gate dissolves.** Owner ruling 2026-09-23 05:50 (goals note §3, "The durable form of any result is the value printer's rendering"): blob = the complete rendering, entity text = the capped shown text, live object only as `result/e<id>`; no faithful-EDN attempt, no encoder extension. Applied to a recorded error: the occurrence keeps its blob reference to the complete value-renderer rendering (the existing `blob/put!` of one rendering, kept), the capped shown text, and the `result/e<id>` handle when an evaluation owns it; `data-edn`, `data-size`, `capped?` and the second render are the duplicates that go. Nothing here is conditional on a further decision. This is distinct from evaluation results, whose objects remain in memory only.
 
 | Step | Data | Computed when | Carried where | Proportional to |
 |---|---|---|---|---|
@@ -240,10 +239,12 @@ over `seon.task` facts (AGENTS §3 layering, as `my.message` over
 
 Namespace responsibility is B3's surviving schema/reader work: `:seon.ns/agents` is a many-to-many ref relation, separate from an agent's REPL namespace. Candidate messages use B2's cluster-qualified message owner; D1 records candidate identity/address on the shared task through this same family. Starting candidate work must not also run it on shared. B2/D1 prove inherited unrelated turns/schedules do not advance. Candidate-local completion is evidence; shared repair resolution occurs only with D1's explicit accepted merge. Resume reuses the assigned agent and declared budget transition; B2 exposes stopped/failed graph state as unavailable, never healthy absence. First live contract-coverage work waits for D1's complete merge proof.
 
-Notes: the 369 live notes are audited separately against §8's deletion list;
-survivors become tasks through a one-off `script/seon/dev/notes_to_tasks.clj`
-(one `my.task/add!` per note), deleted after the final reset — not before,
-because a reset before promotion loses them (the final-reset ordering).
+Notes: the relevance audit (README §8) already classified the 369 live notes;
+class A is deleted now, class B closes at its spec's landing, the rest stay as
+documents. There is no bulk promotion script: a task is created by `my.task/add!`
+when an agent (root, or a namespace agent) takes a note up, carrying the note's
+claim and location as the task's problem and subject. Promoting a directory of
+notes into a directory of tasks would be the "fake tasks" the owner ruled out.
 
 ### 2c. Dials
 

@@ -163,7 +163,7 @@ The fixture branches from the request's captured execution commit. For ordinary 
 | copy-on-write SCI Vars (`core.cljc:345-351`) with explicitly supplied custody (`sci/eval.clj:2370-2395`) | JVM roots or mutable objects shared by those Vars; a SCI fork alone proves no version isolation |
 | nothing store-global | blob tests get independent stores; `blob_test.clj:218`, `ai_stream_fold_test.clj:378`, `cluster/mcp_test.clj:567`, `cluster/source_database_test.clj:14` and surviving generated cases |
 
-`fork-database` (`versioning.cljc:550-585`) copies every key and warns that concurrent writes can tear. A2/B1 must supply a coherent export of the explicit source commit before this fixture conversion lands. A publication lock alone does not establish exclusion of all store writers, nor does setting a branch option make the helper read that branch. Keep the existing independent-store path until the source/export proof passes; never add a per-JVM copied-store delay.
+`fork-database` (`versioning.cljc:550-585`) copies every key and warns that concurrent writes can tear. No "coherent export" mechanism is added for this: the blob-scoped tests split by what they need. A test of blob MECHANICS (`blob_test.clj:218`, `ai_stream_fold_test.clj:378` and any surviving generated case that needs no program facts) opens a fresh EMPTY store with the schema installed — milliseconds, no copy, no program. A test that needs program facts AND an independent store (`cluster/mcp_test.clj:567`, `cluster/source_database_test.clj:14`) keeps `fork-database` of the captured commit under the publication monitor and declares its measured cost as a numbered long allowance; two such tests do not justify a fourth store mechanism. Setting a branch option never makes the helper read that branch.
 
 A running request retains its admitted program even if the live cluster adopts later. B2/A1 must prove both direct SCI calls and calls through loaded JVM functions execute that definition and contract. Shared root replacement makes a retained fork alone insufficient. Mismatched custody, unproven version, or SCI-unloadable fallback for a changed implementation refuses green evidence. Keep the existing isolated host where needed, using this same `run` owner. A candidate-only failing body must make D1's combined gate fail before this interface is accepted.
 
@@ -246,7 +246,6 @@ Form 2 (diagnostic whole-graph read, not the proposed production selector):
 
 Value: `{:basis 536870949 :call-edges 76192 :calls-only {seon.db/transact! 1701 seon.id/id 1716 seon.print/text-sink 1706 seon.render.test/render-html 1701 seon.test-support/with-database 1142 seon.test/destroyers 1701 seon.test/host 1701} :elapsed-ms 150.172041}`. Tool event 152 ms, cluster alive. Neither read proves loaded-source/adoption freshness; both describe this exact live database basis.
 
-
 **Before** (the lane's first act records probe 1 and the exact historical graph forms below in
 the landing note). **After**, on `default`, with every symbol bound locally:
 
@@ -286,7 +285,7 @@ estimates to be replaced by `git diff --stat` in the landing note.
 | 5 | **Diagnostic observed reach** (after C1's wrapper and B1's digest): `commit-results!` persists complete version-attributed observation; selection remains conservative; the duplicate index retires only with its content/schema/input guarantees replaced | ≈ −50 | a request after one recorded run shows its observed set; a timed-out member records no reach |
 | 6 | Landing note; `.agents/skills/clojure-testing/SKILL.md` rewritten; `docs/seon/issues/` notes whose subject died closed by name | docs | — |
 
-Commit 1 requires A1/B2 matching program/context carriage and A2/B1 coherent independent-store export. Commit 4 pairs B1 marker lifting and every loaded schema consumer before reset. Commit 2
+Commit 1 requires A1/B2 matching program/context carriage; the blob-scoped tests take the §2d split (fresh empty store, or a numbered `fork-database` allowance) and wait on nothing. Commit 4 pairs B1 marker lifting and every loaded schema consumer before reset. Commit 2
 touches `cluster/source.clj` (B1) — one slice when free, or B1 converts its two
 `requiring-resolve` sites to `run`'s admission first. Commit 3's `cache.clj`
 remainder waits on B1's move. Commit 5 waits on C1 and B1; it does not change the selection rule.
