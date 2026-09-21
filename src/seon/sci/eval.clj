@@ -2181,6 +2181,8 @@
             @(::kernel/program-snapshot regenerated))
     ctx))
 
+(declare acquire!)
+
 (defn fork-for-turn
   "Fork the current base and reapply the agent's in-memory private layer."
   {:malli/schema [:=> [:cat :seon.sci.eval/defs-fork-request]
@@ -2189,6 +2191,10 @@
     agent-ctx :seon.sci.eval/agent-ctx
     db :seon.db/db
     agent-id :seon.agent/id}]
+  (when (contains? base-ctx ::custody)
+    (when-let [failure (::acquisition-recording-error
+                        (acquire! {:seon.sci.eval/ctx base-ctx :seon.db/db db}))]
+      (throw (ex-info "SCI acquisition could not record a row fault." failure))))
   (let [ctx (if agent-ctx
               (regenerate-agent-context! agent-ctx base-ctx)
               (env/carry-state
@@ -2249,28 +2255,40 @@
          (assoc ctx ::acquisition acquired)))))))
 
 (defn acquire!
-  "Regenerate the cluster base from the supplied database value.
+  "Acquire the supplied database once in this cluster context.
 
   The existing context identity belongs to cluster handles; replacing its
   program environment lets their retained forks regenerate from that base."
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx database :seon.db/db
     commit-fault! :seon.flow/commit-fault!}]
-  (load-core-namespaces! database)
-  (let [generated (base-ctx database
-                            (cond-> {} commit-fault!
-                              (assoc :seon.flow/commit-fault! commit-fault!)))
-        acquired (::acquisition generated)]
-    (reset! (:env ctx) @(:env generated))
-    (reset! (::kernel/program-snapshot ctx) @(::kernel/program-snapshot generated))
-    (reset! (::kernel/installed-functions ctx) @(::kernel/installed-functions generated))
-    (advance-context-projection! ctx database (:seon.schema/projection generated))
-    (record-acquisition-refusals! ctx database acquired commit-fault!)))
+  (locking (::kernel/program-snapshot ctx)
+    (let [snapshot @(::kernel/program-snapshot ctx)
+          previous (:seon.db/db snapshot)
+          identity (db/committed-value-identity database)]
+      (if (and (::acquisition snapshot)
+               (or (identical? previous database)
+                   (and identity previous
+                        (= identity (db/committed-value-identity previous)))))
+        (::acquisition snapshot)
+        (let [commit-fault! (or commit-fault! (:seon.flow/commit-fault! snapshot))
+              _ (load-core-namespaces! database)
+              generated (base-ctx database
+                                  (cond-> {} commit-fault!
+                                    (assoc :seon.flow/commit-fault! commit-fault!)))
+              acquired (::acquisition generated)]
+          (reset! (:env ctx) @(:env generated))
+          (reset! (::kernel/installed-functions ctx) @(::kernel/installed-functions generated))
+          (advance-context-projection! ctx database (:seon.schema/projection generated))
+          (let [recorded (record-acquisition-refusals! ctx database acquired commit-fault!)]
+            (reset! (::kernel/program-snapshot ctx)
+                    (assoc @(::kernel/program-snapshot generated) ::acquisition recorded))
+            recorded))))))
 
 (declare cluster-ctx*)
 
 (defn cluster-ctx
-  "Build and cold-acquire one cluster's live SCI program context."
+  "Build one cluster's interpreter; acquire its program on first use."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
@@ -2298,18 +2316,23 @@
 
 (defn- cluster-ctx*
   [db connection supplied-projection-state arm-request]
-   (load-core-namespaces! db)
-   (let [ctx (assoc (base-ctx db arm-request)
+   (let [projection (or (some-> supplied-projection-state deref :seon.schema/projection)
+                        (db/carried-projection db)
+                        (schema/projection-from-database db))
+         ctx (assoc (build-base-ctx projection)
+                    ::bind-result! #'bind-result!
+                    ::kernel/install-function! install-function-from-database!
                     ::custody (cond-> {}
-                                connection (assoc :seon.db/connection connection)))
-         projection (:seon.schema/projection ctx)
+                                connection (assoc :seon.db/connection connection)
+                                (nil? connection) (assoc :seon.db/db db)))
+         _ (swap! (::kernel/program-snapshot ctx) merge
+                  (select-keys arm-request [:seon.flow/commit-fault!]))
          projection-state (or supplied-projection-state
                               (projection-state db projection))
          ctx (call-preparation/install
               (env/carry-state
                (assoc ctx :seon.schema/projection projection)
                projection-state))]
-     (record-acquisition-refusals! ctx db (::acquisition ctx) nil)
      ;; The listener is the optimizer, never the correctness boundary —
      ;; an idle cluster notices a new supplied-default row without
      ;; waiting for the next call's basis comparison. It needs the live
@@ -2794,7 +2817,8 @@
         (if-let [database (or (:seon.db/db request)
                               (some-> (get-in base-evaluation-ctx
                                                [::custody :seon.db/connection])
-                                      db/db))]
+                                      db/db)
+                              (get-in base-evaluation-ctx [::custody :seon.db/db]))]
           (if-let [projection (or (db/carried-projection database)
                                   (context-projection base-evaluation-ctx))]
             (assoc request :seon.db/db
@@ -2954,6 +2978,13 @@
        (fn [armed]
         (vreset! arm-state armed)
         (try
+          (when (and (contains? evaluation-ctx ::custody)
+                     (not (::turn-fork? evaluation-ctx)))
+            (when-let [database (:seon.db/db request)]
+              (when-let [failure (::acquisition-recording-error
+                                  (acquire! {:seon.sci.eval/ctx evaluation-ctx
+                                             :seon.db/db database}))]
+                (throw (ex-info "SCI acquisition could not record a row fault." failure)))))
           (let [before-reader-context
             (reader-context evaluation-ctx namespace-name)
             event (or (:seon.sci.eval/event request)

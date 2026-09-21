@@ -1526,3 +1526,62 @@ Exact changed-line UTF-8 bytes (including newlines):
 | `test/seon/cluster/publication_notes_test.clj` | 0 | 3527 | 0 | 3527 |
 
 Total: **2189 deleted, 9149 inserted**.
+
+## Slice 4 — SCI acquisition on first use, 2026-09-23
+
+Boot's `cluster-ctx` constructs the minimal SCI interpreter. `evaluate`
+acquires program rows inside its existing execution boundary;
+`fork-for-turn` acquires the base before the agent fork. `acquire!` reuses
+the existing context's acquired program snapshot while the supplied database
+identity is unchanged. It serializes acquisition on that context's existing
+snapshot atom, with no second cache. An uncommitted database reuses only the
+identical supplied value. The original fault recorder travels into later
+acquisition. `bind-result!` and `result-handle` are untouched.
+
+The dependency seams are SCI `init`/`fork`
+(`reference-code/sci/src/sci/core.cljc:330,345`) and Datahike
+`committed-value-identity` (`reference-code/datahike/src/datahike/db.cljc:385`),
+through `seon.db/committed-value-identity`. The latter compares connection,
+generation and commit ID; it avoids database equality's EAVT comparison
+(`db.cljc:703–715`). The minimal interpreter construction measured 1.981 ms
+in the own live JVM before editing.
+
+Deleted adoption's `acquire-development!`, its eager program acquisition and
+its individual SCI deletion installation. The next acquired database naturally
+excludes retracted functions. Deleted the sole stale test caller: its
+handwritten string-identity fixture duplicated the canonical
+`one-unloadable-row-cannot-prevent-cold-acquisition` regression in
+`test/seon/sci/eval_test.clj`. No other caller remains.
+
+Same scratch-root docstring: **8270.733 → 7683.081 ms**.
+[The complete progress](one-jvm-lazy-sci-after-2026-09-23.edn) has no SCI
+acquisition span. Publication reconciliation 1697.784 ms; source acquisition
+1378.252 ms; adoption reconciliation 837.719 ms; final digest walk 517.560 ms.
+No individual span exceeds 2 s, but their aggregate still misses the target.
+Initial convergence of the changed implementation took 45.814 s because
+its core namespaces still reload their dependents and lint caller files;
+that is the next owner-ruled algorithm correction, not steady-state evidence.
+
+Fast run `524b14d377b5`: **2 tests, 17 assertions, 0 failures/errors**.
+The new regression proves zero installed program before first use, acquired
+program afterward, identical context/snapshot reuse for the same committed
+database, and reacquisition after a transaction. It took 20.892 s under its
+30 s declared bound: two complete acquisitions plus first-use loading of
+the published namespaces in the fresh test JVM. That O(program) work is
+now paid on first use, not boot/adoption; the measured warm acquisition
+removed from adoption was 395.691 ms. The other test took 1.201 s.
+The own cluster booted and adopted successfully, then was stopped before
+the final namespace-load proof. Orchestrator cold proof remains owed.
+
+Foreign source_test/source_evidence_test and test/resources changes remain
+excluded. Exact UTF-8 changed-line bytes:
+
+| Path | Before | After | Deleted | Inserted |
+|---|---:|---:|---:|---:|
+| `AGENTS.md` | 98302 | 98398 | 82 | 178 |
+| `src/seon/cluster.clj` | 172923 | 171440 | 1744 | 261 |
+| `src/seon/sci/eval.clj` | 167355 | 169266 | 1076 | 2987 |
+| `test/seon/adoption_rows_test.clj` | 6053 | 1595 | 4499 | 41 |
+| `test/seon/sci/lazy_acquisition_test.clj` | 0 | 2116 | 0 | 2116 |
+
+Total: **7401 deleted, 5583 inserted**.

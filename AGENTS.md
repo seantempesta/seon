@@ -262,7 +262,9 @@ unchanged publication; ordinary clusters are never synchronized. `bin/seon init 
 the publication on an explicitly selected development cluster in its
 hosting JVM; the edit hook's `:current-source` root and cluster select that target.
 Its adoption commit is recorded only after schema and program reconciliation,
-loaded definitions, JVM instrumentation, and SCI acquisition succeed. Publication
+loaded definitions and JVM instrumentation succeed. SCI acquires the program
+on first evaluation or agent fork, reusing the context until its database
+value changes. Publication
 re-arms wrappers when their contract or a transitively referenced declaration
 changes; unrelated wrappers retain identity (`src/seon/instrument.clj:593`).
 The wrapper captures the canonical dependency definitions and their contract

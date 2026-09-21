@@ -33,7 +33,6 @@
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
             [datahike.gc-guard :as gc-guard]
-            [sci.core :as sci]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.source :as source]
             [seon.cluster.export :as export]
@@ -1981,18 +1980,6 @@
 
 (declare commit-fault! process-identity)
 
-(defn- acquire-development!
-  [connection _cluster-name ctx projection]
-  (let [result (sci.eval/acquire!
-                {:seon.sci.eval/ctx ctx
-                 :seon.db/db (db/db connection)
-                 :seon.schema/projection projection
-                 :seon.flow/commit-fault!
-                 (:seon.flow/commit-fault! @(:seon.sci.kernel/program-snapshot ctx))})]
-    (when-let [failure (:seon.sci.eval/acquisition-recording-error result)]
-      (refused! "Development acquisition could not record a row fault." failure))
-    result))
-
 (def ^:private adoption-identity-attribute?
   "Declaration identity attributes the adoption record names.
 
@@ -2095,25 +2082,13 @@
     (report-source-progress! "development loaded definitions")
     ;; Clojure reload leaves removed interns behind. Remove only definitions
     ;; whose identity is absent from the published database.
-    (doseq [[attribute function-symbol :as deleted-identity] deleted-identities
+    (doseq [[attribute function-symbol] deleted-identities
             :when (#{:seon.fn/sym :seon.test/sym} attribute)]
       (let [qualified (symbol function-symbol)
             namespace-name (symbol (namespace qualified))
             local-name (symbol (name qualified))]
         (when (find-ns namespace-name)
-          (ns-unmap namespace-name local-name))
-        (when (get (sci/namespace-state ctx) namespace-name)
-         (schema/call-with-projection
-         projection
-         #(sci.eval/install-row!
-         {:seon.sci.eval/ctx ctx :seon.db/db database
-          :seon.sci.eval/prepared-projection projection
-          :seon.program/row
-          {:seon.program/delete-identities [deleted-identity]
-           :seon.program/ns [:seon.ns/name namespace-name]
-           :seon.program/source
-           (pr-str (list 'ns-unmap (list 'quote namespace-name)
-                         (list 'quote local-name)))}})))))
+          (ns-unmap namespace-name local-name))))
     ;; A changed caller reloaded before its changed callee fails on the
     ;; callee's new Var, so the order follows the declared requires facts.
     (load-development-definitions! namespaces (namespace-requires database namespaces))
@@ -2141,19 +2116,14 @@
                         (not (pos? (or (:seon.instrument/instrumented result) 0)))))
            (refused! "Development JVM instrumentation did not restore contracts."
                      result)))))
-    ;; copy-var* captures the current root. Acquire after arming so copied
-    ;; core functions carry the same contracts as their loaded JVM Vars.
-    (report-source-progress! "development SCI acquisition")
-    (acquire-development! connection cluster-name ctx projection)
     (report-source-progress! "development source verification")
     (when-not (= (:seon.source/digest published)
                  (:seon.source/digest (current-source-snapshot roots)))
       (refused! "Source changed during development adoption; the next edit must converge it."
                 {:seon.source/commit-id (:seon.source/commit-id published)
                  :seon.error/diagnostic-cause ::source-changed-during-adoption}))
-    ;; This fact means indexing, reload, SCI acquisition, and instrumentation
-    ;; succeeded. A reload or acquisition
-    ;; error leaves the old commit, so the next edit retries reconciliation.
+    ;; This fact means indexing, reload and instrumentation succeeded. SCI
+    ;; acquires this database on first use; it does no work during adoption.
     (report-source-progress! "development adoption record")
     (require-committed!
      (db/transact! connection
