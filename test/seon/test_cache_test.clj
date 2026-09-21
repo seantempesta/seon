@@ -74,3 +74,30 @@
                       (assoc "src/seon/example.clj" "source-v2"
                              "docs/example.md" "doc-v2")
                       (dissoc "test/seon/example_test.clj"))))))))
+
+(deftest nonindexed-graph-fixtures-invalidate-the-external-input-signature
+  (let [fixtures {"test/fixtures/input.txt" "text-v1"
+                  "test/resources/program.clj.txt" "template-v1"
+                  "test/seon/dev/probe.py" "python-v1"
+                  "test/seon/html_views.cjs" "browser-v1"
+                  "src/fixtures/input.txt" "source-fixture-v1"}
+        inputs (assoc fixtures
+                      "src/example.clj" "source-v1"
+                      "test/example_test.clj" "test-v1"
+                      "docs/example.md" "doc-v1")
+        original (cache/test-input-digest "." inputs)]
+    (doseq [path (keys fixtures)]
+      (testing path
+        (is (true? (cache/widening-path? path)))
+        (is (not= original
+                  (cache/test-input-digest "." (assoc inputs path "changed"))))
+        (is (not= original
+                  (cache/test-input-digest "." (dissoc inputs path))))
+        (is (not (contains? (cache/publication-inputs "." inputs) path)))))
+    (testing "ordinary indexed edits and external documentation retain the input signature"
+      (is (= original
+             (cache/test-input-digest
+              "." (assoc inputs
+                         "src/example.clj" "source-v2"
+                         "test/example_test.clj" "test-v2"
+                         "docs/example.md" "doc-v2")))))))

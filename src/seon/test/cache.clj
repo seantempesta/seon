@@ -14,7 +14,7 @@
            [java.util.concurrent.locks ReentrantLock]))
 
 (def graph-roots
-  "Roots whose files are represented in the program-graph manifest."
+  "Roots containing indexed program files and nonindexed fixtures."
   ["src" "test"])
 
 (defn worker-count
@@ -83,7 +83,7 @@
      (input-paths (.getPath root-file)))))
 
 (defn source-inputs
-  "The program-source part of a gate's recorded input digests."
+  "The graph-root part of a gate's recorded input digests, fixtures included."
   {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :string :string]]}
   [digests]
   (into {}
@@ -200,17 +200,19 @@
           digests)))
 
 (defn widening-path?
-  "True when a changed path is a gate input outside the program graph of
-  THIS checkout: a file on a declared non-graph classpath root (resources,
-  script), a vendored dependency's gitlink or file (deps.edn `:local/root`
-  or a recorded gitlink), a shipped config manifest, the dependency manifest,
-  or a launcher. A documentation note, a scratch file or a log is not an
-  input and never widens a gate (2026-09-19: the previous complement-of-roots
-  definition widened every gate, and published default, on each markdown
-  edit). Classifying many paths: use [[input-roots]] once with [[input-path?]]."
-  {:malli/schema [:=> [:cat [:string {:min 1}]] :boolean]}
-  [path]
-  (input-path? (input-roots ".") path))
+  "True for a gate input without indexed declarations for reach selection.
+  Includes declared non-graph roots and nonindexed fixtures under graph roots.
+  Documentation outside those input roots, scratch files and logs never widen.
+  The two-argument arity reuses this checkout's already derived input roots."
+  {:malli/schema
+   [:function
+    [:=> [:cat [:string {:min 1}]] :boolean]
+    [:=> [:cat [:set [:string {:min 1}]] [:string {:min 1}]] :boolean]]}
+  ([path] (widening-path? (input-roots ".") path))
+  ([roots path]
+   (or (input-path? roots path)
+       (and (input-path? (set graph-roots) path)
+            (not (source-file? path))))))
 
 (defn gitlink-digests
   "Hash Git pins; recorded snapshot pins take precedence over the live index."
@@ -263,8 +265,8 @@
     (into (file-input-digests root) (gitlink-digests root))))
 
 (defn test-input-digest
-  "Digest the sorted inventory of gate inputs outside the program graph,
-  gitlinks included, for one checkout (`root` names the checkout the
+  "Digest the sorted inventory of gate inputs without indexed declarations,
+  nonindexed graph-root fixtures and gitlinks included, for one checkout (`root` names the checkout the
   `inputs` were inventoried from; the one-argument arity is the current
   checkout)."
   {:malli/schema [:function
@@ -274,7 +276,7 @@
   ([root inputs]
    (let [roots (input-roots root)]
      (sha-256 (.getBytes (pr-str (into (sorted-map)
-                                      (filter (fn [[path _]] (input-path? roots path)))
+                                      (filter (fn [[path _]] (widening-path? roots path)))
                                       inputs)) "UTF-8")))))
 
 (defn- read-edn [file]

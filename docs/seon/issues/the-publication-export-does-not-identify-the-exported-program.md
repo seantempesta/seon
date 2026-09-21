@@ -103,3 +103,39 @@ were detected. A fresh JVM required cache, source, cluster, reply and SCI owners
 successfully. This tooling slice must land before the isolated gate: its automatic
 HEAD-base preparation cannot overlay the broken HEAD cache owner. Canonical gate
 verification follows that bootstrap commit; the broader issue remains open.
+
+## Nonindexed fixture invalidation repair — 2026-09-21
+
+The separate gap above was confirmed at both consumers:
+`seon.test.runner/published-selection-request` and `seon.test.fast` pass
+`cache/test-input-digest` as `:seon.test.run/input-digest`, while
+`seon.test.selection/widening-path?` delegates changed/deleted path decisions
+to the cache owner. Previously both excluded every graph-root file even when
+the publisher's `source-file?` predicate rejected it. A fixture therefore
+had neither indexed reach nor external-input invalidation.
+
+The existing `widening-path?` predicate now accepts declared non-graph inputs
+plus nonindexed files under `src` and `test`. Its additional arity carries
+already derived input roots; `test-input-digest` uses that same predicate
+rather than repeating or broadening the inventory definition. These fixtures
+conservatively invalidate green external-input signatures and widen change
+selection. Ordinary `.clj`, `.cljc`, and `.edn` graph inputs retain reach-based
+selection; documentation outside input roots remains excluded.
+`publication-inputs` is unchanged: nonindexed fixtures are not invented as
+published source, and export verification still compares its distinct inventory.
+
+The production Babashka cache-owner check passed **5 tests / 47 assertions**,
+zero failures/errors:
+
+```sh
+bb --classpath src:test -e "(require 'seon.test-cache-test)(let [r (clojure.test/run-tests 'seon.test-cache-test)] (System/exit (+ (:fail r) (:error r))))"
+```
+
+The regression covers changed and deleted `.txt`, `.clj.txt`, `.py`, and
+`.cjs` fixtures, including a nonindexed `src` input; each changes the external
+signature, widens selection, and stays out of publication inventory. Indexed
+source/test edits and external documentation preserve the signature. The
+first local check found an extra test delimiter; it was corrected before the
+passing check above. `git diff --check` also passed. No JVM, canonical gate,
+operator action, or commit ran in this bounded repair; the owner still owns
+integrated canonical verification and the broader export issue's status.
