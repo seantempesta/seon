@@ -20,9 +20,12 @@ being replaced, not evidence that the replacement has run.
 Write the operator anew. One JVM owns the physical store; reset launches its replacement
 with a destructive option, and that replacement remains running. One store FileLock,
 no cross-process handoff. The replacement gap is explicitly not exclusive.
-The owner's subsequent instruction permits temporary boot, REPL and MCP breakage and
-changes to the tools inside this slice. Restore them at the slice boundary; do not
-retain an old operator or introduce a compatibility implementation to avoid that work.
+Ruled 2026-09-21 (README §7, `1cff03d6a`): this slice may leave `default`'s boot, REPL and
+MCP unusable between its commits and may change the tools; no other lane uses `default`
+while it is open; everything is restored and drilled at the slice boundary. Do not retain
+an old operator or introduce a compatibility implementation to avoid that work.
+**Order: README §4 step 1.3b, before A1-3's projection work, so A1's boot one-liners
+later edit `boot.clj` rather than `cluster.clj`; files disjoint from steps 1.1–1.3.**
 
 | Found while reading, beyond the command/boot tables | Keep/drop and why | Evidence |
 |---|---|---|
@@ -71,8 +74,8 @@ S`maintenance.clj`, S`schedule.clj`, relevant schema resources and exact callers
 `script/seon/dev/mcp.clj`, `bin/test-check`, `bin/seon-hook` and operator tests.
 The holder stays at `resources/seon/operator/runtime.clj:1`, outside indexed source,
 so process-root holdings survive program reload (C:806).
-Coordinate these paths with A2/B3/B4 before the cut; no changes to another lane's
-uncommitted work. This document authorizes no implementation or process operation.
+This lane runs ALONE on `default`; A2/B3/B4 leave these paths untouched while it is open,
+and it touches no other lane's uncommitted work. This document authorizes no implementation or process operation.
 
 ## 2. Requests, boot and exclusion
 
