@@ -1080,3 +1080,26 @@ and reads **103.887 / 22.428 / 25.529 ms**. The total **13097.799917 ms**
 failed the default 5000 ms bound; this physical-copy approach was rejected for
 the property. No performance exemption was added. The normal branch fixture
 does not enter this path. The final namespace load included this repair.
+
+### Remaining platform proof at this checkpoint
+
+Six of the 18 original offenders have passing after measurements: the three
+registry tests, graph workload declaration, completion transport and simultaneous
+physical fixture isolation (the last under its explicit 10000 ms copying and
+hashing declaration). Six publication tests have only the refused measurements
+listed above, not successful after measurements. The other six are:
+
+| Test | Latest observed outcome |
+|---|---|
+| `runner-test/no-double-execution` | 4868 ms; Malli schema acquisition error |
+| `runner-test/platform-claims-and-original-bounds-govern-bulk` | 8776 ms; error and duration failure |
+| `runner-test/selection-is-one-function-on-both-hosts` | 13034 ms; SCI contract error and duration failure |
+| `selection-test/fileless-sci-tests-use-the-same-selection` | 13687 ms; error and duration failure |
+| `selection-test/named-selection-reuses-green-members-by-reachable-content` | 7935 ms; semantic assertions pass, duration fails |
+| `selection-test/omitted-dirty-callers-use-head-and-carry-recordable-provenance` | 6974 ms; semantic assertions pass, duration fails |
+
+These observations preclude claiming the 18-offender task complete. The
+exported publication's age alone does not establish the cause of every error.
+The named and omitted-caller durations remain algorithm work, not reasons for
+new allowances. The **4793 ms** successful two-file publication remains the
+orchestrator's evidence for the publication owner.
