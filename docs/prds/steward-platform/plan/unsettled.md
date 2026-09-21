@@ -7348,3 +7348,12 @@ Lane resumed to commit or delete the file; platform tier rerun after.
 `test-system-fork` landed `d480242c1` (Datahike fork pin `006e634a`) and
 `e9725fc4c` (omitted-caller 10.1 → 3.05 s); its five setup-blocked tests
 were waiting on the export the reset just refreshed.
+
+**~23:00:** head base for `d1fa4561d` (item 5, artifacts derived from
+selected database rows) prepared in 3.1 s; redesign lane verifying its
+fast namespaces on it. `bin/seon init --dev default` (no `--changed`,
+the explicit case) after the untracked test was deleted: 3,304 ms total,
+"source build" 1,831 ms (every input hashed — the explicit case has no
+changed-paths; the hook passes them), JVM instrumentation 366 ms,
+adoption record 112 ms. Platform tier rerun 23:00
+(`tmp/orchestrator/platform-2026-09-23-2300.log`).
