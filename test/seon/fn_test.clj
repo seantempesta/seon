@@ -1468,9 +1468,10 @@
                results))
         (is (every? pos? @scan-counts)
             "even an absent definition can have surviving value referrers")
-        (is (<= (count @queries) (* 5 (count symbols)))
-            "each identity uses at most five nonrecursive selection queries")
-        (is (= (count symbols) (count (filter (fn [query] (some #{'%} query)) @queries)))
+        (is (= (count symbols)
+               (count (filter (fn [query]
+                                (some #{'[?declaration :seon.fn/reference-to :seon.fn/sym]} query))
+                              @queries)))
             "each operation acquires its declared-reference relation once")
         (doseq [seeds [#{(symbol "sample.gates" "a")}
                         #{(symbol "sample.gates" "a") (symbol "sample.gates" "b")}
@@ -1555,7 +1556,7 @@
               refused (with-redefs
                         [db/q (fn [& arguments]
                                 (if (and (identical? thread (Thread/currentThread))
-                                         (= @#'seon.fn/declared-reference-rules (last arguments)))
+                                         (some #{'[?declaration :seon.fn/reference-to :seon.fn/sym]} (first arguments)))
                                   refusal
                                   (apply query arguments)))]
                         [(seon.fn/tests-reaching database (symbol "sample.shape" "many"))

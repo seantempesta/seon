@@ -216,7 +216,8 @@
                                   :seon.error/diagnostic-evidence {}}) :seon.db/invalid-read true)]
            (with-redefs [db/q (fn [& arguments]
                                (if (and (identical? thread (Thread/currentThread))
-                                        (= @#'functions/declared-reference-rules (last arguments)))
+                                        (some #{'[?declaration :seon.fn/reference-to :seon.fn/sym]}
+                                              (first arguments)))
                                  refusal (apply query arguments)))]
              (is (= refusal (select!)) "A refused declared-reference read refuses selection.")))
          (let [admission (sut/selection-admission (assoc request :seon.db/db (db/db connection)))]

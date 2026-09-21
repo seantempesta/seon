@@ -713,3 +713,26 @@ Final bodies: **180.675 ms** and **308.035 ms**. The pre-commit
 snapshot independently loaded HEAD plus only the three item-1 code paths.
 Markdown validation reports two pre-existing Datahike gitlink citations in
 wave-3a and wave-3bc plan documents; this slice does not edit those owners.
+
+### Declared-reference query released and verified
+
+After `b17ad6ef1`, `git diff --unified=0 src/seon/fn.clj` contained only the
+owned `declared-reference-edges` hunk. The query uses Datahike's bound
+attribute search (`reference-code/datahike/src/datahike/db/search.cljc:140–157`):
+acquire declared reference attributes once, query their function-owned and
+data-row edges with the attribute bound, and union capability edges.
+Reverse caller walks retain their existing indexed queries.
+
+Final parity run `e5c72fe4e486`: **1 test, 3 assertions, zero failures/errors**,
+**4925.371 ms** including canonical fixture acquisition. The indexed query
+took **326.389 ms**; the three original rule queries took **19.718 ms**,
+**1639.793 ms**, and **723.792 ms** and produced the same 10 edges. Earlier
+old/new acquisition was **3563.590 → 223.269 ms**. The phase reporter is
+retained as `selection-timing-2026-09-23.clj` beside this note, outside gate
+discovery; the recurring regression is the bounded parity test.
+
+The prior explicit `clojure -M:test -e` require loaded `seon.fn` transitively
+with this unchanged production hunk. The final fast snapshot independently
+loaded it on HEAD. The refusal-injection assertions now identify the bound
+attribute query instead of the retired OR-rule query. The large selection
+regression's other recorded reds are not claimed fixed by that assertion update.

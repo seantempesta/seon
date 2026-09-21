@@ -1399,11 +1399,41 @@
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or [:set [:tuple :int :int]] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [database]
-  (db/q '[:find ?caller ?target
-          :in $ %
-          :where
-          (declared-edge ?caller ?target)]
-        database declared-reference-rules))
+  (let [attributes (db/q '[:find [?attribute ...]
+                            :where
+                            [?declaration :seon.fn/reference-to :seon.fn/sym]
+                            [?declaration :seon.schema/key ?attribute]] database)
+        capabilities (db/q '[:find ?caller ?target
+                              :where
+                              [?caller :seon.effect/capability ?symbol]
+                              [?target :seon.fn/sym ?symbol]
+                              [?caller :seon.fn/sym]] database)]
+    (cond
+      (map? attributes) attributes
+      (map? capabilities) capabilities
+      :else
+      (reduce
+       (fn [edges attribute]
+         ;; Bind the declared attribute before reading its rows. Datahike's
+         ;; search selects AEVT here, then EAVT for the bound row identities.
+         (let [owned (db/q '[:find ?caller ?target
+                            :in $ ?attribute
+                            :where
+                            [?caller ?attribute ?target]
+                            [?target :seon.fn/sym]
+                            [?caller :seon.fn/sym]] database attribute)
+               observed (db/q '[:find ?caller ?target
+                               :in $ ?attribute
+                               :where
+                               [?holder ?attribute ?target]
+                               [?target :seon.fn/sym]
+                               (not [?holder :seon.fn/sym])
+                               [?caller :seon.fn/keywords ?attribute]] database attribute)]
+           (cond
+             (map? owned) (reduced owned)
+             (map? observed) (reduced observed)
+             :else (into (into edges owned) observed))))
+       capabilities attributes))))
 
 (defn- gate-set-in
   "Reverse-walk names, including a seed whose definition has been removed."
