@@ -7183,3 +7183,20 @@ derived, not an input; the aggregate `:seon.source/test-input-digest`
 goes when nothing reads it. `d726468e0` accepted: the validator reads
 only the report's touched rows (849/518 → 77/8 ms); docstring edit
 8.83 → 5.42 s on the lane's own root.
+
+### 2026-09-23 ~20:10 — the 15 GB JVM explained (heap dump + Memory Analyzer, 3 min)
+
+One dominator: the `default` connection's persistent-set `CachedStorage`
+LRU (Datahike bounds it by node COUNT, 1000, `persistent_set.cljc:463`)
+holds 852 K strings, 3.8 GB — ~47 copies of the database's 81 MB of
+string content, because `:seon.schema.shape/form` rows store the FULLY
+EXPANDED Malli form (registry inlined, `schema_shape.clj:76-104`) as a
+`pr-str` on every row AND on every child row that already exists as a
+content-addressed row (`:274`): 65 MB across 4,346 rows, largest 1.4 MB.
+Stored-derived, twice. Issue (blocker):
+`the-index-cache-retains-4gb-of-expanded-schema-shape-forms.md`; fix =
+store the authored form with references as keywords, derive the
+expansion from the registry facts; reset. Queued for the `src/seon/fn/`
+owner after slice 4 (it also shrinks every publication transaction).
+Method that found it in three minutes: `jmap -histo:live`, then
+`jmap -dump:live` + `ParseHeapDump.sh <abs path> org.eclipse.mat.api:suspects`.
