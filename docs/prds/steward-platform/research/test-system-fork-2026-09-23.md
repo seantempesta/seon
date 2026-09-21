@@ -1385,3 +1385,71 @@ six-test result is not a claim that the two entire namespaces are green.
 Broad-run triage: [unacquired task fixture](../../../seon/issues/task-execution-fixture-has-no-acquired-sci-program.md),
 [publication fixture eligibility](../../../seon/issues/platform-tier-rejects-small-publication-fixture-observations.md),
 and [pending selection after completion](../../../seon/issues/recorded-selection-completion-leaves-changed-members-pending.md).
+
+### Config correction: caller scope and scratch-boot boundary
+
+At `ae6a0cdd4`, the initial working tree and `src/seon/config.clj` were clean.
+No production edit was made in this investigation. The recompiling caller is
+`src/seon/config.clj:644`: zero-argument `defaults` calls `compile-settings`,
+which constructs the declaration projection at `:542` and reads the shipped
+document at `:545`. The measured 35 calls / **6282.947 ms**, including
+**3428.804 ms** of declaration projections, remain the before measurement.
+
+This API receives no manifest, projection, or environment. Concrete load-time
+callers include `test/seon/sci/eval_test.clj:46` and
+`test/seon/render/value_test.clj:28`, both top-level `caps` definitions.
+`src/seon/sci/eval.clj:1311` loads the published core namespaces, triggering
+those initializers. A textual inventory (`rg -n 'config/defaults' src test`)
+found 168 references in 83 files, including comments and indirect references;
+this is not a count of executable calls. Production consumers include
+`src/seon/instrument.clj:982`, `src/seon/render.clj:88`, and
+`src/seon/render/transcript.clj:896`. A closure or global immutable map behind
+the existing zero-argument function would still fetch shared state at call time;
+it would not implement the requested explicit carried-value rule.
+
+The compliant change is to acquire compiled config at the owning boot/fixture
+boundary and pass its effective value through consumers, converting load-time
+initializers into consumers of that value. That requires a caller conversion,
+not just a change within config.clj. Under AGENTS.md's owner design gate, the
+lane requested a scope decision before production edits: (1) explicit carried
+config through callers (recommended; cross-owner conversion), (2) an explicit
+exception for one immutable shipped-default value (smaller, but relaxes the
+no-global-fetch ruling), or (3) retain the current API and leave the sixth red.
+No exception was inferred and no cache, memoization, or timing allowance added.
+
+The requested baseline command was attempted on a newly created private root:
+`bin/seon --root tmp/test-system-root start test-system`. It failed in the
+`namespaces` phase, before config, with `Could not locate seon/cluster__init.class,
+seon/cluster.clj or seon/cluster.cljc on classpath.` Start elapsed **2473 ms**;
+that is a failed-start interval, not a config measurement. MCP runtime status
+for that explicit root returned no clusters or sessions. `down` completed;
+the process table showed no scratch JVM, and the root was deleted. The
+[scratch-boot issue](../../../seon/issues/scratch-boot-cannot-load-the-cluster-namespace.md)
+records this foreign verification boundary. No boot before/after improvement
+or sixth-test improvement is claimed.
+
+### Original 18 offenders: latest established measurements at this stop
+
+These are dated measurements from the runs recorded above, not a new suite run.
+Publication refusal durations are deliberately not presented as after results.
+
+| Test (namespace prefix `seon.`) | Original ms | Latest successful ms | State |
+|---|---:|---:|---|
+| `cluster.registry-test/reset-returns-a-cluster-to-source-state` | 5148.969 | 2310.110 | pass |
+| `cluster.registry-test/retiring-one-cluster-reclaims-only-its-own-tail` | 7063.823 | 3895.885 | pass |
+| `cluster.registry-test/two-clusters-write-independently` | 5307.073 | 2310.345 | pass |
+| `cluster.source-lineage-test/existing-clusters-remain-on-their-chosen-source-commit` | 11080.855 | — | awaiting redesign slice 4 |
+| `cluster.source-lineage-test/stale-incremental-upsert-preserves-the-newer-publication` | 8986.838 | — | awaiting redesign slice 4 |
+| `cluster.source-test/incremental-first-party-publication-retains-complete-scalar-rows` | 7250.634 | — | awaiting redesign slice 4 |
+| `cluster.source-test/incremental-publication-does-not-change-an-existing-cluster` | 6276.569 | — | awaiting redesign slice 4 |
+| `cluster.source-test/incremental-upsert-derives-scalar-safety-from-the-installed-schema` | 5963.102 | — | awaiting redesign slice 4 |
+| `cluster.source-test/incremental-upsert-records-source-identity-on-the-expected-commit` | 5704.520 | — | awaiting redesign slice 4 |
+| `flow-configuration-test/every-built-graph-proc-declares-a-specific-workload` | 11876.568 | 2537.603 | pass |
+| `test-runner-test/gate-completions-travel-as-a-file-not-as-code` | 11834.051 | 3274.513 | pass |
+| `test-support-test/simultaneous-fixture-bases-never-open-the-published-store` | 6542.267 | 6339.881 | within declared 10000 ms; three physical copies and two full file-hash comparisons |
+| `test.runner-test/no-double-execution` | 5116.567 | 4472.982 | pass |
+| `test.runner-test/platform-claims-and-original-bounds-govern-bulk` | 30929.637 | 2639.568 | pass |
+| `test.runner-test/selection-is-one-function-on-both-hosts` | 13917.317 | — | latest 15220.769 ms; duration failure |
+| `test.selection-test/fileless-sci-tests-use-the-same-selection` | 6337.355 | 2722.371 | pass after first SCI acquisition |
+| `test.selection-test/named-selection-reuses-green-members-by-reachable-content` | 14137.688 | 3133.237 | pass |
+| `test.selection-test/omitted-dirty-callers-use-head-and-carry-recordable-provenance` | 15795.024 | 543.164 | pass |
