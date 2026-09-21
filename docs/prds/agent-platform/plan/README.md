@@ -313,7 +313,13 @@ Four of them were re-examined with the owner on 2026-09-21 and stand, with numbe
   reached by no test** — the first detector's population.
 - **The operator and boot are rewritten, not cut** (B1 §2c): ≈ 9,000 lines of lifecycle
   plumbing replaced by ≈ 900 written from the data-flow tables, old files deleted in the
-  same slice, revertable by `git revert`.
+  same slice, revertable by `git revert`. Spec: [B1b](lane-b1b-operator-and-boot-rewrite.md).
+  Ruled 2026-09-21 on review: (a) the slice MAY leave `default`'s MCP, REPL and boot
+  unusable between its commits and may change the tools; everything is restored and
+  drilled at the slice boundary, and no other lane uses `default` while the slice is
+  open; (b) ≈ 900 is the measured target, not a ceiling — the landing note reports
+  actual `wc -l` per new file and explains any overrun, and the right design wins
+  over the count (owner: "I don't want the wrong design because it's 901 lines").
 
 | Gate | Default path | What requires a decision or proof before changing it |
 |---|---|---|
