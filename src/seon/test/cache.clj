@@ -383,12 +383,15 @@
   (let [source (.getCanonicalPath (io/file source))
         snapshot (.getCanonicalPath (io/file snapshot))
         base (.getCanonicalPath (io/file base))
+        paths (input-paths snapshot)
         form (pr-str
                `(do
                   (require 'seon.cluster)
                   (with-bindings
                     {(ns-resolve 'seon.cluster (symbol "*source-progress!*"))
                      (fn [phase#] (println "bin/test: SOURCE" phase#) (flush))}
+                    ((ns-resolve 'seon.cluster (symbol "refresh-source!"))
+                     ~(str (io/file source "data/clusters")) ~paths nil ~snapshot)
                     ((ns-resolve 'seon.cluster (symbol "publication-base!"))
                      ~(str (io/file source "data/clusters")) ~snapshot ~base))))
         ;; BB loads the operator after this cache namespace is complete. The
@@ -442,6 +445,14 @@
                            (.isFile (io/file base "manifest.edn")))
               (throw (ex-info "Publication exited without its store and manifest."
                               {::base (str base)})))
+            (let [roots (input-roots snapshot)
+                  expected (into {} (filter #(input-path? roots (key %))) (first inputs))
+                  published (:seon.source/relative-file-digests
+                             (read-edn (io/file base "build/current-src.edn")))
+                  difference (changed-inputs (or published {}) expected)]
+              (when (some seq (vals difference))
+                (throw (ex-info "The exported publication does not contain the requested checkout inputs."
+                                (assoc difference ::base (str base))))))
             (spit ready (pr-str (cond-> {::digest digest ::prepared-at (str (Instant/now))}
                                  (snapshot-git-sha snapshot) (assoc ::git-sha (snapshot-git-sha snapshot))
                                  inputs (assoc ::inputs inputs))))))

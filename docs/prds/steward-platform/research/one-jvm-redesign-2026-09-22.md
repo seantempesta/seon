@@ -2446,3 +2446,32 @@ claimed while the published source/contract mismatch blocks the assertions.
 Other surviving test failures remain pending diagnosis against the actual
 updated program. The scratch host is down; no foreign runner or test-system
 file was edited. Items 6 and 8 remain ordered after this verification.
+
+
+## Export request carries snapshot paths — 2026-09-23
+
+Base `2c3e6b2247…`, labelled HEAD `ae6a0cdd4`, still contains the old set
+argument in `analyzed-artifacts`. Rerun `ac30944affeb`: **71 tests, 372
+assertions, 8 failures, 18 errors**. The remaining seam is
+`seon.test.cache/prepare-base!`: its prepl form resolves the live host's
+loaded `publication-base!`; compiling the launcher does not replace that
+host Var. The previous export-body fix was therefore not exercised by that
+host. This is observed in the exported source, not inferred from its label.
+
+The current launcher now sends its exact snapshot inventory to the existing
+four-argument `refresh-source!` before requesting export. Base preparation
+also compares the exported per-path digests with the requested declared
+inputs before writing `ready.edn`; a mismatch refuses with changed/removed
+paths instead of labelling old facts as HEAD. No alternate writer, reload
+roster, child JVM or retry was added. On an updated host, explicit export may
+repeat the complete inventory comparison; that O(checkout) work belongs to
+explicit base preparation, not a one-file edit. Normal publication remains
+O(requested paths) before analysis.
+
+`seon.test.cache` loads. Fast `ce41167db977`: **3 tests, 22 assertions,
+0 failures, 0 errors**. These exercise existing cache behavior, not a live
+base preparation; the orchestrator owns that operation. Changed-line source
+bytes: **0 deleted, 779 added**. Before row stays **5695.306 ms**;
+after publication measurement is still owed. While the shape lane held
+`fn.clj`, work continued on namespace selection in `cluster.clj`; its separate
+uncommitted diff is excluded from this commit.

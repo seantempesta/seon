@@ -266,3 +266,11 @@ owner. Only this explicit complete-checkout operation enumerates all paths;
 normal changed-path requests retain their bounded file hashing. The existing
 export regression now starts with a canonical published base and checks the
 exported function contract against the checked-out Var's declaration.
+
+
+The second export, `2c3e6b2247…` at `ae6a0cdd4`, also retains the old source
+(run `ac30944affeb`, 71 / 372 / 8 failures / 18 errors). The caller seam
+`seon.test.cache/prepare-base!` resolves the host's already-loaded export Var.
+It now sends snapshot paths explicitly through `refresh-source!`, and checks
+exported input digests before recording readiness. A launcher HEAD label is
+no longer sufficient evidence that its exported program matches that HEAD.
