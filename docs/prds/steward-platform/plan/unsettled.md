@@ -7209,3 +7209,42 @@ authored shape forms, references as keywords; protected on
 `instrument.clj`/`fn.clj`). `error-family-1a` parked. Next slot when one
 lands: the wave 3a build lane. Orchestrator owes: reset, platform tier,
 measurement row, hook publication ON — at the slice 4 landing.
+
+## RESUME HERE (2026-09-23 ~20:30 local — supersedes the 19:00 block above)
+
+Read, in order: the method memory note
+(`~/.claude/projects/-Users-sean-src-seon/memory/project_orchestrator_method_2026_09_23.md`),
+the "Status" section of [the redesign plan](one-jvm-publication-redesign-2026-09-22.md)
+(slice table, slice 4's remaining items with their spans and rulings), then
+`bin/codex-agent status`, `git status --short -- src test`, `bin/seon status`.
+
+**Lanes (all astra low):** `one-jvm-redesign` — slice 4 items 2, 4, 5, 6, 8,
+config, in that order; stops under 1 s for the docstring edit or at a design
+decision. `test-system-fork` — the platform offenders (fix the algorithm, no
+`long-ms` escapes; its diff had zero); holds `src/seon/test.clj`,
+`src/seon/test/runner.clj`, `test/seon/test_support.clj`, `test/seon/turn_work*`,
+`test/seon/test/selection_test.clj`, `test/seon/test_runner_test.clj`.
+`schema-shape-authored` — authored shape forms; `instrument.clj`/`fn.clj` were
+clean, it may edit only the two fingerprint caller hunks if the owner change
+cannot absorb them. `error-family-1a` parked (legacy offending-value members,
+`issue.clj` producers, fault committer) until slice 4 frees those files.
+
+**At the slice 4 landing (orchestrator, in order):** `bin/seon stop default;
+bin/seon init default --force; bin/seon start; bin/seon init --dev default`,
+reseed; `bin/test --platform`; the measurement script on a worktree at the
+commit (row into the plan's Status table); quiet-window boot with no core
+fault printed; bare `bin/test` twice (second executes 0); hook publication ON
+(`.claude/seon-hook.edn` `:current-source :enabled`); then the build lane on
+[wave 3a](wave-3a-task-family-spec-2026-09-21.md) in the first free slot
+(read its 2026-09-23 amendment; three stops, low effort).
+
+**Open tool defects:** MCP exception projection hides faults behind a
+self-refusing diagnostic at `cluster.clj:356`
+(`docs/seon/issues/mcp-exception-projection-is-opaque-after-the-kind-removal.md`,
+reopened); wrap probes in `try` and return `(str t)` until fixed.
+
+**Standing rules:** three lanes, disjoint files, low/medium effort; verify
+before naming a cause; a number is explained by the algorithm's work; rulings
+into this file AND the plan's Status section the same turn; pushes at
+checkpoints; explain in Clojure/Malli/Datahike/SCI/core.async/clj-kondo
+terms only; resident memory is a smell like time is.
