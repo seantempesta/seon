@@ -1658,3 +1658,69 @@ before namespace loading. Exact UTF-8 changed-line bytes:
 | `test/seon/cluster/publication_concurrency_test.clj` | 0 | 1614 | 0 | 1614 |
 
 Total: **7152 deleted, 3759 inserted**.
+
+## Slice 4 — lazy boot acquisition and phase timing, 2026-09-23
+
+Boot now creates the existing minimal SCI context; agent forks retain their
+base context and acquire its program only at evaluation. The existing
+program snapshot still owns reuse for the exact database value, using
+Datahike committed-value identity rather than database equality. No second
+cache was added. `bind-result!` and `result-handle` behavior is unchanged.
+SCI fork still owns environment isolation (`reference-code/sci/src/sci/core.cljc:345`);
+`seon.sci.eval/evaluate` acquires and regenerates the private agent context.
+
+The existing armer selects unarmed agents with pending work or schedules.
+Idle agents have no graph until the existing wake listener observes work.
+Schedule owners must keep their timer proc; the existing `:seon.wake/arms`
+property on schedule ownership triggers this same armer. No new scheduler,
+listener or stored readiness flag exists. Boot and add-cluster use their
+existing progress callback to print each completed phase's elapsed time.
+
+Live own-root evidence: zero installed SCI functions after boot, only the
+scheduled root agent armed. Operator start fell **23998 → 16173 ms**;
+cluster readiness was 6861 ms. [Boot phase evidence](one-jvm-lazy-boot-phases-2026-09-23.txt).
+The labels report the interval AFTER the named readiness fact: branch
+3118 ms covers projection/schema coherence and recovery; config 2330 ms
+covers process/root seeding, Lucene acquisition and minimal SCI construction,
+not config reconciliation alone (`stand-cluster-runtime!`). Namespace loading
+7001 ms is the authorized cold JVM cost. Branch projection is O(program)
+once per new connection; Lucene `search/open!` rebuilds O(indexed entities)
+when its stored basis differs (`src/seon/search.clj:344`). These remain boot
+costs, not hidden incremental-publication work. The 1992 ms final ready
+interval covers instrumentation before operator acknowledgement.
+
+One-file publication plus adoption: **7343.350 → 7138.908 ms**.
+[Raw progress](one-jvm-lazy-boot-after-2026-09-23.edn). No individual span
+exceeds 2 s; publication reconciliation 1674 ms, adoption reconciliation
+834 ms, source build 1006 ms and final digest verification 546 ms remain.
+The multi-file convergence before that measurement took 36263 ms: current
+caller lint and dependent namespace reload still scale beyond changed
+files; this is a finding, not an acceptable incremental bound.
+
+Fast run `ea08434bdaff` passed the lazy SCI regression (11 assertions),
+but its companion agent test had a missing fixture cluster name. After
+repair, agent run `0a7f30379e87` passed 1 test / 3 assertions, 0 failures
+or errors, 5.154 s; its declared 10 s bound names the canonical setup and
+transaction cost. The SCI regression's declared 30 s bound covers two
+complete first-use acquisitions. Namespace load passed after downing the
+scratch JVM. The orchestrator's isolated cold proof remains owed.
+
+Config's stored digest covers dials, not initialization; the existing
+initialization-only-change regression requires reconciliation despite an
+unchanged digest. No unsafe whole-config shortcut was added; that decision
+remains explicit. Foreign test-support, test-runner, turn-work and testing
+skill edits are excluded. No reset is required for the existing wake property.
+
+Exact UTF-8 changed-line bytes:
+
+| Path | Before | After | Deleted | Inserted |
+|---|---:|---:|---:|---:|
+| `AGENTS.md` | 98398 | 98411 | 284 | 297 |
+| `resources/seon/schemas/seon.schedule.task.edn` | 764 | 784 | 72 | 92 |
+| `script/seon/fresh_operator.clj` | 157158 | 157978 | 107 | 927 |
+| `src/seon/cluster.clj` | 171779 | 171571 | 781 | 573 |
+| `src/seon/cluster/agent.clj` | 50654 | 51531 | 811 | 1688 |
+| `src/seon/cluster/wake.clj` | 28319 | 28279 | 472 | 432 |
+| `src/seon/sci/eval.clj` | 169266 | 169522 | 1117 | 1373 |
+| `test/seon/sci/lazy_acquisition_test.clj` | 2116 | 2424 | 43 | 351 |
+| `test/seon/cluster/lazy_agents_test.clj` | 0 | 1759 | 0 | 1759 |

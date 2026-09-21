@@ -119,23 +119,22 @@
              database)))
 
 (defn arming-attributes
-  "The attributes whose assertion means a new agent exists for the armer.
+  "The attributes whose assertion asks the armer to derive required graphs.
 
   ONE DECLARATION, never a name and never a list. An agent's flow graph
   is process-local derived state, so the only durable evidence that an
   agent exists is its identity datom. `:seon.wake/arms true` on that
-  attribute is how the cluster's armer learns of an agent created WHILE
-  THE CLUSTER RUNS, rather than at the next boot — the belt that used to
+  attribute and schedule ownership notify the armer while
+  the cluster runs, rather than at the next boot — the belt that used to
   depend on the new agent also being addressed in the same commit
   (issue `a-worker-started-while-the-cluster-runs-is-never-armed`:
   `seon.issue/start!` created a worker, `seon.turn/next-agent-work`
   answered `:generate`, and nothing ran because no wake-matching datom
   named it).
 
-  Unlike `:seon.wake/listen`, the datom's VALUE is not an agent
-  reference and nothing is routed to a mailbox: the armer derives
-  (agents in facts) - (armed set), so its wake carries nothing at all
-  and an arming attribute needs no `:avet` index."
+  Unlike mailbox delivery, arming does not interpret the datom value as
+  an agent reference. The armer derives unarmed agents with work or schedules,
+  so this wake carries no payload and needs no attribute-value lookup."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   :seon.cluster.wake/attributes]}
   [database]

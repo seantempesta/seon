@@ -54,7 +54,7 @@
   by arming at boot, never a fact. The cluster's one `wake/route!`
   listener delivers through it; `:seon.agent/armer` (hosted in the cluster's own
   graph, R7) closes the agent-created-while-the-cluster-runs window by
-  deriving (agents in facts) − (armed set) under a payload-free wake,
+  deriving unarmed agents with work or schedules under a payload-free wake,
   woken by the arming attribute the creation itself asserts.
 
   Crash walk: everything on any channel is losable by the transport
@@ -896,20 +896,36 @@
 ;;; The armer — hosted in the cluster's own graph (R7)
 ;;; ---------------------------------------------------------------------------
 
+(defn- agents-to-arm
+  "Unarmed agents with work, or schedules whose timers need a running proc."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.agent/id]]
+                  [:set :seon.agent/id]]}
+  [database candidates]
+  (let [rows (db/q '[:find [?id ...] :in $ [?id ...]
+                    :where [?agent :seon.agent/id ?id]
+                    [_ :seon.schedule.task/owner ?agent]]
+                  database (vec candidates))
+        _ (when (:seon.error/at rows)
+            (throw (ex-info "Agent arming could not read schedule owners." rows)))
+        scheduled (set rows)]
+    (into scheduled
+          (filter #(turn/more-agent-work? database {:seon.agent/id %}))
+          (remove scheduled candidates))))
+
 (defn armer-step
   "The armer transform, in Flow's four arities.
-  Derive-all under a payload-free wake: (agents in facts) − (armed
-  set), arm each, sorted for determinism. A COMMITTED AGENT CREATION IS
+  Derive unarmed agents with work or schedules under a payload-free wake,
+  then arm those agents, sorted for determinism. A COMMITTED AGENT CREATION IS
   AN ARM WAKE, and that is a declaration rather than a claim:
   `:seon.agent/id` carries `:seon.wake/arms true`, which
   `wake/arming-attributes` derives and `wake/route!` offers here on
-  every assertion — so an agent created while the cluster runs is armed
-  by this same pass, never by its creator and never at the next boot.
+  every assertion — so an agent created with work while the cluster runs is
+  armed by this same pass. An idle agent waits for work or a schedule.
   The listener also offers here when it sees a `to`-ref with no routing
   entry (the created-and-messaged-in-one-commit belt). AND THIS PROC
   PRIMES ITSELF AT `::flow/resume`, so an agent committed before it was
-  reading is armed by its own first pass rather than by a wake that was
-  never sent — see the transition arity.
+  reading has its pending work observed by the first pass rather than by
+  a wake that was never sent — see the transition arity.
   Coalescing on its sliding-1 in-port is safe by the standard argument.
   L8 holds by construction: arming writes nothing, and the prime is an
   `offer!`. A quiescence request acknowledges that every earlier arm wake
@@ -945,8 +961,8 @@
    ;;
    ;; Boot ALSO calls this transform directly and synchronously
    ;; (`src/seon/cluster.clj:2965`). That is not a second arming path: it is
-   ;; how boot PUBLISHES READINESS — a returned cluster instance is already
-   ;; armed, which an asynchronous prime cannot promise. This one covers
+   ;; how boot publishes readiness: every currently required graph is armed,
+   ;; which an asynchronous prime cannot promise. This one covers
    ;; every other way a graph starts.
    (when (= ::flow/resume transition)
      (async/offer! (:seon.cluster.wake/channel
@@ -979,7 +995,7 @@
            non-root-agents (remove #{"root"} agents)
            first-agent (when (= 1 (count non-root-agents))
                          (first non-root-agents))]
-       (doseq [agent-id (sort unarmed)]
+       (doseq [agent-id (sort (agents-to-arm db (set unarmed)))]
          (arm! {:seon.turn.loop/cluster handle
                 :seon.agent/id agent-id
                 :seon.agent/routing routing}))
@@ -1026,6 +1042,7 @@
                         :seon.error/message
                         "Root's first-agent supervision run did not commit."
                         :seon.error/data result}))))
-                 (when-let [root (armed routing "root")]
-                   (async/offer! (:seon.cluster.wake/channel root) :seon.agent/wake)))))))
+                 (if-let [root (armed routing "root")]
+                   (async/offer! (:seon.cluster.wake/channel root) :seon.agent/wake)
+                   (async/offer! (:seon.cluster.wake/channel handle) :seon.agent/wake)))))))
        [state nil]))))

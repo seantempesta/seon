@@ -2181,8 +2181,6 @@
             @(::kernel/program-snapshot regenerated))
     ctx))
 
-(declare acquire!)
-
 (defn fork-for-turn
   "Fork the current base and reapply the agent's in-memory private layer."
   {:malli/schema [:=> [:cat :seon.sci.eval/defs-fork-request]
@@ -2191,10 +2189,6 @@
     agent-ctx :seon.sci.eval/agent-ctx
     db :seon.db/db
     agent-id :seon.agent/id}]
-  (when (contains? base-ctx ::custody)
-    (when-let [failure (::acquisition-recording-error
-                        (acquire! {:seon.sci.eval/ctx base-ctx :seon.db/db db}))]
-      (throw (ex-info "SCI acquisition could not record a row fault." failure))))
   (let [ctx (if agent-ctx
               (regenerate-agent-context! agent-ctx base-ctx)
               (env/carry-state
@@ -2211,7 +2205,8 @@
                (if (env/environment? (env/of base-ctx))
                  (env/environment-state (env/of base-ctx))
                  (projection-state db (context-projection base-ctx)))))
-        ctx (assoc ctx ::bind-result! #'bind-result!)
+        ctx (cond-> (assoc ctx ::bind-result! #'bind-result!)
+              (contains? base-ctx ::custody) (assoc ::base-ctx base-ctx))
         assigned-namespace (agent-namespace db agent-id)]
     (advance-context-projection! ctx db (context-projection base-ctx))
     (when (and assigned-namespace (not (sci/find-ns ctx assigned-namespace)))
@@ -2254,6 +2249,19 @@
                 :seon.test/class-loader (clojure.lang.RT/baseLoader))
          (assoc ctx ::acquisition acquired)))))))
 
+(defn- acquired-database?
+  "Whether this context already acquired the exact supplied database value."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :boolean]}
+  [ctx database]
+  (let [snapshot @(::kernel/program-snapshot ctx)
+        previous (:seon.db/db snapshot)
+        value-id (db/committed-value-identity database)]
+    (boolean
+     (and (::acquisition snapshot)
+          (or (identical? previous database)
+              (and value-id previous
+                   (= value-id (db/committed-value-identity previous))))))))
+
 (defn acquire!
   "Acquire the supplied database once in this cluster context.
 
@@ -2263,13 +2271,8 @@
   [{ctx :seon.sci.eval/ctx database :seon.db/db
     commit-fault! :seon.flow/commit-fault!}]
   (locking (::kernel/program-snapshot ctx)
-    (let [snapshot @(::kernel/program-snapshot ctx)
-          previous (:seon.db/db snapshot)
-          identity (db/committed-value-identity database)]
-      (if (and (::acquisition snapshot)
-               (or (identical? previous database)
-                   (and identity previous
-                        (= identity (db/committed-value-identity previous)))))
+    (let [snapshot @(::kernel/program-snapshot ctx)]
+      (if (acquired-database? ctx database)
         (::acquisition snapshot)
         (let [commit-fault! (or commit-fault! (:seon.flow/commit-fault! snapshot))
               _ (load-core-namespaces! database)
@@ -2978,13 +2981,15 @@
        (fn [armed]
         (vreset! arm-state armed)
         (try
-          (when (and (contains? evaluation-ctx ::custody)
-                     (not (::turn-fork? evaluation-ctx)))
+          (when (contains? evaluation-ctx ::custody)
             (when-let [database (:seon.db/db request)]
-              (when-let [failure (::acquisition-recording-error
-                                  (acquire! {:seon.sci.eval/ctx evaluation-ctx
-                                             :seon.db/db database}))]
-                (throw (ex-info "SCI acquisition could not record a row fault." failure)))))
+              (when-not (acquired-database? evaluation-ctx database)
+                (let [base (or (::base-ctx evaluation-ctx) evaluation-ctx)
+                      result (acquire! {:seon.sci.eval/ctx base :seon.db/db database})]
+                  (when-let [failure (::acquisition-recording-error result)]
+                    (throw (ex-info "SCI acquisition could not record a row fault." failure)))
+                  (when (::base-ctx evaluation-ctx)
+                    (regenerate-agent-context! evaluation-ctx base))))))
           (let [before-reader-context
             (reader-context evaluation-ctx namespace-name)
             event (or (:seon.sci.eval/event request)

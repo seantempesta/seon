@@ -2010,11 +2010,17 @@
                              (.getOutputStream socket#)
                              java.nio.charset.StandardCharsets/UTF_8)]
           (try
-            (let [progress!#
+            (let [phase-clock# (volatile! nil)
+                  progress!#
                   ;; The socket line drives the waiting operator; the
                   ;; stdout line lands in the cluster log so a boot that
                   ;; never reaches readiness still says how far it got.
                   (fn [phase#]
+                    (let [now# (System/nanoTime)]
+                      (when-let [[previous# began#] @phase-clock#]
+                        (println (str "boot phase complete: " (clojure.core/name previous#)
+                                      " elapsed-ms=" (/ (- now# began#) 1000000.0))))
+                      (vreset! phase-clock# [phase# now#]))
                     (println (str "boot phase: "
                                   (clojure.core/name phase#)))
                     (flush)
@@ -2050,8 +2056,7 @@
                 (println "seon" ~name "ready — instrumented"
                          (:seon.instrument/instrumented applied#) "vars")
                 (flush)
-                (.write writer# "ready\n")
-                (.flush writer#)))
+                (progress!# :seon.boot.phase/ready)))
             (catch Throwable failure#
               (let [failure-data# (clojure.core/ex-data failure#)
                     face#
@@ -2088,8 +2093,14 @@
         ~(refresh-instrument-form)
         (let [progress-var#
               (ns-resolve 'seon.cluster (symbol "*boot-progress!*"))
+              phase-clock# (volatile! nil)
               progress!#
               (fn [phase#]
+                (let [now# (System/nanoTime)]
+                  (when-let [[previous# began#] @phase-clock#]
+                    (println (str "● " ~name " boot phase complete: " (clojure.core/name previous#)
+                                  " elapsed-ms=" (/ (- now# began#) 1000000.0))))
+                  (vreset! phase-clock# [phase# now#]))
                 (println (str "● " ~name " boot: "
                               (clojure.core/name phase#)))
                 (flush))
@@ -2102,6 +2113,7 @@
             (let [applied# ~(instrument-form instance name)]
               (println "seon" ~name "added — instrumented"
                        (:seon.instrument/instrumented applied#) "vars")
+              (progress!# :seon.boot.phase/ready)
               ~name)))))))
 
 (defn- create-log!

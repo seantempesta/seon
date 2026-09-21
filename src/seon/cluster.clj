@@ -2847,16 +2847,12 @@
      :io-exec (:seon.flow/executor handle)}))
 
 (defn- arm-agents!
-  "Arm this cluster: the armer graph, fan-out, routing listener, prime.
-  ARMED AND IDLE — the per-agent successor of the single run loop
-  (F1). The armer's prime derives (agents in facts) − (armed set) and
-  arms one graph per agent (R6: arm-all-at-boot); each arm ends with
-  its own mailbox prime, whose first pass derives that agent's work
-  from FACTS. A fresh cluster has no triggers, so boot makes zero
-  model calls. A rebooted cluster never resumes interrupted work:
-  recovery has already closed it. The first pass can start a new
-  episode only for an unanswered durable message, including one that
-  arrived before the crash.
+  "Arm the cluster's shared graph, fan-out, routing listener and prime.
+  The armer acquires agent graphs only for current work or stored schedules.
+  Idle agents remain facts until a wake or schedule needs their graph. A
+  scheduled agent needs its existing timer proc even when it has no turn;
+  its SCI program remains unacquired until evaluation. Recovery has already
+  closed interrupted turns, and pending durable work is derived by the prime.
 
   ORDER IS THE CONTRACT. The cluster graph starts first because the
   fan-out taps ITS channels; the routing listener comes after the
@@ -2977,8 +2973,7 @@
     ;; this offer are covered by the same newest-database derivation as every
     ;; later pass.
     (async/offer! render-channel ::wake/render)
-    ;; ARM ALL AT BOOT (R6), synchronously, through the armer's ONE
-    ;; derivation. The listener is already registered, so every arm's
+    ;; Derive agents with work or schedules through the ordinary armer. The listener is already registered, so every arm's
     ;; mailbox prime and every commit concurrent with it are conserved.
     ;; Direct invocation publishes readiness: a returned instance is
     ;; armed, while the running proc owns every later wake.

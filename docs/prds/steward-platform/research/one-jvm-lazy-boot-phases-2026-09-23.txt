@@ -1,0 +1,15 @@
+boot phase complete: namespaces elapsed-ms=7000.774
+boot phase complete: repl elapsed-ms=96.649542
+boot phase complete: store elapsed-ms=34.353125
+boot phase complete: branch elapsed-ms=3117.773958
+boot phase complete: recovery elapsed-ms=582.166375
+boot phase complete: config elapsed-ms=2330.128084
+boot phase complete: program elapsed-ms=0.162583
+boot phase complete: work-launcher elapsed-ms=34.497042
+boot phase complete: agents elapsed-ms=22.35175
+boot phase complete: web elapsed-ms=0.083291
+boot phase complete: ready elapsed-ms=1992.040834
+Installed SCI functions after boot: 0
+Armed agents after boot: #{"root"}
+Cluster ready-ms: 6861
+Operator start phase: 16173 ms (previous 23998 ms)

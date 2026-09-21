@@ -227,8 +227,8 @@ produced. The boot order:
    ordinary cluster remains a sovereign older program until destructively
    reforked. An explicitly selected development cluster adopts published
    program facts in place, preserving its agent facts in the hosting JVM.
-4. **Flow.** EVERY AGENT IS ITS OWN FLOW GRAPH, created with the agent from
-   one blueprint, parked between turns, kicked off by wake notifications; per cluster, a few shared plumbing graphs (render pipeline,
+4. **Flow.** EVERY AGENT IS ITS OWN FLOW GRAPH, acquired from one blueprint
+   when it first has work or owns schedules, parked between turns, kicked off by wake notifications; per cluster, a few shared plumbing graphs (render pipeline,
    fault committer). There is NO central loop, dispatcher, or scheduler.
    The process root owns one bounded `:compute` executor and one `:io`
    (virtual threads) executor; every proc pins `:io` or `:compute`
@@ -263,7 +263,7 @@ the publication on an explicitly selected development cluster in its
 hosting JVM; the edit hook's `:current-source` root and cluster select that target.
 Its adoption commit is recorded only after schema and program reconciliation,
 loaded definitions and JVM instrumentation succeed. SCI acquires the program
-on first evaluation or agent fork, reusing the context until its database
+on first evaluation, reusing the context until its database
 value changes. Publication
 re-arms wrappers when their contract or a transitively referenced declaration
 changes; unrelated wrappers retain identity (`src/seon/instrument.clj:593`).

@@ -13,12 +13,17 @@
    (fn [connection]
      (let [database (db/db connection)
            ctx (evaluation/cluster-ctx database connection)
-           request {:seon.sci.eval/ctx ctx
+           fork (:seon.sci.eval/ctx
+                 (evaluation/fork-for-turn {:seon.sci.eval/ctx ctx
+                                            :seon.db/db database
+                                            :seon.agent/id "lazy-acquisition"}))
+           request {:seon.sci.eval/ctx fork
                     :seon.sci.admit/caps (config/result-caps (config/defaults))
                     :seon.sci.eval/time-limit-ms 10000
                     :seon.config/on-core-error :panic
                     :seon.cluster.eval/source "(+ 1 2)"}]
        (is (empty? @(::kernel/installed-functions ctx)))
+       (is (empty? @(::kernel/installed-functions fork)))
        (is (nil? (:seon.db/db (evaluation/acquired-program ctx))))
        (is (= 3 (:seon.sci.admit/value (evaluation/evaluate request))))
        (is (seq @(::kernel/installed-functions ctx)))
