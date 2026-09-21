@@ -38,7 +38,7 @@
     (let [bound (some-> bound-value parse-long)
           request (cond-> {:seon.boot/cluster-name cluster
                            :seon.db/connection (list 'seon.cluster.boot/connection cluster)}
-                    test-symbol (assoc :seon.test/sym test-symbol)
+                    test-symbol (assoc :seon.test/sym (list (quote quote) (symbol test-symbol)))
                     bound (assoc :seon.test/check-time-limit-ms bound))
           result (eval! (list 'seon.test/check-request request)
                         (+ (or bound shipped-check-bound) transport-bound))]

@@ -746,7 +746,7 @@ writing.
 | turn | An agent's ordered evaluations and any provider attempts; open means no `:seon.turn/closed-tx`, enforced at the writer. `seon.turn` owns the transitions; its schema declares the history render pair ([open?](src/seon/turn.clj:189), [open-call](src/seon/turn.clj:348), [schema](resources/seon/schemas/seon.turn.edn:1)); process provenance rides execution requests, never the turn entity. | run, `seon.cluster.run`, `:seon.cluster.run/process` |
 | accretion / breakage | a change that requires no more and provides no less | graduation, nursery |
 | **[TARGET]** source initialization rows, transaction data | Static source population is admitted transaction data; the agent's opening is separately evaluated and stored as system turn 0 ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/bootstrap.clj`) | bootstrap-plan rows, seed bundle |
-| process record, generation, (pid, start-instant) | operator-managed process descriptors (`script/seon/fresh_operator.clj` ↔ `src/seon/cluster/process.clj`) | orphan registry, liveness flag |
+| process identity, (pid, start-instant) | exact OS identity used by the client and boot advertisement (`script/seon/operator.clj` ↔ `src/seon/cluster/process.clj`) | orphan registry, liveness flag |
 | system turn | An ordinary turn with a reply and no provider attempt; "system" is derived, never stamped. `seon.turn/system-turn` computes the opening and changed reads and optionally stores their evaluations ([owner](src/seon/turn.clj:2191), [debug controls](src/seon/render/web.clj:709)); the wake-answering `:t` rule remains specified by [turn PRD §14](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md) and implemented at `src/seon/turn.clj:2823`. | generated opening episode, generated run |
 | message subject | The nonempty string identity token supplied in `:my.message/about`, stored verbatim in `:seon.message/about`; no target lookup is required. Assignment/declination uses `:seon.message/assignment` independently (`src/seon/cluster/message.clj`, `resources/seon/schemas/seon.message.edn`; [program-facts PRD §§1h–1i](docs/prds/steward-platform/plan/program-facts-are-the-runtime-prd-2026-09-17.md)). | about as subject, inside marker, and protocol correlation together |
 | inside wake | Population activity that cannot refill the recipient's turn bound. For messages, `:seon.message/from` is the sole marker, independent of subject or protocol; `wake/inside-wake?` consumes the declaration (`src/seon/cluster/wake.clj`, `resources/seon/schemas/seon.message.edn`). | subject presence implies inside |
@@ -810,7 +810,7 @@ The loop:
    `mcp__seon__eval_clj` evaluates in the selected cluster's JVM (qualify
    the cluster when several are live — ambiguity must fail). Its `jvm`
    mode is the host prepl with NO cluster custody bound — `seon.db`'s
-   elided db/conn arities refuse there; `(seon.operator/connection
+   elided db/conn arities refuse there; `(seon.cluster.boot/connection
    "default")` supplies explicit custody. SCI evaluation mode (the tool's
    literal argument is `mode: "sci"`) evaluates through
    the cluster's SCI ctx where elision holds (and mutates that shared ctx,
@@ -945,7 +945,7 @@ members through the shared recorder; covered requests execute nothing.
 Issue completion, failure discovery and test rendering query those members
 through `seon.test/recorded-result` / `seon.test.runner/latest-results`.
 Fresh operator boot supplies the resolved `:test` classpath once
-(`script/seon/fresh_operator.clj`, `launch!`); development adoption uses that
+(`script/seon/operator.clj`, `launch!`); development adoption uses that
 JVM's loader without preparing another classpath or starting another JVM.
 A host started before this change still has its original classpath.
 
@@ -1095,7 +1095,7 @@ bin/seon config apply [CLUSTER] PATH
 bin/seon status | open [NAME]
 bin/seon init [--changed PATH] | init NAME [--force]
 bin/seon stop [--force] [NAME] | down [--force]
-bin/seon reset --force           # preflight (syntax, lock holder), down all, destroy, republish, refork, start, adopt
+bin/seon reset --force           # validate argv, down captured identities, boot with destructive store acquisition
 ```
 
 Absent cluster means `default` for `start`/`config apply`; bare `init`

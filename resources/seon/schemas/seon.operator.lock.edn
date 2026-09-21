@@ -1,6 +1,0 @@
-{
- :seon.operator.lock/bound :qualified-keyword
- :seon.operator.lock/path :string
- :seon.operator.lock/waited-ms [:int {:min 0}]
- :seon.operator.lock/expired-at :inst
-}

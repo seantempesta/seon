@@ -1,224 +1,17 @@
-#:seon.maintenance.result{:id
-                          [:string {:min 1, :seon.db/identity true}],
-                          :process-census-roots
+#:seon.maintenance.result{:collect-branches
                           [:vector
-                           {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/process-census-root}
+                           #:seon.db{:component true,
+                                     :component-schema
+                                     :seon.maintenance.result/collect-branch}
                            :seon.db/ref],
-                          :process-census-processes
-                          [:vector
-                           {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/process-census-process}
-                           :seon.db/ref],
-                          :process-census-dead
-                          [:vector
-                           {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/process-census-identity}
-                           :seon.db/ref],
-                          :process-census-unresponsive
-                          [:vector
-                           {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/process-census-identity
-                            :seon.maintenance/attention-when :non-empty}
-                           :seon.db/ref],
-                          :process-census-unclaimed
-                          [:vector
-                           {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/process-census-identity
-                            :seon.maintenance/attention-when :non-empty}
-                           :seon.db/ref],
-                          :process-census-claim-errors
-                          [:vector
-                           {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/process-census-claim-error
-                            :seon.maintenance/attention-when :non-empty}
-                           :seon.db/ref],
-                          :reap-census
-                          [:and {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/process-census-component} :seon.db/ref],
-                          :reap-stopped-processes
-                          [:vector {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/reap-stopped-process} :seon.db/ref],
-                          :reap-roots
-                          [:vector {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/reap-root} :seon.db/ref],
-                          :reap-refused
-                          [:vector
-                           {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/reap-refusal
-                            :seon.maintenance/attention-when :non-empty}
-                           :seon.db/ref],
-                          :cluster-cleanup-collection
-                          [:and {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/cluster-cleanup-collection-component} :seon.db/ref],
-                          :collect-branches
-                          [:vector {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/collect-branch} :seon.db/ref],
-                          :root-claim-id :seon.operator.claim/id,
-                          :root-claim-path :seon.operator.claim/root,
-                          :root-claim-creator-pid :seon.dev.process/pid,
-                          :root-claim-creator-start-instant
-                          :seon.dev.process/start-instant,
-                          :root-claim-reap-on-owner-exit?
-                          :seon.operator.claim/reap-on-owner-exit?,
-                          :process-census-root
+                          :entity
                           [:map
-                           {:seon.db/attributes true}
-                           [:seon.maintenance.result/root-claim-id
-                            :seon.maintenance.result/root-claim-id]
-                           [:seon.maintenance.result/root-claim-path
-                            :seon.maintenance.result/root-claim-path]
-                           [:seon.maintenance.result/root-claim-creator-pid
-                            :seon.maintenance.result/root-claim-creator-pid]
-                           [:seon.maintenance.result/root-claim-creator-start-instant
-                            :seon.maintenance.result/root-claim-creator-start-instant]
-                           [:seon.maintenance.result/root-claim-reap-on-owner-exit?
-                            :seon.maintenance.result/root-claim-reap-on-owner-exit?]],
-                          :process-census-process
-                          [:map
-                           {:seon.db/attributes true}
-                           [:seon.dev.process/generation
-                            :seon.dev.process/generation]
-                           [:seon.dev.process/pid :seon.dev.process/pid]
-                           [:seon.dev.process/start-instant
-                            :seon.dev.process/start-instant]
-                           [:seon.dev.process/root :seon.dev.process/root]
-                           [:seon.operator.process-census/alive?
-                            :seon.operator.process-census/alive?]
-                           [:seon.operator.process-census/responsive?
-                            :seon.operator.process-census/responsive?]
-                           [:seon.operator.process-census/advertisements
-                            {:optional true}
-                            :seon.operator.process-census/advertisements]],
-                          :process-census-identity
-                          [:map
-                           {:seon.db/attributes true}
-                           [:seon.dev.process/generation
-                            {:optional true}
-                            :seon.dev.process/generation]
-                           [:seon.dev.process/pid :seon.dev.process/pid]
-                           [:seon.dev.process/start-instant
-                            :seon.dev.process/start-instant]
-                           [:seon.dev.process/root :seon.dev.process/root]],
-                          :process-census-claim-error
-                          [:map
-                           {:seon.db/attributes true}
-                           [:seon.operator.claim/path
-                            {:optional true}
-                            :seon.operator.claim/path]
-                           [:seon.error/message :seon.error/message]],
-                          :process-census-component
-                          [:map
-                           {:seon.db/attributes true}
-                           [:seon.operator.process-census/observed-at
-                            :seon.operator.process-census/observed-at]
-                           [:seon.operator.process-census/complete?
-                            :seon.operator.process-census/complete?]
-                           [:seon.maintenance.result/process-census-roots
-                            {:optional true}
-                            :seon.maintenance.result/process-census-roots]
-                           [:seon.maintenance.result/process-census-processes
-                            {:optional true}
-                            :seon.maintenance.result/process-census-processes]
-                           [:seon.maintenance.result/process-census-dead
-                            {:optional true}
-                            :seon.maintenance.result/process-census-dead]
-                           [:seon.maintenance.result/process-census-unresponsive
-                            {:optional true}
-                            :seon.maintenance.result/process-census-unresponsive]
-                           [:seon.maintenance.result/process-census-unclaimed
-                            {:optional true}
-                            :seon.maintenance.result/process-census-unclaimed]
-                           [:seon.maintenance.result/process-census-claim-errors
-                            {:optional true}
-                            :seon.maintenance.result/process-census-claim-errors]],
-                          :reap-stopped-process
-                          [:map
-                           {:seon.db/attributes true}
-                           [:seon.dev.process/generation
-                            :seon.dev.process/generation]
-                           [:seon.dev.process/pid :seon.dev.process/pid]
-                           [:seon.dev.process/start-instant
-                            :seon.dev.process/start-instant]
-                           [:seon.operator.reap/stop-path
-                            :seon.operator.reap/stop-path]],
-                          :reap-root
-                          [:map
-                           {:seon.db/attributes true}
-                           [:seon.operator.claim/id :seon.operator.claim/id]
-                           [:seon.operator.claim/root
-                            :seon.operator.claim/root]
-                           [:seon.operator.cleanup/reclaimed-bytes
-                            :seon.operator.cleanup/reclaimed-bytes]],
-                          :reap-refusal
-                          [:map
-                           {:seon.db/attributes true}
-                           [:seon.operator.claim/id :seon.operator.claim/id]
-                           [:seon.operator.reap/reason
-                            :seon.operator.reap/reason]
-                           [:seon.error/message :seon.error/message]],
-                          :collection-error
-                          [:map
-                           {:seon.db/attributes true}
-                           [:seon.error/at :seon.error/at]
-                           [:seon.error/layer :seon.error/layer]
-                           [:seon.error/operation :seon.error/operation]
-                           [:seon.error/message :seon.error/message]],
-                          ;; The maintenance mirror of
-                          ;; `:seon.operator.cluster-cleanup/collection`, which
-                          ;; `ec260cd2e` widened to [:or result error] because
-                          ;; `collect-store!` returns its verified collect
-                          ;; result or throws. A completed cleanup therefore
-                          ;; persists the SAME collect component every
-                          ;; `collect!` receipt stores; a refused collection
-                          ;; persists the error component. One declaration per
-                          ;; arm, referenced twice, never a second shape.
-                          :cluster-cleanup-collection-component
-                          [:or :seon.maintenance.result/collect-component
-                           :seon.maintenance.result/collection-error],
-                          :reap-component
-                          [:map
-                           {:seon.db/attributes true}
-                           [:seon.operator.reap/observed-at
-                            :seon.operator.reap/observed-at]
-                           [:seon.maintenance.result/reap-census
-                            :seon.maintenance.result/reap-census]
-                           [:seon.operator.reap/eligible-root-claims
-                            {:optional true}
-                            :seon.operator.reap/eligible-root-claims]
-                           [:seon.maintenance.result/reap-stopped-processes
-                            {:optional true}
-                            :seon.maintenance.result/reap-stopped-processes]
-                           [:seon.maintenance.result/reap-roots
-                            {:optional true}
-                            :seon.maintenance.result/reap-roots]
-                           [:seon.maintenance.result/reap-refused
-                            {:optional true}
-                            :seon.maintenance.result/reap-refused]
-                           [:seon.operator.reap/reclaimed-bytes
-                            :seon.operator.reap/reclaimed-bytes]
-                           [:seon.operator.reap/complete?
-                            :seon.operator.reap/complete?]],
-                          :cluster-cleanup-component
-                          [:map
-                           {:seon.db/attributes true}
-                           [:seon.operator.cluster-cleanup/managed-root
-                            :seon.operator.cluster-cleanup/managed-root]
-                           [:seon.boot/cluster-name
-                            :seon.boot/cluster-name]
-                           [:seon.store/branch :seon.store/branch]
-                           [:seon.operator.cluster-cleanup/live-instance-stopped?
-                            :seon.operator.cluster-cleanup/live-instance-stopped?]
-                           [:seon.operator.cluster-cleanup/branch-retired?
-                            :seon.operator.cluster-cleanup/branch-retired?]
-                           [:seon.operator.cluster-cleanup/removed
-                            {:optional true}
-                            :seon.operator.cluster-cleanup/removed]
-                           [:seon.maintenance.result/cluster-cleanup-collection
-                            :seon.maintenance.result/cluster-cleanup-collection]
-                           [:seon.operator.cluster-cleanup/remaining
-                            {:optional true}
-                            :seon.operator.cluster-cleanup/remaining]
-                           [:seon.operator.cluster-cleanup/reclaimed-bytes
-                            :seon.operator.cluster-cleanup/reclaimed-bytes]
-                           [:seon.operator.cluster-cleanup/complete?
-                            :seon.operator.cluster-cleanup/complete?]],
-                          :collect-branch
-                          [:map
-                           {:seon.db/attributes true}
-                           [:seon.store/branch :seon.store/branch]
-                           [:seon.source/commit-id :seon.source/commit-id]],
+                           #:seon.db{:attributes true}
+                           [:seon.maintenance.result/id
+                            :seon.maintenance.result/id]],
                           :collect-component
                           [:map
-                           {:seon.db/attributes true}
+                           #:seon.db{:attributes true}
                            [:seon.operator.collect/store-id
                             :seon.operator.collect/store-id]
                            [:seon.operator.collect/managed-root
@@ -242,8 +35,54 @@
                             :seon.operator.collect/verification-pass-swept]
                            [:seon.operator.collect/complete?
                             :seon.operator.collect/complete?]],
-                          :entity
-                          [:map {:seon.db/attributes true}
-                           [:seon.maintenance.result/id
-                            :seon.maintenance.result/id]],
-                          :value :map}
+                          :cluster-cleanup-collection
+                          [:and
+                           #:seon.db{:component true,
+                                     :component-schema
+                                     :seon.maintenance.result/cluster-cleanup-collection-component}
+                           :seon.db/ref],
+                          :collection-error
+                          [:map
+                           #:seon.db{:attributes true}
+                           [:seon.error/at :seon.error/at]
+                           [:seon.error/layer :seon.error/layer]
+                           [:seon.error/operation
+                            :seon.error/operation]
+                           [:seon.error/message :seon.error/message]],
+                          :value :map,
+                          :collect-branch
+                          [:map
+                           #:seon.db{:attributes true}
+                           [:seon.store/branch :seon.store/branch]
+                           [:seon.source/commit-id
+                            :seon.source/commit-id]],
+                          :cluster-cleanup-collection-component
+                          [:or
+                           :seon.maintenance.result/collect-component
+                           :seon.maintenance.result/collection-error],
+                          :cluster-cleanup-component
+                          [:map
+                           #:seon.db{:attributes true}
+                           [:seon.operator.cluster-cleanup/managed-root
+                            :seon.operator.cluster-cleanup/managed-root]
+                           [:seon.boot/cluster-name
+                            :seon.boot/cluster-name]
+                           [:seon.store/branch :seon.store/branch]
+                           [:seon.operator.cluster-cleanup/live-instance-stopped?
+                            :seon.operator.cluster-cleanup/live-instance-stopped?]
+                           [:seon.operator.cluster-cleanup/branch-retired?
+                            :seon.operator.cluster-cleanup/branch-retired?]
+                           [:seon.operator.cluster-cleanup/removed
+                            {:optional true}
+                            :seon.operator.cluster-cleanup/removed]
+                           [:seon.maintenance.result/cluster-cleanup-collection
+                            :seon.maintenance.result/cluster-cleanup-collection]
+                           [:seon.operator.cluster-cleanup/remaining
+                            {:optional true}
+                            :seon.operator.cluster-cleanup/remaining]
+                           [:seon.operator.cluster-cleanup/reclaimed-bytes
+                            :seon.operator.cluster-cleanup/reclaimed-bytes]
+                           [:seon.operator.cluster-cleanup/complete?
+                            :seon.operator.cluster-cleanup/complete?]],
+                          :id
+                          [:string {:min 1, :seon.db/identity true}]}

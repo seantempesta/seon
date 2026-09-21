@@ -2434,7 +2434,7 @@
         (is (= ["src"] (root-of (quote seon.fn/build-manifest))))
         (is (= ["test"] (root-of (quote seon.test-support/with-database))))))))
 
-(deftest operator-state-is-a-queryable-program-namespace
+(deftest process-owner-is-a-queryable-program-namespace
   (test-support/with-database
    (fn [connection]
      (let [database (db/db connection)
@@ -2447,12 +2447,12 @@
            callers (my.program/callers
                     {:seon.db/db database :seon.program/subject target})]
        (is (= target (:seon.fn/sym row))
-           "the canonical fixture indexes operator-state functions")
+           "the canonical fixture indexes process functions")
        (is (true? (:seon.fn/private? row))
-           "private operator functions are program facts too")
+           "private process functions are program facts too")
        (is (= "src" (get-in row [:seon.fn/file
                                   :seon.fn.file/relative-root])))
-       (is (= "src/seon/operator/state.clj"
+       (is (= "src/seon/cluster/process.clj"
               (get-in row [:seon.fn/file
                            :seon.fn.file/relative-path])))
        (is (some #(= "seon.cluster.process" (namespace %))

@@ -5,6 +5,7 @@
             [clojure.edn :as edn]
             [datahike.api :as d]
             [konserve.core :as k]
+            [konserve.protocols]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.fs :as fs]
@@ -96,109 +97,6 @@
         :seon.error/diagnostic-cause :seon.maintenance/projection-refused
         :seon.error/diagnostic-evidence {}
         :seon.maintenance/failed-producer projection})))))))
-
-(defn- process-identity
-  [process]
-  (select-keys process
-               [:seon.dev.process/generation
-                :seon.dev.process/pid
-                :seon.dev.process/start-instant
-                :seon.dev.process/root]))
-
-(defn- process-observation
-  [process]
-  (select-keys process
-               [:seon.dev.process/generation
-                :seon.dev.process/pid
-                :seon.dev.process/start-instant
-                :seon.dev.process/root
-                :seon.operator.process-census/alive?
-                :seon.operator.process-census/responsive?
-                :seon.operator.process-census/advertisements]))
-
-(defn- root-claim
-  [claim]
-  (let [creator (:seon.operator.claim/creator claim)]
-    {:seon.maintenance.result/root-claim-id
-     (:seon.operator.claim/id claim)
-     :seon.maintenance.result/root-claim-path
-     (:seon.operator.claim/root claim)
-     :seon.maintenance.result/root-claim-creator-pid
-     (:seon.dev.process/pid creator)
-     :seon.maintenance.result/root-claim-creator-start-instant
-     (:seon.dev.process/start-instant creator)
-     :seon.maintenance.result/root-claim-reap-on-owner-exit?
-     (:seon.operator.claim/reap-on-owner-exit? claim)}))
-
-(defn- claim-error
-  [error]
-  (cond-> (select-keys error [:seon.error/at :seon.error/layer
-                             :seon.error/operation :seon.error/message])
-    (get-in error [:seon.error/data :seon.operator.claim/path])
-    (assoc :seon.operator.claim/path
-           (get-in error [:seon.error/data :seon.operator.claim/path]))))
-
-(defn project-process-census-result
-  "Project one public census value into queryable component facts."
-  {:malli/schema
-   [:=> [:cat :seon.operator.process-census/result]
-    :seon.maintenance.result/value]}
-  [result]
-  {:seon.operator.process-census/observed-at
-   (:seon.operator.process-census/observed-at result)
-   :seon.operator.process-census/complete?
-   (:seon.operator.process-census/complete? result)
-   :seon.maintenance.result/process-census-roots
-   (mapv root-claim (:seon.operator.process-census/roots result))
-   :seon.maintenance.result/process-census-processes
-   (mapv process-observation
-         (:seon.operator.process-census/processes result))
-   :seon.maintenance.result/process-census-dead
-   (mapv process-identity (:seon.operator.process-census/dead result))
-   :seon.maintenance.result/process-census-unresponsive
-   (mapv process-identity
-         (:seon.operator.process-census/unresponsive result))
-   :seon.maintenance.result/process-census-unclaimed
-   (mapv process-identity
-         (:seon.operator.process-census/unclaimed result))
-   :seon.maintenance.result/process-census-claim-errors
-   (mapv claim-error (:seon.operator.process-census/claim-errors result))})
-
-(defn project-reap-result
-  "Project one public reap value into queryable component facts."
-  {:malli/schema
-   [:=> [:cat :seon.operator.reap/result]
-    :seon.maintenance.result/value]}
-  [result]
-  {:seon.operator.reap/observed-at
-   (:seon.operator.reap/observed-at result)
-   :seon.maintenance.result/reap-census
-   (project-process-census-result (:seon.operator.reap/census result))
-   :seon.operator.reap/eligible-root-claims
-   (:seon.operator.reap/eligible-root-claims result)
-   :seon.maintenance.result/reap-stopped-processes
-   (mapv #(select-keys %
-                       [:seon.dev.process/generation
-                        :seon.dev.process/pid
-                        :seon.dev.process/start-instant
-                        :seon.operator.reap/stop-path])
-         (:seon.operator.reap/stopped-processes result))
-   :seon.maintenance.result/reap-roots
-   (mapv #(select-keys %
-                       [:seon.operator.claim/id
-                        :seon.operator.claim/root
-                        :seon.operator.cleanup/reclaimed-bytes])
-         (:seon.operator.reap/roots result))
-   :seon.maintenance.result/reap-refused
-   (mapv #(select-keys %
-                       [:seon.operator.claim/id
-                        :seon.operator.reap/reason
-                        :seon.error/message])
-         (:seon.operator.reap/refused result))
-   :seon.operator.reap/reclaimed-bytes
-   (:seon.operator.reap/reclaimed-bytes result)
-   :seon.operator.reap/complete?
-   (:seon.operator.reap/complete? result)})
 
 (defn project-collect-result
   "Project one public collection value into queryable component facts."
@@ -591,6 +489,7 @@
              :seon.error/data (or data {})}))))
 
 (defn- attempt
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]] [:or :seon.operator/log-result :seon.operator.collect/result :seon.operator/footprint-observation :seon.operator/failed-error]]}
   [f]
   (try
     (f)
@@ -599,6 +498,7 @@
 
 
 (defn- archive-path
+  {:malli/schema [:=> [:cat :string :int] :string]}
   [log-path index]
   (str log-path "." index))
 
@@ -641,17 +541,20 @@
 
 
 (defn- store-dir
+  {:malli/schema [:=> [:cat :string] :string]}
   [managed-root]
   (.getCanonicalPath
    (io/file managed-root "data" "store")))
 
 (defn- valid-store?
+  {:malli/schema [:=> [:cat [:or :nil :map]] :boolean]}
   [value]
-  (and (map? value)
-       (some-> ^java.nio.channels.FileLock (:seon.store/lock value)
-               .isValid)))
+  (boolean (and (map? value)
+                (some-> ^java.nio.channels.FileLock (:seon.store/lock value)
+                        .isValid))))
 
 (defn- acquire-operation-store!
+  {:malli/schema [:=> [:cat :string [:or :nil :seon.store/store]] [:tuple :seon.store/store :boolean]]}
   [managed-root supplied]
   (let [path (store-dir managed-root)
         held (some-> (get @runtime/root-store-holder path)
@@ -662,11 +565,17 @@
       :else [(store/open-store! {:seon.store/dir path}) true])))
 
 
+(defn konserve-store?
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value] (satisfies? konserve.protocols/PEDNKeyValueStore value))
+
 (defn- operation-konserve
+  {:malli/schema [:=> [:cat :seon.store/store] [:fn seon.maintenance/konserve-store?]]}
   [operation-store]
   (:store @(:seon.store/connection-object operation-store)))
 
 (defn- collection-observation
+  {:malli/schema [:=> [:cat :seon.store/store] [:map [:seon.operator.collect/objects [:int {:min 0}]] [:seon.operator.collect/bytes [:int {:min 0}]]]]}
   [operation-store]
   {:seon.operator.collect/objects
    (count (k/keys (operation-konserve operation-store) {:sync? true}))
@@ -675,6 +584,7 @@
     (fs/footprint (:seon.store/dir operation-store)))})
 
 (defn- resolves-to-digest?
+  {:malli/schema [:=> [:cat [:map-of :keyword :seon.schema/malli-form] :seon.schema/malli-form] :boolean]}
   [forms form]
   (loop [current form
          visited #{}]
@@ -686,6 +596,7 @@
       :else (recur (get forms current) (conj visited current)))))
 
 (defn- digest-attributes
+  {:malli/schema [:=> [:cat :seon.db/db] [:vector :qualified-keyword]]}
   [database]
   (let [rows
         (d/q '[:find ?attribute ?form
@@ -703,6 +614,7 @@
           rows)))
 
 (defn- branch-digests
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch] [:set :seon.blob/digest]]}
   [operation-store branch]
   (let [database (d/branch-as-db
                   (:seon.store/connection-object operation-store) branch)]
@@ -726,6 +638,7 @@
         (d/release-materialized-db database)))))
 
 (defn- collection-evidence
+  {:malli/schema [:=> [:cat :seon.store/store] [:map [:seon.operator.collect/branches :seon.operator.collect/branches] [:seon.operator.collect/digests [:set :seon.blob/digest]]]]}
   [operation-store]
   (let [branches (sort-by str (registry/roster operation-store))]
     {:seon.operator.collect/branches
@@ -740,6 +653,7 @@
      (into #{} (mapcat #(branch-digests operation-store %)) branches)}))
 
 (defn- branch-reopens?
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch [:or :nil :seon.source/commit-id]] :boolean]}
   [operation-store branch expected]
   (boolean
    (when expected
@@ -752,6 +666,7 @@
            (d/release-materialized-db database)))))))
 
 (defn- digest-reads?
+  {:malli/schema [:=> [:cat :seon.store/store :seon.blob/digest] :boolean]}
   [operation-store digest]
   (true?
    (k/bget (operation-konserve operation-store)
@@ -764,6 +679,7 @@
            {:sync? true})))
 
 (defn- konserve-key-set
+  {:malli/schema [:=> [:cat :seon.store/store] [:set :seon.schema/value]]}
   [operation-store]
   (into #{} (map :key) (k/keys (operation-konserve operation-store)
                                {:sync? true})))
@@ -792,6 +708,7 @@
   root the collection lost: it is counted as
   `:seon.operator.collect/unstored-digests`, never silently dropped and never
   a refusal here."
+  {:malli/schema [:=> [:cat :seon.store/store [:map [:seon.operator.collect/branches :seon.operator.collect/branches] [:seon.operator.collect/digests [:set :seon.blob/digest]]] [:set :seon.schema/value]] [:map [:seon.operator.collect/roots-verified? :boolean] [:seon.operator.collect/unstored-digests [:int {:min 0}]] [:seon.operator.collect/unverified-branch {:optional true} :seon.store/branch] [:seon.operator.collect/unverified-digest {:optional true} :seon.blob/digest]]]}
   [operation-store evidence held-before]
   (let [digests (:seon.operator.collect/digests evidence)
         stored (filterv held-before digests)
@@ -817,6 +734,7 @@
       (assoc :seon.operator.collect/unverified-digest unverified-digest))))
 
 (defn- unverified-root-clause
+  {:malli/schema [:=> [:cat [:map [:seon.operator.collect/unverified-branch {:optional true} :seon.store/branch] [:seon.operator.collect/unverified-digest {:optional true} :seon.blob/digest]]] :string]}
   [result]
   (let [branch (:seon.operator.collect/unverified-branch result)
         digest (:seon.operator.collect/unverified-digest result)]
@@ -827,6 +745,7 @@
       :else "")))
 
 (defn- incomplete-collection!
+  {:malli/schema [:=> [:cat :seon.operator.collect/result [:or :nil :seon.error/throwable]] :nil]}
   [result failure]
   (throw
    (ex-info
@@ -856,6 +775,7 @@
   "Project one registry inventory into the collection result's own keys.
 
   A number the inventory does not carry is ABSENT here, never a stored nil."
+  {:malli/schema [:=> [:cat :seon.cluster.registry/inventory] [:map [:seon.operator.collect/retained-files {:optional true} :int] [:seon.operator.collect/candidate-files {:optional true} :int] [:seon.operator.collect/candidate-bytes {:optional true} :int] [:seon.operator.collect/mark-duration-ms {:optional true} :int]]]}
   [inventory]
   (into {}
         (keep (fn [[from to]]
@@ -875,6 +795,7 @@
   5)
 
 (defn- dry-run-store!
+  {:malli/schema [:=> [:cat :string :seon.store/store] :seon.operator.collect/result]}
   [managed-root operation-store]
   (let [inventory
         (registry/collect!
@@ -921,6 +842,7 @@
       (incomplete-collection! result nil))))
 
 (defn- collect-store!
+  {:malli/schema [:=> [:cat :string :seon.store/store] :seon.operator.collect/result]}
   [managed-root operation-store]
   (let [store-id
         (get-in @(:seon.store/connection-object operation-store)
@@ -1008,7 +930,7 @@
   through this set, and the misspelling check below derives its family from
   the same set, so the two can never disagree. It is not a mirror of the
   declaration either —
-  `seon.operator-test/the-documented-collection-request-keys-are-the-declared-ones`
+  `seon.maintenance-test/the-documented-collection-request-keys-are-the-declared-ones`
   fails on drift against `:seon.operator.collect/request` in
   `resources/seon/schemas/`.
 
@@ -1033,6 +955,7 @@
   Maps stay OPEN (§2.5): a key with an unrelated name is ordinary extra data
   and is ignored, which is what the scheduler's merged maintenance request
   needs. What is refused is only a key that means to be a documented one."
+  {:malli/schema [:=> [:cat :seon.operator.collect/request] :seon.operator.collect/request]}
   [request]
   (let [by-name (into {} (map (juxt name identity)) documented-request-keys)]
     (doseq [supplied (keys request)

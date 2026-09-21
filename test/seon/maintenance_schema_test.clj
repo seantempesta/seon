@@ -23,21 +23,11 @@
     :seon.schedule/expression "0 2 * * *"
     :seon.schedule/zone-id "UTC"
     :seon.fn/sym 'seon.maintenance/observe-footprint!}
-   {:seon.schedule.task/id "root/maintenance/reap-dead-roots"
-    :seon.schedule/id "root/maintenance/reap-dead-roots-schedule"
-    :seon.schedule/expression "15 2 * * *"
-    :seon.schedule/zone-id "UTC"
-    :seon.fn/sym 'seon.operator/reap-dead-roots!}
    {:seon.schedule.task/id "root/maintenance/rotate-logs"
     :seon.schedule/id "root/maintenance/rotate-logs-schedule"
     :seon.schedule/expression "30 2 * * *"
     :seon.schedule/zone-id "UTC"
     :seon.fn/sym 'seon.maintenance/rotate-logs!}
-   {:seon.schedule.task/id "root/maintenance/process-census"
-    :seon.schedule/id "root/maintenance/process-census-schedule"
-    :seon.schedule/expression "5 * * * *"
-    :seon.schedule/zone-id "UTC"
-    :seon.fn/sym 'seon.operator/census-processes!}
    {:seon.schedule.task/id "root/maintenance/compact"
     :seon.schedule/id "root/maintenance/compact-schedule"
     :seon.schedule/expression "0 3 * * 0"
@@ -315,20 +305,6 @@
   (test-support/with-database
    (fn [connection]
      (let [observed (Date. 0)
-           census {:seon.operator.process-census/observed-at observed
-                   :seon.operator.process-census/roots []
-                   :seon.operator.process-census/processes []
-                   :seon.operator.process-census/dead []
-                   :seon.operator.process-census/unresponsive []
-                   :seon.operator.process-census/unclaimed []
-                   :seon.operator.process-census/claim-errors []
-                   :seon.operator.process-census/complete? true}
-           reap {:seon.operator.reap/observed-at observed
-                 :seon.operator.reap/census census
-                 :seon.operator.reap/eligible-root-claims []
-                 :seon.operator.reap/stopped-processes []
-                 :seon.operator.reap/roots [] :seon.operator.reap/refused []
-                 :seon.operator.reap/reclaimed-bytes 0 :seon.operator.reap/complete? true}
            collect {:seon.operator.collect/store-id (UUID/randomUUID)
                     :seon.operator.collect/managed-root "/unused"
                     :seon.operator.collect/branches []
@@ -349,11 +325,7 @@
                     :seon.operator.cluster-cleanup/reclaimed-bytes 0
                     :seon.operator.cluster-cleanup/complete? true}]
        (doseq [[operation-name producer value positive membership]
-               [["census" maintenance/project-process-census-result census
-                 :seon.operator.process-census/observed-at :seon.maintenance.result/process-census-roots]
-                ["reap" maintenance/project-reap-result reap
-                 :seon.operator.reap/observed-at :seon.maintenance.result/reap-roots]
-                ["collect" maintenance/project-collect-result collect
+               [["collect" maintenance/project-collect-result collect
                  :seon.operator.collect/store-id :seon.maintenance.result/collect-branches]
                 ["cleanup" maintenance/project-cluster-cleanup-result cleanup
                  :seon.operator.cluster-cleanup/managed-root :seon.operator.cluster-cleanup/removed]]]

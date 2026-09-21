@@ -1,151 +1,236 @@
-#:seon.operator{:advertisements [:vector :seon.boot/advertisement],
-                 :low-disk-space :string,
-                 :low-disk-space-error [:and :seon.error/base [:map [:seon.operator/low-disk-space :seon.operator/low-disk-space]]],
-                 :repository-root :seon.boot/root,
-                 :managed-root :seon.boot/root,
-                 :ephemeral-owner :seon.cluster.process/identity,
-                 :root-request
+#:seon.operator{:census
+                [:map
+                 [:seon.operator/advertisements
+                  :seon.operator/advertisements]
+                 [:seon.operator/branches :seon.operator/branches]],
+                :working-directory :string,
+                :missing-bound :qualified-keyword,
+                :custody-selection-error
+                [:and
+                 :seon.error/base
                  [:map
-                  [:seon.operator/repository-root :seon.operator/repository-root]
-                  [:seon.operator/managed-root :seon.operator/managed-root]
-                  [:seon.operator/ephemeral-owner
-                   {:optional true}
-                   :seon.operator/ephemeral-owner]
-                  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]],
-                 :cleanup-request
+                  [:seon.operator/candidate-count
+                   :seon.operator/candidate-count]]],
+                :low-disk-space :string,
+                :readiness :seon.boot/readiness,
+                :request
+                [:map
+                 [:seon.operator/managed-root
+                  :seon.operator/managed-root]
+                 [:seon.operator/command :seon.operator/command]
+                 [:seon.boot/cluster-name
+                  {:optional true}
+                  :seon.boot/cluster-name]
+                 [:seon.boot/pid {:optional true} :seon.boot/pid]
+                 [:seon.boot/start-instant
+                  {:optional true}
+                  :seon.boot/start-instant]
+                 [:seon.config/manifest
+                  {:optional true}
+                  :seon.config/manifest]
+                 [:seon.operator/force? {:optional true} :boolean]
+                 [:seon.operator/verbose? {:optional true} :boolean]
+                 [:seon.operator/development-cluster
+                  {:optional true}
+                  :seon.boot/cluster-name]
+                 [:seon.source/changed-paths
+                  {:optional true}
+                  [:vector :string]]
+                 [:seon.operator/destination {:optional true} :string]
+                 [:seon.store/destroy? {:optional true} :boolean]
+                 [:seon.boot/prepl-server
+                  {:optional true}
+                  [:fn seon.cluster/socket-server?]]],
+                :operation-observation
+                [:and
+                 #:seon.db{:component true,
+                           :component-schema
+                           :seon.error.evidence/entity}
+                 :seon.db/ref],
+                :log-result :seon.operator.log/result,
+                :flow [:or [:enum :unknown] :map],
+                :advertisements [:vector :seon.boot/advertisement],
+                :exception-class :symbol,
+                :low-disk-space-error
+                [:and
+                 :seon.error/base
                  [:map
-                 [:seon.operator/repository-root :seon.operator/repository-root]
-                  [:seon.operator/managed-root :seon.operator/managed-root]],
-                 :footprint-request
-                 [:map
-                  [:seon.operator/repository-root :seon.operator/repository-root]
-                  [:seon.operator/managed-root :seon.operator/managed-root]
-                  [:seon.config.maintenance/min-usable-bytes
-                   {:optional true}
-                   :seon.config.maintenance/min-usable-bytes]
-                  [:seon.config.maintenance/min-usable-ratio
-                   {:optional true}
-                   :seon.config.maintenance/min-usable-ratio]],
-                 :log-request
-                 [:map
-                  [:seon.boot/log-dir :seon.boot/log-dir]
-                  [:seon.config.maintenance/log-max-bytes
-                   :seon.config.maintenance/log-max-bytes]
-                  [:seon.config.maintenance/log-retained-files
-                   :seon.config.maintenance/log-retained-files]],
-                 :existence-request
-                 [:map
-                  [:seon.operator/repository-root :seon.operator/repository-root]],
-                 :process-census-request
-                 [:map
-                  [:seon.operator/repository-root :seon.operator/repository-root]
-                  [:seon.operator/managed-root :seon.operator/managed-root]
-                  [:seon.config.operator/event-silence-backstop-ms
-                   {:optional true}
-                   :seon.config.operator/event-silence-backstop-ms]],
-                 :low-space?
-                 [:boolean {:seon.maintenance/attention-when :truthy}],
-                 :footprint
-                 [:map
-                  {:seon.db/attributes true}
-                  [:seon.operator.footprint/root :string]
-                  [:seon.operator.footprint/file-bytes [:int {:min 0}]]
-                  [:seon.operator.footprint/usable-bytes [:int {:min 0}]]
-                  [:seon.operator.footprint/total-bytes [:int {:min 0}]]
-                  [:seon.operator.footprint/usable-ratio :double]
-                  [:seon.operator.footprint/observed-at :inst]
-                  [:seon.operator/low-space?
-                   {:optional true}
-                   :seon.operator/low-space?]],
-                 :footprint-observation
-                 [:and
-                  :seon.operator/footprint
-                  [:map
-                   [:seon.operator/low-space? :seon.operator/low-space?]]],
-                 :cleanup-result
-                 [:map
-                  [:seon.operator.cleanup/root :string]
-                  [:seon.operator.cleanup/target :string]
-                  [:seon.operator.cleanup/removed [:vector :string]]
-                  [:seon.operator.cleanup/removed-file-bytes
-                   [:int {:min 0}]]
-                  [:seon.operator.cleanup/remaining [:vector :string]]
-                  [:seon.operator.cleanup/complete? :boolean]],
-                 :claim-errors [:vector :seon.operator.claim/read-error],
-                 :roots [:vector :seon.operator.claim/record],
-                 :existence
-                 [:map
-                  [:seon.operator/roots :seon.operator/roots]
-                  [:seon.operator/claim-errors :seon.operator/claim-errors]],
-                 :log-result :seon.operator.log/result,
-                 :branches :seon.cluster.registry/roster,
-                 :census
-                 [:map
-                  [:seon.operator/advertisements
-                   :seon.operator/advertisements]
-                  [:seon.operator/branches :seon.operator/branches]],
-                 :changed-paths [:vector :string],
-                 :clusters [:vector :seon.operator/observation],
-                 :flow [:or [:enum :unknown] :map],
-                 :health [:enum :observed :unknown],
-                 :observation
-                 [:map
-                  [:seon.boot/cluster-name :seon.boot/cluster-name]
-                  [:seon.operator/health :seon.operator/health]
-                  [:seon.operator/flow :seon.operator/flow]
-                  [:seon.operator/readiness
-                   {:optional true}
-                   :seon.operator/readiness]],
-                 :publish-request
-                 [:map
-                  [:seon.boot/root :seon.boot/root]
-                  [:seon.operator/changed-paths
-                   {:optional true}
-                   :seon.operator/changed-paths]],
-                 :refork-request
-                 [:map
-                  [:seon.operator/repository-root
-                   :seon.operator/repository-root]
-                  [:seon.operator/managed-root
-                   :seon.operator/managed-root]
-                  [:seon.boot/cluster-name :seon.boot/cluster-name]
-                  [:seon.source/commit-id :seon.source/commit-id]
-                  [:seon.store/store {:optional true} :seon.store/store]],
-                 :readiness :seon.boot/readiness,
+                  [:seon.operator/low-disk-space
+                   :seon.operator/low-disk-space]]],
+                :branches :seon.cluster.registry/roster,
+                :command
+                [:enum
+                 :start
+                 :init
                  :status
+                 :open
+                 :stop
+                 :down
+                 :reset
+                 :logs
+                 :config-apply
+                 :export],
+                :observation
+                [:map
+                 [:seon.boot/cluster-name :seon.boot/cluster-name]
+                 [:seon.operator/health :seon.operator/health]
+                 [:seon.operator/flow :seon.operator/flow]
+                 [:seon.operator/readiness
+                  {:optional true}
+                  :seon.operator/readiness]],
+                :footprint
+                [:map
+                 #:seon.db{:attributes true}
+                 [:seon.operator.footprint/root :string]
+                 [:seon.operator.footprint/file-bytes [:int {:min 0}]]
+                 [:seon.operator.footprint/usable-bytes
+                  [:int {:min 0}]]
+                 [:seon.operator.footprint/total-bytes [:int {:min 0}]]
+                 [:seon.operator.footprint/usable-ratio :double]
+                 [:seon.operator.footprint/observed-at :inst]
+                 [:seon.operator/low-space?
+                  {:optional true}
+                  :seon.operator/low-space?]],
+                :footprint-observation
+                [:and
+                 :seon.operator/footprint
                  [:map
-                  [:seon.operator/clusters :seon.operator/clusters]],
-                 :exception-class :symbol
-                 :failed-error [:and :seon.error/base [:map [:seon.operator/exception-class :seon.operator/exception-class]]]
-                 :candidate-count [:int {:min 0}]
-                 :custody-selection-error [:and :seon.error/base [:map [:seon.operator/candidate-count :seon.operator/candidate-count]]]
-                 :unclaimed-root :seon.operator/managed-root
-                 :unclaimed-root-error [:and :seon.error/base [:map [:seon.operator/unclaimed-root :seon.operator/unclaimed-root] [:seon.boot/cluster-name :seon.boot/cluster-name]]]
- :seon.operator/cluster-cleanup-incomplete-error [:and {:seon.db/attributes false} :seon.error/base [:map [:seon.operator.cluster-cleanup/result :seon.operator.cluster-cleanup/result]]]
- :seon.operator/collection-incomplete-error [:and {:seon.db/attributes false} :seon.error/base [:map [:seon.operator.collect/result :seon.operator.collect/result]]]
- :seon.operator/process-census-incomplete-error [:and {:seon.db/attributes false} :seon.error/base [:map [:seon.operator.process-census/result :seon.operator.process-census/result]]]
- :seon.operator/reap-incomplete-error [:and {:seon.db/attributes false} :seon.error/base [:map [:seon.operator.reap/result :seon.operator.reap/result]]]
- ; Additive error declaration manifest, 2026-09-18.
-
- :seon.operator/error
- [:and
- {:seon.db/attributes true}
- :seon.error/base
- [:map
-  {:seon.db/attributes true}
-  [:seon.operator/error-root :seon.operator/error-root]
-  [:seon.operator/operation-observation
-   :seon.operator/operation-observation]]]
-
- :seon.operator/error-root
- [:string {:min 1}]
-
- :seon.operator/operation-observation
- [:and
- {:seon.db/component true,
-  :seon.db/component-schema :seon.error.evidence/entity}
- :seon.db/ref]
-
- :seon.operator/missing-bound :qualified-keyword
- :seon.operator/working-directory :string
-}
+                  [:seon.operator/low-space?
+                   :seon.operator/low-space?]]],
+                :low-space?
+                [:boolean #:seon.maintenance{:attention-when :truthy}],
+                :cleanup-result
+                [:map
+                 [:seon.operator.cleanup/root :string]
+                 [:seon.operator.cleanup/target :string]
+                 [:seon.operator.cleanup/removed [:vector :string]]
+                 [:seon.operator.cleanup/removed-file-bytes
+                  [:int {:min 0}]]
+                 [:seon.operator.cleanup/remaining [:vector :string]]
+                 [:seon.operator.cleanup/complete? :boolean]],
+                :candidate-count [:int {:min 0}],
+                :cleanup-request
+                [:map
+                 [:seon.operator/repository-root
+                  :seon.operator/repository-root]
+                 [:seon.operator/managed-root
+                  :seon.operator/managed-root]],
+                :error-root [:string {:min 1}],
+                :failed-error
+                [:and
+                 :seon.error/base
+                 [:map
+                  [:seon.operator/exception-class
+                   :seon.operator/exception-class]]],
+                :managed-root :seon.boot/root,
+                :collection-incomplete-error
+                [:and
+                 #:seon.db{:attributes false}
+                 :seon.error/base
+                 [:map
+                  [:seon.operator.collect/result
+                   :seon.operator.collect/result]]],
+                :refork-request
+                [:map
+                 [:seon.operator/repository-root
+                  :seon.operator/repository-root]
+                 [:seon.operator/managed-root
+                  :seon.operator/managed-root]
+                 [:seon.boot/cluster-name :seon.boot/cluster-name]
+                 [:seon.source/commit-id :seon.source/commit-id]
+                 [:seon.store/store
+                  {:optional true}
+                  :seon.store/store]],
+                :changed-paths [:vector :string],
+                :log-request
+                [:map
+                 [:seon.boot/log-dir :seon.boot/log-dir]
+                 [:seon.config.maintenance/log-max-bytes
+                  :seon.config.maintenance/log-max-bytes]
+                 [:seon.config.maintenance/log-retained-files
+                  :seon.config.maintenance/log-retained-files]],
+                :error
+                [:and
+                 #:seon.db{:attributes true}
+                 :seon.error/base
+                 [:map
+                  #:seon.db{:attributes true}
+                  [:seon.operator/error-root :seon.operator/error-root]
+                  [:seon.operator/operation-observation
+                   :seon.operator/operation-observation]]],
+                :health [:enum :observed :unknown],
+                :footprint-request
+                [:map
+                 [:seon.operator/repository-root
+                  :seon.operator/repository-root]
+                 [:seon.operator/managed-root
+                  :seon.operator/managed-root]
+                 [:seon.config.maintenance/min-usable-bytes
+                  {:optional true}
+                  :seon.config.maintenance/min-usable-bytes]
+                 [:seon.config.maintenance/min-usable-ratio
+                  {:optional true}
+                  :seon.config.maintenance/min-usable-ratio]],
+                :status
+                [:map
+                 [:seon.operator/clusters :seon.operator/clusters]],
+                :cluster-cleanup-incomplete-error
+                [:and
+                 #:seon.db{:attributes false}
+                 :seon.error/base
+                 [:map
+                  [:seon.operator.cluster-cleanup/result
+                   :seon.operator.cluster-cleanup/result]]],
+                :publish-request
+                [:map
+                 [:seon.boot/root :seon.boot/root]
+                 [:seon.operator/changed-paths
+                  {:optional true}
+                  :seon.operator/changed-paths]],
+                :repository-root :seon.boot/root,
+                :clusters [:vector :seon.operator/observation],
+                :response
+                [:or
+                 :seon.error/base
+                 [:map
+                  [:seon.boot/pid :seon.boot/pid]
+                  [:seon.boot/start-instant :seon.boot/start-instant]
+                  [:seon.boot/cluster-name :seon.boot/cluster-name]
+                  [:seon.boot/readiness :seon.boot/readiness]
+                  [:seon.source/commit-id
+                   {:optional true}
+                   :seon.source/commit-id]]
+                 [:map
+                  [:seon.source/commit-id :seon.source/commit-id]
+                  [:seon.boot/cluster-name
+                   {:optional true}
+                   :seon.boot/cluster-name]
+                  [:seon.store/branch
+                   {:optional true}
+                   :seon.store/branch]
+                  [:seon.cluster/created? {:optional true} :boolean]]
+                 [:map
+                  [:seon.boot/pid :seon.boot/pid]
+                  [:seon.boot/start-instant :seon.boot/start-instant]
+                  [:seon.operator/clusters
+                   [:vector
+                    [:map
+                     [:seon.dev.mcp/cluster :seon.boot/cluster-name]
+                     [:seon.dev.mcp/health
+                      [:enum :observed :unknown]]]]]
+                  [:seon.operator/footprint
+                   {:optional true}
+                   :seon.operator/footprint]]
+                 [:map
+                  [:seon.boot/cluster-name :seon.boot/cluster-name]
+                  [:seon.render.web/url :seon.render.web/url]]
+                 [:map
+                  [:seon.boot/cluster-name :seon.boot/cluster-name]
+                  [:seon.operator/stopped? [:= true]]]
+                 [:map
+                  [:seon.operator/stopped-processes
+                   [:vector :seon.cluster.process/identity]]]
+                 [:map
+                  [:seon.boot/cluster-name :seon.boot/cluster-name]
+                  [:seon.reconcile/result :seon.reconcile/result]]
+                 [:map [:seon.operator/destination :string]]]}

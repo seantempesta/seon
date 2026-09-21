@@ -9,16 +9,13 @@
 ;; form beneath them is derived from syntax on each run.
 (def ^:private production-roots
   ["resources/seon/operator"
-   "src/seon/operator.clj"
+   "src/seon/cluster/boot.clj"
+   "src/seon/cluster/process.clj"
    "src/seon/cluster/export.clj"
    "src/seon/cluster/registry.clj"
    "src/seon/shell/jvm.clj"
    "script/seon/dev"
-   "script/seon/fresh_operator.clj"])
-
-(def ^:private lifecycle-lock-symbols
-  '#{seon.cluster.process/with-control-lock!
-     seon.cluster.process/with-lifecycle-lock!})
+   "script/seon/operator.clj"])
 
 (def ^:private subprocess-seam-symbol
   'seon.cluster.process/run-process!)
@@ -138,33 +135,6 @@
   [value bound-keys]
   (and (map? value) (every? #(some? (get value %)) bound-keys)))
 
-(defn- lifecycle-lock-subject
-  [{form :seon.bounded-boundary-census/form
-    head :seon.bounded-boundary-census/head
-    owner :seon.bounded-boundary-census/owner
-    path :seon.bounded-boundary-census/file
-    :as subject}]
-  (when (contains? lifecycle-lock-symbols head)
-    (let [forwarding-seam?
-          (and (= head 'seon.cluster.process/with-lifecycle-lock!)
-               (or (and (= path "src/seon/operator/state.clj")
-                        (= owner 'with-control-lock!))
-                   (and (= path "script/seon/fresh_operator.clj")
-                        (= owner 'with-operator-lock))))
-          request (if (= head 'seon.cluster.process/with-control-lock!)
-                    (nth form 2 nil)
-                    (second form))
-          bounded?
-          (or forwarding-seam?
-              (map-declares-bounds?
-               request
-               [:seon.operator.lock/acquisition-timeout-ms
-                :seon.operator.lock/hold-timeout-ms]))]
-      (assoc subject
-             :seon.bounded-boundary-census/class :lifecycle-lock
-             :seon.bounded-boundary-census/disposition
-             (if bounded? :bounded :defect)))))
-
 (defn- process-constructor?
   [form head]
   (or (contains? process-constructor-symbols head)
@@ -206,11 +176,11 @@
 (defn- exact-subprocess-seam-internal?
   [path owner head form]
   (or
-   (and (= path "src/seon/operator/state.clj")
+   (and (= path "src/seon/cluster/process.clj")
         (= owner 'run-process!)
         (or (= head 'babashka.process/process)
             (and (= head '.waitFor) (= 4 (count form)))))
-   (and (= path "src/seon/operator/state.clj")
+   (and (= path "src/seon/cluster/process.clj")
         (contains? '#{terminate-recorded-process! terminate-subprocess!} owner)
         (= head '.get)
         (= 4 (count form)))
@@ -223,7 +193,7 @@
             (and (contains? '#{await-exit terminate-tree!} owner)
                  (= head '.get)
                  (= 4 (count form)))))
-   (and (= path "script/seon/fresh_operator.clj")
+   (and (= path "script/seon/operator.clj")
         (= owner 'record-launched-process!)
         (= head '.get)
         (= 4 (count form)))))
@@ -276,8 +246,7 @@
         network-owners (network-owner-keys forms)
         subjects
         (into []
-              (keep #(or (lifecycle-lock-subject %)
-                         (subprocess-subject process-owners network-owners %)))
+              (keep #(or                          (subprocess-subject process-owners network-owners %)))
               forms)]
     (when-not (seq subjects)
       (throw
@@ -309,12 +278,11 @@
       (finally
         (delete-tree! root)))))
 
-(deftest every-lock-and-foreign-subprocess-boundary-declares-a-bound
+(deftest every-foreign-subprocess-boundary-declares-a-bound
   (let [subjects (boundary-census production-roots)
         by-class (group-by :seon.bounded-boundary-census/class subjects)
         found-defects (defects subjects)]
-    (testing "the source-derived census is subject-present on both classes"
-      (is (seq (:lifecycle-lock by-class)) (pr-str subjects))
+    (testing "the source-derived census has foreign-process subjects"
       (is (seq (:foreign-subprocess by-class)) (pr-str subjects)))
     (testing "new direct acquisitions and waits cannot omit their bound"
       (is (empty? found-defects) (pr-str found-defects)))))
@@ -338,10 +306,7 @@
 
 (deftest synthetic-unbounded-forms-are-classified-as-defects
   (doseq [[label source expected-class]
-          [[:lock
-            "(ns fixture.lock (:require [seon.cluster.process :as state]))\n(defn f [] (state/with-lifecycle-lock! {:seon.operator.lock/path \"x\" :seon.operator.lock/acquisition-timeout-ms 10} identity))\n"
-            :lifecycle-lock]
-           [:subprocess-seam
+          [[:subprocess-seam
             "(ns fixture.seam (:require [seon.cluster.process :as state]))\n(defn f [] (state/run-process! {:seon.operator.subprocess/argv [\"true\"]}))\n"
             :foreign-subprocess]
            [:timed-direct-wait
@@ -366,13 +331,8 @@
 (deftest synthetic-declared-calls-are-bounded
   (with-source
     (str "(ns fixture.bounded (:require [seon.cluster.process :as state]))\n"
-         "(defn f []\n"
-         "  (state/with-lifecycle-lock!\n"
-         "   {:seon.operator.lock/path \"x\"\n"
-         "    :seon.operator.lock/acquisition-timeout-ms 10\n"
-         "    :seon.operator.lock/hold-timeout-ms 10}\n"
-         "   #(state/run-process!\n"
-         "     {:seon.operator.subprocess/argv [\"true\"]\n"
-         "      :seon.operator.subprocess/deadline-ms 10})))\n")
+         "(defn f [] (state/run-process!\n"
+         " {:seon.operator.subprocess/argv [\"true\"]\n"
+         "  :seon.operator.subprocess/deadline-ms 10}))\n")
     (fn [root]
       (is (empty? (defects (boundary-census [root])))))))

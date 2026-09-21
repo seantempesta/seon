@@ -322,6 +322,13 @@
  ; Unit: milliseconds without the next declared operator event.
  :seon.config.operator/event-silence-backstop-ms 30000
 
+ ; Initial indexing plus cold JVM loading is explicitly authorized long work.
+ ; B1b cold-start drill measured 144.131 s including zero-store indexing,
+ ; HTTP/JVM/SCI proof and a later partial boot. Five minutes is twice that
+ ; complete observed path; repaired in-process boot alone measured 9.154 s.
+ ; Ordinary socket/process events retain the separate silence bound above.
+ :seon.config.operator/boot-bound-ms 300000
+
  ; THE VIEW'S PORT IS EXPLICITLY ABSENT, and absence is the state: with
  ; no dial the port is DERIVED from the cluster name (7700-7999, FNV-1a
  ; over the name — `seon.render.web/derived-port`), so every named

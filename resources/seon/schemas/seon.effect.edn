@@ -1,36 +1,38 @@
-#:seon.effect{:capability [:qualified-symbol {:seon.db/index true :description "Declared handler on a function; the exact dispatched handler observed on an effect. Only function declarations are live deletion obligations."}],
-              :eval
-              [:and
-               {:description
-                "The evaluation this request was made from. `:seon.effect/run` and `:seon.effect/form-ordinal` are the two parts of exactly this evaluation's identity; they remain written only because `seon.turn` still reads them, and retire with that reader (issue effect-run-and-form-ordinal-duplicate-the-evaluation-ref)."
-                :seon.db/index true}
-               :seon.db/ref],
+#:seon.effect{:disposition [:enum :interrupted],
               :file
               [:and
                {:description
-                "The indexed source file this effect wrote, by canonical absolute path. Absent when the written path is not part of the indexed program."
+                "The indexed source file this effect wrote, by canonical absolute path. Absent when the written path is not part of the indexed program.",
                 :seon.db/index true}
                :seon.db/ref],
-              :form-span
-              [:tuple
-               {:description
-                "Half-open UTF-8 byte offsets of the region this effect wrote, in the file AFTER the write \u2014 the same unit as `:seon.fn/form-span`."}
-               :int :int],
-              :program
+              :handler-failed-error
               [:and
-               {:description
-                "The declaration whose span contains the region this effect wrote. Absent when no indexed declaration contains it."
-                :seon.db/index true}
-               :seon.db/ref],
+               :seon.error/base
+               [:map
+                [:seon.effect/failed-owner
+                 :seon.effect/failed-owner]]],
               :provenance
               [:map
                {:description
                 "Write-back provenance a capability handler reports to the effect writer. It never reaches the agent: `settle-value!` removes it from the handler's value exactly as it removes `:seon.blob/staged-writes`, and the writer derives `:seon.effect/program` from the file and span at the database that owns the declarations."}
                [:seon.effect/file :my.fs/path]
                [:seon.effect/form-span :seon.effect/form-span]],
-              :content-blobs [:vector :seon.blob/digest],
-              :background? :boolean,
-              :disposition [:enum :interrupted],
+              :request-edn [:string #:seon.db{:no-history? true}],
+              :result-edn [:string #:seon.db{:no-history? true}],
+              :error
+              [:and
+               #:seon.db{:attributes true}
+               :seon.error/base
+               [:map
+                #:seon.db{:attributes true}
+                [:seon.effect/request-identity
+                 :seon.effect/request-identity]
+                [:seon.effect/capability-symbol
+                 :seon.effect/capability-symbol]
+                [:seon.effect/execution-observation
+                 :seon.effect/execution-observation]]],
+              :settled-effect-id [:string {:min 1}],
+              :interrupted-at :inst,
               :execution-options
               [:map
                [:seon.effect/background?
@@ -39,28 +41,181 @@
                [:seon.effect/time-limit-ms
                 {:optional true}
                 :seon.effect/time-limit-ms]],
-              :time-limit-ms [:int {:min 1}],
-              :form-ordinal [:int {:min 0}],
-              :duration-ms [:int {:min 0}],
-              :id [:string {:min 1, :seon.db/identity true}],
-              :interrupted-at :inst,
-              :arguments
-              [:map
+              :missing-receipt-error
+              [:and
+               :seon.error/base
+               [:map
+                [:seon.effect/missing-effect-id
+                 :seon.effect/missing-effect-id]]],
+              :result-validator
+              [:fn
+               #:gen{:schema [:=> [:cat :seon.schema/value] :boolean]}
+               clojure.core/ifn?],
+              :request-owner :qualified-symbol,
+              :program
+              [:and
                {:description
-                "The admitted request or result map, handed to the writer beside the receipt so the writer can record the entries this branch installs as attributes. It is transaction-function input, never an entity map."}],
+                "The declaration whose span contains the region this effect wrote. Absent when no indexed declaration contains it.",
+                :seon.db/index true}
+               :seon.db/ref],
+              :invalid-time-limit-error
+              [:and
+               :seon.error/base
+               [:map
+                [:seon.effect/time-limit-attribute
+                 :seon.effect/time-limit-attribute]]],
+              :id [:string {:min 1, :seon.db/identity true}],
+              :time-limit-attribute :qualified-keyword,
+              :unavailable-handler-symbol :qualified-symbol,
+              :request-too-large-error
+              [:and
+               :seon.error/base
+               [:map
+                [:seon.effect/unadmitted-owner
+                 :seon.effect/unadmitted-owner]]],
+              :form-span
+              [:tuple
+               {:description
+                "Half-open UTF-8 byte offsets of the region this effect wrote, in the file AFTER the write — the same unit as `:seon.fn/form-span`."}
+               :int
+               :int],
+              :time-limit-ms [:int {:min 1}],
+              :execution-observation
+              [:and
+               #:seon.db{:component true,
+                         :component-schema :seon.error.evidence/entity}
+               :seon.db/ref],
+              :to
+              [:and
+               {:description
+                "The agent a settled effect is delivered to. A LISTENED ATTRIBUTE: the settlement transaction moves the recipient from `notify` to `to`, so the datom appears exactly when the result becomes deliverable and is never retracted-and-reasserted. Also an INSIDE wake — the agent asked for this effect, so its settlement does not reset that agent's turn bound.",
+                :seon.db/index true,
+                :seon.wake/listen true,
+                :seon.wake/opens-turn? true,
+                :seon.wake/inside true}
+               :seon.db/ref],
+              :interrupted-effect-id [:string {:min 1}],
+              :undeclared-owner-error
+              [:and
+               :seon.error/base
+               [:map
+                [:seon.effect/owner-without-handler
+                 :seon.effect/owner-without-handler]]],
+              :eval
+              [:and
+               {:description
+                "The evaluation this request was made from. `:seon.effect/run` and `:seon.effect/form-ordinal` are the two parts of exactly this evaluation's identity; they remain written only because `seon.turn` still reads them, and retire with that reader (issue effect-run-and-form-ordinal-duplicate-the-evaluation-ref).",
+                :seon.db/index true}
+               :seon.db/ref],
+              :owner :seon.db/ref,
               :open-request
               [:map
                [:seon.effect/receipt :seon.effect/receipt]
                [:seon.effect/arguments
                 {:optional true}
                 :seon.effect/arguments]],
-              :opened-at :inst,
+              :request-context
+              [:map
+               [:seon.db/connection :seon.db/connection]
+               [:seon.turn/id :seon.turn/id]
+               [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+               [:seon.boot/cluster-name :seon.boot/cluster-name]
+               [:seon.sci.admit/caps :seon.sci.admit/caps]
+               [:seon.config/on-core-error :seon.config/on-core-error]
+               [:seon.agent/id {:optional true} :seon.agent/id]
+               [:seon.sci.eval/projection-state
+                {:optional true,
+                 :description
+                 "This evaluation's schema projection state, named so a detached handler can rebuild the frame instead of hoping its executor inherited one."}
+                :seon.sci.eval/projection-state]
+               [:seon.flow/work-launcher
+                {:optional true}
+                :seon.flow/work-launcher]],
+              :notify [:and #:seon.db{:index true} :seon.db/ref],
+              :interrupted-error
+              [:and
+               :seon.error/base
+               [:map
+                [:seon.effect/interrupted-effect-id
+                 :seon.effect/interrupted-effect-id]]],
+              :result-size [:int {:min 0}],
+              :failed-owner :qualified-symbol,
+              :missing-bound :qualified-keyword,
+              :unavailable-handler-error
+              [:and
+               :seon.error/base
+               [:map
+                [:seon.effect/unavailable-handler-symbol
+                 :seon.effect/unavailable-handler-symbol]]],
+              :missing-effect-id [:string {:min 1}],
+              :missing-background-time-limit-error
+              [:and
+               :seon.error/base
+               [:map
+                [:seon.effect/missing-bound
+                 :seon.effect/missing-bound]]],
+              :recorded-effect-id [:string {:min 1}],
+              :already-settled-error
+              [:and
+               :seon.error/base
+               [:map
+                [:seon.effect/settled-effect-id
+                 :seon.effect/settled-effect-id]]],
+              :run [:and #:seon.db{:index true} :seon.db/ref],
+              :background? :boolean,
+              :arguments
+              [:map
+               {:description
+                "The admitted request or result map, handed to the writer beside the receipt so the writer can record the entries this branch installs as attributes. It is transaction-function input, never an entity map."}],
+              :invalid-request-error
+              [:and
+               :seon.error/base
+               [:map
+                [:seon.effect/request-owner
+                 :seon.effect/request-owner]]],
+              :no-evaluation-context-error
+              [:and
+               :seon.error/base
+               [:map
+                [:seon.effect/missing-context-member
+                 :seon.effect/missing-context-member]]],
+              :unadmitted-owner :qualified-symbol,
+              :settled-at :inst,
+              :request-identity [:string {:min 1}],
+              :invalid-owner-error
+              [:and
+               :seon.error/base
+               [:map
+                [:seon.effect/owner-class :seon.effect/owner-class]]],
+              :form-ordinal [:int {:min 0}],
+              :settle-request
+              [:map
+               [:seon.effect/id :seon.effect/id]
+               [:seon.effect/result-edn :seon.effect/result-edn]
+               [:seon.effect/result-blob
+                {:optional true}
+                :seon.effect/result-blob]
+               [:seon.effect/content-blobs
+                {:optional true}
+                :seon.effect/content-blobs]
+               [:seon.effect/result-size
+                {:optional true}
+                :seon.effect/result-size]
+               [:seon.effect/duration-ms :seon.effect/duration-ms]
+               [:seon.effect/settled-at :seon.effect/settled-at]
+               [:seon.effect/arguments
+                {:optional true}
+                :seon.effect/arguments]
+               [:seon.effect/provenance
+                {:optional true}
+                :seon.effect/provenance]],
+              :result-blob :seon.blob/digest,
+              :owner-class :symbol,
               :ordinal [:int {:min 0}],
-              :owner :seon.db/ref,
               :receipt
               [:map
-               {:seon.db/attributes true
-                :seon.render/ai seon.effect/render-ai
+               {:seon.db/attributes true,
+                :seon.render/ai seon.effect/render-ai,
                 :seon.render/html seon.effect/render-html}
                [:seon.effect/id :seon.effect/id]
                [:seon.effect/run :seon.effect/run]
@@ -71,7 +226,9 @@
                [:seon.effect/form-span
                 {:optional true}
                 :seon.effect/form-span]
-               [:seon.effect/program {:optional true} :seon.effect/program]
+               [:seon.effect/program
+                {:optional true}
+                :seon.effect/program]
                [:seon.effect/form-ordinal :seon.effect/form-ordinal]
                [:seon.effect/ordinal :seon.effect/ordinal]
                [:seon.effect/request-edn :seon.effect/request-edn]
@@ -101,383 +258,277 @@
                [:seon.effect/interrupted-at
                 {:optional true}
                 :seon.effect/interrupted-at]],
-              :request-context
-              [:map
-               [:seon.db/connection
-                :seon.db/connection]
-               [:seon.turn/id :seon.turn/id]
-               [:seon.cluster.eval/ordinal
-                :seon.cluster.eval/ordinal]
-               [:seon.boot/cluster-name :seon.boot/cluster-name]
-               [:seon.sci.admit/caps :seon.sci.admit/caps]
-               [:seon.config/on-core-error
-                :seon.config/on-core-error]
-               [:seon.agent/id
-                {:optional true}
-                :seon.agent/id]
-               [:seon.sci.eval/projection-state
-                {:optional true
-                 :description
-                 "This evaluation's schema projection state, named so a detached handler can rebuild the frame instead of hoping its executor inherited one."}
-                :seon.sci.eval/projection-state]
-               [:seon.flow/work-launcher
-                {:optional true}
-                :seon.flow/work-launcher]],
-              :notify [:and #:seon.db{:index true} :seon.db/ref],
-              :request-edn [:string #:seon.db{:no-history? true}],
-              :result-edn [:string #:seon.db{:no-history? true}],
-              :result-blob :seon.blob/digest,
-              :result-size [:int {:min 0}],
-              :run [:and #:seon.db{:index true} :seon.db/ref],
-              :settle-request
-              [:map
-               [:seon.effect/id :seon.effect/id]
-               [:seon.effect/result-edn :seon.effect/result-edn]
-               [:seon.effect/result-blob
-                {:optional true}
-                :seon.effect/result-blob]
-               [:seon.effect/content-blobs
-                {:optional true}
-                :seon.effect/content-blobs]
-               [:seon.effect/result-size
-                {:optional true}
-                :seon.effect/result-size]
-               [:seon.effect/duration-ms :seon.effect/duration-ms]
-               [:seon.effect/settled-at :seon.effect/settled-at]
-               [:seon.effect/arguments
-                {:optional true}
-                :seon.effect/arguments]
-               [:seon.effect/provenance
-                {:optional true}
-                :seon.effect/provenance]],
-              :settled-at :inst,
-              :to
+              :capability-symbol
+              [:qualified-symbol #:seon.db{:index true}],
+              :duration-ms [:int {:min 0}],
+              :owner-without-handler :qualified-symbol,
+              :capability
+              [:qualified-symbol
+               {:seon.db/index true,
+                :description
+                "Declared handler on a function; the exact dispatched handler observed on an effect. Only function declarations are live deletion obligations."}],
+              :missing-context-member :qualified-keyword,
+              :request-result
+              [:or
+               :seon.schema/value
+               :seon.db/error-result
+               :my.background/error
+               :my.background/invalid-call-error
+               :my.background/invalid-result-error
+               :my.background/missing-result-error
+               :my.edit/ambiguous-match-error
+               :my.edit/error
+               :my.edit/lossless-check-failed-error
+               :my.edit/no-match-error
+               :my.edit/not-utf8-error
+               :my.edit/parse-refused-error
+               :my.edit/stale-source-error
+               :my.fs/error
+               :my.message/error
+               :my.plan/agent-not-found-error
+               :my.plan/dependency-cycle-error
+               :my.plan/dependency-not-found-error
+               :my.plan/done-query-failed-error
+               :my.plan/done-query-unsatisfied-error
+               :my.plan/duplicate-identity-error
+               :my.plan/duplicate-position-error
+               :my.plan/error
+               :my.plan/foreign-identity-error
+               :my.plan/identity-exists-error
+               :my.plan/item-reference-not-found-error
+               :my.plan/item-reference-not-owned-error
+               :my.plan/missing-query-bound-error
+               :my.plan/not-found-error
+               :my.plan/not-owned-error
+               :my.plan/subject-not-found-error
+               :my.plan/unusable-current-step-error
+               :my.shell/blob-unavailable-error
+               :my.shell/cwd-refused-error
+               :my.shell/error
+               :my.shell/start-failed-error
+               :my.shell/stdin-limit-error
+               :my.shell/time-limit-error
+               :my.turn/error
+               :seon.agent/error
+               :seon.agent.graph/error
+               :seon.ai/authentication-failure-error
+               :seon.ai/authorization-failure-error
+               :seon.ai/extra-body-conflict-error
+               :seon.ai/invalid-extra-body-error
+               :seon.ai/no-credential-error
+               :seon.ai/provider-error-error
+               :seon.ai/provider-server-failure-error
+               :seon.ai/rate-limited-error
+               :seon.ai/reasoning-without-answer-error
+               :seon.ai/request-error
+               :seon.ai/request-failure-error
+               :seon.ai/stream-truncated-error
+               :seon.ai/timeout-error
+               :seon.ai/token-starvation-error
+               :seon.ai/transport-failure-error
+               :seon.ai/transport-outcome-unknown-error
+               :seon.ai/unparseable-body-error
+               :seon.artifact/error
+               :seon.await/closed-error
+               :seon.await/timeout-error
+               :seon.blob/content-digest-mismatch-error
+               :seon.blob/input-stalled-error
+               :seon.blob/invalid-threshold-error
+               :seon.blob/store-root-absent-error
+               :seon.blob/stored-content-mismatch-error
+               :seon.boot/error
+               :seon.bootstrap/error
+               :seon.bootstrap/prefix-drift-error
+               :seon.bootstrap/root-acquisition-empty-error
+               :seon.bootstrap/unmatched-source-error
+               :seon.cluster/error
+               :seon.cluster.process/start-instant-unavailable-error
+               :seon.cluster.prompt/error
+               :seon.cluster.registry/error
+               :seon.cluster.reply/error
+               :seon.cluster.source/error
+               :seon.cluster.store/error
+               :seon.cluster.wake/error
+               :seon.config/error
+               :seon.config/rule-error
+               :seon.context/selection-refused-error
+               :seon.db.availability/error
+               :seon.db.read/error
+               :seon.db.write/error
+               :seon.db.write/validation-refusal
+               :seon.dev.mcp/error
+               :seon.dev.mcp/jvm-exception-error
+               :seon.dev.mcp/projection-failed-error
+               :seon.effect/already-recorded-error
+               :seon.effect/already-settled-error
+               :seon.effect/error
+               :seon.effect/handler-failed-error
+               :seon.effect/interrupted-error
+               :seon.effect/invalid-owner-error
+               :seon.effect/invalid-request-error
+               :seon.effect/invalid-time-limit-error
+               :seon.effect/missing-background-time-limit-error
+               :seon.effect/missing-receipt-error
+               :seon.effect/no-evaluation-context-error
+               :seon.effect/request-too-large-error
+               :seon.effect/unavailable-handler-error
+               :seon.effect/undeclared-owner-error
+               :seon.env/absent-environment-error
+               :seon.env/agent-id-absent-error
+               :seon.env/error
+               :seon.env/incomplete-environment-error
+               :seon.env/invalid-value-error
+               :seon.env/schema-absent-error
+               :seon.env/unscopable-member-error
+               :seon.eval.drive/error
+               :seon.flow/configuration-error
+               :seon.flow/error
+               :seon.flow/fault-channel-overflow-error
+               :seon.flow/launcher-stopped-error
+               :seon.flow/missing-launcher-error
+               :seon.flow/submission-capacity-error
+               :seon.flow/time-limit-error
+               :seon.flow/timeout-error
+               :seon.flow/unsupported-command-error
+               :seon.fn/error
+               :seon.fn.binding/error
+               :seon.instrument/arity-error
+               :seon.instrument/contract-error
+               :seon.instrument/registration-error
+               :seon.instrument/undeclared-error
+               :seon.issue/already-exists-error
+               :seon.issue/already-started-error
+               :seon.issue/citations-undeclared-error
+               :seon.issue/detector-refused-error
+               :seon.issue/detector-unknown-error
+               :seon.issue/detector-unresolved-error
+               :seon.issue/git-unbounded-error
+               :seon.issue/no-author-error
+               :seon.issue/no-cluster-error
+               :seon.issue/no-namespace-error
+               :seon.issue/no-tests-error
+               :seon.issue/not-a-test-error
+               :seon.issue/not-found-error
+               :seon.issue/notes-absent-error
+               :seon.issue/subject-absent-error
+               :seon.issue/subject-unlinkable-error
+               :seon.issue/subject-without-identity-error
+               :seon.issue/worker-exists-error
+               :seon.maintenance/ambiguous-result-projection-error
+               :seon.maintenance/result-projection-failed-error
+               :seon.maintenance/result-projection-unresolved-error
+               :seon.maintenance/root-never-collected-error
+               :seon.message/error
+               :seon.operator/cluster-cleanup-incomplete-error
+               :seon.operator/collection-incomplete-error
+               :seon.operator/custody-selection-error
+               :seon.operator/error
+               :seon.operator/failed-error
+               :seon.operator/low-disk-space-error
+               :seon.operator.collect/error
+               :seon.operator.collect/unrecognized-option-error
+               :seon.operator.state/deadline-exceeded-error
+               :seon.operator.state/deadline-undeclared-error
+               :seon.operator.state/missing-bound-error
+               :seon.operator.state/process-termination-error
+               :seon.operator.state/progress-undeclared-error
+               :seon.plan/non-test-error
+               :seon.problems/error
+               :seon.program/binding-error
+               :seon.program/declaration-refused-error
+               :seon.program/error
+               :seon.program/no-declaration-at-error
+               :seon.program/signature-error
+               :seon.reconcile/error
+               :seon.render/ambiguous-error
+               :seon.render/error
+               :seon.render/invalid-output-error
+               :seon.render/request-error
+               :seon.render/unknown
+               :seon.render/walk-failed-error
+               :seon.render.data/error
+               :seon.render.data/no-such-path-error
+               :seon.render.data/observation-error
+               :seon.render.hiccup/unparseable-tag-error
+               :seon.render.lint/absent-element-error
+               :seon.render.transcript/request-error
+               :seon.render.value/error
+               :seon.render.value/missing-root-identity-error
+               :seon.render.value/window-failed-error
+               :seon.render.value/window-realization-failed-error
+               :seon.render.walk/elided-error
+               :seon.render.walk/error
+               :seon.render.walk/no-such-entity-error
+               :seon.render.web/error
+               :seon.render.web/function-unavailable-error
+               :seon.render.web/missing-port-error
+               :seon.render.web/request-error
+               :seon.render.web/value-not-found-error
+               :seon.render.web/value-unreadable-error
+               :seon.schedule/error
+               :seon.schedule/incomplete-task-error
+               :seon.schedule/invalid-fire-id-error
+               :seon.schedule/invalid-task-owner-error
+               :seon.schedule/invalid-terminal-arm-error
+               :seon.schedule/missing-receipt-error
+               :seon.schedule/task-without-creation-instant-error
+               :seon.schedule/unresolved-handler-error
+               :seon.schema/error
+               :seon.schema/validation-refusal
+               :seon.schema.datahike/error
+               :seon.schema.shape/error
+               :seon.sci.admit/error
+               :seon.sci.admit/projection-failed-error
+               :seon.sci.eval/acquisition-error
+               :seon.sci.eval/declaration-absent-error
+               :seon.sci.eval/documentation-unavailable-error
+               :seon.sci.eval/evaluation-error
+               :seon.sci.eval/install-mismatch-error
+               :seon.sci.eval/missing-function-row-error
+               :seon.sci.eval/namespace-binding-cycle-error
+               :seon.sci.eval/reader-event-count-error
+               :seon.sci.eval/row-acquisition-error
+               :seon.sci.eval/schema-refused-error
+               :seon.sci.kernel/error
+               :seon.sci.reader/error
+               :seon.sci.reader/fabricated-response-error
+               :seon.sci.reader/oversize-error
+               :seon.sci.reader/refused-tag-error
+               :seon.sci.reader/unreadable-error
+               :seon.search/error
+               :seon.source/test-evidence-error
+               :seon.test/admission-error
+               :seon.test/error
+               :seon.test/execution-error
+               :seon.test/expired
+               :seon.test/not-runnable-error
+               :seon.test/resolution-error
+               :seon.test/selection-error
+               :seon.test/unknown-error
+               :seon.test.accretion/error
+               :seon.test.accretion/install-refused-error
+               :seon.test.run/error
+               :seon.test.run/immutable-error
+               :seon.test.run/unavailable-error
+               :seon.test.runner/default-cluster-refused-error
+               :seon.test.runner/error
+               :seon.test.runner/invalid-long-reason-error
+               :seon.test.runner/invalid-marker-reason-error
+               :seon.test.runner/invalid-selection-mode-error
+               :seon.test.runner/invalid-silence-seconds-error
+               :seon.test.runner/long-test-ns-hook-error
+               :seon.test.runner/process-tree-exit-backstop-error
+               :seon.test.runner/unknown-worker-command-error
+               :seon.test.runner/unresolved-test-var-error
+               :seon.test.runner/worker-launch-failure-error
+               :seon.turn/error
+               :seon.turn/refused-error
+               :seon.turn.loop/error],
+              :opened-at :inst,
+              :content-blobs [:vector :seon.blob/digest],
+              :already-recorded-error
               [:and
-               {:description
-                "The agent a settled effect is delivered to. A LISTENED ATTRIBUTE: the settlement transaction moves the recipient from `notify` to `to`, so the datom appears exactly when the result becomes deliverable and is never retracted-and-reasserted. Also an INSIDE wake — the agent asked for this effect, so its settlement does not reset that agent's turn bound.",
-                :seon.db/index true,
-                :seon.wake/listen true,
-                :seon.wake/opens-turn? true,
-                :seon.wake/inside true}
-               :seon.db/ref]
- :seon.effect/recorded-effect-id [:string {:min 1}]
- :seon.effect/already-recorded-error [:and :seon.error/base [:map [:seon.effect/recorded-effect-id :seon.effect/recorded-effect-id]]]
- :seon.effect/settled-effect-id [:string {:min 1}]
- :seon.effect/already-settled-error [:and :seon.error/base [:map [:seon.effect/settled-effect-id :seon.effect/settled-effect-id]]]
- :seon.effect/missing-effect-id [:string {:min 1}]
- :seon.effect/missing-receipt-error [:and :seon.error/base [:map [:seon.effect/missing-effect-id :seon.effect/missing-effect-id]]]
- :seon.effect/interrupted-effect-id [:string {:min 1}]
- :seon.effect/interrupted-error [:and :seon.error/base [:map [:seon.effect/interrupted-effect-id :seon.effect/interrupted-effect-id]]]
- :seon.effect/failed-owner :qualified-symbol
- :seon.effect/handler-failed-error [:and :seon.error/base [:map [:seon.effect/failed-owner :seon.effect/failed-owner]]]
- :seon.effect/time-limit-attribute :qualified-keyword
- :seon.effect/invalid-time-limit-error [:and :seon.error/base [:map [:seon.effect/time-limit-attribute :seon.effect/time-limit-attribute]]]
- :seon.effect/missing-bound :qualified-keyword
- :seon.effect/missing-background-time-limit-error [:and :seon.error/base [:map [:seon.effect/missing-bound :seon.effect/missing-bound]]]
- :seon.effect/missing-context-member :qualified-keyword
- :seon.effect/no-evaluation-context-error [:and :seon.error/base [:map [:seon.effect/missing-context-member :seon.effect/missing-context-member]]]
- :seon.effect/owner-class :symbol
- :seon.effect/invalid-owner-error [:and :seon.error/base [:map [:seon.effect/owner-class :seon.effect/owner-class]]]
- :seon.effect/owner-without-handler :qualified-symbol
- :seon.effect/undeclared-owner-error [:and :seon.error/base [:map [:seon.effect/owner-without-handler :seon.effect/owner-without-handler]]]
- :seon.effect/unavailable-handler-symbol :qualified-symbol
- :seon.effect/unavailable-handler-error [:and :seon.error/base [:map [:seon.effect/unavailable-handler-symbol :seon.effect/unavailable-handler-symbol]]]
- :seon.effect/request-owner :qualified-symbol
- :seon.effect/invalid-request-error [:and :seon.error/base [:map [:seon.effect/request-owner :seon.effect/request-owner]]]
- :seon.effect/unadmitted-owner :qualified-symbol
- :seon.effect/request-too-large-error [:and :seon.error/base [:map [:seon.effect/unadmitted-owner :seon.effect/unadmitted-owner]]]
- :seon.effect/result-validator
- [:fn {:gen/schema [:=> [:cat :seon.schema/value] :boolean]} clojure.core/ifn?]
- ; Polymorphic handler pass-through: explicit canonical facets per PRD 1q.
- ; effect-test checks this manifest against the canonical fixture population.
- :seon.effect/request-result
- [:or :seon.schema/value :seon.db/error-result
-  :my.background/error
-  :my.background/invalid-call-error
-  :my.background/invalid-result-error
-  :my.background/missing-result-error
-  :my.edit/ambiguous-match-error
-  :my.edit/error
-  :my.edit/lossless-check-failed-error
-  :my.edit/no-match-error
-  :my.edit/not-utf8-error
-  :my.edit/parse-refused-error
-  :my.edit/stale-source-error
-  :my.fs/error
-  :my.message/error
-  :my.plan/agent-not-found-error
-  :my.plan/dependency-cycle-error
-  :my.plan/dependency-not-found-error
-  :my.plan/done-query-failed-error
-  :my.plan/done-query-unsatisfied-error
-  :my.plan/duplicate-identity-error
-  :my.plan/duplicate-position-error
-  :my.plan/error
-  :my.plan/foreign-identity-error
-  :my.plan/identity-exists-error
-  :my.plan/item-reference-not-found-error
-  :my.plan/item-reference-not-owned-error
-  :my.plan/missing-query-bound-error
-  :my.plan/not-found-error
-  :my.plan/not-owned-error
-  :my.plan/subject-not-found-error
-  :my.plan/unusable-current-step-error
-  :my.shell/blob-unavailable-error
-  :my.shell/cwd-refused-error
-  :my.shell/error
-  :my.shell/start-failed-error
-  :my.shell/stdin-limit-error
-  :my.shell/time-limit-error
-  :my.turn/error
-  :seon.agent/error
-  :seon.agent.graph/error
-  :seon.ai/authentication-failure-error
-  :seon.ai/authorization-failure-error
-  :seon.ai/extra-body-conflict-error
-  :seon.ai/invalid-extra-body-error
-  :seon.ai/no-credential-error
-  :seon.ai/provider-error-error
-  :seon.ai/provider-server-failure-error
-  :seon.ai/rate-limited-error
-  :seon.ai/reasoning-without-answer-error
-  :seon.ai/request-error
-  :seon.ai/request-failure-error
-  :seon.ai/stream-truncated-error
-  :seon.ai/timeout-error
-  :seon.ai/token-starvation-error
-  :seon.ai/transport-failure-error
-  :seon.ai/transport-outcome-unknown-error
-  :seon.ai/unparseable-body-error
-  :seon.artifact/error
-  :seon.await/closed-error
-  :seon.await/timeout-error
-  :seon.blob/content-digest-mismatch-error
-  :seon.blob/input-stalled-error
-  :seon.blob/invalid-threshold-error
-  :seon.blob/store-root-absent-error
-  :seon.blob/stored-content-mismatch-error
-  :seon.boot/error
-  :seon.bootstrap/error
-  :seon.bootstrap/prefix-drift-error
-  :seon.bootstrap/root-acquisition-empty-error
-  :seon.bootstrap/unmatched-source-error
-  :seon.cluster/error
-  :seon.cluster.process/start-instant-unavailable-error
-  :seon.cluster.prompt/error
-  :seon.cluster.registry/error
-  :seon.cluster.reply/error
-  :seon.cluster.source/error
-  :seon.cluster.store/error
-  :seon.cluster.wake/error
-  :seon.config/error
-  :seon.config/rule-error
-  :seon.context/selection-refused-error
-  :seon.db.availability/error
-  :seon.db.read/error
-  :seon.db.write/error
-  :seon.db.write/validation-refusal
-  :seon.dev.mcp/error
-  :seon.dev.mcp/jvm-exception-error
-  :seon.dev.mcp/projection-failed-error
-  :seon.effect/already-recorded-error
-  :seon.effect/already-settled-error
-  :seon.effect/error
-  :seon.effect/handler-failed-error
-  :seon.effect/interrupted-error
-  :seon.effect/invalid-owner-error
-  :seon.effect/invalid-request-error
-  :seon.effect/invalid-time-limit-error
-  :seon.effect/missing-background-time-limit-error
-  :seon.effect/missing-receipt-error
-  :seon.effect/no-evaluation-context-error
-  :seon.effect/request-too-large-error
-  :seon.effect/unavailable-handler-error
-  :seon.effect/undeclared-owner-error
-  :seon.env/absent-environment-error
-  :seon.env/agent-id-absent-error
-  :seon.env/error
-  :seon.env/incomplete-environment-error
-  :seon.env/invalid-value-error
-  :seon.env/schema-absent-error
-  :seon.env/unscopable-member-error
-  :seon.eval.drive/error
-  :seon.flow/configuration-error
-  :seon.flow/error
-  :seon.flow/fault-channel-overflow-error
-  :seon.flow/launcher-stopped-error
-  :seon.flow/missing-launcher-error
-  :seon.flow/submission-capacity-error
-  :seon.flow/time-limit-error
-  :seon.flow/timeout-error
-  :seon.flow/unsupported-command-error
-  :seon.fn/error
-  :seon.fn.binding/error
-  :seon.instrument/arity-error
-  :seon.instrument/contract-error
-  :seon.instrument/registration-error
-  :seon.instrument/undeclared-error
-  :seon.issue/already-exists-error
-  :seon.issue/already-started-error
-  :seon.issue/citations-undeclared-error
-  :seon.issue/detector-refused-error
-  :seon.issue/detector-unknown-error
-  :seon.issue/detector-unresolved-error
-  :seon.issue/git-unbounded-error
-  :seon.issue/no-author-error
-  :seon.issue/no-cluster-error
-  :seon.issue/no-namespace-error
-  :seon.issue/no-tests-error
-  :seon.issue/not-a-test-error
-  :seon.issue/not-found-error
-  :seon.issue/notes-absent-error
-  :seon.issue/subject-absent-error
-  :seon.issue/subject-unlinkable-error
-  :seon.issue/subject-without-identity-error
-  :seon.issue/worker-exists-error
-  :seon.maintenance/ambiguous-result-projection-error
-  :seon.maintenance/result-projection-failed-error
-  :seon.maintenance/result-projection-unresolved-error
-  :seon.maintenance/root-never-collected-error
-  :seon.message/error
-  :seon.operator/cluster-cleanup-incomplete-error
-  :seon.operator/collection-incomplete-error
-  :seon.operator/custody-selection-error
-  :seon.operator/error
-  :seon.operator/failed-error
-  :seon.operator/low-disk-space-error
-  :seon.operator/process-census-incomplete-error
-  :seon.operator/reap-incomplete-error
-  :seon.operator/unclaimed-root-error
-  :seon.operator.claim/read-error
-  :seon.operator.collect/error
-  :seon.operator.collect/unrecognized-option-error
-  :seon.operator.state/deadline-exceeded-error
-  :seon.operator.state/deadline-undeclared-error
-  :seon.operator.state/ephemeral-owner-error
-  :seon.operator.state/lock-acquisition-timeout-error
-  :seon.operator.state/lock-bound-error
-  :seon.operator.state/lock-hold-timeout-error
-  :seon.operator.state/lock-holder-error
-  :seon.operator.state/managed-root-error
-  :seon.operator.state/missing-bound-error
-  :seon.operator.state/process-claim-error
-  :seon.operator.state/process-termination-error
-  :seon.operator.state/progress-undeclared-error
-  :seon.operator.state/root-creator-error
-  :seon.plan/non-test-error
-  :seon.problems/error
-  :seon.program/binding-error
-  :seon.program/declaration-refused-error
-  :seon.program/error
-  :seon.program/no-declaration-at-error
-  :seon.program/signature-error
-  :seon.reconcile/error
-  :seon.render/ambiguous-error
-  :seon.render/error
-  :seon.render/invalid-output-error
-  :seon.render/request-error
-  :seon.render/unknown
-  :seon.render/walk-failed-error
-  :seon.render.data/error
-  :seon.render.data/no-such-path-error
-  :seon.render.data/observation-error
-  :seon.render.hiccup/unparseable-tag-error
-  :seon.render.lint/absent-element-error
-  :seon.render.transcript/request-error
-  :seon.render.value/error
-  :seon.render.value/missing-root-identity-error
-  :seon.render.value/window-failed-error
-  :seon.render.value/window-realization-failed-error
-  :seon.render.walk/elided-error
-  :seon.render.walk/error
-  :seon.render.walk/no-such-entity-error
-  :seon.render.web/error
-  :seon.render.web/function-unavailable-error
-  :seon.render.web/missing-port-error
-  :seon.render.web/request-error
-  :seon.render.web/value-not-found-error
-  :seon.render.web/value-unreadable-error
-  :seon.schedule/error
-  :seon.schedule/incomplete-task-error
-  :seon.schedule/invalid-fire-id-error
-  :seon.schedule/invalid-task-owner-error
-  :seon.schedule/invalid-terminal-arm-error
-  :seon.schedule/missing-receipt-error
-  :seon.schedule/task-without-creation-instant-error
-  :seon.schedule/unresolved-handler-error
-  :seon.schema/error
-  :seon.schema/validation-refusal
-  :seon.schema.datahike/error
-  :seon.schema.shape/error
-  :seon.sci.admit/error
-  :seon.sci.admit/projection-failed-error
-  :seon.sci.eval/acquisition-error
-  :seon.sci.eval/declaration-absent-error
-  :seon.sci.eval/documentation-unavailable-error
-  :seon.sci.eval/evaluation-error
-  :seon.sci.eval/install-mismatch-error
-  :seon.sci.eval/missing-function-row-error
-  :seon.sci.eval/namespace-binding-cycle-error
-  :seon.sci.eval/reader-event-count-error
-  :seon.sci.eval/row-acquisition-error
-  :seon.sci.eval/schema-refused-error
-  :seon.sci.kernel/error
-  :seon.sci.reader/error
-  :seon.sci.reader/fabricated-response-error
-  :seon.sci.reader/oversize-error
-  :seon.sci.reader/refused-tag-error
-  :seon.sci.reader/unreadable-error
-  :seon.search/error
-  :seon.source/test-evidence-error
-  :seon.test/admission-error
-  :seon.test/error
-  :seon.test/execution-error
-  :seon.test/expired
-  :seon.test/not-runnable-error
-  :seon.test/resolution-error
-  :seon.test/selection-error
-  :seon.test/unknown-error
-  :seon.test.accretion/error
-  :seon.test.accretion/install-refused-error
-  :seon.test.run/error
-  :seon.test.run/immutable-error
-  :seon.test.run/unavailable-error
-  :seon.test.runner/default-cluster-refused-error
-  :seon.test.runner/error
-  :seon.test.runner/invalid-long-reason-error
-  :seon.test.runner/invalid-marker-reason-error
-  :seon.test.runner/invalid-selection-mode-error
-  :seon.test.runner/invalid-silence-seconds-error
-  :seon.test.runner/long-test-ns-hook-error
-  :seon.test.runner/process-tree-exit-backstop-error
-  :seon.test.runner/unknown-worker-command-error
-  :seon.test.runner/unresolved-test-var-error
-  :seon.test.runner/worker-launch-failure-error
-  :seon.turn/error
-  :seon.turn/refused-error
-  :seon.turn.loop/error]
- ; Additive error declaration manifest, 2026-09-18.
-
- :seon.effect/capability-symbol
- [:qualified-symbol {:seon.db/index true}]
-
- :seon.effect/error
- [:and
- {:seon.db/attributes true}
- :seon.error/base
- [:map
-  {:seon.db/attributes true}
-  [:seon.effect/request-identity :seon.effect/request-identity]
-  [:seon.effect/capability-symbol :seon.effect/capability-symbol]
-  [:seon.effect/execution-observation
-   :seon.effect/execution-observation]]]
-
- :seon.effect/execution-observation
- [:and
- {:seon.db/component true,
-  :seon.db/component-schema :seon.error.evidence/entity}
- :seon.db/ref]
-
- :seon.effect/request-identity
- [:string {:min 1}]
-}
+               :seon.error/base
+               [:map
+                [:seon.effect/recorded-effect-id
+                 :seon.effect/recorded-effect-id]]]}

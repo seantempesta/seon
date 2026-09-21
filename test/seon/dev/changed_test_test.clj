@@ -162,3 +162,30 @@
         (run-babashka "(require 'seon.time)")]
     (is (pos? exit))
     (is (re-find #"Could not locate seon/time" err))))
+
+(deftest concurrent-tooling-transition-refuses-busy
+  (let [{:keys [exit out err]}
+        (run-babashka
+         (pr-str
+          '(do
+             (require 'seon.dev.state 'babashka.fs)
+             (let [directory (str (babashka.fs/create-temp-dir {:base-dir "tmp" :prefix "b1b-tooling-"}))
+                   config {:seon.dev.config/process-dir (str (babashka.fs/absolutize directory))}
+                   acquired (promise) release (promise)
+                   owner (future (seon.dev.state/with-lock config :changed-test 5000
+                                   #(do (deliver acquired true)
+                                        (when (= :timeout (deref release 5000 :timeout))
+                                          (throw (ex-info "Owner release absent" {})))
+                                        :released)))]
+               (try
+                 (when (= :timeout (deref acquired 5000 :timeout))
+                   (throw (ex-info "Owner acquisition absent" {})))
+                 (let [busy (try (seon.dev.state/with-lock config :changed-test 5000 (constantly :wrong))
+                                 (catch clojure.lang.ExceptionInfo e (boolean (:seon.dev.lock/path (ex-data e)))))]
+                   (deliver release true)
+                   (prn [busy (deref owner 5000 :timeout)
+                         (seon.dev.state/with-lock config :changed-test 5000 (constantly :acquired))]))
+                 (finally (deliver release true) (deref owner 5000 :timeout)
+                          (babashka.fs/delete-tree directory)))))))]
+    (is (zero? exit) err)
+    (is (= [true :released :acquired] (edn/read-string out)))))

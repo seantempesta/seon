@@ -22,6 +22,12 @@
     (when-not (pos-int? value) (throw (ex-info "Missing operator silence bound." manifest)))
     value))
 
+(defn operator-boot-bound-ms [manifest]
+  (let [value (get manifest :seon.config.operator/boot-bound-ms
+                   (:seon.config.operator/boot-bound-ms @shipped-default-decisions))]
+    (when-not (pos-int? value) (throw (ex-info "Missing operator boot bound." manifest)))
+    value))
+
 (defn diagnostic [message evidence cause]
   (refusal/diagnostic
    {:seon.error/at (java.util.Date.) :seon.error/layer :seon.operator/operation
@@ -47,15 +53,18 @@
       (fail! "OS process start instant is unavailable." {:seon.boot/pid (.pid handle)}))
     {:seon.boot/pid (.pid handle) :seon.boot/start-instant (java.util.Date/from (.get start))}))
 
-(defn matching-handle [identity]
+(defn matching-handle
+  ([identity] (matching-handle identity false))
+  ([identity stale-is-absent?]
   (when-not (and (pos-int? (:seon.boot/pid identity)) (inst? (:seon.boot/start-instant identity)))
     (fail! "Exact process identity is required." identity))
   (let [optional (java.lang.ProcessHandle/of (:seon.boot/pid identity))]
     (when (and (.isPresent optional) (.isAlive (.get optional)))
       (let [handle (.get optional) current (identity-of handle)]
-        (when-not (= current (select-keys identity [:seon.boot/pid :seon.boot/start-instant]))
-          (fail! "Process identity changed; refusing to signal its replacement." identity))
-        handle))))
+        (if (= current (select-keys identity [:seon.boot/pid :seon.boot/start-instant]))
+          handle
+          (when-not stale-is-absent?
+            (fail! "Process identity changed; refusing to signal its replacement." identity))))))))
 
 (defn advertisements [root]
   (let [directory (io/file root "data/clusters")]
@@ -64,7 +73,7 @@
                   (let [path (io/file child "prepl.edn")]
                     (when (.isFile path)
                       (let [value (edn/read-string (slurp path))]
-                        (when (matching-handle value) value))))))
+                        (when (matching-handle value true) value))))))
           (or (.listFiles directory) []))))
 
 (defn advertisement [root name]
@@ -113,12 +122,13 @@
       :seon.operator/value
       (if-let [observe! (:seon.operator/observe-output! options)]
         (prepl-value! endpoint form
-                      (* 1000 (get-in (edn/read-string (slurp (io/file (repository-root) ".claude/seon-hook.edn")))
-                                     [:current-source :timeout-seconds])) observe!)
+                      (operator-boot-bound-ms {}) observe!)
         (prepl-value! endpoint form))}
-     (if (seq (selected-processes root))
-       (fail! "An exact-root JVM is alive but its endpoint is unavailable." {:seon.operator/root root})
-       {:seon.operator/live-process? false}))))
+     (let [identities (selected-processes root)]
+       (if (seq identities)
+         (fail! "An exact-root JVM is alive but its endpoint is unavailable."
+                {:seon.operator/root root :seon.operator/processes (vec identities)})
+         {:seon.operator/live-process? false})))))
 
 (defn- request-form [request]
   (pr-str `(do
@@ -130,12 +140,16 @@
 (defn connected! [request]
   (let [root (:seon.operator/managed-root request)
         endpoint (advertisement root nil)]
-    (when-not endpoint (fail! "No live JVM endpoint; no offline reader is started." request))
+    (when-not endpoint
+      (let [identities (selected-processes root)]
+        (fail! (if (seq identities)
+                 "An exact-root JVM is alive but its endpoint is unavailable."
+                 "No live exact-root JVM; start the selected root first.")
+               (assoc request :seon.operator/processes (vec identities)))))
     (prepl-value! endpoint
                   (request-form (merge request (select-keys endpoint [:seon.boot/pid :seon.boot/start-instant])))
                   (if (#{:init :export} (:seon.operator/command request))
-                    (* 1000 (get-in (edn/read-string (slurp (io/file (repository-root) ".claude/seon-hook.edn")))
-                                   [:current-source :timeout-seconds]))
+                    (operator-boot-bound-ms {})
                     (operator-silence-backstop-ms {})))))
 
 (defn terminate! [identity bound]
@@ -255,8 +269,7 @@
           (let [coordinates (edn/read-string (.readLine reader))
                 _ (binding [*out* *err*] (println "REPL" (pr-str coordinates) "log" (str log)))
                 ;; Cold indexing has the publication's declared bound, independently of socket silence.
-                boot-bound (* 1000 (get-in (edn/read-string (slurp (io/file (repository-root) ".claude/seon-hook.edn")))
-                                          [:current-source :timeout-seconds]))
+                boot-bound (operator-boot-bound-ms {})
                 _ (.setSoTimeout socket boot-bound)
                 terminal (CompletableFuture/supplyAsync
                           (reify Supplier (get [_] (if-let [line (.readLine reader)]
@@ -267,6 +280,9 @@
               (fail! "Child exited or closed its boot channel before readiness."
                      {:seon.operator/event value :seon.operator/log (str log)
                       :seon.boot/advertisement coordinates}))
+            (when (= :seon.cluster.store/held-elsewhere
+                     (get-in value [:seon.error/data :seon.cluster.store/rule]))
+              (.get (.onExit child) bound TimeUnit/MILLISECONDS))
             value))))))
 
 (defn request! [request]
@@ -311,7 +327,9 @@
           "--verbose" (recur (next args) (assoc request :seon.operator/verbose? true) positionals)
           "--dev" (recur (nnext args) (assoc request :seon.operator/development-cluster (valid-name (second args))) positionals)
           "--result-file" (recur (nnext args) (assoc request :seon.operator/result-file (second args)) positionals)
-          "--config" (let [manifest (edn/read-string (slurp (second args)))]
+          "--config" (let [_ (when-not (= :start command)
+                                        (fail! "--config is supported only by start." request))
+                           manifest (edn/read-string (slurp (second args)))]
                          (when-not (map? manifest) (fail! "Manifest must be a map." {}))
                          (recur (nnext args) (assoc request :seon.config/manifest manifest) positionals))
           "--changed" (if (seq (next args))

@@ -25,6 +25,11 @@
             [seon.search :as search]))
 
 (defn- stand-cluster-runtime!
+  {:malli/schema
+   [:=> [:cat :seon.boot/instance [:=> [:cat :seon.boot/instance] :seon.boot/instance]
+         :seon.config/compiled :seon.db/connection :seon.boot/cluster-name :seon.boot/config
+         :seon.sci.eval/projection-state [:or :nil :seon.sci.eval/ctx]]
+    :seon.boot/instance]}
   [instance publish! compiled-config connection cluster-name config
    projection-state base-ctx]
   (schema/call-with-projection-state
@@ -102,6 +107,9 @@
   as they stand, and the whole value is republished to the registry at every
   step. The instance a failure carries is exactly what stands: absence marks
   where boot stopped."
+  {:malli/schema
+   [:=> [:cat :seon.boot/instance [:=> [:cat :seon.boot/instance] :seon.boot/instance]
+         :seon.config/compiled] :seon.boot/instance]}
   [instance publish! compiled-config]
   (let [config (:seon.boot/config instance)
         cluster-name (:seon.boot/cluster-name config)
@@ -143,17 +151,18 @@
               :datahike.gc-guard/reachability-permit start-permit}))
           (finally
             (gc-guard/release-reachability-permit! start-permit)))
-        instance (publish! (assoc instance :seon.store/branch (:seon.store/branch forked)
-                                   :seon.source/commit-id
-                                   (or (:seon.source/commit-id source-base)
-                                       (registry/branch-commit-id
-                                        {:seon.store/store store :seon.store/branch cluster-branch}))))
+        instance (publish! (assoc instance :seon.store/branch (:seon.store/branch forked)))
         provisional-connection
         (store/open-branch! store (:seon.store/branch forked))
         instance (publish!
                   (assoc instance
                          :seon.boot/cluster-connection provisional-connection))
         initial-database @provisional-connection
+        instance (publish! (assoc instance :seon.source/commit-id
+                                   (or (:seon.source/commit-id source-base)
+                                       (:seon.source/commit-id
+                                        (d/pull initial-database [:seon.source/commit-id]
+                                                [:seon.cluster/name cluster-name])))))
         _ (cluster/require-admissible-branch! initial-database cluster-name)
         initial-projection
         (or (:seon.schema/projection source-base)
@@ -347,7 +356,7 @@
 
 (defn request!
   "One data request. Verify root and process identity before connected effects."
-  {:malli/schema [:=> [:cat :map] :map]}
+  {:malli/schema [:=> [:cat :seon.operator/request] :seon.operator/response]}
   [{command :seon.operator/command root :seon.operator/managed-root
     name :seon.boot/cluster-name :as request}]
   (try
@@ -356,7 +365,7 @@
           cluster-root (str (io/file root "data/clusters"))]
       (when (and actual (not= actual (.getCanonicalPath (io/file root))))
         (refuse! "Request root does not match this process." request))
-      (when (and (:seon.boot/pid request)
+      (when (and (not (:seon.boot/prepl-server request))
                  (not= identity (select-keys request [:seon.boot/pid :seon.boot/start-instant])))
         (refuse! "Request process identity does not match this process." request))
       (case command
@@ -391,11 +400,12 @@
                 {:seon.boot/cluster-name n :seon.operator/stopped? true})
         :down (do (doseq [instance (filter map? (vals @running-instances))] (stop! instance))
                   {:seon.operator/stopped-processes [identity]})
-        :config-apply {:seon.boot/cluster-name (or name "default")
-                       :seon.reconcile/result
-                       (config/apply! {:seon.db/connection (connection (or name "default"))
-                                       :seon.boot/cluster-name (or name "default")
-                                       :seon.config/manifest (:seon.config/manifest request)})}
+        :config-apply
+        (let [result (config/apply! {:seon.db/connection (connection (or name "default"))
+                                    :seon.boot/cluster-name (or name "default")
+                                    :seon.config/manifest (:seon.config/manifest request)})]
+          (if (:seon.error/at result) result
+              {:seon.boot/cluster-name (or name "default") :seon.reconcile/result result}))
         :export {:seon.operator/destination
                  (export/export! {:seon.store/store (:seon.store/store (selected-instance name))
                                   :seon.export/parent-dir (:seon.operator/destination request)})}

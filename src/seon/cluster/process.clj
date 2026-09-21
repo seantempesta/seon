@@ -11,6 +11,18 @@
 
 
 
+(defn process-handle?
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value] (instance? java.lang.ProcessHandle value))
+
+(defn process?
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value] (instance? Process value))
+
+(defn progress-atom?
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value] (instance? clojure.lang.IAtom value))
+
 (defn current-identity
   "This JVM's `(pid, start-instant)` identity.
 
@@ -65,6 +77,7 @@
 
 (defn process-start-instant
   "Return the OS start instant for a live PID."
+  {:malli/schema [:=> [:cat :seon.boot/pid] [:or :nil :seon.boot/start-instant]]}
   [pid]
   (try
     (let [optional (java.lang.ProcessHandle/of (long pid))]
@@ -75,12 +88,14 @@
 
 (defn process-identity-alive?
   "True when a PID still has the recorded OS start instant."
+  {:malli/schema [:=> [:cat :map] :boolean]}
   [{:seon.boot/keys [pid start-instant]}]
   (and (integer? pid)
        (inst? start-instant)
        (= start-instant (process-start-instant pid))))
 
 (defn matching-process-handle
+  {:malli/schema [:=> [:cat [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]] [:or :nil [:fn seon.cluster.process/process-handle?]]]}
   [record]
   (let [optional (java.lang.ProcessHandle/of
                   (long (:seon.boot/pid record)))]
@@ -95,27 +110,33 @@
 
 
 (defn- subprocess-remaining-ms
+  {:malli/schema [:=> [:cat :int] [:int {:min 0}]]}
   [deadline-ns]
   (max 0 (long (/ (- deadline-ns (System/nanoTime)) 1000000))))
 
 (defn- await-subprocess-value
+  "Generic future-or-value join; the caller owns both result and identity sentinel."
+  {:malli/schema [:=> [:cat :seon.schema/value :int :seon.schema/value] :seon.schema/value]}
   [value deadline-ns timeout-value]
   (if (future? value)
     (deref value (subprocess-remaining-ms deadline-ns) timeout-value)
     value))
 
 (defn- subprocess-identity
+  {:malli/schema [:=> [:cat [:fn seon.cluster.process/process-handle?]] [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]]}
   [^java.lang.ProcessHandle handle]
   {:seon.boot/pid (.pid handle)
    :seon.boot/start-instant (process-start-instant (.pid handle))})
 
 (defn- same-subprocess-handle
+  {:malli/schema [:=> [:cat [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]] [:or :nil [:fn seon.cluster.process/process-handle?]]]}
   [{:seon.boot/keys [pid] :as process-identity}]
   (let [candidate (matching-process-handle process-identity)]
     (when (and candidate (= pid (.pid ^java.lang.ProcessHandle candidate)))
       candidate)))
 
 (defn- subprocess-tree-identities
+  {:malli/schema [:=> [:cat [:fn seon.cluster.process/process-handle?]] [:vector [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]]]}
   [^java.lang.ProcessHandle root]
   (with-open [descendant-stream (.descendants root)]
     (into [(subprocess-identity root)]
@@ -123,6 +144,7 @@
           (iterator-seq (.iterator descendant-stream)))))
 
 (defn- terminate-subprocess!
+  {:malli/schema [:=> [:cat [:map [:proc [:fn seon.cluster.process/process?]]] [:vector [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]]] :boolean]}
   [process-record launch-identities]
   (let [^Process child (:proc process-record)
         identities (vec (distinct (concat launch-identities
@@ -147,6 +169,21 @@
 (defn run-process!
   "Run one foreign argv under a deadline, or an explicitly declared event-silence bound.
   A supplied progress atom names phase events; ordinary output is not progress."
+  {:malli/schema [:=> [:cat [:map
+                 [:seon.operator.subprocess/argv [:vector {:min 1} :string]]
+                 [:seon.operator.subprocess/deadline-ms [:int {:min 1}]]
+                 [:seon.operator.subprocess/directory {:optional true} :string]
+                 [:seon.operator.subprocess/extra-env {:optional true} [:map-of :string :string]]
+                 [:seon.operator.subprocess/input {:optional true} :string]
+                 [:seon.operator.subprocess/merge-error? {:optional true} :boolean]
+                 [:seon.operator.subprocess/output-file {:optional true} :string]
+                 [:seon.operator.subprocess/event-silence-ms {:optional true} [:int {:min 1}]]
+                 [:seon.operator.subprocess/progress {:optional true} [:fn seon.cluster.process/progress-atom?]]
+                 [:seon.operator.subprocess/observe-output! {:optional true} [:=> [:cat :string] :seon.schema/value]]]]
+     [:map [:seon.operator.subprocess/argv [:vector :string]]
+      [:seon.operator.subprocess/exit :int]
+      [:seon.operator.subprocess/output :string]
+      [:seon.operator.subprocess/error-output :string]]]}
   [{argv :seon.operator.subprocess/argv
     deadline-ms :seon.operator.subprocess/deadline-ms
     directory :seon.operator.subprocess/directory

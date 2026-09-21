@@ -92,7 +92,7 @@ Choose the namespace to reload; the database supplies both the projection
 and instrumentation mode (`src/seon/schema.clj:930`, `src/seon/config.clj:533`).
 
 ```clojure
-(let [connection (seon.operator/connection "default")
+(let [connection (seon.cluster.boot/connection "default")
       database @connection
       projection (seon.schema/projection-from-database database)]
   (seon.schema/call-with-projection
