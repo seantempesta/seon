@@ -134,6 +134,7 @@
         :seon.source/test-input-digest (id/digest 64 [::resolution-inputs])}])
      (let [ctx (test-support/fork-cluster-ctx connection)
            before (db/db connection)
+           _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db before})
            stale (sci.eval/fork-cluster-ctx ctx before connection)
            source "(clojure.test/deftest admitted-fileless-test (clojure.test/is (seon.db/database-value? (seon.db/db))))"
            evaluation (sci.eval/evaluate
@@ -154,6 +155,17 @@
                       :seon.schema/projection (schema/projection-from-database database)
                       :seon.test/class-loader (clojure.lang.RT/baseLoader)}]
          (is (= :seon.test/program-mismatch (:seon.test/resolution-refusal (sut/resolve-test request))))
+         (let [snapshot (sci.eval/acquired-program stale)
+               refused (#'runner/run-task!
+                        {:seon.test.runner/task-namespace "seon.test-test"
+                         :seon.test.runner/task-symbols ['seon.test-test/admitted-fileless-test]}
+                        request)]
+           (is (= 0 (get-in refused [:seon.test.runner/task-summary :seon.test.runner/test-count])))
+           (is (= 1 (get-in refused [:seon.test.runner/task-summary :seon.test.runner/error-count])))
+           (is (identical? (:seon.db/db snapshot)
+                           (:seon.db/db (sci.eval/acquired-program stale))))
+           (is (= :seon.test/program-mismatch
+                  (:seon.test/resolution-refusal (sut/resolve-test request)))))
          (sci.eval/install-evaluated-rows!
           {:seon.sci.eval/ctx ctx :seon.db/db database
            :seon.sci.eval/installations

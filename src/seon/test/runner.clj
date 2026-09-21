@@ -1663,7 +1663,16 @@
         started-at (Instant/now)
         started-nanos (System/nanoTime)]
     (try
-      (let [test-vars (mapv #(@resolve-admitted-test
+      (let [ctx (:seon.sci.eval/ctx resolution)
+            ;; Construction is lazy. Acquire only an unacquired context;
+            ;; resolution must still refuse an already acquired wrong program.
+            _ (when-not (:seon.db/db
+                         ((requiring-resolve 'seon.sci.eval/acquired-program) ctx))
+                ((requiring-resolve 'seon.test/with-test-loader)
+                 (:seon.test/class-loader resolution)
+                 #((requiring-resolve 'seon.sci.eval/acquire!)
+                   {:seon.sci.eval/ctx ctx :seon.db/db (:seon.db/db resolution)})))
+            test-vars (mapv #(@resolve-admitted-test
                               (assoc resolution :seon.test/identity %))
                             (::task-symbols task))
             _ (when-let [failure (first (filter :seon.test/resolution-refusal test-vars))]
@@ -2074,9 +2083,8 @@
     (when (and (map? base) (contains? base :seon.error/at))
       (throw (ex-info "A test worker could not prepare its canonical fixture base."
                       base)))
-    ;; Resolution currently requires an acquired SCI program even for host
-    ;; tests. Preserve readiness's guarantee while plain database fixtures
-    ;; avoid acquiring an interpreter they never use.
+    ;; Realize the lazy context handle. The task boundary acquires its program
+    ;; before resolution; plain database fixtures need no interpreter program.
     (let [context @(:seon.test-support/sci-context base)]
       (write-protocol! writer {::worker-event :ready
                               ::worker-id worker-id

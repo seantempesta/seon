@@ -717,8 +717,10 @@
   (test-support/with-database
    (fn [connection]
     (let [database (db/db connection)
+          ctx (sci.eval/cluster-ctx database connection)
+          _ (is (nil? (:seon.db/db (sci.eval/acquired-program ctx))))
           resolution {:seon.db/db database :seon.db/connection connection
-                      :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
+                      :seon.sci.eval/ctx ctx
                       :seon.schema/projection (schema/projection-from-database database)
                       :seon.test/class-loader (clojure.lang.RT/baseLoader)}
           task {::runner/task-id "default-red"
@@ -736,6 +738,10 @@
         #(reset! outcome
                  (#'runner/run-parallel-stage!
                   [] nil {:seon.fn.manifest/artifacts []} (atom []) [task]))))
+    (is (= (runner/program-digest database)
+           (runner/program-digest (:seon.db/db (sci.eval/acquired-program ctx)))))
+    (is (= 0 (get-in red [::runner/task-summary ::runner/error-count])))
+    (is (= 1 (get-in red [::runner/task-summary ::runner/test-count])))
     (is (= 0 @launches))
     (is (= [red] (::runner/task-results @outcome)))
     (is (= 1 (get-in @outcome [::runner/task-summary ::runner/fail-count])))

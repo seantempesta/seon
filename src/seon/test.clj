@@ -1583,9 +1583,13 @@
                 (with-test-loader loader #(sci.eval/cluster-ctx database connection)))]
     (if (and (map? ctx) (contains? ctx :seon.error/at) (contains? ctx :seon.error/layer) (contains? ctx :seon.error/operation))
       ctx
-      {:seon.db/db database :seon.db/connection connection
-       :seon.schema/projection (schema/projection-from-database database)
-       :seon.test/class-loader loader :seon.sci.eval/ctx ctx})))
+      (do
+        (when-not (:seon.db/db (sci.eval/acquired-program ctx))
+          (with-test-loader loader
+            #(sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database})))
+        {:seon.db/db database :seon.db/connection connection
+         :seon.schema/projection (schema/projection-from-database database)
+         :seon.test/class-loader loader :seon.sci.eval/ctx ctx}))))
 
 (defn- relative-path [path]
   (let [root (.toPath (.getCanonicalFile (io/file ".")))
