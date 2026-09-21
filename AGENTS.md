@@ -31,6 +31,10 @@ exact verification boundary when reporting.
    base publication. Plain namespaces use the working tree. **The orchestrator
    gates a commit with `bin/test --paths <owned files…> -- <namespaces…>`
    and `bin/test --platform`. Lanes use `bin/test-fast`, never cold gates.**
+   For the owner-approved [agent-platform refactor](docs/prds/agent-platform/plan/README.md),
+   focused regressions run inside four substantial cuts; affected integration and
+   platform gates run at completed-cut checkpoints, not every small commit. Reserve
+   the full suite for final integration or a concrete failure requiring it.
    `bin/test` refuses a gate carrying `SEON_CODEX_LANE`; its shared `--fast`
    snapshot path remains available. Foreign breakage is never a reason to
    stop unless the assignment explicitly requires it. NEVER
