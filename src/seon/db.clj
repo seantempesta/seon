@@ -3773,7 +3773,21 @@
                  (let [value (get @expanded root)
                        identities (merge (select-keys (row :before before root) identity-attrs)
                                          (select-keys value identity-attrs))]
-                   (vswap! changed-identity-attributes into (keys identities))
+                   ;; A function's documentation/source coordinates do not alter
+                   ;; prepared arities. Only its call facts, arity relation,
+                   ;; identity, or changed owned components can do that.
+                   (when (or (not (some identities [:seon.fn/sym :seon.test/sym]))
+                             (some (fn [datom]
+                                     (let [entity (:e datom)]
+                                       (if (= root entity)
+                                         (#{:seon.fn/sym :seon.test/sym
+                                            :seon.fn/call-arities :seon.fn/arities}
+                                          (:a datom))
+                                         (and (< (long entity) const/tx0)
+                                              (or ((owning-ancestors :before before [entity]) root)
+                                                  ((owning-ancestors :after after [entity]) root))))))
+                                   (:tx-data report)))
+                     (vswap! changed-identity-attributes into (keys identities)))
                    (when (and (seq value) (empty? identities))
                      (fail! ::unowned-entity {::entity root ::entity-value value}))
                    (write-entity-error after projection attribute-plans root identities value)))
@@ -4077,7 +4091,7 @@
      (write-owned-values-error projection report attribute-plans identity-attrs
                                changed-identity-attributes)
      (when (some (comp #{:seon.schema/form :seon.schema/key :seon.fn/sym} :a)
-                 (concat attempted (:tx-data report)))
+                 (:tx-data report))
        (write-render-target-error database))
      ;; Arity admission depends on declarations, their owned children, shared
      ;; shapes and supplied defaults. The owning-value walk already found

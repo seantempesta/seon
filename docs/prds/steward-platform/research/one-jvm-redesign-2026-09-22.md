@@ -1724,3 +1724,113 @@ Exact UTF-8 changed-line bytes:
 | `src/seon/sci/eval.clj` | 169266 | 169522 | 1117 | 1373 |
 | `test/seon/sci/lazy_acquisition_test.clj` | 2116 | 2424 | 43 | 351 |
 | `test/seon/cluster/lazy_agents_test.clj` | 0 | 1759 | 0 | 1759 |
+
+## Slice 4, remaining item 1 — report-scoped validation, 2026-09-23
+
+The clean own-root docstring baseline is **8831.448 ms**. An earlier shared
+checkout run touched 21 entities including call edges while another lane
+edited; it is not the one-file baseline. The retained measurement uses a
+HEAD archive with reference-code linked, plus only this lane's edits.
+No foreign JVM, session or files were changed.
+
+The [profiling script](one-jvm-validator-profile-2026-09-23.clj) delegates
+all instrumented calls to their entering roots. [Before profile](one-jvm-validator-before-profile-2026-09-23.edn):
+only five entities were touched (three functions, their file, transaction
+metadata), but final-report validation ran the full arity query at
+702.666/481.017 ms and scanned all render declarations at 55.036/27.750 ms.
+Owning-value validation was already scoped: 64.823/7.337 ms. The cause was
+using a touched function identity as evidence of changed arities, and
+attempted idempotent identity assertions as evidence of changed render targets.
+
+Now effective datoms decide whether a function's identity, calls, arity
+relation or owned components changed. All touched owning values still
+validate. Schema/default changes retain the existing arity validation;
+this does not claim that their global query is now incremental. Render
+validation ignores idempotent identity assertions. Datahike supplies both
+attempted and effective datoms at its final callback
+(`reference-code/datahike/src/datahike/db/transaction.cljc:1206`).
+The same-transaction component repair guarantee remains at that callback.
+
+`fn/index!` carries its existing projection on the writer's database argument.
+`fn/report-identities` now pulls only installed identity attributes of report
+entities, before and after, through `db/pull-many`; the relation query over
+entity and attribute collections cost 486 ms on the new publication branch.
+The indexed pull measured 42 ms and preserves deleted identities. Native
+pull owns the EAVT access (`reference-code/datahike/src/datahike/pull_api.cljc`).
+No transaction count, validation guarantee or cache was added.
+
+[After profile](one-jvm-validator-after-profile-2026-09-23.edn): final report
+76.501/7.935 ms, zero arity scans, zero render scans. One-file edit:
+**5416.485 ms**. Publication/adoption reconciliation spans: 614.731/388.754 ms.
+The population still normalizes the three changed functions' complete owned
+rows (282.559 ms on the new branch versus 5.608 ms on the live branch);
+this is O(the changed functions' owned contract rows), not a whole-program
+pull. Remaining whole-program acquisitions include three schema projections
+(~250 ms each), the artifact read/validation/write and full digest walks.
+
+Phase labels mark the interval after the named event: the 542.996 ms
+“findings” interval is the pre-publication snapshot verification, not lint;
+“analysis selected files” is 85.004 ms. The 561.799 ms “branch publication
+complete” interval includes serializing the stored artifact, then acquiring
+the adopted publication. These are the next ordered deletions.
+
+Fast run `2e9031a125aa`: 5 tests, 16 assertions, 1 failure, 1 error.
+Documentation's zero-global-check regression and changed/deleted report
+identity regression pass. Invalid arity reaches the existing supplied-default
+coherence refusal for `seon.db/supplied-connection`, before its expected arity
+diagnostic; this is also recorded by the error lane in the full-publication
+issue. The wrapper regression refuses a loaded function contract during
+instrumentation under exported base `0e3ced...`, 39 commits behind HEAD.
+No green wrapper or invalid-arity proof is claimed; the orchestrator owes
+these regressions against its current canonical base. The duration declaration
+on the invalid-arity regression names its measured 5.078 s fixture/check cost.
+Source namespaces load with the scratch JVM down. Foreign test-support,
+test-system runner/turn-work and testing-skill edits are excluded.
+
+Exact changed-line UTF-8 bytes:
+
+| Path | Before | After | Deleted | Inserted |
+|---|---:|---:|---:|---:|
+| `src/seon/db.clj` | 221722 | 222730 | 134 | 1142 |
+| `src/seon/fn.clj` | 149108 | 149206 | 396 | 494 |
+| `test/seon/publication_validation_test.clj` | 0 | 1883 | 0 | 1883 |
+
+| Completed phase (in order) | Before ms | After ms |
+|---|---:|---:|
+| request | 1.199 | 1.150 |
+| request accepted | 1.193 | 1.119 |
+| bootstrap configuration | 106.449 | 100.713 |
+| store acquisition | 0.576 | 0.480 |
+| source build | 987.439 | 909.097 |
+| published manifest read | 126.267 | 116.808 |
+| published manifest validation | 288.865 | 265.322 |
+| published database acquisition | 0.276 | 0.285 |
+| analysis started | 12.819 | 12.713 |
+| analysis input inventory | 104.568 | 105.576 |
+| analysis caller files | 328.973 | 235.399 |
+| analysis selected files | 95.846 | 85.004 |
+| analysis replace artifacts | 80.393 | 60.888 |
+| analysis manifest complete | 13.785 | 13.561 |
+| analysis complete | 1.599 | 1.248 |
+| findings in analyzed files: 0; added=0; resolved=0 | 635.756 | 542.996 |
+| branch publication started: 1 inputs | 225.010 | 148.772 |
+| program rows started | 186.830 | 175.724 |
+| contract projection started: 3336 schemas, 3 functions | 0.123 | 0.089 |
+| contract projection complete | 0.649 | 0.682 |
+| contract rows: 1/5 | 3.510 | 3.104 |
+| contract rows: 2/5 | 3.656 | 3.459 |
+| contract rows: 3/5 | 3.135 | 2.666 |
+| contract rows: 4/5 | 0.338 | 0.129 |
+| contract rows: 5/5 | 34.289 | 34.099 |
+| development reconciliation transaction | 1783.698 | 614.731 |
+| program rows complete | 0.465 | 0.137 |
+| publication source identity | 107.625 | 81.883 |
+| publication branch head | 88.081 | 54.649 |
+| branch publication complete | 682.279 | 561.799 |
+| development changed program rows | 108.956 | 88.288 |
+| development reconciliation transaction | 1332.393 | 388.754 |
+| development loaded definitions | 5.280 | 1.968 |
+| development JVM instrumentation | 340.447 | 173.362 |
+| development source verification | 939.835 | 522.576 |
+| development adoption record | 197.908 | 106.734 |
+| development cluster converged | 0.938 | 0.521 |

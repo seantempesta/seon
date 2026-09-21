@@ -3018,10 +3018,10 @@
                                   (set (db/identity-attributes after))))
         entities (into #{} (map :e) datoms)
         identities (fn [database]
-                     (db/q '[:find ?attribute ?value
-                             :in $ [?entity ...] [?attribute ...]
-                             :where [?entity ?attribute ?value]]
-                           database entities attributes))
+                     (let [rows (db/pull-many database attributes (vec entities))]
+                       (if (:seon.error/at rows)
+                         rows
+                         (into #{} (mapcat #(dissoc % :db/id)) rows))))
         previous (identities before)
         current (identities after)]
     (or (when (:seon.error/at previous) previous)
@@ -3198,8 +3198,9 @@
                             (let [tx-data
                                   (schema/call-with-projection
                                    projection
-                                   #(reconcile-tx-in row-shapes database rows
-                                                     previous-identities))]
+                                   #(reconcile-tx-in row-shapes
+                                                     (vary-meta database assoc :seon.schema/projection projection)
+                                                     rows previous-identities))]
                               (if (and (map? tx-data)
                                        (contains? tx-data :seon.error/at)
                                        (contains? tx-data :seon.error/layer)

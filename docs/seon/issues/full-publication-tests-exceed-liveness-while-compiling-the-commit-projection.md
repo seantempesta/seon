@@ -191,3 +191,16 @@ the acquisition reason, while retaining the separate one-second writer
 assertion. The ordinary object and nested-value tests retain their default
 five-second bound. See the per-test table and final tally in the
 [error landing note](../../prds/steward-platform/research/error-family-1a-2026-09-19.md).
+
+
+## Documentation-only report validation — 2026-09-23
+
+The redesign lane's isolated five-entity docstring write ran full arity checks
+at 702.666/481.017 ms despite no changed calls/contracts. Effective report
+changes now decide arity relevance, including changed owned components;
+idempotent function identity assertions no longer scan render declarations.
+Final validation measured 76.501/7.935 ms with both unrelated scans absent.
+The fixture still returns the supplied-connection coherence refusal above:
+`2e9031a125aa`, base `0e3ced...`, 39 commits behind HEAD. The intended arity
+mismatch diagnostic is not proven past that boundary. Full evidence and
+remaining ordered work are in the redesign landing note.
