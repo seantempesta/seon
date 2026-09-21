@@ -7080,3 +7080,18 @@ reloaded per call?), reconciliation transaction 1–2.2 s, issue indexing
 1.4 s (re-arm of the changed wrappers — for 25 dependents legitimately
 more), source build 1.1 s. Handed to the redesign lane at its next stop
 with the rest of slice 4.
+
+## 2026-09-23 ~10:45 local — OWNER: docstring edits "should be sub second" — RULED: slice 4's definition of done is four algorithms, not a number
+
+A docstring change is: one file linted (~80 ms), one row's digest
+changed, one row transacted, one namespace reloaded (16 ms), zero wrappers
+re-armed (no contract changed). What the lane still does that does not
+follow from the change: (1) re-lints the callers' files — callers need a
+fresh lint only when a declaration's contract/arity digest changed;
+(2) reloads the dependents — Clojure Vars are indirection: `require
+:reload` of the changed namespace replaces the root bindings of the same
+Var objects and every dependent sees them; reloading 113 dependents of
+`seon.id` is the wrong algorithm (28 s core case); (3) issue indexing on
+every edit (ruled per changed path, not landed); (4) the reconciliation
+transaction reads more than the touched rows. Done = those four fixed and
+the docstring rows under one second in the script.
