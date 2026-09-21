@@ -17,7 +17,7 @@
  (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 (deftest
- ^#:seon.test{:long "Multiple complete publications verify branch advancement and retirement.", :long-ms 600000} publication-advances-one-branch-and-retires-scratch
+ ^#:seon.test{:long "Three marker publications and branch-history assertions on a private canonical store.", :long-ms 10000} publication-advances-one-branch-and-retires-scratch
  ((deref #'source-test/with-store)
   (fn
    [opened]
@@ -146,7 +146,7 @@
     (is (empty? ((deref #'source-test/scratch-branches) opened)))))))
 
 (deftest
- ^#:seon.test{:long "Three complete source publications exercise the stale branch-head decision.", :long-ms 600000} failed-and-stale-builds-preserve-the-published-head
+ ^#:seon.test{:long "Three marker publications, one held on an explicit latch, exercise the stale branch-head decision.", :long-ms 10000} failed-and-stale-builds-preserve-the-published-head
  ((deref #'source-test/with-store)
   (fn
    [opened]
@@ -252,4 +252,3 @@
        (try
         (is (= expected ((deref #'source-test/markers) connection)))
         (finally (d/release connection))))))))))
-

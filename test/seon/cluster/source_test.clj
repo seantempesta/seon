@@ -3,7 +3,7 @@
     seon.cluster.source-test
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
@@ -17,10 +17,9 @@
             [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
-            [seon.test.runner :as runner]
             [seon.test.cache :as cache]
             [seon.test-support :as test-support])
-  (:import [java.util.concurrent CountDownLatch TimeUnit]))
+  (:import [java.util.concurrent CountDownLatch]))
 
 (def ^:private probe-schema
   [{:db/ident :seon.source.test/marker
@@ -39,19 +38,24 @@
 (defonce ^:private blocked-release (atom nil))
 
 
-(defn- populate-schema!
-  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]]] :nil]}
-  [{connection :seon.db/connection prior :seon.source/previous-database :as request}]
-  ;; Subsequent synthetic publications change only the probe row. The real
-  ;; program population is already inherited from the published branch.
-  (when-not prior
-    (cluster/populate-source! (assoc request :seon.fn/manifest @test-support/source-manifest))
-    (test-support/transacted! connection probe-schema))
-  nil)
+(defn populate-program!
+  "Publish only the fixture files against their canonical published ancestor."
+  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
+                             [:seon.fn/manifest :seon.fn.manifest/manifest]]]
+                  [:or :seon.reconcile/result :seon.error/value]]}
+  [{:keys [:seon.db/connection :seon.fn/manifest] :as request}]
+  (let [database (or (:seon.source/previous-database request) (db/db connection))
+        projection (or (db/carried-projection database) (schema/handed-projection))]
+    (fn/index! (assoc request
+                     :seon.schema/projection projection
+                     :seon.schema.projection/forms (:seon.schema.projection/forms projection)
+                     :seon.source/previous-database database
+                     :seon.fn/previous-manifest (assoc manifest :seon.fn.manifest/artifacts [])
+                     :seon.fn/changed-paths (set (map :seon.fn.file/relative-path
+                                                     (:seon.fn.manifest/artifacts manifest)))))))
 
 (defn populate!
-  [{:keys [:seon.db/connection :seon.source/digest] :as request}]
-  (populate-schema! request)
+  [{:keys [:seon.db/connection :seon.source/digest]}]
   (test-support/transacted! connection
     (conj (mapv (fn [entity] [:db/retractEntity entity])
                 (db/q '[:find [?entity ...] :where [?entity :seon.source.test/marker]] @connection))
@@ -62,51 +66,98 @@
   (throw (ex-info "population failed" {::injected true})))
 
 (defn populate-from-data!
-  [{:keys [:seon.db/connection :seon.source.test/marker] :as request}]
-  (populate-schema! request)
+  [{:keys [:seon.db/connection :seon.source.test/marker]}]
   (test-support/transacted! connection [{:seon.source.test/marker marker}]))
 
 (defn populate-blocked!
   [request]
   (.countDown ^CountDownLatch @blocked-entered)
-  (.await ^CountDownLatch @blocked-release)
+  (test-support/await-event! @blocked-release "release blocked publication")
   (populate! request)
   nil)
 
 
 
+(defn- fixture-program!
+  "Analyze the small publication program in its own source directory."
+  {:malli/schema [:=> [:cat :string] :seon.fn.manifest/manifest]}
+  [root]
+  (let [resources (io/file "test/resources/publication-program")]
+    (doseq [file (file-seq resources)
+            :when (and (.isFile file) (.endsWith (.getName file) ".txt"))]
+      (let [relative (str (.relativize (.toPath resources) (.toPath file)))
+            target (io/file root (subs relative 0 (- (count relative) 4)))]
+        (.mkdirs (.getParentFile target))
+        (io/copy file target)))
+    (fn/build-manifest {:seon.fn/roots [root]})))
+
 (defn- with-store
   [body]
-  (let [root (str "tmp/source-test/" (random-uuid))
-        dir (str root "/store")]
-    (.mkdirs (io/file root))
-    (let [opened (store/open-store! {:seon.store/dir dir})]
-      (try
-        (body opened)
-        (finally
-          (store/release-store! opened)
-          (test-support/delete-recursively! root))))))
+  (test-support/with-database
+   (fn [canonical]
+     (let [root (str "tmp/source-test/" (random-uuid))
+           dir (str root "/data/store")
+           projection (db/carried-projection (db/db canonical))]
+       (.mkdirs (io/file root))
+       (try
+         (test-support/populate-published-operator-root!
+          root {:seon.test/fixture-observation
+                "Publication and branch-head races require a private physical store."})
+         (let [opened (store/open-store! {:seon.store/dir dir})]
+           (try
+             (doseq [branch (remove #{:db source/current-branch} (registry/roster opened))]
+               (registry/retire-branch! {:seon.store/store opened :seon.store/branch branch}))
+             (let [connection (store/open-branch! opened source/current-branch)]
+               (try
+                 (db/carry-connection-projection-state!
+                  connection (sci.eval/projection-state @connection projection))
+                 (test-support/transacted!
+                  connection
+                  (into probe-schema
+                        (map #(vector :db/retractEntity %))
+                        (db/q '[:find [?source ...] :where [?source :seon.source/digest]]
+                              (db/db connection))))
+                 (finally (d/release connection))))
+             (body (assoc opened
+                          :seon.schema/projection projection
+                          :seon.fn/manifest (fixture-program! (str root "/program"))))
+             (finally (store/release-store! opened))))
+         (finally (test-support/delete-recursively! root)))))))
 
 (defn- publish
   ([opened digest]
    (publish opened digest 'seon.cluster.source-test/populate!))
   ([opened digest populate]
-   (source/publish! {:seon.store/store opened
-                     :seon.source/digest digest
-                     :seon.source/populate populate}))
+   (publish opened digest populate {}))
   ([opened digest populate populate-request]
-   (source/publish! {:seon.store/store opened
+   (let [database (d/branch-as-db (:seon.store/connection-object opened) source/current-branch)
+         previous (db/carry-projection-state
+                   database (sci.eval/projection-state database (:seon.schema/projection opened)))]
+    (try
+     (source/publish! (merge (select-keys populate-request [:seon.source/expected-commit-id])
+                     {:seon.store/store opened
                      :seon.source/digest digest
                      :seon.source/populate populate
-                     :seon.source/populate-request populate-request
-                     :seon.source/progress! @#'cluster/*source-progress!*})))
+                     :seon.source/changed-paths
+                     (mapv :seon.fn.file/relative-path
+                           (:seon.fn.manifest/artifacts (:seon.fn/manifest opened)))
+                     :seon.source/populate-request
+                     (merge {:seon.fn/manifest (:seon.fn/manifest opened)
+                             :seon.source/previous-database previous
+                             :seon.source/change-classes #{:program}}
+                            populate-request)
+                     :seon.source/progress! @#'cluster/*source-progress!*}))
+     (finally (d/release-materialized-db database))))))
 
 (defn- upsert
   [opened expected-commit digest rows]
-  (source/upsert! {:seon.store/store opened
-                   :seon.source/expected-commit-id expected-commit
-                   :seon.source/digest digest
-                   :seon.source/upsert-rows rows}))
+  (publish opened digest 'seon.cluster.source/populate-upserts!
+           {:seon.source/expected-commit-id expected-commit
+            :seon.source/upsert-request
+            {:seon.store/store opened
+             :seon.source/expected-commit-id expected-commit
+             :seon.source/digest digest
+             :seon.source/upsert-rows rows}}))
 
 (defn- markers
   [connection]
@@ -217,7 +268,7 @@
         (is (= :seon.db/invalid-transaction
                (get-in result
                        [:seon.source/transaction-result :seon.error/kind])))
-        (is (= #{:db} (set (registry/roster opened))))
+        (is (= #{:db :current-src} (set (registry/roster opened))))
         (is (empty? (scratch-branches opened)))))))
 
 (deftest incremental-upsert-records-source-identity-on-the-expected-commit
@@ -251,10 +302,12 @@
         (is (= #{commit-a} (d/parent-commit-ids current-db)))
         (is (empty? (scratch-branches opened)))))))
 
-(deftest incremental-first-party-publication-retains-complete-scalar-rows
+(deftest ^{:seon.test/long "Analyze two versions of two fixture files, validate scalar writes, publish and upsert on an isolated store."
+           :seon.test/long-ms 10000}
+  incremental-first-party-publication-retains-complete-scalar-rows
   (let [root (io/file "tmp/publication-provenance" (str (random-uuid)))
         file (io/file root "id.clj")
-        manifest @test-support/source-manifest
+        manifest (fixture-program! (str root "/program"))
         original (slurp (io/resource "seon/id.clj"))
         revised (-> original
                     (str/replace "One identity entry:" "The identity entry:")
@@ -313,10 +366,10 @@
                                                          "elapsed-ms" (quot (- now at) 1000000))
                                                 (vreset! clock [phase now])))
                                   result (binding [cluster/*source-progress!* progress!]
-                                           (publish opened digest-a 'seon.cluster/populate-source!
+                                           (publish opened digest-a 'seon.cluster.source-test/populate-program!
                                                     {:seon.fn/manifest manifest}))
                                   _ (progress! "publication complete")]
-                              (println "complete-program-publication-ms"
+                              (println "fixture-program-publication-ms"
                                        (/ (- (System/nanoTime) started) 1e6))
                               result)
                   database-before (source/database opened (:seon.source/commit-id published))

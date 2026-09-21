@@ -7,16 +7,15 @@
             [seon.cluster.source :as source]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
-            [seon.test.runner :as runner]
-            [seon.test-support :as test-support]))
+            [seon.test.runner :as runner]))
 
-(deftest ^{:seon.test/long "Complete publications and competing branch heads verify durable evidence."
-           :seon.test/long-ms 600000}
+(deftest ^{:seon.test/long "Publish two fixture files, record three completions, and verify bounded branch-head retries."
+           :seon.test/long-ms 10000}
   latest-test-evidence-survives-rebuilding-from-an-older-base
   (#'source-fixture/with-store
     (fn [opened]
-      (let [manifest @test-support/source-manifest
-            population 'seon.cluster/populate-source!
+      (let [manifest (:seon.fn/manifest opened)
+            population 'seon.cluster.source-test/populate-program!
             first-publication (#'source-fixture/publish opened @#'source-fixture/digest-a population
                                        {:seon.fn/manifest manifest})
             first-db (source/database opened (:seon.source/commit-id first-publication))

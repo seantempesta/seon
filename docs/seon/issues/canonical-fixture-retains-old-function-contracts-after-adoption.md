@@ -7,6 +7,26 @@ tags: [issue, test, schema, wave/test-fixture]
 
 # Refresh canonical fixture contracts after development adoption
 
+## Retired publication activation required by the old base — 2026-09-23
+
+The small-publication fixture iteration on HEAD `3b73038f2` uses the exported
+base `0e3ced090fbd53d22cbcb28b6c6d4f067f4b448a1d1247146f9e5149a832c1e3`,
+22 commits behind HEAD. After the fixture carries that base's projection,
+`seon.cluster.source/publish!` refuses its current request because the carried
+`:seon.source/publish-request` still requires `:seon.source/activation`.
+The current resource and implementation have retired that member. This is an
+exact old/new contract disagreement, not a reason to reintroduce activation.
+
+Before carrying that projection, a copied source seal was refused for its
+old `:seon.source/activation-closure` component. The fixture now retracts the
+copied source identity before authoring its own publication history; it does
+not name or migrate retired attributes. The remaining contract mismatch
+requires a fresh orchestrator-prepared export. The lane did not run a cold
+gate or prepare the base. Final affected fast iteration: 14 tests, 37
+assertions, 2 failures and 9 errors; publication timing is not proven by a
+refusal before the body. See the
+[landing note](../../prds/steward-platform/research/test-system-fork-2026-09-23.md).
+
 ## New result attributes absent from a selected snapshot's fixture — 2026-09-23
 
 The error result accretion adds `:seon.error/result-id` and

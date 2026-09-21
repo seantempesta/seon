@@ -736,3 +736,55 @@ with this unchanged production hunk. The final fast snapshot independently
 loaded it on HEAD. The refusal-injection assertions now identify the bound
 attribute query instead of the retired OR-rule query. The large selection
 regression's other recorded reds are not claimed fixed by that assertion update.
+
+### Small publication inputs; fresh-export proof still required
+
+The source/lineage/evidence fixtures inherit the exported canonical schema
+and program in a private, reidentified store through
+`test-support/populate-published-operator-root!`. The canonical
+`with-database` fixture hands the already acquired projection. Only the
+private copy's extra branches and copied source identity are removed; the
+fixture authors its own source history. No development cluster is operated.
+
+`test/resources/publication-program/seon/{id.clj,id_test.clj}.txt` supplies
+two namespaces. The fixture copies them into its owned source root and calls
+`seon.fn/build-manifest`; `.txt` prevents duplicate program identities during
+ordinary checkout discovery. `populate-program!` calls the existing
+`fn/index!` with only those changed files, the prior database and the carried
+projection. Marker publications only write their marker rows. Scalar updates
+call the same `source/publish!` / `source/populate-upserts!` seam and retain
+expected-head custody. Changed paths exclude unrelated Markdown indexing.
+No complete program manifest is rebuilt or indexed by these fixtures.
+
+Before: the 05:00 ledger records **150–202 seconds per publication test**.
+The first successful two-file publication measured **4793.213 ms** (4631 ms
+before source identity, 88 ms identity, 73 ms branch-head update). The next
+change hands the existing compiled projection rather than reacquiring it.
+Its final timing proof is **blocked by the old export**, not established by
+fast failures: the export is 22 commits behind HEAD and its request schema
+still requires retired `:seon.source/activation`. The final snapshot ran
+14 tests / 37 assertions / 2 failures / 9 errors, all nine errors naming that
+contract mismatch. See the existing
+[fixture-contract issue](../../../seon/issues/canonical-fixture-retains-old-function-contracts-after-adoption.md).
+
+The preceding run reached branch-history assertions and exposed an existing
+expectation that equal digests rebuild stale rows; current publication
+returns unchanged for equal source identities. That assertion is retained,
+not weakened to obtain a green run. The fixture's branch-roster assertion
+now includes its explicit canonical ancestor branch. No test was deleted.
+The three old 600000 ms declarations are reduced to 10000 ms, naming their
+multiple publication/recording operations. The scalar-publication test also
+declares 10000 ms for two analyses, database validation, publication and
+scalar update. A single ordinary marker publication remains under 5000 ms.
+
+Repeated failure recording independently exposed
+[immutable report/source-position conflict](../../../seon/issues/moving-a-failing-assertion-conflicts-with-its-immutable-report.md).
+Those later runs have no durable tally; their local execution counts are
+not represented as recorded facts. The item-1 baseline remains durably
+recorded. Cold publication and the complete successful timing proof remain
+with the orchestrator after refreshing the export. No foreign source hunk
+was included in a fast overlay or edited to work around this boundary.
+The pre-commit `clojure -M:test -e` require of all three affected namespaces
+exited zero under one acquired test slot. fn.clj is clean after its separate
+commit. The only remaining clj-kondo notice in the fixture is the existing
+private digest Var used by the lineage namespace.
