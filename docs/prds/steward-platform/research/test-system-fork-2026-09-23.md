@@ -1291,3 +1291,14 @@ the five config-dependent bodies. The existing
 owns this exact boundary. Cold proof and full six-test remeasurement remain owed.
 The disposable measurement source and worktree were removed after their JVMs
 exited; summaries and complete config-refusal envelopes remain under `tmp/`.
+
+### Scratch namespace removed — reset publication follow-up
+
+`test/seon/test/offenders_test.clj` was disposable measurement code, not a
+maintained regression. It was removed at the end of the preceding slice;
+`test -e test/seon/test/offenders_test.clj` is false at `f850562da`, and
+`git status --short` shows no untracked test namespace. The reset had indexed
+it before that removal. Its published row is therefore stale relative to HEAD;
+this lane does not operate the shared publication to retract it. Subsequent
+iterations select the original maintained test namespaces directly. No temporary
+test namespace will be recreated in the shared tree.
