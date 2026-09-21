@@ -7146,3 +7146,26 @@ namespace agents' work).
 **Standing rules:** three lanes, disjoint files, low/medium effort;
 verify before naming a cause; rulings here the same turn; pushes at
 checkpoints; explain in library terms only.
+
+### 2026-09-23 ~19:15 — slice 4 not landed; config ruling; JVM heap finding
+
+`f6a463de6` (lazy agent graphs, SCI acquisition at first evaluation, boot
+phases timed; operator start 24.0 → 16.2 s) accepted. One-file docstring
+edit measured at 7.14 s; slice 4 stays open. Lane resumed with each span
+against the work it should do: the two "development reconciliation
+transaction" spans (1674 + 834 ms) and "branch publication complete"
+(671 ms) against one commit of the changed rows; "source build" (1006 ms)
+against digesting only `:seon.source/changed-paths`; "development source
+verification" (546 ms) against a commit-id compare; the stored-manifest
+read + validation (420 ms) as a mirror of the database; caller lint only
+on a contract-digest change; changed namespaces only on reload.
+
+**Ruling (config digest issue):** option 1 in the law's terms —
+reconciliation transacts the difference between the manifest's facts and
+the current database value; empty difference, no transaction;
+initialization compares its facts the same way; no digest decides; the
+stored applied-manifest digest is deleted if nothing else reads it.
+
+**Finding:** `default` JVM at 15.3 GB resident, 4.5 GB live after a forced
+GC (`MaxRAMPercentage=12.5` → 16 GB max). Not on the critical path; to
+be explained (what holds 4.5 GB for a program graph) once slice 4 lands.
