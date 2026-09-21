@@ -54,14 +54,13 @@
   ;; Keep the canonical dependency closure of the synthetic declarations.
   ;; Unrelated render declarations require program definitions, not this
   ;; file-store fixture's schema-only population.
-  (let [rows (into {} (map (juxt :seon.schema/key identity))
-                   (seon.schema/canonical-schema-rows projection forms))]
+  (let [references (:seon.schema.projection/schema-dependencies projection)]
     (loop [needed (set probe-keys)]
       (let [expanded (into needed
-                           (mapcat #(get-in rows [% :seon.schema/references]))
+                           (mapcat #(get references %))
                            needed)]
         (if (= needed expanded)
-          (mapv rows (sort expanded))
+          (seon.schema/canonical-schema-rows projection (select-keys forms expanded))
           (recur expanded))))))
 
 (def ^:private source-branch :current-src)
@@ -103,8 +102,12 @@
        (try
          (let [probe-forms {:seon.registry.test/payload-blob :seon.blob/digest
                             :seon.registry.test/archive-blob :seon.blob/digest}
-               forms (merge (seon.schema/declaration-population) probe-forms)
-               projection (seon.schema/build-projection forms)
+               projection (reduce-kv
+                           (fn [projection key form]
+                             (seon.schema/projection-with-schema
+                              projection key form {:seon.schema.admission/source :core}))
+                           (seon.schema/handed-projection) probe-forms)
+               forms (:seon.schema.projection/forms projection)
                connection (:seon.store/connection-object opened)]
            (test-support/transacted!
             connection

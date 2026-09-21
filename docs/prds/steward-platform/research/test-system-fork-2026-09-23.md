@@ -861,3 +861,26 @@ class; no after-duration is claimed for it yet.
 The **4793.213 ms** two-file publication remains explicitly **the publication
 seam's measurement for the orchestrator and redesign lane**. It is not a
 fixture-only duration and this lane does not widen a fixture bound to justify it.
+
+### Registry setup extends the supplied projection
+
+The registry's physical-store tests now extend the supplied compiled projection
+with their two synthetic blob attributes. They no longer read and compile the
+whole declaration population per fixture. `probe-schema-rows` follows the
+projection's existing dependency map before calling `canonical-schema-rows`,
+instead of deriving every canonical row and discarding unrelated rows afterward.
+The store remains physically isolated: garbage collection and non-temporal
+storage are the subjects, and a branch of a shared worker store would not
+provide that isolation. Production registry operations and assertions stay intact.
+
+Fast run **b6ad7885e5ea** recorded **12 tests, 73 assertions, 0 failures,
+0 errors**. Reporter intervals, with all original 5000 ms bounds retained:
+
+| Test (`seon.cluster.registry-test/`) | Before ms | After ms |
+|---|---:|---:|
+| `reset-returns-a-cluster-to-source-state` | 5148.969416 | 2310.110 |
+| `retiring-one-cluster-reclaims-only-its-own-tail` | 7063.822625 | 3895.885 |
+| `two-clusters-write-independently` | 5307.07325 | 2310.345 |
+
+The explicit test-alias namespace load passed before commit. No cold gate or
+default-cluster operation was run.
