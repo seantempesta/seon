@@ -44,3 +44,10 @@ read-only probe of live `default` (PID 12119, database basis 536870935) complete
 in 5 ms and returned only `["seon.id"]` for an ordinary `seon.id/id` identity;
 that establishes the inherited loaded behavior, not proof of this repair.
 This issue stays open until the repaired path is verified.
+
+The combined checkpoint `fresh-start-combined-gate-repaired.log` exposed two
+fixture errors before the arity/privacy cases: the unchanged-manifest request
+omitted its previous database (changing schema declaration-digest inputs), and
+the changed contract used unsupported Malli `:number`. The fixture now carries
+the previous database consistently and uses the supported `number?` predicate.
+Assertions and bounds remain unchanged; armed verification is pending.

@@ -55,9 +55,10 @@
                    "Declaration changes conservatively lint direct callers, not their callers.")
                (reset! observed [])
                (is (= after (functions/build-manifest
-                              (assoc request :seon.fn/previous-manifest after))))
+                              (assoc request :seon.fn/previous-manifest after
+                                             :seon.source/previous-database (db/db connection)))))
                (is (empty? @observed) "No source change performs zero lint.")
-               (write! "alpha.clj" "(ns pub.alpha) (defn f \"Changed.\" {:malli/schema [:=> [:cat :number] :number]} [x] x)")
+               (write! "alpha.clj" "(ns pub.alpha) (defn f \"Changed.\" {:malli/schema [:=> [:cat number?] number?]} [x] x)")
                (let [changed (functions/build-manifest
                               (assoc request :seon.fn/previous-manifest after
                                              :seon.source/previous-database (db/db connection)))

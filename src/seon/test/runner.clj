@@ -1915,7 +1915,9 @@
 
 (defn- write-protocol!
   [^PrintWriter writer value]
-  (.println writer (str protocol-prefix (pr-str value)))
+  ;; Startup code may retain the original stdout writer. Terminate any partial
+  ;; diagnostic before emitting the independently readable protocol line.
+  (.println writer (str "\n" protocol-prefix (pr-str value)))
   (.flush writer))
 
 (defn- write-command!

@@ -81,3 +81,36 @@ drift comparison are unchanged, so subsequent namespace additions/removals
 remain observable. No test/JVM was launched alongside the owner's checkpoint;
 static diff checking passed. The next owner source-load check and checkpoint
 must verify this initialization placement.
+
+### Readiness frame joined to partial diagnostic — 2026-09-21
+
+The next checkpoint (`tmp/test-runs/run.Ns3SqO`, launcher 23490,
+coordinator 24053, worker 24145) acquired its program but could not exchange
+readiness. The owner captured thread dumps under
+`docs/prds/agent-platform/landing/runtime-*-readiness-threads.json`: the worker
+was reading commands and the coordinator waiting for its readiness event.
+The final retained worker stderr line contained:
+
+```text
+    seon.test.runner$worker_main_BANG_.invokeStatic (runner.cljSEON_TEST_WORKER_EDN #:seon.test.runner{:worker-event :ready, ...}
+```
+
+The coordinator's `read-exchange-reply!` recognizes protocol lines only at
+the start of a line. It therefore attributed this entire joined line as
+nonprotocol output, then waited for an event the worker had already sent.
+The exact earlier diagnostic writer is unproven; `worker-main!` redirects
+`System/out`, but code can retain an earlier writer. No stream-ownership
+redesign is required to repair the observed framing defect.
+
+`write-protocol!` now begins each complete frame with a newline. The strict
+reader and its identity/exchange validation are unchanged. The real canonical
+worker-readiness regression first writes an unterminated startup diagnostic,
+then runs worker initialization and passes the resulting output through the
+actual coordinator reader. It requires a ready terminal and separately
+preserved diagnostic output. It also feeds an unmatched frame followed by a
+normal frame, requiring the former to be attributed and the latter parsed
+unchanged. Existing protocol fixture parsers skip blank frame boundaries.
+
+`git diff --check` passed; no JVM or test ran in this lane. Root terminated
+the captured gate through its owned trap and owns source-load and canonical
+verification of these final edits.

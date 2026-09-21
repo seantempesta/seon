@@ -47,22 +47,27 @@
     nil))
 
 (defn- complete-selection-tx
-  "Admit and mark synthetic fixture evidence in one transaction."
+  "Mark synthetic terminal evidence only on this admission's owned members."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/admission]
                   :seon.store/transaction-data]}
   [database admission]
-  (mapv (fn [row]
-          (if (:seon.test.run/members row)
-            (update row :seon.test.run/members
-                    (fn [members]
-                      (mapv #(assoc %
-                                    :seon.test.member/completed-tx "datomic.tx"
-                                    :seon.test.member/terminated-tx "datomic.tx"
-                                    :seon.test.member/began? true :seon.test.member/ended? true
-                                    :seon.test.member/pass-count 1 :seon.test.member/fail-count 0
-                                    :seon.test.member/error-count 0) members)))
-            row))
-        (sut/admit-run database admission)))
+  (let [complete-member #(assoc %
+                               :seon.test.member/completed-tx "datomic.tx"
+                               :seon.test.member/terminated-tx "datomic.tx"
+                               :seon.test.member/began? true :seon.test.member/ended? true
+                               :seon.test.member/pass-count 1 :seon.test.member/fail-count 0
+                               :seon.test.member/error-count 0)
+        owned (db/q '[:find [?member ...] :in $ ?run-id
+                      :where [?run :seon.test.run/id ?run-id]
+                             [?run :seon.test.run/members ?member]]
+                    database (get-in admission [:seon.test.run/provenance :seon.test.run/id]))]
+    (into (mapv (fn [row]
+                  (cond-> row
+                    (:seon.test.run/members row)
+                    (update :seon.test.run/members #(mapv complete-member %))))
+                (sut/admit-run database admission))
+          (map (fn [member] (complete-member {:db/id member})))
+          owned)))
 
 (defn- complete-selection!
   "Establish terminal run evidence; no claim that the canonical suite executed here."
@@ -211,6 +216,7 @@
          (is (every? #(get-in % [:seon.test.member/reasons]) (:seon.test.run/members changed)))
          (let [query db/q
                thread (Thread/currentThread)
+               injected (atom 0)
                refusal (assoc (error/diagnostic
                                  {:seon.error/at (java.util.Date.) :seon.error/layer :seon.db/read
                                   :seon.error/operation 'seon.db/q
@@ -224,14 +230,16 @@
                                   :seon.error/diagnostic-evidence {}}) :seon.db/invalid-read true)]
            (with-redefs [db/q (fn [& arguments]
                                (if (and (identical? thread (Thread/currentThread))
-                                        (some #{'[?declaration :seon.fn/reference-to :seon.fn/sym]}
+                                        (some #{'(declared-edge ?caller ?target)}
                                               (first arguments)))
-                                 refusal (apply query arguments)))]
-             (is (= refusal (select!)) "A refused declared-reference read refuses selection.")))
+                                 (do (swap! injected inc) refusal)
+                                 (apply query arguments)))]
+             (is (= refusal (select!)) "A refused declared-reference read refuses selection.")
+             (is (pos? @injected) "The owning declared-edge query was exercised.")))
          (let [admission (sut/selection-admission (assoc request :seon.db/db (db/db connection)))]
            (support/transacted! connection [[:db.fn/call sut/admit-run admission]])
-           (is (= (symbols changed) (symbols (select!))) "An open admission does not discharge obligations.")))
-       (complete-selection! connection request)
+           (is (= (symbols changed) (symbols (select!))) "An open admission does not discharge obligations.")
+           (support/transacted! connection [[:db.fn/call complete-selection-tx admission]])))
        (is (empty? (:seon.test.run/members (select!))))
        (testing "Spec and reference edits seed their owning definition"
          (support/transacted! connection [{:seon.fn/sym (fixture-symbol "leaf")

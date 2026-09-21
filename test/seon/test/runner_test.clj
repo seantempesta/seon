@@ -164,7 +164,7 @@
                (.shutdownNow executor)))
            (let [prefix (var-get #'runner/protocol-prefix)
                  events (mapv #(edn/read-string (subs % (count prefix)))
-                              (str/split-lines (str output)))
+                              (remove str/blank? (str/split-lines (str output))))
                  completed (filterv #(= :task-complete
                                          (::runner/worker-event %))
                                     events)]
@@ -208,6 +208,7 @@
                (.shutdownNow executor)))
            (let [prefix (var-get #'runner/protocol-prefix)
                  completed (->> (str/split-lines (str output))
+                                (remove str/blank?)
                                 (map #(edn/read-string (subs % (count prefix))))
                                 (filter #(= :task-complete
                                             (::runner/worker-event %)))

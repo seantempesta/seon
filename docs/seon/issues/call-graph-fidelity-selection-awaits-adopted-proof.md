@@ -266,3 +266,13 @@ Expected: no phantom call rows; the six owners/eight keys above present;
 the real renderer target retained. No test, JVM, publication, or adoption was
 run by this implementation lane. The issue remains open pending root's one
 combined canonical checkpoint, fresh graph queries, and selection measurements.
+
+The combined checkpoint `fresh-start-combined-gate-repaired.log` found two
+test observers still matching the retired literal declared-reference query.
+The refusal-injection and once-per-operation query-count assertions now match
+the shared `(declared-edge ?caller ?target)` rule invocation. They still wrap
+the real database query, preserve thread scoping, and retain all refusal and
+indexed-read assertions. Four real-analyzer fixtures also now carry the
+canonical projection into reconciliation; that repair is tracked in
+`program-graph-tests-do-not-carry-their-current-contract-projection.md`.
+These fixture changes have not yet been run by the owner.

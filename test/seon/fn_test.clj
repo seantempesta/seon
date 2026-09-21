@@ -1470,7 +1470,7 @@
             "even an absent definition can have surviving value referrers")
         (is (= (count symbols)
                (count (filter (fn [query]
-                                (some #{'[?declaration :seon.fn/reference-to :seon.fn/sym]} query))
+                                (some #{'(declared-edge ?caller ?target)} query))
                               @queries)))
             "each operation acquires its declared-reference relation once")
         (doseq [seeds [#{(symbol "sample.gates" "a")}
@@ -1556,7 +1556,7 @@
               refused (with-redefs
                         [db/q (fn [& arguments]
                                 (if (and (identical? thread (Thread/currentThread))
-                                         (some #{'[?declaration :seon.fn/reference-to :seon.fn/sym]} (first arguments)))
+                                         (some #{'(declared-edge ?caller ?target)} (first arguments)))
                                   refusal
                                   (apply query arguments)))]
                         [(seon.fn/tests-reaching database (symbol "sample.shape" "many"))
@@ -2736,7 +2736,7 @@
     "sample/call_implementations.clj"
     (slurp (io/resource "test/fixtures/call_graph_fidelity/implementations.txt"))
     (fn [connection _ rows]
-      (test-support/transacted! connection (seon.fn/reconcile-tx @connection rows []))
+      (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) rows []))
       (doseq [[caller target] [[(quote sample.call-implementations/operate) (quote sample.call-implementations/protocol-target)]
                                [(quote sample.call-implementations/dispatch) (quote sample.call-implementations/multi-target)]]]
         (is (= #{target}
@@ -2759,7 +2759,7 @@
                        :seon.fn.file/first-party-functions []
                        :seon.schema.projection/forms forms})
             rows (:seon.fn.file/rows artifact)]
-        (test-support/transacted! connection (seon.fn/reconcile-tx @connection rows []))
+        (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) rows []))
         (let [database @connection
               owner (:db/id (db/pull database [:db/id]
                                      [:seon.fn/sym (quote sample.call-declarations/capability)]))
@@ -2839,7 +2839,7 @@
     "sample/call_references.clj"
     (slurp (io/resource "test/fixtures/call_graph_fidelity/references.txt"))
     (fn [connection _ rows]
-      (test-support/transacted! connection (seon.fn/reconcile-tx @connection rows []))
+      (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) rows []))
       (doseq [[caller target] [["applied" "apply-target"] ["partialled" "partial-target"]
                                ["composed" "comp-target"] ["expanded" "macro-target"]
                                ["resolved" "resolve-target"]]]
@@ -2921,7 +2921,7 @@
           (fn [connection]
             (test-support/transacted!
              connection
-             (seon.fn/reconcile-tx @connection
+             (seon.fn/reconcile-tx (db/db connection)
                                   (vec (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts manifest))) []))
             (is (contains?
                  (set (:seon.fn/calls
@@ -2932,7 +2932,7 @@
             (is (some #(contains? (set (:seon.fn/unresolved-references %)) target)
                       (:seon.fn.file/rows partial)))
             (test-support/transacted! connection
-                                      (seon.fn/reconcile-tx @connection (:seon.fn.file/rows partial) []))
+                                      (seon.fn/reconcile-tx (db/db connection) (:seon.fn.file/rows partial) []))
             (is (contains? (set (seon.fn/tests-reaching @connection target))
                            (quote sample.cross-implementation/unrelated))))))
       (finally (test-support/delete-recursively! root)))))
