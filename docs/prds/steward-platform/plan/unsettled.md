@@ -7248,3 +7248,13 @@ before naming a cause; a number is explained by the algorithm's work; rulings
 into this file AND the plan's Status section the same turn; pushes at
 checkpoints; explain in Clojure/Malli/Datahike/SCI/core.async/clj-kondo
 terms only; resident memory is a smell like time is.
+
+### 2026-09-23 ~20:50 — two rulings for running lanes
+
+`schema-shape-authored`: supplied defaults key on the declared schema NAME,
+never on structural equivalence to a registry schema (option 1 of its
+landing note; an inline copy expecting a default is a contract defect to
+convert or file). Baseline on its root: 72.9 MB of shape strings, largest
+1.56 M chars. `one-jvm-redesign`: `src/seon/test/cache.clj` was clean and
+is granted for `gitlink-digests` (pin digests read, never `deps.edn`
+rehashed on an unrelated edit); baseline 6,175 ms at `db0cd21be`.
