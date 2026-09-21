@@ -177,53 +177,19 @@ observation (`cluster.clj:1832`), the projection re-derivation once A1 lands
 validator: it is a diagnostic LOWER BOUND for the probe, labelled
 non-equivalent, never a production switch.
 
-### 2c. The operator after the cut
+### 2c. The operator and boot rewrite
 
-**Ruled 2026-09-21: the operator and boot are REWRITTEN from the data flow, not cut.**
-`script/seon/fresh_operator.clj` (3,727), `src/seon/operator/state.clj` (1,627),
-`src/seon/operator.clj` (1,219) and the boot sections of `src/seon/cluster.clj`
-(`stand-boot-layers!`/`stand-cluster-runtime!`/`start!`, `:3187-3560`) carry no agent
-semantics: they are one launcher, one prepl client and one boot sequence. The
-replacement is written new from this spec's §2a–§2d tables (≈ 900 lines: argv →
-`launch!` when no advertisement answers, else one `prepl-eval!` request; `reset!` as
-down → delete → republish → start under the store lock; `start!` as the ordered
-layers store → branch → connection → projection → context → graphs → prepl → web,
-each publishing its readiness) and the old files are deleted in the same slice,
-with their tests replaced by one drill per lifecycle transition. The surviving
-guarantees are the ones named below: cold `launch!`, `reset!`, and exact
-`(pid, start-instant)` termination when the JVM cannot answer — `down` never relies
-on a reply from the process it terminates. The lane launcher stays. Recovery if the
-rewrite breaks `default`: `git revert` of the slice, then `bin/seon reset --force`.
+The integrated implementation contract is [B1b — one operator request, one boot
+sequence](lane-b1b-operator-and-boot-rewrite.md). It replaces the previous inventory
+and owns command/reply maps, REPL-first boot, one-JVM reset under the store lock,
+exact process identity, caller/tool conversion, eight destructive drills and recovery.
 
-**Ruled 2026-09-21 (reset shape, README §7):** reset is one JVM. `bin/seon` terminates the old
-JVM by exact identity and launches one JVM with a destroy flag; that JVM takes the store flock
-first, deletes the store beside the retained lock file before any connection opens, republishes,
-forks, boots and stays. `open-store!` (`store.clj:421`) gains acquire → optionally delete →
-create/open. The guarantee is stated honestly: exclusion holds through delete → republish →
-boot, not across the JVM-replacement gap; losing that race is a clean refusal that deletes
-nothing and kills no one. Two guarantees found while reading are KEPT: the REPL opens before
-store acquisition (AGENTS §1), and the advertisement carries the prepl port AND
-(pid, start-instant) because the unchanged MCP bridge verifies identity against it.
-
-| File | Today | Survives (≈) | Derived from the OS / the JVM instead |
-|---|---:|---:|---|
-| `script/seon/fresh_operator.clj` | 3,727 | ~900: argv, `prepl-eval!` `:1820` / `read-prepl-reply` `:1166` / `prepl-value!` `:1182` / `live-root-value!` `:1609`, `launch!` `:2129`, a readiness wait bounded by the boot bound (one prepl round trip on `cluster/readiness` `cluster.clj:3432`), `reset!`, `help!`, exact termination | process records `:144-243` → `ProcessHandle` (`state.clj:224`, `:1199`); truth/repair `:757-770`, `:1323-1769`, `:3351-3392` → the prepl answers or its bound names the phase; offline readers `:881-1082` → "no JVM running"; phase logs `:3008-3074` → re-run reset; `await-advertisement!` `:2266-2402` (136 lines polling a file) → the readiness value; `source-preflight!` `:330` (clj-kondo in the JVM refuses); `init-form` `:2680` codegen → one `pr-str`'d request map; `publication-output!` `:2804` |
-| `src/seon/operator.clj` | 1,219 | ~600: `start!`/`stop!`/`restart!` `:70-96`, `connection :168`, `status :180`, `collect!` `:1112`, `refork!` `:1204`, footprint | `publish!` `:551` (entry 5), `reap-dead-roots!` `:373-509`, `census-processes!` `:250`, `claim-root!` `:230`, `projected-delete-ms-per-file :919` |
-| `src/seon/operator/state.clj` | 1,627 | ~430: `run-process!` `:76`, `read-advertisement :1150`, `observed-property-processes :1199`, `responsive-advertisement? :1262`, footprint `:1457-1522`, destructive-path admission `:1585+` | claims `:801-1149`; census/truth `:1159-1456` except the two kept; `subprocess-cleanup-ms :22` becomes the child-exit bound's declared name; **the root lifecycle `flock` `:436-800`** (`try-file-lock`, lock slots, `await-lock-held-transition!`, `with-lifecycle-lock!`, holder files, `lifecycle-lock-timeout-ms :413`, `operator.clj:65`, the `:seon.operator.lock/*` schema; deep review win 3) — once every healthy command is one prepl request the JVM serialises, only cold `start` and `reset` cross processes, and the store's own `flock` (`store.clj:306-356`) already refuses a second JVM on the store; a second `start` refuses with the holder's pid from the store lock; the silence bound it carried observed a publication that is now a bounded prepl phase (§2d). The store lock lives BESIDE the store (`data/store.lock`, AGENTS §1), so `reset --force` holds it across down → delete → republish → start and a concurrent `start` refuses throughout; a lock inside a deleted directory would protect nothing (Codex's REPL verification note). Drills: two concurrent starts; a `start` during `reset`; a `reset` during a live `start` — each on a scratch root → one JVM, typed refusals naming the holder |
-
-Process identity is `(pid, start-instant)` (`process.clj:13`,
-`cluster.clj:2284`); the generation UUID (`-Dseon.operator.generation`) is
-deleted; `-Dseon.operator.root` stays for a cold `down`. The prepl belongs
-to a CLUSTER: it is started in boot layer 0 (`cluster.clj:3340-3352`) and
-closed by that instance's `stop!` (`:3517`), so the advertisement file per
-cluster (`write-advertisement! :929`) stays as the one file whose only job
-is to tell a cold dialer the port; it is never consulted for health
-(`responsive-advertisement?` decides that with one round trip). A root-wide address requires a proven owner that outlives a cluster stop; retain cluster advertisements until that owner exists. Commands after the cut: `start` (no JVM: `launch!`; JVM:
-`seon.operator/start!`), `init`, `init NAME`, `init --dev`, `status`,
-`open`, `stop`, `down`, `reset --force`, `logs`, `config apply`; `export`
-dies with B4's base store. All but cold `start`, `down` of an unresponsive
-JVM and `reset` are one prepl request; `bin/test-check` (53 lines) is the
-model.
+The owner permits temporary MCP, REPL and boot breakage inside this rewrite and
+changes to the tools to fit the design. Restore them at the completed slice boundary;
+do not preserve old machinery to keep intermediate edits runnable. Reset exclusion
+covers delete → republish → boot, not the replacement gap; a competing winner makes
+the reset replacement refuse without deletion or killing. The lock file survives.
+Line counts are estimates, not constraints. B1b §0 records guarantees kept and dropped.
 
 ### 2d. Entry points, progress, bounds, hook
 
@@ -405,7 +371,7 @@ the same commit.
 | 8 | adoption: commit-id compare on every request; roots from both databases; `reload-order` refuses; post-reload digest verification replaces the blind retry; `instrument/apply!` receives `:seon.instrument/changed-identities` (A1 owns `apply!`; the producer and A1 consumer land together; existing broad arming remains beforehand) | −40 | `adopt-first` row; a forced reload refusal leaves the prior record |
 | 9 | reset cold path: tempid = identity print for submitted rows, keywords inside the map, `index-tempids` deleted; the §2b attribution probe recorded FIRST | −120 | `init-zero` row and the phase table |
 | 10 | one progress argument; `:seon.config.source/phase-bounds-ms`; the nine mechanisms and the publication-phase bounds deleted; `test/runner.clj:60` converted; script re-homed and its grep rewritten | ≈ −200 | each phase fires as a typed error under a 1 ms bound |
-| 11 | operator and boot REWRITTEN (§2c ruling): the new launcher, prepl client, `reset!` and boot sequence land as new files from the §2 tables; `fresh_operator.clj`, `operator/state.clj`, `operator.clj` and `cluster.clj:3187-3560` are deleted in the same slice with `dev/fresh_operator_test.clj`, `dev/fresh_operator_reset_test.clj` and `operator_test.clj`, replaced by one drill per transition (cold start, second start refused, stop, exact `down` of an unresponsive JVM, reset, start-during-reset, reset-during-start) | ≈ −8,700 + ≈ 900 new | every drill green on a scratch root; `default` restarted through the new operator once by the orchestrator |
+| 11 | [B1b — operator and boot rewrite](lane-b1b-operator-and-boot-rewrite.md): replacement client/boot/store admission, tool and surviving-maintenance caller conversion, old files and superseded tests removed in one slice; temporary tool/boot breakage permitted inside the slice | measure deletions, moves and new code separately; ~900 is not a ceiling | B1b’s eight scratch-root drills; tools restored; orchestrator restarts `default` once |
 | 12 | hook: publication = ~40 lines over `prepl-eval!`; queue/worker/result files deleted; `.codex/hooks.json` untouched | ≈ −350 | live: named-file edit → adopted in `default` (browser observed separately) |
 | 13 | after the reset and the §2d conditions: `:current-source {:enabled true}`, comment block deleted; shell-created file observed | −12 | one real hook event |
 | 14 | `publication-base!` and the `test.cache` base callers (after B4 lands) | −49 | B4 seam |
