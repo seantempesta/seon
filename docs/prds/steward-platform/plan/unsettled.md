@@ -7312,3 +7312,9 @@ transact the findings, then move the head — the report is the seam.
 file refs) accepted; `fn.clj`/`instrument.clj` released to the redesign
 lane. Fast-run recording is refused on the pre-reset host's old config
 schema for every lane: the reset is due as soon as `src` is quiet.
+
+**~22:15:** `schema-shape-authored` done (`cde798ad8`: the two
+`program_test` expectations assert authored nodes; issue resolved; the
+namespace's other 2 failures + 3 errors are documented in its note for the
+post-reset platform tier). Lane closed; slot held free during the reset.
+Reset of `default` started 22:10 (`tmp/orchestrator/reset-2026-09-23-2210.log`).
