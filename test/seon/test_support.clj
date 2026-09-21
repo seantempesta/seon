@@ -925,6 +925,9 @@
   ;; They never reconstruct that data by indexing the program again.
   (let [base (create-base nil)]
     (try
+      ;; fork-database reads :db, regardless of source-config :branch
+      ;; (Datahike versioning.cljc:620). This private store has no :db writer.
+      (d/force-branch! @(::connection base) :db #{:current-src})
       (let [configuration
             (d/fork-database (::configuration base)
                              {:store {:backend :memory
@@ -977,7 +980,15 @@
         (release-base! database-base held)))))
 
 (defn with-database
-  "Run `body` on a fresh branch of the published test database.\n\n   The worker opens the published population without indexing source.\n   Every invocation gets a distinct active branch, connection, datoms, schema\n   evolution, transaction history, and writer. Optional\n   `:seon.test-support/extra-schema` rows are synthetic declarations whose\n   installation is itself part of a test.\n\n   `:seon.test-support/database-id` preserves the legacy physical-store\n   identity contract through an isolated slower path. Store-global blob tests\n   request `:seon.test-support/fresh-store?` because blob keys are outside\n   Datahike branch facts."
+  "Run `body` on an isolated branch of the published test database.
+
+   The worker opens the published population without indexing source.
+   Every invocation gets its own branch, connection, datoms, history and writer.
+   `:seon.test-support/extra-schema` installs synthetic declarations.
+
+   `:seon.test-support/database-id` preserves physical-store identity through
+   the isolated store path. Store-global blob tests request
+   `:seon.test-support/fresh-store?` because blob keys are outside branch facts."
   ([body] (with-database {} body))
   ([{:seon.test-support/keys [database-id extra-schema fresh-store?], :as options} body]
     (if (or database-id fresh-store?)

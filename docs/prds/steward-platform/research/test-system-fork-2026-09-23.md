@@ -1066,3 +1066,17 @@ The shared shell hook temporarily refused even `git status` for foreign
 any edit to that file. Markdown checking reports two foreign stale Datahike
 gitlink citations in the wave-3a and wave-3bc plan documents. Neither boundary
 was bypassed or edited. The orchestrator still owns cold proof.
+
+### Physical-copy fixture selects the published head
+
+The rejected memory-store experiment exposed a separate fixture defect:
+Datahike `fork-database` reads the source `:db` head explicitly, ignoring the
+configuration's `:current-src` branch. `with-fresh-database` now points the
+private copied store's unused `:db` head at its published value before the
+physical copy. The dependency seam is `datahike/versioning.cljc:620`.
+Before this repair, the probe lacked the agent identity schema. Afterwards
+its three state derivations passed, with writes **121.585 / 94.617 / 76.681 ms**
+and reads **103.887 / 22.428 / 25.529 ms**. The total **13097.799917 ms**
+failed the default 5000 ms bound; this physical-copy approach was rejected for
+the property. No performance exemption was added. The normal branch fixture
+does not enter this path. The final namespace load included this repair.
