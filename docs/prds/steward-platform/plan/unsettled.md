@@ -7295,3 +7295,11 @@ and request identities, never a serialized invocation argument (the
 transaction error path logged full projection arguments: >3 GB over four
 runs; the six runner/selection offenders at 13–58 s are re-measured with
 the writes gone). Seam named by the lane; a fork fix is pushed.
+
+**~21:55:** `error-family-1a` recorded the retirement inventory
+(`40636ed93`: 309 lines across 59 files, verbatim hunks for the held
+`cluster.clj`, `sci/eval.clj`, `instrument.clj`, test-system callers) and
+stopped correctly — the retirement is one atomic slice and waits for the
+slice 4 landing; parked again. `test-system-fork` pushed the Datahike
+fork fix for the writer log (`e1491ed72`, pinned). `schema-shape-authored`
+resumed on the two owed `program_test` expectations only.
