@@ -105,17 +105,24 @@ member facts step 12 writes. Group admitted Vars through the existing namespace 
 | the test's own `:seon.program/definition-digest` as-of the tested basis | B1 (`lane-b1:222`) |
 | `:seon.test/reach` — the OBSERVED executed set (after C1); absent before | `seon.test.edn:2` `[:set {:seon.db/index true} …]` |
 
-"Unchanged" for one candidate means ALL of: its latest member on this branch has
+"Unchanged" for one candidate means ALL of: its latest admissible member from the explicit recording authority has
 `completed-tx`, `terminated-tx`, `began? ended?` true, `pass-count > 0`,
 `fail-count 0`, `error-count 0`, no `error` ref (`green-members` `test.clj:759-774`);
-its own definition digest is equal as-of that run's `basis-t` and now; no
-symbol in its static reach has a different digest between the two; no schema, namespace-binding, resource, config, macro or dependency-input change since that basis invalidates the execution. Unknown input dependency is a refusal or conservative execution, never reuse. Retain B1's input evidence until the per-path producer and consumer replace it together. A member lacking
+its own definition digest matches the recorded immutable execution commit and current program; no
+symbol in its static reach differs between those programs (use numeric `since`/`as-of` only after proving ancestry in the same lineage); no schema, namespace-binding, resource, config, macro or dependency-input change since that basis invalidates the execution. Unknown input dependency is a refusal or conservative execution, never reuse. Retain B1's input evidence until the per-path producer and consumer replace it together. A member lacking
 any of these — including a run admitted and never completed, or an execution
 whose body did not exit — is an obligation, never reuse. A green at t3 for
 test B discharges nothing for test A (the independent-test case): the
 comparison is per test against its own basis.
 
 ### 2b. Observed reach — what it is and what it misses
+
+B1's graph-fidelity gate precedes precision claims. Current `:seon.fn/calls` combines
+lexical calls with declared edges inferred from keyword/function-value relations;
+therefore even “calls-only” reverse reach is not lexical-only or observed execution.
+Descriptive operation symbols must not become invocation dependencies solely through
+attribute co-occurrence. Retain real callable dependencies and explain selection
+paths; do not prune common functions simply because many tests depend on them.
 
 | Source | What it captures | What it misses |
 |---|---|---|

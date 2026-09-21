@@ -139,7 +139,7 @@ The implementation order is by usable interfaces, not whole-lane barriers:
 | Step | Coherent slice | Exit condition |
 |---|---|---|
 | 1 | B1 development-tool preflight; orchestrator prepares the authorized fresh baseline | Status and one bounded evaluation answer; recorded boot/publication measurements; required evidence preserved |
-| 2 | A1/A2/B1 projection constructors and B1 definition identity; B3 constructor contract | Every consumer has real inputs before any fallback or public constructor is retired |
+| 2 | A1/A2/B1 projection constructors, B1 definition identity and graph fidelity; B3 constructor contract | Every consumer has real inputs before any fallback or public constructor is retired |
 | 3 | A1/A2/B1 validator producers, publication reports, affected arming and input observation | Incremental behavior and refusal preserve the published head and complete validation |
 | 4 | B1/B2/A1 independent execution; B4 carried fixture and final request | Old/new/candidate definitions remain independent; named execution program actually runs |
 | 5 | B2/B3 task/render lifecycle and B4 caller conversion | One settlement path and test request; every retired name converted in the same loadable slice |

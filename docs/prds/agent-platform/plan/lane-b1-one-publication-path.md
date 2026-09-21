@@ -389,6 +389,23 @@ the same commit.
 | 13 | after the reset and the §2d conditions: `:current-source {:enabled true}`, comment block deleted; shell-created file observed | −12 | one real hook event |
 | 14 | `publication-base!` and the `test.cache` base callers (after B4 lands) | −49 | B4 seam |
 
+## Graph fidelity before selective test execution
+
+The declaration graph must separate actual calls, callable references and symbols
+stored as descriptive data. A schema permitting a symbol does not prove its consumer
+invokes that symbol. The [graph-fidelity issue](../../../seon/issues/call-graph-fidelity-selection-awaits-adopted-proof.md)
+records source-matched examples where keyword joins add non-lexical call edges;
+static-plus-declared reach is not measured execution reach.
+
+Before B4 narrows selection, prove both sides with the real analyzer and canonical
+publication: a genuinely dispatched configured handler remains a dependency, while
+an error operation symbol creates no invocation edge merely because another function
+mentions that attribute. Renderer declarations participate through the consumer that
+actually dispatches them. A selected test must have an explainable dependency path
+and edge provenance. Preserve conservative treatment of genuinely unresolved dispatch;
+never remove real edges merely to obtain a smaller count. Re-measure representative
+selection sets after this proof; no reduction is promised from the existing counts.
+
 ## 6. Better than the floor — probes that decide
 
 | Candidate | Probe | Decides |
