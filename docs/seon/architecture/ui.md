@@ -1,178 +1,131 @@
 ---
 type: architecture
-status: active
-tags: [architecture, web, agent]
+status: active — first pass 2026-09-21 (Fable), for astra review before the clean write
+tags: [architecture, web, ui, datastar]
 ---
 
-# UI — entity blocks and two render projections
-
-> Target contract: [agent record and turn loop PRD](../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
-> §13–§15. Current implementation state belongs in the program roadmap.
+# UI — namespace pages, blocks, whole-view delivery
 
 The web UI runs in the cluster JVM and renders the same entity facts the
-agent reads. AI and HTML are two projections, each structured for its
-reader. A browser page is derived from data; an evaluation's shown text is
-a durable fact about what the agent saw. These have different lifetimes.
+agent reads: AI and HTML are two projections of one render pair per entity
+schema. A browser page is derived from data; the agent's shown text is a
+durable fact. The browser owns no database logic and no durable UI state.
+Marking as in [README.md](README.md).
 
-## One block per concern
+## 1. Namespace pages and blocks
 
-One entity schema declares one pair, `:seon.render/ai` and
-`:seon.render/html`. Scalar attributes render together in the entity's
-own block. Components own their blocks; derived concerns are queried by
-functions declared once on the agent schema. A scalar does not acquire its
-own render pair merely because it is separately queryable.
+Routes are `/`, `/ns/{namespace}`, `/agent/{id}`, their debug routes and
+`/data`; the route table is code data compiled by Reitit, never a second
+catalog. A namespace page is route → namespace → responsible agents → the
+walk rendered as blocks: one identified block per entity, whole concern each
+(scalars together; components and declared derived queries own theirs). The
+identified block is the morph target, so Datastar preserves unaffected DOM
+and browser input. A layout receives blocks as data and controls placement
+and CSS, never membership or renderer selection. The data browser navigates
+with explicit `get-in` paths and offsets; a query-work window names its
+boundary and continuation.
 
-The record's opening order is identity, plan, unanswered wakes, routed
-faults, and history last. History is chronological with every turn shown
-by default. No render pair means the default attribute-map printer; an
-empty concern may be absent, but a failed render produces a diagnostic.
+**Data flow.** Per request: one walk over the page's entities, one render
+per block through its pair, Hiccup out. Proportional to the page's entities.
 
-A render function chooses its source from the data. An empty plan emits
-a short absence comment and useful `dir`/`doc` forms; a populated plan
-emits its current, ready, and blocked queries. `dir` and `doc` return
-program data, not a parallel body of teaching prose.
+**Current / Target.** Current: `src/seon/render/route.clj:5` `routes`, `:37`
+the Reitit router; `src/seon/render/block.clj:61` `surface-id` (the DOM id,
+injective by docstring); `src/seon/render/ns.clj:895` `render-ai`, `:928`
+`render-html`. Several agents may share a namespace; the responsibility ref
+is single-valued under a retired spelling (`resources/seon/schemas/seon.ns.edn:28`).
+Target: `:seon.ns/agents`, many-to-many (ruling D1); "everything about
+namespace N" is ONE pull that returns tests, errors, lint, tasks and the
+responsible agents, and an agent's opening IS this view (goals note §2d row
+10); lanes B2, B3.
 
-AI source executes through the ordinary turn evaluation path and produces
-stored evaluations. HTML returns Hiccup. There is no third form projection.
-Every value inside a block prints through the one value renderer.
+**Reference code.** datastar-clojure
+`libraries/sdk/src/main/starfederation/datastar/clojure/api/elements.clj:112`
+`->patch-elements-seq` (the one SDK call the page uses).
 
-## History is ordinary entity rendering
+## 2. Whole-view delivery, hyperlith-style
 
-The walk renders the ordered evaluation entities through their declared
-`seon.repl/render-ai` and `seon.repl/render-html` pair.
-`seon.repl/text` is the single REPL grammar. No history-specific assembly
-of entry kinds or independently formatted result strings participates.
+Each browser tab taps the cluster's refresh mult through a
+`(dropping-buffer 1)` channel; on each signal the tab's thread renders the
+WHOLE view, streams it as one `datastar-patch-elements` event through a
+brotli writer, and the browser's idiomorph does the diff. No revisioning, no
+delta, no keyframe, no per-tab registry, no drain queue: loss is the dropping
+buffer's, and a late tab simply renders on connect. Streamed provider replies
+ride the same path as complete prefixes; only the completed reply becomes a
+turn fact. No agent code receives an SSE connection; authored render
+functions return values and the HTTP owner performs transport.
 
-At evaluation time, the value renderer applies the profile once and the
-evaluation stores its shown text, including elisions and requery forms.
-The history uses those saved bytes; it never reruns a form to display it
-or applies another history-wide clip. All turns remain visible until
-explicit compaction.
+**Data flow.** Per change: one signal on the mult; per tab: at most one
+pending render (the buffer), one whole-view render, one compressed write.
+Proportional to tabs × view size, never to history.
 
-HTML can render the actual live result object without presentation
-clipping. After a JVM restart it renders the saved shown text and makes
-the loss of the live object explicit. It never implies that saved text
-is a restored atom, channel, function, or lazy sequence. Query-work bounds
-and evaluation deadlines remain separate from presentation.
+**Current / Target.** Current: `src/seon/render/web.clj:1849` `join-package`,
+`:1877` `next-package`, `:1905` `package-patches` — revisioned packages with
+a delta and a keyframe, a per-tab drain feed (`:2689-2891`), and an
+invocation cache at `src/seon/render.clj:701-889` whose question ("did the
+program change?") a commit id answers; `next-package` and `package-patches`
+have no test (data pack B2 §6). Target: the hyperlith shape above; lane B2.
 
-## Context mutation and previews
+**Reference code.** hyperlith `src/hyperlith/impl/datastar.clj:122-189`
+`render-handler` (`:143-145` the dropping-buffer tap with its reason in the
+comment: the mult distributes synchronously, so a slow handler must not
+block; `:148` `hk/as-channel`; `:179-182` `:on-close` closes the tap);
+http-kit (our fork) `src/org/httpkit/server.clj:321` `write-state` (atomic
+pending-byte state for bounded SSE writes); datastar-clojure `elements.clj:112`.
 
-The turn owner appends a system turn before an agent turn when read
-evidence changed. The since-query algorithm covers every distinct read
-form, generated or agent-written; it never repeats writes or effects.
-Passive page rendering does not append history.
+## 3. HTML never clips
 
-The agent debug page defaults to a chronological turn ledger. Each provider
-card separates WE SENT (generated context), AGENT REPLIED (the exact raw
-reply), and RESULTS (the saved evaluations). System cards contain only WE
-GENERATED. Section labels and colours identify authorship without changing
-bytes. Collapsed headers show the agent's stated intent, result counts, and
-transaction effects, or the generated concerns for a system turn. Named
-emission disclosures retain order; the first provider card folds the opening
-separately from its since-diff re-reads. The selected turn and last three cards are open; other card bodies
-load on demand. A card's Full context as sent disclosure opens the faithful
-REPL transcript below that card. A chronological strip selects every turn;
-cell width shows bytes added, fill distinguishes provider turns, and semantic
-colour shows errors or missing results. Its selected underline stays visible
-on narrow screens. Selected cards scroll below the measured sticky header.
-A problems panel derives counts and turn links from saved evaluations,
-attempt usage, fault messages, and historical directory facts. The compact
-summary keeps the turn budget, completed steps, errors, and repeated reads
-visible while reading cards. Zero-count rules appear under Checks passed;
-missing evidence is explicitly unavailable. Provider costs use the current
-model rates on file and are unavailable when rates or usage are absent.
-Problem dots on the strip link those findings to their owning turns.
-The full context comes from the provider acquisition fold at the turn's
-opening database. `render/acquire-context!` owns this temporal selection even
-when passed the current database. A request without a turn id folds all
-current evaluations, including the latest reply's results; a named reply
-turn excludes even its source rows admitted in the opening transaction.
-Rebuilt estimates and provider-billed tokens are shown
-separately, since the estimator does not prove byte identity.
-`seon.repl/render-emission-html` colourises the exact
-`seon.repl/text` bytes; prompt, comment, form and response stay in their
-original order. Turn boundaries and origin gutters sit outside those bytes.
-Repeated system reads fold in place, with every exact entry available at
-its original position. The `?prompt=true` toggle shows the complete acquired
-prompt as one unchanged block. Selected-turn content loads on demand;
-the initial response never acquires all historical prompts. The Record
-section loads the existing agent record blocks on demand below the session.
-A compact header shows the agent, namespace, objective, local state time,
-and cluster. System/virtual/compact actions and the raw toggle share its
-toolbar; the message form is collapsed until requested.
-The same header appears on the ordinary namespace page, with agent/debug
-navigation. Debug history uses normal document scrolling, with selected-turn
-facts and navigation in the sticky header. Re-read disclosures reveal entries
-in place, and the selected card scrolls into view on load.
-The ordinary page is one full-width column ordered by declared concern:
-plan, runtime, inbox, notes, settings, identity, faults, namespace bindings.
-The walk still owns membership and stable block identities; presentation
-order no longer promotes the most recently changed empty block. Blocks have
-no inner scroll boxes. Runtime's existing turn table is an expandable
-disclosure, with a fixed-layout wrapping table when opened.
-Compaction wipes the agent's evaluations;
-the next system turn regenerates the opening. There is no manual
-Add/remove/revision/proof/adoption path for editing context.
+HTML renders the live result object without presentation clipping while it
+exists, and the saved shown text after a restart, saying plainly that the
+object is gone. The only elisions an HTML page shows are query-work bounds
+reported as elision values (a walk's distance or connection limit, a pull
+over 1,000 members), each naming the bound and a continuation.
 
-The message form commits an ordinary message addressed to the agent.
-The corresponding listened datom wakes its graph; the ordinary render
-feed shows the resulting facts. HTTP submission is not an evaluation
-result channel.
+**Current / Target.** Current: `src/seon/render/ns.clj:793` `html-within-budget?`,
+`:797` `budgeted-html`, a three-tier ladder at `:808-818` under `:416`
+`token-budget` — the namespace page clips HTML, violating AGENTS.md §2.4.
+Target: the ladder is deleted; lane B2.
 
-## Namespace pages and navigation
+## 4. The debug page shows the algorithm
 
-The route table belongs to `seon.render.route/routes`, compiled by
-Reitit. It is code data, not a second database catalog. Namespace and
-agent routes resolve their identities through facts. Several agents may
-share a namespace; namespace assignment is not unique and stewardship
-belongs to the namespace.
+`/ns/{ns}/debug` for an agent is where the turn loop is visible in every
+state without a model call: a state line (evaluations held, last turn `:t`,
+fresh or continuing); context now — every evaluation through `seon.repl/text`
+with a per-evaluation as-of check (the stored text rendered again at its own
+`:t` equals the stored text, or the renderer stopped being a function of the
+data); the would-be system turn computed now and writing nothing (none /
+unchanged / changed per read form, with the bytes that would run); the prompt
+bytes with their digest, always present, collapsed; three controls — run
+system turn, virtual turn (one turn through the ordinary loop with a fixture
+reply), compact — each a same-origin POST after which the page repaints
+through the feed. Provider cards separate what we sent, the raw reply and the
+saved evaluations; rebuilt token estimates and provider-billed tokens are
+shown separately.
 
-Root, namespace, agent aliases, debug inspection, and the data browser use
-the same render owners. Inspect the route table for exact live paths
-rather than copying a route inventory into this document. Browser-local
-selection, scroll, disclosure, and inputs remain browser state.
+**Current / Target.** Current: `src/seon/render/web.clj:3217`, `:3242-3245`
+the `?prompt=true` flag; `src/seon/turn.clj:2103` `system-turn` with
+`:write? false` for the preview, `:2330` `virtual-turn!`, `:2323` `compact!`;
+the debug value and experiment views at `web.clj:583-1357` (ten functions).
+Target: the flag retires — context-now is always primary and the prompt
+comparison is always present (goals note §4); the page's UI-state prose of
+the previous version of this file is not architecture and is not carried.
 
-The data browser uses explicit `get-in` paths and offsets. A query-work
-window names its boundary and continuation; it does not silently turn an
-unavailable observation into an empty value. A link identifies the
-position being inspected.
+## 5. Messages
 
-Generalized agent-authored canvas and control constructors remain a
-separate target contract. Their schemas and action boundary must be
-declared before a new callback route or API is introduced. Consumer
-products and their domain-specific routes belong downstream.
+The message form commits an ordinary `seon.message` addressed to the agent;
+the listened `:seon.message/to` datom wakes its graph; the feed shows the
+resulting facts. HTTP submission is never an evaluation result channel.
+`my.message` is the thin agent-facing protocol over the same facts.
 
-## Stable blocks and delivery
+**Current / Target.** Current: `src/seon/cluster/message.clj` (owner),
+`src/my/message.clj:31` `send`; `resources/seon/schemas/seon.message.edn`.
+Target: a conversation is derived from message facts — done is "no outside
+wake newer than my reply" — and a reply task uses the same context mechanism
+as any task (ruling D1, F4).
 
-The identified block is the morph target. Stable DOM ids let Datastar
-preserve unaffected content and browser input. A layout receives blocks
-and relationships as data; it controls placement and CSS, not membership
-or renderer selection.
+## 6. The canvas — target
 
-The cluster render proc owns revisioned packages, each carrying a delta
-and a complete keyframe. It serializes once and publishes through a mult.
-Each tab taps with a sliding-one buffer: contiguous revisions use the
-delta, while a gap uses the complete keyframe. An unchanged HTML block
-does not need a morph.
-
-A late tab needs an initial keyframe because a mult does not replay.
-Latest packages, render caches, and browser connections are disposable
-process state. Their loss changes render work, never the stored prompt
-bytes. A tab's connection-owned writer waits for socket drain or close;
-slow readers cannot accumulate a queue of stale packages.
-
-Streamed provider replies use the same delivery path. Each partial is a
-complete prefix, offered without blocking the provider reducer onto a
-sliding-one channel. Only the completed reply and its durable consequences
-are written as turn facts. Reconnect does not replay discarded partials.
-
-No agent code receives an SSE connection. Authored render functions run
-through the bounded SCI invocation owner and return values; the HTTP
-owner performs transport. A render failure remains an in-place
-diagnostic and a durable core-fault observation when appropriate, while
-siblings continue.
-
-See [context](context.md) for additive prompt semantics,
-[agent runtime](agent-runtime.md) for system turns,
-[data model](data-model.md) for relationships, and
-[observability](observability.md) for evidence limits.
+A generalized agent-authored canvas (forms, buttons, inputs) remains a
+separate target contract: its schemas and action boundary are declared
+before any callback route or API exists. No declared attribute exists at HEAD.
+Consumer products and their domain routes belong downstream, never in
+`src/`.

@@ -217,8 +217,8 @@ from temporal retention.
   survive and are still live work:* (a) its inventory of **six** program
   identity families and **four** retirement writers
   (`src/seon/program.cljc:11`; `turn/row-tx` `src/seon/turn.clj:1281-1330`;
-  `fn/reconcile-tx-in` `src/seon/fn.clj:2557-2597`; `issue/index-tx` and
-  `adopt-tx` `src/seon/issue.clj:225-393`), which is the list G3's tombstone
+  `fn/reconcile-tx-in` `src/seon/fn.clj:3047`; `issue/index-tx` and
+  `adopt-tx` `src/seon/issue.clj:338`, `:950`), which is the list G3's tombstone
   deletion must cover; and (b) its "third state" observation — an identity
   minted only to resolve evidence in a database that never defined it is
   **not** retirement — which G4 answers as a required positive provenance
@@ -622,9 +622,9 @@ docstrings."*
 |---|---|---|
 | `:seon.turn/closed-tx`, `:my.plan.item/*-tx` | `-tx` refs (`seon.turn.edn:157-158`, `my.plan.item.edn:79`) | correct, the pattern |
 | `:seon.issue/opened` | `:inst` (`seon.issue.edn:5`) beside `/resolved-tx` and `/budget-exhausted-tx` refs (`:38`, `:37`) | **two clocks on one lifecycle** — make it `:seon.issue/opened-tx` |
-| `:seon.effect/*-at`, `:seon.maintenance.receipt/*-at` | instants (`seon.effect.edn:52`, `:63`, `:161`; `seon.maintenance.receipt.edn:12`, `:14`, `:20`) | convert to `-tx` — the event is recorded in its own transaction |
+| `:seon.effect/*-at`, `:seon.maintenance.receipt/*-at` | instants (`seon.effect.edn:46` `interrupted-at`, `:57` `opened-at`, `:153` `settled-at`; `seon.maintenance.receipt.edn:12`, `:14`, `:20`) | convert to `-tx` — the event is recorded in its own transaction |
 | `:seon.ai.attempt/at`, `:seon.error.occurrence/first-at` | instants | **keep** — the event genuinely predates its recording |
-| `:seon.test/run-at`, `/run-basis-t` | copies of the run entity's own facts onto the domain entity (`seon.test.edn:32`, `:31` vs `seon.test.run.edn:1`, `:5`) | **delete both** — AGENTS.md §3 forbids copying transaction projections onto domain entities; join the run |
+| `:seon.test/run-at`, `/run-basis-t` | copies of the run entity's own facts onto the domain entity (`seon.test.edn:34`, `:33` vs `seon.test.run.edn:1`, `:5`) | **delete both** — AGENTS.md §3 forbids copying transaction projections onto domain entities; join the run |
 
 ### 4.3 What is still open here
 
@@ -732,7 +732,7 @@ point-in-time record.*
 
 | Question | The query | Not an attribute |
 |---|---|---|
-| Is this turn open? | no `:seon.turn/closed-tx` — decided **at the writer**, inside the transaction (`seon.turn/open-run-tx-call`, `src/seon/turn.clj:417`) | no `open?` boolean |
+| Is this turn open? | no `:seon.turn/closed-tx` — decided **at the writer**, inside the transaction (`seon.turn/open-run-tx-call`, `src/seon/turn.clj:465`) | no `open?` boolean |
 | Is this issue open? | no `:seon.issue/resolved-tx` | the `:open`/`:resolved` enum arms dissolve (§5.1) |
 | Which evaluation supersedes which? | the since-diff's **fold over ordinals** | `:seon.cluster.eval/refreshes` is **deleted** (1h) |
 | Who wrote this? | minimal transaction metadata — `:seon.db/user`, `:seon.db/process`, `:db/txInstant` — joined through the datom's transaction | never copied onto domain entities (AGENTS.md §3) |
@@ -837,3 +837,16 @@ and [owner decisions, 2026-09-17](../../prds/steward-platform/plan/owner-decisio
    row by identity?"*) is this guide's phrasing of the three ruled cases; it
    is a reading of G1 + 1g + the turn PRD, not a quoted rule. Treat new
    candidates as owner decisions.
+
+---
+
+## 9. Where the error model and the task rulings live
+
+This guide predates the 2026-09-19/20 rulings that replaced two of its
+nouns. It is left in its own spelling except for the citations above; read
+these two rows before applying §2 or §5 to an error or a work entity.
+
+| Ruled | The decision | Where it is stated and applied |
+|---|---|---|
+| Errors (D3, D12, D13, §1k, §1o, §1q) | an error IS a map — a base (`:seon.error/at`, `/layer`, `/operation`, optional `/message`) plus a domain error schema declared in the owning resource; no kind stamp, no class marker, no general predicate; a consumer branches on a required member no sibling in the callee's declared union shares; the output contract names the exact error schemas and the wrapper refuses a returned error satisfying none; recurrence identity is `seon.id/id` over layer, operation, the sorted set of satisfied schema keys, throwable class and top frame, the violated expectation and the location path — one root entity per signature, occurrences as components | [goals note §2e, §3](../../prds/agent-platform/research/durable-goals-and-rulings-2026-09-21.md); [architecture §9](architecture.md); the landed identity `src/seon/error.clj:200` `signature` |
+| Tasks (D1, D2, D6, T1, F4) | `seon.task` is the ONE entity for work: linked facts (subject refs, tests that define done, errors, functions) plus an optional agent and a budget; a trigger resolves to a task identity at the writer; done is a query written by settlement only; a same-identity merge conflict is a conflict task for `root`; a conversation is derived from `seon.message` facts; namespace responsibility is `:seon.ns/agents`, a cardinality-many ref set. Every `seon.issue` row and attribute in this guide reads as its `seon.task` successor; `:seon.issue/resolved-tx` remains the closing-fact pattern | [goals note §2d, §4](../../prds/agent-platform/research/durable-goals-and-rulings-2026-09-21.md); [architecture §10](architecture.md); the identity idiom to keep, `src/seon/issue.clj:554` `subject-id` |

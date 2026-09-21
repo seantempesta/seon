@@ -1,319 +1,271 @@
 ---
 type: plan
-status: DRAFT written from the audit summaries before the notes were read in full — superseded by the per-lane specs `lane-*.md` in this directory; its totals are wrong (test corpus ≈5 % deletable, not 14 %; the lever is hoisting setup); rewritten once the lane specs land
+status: first pass (Fable, 2026-09-21) for astra review, then the clean write; the owner reads this personally
 created: 2026-09-21
-tags: [plan, agent-platform, cut, deletion, namespace-agents]
+tags: [plan, agent-platform, cut, refactor, namespace-agents, profiling, size-target]
 ---
 
-# The cut: one branch, every seam, then the live loop
+# Agent platform — from where the system is to where the owner wants it
 
-**Owner, 2026-09-21:** "identify all the code we can delete … code that's
-duplicating behavior (in a worse way) than what the libraries are doing …
-duplicate code paths, duplicate caches." "A plan that will aggressively cut
-the code and provide clear instructions to the agents implementing it on
-the reference code to build against … I want them to read and understand
-good clojure code relevant to what they are implementing before they are
-implementing it. I want them to use the REPL to test ideas, inspect data
-and look at perf. I want them to find even better ways to do the fixes …
-I don't want everything to be gated on tests running to completion
-especially when so many of the tests are part of the problem." "If this
-experiment doesn't work we can always revert back to git."
+Every number below names its source. Short tags: **[brief]** [the writer brief](WRITER-BRIEF-2026-09-21.md) · **[syn]** [synthesis](../research/synthesis-2026-09-21.md) · **[goals]** [durable goals and rulings](../research/durable-goals-and-rulings-2026-09-21.md) · **[instr]** [instructions and process audit](../research/instructions-and-process-audit-2026-09-21.md) · **[arch]** [architecture docs verification](../research/architecture-docs-verification-2026-09-21.md) · **[a-malli]** [Malli audit](../research/deletion-audit-malli-2026-09-21.md) · **[a-dh]** [Datahike audit](../research/deletion-audit-datahike-2026-09-21.md) · **[a-pub]** [publication audit](../research/deletion-audit-publication-operator-2026-09-21.md) · **[a-test]** [test-system audit](../research/deletion-audit-test-system-2026-09-21.md) · **[a-sci]** [SCI/turn/render audit](../research/deletion-audit-sci-turn-render-2026-09-21.md) · **[a-err]** [errors/tasks/config audit](../research/deletion-audit-errors-issues-config-2026-09-21.md) · **[p-a1]**…**[p-c1]** the seven data packs ([a1](../research/data-pack-a1-malli-2026-09-21.md), [a2](../research/data-pack-a2-datahike-2026-09-21.md), [b1](../research/data-pack-b1-publication-2026-09-21.md), [b2](../research/data-pack-b2-sci-turn-render-2026-09-21.md), [b3](../research/data-pack-b3-errors-tasks-config-2026-09-21.md), [b4](../research/data-pack-b4-test-system-2026-09-21.md), [c1](../research/data-pack-c1-profiling-2026-09-21.md)) · **[sweep]** [issue-note lifecycle sweep](../research/issue-notes-lifecycle-sweep-2026-09-21.md) · **[refcode]** [reference-code usage audit](../../../research/agent-platform/reference-code-usage-audit-2026-09-21.md) · **[wc]** measured in this session with `wc -l` at `215447c46`. Where a pack corrects an audit, the pack's number is used.
 
-Evidence: the eight audits and their synthesis in
-[../research/](../research/synthesis-2026-09-21.md). Every goal that must
-survive is in
-[durable-goals-and-rulings](../research/durable-goals-and-rulings-2026-09-21.md)
-(55 targets, 89 rulings, 36 retired directions). Nothing in this file
-repeats a table that lives there; it points.
+## 0. For the owner
 
-## 0. The shape
+**What we were doing that was dumb.** Every audit found the same shape: a fact already held by a library or by the database, a copy of that fact kept beside it, machinery to keep the copy fresh, and tests to police the machinery's cost [syn §1]. Four examples, with their numbers.
 
-- **One branch, `agent-platform-cut`, from `steward-platform`.** Every lane
-  commits to it, path-limited. `steward-platform` is the revert.
-- **Cut ≈ 20 K src lines and ≈ 14 K test lines** (22 % / 14 %), the docs
-  tree to 9 % of itself, AGENTS.md to its laws. Totals per seam are in the
-  synthesis §2.
-- **The gate is not the suite.** A lane is done when: its namespaces load
-  (`clojure -M -e "(require 'ns…)"`), its REPL probes show the fact or the
-  number it claims, the deftests that reach its change pass in-process
-  through `seon.test/run-owned` on a forked branch, every time escape in its
-  files is converted to a bound or deleted, and the diff is net-negative.
-  The orchestrator runs boot-from-zero once per integration, never a full
-  suite.
-- **Lanes are astra at medium** (these are design cuts), launched through
-  `bin/codex-agent`, three at a time, one JVM each. The orchestrator
-  designs, reads every diff, integrates, measures.
-- **Each lane's first act is reading.** The reading list below names the
-  vendored library code (file and line block) and the first-party idiom
-  the lane builds on. A lane that has not read the seam does not edit.
-- **Each lane's second act is a REPL probe** on its own scratch cluster
-  (`bin/seon --root tmp/<lane>-root start <lane>`; downed and deleted when
-  done) or the JVM REPL of `default` read-only: the current cost or shape,
-  as a number, before the cut; the same probe after.
-- **Better is welcome.** The audit tables are the floor. A lane that finds
-  a smaller mechanism than the audit proposed takes it and records why.
-  A lane that refutes an audit claim with evidence records the refutation
-  in its landing note; the note is the deliverable, never chat.
+1. *The read that re-runs itself.* Before every agent turn the system asks "is this retained read still current?" `src/seon/db.clj:1102-1144` answers it three ways in a row: replay an index pattern, compare Datahike's own revision counters, and — when those two do not settle it — **run the query again and compare digests** (`replay-read`, `:971`). Datahike already keeps a per-attribute revision on every committed transaction (`query.cljc:2568-2590`) and compares it in `source-context-unchanged?` (`:2963-2976`) [p-a2 §2]. The two extra arms are ~405 lines with **zero** production callers and **zero** tests outside `db.clj` [p-a2 §3]. Nothing would notice if they were gone. The third arm is the worst algorithm available: it does the work to decide whether to do the work.
+2. *Six hundred and sixty lines that nobody calls.* `seon.fn/build-artifact`, `rows`, `reconcile-tx`, `plan-file-change` and their helpers have **0** production references and are kept alive by roughly 700–900 lines of tests (`rows` alone has 782 test mentions) [a-pub §1; p-b1 §4]. The live path is `reconcile-tx-in` (`fn.clj:3047`). The tests do not prove the product; they prove the dead code still works.
+3. *Time escapes.* 128 tests declare they may exceed the five-second bound, for a granted total of **18.9 hours** [a-test §2a; p-b4 §4]. Read one by one: 72 are algorithm defects (work proportional to the whole program inside a fixture), 18 are process machinery, 31 copy a sibling's declaration, and **7** are genuinely long — 0.1 % of the budget. Folding the copies back in, **78 %** of the budget belongs to the machinery that runs other JVMs [a-test §2b]. One file grants 28 tests thirty minutes each — 12.5 hours — and is the regression suite for the launcher this plan deletes. A ten-minute test proves "an unchanged digest performs zero transactions"; the measured no-change publication is **264 ms** [a-pub §5; p-b1 §5]. And 38 tests declare a reason without a number, so the runner silently keeps the 5 s default; they pass only because declared-long tests are excluded from ordinary selection [a-test §2c] — the check reads the absence of a signal as health.
+4. *Process records beside the operating system.* ~450 lines write and repair EDN "process records" and claim files, and ~400 more derive a "cluster truth" from advertisement files and repair it when it drifts — while `ProcessHandle/allProcesses` already yields every JVM with its root and start instant (`state.clj:1199-1223`) and the prepl already answers whether it is alive (`:1262-1298`) [a-pub §1, §4]. The operator is 6,599 lines; ~1,800 do what an operator does.
+5. *The history ruled deleted and never cut.* The turn PRD (§15) ruled that nothing assembles an agent's history but the walk over its stored evaluations. `src/seon/render/transcript.clj` (legacy spelling) is still **2,443** lines of hand-assembled views at HEAD; four architecture pages state it is gone [arch, cross-file finding 2].
 
-## 1. Phase A — the base every other cut reads (hours, two lanes + orchestrator)
+Two more of the same shape decide the order of this plan. The compiled Malli generation — every schema and every contract — is rebuilt from stored rows at every acquisition instead of being read from the database value that already carries it: **3,996 ms of the 4,648 ms** fixture base, 248 ms per newly materialized commit on the edit path, and a whole-population compile per arming pass; nine separate derivations, 43 call sites [a-malli §2–3; p-a1 §1, §4b]. And the process holds **4.2 GB** because Datahike's node cache, bounded by node count rather than bytes, held ~47 copies of the database's 81 MB of string content [goals §2b, "Derived state"].
 
-### A0 Instructions (orchestrator, first, same day)
+**Why it happened.** Proof was defined as a green run, so a mechanism that made the run green earned its place regardless of what it cost or duplicated; the instructions then normalized the cost — "60–150 s under the lifecycle lock" written into the standing file beside the law that says ten seconds requires the owner's authorization [instr §1.3 F2], a schedule that forecast 47–75 lane-days before the first live agent [goals §7], and a working file that spent 26 % of its 1,321 lines on lane choreography [instr §1]. Mechanisms were built beside the tools instead of on them: a second cache beside clj-kondo's, a second store beside Datahike's branches, a second scheduler beside core.async.flow, six run paths beside one [syn §1; a-test §1c].
 
-AGENTS.md rewritten to ~250 lines: the five laws, the vocabulary table with
-[TARGET] rows verified or deleted, the REPL loop, one page of current
-state. Outline and surviving line ranges:
-[instructions audit §1](../research/instructions-and-process-audit-2026-09-21.md).
-Docs archived by the eleven `git mv` moves in its §4; the eight AGENTS.md
-links repointed. Memory index: the 24 superseded handovers deleted, the 32
-product rules folded in. `tmp/` swept (7.9 GB; `tmp/head-wt` worktree,
-86 lane directories).
+**The simpler way, as data flow.** The rule is one sentence: *compute a fact once, where it is made; carry it on the immutable value it belongs to; make every later step read the transaction report, never the program.*
 
-### A1 The projection is read, never rebuilt (astra, medium)
+| Concern | What is computed | When | Where it is carried | Why it is proportional to the change |
+|---|---|---|---|---|
+| Program facts | one clj-kondo analysis of the changed files, one transaction of the difference | on each edit (a reset pays the whole analysis once) | `current-src`'s commit; the transaction report names every changed identity | callers are re-linted only when a contract datom is in the report; only the report's namespaces are reloaded; only wrappers whose contract changed are re-armed [a-pub §3, §6] |
+| The compiled schema generation | compiled once at publication | when the commit is written | on the database value (`seon.db/carried-projection`, `db.clj:1219`) and every branch forked from it | a fork is a pointer to the same value; nothing recompiles [p-a1 §1] |
+| Isolation for a task or a test | a Datahike `branch!` plus a `sci/fork` | when work starts | the branch head and the forked ctx | measured 37 ms per test fixture, 0.002 ms per warm `sci/fork` [a-test §4; p-b2 §2.5] |
+| Read currency | per-attribute revision comparison | before each agent turn | Datahike's cache context on the value | nothing re-executes [p-a2 §2] |
+| Tests | the set of tests reaching the changed functions, from stored `:seon.fn/calls` edges | on request, in the cluster's JVM | recorded result facts; unchanged green is reused, not rerun | selection is a Datalog read; one subprocess remains, for boot from zero [a-test §1c, §5] |
+| Errors | one flat map validated at the armed wrapper against the function's declared union; recurrence = a content hash | at the boundary | the error entity, occurrences as components | no stamps, no copies of the union [a-err §1.6; p-b3 §9] |
+| Profiling | two `nanoTime` reads and a `LongAdder` per armed call (40 ns measured), flushed on a bound as facts keyed by (symbol, definition digest, branch) | continuously | aggregate rows; bottlenecks are a Datalog query over `:seon.fn/calls`; a finding becomes a task | no sampling thread, no second store [p-c1 §8; syn §8.5] |
 
-The single deletion every other seam depends on: the database value
-already carries its compiled registry (`seon.db/carried-projection`,
-`src/seon/db.clj:1168`). Nine derivations, four digest schemes and three
-cache holders rebuild it.
+Everything in §4 is one of those rows applied to one area, and every deletion there is the copy that the row makes unnecessary.
 
-- **Owned:** `src/seon/schema.clj`, `src/seon/schema/*.clj`,
-  `src/seon/instrument.clj`, `src/seon/call_preparation.clj`,
-  `src/seon/test/arm.clj`, their tests, `reference-code/malli`.
-- **Cut (floor):** [malli audit](../research/deletion-audit-malli-2026-09-21.md)
-  tables — `projection-rows`…`projection-from-database`
-  (`schema.clj:2514-2810`, 138 callers become reads of the carried value);
-  `call_preparation.clj:604-748` (argument structure from the retained
-  compiled contract: `m/-function-schema-arities`, `m/-function-info`,
-  `m/entries`); the classpath fallback `schema.clj:929-1100`; the
-  per-wrapper recompile `instrument.clj:747-754` and the second
-  whole-population projection in `apply!:993-995`; `contract-digest`
-  `:872-874`; `assert-config-display!` `schema.clj:1206-1225`;
-  `supplied-projection` `instrument.clj:604-620` (three scans per call).
-  `fn/schema_shape.clj:21-57` → `m/ast`/`m/from-ast` (RESET NEEDED).
-- **Read first:** `reference-code/malli/src/malli/core.cljc` — registry
-  and `-schema` (`:1943-1950`), `-function-schema-arities`/`-function-info`
-  (`:2771-2798`, `:3118-3143`), `ast`/`from-ast` (`:2848-2875`), `walk`,
-  `-memoize`; `reference-code/malli/src/malli/registry.cljc` whole;
-  `malli/error.cljc:44-181` (`default-errors`); first-party idiom: the
-  lazy registry that already landed, `src/seon/schema.clj:454-503`.
-- **Fork:** keyword-type entries in `default-errors`; deletes
-  `error.clj:977-1000`. Probe `generator.cljc:299-310` per-call registry
-  enumeration; fix in the fork if measured.
-- **Probe before/after:** `schema/projection-from-database` on `default`
-  (the test-system audit measured 3,996 ms — the last O(program) step in
-  the 37 ms fixture fork); one arming pass; `m/ast` round-trip of every
-  stored form preserves `{:closed false}`/`{:optional false}`.
-- **Stop rule:** none for held files — A2 owns `db.clj`; the seam between
-  them is `carried-projection`, which A1 reads and A2 does not change.
+## 1. Where we are
 
-### A2 Datahike: three answers become one (astra, medium)
+| Measure | Value | Source |
+|---|---|---|
+| `src/` · `test/` · `resources/seon/schemas/` | 90,162 lines in 109 files · 98,985 in 299 · 14,256 | [brief; wc] |
+| `docs/` after today's deletions | 237,714 lines in 950 `.md` files; of these `docs/prds/steward-platform` 125,419 and `docs/prds/context-generation` 78,937 are still present; live issue notes 22,193 | [wc] |
+| `AGENTS.md` | 1,321 lines; 827 product law, 351 lane choreography, 44 anecdote, 4 sentences contradicting its own laws | [instr §1] |
+| Live JVM (`default`) | 4.2 GB resident; the node cache's ~47 copies of 81 MB of strings | [goals §2b] |
+| Publication | no change **264 ms**; repeat docstring edit **2.7 s** (first 4.3 s); boot to ready **5.6 s**; reset: **13.2 s** final population compile + **36.1 s** transaction of 107,049 datoms inside a 178.8 s cold publication | [p-b1 §5; p-b4 §0b] |
+| Fixture fork | **37 ms** p50 after four O(program) steps were removed (from 188,908 ms); one remains: `projection-from-database` at **3,996 ms** of the 4,648 ms first acquisition | [a-test §4] |
+| Hook publication | `:current-source {:enabled false}`, `:check-tests false`, `:schema-admission {:enabled false}` — two of three disabled because of multi-lane editing | [instr §3] |
+| Error models | two at once: 799 `:seon.error/kind` sites (306 src, 443 test, 46 script, 4 bin) and 183 `:seon.error/class` markers beside the ruled base model; the attribute is absent from the live schema, so all 799 are dead writes and reads | [p-b3 §3] |
+| Linking facts | `:seon.test/subject` on 0 of 2,157 tests; `:seon.test/reach` on 0; responsible agents on 2 of 411 namespaces; no per-function content digest (the row digest is the FILE's digest); `:seon.test/platform` HAS landed on 110 rows | [p-b4 §0b; p-c1 §2; goals §2d] |
+| Contracts | 16 of 3,161 private functions carry one; 352 private `seon.db` read consumers uncontracted; 1,570 armed Vars of 5,191 functions | [goals §2a; p-c1 §8] |
+| Process machinery | `bin/test` 1,107 · `bin/seon-hook` 1,987 · `bin/codex-agent` 573 · `bin/_test-slot` 165 · `fresh_operator.clj` 3,727 · `test/runner.clj` 4,967 | [instr §0; a-pub; a-test §1] |
+| `reference-code/` | 109 submodules, 21.27 GB; 12 on the classpath, 8 read for design, 15 cited only by history, **74 uncited (20.96 GB, `bun` alone 15 GB)** | [refcode §1–2] |
+| Issue notes | 369 live after the sweep (61 blocker, 279 friction, 29 cleanup); 120 archived today | [sweep §0, §5] |
 
-- **Owned:** `src/seon/db.clj`, `src/seon/schema/datahike.clj`,
-  `src/seon/store.clj`, `src/seon/cluster/store*.clj`, `src/seon/blob.clj`,
-  their tests, `reference-code/datahike`, `reference-code/konserve`.
-- **Cut (floor):** [datahike audit](../research/deletion-audit-datahike-2026-09-21.md)
-  tables — read-currency mechanisms 2 and 3 (`db.clj:1102-1144`,
-  `replay-read :971`, `stable-value :530`, ~405 lines); the multi-arity
-  `diff` family with no caller (`:2797-3223`, keep the one-arg arity
-  `turn.clj:2224` uses); the EDN-string codec (`schema/datahike.clj:118-124`)
-  and the decode walker (~260); the O(program) checks inside the
-  final-report validator (`write-render-target-error :3904`,
-  `arity-mismatches-with :3833`) moved off the commit path; the two tests
-  that police that cost (`error_write_timing_test.clj`,
-  `publication_validation_test.clj`); nine duplicate test classes collapsed.
-  Fix the two live defects: `store.clj:564` vs `registry.clj:165`
-  liveness; `store.clj:121-124` unreleased flock.
-- **Read first:** `reference-code/datahike/src/datahike/query.cljc`
-  `:2658-2671` (cache context) and `:2877` (`query-dependency-plan`);
-  `pull_api.cljc:16`, `:315`, `:323` (the 1,000 cut);
-  `db/schema.cljc:35-55`, `:87`, `:105` (`:db.type/any`);
-  `connector.cljc:144`; `versioning.cljc` whole (branch = pointer,
-  `merge!`, `fork-database :620`); `writer.cljc` whole (one serial loop per
-  connection); `gc.cljc:120-168`; `db/transaction.cljc` coercion;
-  konserve `bassoc`/`bget`/`bget-range` and GC; first-party idiom:
-  `src/seon/cluster/source.clj` (every mutation through `versioning`),
-  `src/seon/blob.clj`.
-- **Fork:** the eight changes in synthesis §5, each landing with the
-  deletion it enables; pushed to our datahike fork (no upstream PR).
-- **Probe before/after:** one publication transaction's final-report
-  validator time on `default`; a retained read's currency check; pull of a
-  cardinality-many attribute over 1,000 members.
+## 2. Where we want to be
 
-## 2. Phase B — four seams at once (after A1 lands; three lanes running, the fourth queued)
+**The mission, in the owner's words** [goals §1]: "The entire program graph is in the database and it's queryable and we know every function and call edge and what each input and output is and what tests exist … make it easy to refactor and impossible to cause certain software failures (like removing a function that's still in use, or allowing a function to be used if it's violating the schemas)." "The goal is to get to the point where the system can improve itself." "It was always supposed to be a single JVM and we pay the cost of startup once. We pay the cost of indexing once and then it's incremental."
 
-### B1 Publication and operator: one path, no mirrors (astra, medium)
+**The target loop** [goals §1]: a task is an entity — instructions, namespace, subject, a set of tests that define done, a budget. Starting it creates an agent with its first turn open in the same transaction. The agent works on a forked branch and forked ctx until every test in the set verifies on the current reach; it may add tests, never remove them. A finished batch merges its changed program entities into the shared branch; the merge gate runs exactly the tests whose reach changed; approved entities are written back to their files by exact span. Signals derived from facts open tasks: red tests, uncontracted and untested functions, recurring errors, missing render pairs, profiling findings, a user's unanswered message. A namespace's agents are the engineers responsible for all of it.
 
-- **Owned:** `src/seon/fn.clj`, `src/seon/fn/*.clj`, `src/seon/program.cljc`,
-  `src/seon/cluster.clj` (publication/adoption/development sections),
-  `src/seon/cluster/source.clj`, `src/seon/test/cache.clj`,
-  `src/seon/operator.clj`, `src/seon/operator/state.clj`,
-  `script/seon/fresh_operator.clj`, `bin/seon`, `bin/seon-hook`,
-  `.claude/seon-hook.edn`, their tests, `reference-code/clj-kondo`.
-- **Cut (floor):** [publication audit](../research/deletion-audit-publication-operator-2026-09-21.md)
-  — the 660 caller-less lines of `fn.clj` (`plan-file-change :2443`,
-  `build-artifact :2116`, `rows :2552`, `reconcile-tx :3115`,
-  `backfill-contract-facts! :2663`, output-path family `:1807-2001`);
-  the operator's process-record/advertisement/claim/repair/phase-log layer
-  (~1,300: `fresh_operator.clj`, `state.clj` — the OS process table and
-  the prepl answer these, `state.clj:1199-1223`, `:1262`); the test-base
-  store and worker checkouts (`cache.clj:358-546`); six of seven
-  publication entry points and eight of nine progress mechanisms; the
-  toolchain double-hash, `published-index-rows :3149` on first adoption,
-  per-commit projection re-derivation (`source.clj:151`). The surviving
-  path, one sentence: the running JVM's prepl receives the changed paths,
-  hashes only those, lints them with clj-kondo's cache, transacts the
-  digest difference on `current-src`, reloads exactly the namespaces the
-  transaction report names; cold boot and `reset` alone spawn a JVM.
-  Absorb the right algorithm from the preserved draft
-  (`../research/one-jvm-lane-items-6-8-draft-2026-09-21.patch`) without its
-  second pass and second transaction. Convert the 15 algorithm-defect time
-  escapes; delete the 2 that die with their mechanism.
-- **Read first:** `reference-code/clj-kondo/src/clj_kondo/core.clj` (`run!`,
-  `:cache`, `:analysis` output keys); `impl/cache.clj:26-35`
-  (`from-cache-1`), `:129` (`load-when-missing`); `impl/analysis` (what a
-  var-definition row carries); `reference-code/clj-reload/src` (reload
-  ordering by dependents — compare with our `reload-order`,
-  `cluster.clj:2428`); `reference-code/datahike/src/datahike/versioning.cljc`
-  (commit ids); `script/seon/fresh_operator.clj:1819` (`prepl-eval!`, the
-  client that already exists).
-- **Fork:** clj-kondo `from-cache-1` skips a `:disk` entry whose
-  `:filename` is gone (~3 lines). Probe whether `load-when-missing` can
-  replace the stub prelude synthesized per agent evaluation
-  (`analyzer.clj:595`) — SCI-only definitions are not in the cache; record
-  the answer either way.
-- **Probe before/after:** the committed measurement script rows
-  (`docs/prds/steward-platform/research/measure-publication-path-2026-09-22.sh`,
-  moved with the archive): no change (264 ms), docstring edit
-  (2.7–4.3 s → < 1 s), from zero, boot; reset's "program population
-  compiled" 117 s explained by algorithm.
+### 2a. Functionality targets (deduplicated from [goals §2]; each has an acceptance condition)
 
-### B2 SCI, turn loop, render: the walk is the history (astra, medium)
+| # | Target | Acceptance | Lane |
+|---|---|---|---|
+| T1 | Every function, private included, carries a complete Malli contract and is armed | arming covers private; an uncontracted function is a positive finding fact at publication; newly asserted uncontracted identities are refused | A1, agents |
+| T2 | Every function's output contract names the errors it can return | the wrapper refuses a returned error satisfying none of the declared schemas (landed `796a76314`); the declared union is checked against the body-derived set | B3 |
+| T3 | The compiled generation is carried, never rebuilt | arming an unchanged generation performs **zero** named-declaration compilations, counted at the seam; fixture base loses its 3,996 ms step | A1 |
+| T4 | Read currency is one mechanism | Datahike's cache context; no replay, no index-pattern walker | A2 |
+| T5 | A pull never silently cuts; heterogeneous values store natively | fork default limit nil; `:db.type/any` admitted (zero indexed EDN attributes exist) | A2 |
+| T6 | The write validator reads only the report's datoms | arity and render-target checks bounded by the transaction, never O(program) | A2 |
+| T7 | An edit is program facts in ≤ 1 s; no change is two commit ids compared | docstring edit ≤ 1,000 ms (from 2,723); no-change ≤ 300 ms; measurement-script row moves | B1 |
+| T8 | One publication entry point, one adoption path, no file mirrors of database state | `refresh-source!` over the prepl; `current-src.edn`, `ready.edn`, manifests, test-base store gone | B1 |
+| T9 | The operator is a prepl client | one child JVM for cold boot and `reset --force`; every other command is a form the live JVM evaluates | B1 |
+| T10 | Every function row carries its own content digest | derived from `:seon.fn/source`; two functions in one file have different digests | B1 |
+| T11 | An agent's fork is `sci/fork` plus its private objects, once | no per-turn snapshot of every namespace binding; `:sci/generation` alone discriminates the private layer | B2 |
+| T12 | The history is the walk over stored evaluations through the declared pair | the hand-assembled views are deleted; HTML never clips; the walk's distance cut is a query-work elision | B2 |
+| T13 | Bounded execution is core.async.flow's | the turn transform is `:compute` with `:compute-timeout-ms`; no work launcher, no per-turn watchdog thread | B2 |
+| T14 | One error model | 0 `:seon.error/kind` sites, 0 `:seon.error/class` markers, 0 hand-copied unions, 0 inline error guards; recurrence identity content-derived (landed) | B3 |
+| T15 | One task family, trigger → task at the writer | `seon.task` replaces `seon.issue` and the plan lifecycle; `start!` refuses while `:seon.task/agent` exists; done is a query written by settlement | B3 |
+| T16 | Tests run in the cluster's JVM through one path | `seon.test/check` over `run-owned`; the platform tier is the one subprocess; `bin/test` ≤ 100 lines | B4 |
+| T17 | Every test carries a bound and fails over it | default 5 s; a reason without a number is a refusal; the 128 escapes are converted or deleted | B4 |
+| T18 | Selection derives from `:seon.fn/calls` and recorded green; unchanged green is reused | zero executions on an unchanged request; no mtimes, no file lists | B4 |
+| T19 | Profiling on the armed wrapper, keyed by definition digest and branch | ≤ 5 % overhead on an armed call; bottleneck chains are a query; findings open tasks | C1 |
+| T20 | Isolated candidate per task; gated merge; write-back by exact span | candidate writes leave main unchanged; the merge gate = the reaching tests; the indexer reproduces written files byte for byte; a same-identity conflict opens a task for root | D1 |
+| T21 | The first live namespace agent closes contract coverage on one namespace | on a fork, through `run-owned`, with the uncontracted functions and their reaching tests as the task's linked facts; merged through D1's gate | after B3+B4 |
+| T22 | Agents see their tests and results every turn; budget exhaustion is loud and resumable | the opening names the tests; each turn appends one evaluation of what passed and failed; a typed outcome on the task | B2, B3 |
 
-- **Owned:** `src/seon/sci/*.clj`, `src/seon/turn.clj`,
-  `src/seon/cluster/agent.clj`, `src/seon/flow.clj`, `src/seon/plan.clj`,
-  `src/seon/render.clj`, `src/seon/render/*.clj`, `src/seon/print.cljc`,
-  `src/seon/repl.clj`, `src/my/*.clj`, their tests, `reference-code/sci`.
-- **Cut (floor):** [sci/turn/render audit](../research/deletion-audit-sci-turn-render-2026-09-21.md)
-  — `render/transcript.clj` hand-assembled views (`:31-675`, `:1502-2442`;
-  turn PRD §15: "nothing assembles the history but the walk");
-  `flow.clj:241-944` launcher → `flow/futurize` + `:compute` workload +
-  `:compute-timeout-ms`; the per-turn watchdog thread `turn.clj:5053-5262`;
-  `render/web.clj` keyframe/delta (`:1849-1916`) and per-tab drain
-  (`:2689-2891`) → hyperlith's whole-view batch over `(dropping-buffer 1)`;
-  the invocation cache `render.clj:692-889` (commit id answers);
-  `render/ns.clj:412-833` HTML clipping ladder (§2.4 violation);
-  `plan.clj`/`issue.clj` duplicate task lifecycle (~700, coordinate with
-  B3 on `issue.clj`); `base-bindings`/`same-program-root?` O(program)
-  snapshot per turn fork and the two ctx atoms. Seven test namespaces
-  on one turn loop → one class each.
-- **Read first:** `reference-code/sci/src/sci/core.cljc` — `init :331`,
-  `fork :345`, `intern :260`, `copy-ns`, `eval-string*`, binding;
-  `sci/impl/namespaces`, `vars` (generation), `evaluator`;
-  `reference-code/sci/doc/interrupt.md`;
-  `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:78`,
-  `:165` and `flow/impl.clj:245-260`, `:313-318` (`futurize`, workloads);
-  `reference-code/hyperlith` (SSE, brotli writer, batch send);
-  `reference-code/datastar-clojure`; the binding turn design:
-  `docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md`
-  §13–§16.
-- **Fork:** sci — arm contract wrappers at the base so `:sci/generation`
-  discriminates the private layer; pushed to our `seon-env-hook` branch.
-- **Probe before/after:** `fork-for-turn` on `default` (ms); one agent
-  turn end to end; the namespace page for the largest namespace with HTML
-  unclipped; the debug page.
+### 2b. Size targets
 
-### B3 Errors, tasks, config, effects: one model (astra, medium)
+The audits' floors sum to ≈ 19,800 src lines deleted (≈ 70 K src) and ≈ 13,600 test lines [syn §2]. The owner's norm is a codebase ten times smaller than conventional software [brief]. The targets below go past the floor by **dissolution**: an area gets smaller than "delete the duplicates" when the mechanism a duplicate protected is itself removed (no worker pool ⇒ no slots, no checkouts, no wire protocol, no confirmation stage, no watchdog ⇒ no tests for any of them). A reviewer checks each target with `wc -l`.
 
-- **Owned:** `src/seon/error.clj`, `src/seon/error/*.clj`,
-  `resources/seon/schemas/seon.error*.edn`, `src/seon/issue.clj`,
-  `src/seon/issue/*.clj`, `src/my/issue.clj`, `src/seon/config.clj`,
-  `config/default.edn`, `resources/seon/schemas/seon.config*.edn`,
-  `src/seon/effect.clj`, `src/seon/search.clj`, `src/seon/bootstrap.clj`,
-  their tests, plus the consumer sites of the kind stamps (listed in
-  `../research/error-result-retirement-hunks-2026-09-23.md` before archive;
-  every conversion is one atomic slice, AGENTS.md rule 13).
-- **Cut (floor):** [errors audit](../research/deletion-audit-errors-issues-config-2026-09-21.md)
-  — the `diagnostic-*` restatement (`error/refusal.clj:37-74`, 275 sites,
-  keep `-member` and `-cause`); the Lucene tier (`seon.search`, zero
-  production callers of `search/search`; `similar-identities` is a 25-line
-  token overlap); fourteen copies of the error union → `error/facet-keys
-  :1921`; the 799 `:seon.error/kind`/`/class` stamps → the base + facet
-  model (ruling D3/D12: no general predicate, every contract names its
-  error schemas); 43 tuned config dials deleted, 9 replaced by the event
-  they stand for; `seon.issue` → `seon.task` (ruling D1: linked facts +
-  optional agent; template = render pair + units; detector finding = task
-  with detector subject; recurrence id per D13 through `seon.id/id`).
-- **Read first:** Clojure `ex-info`/`ex-data`/`Throwable->map`;
-  `reference-code/malli/src/malli/error.cljc` (explain, humanize);
-  `reference-code/malli/src/malli/core.cljc` `:or`/`:multi` dispatch;
-  `reference-code/datahike` tx-meta provenance; `reference-code/konserve`
-  for blobs; the two error PRDs
-  (`error-conversion-prd-2026-09-20.md`, `error-entities-prd-2026-09-17.md`,
-  archived) for the ruled shapes only.
-- **Probe before/after:** transact one error of every declared facet on a
-  fixture branch: stored, pulled, rendered; a contract miss names function,
-  arity, argument path, expected shape, offending value; the error-write
-  timing the deleted timing test policed.
+| Area (files) | Today | Audit floor | **Target** | What dissolves beyond the floor |
+|---|---:|---:|---:|---|
+| A1 Malli — `schema.clj`, `schema/{admission,edn}.clj`, `instrument.clj`, `call_preparation.clj`, `test/arm.clj`, `fn/schema_shape.clj` | 8,274 | ~6,700 | **6,070** | plans in the snapshot (no plan cache, no `contract-t`), supplier matching by compiled-form equality (no shape-row reads), the second compiled-cache holder deleted, `m/-instrument`'s own arity dispatch hosting the declared-error check — the spec's four probes [A1 spec §6, §8] |
+| A2 Datahike — `db.clj`, `schema/datahike.clj`, `cluster/{store,registry}.clj`, `blob.clj`, `seon.db.edn` | 7,196 | 5,456 | **5,000** | the population plumbing, the read-evidence writer arms, read-side validation and the eight holders dissolve the code around the audited spans too (contracts, docstrings, schema keys, the `::read-projection` delay); ~45 more if the fork's own `source-context-unchanged?` is made public [A2 spec §8, §6.2] |
+| B1 publication/operator — `fn.clj`, `fn/*`, `program.cljc`, `cluster.clj` (publication), `cluster/source.clj`, `operator*.clj`, `id.clj` | 12,402 src · 3,727 script · 1,987 hook | ~9,600 src | **8,000 src · ≤ 700 script · ≤ 1,500 hook** | nine progress mechanisms → one argument; seventeen bounds → one per phase; the manifest value; offline readers; process records; advertisement repair [a-pub §1–4] |
+| B2 SCI/turn/render — `sci/*`, `turn.clj`, `run.clj`, `cluster/{agent,wake,message,prompt}.clj`, `flow.clj`, `oversight.clj`, `render.clj`, `render/*`, `print.cljc`, `repl.clj`, `ai.clj`, `my/*` (not `my/issue`) | 33,353 | ≈ 28,550 | **24,500** (`turn.clj` 3,300 · `render/web.clj` 2,300 · `sci/eval.clj` 2,400 · `flow.clj` 600 · `render/ns.clj` 480 · `render/transcript.clj` 0) | one turn function, one bind of first-party Vars, one history, one delivery; the routed-problem block leaves for B3; the since-diff is one query; the render proc's retention goes with per-tab render [B2 spec §9] |
+| B3 errors/tasks/config — `error*.clj`, `issue*.clj` + `plan.clj` + `my/{issue,plan}.clj` → `task.clj` + `my/task.clj`, `config.clj`, `effect.clj`, `search.clj`, `env.clj`, `bootstrap.clj` | 10,972 | ≈ 6,900 | **≈ 2,500** (`error.clj` 550 · task family 530 · `config.clj` 650 · `effect.clj` 500 · `env.clj` 150 · `bootstrap.clj` 120 · `search.clj` 0) | rendering leaves the recorder; the evidence-cap machinery dissolves into the value renderer; one task entity, one writer, done as a query, no note pipeline, no tree reconcile; the retired opening generator [B3 spec §8] |
+| B4 test system — `test.clj`, `test/*` (not `arm.clj`, `accretion.clj`), `test_support.clj`, `bin/test*`, `seon.test*.edn` | 8,077 src · 1,123 fixture · 1,373 shell · 1,203 schema = 11,776 | ≈ 6,300 | **≤ 3,300** (`runner.clj` ≤ 1,100 · `test.clj` ≤ 700 · fixture ≤ 450 · shell ≤ 160 · schemas ≤ 800) | one `run`; observed reach deletes the 305-line reach-digest index; recording without claims, workers, staged writes is ~200 lines; the fixture is the hosting cluster's connection and ctx, so no base clone and no hold protocol [B4 spec §9] |
+| remainder of `src/` (`fs*`, `shell/*`, `web/*`, `schedule.clj`, `maintenance.clj`, `reconcile.cljc`, `edit*`, `context.clj`, `problems.clj`, `background.clj`, `eval/*`, `bootstrap_drive.clj`, …) | ~10,900 | — | **8,000** | the 179 inline error guards (~700 lines repo-wide), retired vocabulary, `problems.clj` duplicates of `turn.clj` names [a-sci §4; p-b2 §9-A] |
+| **`src/` total** | **90,162** | **≈ 70,000** | **≤ 55,000** | the six landed specs' targets (A1 6,070 · A2 ~4,700 src · B2 24,500 · B3 ~2,500 · B4 ~1,800 · C1 +240) plus B1's 8,000 and the remainder's 7,500 sum to ≈ 55,300 before B1's spec and the agents' work |
+| `test/` | 98,985 | ~94,300 | **≤ 68,000 at the cut; ≤ 45,000 after the hoisting task class** | the landed specs alone remove ≈ 31,000: B2 ~17,700 (seven turn namespaces → three classes; cache, package, launcher, history suites), B4 ~7,000 (process suites, two runner suites → two class files), A1 ~2,200, A2 ~1,470; B1 and B3 add ~2,400; then the 46-lines-per-test setup hoisted by agents [A1 §7; A2 §7; B2 §7; B4 §9; a-test §3d] |
+| `resources/seon/schemas/` | 14,256 | — | **≤ 11,000** | 264-line union in `seon.effect.edn`, 156 class markers, the worker/claim families in `seon.test*.edn`, ~180 lines of class-C dials, the replay/digest keys in `seon.db.edn` [p-b3 §3–5; a-dh §8] |
+| `AGENTS.md` | 1,321 | — | **≤ 250** | the laws, the vocabulary, one page of state; mechanism prose re-homed to `docs/seon/architecture/` and the skills [instr §1.4]; a first draft is at [AGENTS-rewrite-2026-09-21.md](AGENTS-rewrite-2026-09-21.md) (548 lines, still over the target) |
+| `docs/` | 237,714 | — | **≤ 35,000** | the two old programs (204,356 lines) and the brief deleted at the clean write; issue notes stay until promoted to `seon.task` rows |
+| `reference-code/` | 109 · 21.27 GB | — | **20 · ≤ 0.2 GB** | 74 uncited and 15 history-only submodules unvendored [refcode §1–2] |
 
-### B4 The test system is the runtime (astra, medium; queued behind the first free slot)
+## 3. The laws that decide every design
 
-- **Owned:** `src/seon/test.clj`, `src/seon/test/*.clj` except `arm.clj`
-  and `cache.clj`, `test/seon/test_support.clj`, `bin/test`,
-  `bin/test-fast`, `bin/_test-slot`, `resources/seon/schemas/seon.test*.edn`,
-  their tests.
-- **Cut (floor):** [test-system audit](../research/deletion-audit-test-system-2026-09-21.md)
-  — the 1,213 shell lines; `runner.clj:3628-4310` worker pool; the 682
-  lines of checkout/exchange/process-tree; `test_runner_integration_test.clj`
-  (28 × 30 min); the surviving path `seon.test/check` (`test.clj:1901`) →
-  `run-owned` (`:576`), admitted through the one selector, executed in the
-  cluster's JVM on a `with-database` branch + ctx fork, recorded through
-  `commit-results!`; `bin/test` becomes a launcher of that path for the
-  platform tier (boot from zero) only. Fix `duration-failures`
-  (`runner.clj:369-371`): a reason without a number is a refusal, not a
-  default. Hoist the repeated 46 lines/test into `test-support`. Convert the
-  72 algorithm-defect escapes across the tree with their owning lanes; delete
-  the 18 process and 31 duplicate ones.
-- **Read first:** `reference-code/kaocha` (selection, reporters, bounds —
-  what a runner is); `clojure.test` itself (`test-var`, fixtures, report
-  multimethod); `test_support.clj:946` (the 37 ms fork, the idiom to
-  build on); `reference-code/datahike/src/datahike/versioning.cljc:620`.
-- **Probe before/after:** an agent asks "which tests reach my change",
-  runs exactly those in-process, gets recorded results; a second identical
-  request executes zero; the platform tier boots from zero.
+1. **Values carry their world** — the projection, the database value, the profile travel with the computation; never a dynamic var, atom or registry fetched at call time (AGENTS.md §2.1).
+2. **Facts over inference; derive or die** — a question the database cannot answer is a data-model defect; no hand list, naming convention or regex; every mirror is derived, checked, or dated (AGENTS.md §2.2).
+3. **Bounded, event-driven, both halves** — every execution surface carries its declared bound at the admitting seam; a bound firing is a bug report, never a retry; absence of signal is never health (AGENTS.md §2.3).
+4. **Total, honest boundaries** — every function carries a contract; errors are flat values validated by the wrapper; one clipping spot (AI render functions and the value renderer); HTML never clips (AGENTS.md §2.4).
+5. **One mechanism, accreted in place; seconds, not minutes** — no second path, cache, constant or noun; a fork is a pointer; an edit costs the change; anything over ten seconds needs the owner's authorization (AGENTS.md §2.5 and "How we work here").
 
-## 3. Phase C — the live loop (the orchestrator, the moment A lands; runs beside B)
+## 4. The work
 
-1. **Profiling on the wrapper** (owner, 2026-09-21): two `nanoTime` reads
-   in the armed wrapper; `LongAdder` count/total + `LongAccumulator` max per
-   armed definition, keyed by (symbol, `:seon.fn/digest`, branch); one
-   flush on a bound transacts aggregates as facts (symbol as value); hot
-   chains are a Datalog join over `:seon.fn/calls`; findings resolve to a
-   task identity (ruling D2). Java Flight Recorder is the independent
-   check. Read: `java.util.concurrent.atomic.LongAdder`, the wrapper's
-   invocation path `instrument.clj:378`, `current-wrapper? :844-858`.
-2. **The first namespace agent: contract coverage** (owner's choice). Task
-   = the uncontracted functions of one namespace (query) + the tests
-   reaching them; the agent works on a forked branch + SCI context, installs
-   contracts, runs `run-owned`, merges through `exact-replacement-tx`
-   (`program.cljc:840`). A same-identity conflict opens a conflict task for
-   root (ruling D6/D8). Subject namespace: owner's pick, or the smallest
-   with the most uncontracted `seon.db` readers.
-3. **Second agent: a profiling task** from C1's first finding, on its own
-   fork, measured before and after by digest.
+Ownership seams are the brief's [brief, "Decisions"]. A1 and A2 meet at `seon.db/carried-projection` (`db.clj:1219`). Each lane's spec lives at `lane-<x>.md` in this directory. As this pass is written six have landed — [A1](lane-a1-projection-carried.md), [A2](lane-a2-datahike-one-answer.md), [B2](lane-b2-walk-flow-fork.md), [B3](lane-b3-errors-tasks-dials.md), [B4](lane-b4-tests-in-process.md), [C1](lane-c1-wrapper-profiling.md) — and their rows quote the spec; B1 is being written in parallel and its row is summarized from the audit and pack, marked **spec pending**. D1 is defined here.
 
-## 4. Integration (orchestrator, per landing)
+### A1 — the projection is read, never rebuilt ([spec](lane-a1-projection-carried.md), landed)
 
-Read the diff (what did it delete; which seam does it call, cited; is any
-step O(program); did it add a cache, constant, roster or noun — send back).
-`clojure -M -e "(require …)"` for every touched namespace. Boot from zero
-on a scratch root; `default` reset once per integration with every pending
-schema change batched (database data is disposable). The measurement
-script row. Push `agent-platform-cut` at every integration. When B lands:
-merge to `steward-platform`, then `main`.
+| | |
+|---|---|
+| Deletes | per-call `supplied-projection` and its 70-line member union, the `boot-wrapper`/`bootstrap` second population, the dead `contract-digest`, the per-wrapper recompile and the arity scan (`instrument.clj`); `derive-projection-from-database` and `projection-from-rows` collapsed to a ≈40-line loader; the classpath fallback and its 158-line diagnostic (`schema.clj:929-1085`) with `schema/edn.clj`'s process-global population cache; whole-population `assert-config-display!`; twelve Datalog queries, the plan cache and the prepared-symbol queries in `call_preparation.clj`; the raw-form fingerprint walker; `schema/admission.clj`'s file-reading and second form walker plus its child-JVM `-main`; `sha-256`/`byte-array?` copies; 5 benchmark deftests; 14 refusal-grammar tests → 2; 9 idempotence tests → 3; 5 "resolves once" tests; the Datalog-structure tests of call preparation [spec §5, §7] |
+| Builds | the wrapper closes over its generation at arm time and reads `(mr/schema registry sym)`; `projection-from-database` returns the carried value (a refusal when absent, once B1 names the boot loader); config admission per declaration in `register!`; plans derived from the compiled contract inside the call-preparation snapshot; fingerprint = normalized `m/ast` (RESET); admission pure over the carried forms; Malli's own error table with a 13-entry noun overlay as data; one class regression: an unchanged generation arms with zero compiles [spec §5] |
+| Numbers | seam acquisition 589 ms warm / 3,996 ms cold → a metadata read; `create-base` 4,648 → < 700 ms; arming compiles → **0** (counted); per-call wrapper work 11 items → 5; call-preparation queries per plan 12 → 0; A1 src 8,274 → ≈ 6,070; A1 tests 7,233 → ≈ 5,000 [spec §1, §8] |
+| Fork | `malli/error.cljc:44-172`: `default-errors` gains `:vector :sequential :map :set :tuple :and :or :fn` in Malli's grammar; Seon's noun grammar is a data overlay, no `case` [spec A1-7] |
+| Depends on | nothing; every other lane reads this seam. Names for their owners: 7 boot callers (B1/A2), 8 dead `or` fallbacks, 22 running-code sites that start reading the carried value untouched, 7 guard sites whose union lives in `db.clj` (A2). Leaves `arm-var!` clean for C1 [spec §5b, §5c] |
 
-## 5. What this plan never does
+### A2 — three answers become one ([spec](lane-a2-datahike-one-answer.md), landed)
 
-No second cache, analysis path, runner, registry or noun. No tuned constant
-without the event it stands for. No `foo-v2`. No lane runs a full suite. No
-lane edits a file another running lane owns; a held file is a stop and a
-report, answered by the orchestrator with a ruling. No stored data
-migrated: reset.
+| | |
+|---|---|
+| Deletes | read-currency arms (a) and (c): index-pattern walkers, `replay-read`, `stable-value`/`read-result-digest`, the read-request/result/digest keys of `seon.db.edn` (−405); the EDN-string codec, every decode/encode walker and the declaration-population plumbing (−410); the multi-arity `diff` family (−330, zero production callers); `total-pull-selector` (−70); pulled-form inference and read-side validation (−182); `jdk-integers->long`; the 56 inline error-shape checks; the 8 load-cycle holders; `store.clj`'s redundant config policy, the never-released `file-lock-generator`, the `contains?` liveness answer; `registry.clj`'s pre-reads the library already refuses, the filestore directory walk, `dry-run!`'s control-flow exception; one `blob.clj` unwrapper; the tests of each, nine duplicate classes to one member, `error_write_timing_test` whole [spec §5, §7] |
+| Builds | currency = equality of the read's per-attribute revision with the connection's cache context (Datahike's own `source-context-unchanged?` predicate); values stored as `:db.type/any`; a pull is complete or refuses under the fork's resource bound, reported as an elision; the validator reads the report's datoms grouped by entity, arity edges checked against indexed facts, render targets as facts on the schema row; `active-connection` as the one liveness answer; one new regression per class (currency by revision, validator proportional to the report, liveness during a drain, fresh-store fixture time) [spec §2, §7] |
+| Numbers | `read-evidence-current?` over 435 retained reads 114.9 ms → ≤ 5 ms; EDN-encoded attributes 23 → 0; validator work per program write from 65,764 call-arity datoms + 1,684 arity rows + 3,337 parsed forms → proportional to the report; `with-fresh-database` 4,648 → tens of ms; owned lines 7,196 → **5,000** (floor 5,456) [spec §1, §8] |
+| Fork | datahike: `:db.type/any` in the value set, refused with `:db/index`/`:db/unique`/cardinality-many; `+default-limit+` nil; `versioning/branch-commit-id`; `:datahike.gc/plan-only?`; Integer→Long only if the probe shows it reaching the writer. konserve: `:size` in `k/keys` metadata and a `store-base` accessor [spec §5 f1–f6] |
+| Depends on | A1 (`:seon.schema/render-ai`/`render-html` as schema-row facts live in A1's file); B1 (`:seon.fn/calls` `:db/index` and arity bounds as facts); B3 (the constructor the 56 sites convert to); B2 (`turn.clj:2030`, `wake.clj:422` one-line edits). Two RESETs: currency attributes removed, 23 attributes change type. Unsettled in the spec: why 413 of 435 retained reads plan `:all` [spec §6.1] |
+
+### B1 — one publication path, one operator request (spec pending)
+
+| | |
+|---|---|
+| Deletes | the manifest value and `database-manifest` (~115); the 660 caller-less `fn.clj` lines and their tests (~700–900); `discard-obsolete-cache-entries!` and the second clj-kondo run; `program-prelude` stubs (probe first); `current-src.edn`/`ready.edn`/`program-currentness` (~100); the test-base store with its GC and liveness files (~200, with B4); the aggregate `test-input-digest` (per-path rows replace it, with B4's reads); process records, claim files, advertisement truth/repair, phase logs, offline readers (~1,140); six of seven publication entry points and `publication-base!`; the hook's cache diagnostic (~130), session-digest walk (~90), worker/queue/result files (~180); eight of nine progress mechanisms; sixteen of seventeen bounds; three `sha-256` copies [a-pub §1–4; p-b1 §3–4] |
+| Builds | `refresh-source!` as THE request: changed paths → digest difference → clj-kondo lint with its own cache → transaction of the difference → report names identities → callers linted only on a contract datom (the preserved draft's algorithm, landed inside the publication's transaction sequence per the ruling "the transaction report is the seam") → reload the report's namespaces → re-arm changed wrappers; the projection the publisher holds carried onto the commit it writes; **the per-function content digest** on every `:seon.fn` row, derived from `:seon.fn/source` (RESET); hook publication re-enabled once the edit is sub-second |
+| Numbers | docstring edit 2,723 → ≤ 1,000 ms; no change 264 → ≤ 300 ms (held); complete publication 178.8 s → ≤ 60 s (tempid map O(rows × 53 identity attributes) replaced by Datahike's identity upsert); `fresh_operator.clj` 3,727 → ≤ 700; operator 6,599 → ≤ 1,800; every row of the measurement script re-recorded |
+| Fork | clj-kondo `impl/cache.clj:23-36`: `from-cache-1` skips a `:disk` entry whose recorded `:filename` no longer exists (~3 lines) |
+| Depends on | A1 (carried projection replaces `source/database`'s rebuild); coordinates with B4 on the test-base store and the four `test-input-digest` reads |
+
+### B2 — the walk is the history; flow is the launcher; the fork is the context ([spec](lane-b2-walk-flow-fork.md), landed)
+
+| | |
+|---|---|
+| Deletes | the per-turn binding snapshot (`base-bindings`, `same-program-root?`, the diff in `regenerate-agent-context!`), the two kernel mirror atoms, `installation-covers-program-change?`, `::print-session`; 7,725 `copy-var*` root copies per acquisition; 272 lines of doc/dir assembly; the candidate ctx fork; the work launcher (704), the capacity observer, the turn backstop (252) and its caller; the relaying mailbox proc and `CountedSlidingBuffer`; the three turn siblings, delimiter repair, schema-change machinery, declaration-shape duplicates, hand-rolled optimistic concurrency; the whole history assembler (2,443); packages, per-tab registration, the drain await, the render proc's retention, the invocation cache and its consumers (~900); the namespace page ladder (440); the debug page's parallel derivations (750); the namespace-candidate scan; `*walk-context*`; 15 delays + 7 inline `requiring-resolve`; `seon.run`; ~17,000 test lines (seven turn namespaces → three classes; cache, package, launcher and history suites whole) [spec §5, §7] |
+| Builds | first-party functions bound as the JVM `Var` objects themselves (one 8.6 ms walk, never repeated; a reload or re-arm is visible immediately through `Var.invoke`); `fork-for-turn` = `sci/fork` + re-intern of the private Vars by `:sci/generation`; the turn as one function with one source selector, run as one flow proc whose in-port is the wake channel and whose deadline is flow's `:compute-timeout-ms`, reported on `::flow/error` to the fault committer; the history as the walk through the evaluation schema's pair; per-tab whole-view render on a `(dropping-buffer 1)` tap, brotli-streamed by the SDK's own profile (nothing vendored); one AI text + one full HTML view per namespace page; the since-diff as one `db/since`; the load order `print → render.value → repl → render → render.walk → sci.* → prompt/context → turn → cluster.agent → render.web` [spec §2, §5, §2h] |
+| Numbers | private-layer discovery per turn: a 5,326-binding walk × 2 → `sci/fork` (0.002–0.02 ms) + N private Vars; ctx atoms per agent 5 → 1; procs per agent 3 → 2; history render paths 4 → 1; `requiring-resolve` in owned files 22 → 0; owned src 33,353 → **24,500**; owned tests ~37,700 → **~20,000** [spec §1, §9] |
+| Fork | the sci change is **withdrawn** — arming never runs against a fork once program rows install at the base. core.async `flow/impl.clj:257-261` (3 lines): `:compute-timeout-ms` applies the futurized `.get` for any workload, so the paid call stays `:io`; fallback without the fork stated [spec §2b] |
+| Depends on | A1 (carried projection at `sci/eval.clj`'s ten rebuild sites); B3 for `effect.clj:991`, `bootstrap.clj:816,863,871`, the seven `plan/settle-call`/`run-issue-tests!` sites, the two config key names and the error render split; B4's fixture for the turn-test collapse. Two RESETs: the `:seon.render/request-error` key and the opening's bytes |
+
+### B3 — one error model, one task family, dials that mean something ([spec](lane-b3-errors-tasks-dials.md), landed)
+
+| | |
+|---|---|
+| Deletes | all 799 `:seon.error/kind` sites (pure code; the attribute is not in the live schema) and 172 `:seon.error/class` markers with their test; the `diagnostic-*` ceremony at 275 sites (2,310 key lines); the 14 drifted union copies (695 lines, six different member sets); the stored EDN copy of every recorded error (a live occurrence: 55,201 bytes beside the datoms that say the same), the path/segment/omission components and the 33 predicates and generators that reassemble them; the renderer from the recorder (300 lines move to `seon.render.error`, B2) and the two load-cycle delays; dead prose builders; the 195 `;; debt:` guards in owned files; the note-ingestion pipeline, `seon.issue`, `issue/*`, `my.issue`, `seon.plan`, `my.plan`, the plan's tree reconciler and the `:seon.agent/plan` component (1,882 issue entities on `default`: every one from a note path, none with a detector or agent); Lucene whole; `seon.env`'s record, atom and predicates; `*request-context*`; synchronous effect rows and the retired `receipt`/`face` spellings; 33 class-C dials with rows and readers, 5 class-B rows with their event conversions; `bootstrap.clj` to `seed-tx` + `supervision-tx` (probe §6.4); ~7,000 test lines [spec §2, §5, §7] |
+| Builds | `(seon.error/error m)`: one additive pure constructor; the wrapper validates the DECLARED union only (A1 seam); the offending value is the value renderer's shown text + `result/e<id>`; recurrence identity unchanged (D13 landed); `:seon.error/base` at the 14 pass-through boundaries, every domain function still naming its union; **`seon.task`** as one entity (linked facts, optional agent, `parent`/`needs`/`position` for a plan step) with **the D2 writer** `trigger-call`: one identity lookup inside the caller's transaction — absent → task + agent + first turn; present with agent → `updated-tx` wakes it; done = tests verified on current reach OR the detector scoped to the ONE subject returns nothing; `settle-call` at turn close; detectors as scoped queries fired from root's schedule rows; a recurring error opens its task in the same transaction as the second occurrence; a conflict task from the merge writer; `my.task`; the 369 notes promoted once by a throwaway script; each class-B dial replaced by the event it stood for [spec §2a–2c] |
+| Numbers | owned src 10,972 → **≈ 2,500** (`error.clj` 2,790 → 550; task family 4,169 → 530; `bootstrap.clj` 932 → 120); owned schema ≈ 2,400 → ≈ 900; `kind` 799 → 0; `diagnostic-*` 2,310 → 0; union copies 14 → 0; bytes per recorded fault 55 KB EDN + 13 KB blob → the declared datoms + shown text; done check: a whole-program detector run → one scoped query ≤ 10 ms; config keys 92 → 50 [spec §1, §8] |
+| Fork | none |
+| Depends on | A1 (`default-errors` entries, declared-only validation at the wrapper, `admission.clj` for `similar-identities`); A2 (`:db.type/any` for the explanation path, `blob.clj`); B2 (`seon.render.error`, the seven `turn.clj` sites, `my/plan.clj`, `:seon.agent/plan` readers, `render/web` coalesce, `ai.clj` retry); B4 (`run-owned` for `run-tests!`); B1 (`cluster.clj` search wiring, held today). Three RESETs: the error shape, the task family, the retired config attributes |
+
+### B4 — the test system is the runtime ([spec](lane-b4-tests-in-process.md), landed)
+
+| | |
+|---|---|
+| Deletes | worker pool, checkouts, exchange, wire protocol, claim protocol, staged results, watchdog and thread dumps, confirmation stage, packing, ambient drift, the 305-line reach-digest index, the `arm.clj` duplicate (−2,900 of `runner.clj`); `run`, `run-owned`, `check`, `check-in-process` and two private selectors → one function; `seon.test.fast`, `bounds.clj`, `cache.clj`, `selection.clj` whole (the ~90 lines of input roots move to B1's `cluster/source.clj`); `bin/test` to ≤ 100, `bin/test-fast` and `bin/_test-slot` whole; the fixture's base clone, hold protocol and file-backed roots (`test_support.clj` 1,123 → ≤ 450); the process families in five `seon.test*.edn` schemas plus 14 shapes of `seon.test.edn` (RESET); `:seon.test/subject` (0 rows; E2 forbids the annotation); ten test files that prove the machinery (−6,600 in commit 1 alone) [spec §5, §9] |
+| Builds | **the in-process test request**: `(seon.test/run request)` — basis = last green run; changed = `since` over per-function content digests; reached = AVET lookup of each changed symbol in `:seon.test/reach`, the set the armed wrappers **observed executing** on the last run (static `gate-sets` only as the first-run seed); green unreached members answered from the record; the rest run serially on a branch + ctx fork of the hosting cluster under `(or long-ms 5000)`; one transaction per member records counts, failures, observed reach and basis; the tally is a query; `bin/test-check` (53 lines, no JVM) and `my.test` are one-line callers; `bin/test --platform` boots one scratch JVM for the 110 declared platform rows; a `:seon.test/long` without `long-ms` does not publish [spec §2, §6] |
+| Numbers | tests selected for a one-function change: **1,827 of 2,157 today for every seed probed** (the static graph is saturated) → the observed set, expected tens; selection 134–293 ms → ≤ 20 ms; first fixture acquisition 4,648 → ~40 ms; JVMs per gate 4+ → 0 (1 for platform); granted budget 68,105,085 → ≤ 1,500,000 ms, every declaration numbered; `runner.clj` 4,967 → ≤ 1,100; `test.clj` 2,182 → ≤ 700; area (src + shell + schemas) 11,776 → **≤ 3,300**; corpus in the area 10,080 → ≤ 3,000 [spec §1, §9] |
+| Fork | none |
+| Depends on | A1 (the 3,996 ms base step); B1 (content digests for `changed`, `:seon.test/subject` lifting removed from the indexer, `cluster/source.clj:287-293`); C1 (the wrapper's observation is the reach — until it lands, selection falls back to the static seed and says so); B3/B2 for five foreign call sites of the one function |
+
+### C1 — profiling on the armed wrapper ([spec](lane-c1-wrapper-profiling.md), landed)
+
+| | |
+|---|---|
+| Deletes | nothing; the one net-positive lane, budgeted at **≤ 240 src, ≤ 130 test** lines [spec §8] |
+| Builds | a `deftype` cell (`LongAdder` count and total, `LongAccumulator` max) per armed definition, allocated at arming and keyed by (symbol, content digest) — a redefinition starts a new row; per-branch cells chosen by the custody binding the turn already establishes (`seon.db/*conn*`, 12 ns), host work in a `host` cell never transacted; two `nanoTime` reads around the call in both wrappers; **the flush joins the turn's own close transaction** — `sumThenReset` over touched cells, one entity per (symbol, digest) whose `[count total max]` tuple is REPLACED per window, every earlier window kept by Datahike's history; rolling average = a history query; self time = total minus callees over `:seon.fn/calls`; `my.program/profile` as a one-hop chain read; a window over the `:slow-ms` dial (2,000 ms, the owner's law) opens ONE task per symbol through the D2 writer inside the same transaction; JFR as the independent check [spec §0, §2, §5] |
+| Numbers | unwrapped 174.7 ns, armed 1,136.8 ns; the sample done right +40 ns, done wrong (map of cells, boxed locals) **+624 ns** — forbidden by construction; custody attribution +12 ns; flush floor 300 identity upserts 12.95 ms first / 6.03 ms second; callees of 300 symbols over 40,812 edges 7.87 ms; acceptance: sampled − unwrapped ≤ 60 ns, custody − sampled ≤ 20 ns, flush ≤ 30 ms inside the close transaction [spec §1] |
+| Fork | none |
+| Depends on | A1-3 (the clean outer fn; lands on today's anyway and reports both numbers); B1 (`:seon.fn/digest`, form-scoped — until then the file digest over-splits windows, never merges); B3 (the D2 writer; `seon.issue/subject-row` upserts by the same identity until then); one RESET for the new attributes. Unsettled: provider and effect waits rank as slow self time — the effect owner samples its own crossing (recommended) [spec §8] |
+
+### D1 — isolation, merge gate, write-back (defined here from [goals §2f] and the isolation research; spec pending)
+
+| | |
+|---|---|
+| Deletes | `bin/seon init NAME` as a separate fork path once a task fork is the same `branch!`; any second "changed entities" derivation |
+| Builds | a candidate per task = `branch!` from the shared branch's commit + `sci/fork` (the fixture already does exactly this); **changed program entities since the fork basis** as a pure projection over `since` (edit three entities on a fork ⇒ exactly those three); **the merge gate**: exact replacement through `seon.program` into the shared branch, admitted only when the task's tests and every test reaching a changed function are green on the proposed combined program in-process (B4's request), refusing an identity no test reaches BY NAME; a durable acceptance record (base, proposed definitions, selected tests, results, tested head); a same-identity conflict opens a conflict task for root with both sources and the basis (D6), fingerprinted so only one arises; **write-back**: accepted definitions to their files by `:seon.fn/file` + form span through the effect boundary, gated on the ordinary indexer reproducing the written bytes byte for byte, then a path-limited commit; C6: no agent ever shells out to change its own system |
+| Numbers | fork ≤ 50 ms; changed-entities projection proportional to the fork's datoms; merge gate executes only the reaching set; write-back round-trip digest equality proven on the first merged namespace |
+| Fork | datahike `versioning/merge!` (`:734`) is read first; a Seon merge is exact replacement over `seon.program`, not a Datahike three-way merge |
+| Depends on | B1 (form spans, content digest, the indexer as the write-back oracle), B2 (the fork ctx and private objects), B4 (the in-process request), B3 (the task and conflict-task writers) |
+
+### Dependency order
+
+| Step | Lanes | Why this order |
+|---|---|---|
+| 1 | **A1**, with **A2** alongside | every seam reads the carried projection; A2's currency and codec cuts touch nothing A1 owns; both meet at `carried-projection` |
+| 2 | **B1, B2, B3, B4** after A1 lands | each reads the carried value; B1↔B4 share the test-base store and digest reads; B2↔B3 share seven call sites — the specs name the exact seams and the second lane to arrive stops at them |
+| 3 | **C1** after A1 + B1 | needs the clean wrapper and the content digest; its observation is also B4's reach (B4 commit 7 waits on it) |
+| 4 | **D1** after B1 + B2 + B4 + B3's writers | the gate is B4's request; write-back is B1's indexer in reverse |
+| 5 | **the first live namespace agent** after B3 + B4 (D1 for its merge) | contract coverage on one namespace, through `run-owned` on a fork |
+| 6 | **agent work**: the second task class (hoisting the repeated test setup — 46 lines per deftest, the `:seon.audit/poison` probe at 7 sites, the 12-row provider table in two files, five `delete-recursively!` copies [p-b4 §6]) and the contract campaign (3,145 private functions, 352 uncontracted `seon.db` readers, 288 untested public functions [goals §2d]) | these are the namespace agents' first real work by ruling; no human lane is launched at them |
+
+Lane concurrency within a step is the owner's decision after this plan [brief].
+
+## 5. The pipeline and gates
+
+**How a lane works** [brief, "What every spec must contain"]. It opens its spec's owner section and reads the reference-code blocks listed there before editing (verified `file:line` at the current gitlinks; the packs carry them). It records the before-numbers in the REPL (`eval_clj`, mode `jvm`, `read_only`, against `default`; a scratch cluster only when a probe must mutate; never a restart of `default`). It probes the spec's "better than the floor" candidates first and takes the smaller cut when a probe shows one, saying so with evidence. It lands ordered, net-negative, path-limited commits, each leaving HEAD loadable (`clojure -M -e "(require …)"` for the touched namespaces), fork commits pushed before the deletion they enable, RESET NEEDED marked where a stored shape changes. It runs only the tests reaching its change, in process, through `seon.test/check` or `run-owned` — never a suite, never a cold gate. It stops at a held file, at an unsettled design (three options in the landing note), and at a seam another lane has not landed.
+
+**What "landed" means.** The numbers the spec names have moved, measured on the REPL and pasted as exact forms and values; HEAD loads after every commit; the reaching tests are green in process; the landing note exists at `docs/prds/agent-platform/landing/lane-<x>.md` with the commit list, `git diff --stat` per commit, RESET NEEDED with its commit, every guard site's disposition, every citation whose line moved corrected. A green run alone lands nothing.
+
+**Integration, by the orchestrator.** One boot from zero per integration step, on the measurement script (`docs/prds/steward-platform/research/measure-publication-path-2026-09-22.sh` until it moves with the docs), recording its rows; one reset per step with every pending schema change batched (fingerprints, content digest, ordered explanation, `:db.type/any`); the platform tier once; **no full suite** — the reaching set for the integrated change plus the platform tier is the proof, and a red outside that set is the namespace agents' work by ruling [goals §3, "Fix the highest value first"].
+
+**The astra review lens** [brief]. First: is the data processed at the right time and place — is anything computed per call that belongs at construction, per turn that belongs at publication, per program that belongs to the change? Second: errors in citations, counts and ordering. A reviewer improves the algorithm before it corrects the prose.
+
+**The fresh implementation session** starts from this plan and the specs only; the research directory and the brief are deleted at the clean write, so nothing a lane needs may live only there.
+
+## 6. What this plan never does
+
+- Never a second cache, analysis path, registry, renderer, feed, retry, scheduler, run path, or noun.
+- Never a tuned timeout without the observable event it stands in for; never a bound that is not part of the seam's contract.
+- Never a migration: every stored-shape change is a reset, and database data is disposable.
+- Never a hand-maintained list, a naming convention, or a regex in production code.
+- Never a general error predicate, a kind stamp, a class marker, or a copy of the error union.
+- Never a worker JVM for anything but boot from zero and destructive drills.
+- Never a schedule, a lane-day, or a date as a promise; never a green run as proof.
+- Never a lane at a bulk-tier red class, a placeholder test entity, a task with no way to decide done, or a shell command taught to an agent for changing its own system.
+- Never a rebuild of the projection from rows in running code; never a pre-read the authority re-decides.
+- Never a worktree for structural edits; never a revert of a shared file.
+
+## 7. Open decisions for the owner
+
+Only what the audits and packs could not settle; the brief's decisions are not re-opened. Recommendation first.
+
+| # | Decision | Options (priced) | Recommendation |
+|---|---|---|---|
+| 1 | **The write-back gate** (goals §6 #1): what admits a merged definition to disk? | (a) reaching tests green in the candidate + platform tier once per integration — cheapest, proven by B4; (b) (a) + the task's cited tests, re-run on the combined program — one extra selection; (c) (b) + a human approval before the commit — a queue, and the owner in the loop for every merge | **(b)**; (c) only for `src/seon/db.clj` and `schema.clj` until the first ten merges have been read |
+| 2 | **Observed reach over the static call graph** (B4 spec §8): ruling E2 says coverage is the stored call graph; the graph is saturated — any seed reaches 1,827 of 2,157 tests, so "run only the reaching tests" has been a full run | (a) `:seon.test/reach` = the functions the armed wrappers observed executing on the test's last run (one observation shared with C1's profiler); the static walk remains the first-run seed and the "unknown" floor — precise, proportional, 40 ns per armed call; (b) keep static reach and prune hub edges by a declared marker — a hand list, banned; (c) keep static reach and accept 85 % runs — D9 unmet | **(a)**; E2's "no annotation" holds — the observation is recorded by the runner, never declared by the author |
+| 3 | **`seon.bootstrap`'s generated opening** (goals §6 #23; B3 spec §6.4): 932 lines of `situation`/`next-entry`/intent acquisition; the ruled path is system turn 0 evaluating the opening forms; the 160-byte namespace picture won the seven-opening trial | (a) delete to `seed-tx` + `supervision-tx` (≈ 120 lines) and let the namespace picture open — zero mechanism; (b) move the opening into `seon.task/render-ai` — the task's own pair, ~200 lines kept; (c) keep as is — the retired direction survives | **(a)**, after B3's probe shows no live turn on `default` reaches `bootstrap/situation` |
+| 4 | **Where platform-tier results live** (B4 spec §8; goals §6 #6): the platform JVM boots a scratch cluster | (a) recorded on the scratch cluster it ran on, tally printed, root downed; "last green" across clusters is a query (E1) — zero mirrors; (b) copy the run entity into `default` afterwards — a mirror; (c) run the platform tier against `default` — destroys the development root, refused by `host` | **(a)** |
+| 5 | **What a profiling finding is** (C1 spec §8): a window whose self time crosses a declared `:slow-ms` dial (2,000 ms, the owner's "couple of seconds"), or the top-N by self time per window | (a) the dial — one config fact with a default, a task only when the law is broken, zero tasks on a healthy window; (b) top-N — a constant too, and N tasks every window whether or not anything is slow; (c) both — two mechanisms | **(a)**; and every armed call is counted (40 ns), never sampled every Nth |
+| 6 | **Provider and effect waits in the profile** (C1 spec §8): wall-clock self time ranks a provider wait as the slowest function | (a) the one effect owner `seon.effect/request!` samples its crossing into its own row and the detector excludes the function the config declares as the effect executor — a config fact, not a name; (b) CPU time through `ThreadMXBean` — microseconds per call, rejected by cost; (c) accept one permanent task per waiting seam closed by "under the dial for k windows" — a constant | **(a)** |
+| 7 | **The four keeperless issue classes** (sweep §6): `class/p1`, `p2`, `p3`, `absence-as-health` hold 40 open notes with no class-kill statement | (a) the owner rules one sentence per class and the 40 fold into four keepers, then into four `seon.task` rows — four sentences; (b) they stay as query tags and 40 individual tasks are minted at B3's promotion — no ruling, 40 agents' worth of context | **(a)** |
+| 8 | **Agent-facing adoption** (goals §6 #19): does `my.edit` request in-process adoption, or does `my.test/check` adopt the changed `src` namespaces before selecting? | (a) `my.test/check` adopts what it needs — one request, the agent never names adoption; (b) `my.edit` adopts on write — every edit pays it, even mid-thought; (c) an explicit `my.adopt` — a new surface | **(a)** |
+| 9 | **Merging `steward-platform` into `main`** (goals §6 #22) | (a) merge at the first integration checkpoint after A1 lands — `main` gets a loadable, smaller tree; (b) merge only after D1 — `main` stays six weeks behind | **(a)** |
+| 10 | **The first namespace for the first live agent** (goals §6 #14–15): by evidence `seon.render.web` (28 citations, 130 functions), `seon.cluster` (37), `seon.sci.eval` (32) | the owner picks; contract coverage is the task class either way | `seon.render.web` after B2 shrinks it — the most public surface with the most uncontracted private functions |
+
+Settled by the brief, the packs or a landed spec and therefore not listed: read currency (one mechanism), pull limit (nil), `:db.type/any`, the walk's distance elision, the 5 s default bound (B4: no test pays a base after its commit 5), the platform tier as the one subprocess, `:seon.test/subject` deleted (B4; E2), `:seon.test/platform` kept as a declared fact (B4; 110 rows), `seon.run` folded into `my.turn` (B2 commit 13), the sci fork change withdrawn (B2 §2a), Malli's error grammar with a Seon noun overlay (A1-7), `seon.plan` and `seon.issue` into one `seon.task` with a plan step as a task with a parent (B3 §2b), `:seon.error/base` at the 14 pass-through boundaries with every domain function still naming its union (B3 §2a), the result mechanism at the recorder (B3 §2a keeps goals #21), profiling counts every call and flushes in the turn's close transaction (C1), override scope (C3), merge collision (D6), worker claim granularity (dissolved by one JVM), `:seon.fn/sym` as a symbol (installed), the callee tuple, write admission in the fork (`73afe782`), prompt whole-unit selection.
+
+## 8. What is deleted from the repository
+
+| Kind | What | Count / lines | Source |
+|---|---|---|---|
+| Docs | `docs/prds/steward-platform/` and `docs/prds/context-generation/` after the goals note has been checked against every spec; `docs/prds/agent-platform/research/` and the brief at the clean write; `docs/TRANSFER_PROMPT.md` shrunk to owner working style, session start and the sweep; `docs/seon/reference/{driving-codex-agents,codex-cli-hooks-2026-09-17,claude-code-hooks-2026-09-17}.md`; the `clojurescript` and `codex-lanes` skills; 22 superseded handover lines from the memory index | 204,356 + 6,279 lines; 391 → ~150; 3 files; 2 skills | [wc; instr §2–5] |
+| Code, by lane | A1 ~2,200 · A2 ~2,200 · B1 ~4,400 src + ~3,000 script + ~500 hook · B2 ~8,900 · B3 ~8,500 · B4 ~7,000 src + fixture + ~1,200 shell · C1 +240 · remainder ~1,500 | **≈ 35,000 src** (90,162 → ≤ 55,000) | §2b; the six landed specs' targets sum to their rows there |
+| Tests | process-machinery suites, tests of every deleted mechanism, duplicate classes to one member, four turn namespaces, benchmarks as deftests, tests pinning private helpers rewritten | ≈ 39,000 at the cut (98,985 → ≤ 60,000); the hoisting task class continues | §2b; [a-test §6b; a-sci §5; a-malli §4] |
+| Process machinery | `bin/codex-agent`, `bin/test-fast`, `bin/_test-slot`, `.codex/hooks.json`, `.codex/agents/*.toml`, the `--paths` overlay and contamination proof in `bin/test`, `SEON_CODEX_LANE` and its three consumers, `tmp/orchestrator` (1.2 GB), `tmp/test-runs` (1.8 GB), `tmp/head-wt` | ~2,000 shell lines; 3 GB of exhaust | [instr §3] |
+| `reference-code/` | the 74 uncited submodules (20.96 GB, `bun` first) and the 15 history-only ones (0.14 GB); every `seantempesta` fork among them is already on a remote branch; the surviving 20 are the 12 on the classpath and the 8 read for design, each named in `docs/seon/architecture/` with the seam an agent reads there | 89 submodules, 21.10 GB | [refcode §2–3] |
+| Issue notes | the 369 survivors are audited against each spec's deletion list at the spec's landing; a note whose subject is deleted closes `superseded` with the commit; the rest are promoted to `seon.task` rows by B3 and the directory is then a render of those rows, not a registry | 369 → the promoted set | [sweep; a-err §2.4] |
+| Schemas | `:seon.error/class` markers (156 lines), the `seon.effect.edn` union (264), `seon.test*` worker/claim families, class-C dials (~180), `seon.db.edn` replay/digest keys (~60), `seon.plan.edn`'s union, the ordinal/count/omission predicates' references | ≈ 3,000 (14,256 → ≤ 11,000) | [p-b3 §3–5; a-dh §8; a-err §1.4] |
+| After the reset | `tmp/` and `target/` wiped; `data/store` destroyed and republished from zero with every batched schema change; the measurement script's rows re-recorded | — | [goals §3, "Resets are the recovery"] |
