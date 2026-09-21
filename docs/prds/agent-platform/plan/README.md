@@ -186,6 +186,11 @@ waits on it. Each step is one loadable slice with every caller converted.
 | 3.x | B3 task family and settlement on the existing turn loop; C1 on the wrapper; D1 branch-plus-handle candidates, merge, export; the demonstration; reset batch 2 | the first namespace agents |
 | 4.x | B2 commits 1–14: context, turn, bounded completion, history, delivery, namespace page, cycles | — |
 
+B1b may be the first implementation assignment, alone on `default`. Its early boot
+rewrite preserves calls to the currently installed projection, acquisition and search
+owners until their listed replacement slices land; it does not require implementing
+steps 1.1–1.3 or 1.4/1.5 inside B1b. Those steps retain their dependency order.
+
 Assign models by the work: `gpt-5.6-sol` at low effort for fully specified
 conversions, deletions and caller updates; `gpt-6-astra` at low effort for bounded
 repairs that still require diagnosis; Astra at medium for architectural decisions
@@ -270,7 +275,8 @@ cut and the reaching selection once at the cut's end through the request that ex
 by then. Breakage between steps of a cut is expected and named in the landing note;
 the REPL stays up so it can be seen. No lane runs a suite, ever.
 
-Every commit leaves HEAD loadable and the host REPL reachable. Live verification
+Except B1b's explicitly ruled temporary breakage (§7), every commit leaves HEAD
+loadable and the host REPL reachable. Live verification
 names hot reload, new fork or in-place adoption, and checks the actual program identity.
 A browser-facing change includes observed paint. The orchestrator performs isolated
 boot/platform proof for integration; lanes never reset `default`.

@@ -26,6 +26,8 @@ while it is open; everything is restored and drilled at the slice boundary. Do n
 an old operator or introduce a compatibility implementation to avoid that work.
 **Order: README §4 step 1.3b, before A1-3's projection work, so A1's boot one-liners
 later edit `boot.clj` rather than `cluster.clj`; files disjoint from steps 1.1–1.3.**
+This rewrite can be the first implementation assignment: it uses the installed
+contracts and acquisition owners, without assuming steps 1.1–1.3 have landed.
 
 | Found while reading, beyond the command/boot tables | Keep/drop and why | Evidence |
 |---|---|---|
@@ -159,8 +161,11 @@ published commit. Cold empty-store start/reset calls the existing publisher, the
 forks; it does not invent a second indexer. Publication/adoption receives the same
 held store through the existing root holder (C:947), never opens it a second time.
 Root executors remain shared, released only at process shutdown (C:802,3504).
-Remove coherence/accretion/search layers with their B1/A1/B3 replacements; do not
-pull later turn/context redesign into this plumbing cut (README §4).
+The table describes the completed cut. At step 1.3b, preserve the installed projection
+construction/bindings, coherence/accretion and search calls in the new boot sequence
+until their B1/A1/B3 replacement slices land. Move those calls, not the old operator
+machinery; do not remove a still-needed dependency or implement a later semantic cut
+to make this rewrite start. A1-3 and step 1.5 then update the new boot file (README §4).
 
 ### 2c. One lock and exact process identity
 
