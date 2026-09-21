@@ -147,12 +147,18 @@ dependencies and descriptive symbols before trusting a selective gate. Sample le
 intermediate and shared functions; broad shared-function samples do not establish an
 average for ordinary edits.
 
+**Ruled 2026-09-21: plumbing first, the turn and context last.** Every mechanism
+whose deletion carries no agent semantics lands before anyone opens `turn.clj`; the
+owner's experience is that every change to the turn or context code is a slog, so the
+platform is made solid and small around it first, and the namespace agents start on
+that platform. B2's context, turn, read-evidence and rendering work is the LAST cut.
+
 | Cut | Coherent removal and replacement | Exit condition |
 |---|---|---|
-| 1 | Program facts, publication and contracts: A1/B1 with A2 validator inputs and B3 constructor contract; remove redundant construction/publication paths with all callers | Faithful dependencies and definition identity; carried compiled contracts; incremental work and refused publication preserve the published head |
-| 2 | Database and execution: A2/B2 with A1 acquisition and B4 execution inputs; remove repeated database/context reconstruction and duplicate execution machinery | Complete validation; old/new/candidate definitions remain independent; private objects survive turns; named execution program actually runs |
-| 3 | Tasks, rendering and tests: B2/B3/B4; remove parallel settlement, history and test-request paths with all callers | One task settlement, history renderer and test authority; per-member reuse, actual termination and observed browser behavior |
-| 4 | Profiling, acceptance and export: C1/D1 with B4 evidence; complete the composed self-improvement path | Honest observations; invalid/stale/conflicting candidates refuse; a real accepted repair survives export and reindex |
+| 1 | **Plumbing, no agent semantics:** the operator and boot rewrite (B1 §2c), the lifecycle lock, the hook as one request, the carried projection and its ambient transport (A1-3/4/12), the schema-shape family (A1-13), `seon.search`, the error kind/class sites (B3 commit 4), the parser pre-checks (A2 c13), the B3 constructor contract (1.1) and the definition digest (1.2) | `default` restarts through the new operator; a docstring edit publishes through one request; the projection has one transport; reset batch 1 |
+| 2 | **Tests, publication, database:** B4's machinery deletion and the one `seon.test/run`; B1's manifest/seal/snapshot dissolution and caller lint; A2's currency, codec, pull and validator narrowing | An unchanged green request executes nothing; a docstring edit adopts in ≤ 700 ms; complete validation proportional to the report |
+| 3 | **Tasks, profiling, candidates on the existing turn loop:** B3's task family and settlement, C1 on the wrapper, D1's branch-plus-handle candidate, merge and export | Trigger→task→agent→merge→export demonstrated with the turn loop as it is; the first namespace agents start here on the 433 untested and 3,145 uncontracted functions |
+| 4 | **Turn, context, rendering, last:** B2's acquire-once/fork-retained context, one turn function, bounded completion, the walk as history, whole-view delivery | Private objects survive turns; an ordinary write installs 0 rows; one history; two tabs converge |
 
 At most three editing assignments run concurrently; exact file ownership decides what
 can overlap. No slice removes a safety mechanism before its replacement passes the
@@ -174,11 +180,10 @@ waits on it. Each step is one loadable slice with every caller converted.
 | 1.3 | A1-1/1b: wrappers read the retained contract; per-context installation of the original (§3 above); the per-call scan and classpath population go with their callers | B2's context work, C1's hook point |
 | 1.4 | A1-3 with the boot-site one-liners in A2/B1/B2/B4: the projection is a read; `load-projection` for the cold constructors only; A1-12 deletes the ambient transport (`call-with-projection*`, `handed-projection`, the registration delta) once A2 c2 removes the in-writer decode that binds a projection state | every reconstruction fallback; the last dynamic-var authority |
 | 1.4b | A1-13: the schema-shape family leaves with A1-1b and A1-6 (no surviving reader); A1-7's fingerprint normaliser is withdrawn; RESET batch 1 | ≈ 30 K datoms, one RESET item |
-| 1.5 | B1: manifest, caller-less vars, snapshot/toolchain, seal, one-transaction-per-report publication; `cluster.clj`/`fn.clj` become free | B3's kind cut (held files), A2's c6 inputs |
-| 1.6 | A2 c1/c3–c6 with B3's guards (c8) and the validator narrowed to report datoms; B3 commit 4 (kind/class, one commit) | reset batch 1 |
-| 2.x | B2 context/turn/history/delivery, A2 c2 after the `:db.type/any` proof, B4 fixture on the open store and the one `run` | Cut 3 callers |
-| 3.x | B3 task family and settlement, B4 launcher retirement, B2 renderer moves; reset batch 2 | C1, D1 |
-| 4.x | C1 on the final wrapper; D1 lifecycle, merge, export; the demonstration | the first namespace agent |
+| 1.5 | B1 commit 11: the operator and boot rewrite; the lifecycle lock and the hook as one request; B3 commit 14 (`seon.search`) and commit 4 (kind/class) once `cluster.clj` is free | `default` on the new operator; reset batch 1 |
+| 2.x | B4 commits 1–3 (fixture on the open store, one `run`, launchers retired); B1 commits 2–10 (manifest, seal, snapshot, caller lint, reset cold path); A2 c1/c3–c6/c8/c13, then c2 after the `:db.type/any` proof | cut 3 callers |
+| 3.x | B3 task family and settlement on the existing turn loop; C1 on the wrapper; D1 branch-plus-handle candidates, merge, export; the demonstration; reset batch 2 | the first namespace agents |
+| 4.x | B2 commits 1–14: context, turn, bounded completion, history, delivery, namespace page, cycles | — |
 
 Assign models by the work: `gpt-5.6-sol` at low effort for fully specified
 conversions, deletions and caller updates; `gpt-6-astra` at low effort for bounded
