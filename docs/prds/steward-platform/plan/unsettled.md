@@ -7047,3 +7047,17 @@ printer + blob + validator). The lane's only remaining item — retire the
 four legacy members and convert the 22 `issue.clj` producers + the fault
 committer — waits on the redesign lane's files; the lane is stopped with
 its session until then.
+
+## 2026-09-23 ~10:00 local — SLICE 4 (`b17ad6ef1`): one-file edit **8.17 s** end to end (was 49 s this morning, 419–483 s yesterday); no change **757 ms**; head unmoved. RULED: note indexing per changed path (option 2); SCI base acquired lazily (sci/eval.clj granted); three items left
+
+Publication inputs are carried and changed identities are queried from
+the report. Lane's remaining spans and rulings: Markdown issue-note
+indexing 729 ms → only for changed note paths (the request already
+carries them; cold/explicit indexes all); the SCI base acquired on first
+use and reused until the database value changes; then the core-fault
+message, same-branch publication serialization, and boot phases timed +
+lazy config/agent graphs. The orchestrator's script is re-measuring at
+`b17ad6ef1` on the worktree (two lanes' load; the fork/no-change/edit
+rows are what matter). Error lane parked; test-system lane on the 5 s
+bound; its fn.clj hunk is now the only foreign change there and commits
+at its next stop.
