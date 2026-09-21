@@ -1,6 +1,6 @@
 ---
 type: plan
-status: proposed 2026-09-21 (owner: "deeply cut in all areas, both source and tests, then fix everything at the same time; git is the revert")
+status: DRAFT written from the audit summaries before the notes were read in full — superseded by the per-lane specs `lane-*.md` in this directory; its totals are wrong (test corpus ≈5 % deletable, not 14 %; the lever is hoisting setup); rewritten once the lane specs land
 created: 2026-09-21
 tags: [plan, agent-platform, cut, deletion, namespace-agents]
 ---

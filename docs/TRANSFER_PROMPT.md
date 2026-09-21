@@ -27,9 +27,9 @@ grounding, review, and integration.
 1. Run AGENTS.md's session-start hygiene (status, MCP tools answer, foreign
    residue, exhaust sweep with the live-runner guard).
 2. Read the working edge:
-   [unsettled.md](prds/sci-execution-runtime/plan/unsettled.md) top block,
+   [unsettled.md](archive/prds/sci-execution-runtime/plan/unsettled.md) top block,
    then the current dependency spine in
-   [the plan README](prds/sci-execution-runtime/plan/README.md). Do not
+   [the plan README](archive/prds/sci-execution-runtime/plan/README.md). Do not
    restart settled design.
 3. **The current entry point is the agent record and turn loop PRD:**
    [agent-record-and-turn-loop-prd-2026-09-07.md](prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).

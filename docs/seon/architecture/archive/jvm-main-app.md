@@ -21,4 +21,4 @@ The target system has one cluster JVM per store. That JVM owns Datahike writes,
 the run loop, guarded evals, the program graph, the render pipeline, and its web
 UI; disposable leaf runtimes run packages and selected workers. Start with
 [[../architecture]] for the canonical design and
-[[../../../prds/archive/runtime-reliability/roadmap]] for current implementation status.
+[[../../../archive/prds/pre-2026-09/runtime-reliability/roadmap]] for current implementation status.
