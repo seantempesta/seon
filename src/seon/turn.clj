@@ -2741,7 +2741,7 @@
 
 (defn turns-left
   "The remaining turns under the same session bound that admits a turn."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id] [:or :my.agent/turns-left :seon.error/value]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :my.agent/turns-left :seon.error/value]]}
   [database agent-id]
   (let [limit (max-episode-runs database agent-id)
         spent (episode-runs database agent-id)]

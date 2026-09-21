@@ -576,6 +576,11 @@ function touches no caller's datom and "A calls a name with no row" is one
 Datalog clause instead of an impossibility. Refs stay where a genuine
 entity relation exists (`:seon.fn/ns`, `/file`, `/arities`). Calls and
 references are indexed qualified-symbol sets, as is recorded test reach.
+A function that invokes targets held under declared attributes records those keys
+in `:seon.fn/invokes` metadata. The index and dependency queries connect those
+invokers to candidate targets; mentioning an attribute or storing a diagnostic
+function symbol does not itself assert invocation. This does not make arbitrary
+higher-order dispatch complete; unknown dependencies remain conservative.
 Canonical arity inputs/returns link to shared `seon.schema.shape` facts; the
 old `seon.fn.ast` family is deleted.
 

@@ -27,7 +27,8 @@
 
 (defn result-entity
   "Project an operation result through its declared persistence producer."
-  {:malli/schema
+  {:seon.fn/invokes #{:seon.maintenance/result-projection}
+   :malli/schema
    [:=> [:cat :seon.schema/projection :seon.maintenance/result-entity-request]
     :seon.maintenance/result-entity-response]}
   [projection result]

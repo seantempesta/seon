@@ -1016,6 +1016,7 @@
   `invocation-unknown` tell a refusal from a producer that legitimately
   RETURNED an ordinary `:seon.error` value. Asking the shape of the value
   instead would confuse the two forever."
+  {:seon.fn/invokes #{:seon.render/ai :seon.render/html :seon.render/form}}
   [{ctx :seon.sci.eval/ctx
     caps :seon.sci.admit/caps
     time-limit-ms :seon.sci.eval/time-limit-ms

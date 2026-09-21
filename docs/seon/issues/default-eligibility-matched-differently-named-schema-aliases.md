@@ -58,3 +58,43 @@ fixture. Do not reintroduce shape-equivalence matching or a second identity.
 
 Evidence and stored-size measurements:
 [landing note](../../prds/steward-platform/research/schema-shape-authored-2026-09-23.md).
+
+## Live omission repair — 2026-09-21
+
+Fresh default evaluations after publication/adoption
+`6ab18937-ff35-559a-a665-022e153f3027` recorded zero-argument refusals for
+`(help)` (evaluation entity 37541, `seon.bootstrap/help-value`) and
+`(seon.agent/settings)` (entity 39293). The owner queried the exact stored
+source and error in 5 ms. A read-only context probe confirmed both functions
+in the preparation snapshot's eligible-symbol set; that alone is insufficient
+because eligibility can come from only one argument. The owner's follow-up
+plan probe (487 ms; basis 536870918, contract transaction 536870917) showed
+only index 1, `:seon.agent/id`, supplied, and accepted counts 1 and 2, never 0.
+Both contracts still named `:seon.db/db` at index 0. The SCI wrapper and
+supplied-default mechanism were operating as declared.
+
+The repair changes the database input name to `:seon.db/database-value` on
+twelve reads intended to address the calling agent: `help-value`; the five
+own-record reads in `seon.agent` (`identity`, `archived?`, `open?`, `settings`,
+`effective-settings`); the five own-plan reads in `seon.plan` (`current`,
+`blocked`, `steps`, `ready`, `ready-subjects`); and `seon.turn/turns-left`.
+The help macro emits a zero-argument call, settings rendering emits
+`(seon.agent/settings)` and advertises `(seon.agent/effective-settings)`,
+and help advertises `(seon.turn/turns-left)`. The agent and plan read families
+address the calling agent's own state. Explicit database and agent arguments
+remain admitted with the same implementation and result contract.
+
+The remaining inventory is deliberately unchanged: bootstrap generation
+helpers, AI attribute discovery, evaluation-history queries, frame construction,
+and documentation helpers have explicit database callers; doc/dir macros
+already emit `(seon.db/db)`. Render entity/transformation helpers also retain
+their authored input semantics. Message recipients remain explicit; structural
+alias matching is not restored.
+
+The canonical SCI regression
+`seon.sci.supplied-database-test/own-record-reads-supply-the-same-database-and-agent-as-explicit-calls`
+compares omitted and explicit calls for all twelve reads, rejects error values,
+and requires actual help content. Verification is pending the owner's serial
+gate and fresh live evaluations; the bounded lane ran no test, JVM, operator,
+or adoption command. Stored historical evaluation errors remain historical
+facts until reset; successful new evaluations are the live proof.

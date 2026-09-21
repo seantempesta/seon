@@ -535,7 +535,7 @@
 
 (defn current
   "Read your current step; an empty map means none is selected."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :my.plan/current-value :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})
@@ -551,7 +551,7 @@
 
 (defn blocked
   "Read your blocked steps and the step identities they need."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or [:vector :my.plan/step-summary] :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
@@ -562,7 +562,7 @@
 
 (defn steps
   "Read your plan steps in their authored tree order."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or [:vector :my.plan/step-summary] :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
@@ -574,7 +574,7 @@
 (defn ready
   "Read your ready steps; complete one with my.plan/complete!."
   {:malli/schema
-   [:=> [:cat :seon.db/db :seon.agent/id]
+   [:=> [:cat :seon.db/database-value :seon.agent/id]
     [:or [:vector :my.plan/step-summary] :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
@@ -589,7 +589,7 @@
   Ready-step order and each authored subject-vector order are retained.
   Repeated resolved rows collapse at their first occurrence."
   {:malli/schema
-   [:=> [:cat :seon.db/db :seon.agent/id]
+   [:=> [:cat :seon.db/database-value :seon.agent/id]
     [:or :my.plan/intent-subjects :seon.db/error-result :my.plan/agent-not-found-error :my.plan/subject-not-found-error]]}
   [database agent-id]
   (let [plan-steps (ready database agent-id)]

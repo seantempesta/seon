@@ -543,33 +543,10 @@
     (second value)
     value))
 
-(defn- function-value-schema?
-  "Follow compiled aliases and scalar alternatives in their captured scope."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?] [:set :seon.schema/value]] :boolean]}
-  [node seen]
-  (let [reference (when (m/-ref-schema? node) (m/-ref node))
-        identity [(m/options node) reference]]
-    (boolean
-     (or (= :seon.fn/sym reference)
-         (= :seon.fn/sym (:seon.fn/reference-to (m/properties node)))
-         (contains? #{:symbol :qualified-symbol} (m/type node))
-         (and (m/-ref-schema? node) (not (contains? seen identity))
-              (function-value-schema? (m/deref node) (conj seen identity)))
-         (and (contains? #{:or :and} (m/type node))
-              (some #(function-value-schema? % seen) (m/children node)))))))
-
 (defn- declared-function-targets
-  "Literal function-valued declarations, classified by their own schema.
-  Consumers are joined by the attribute they use; no callable-key roster."
-  [projection values first-party-functions]
-  (let [registry (:seon.schema.projection/registry projection)
-        forms (:seon.schema.projection/forms projection)
-        maps (filter map? (mapcat #(tree-seq coll? seq %) values))
-        attributes (into #{} (keep (fn [k]
-                                    (when-let [node (mr/schema registry k)]
-                                      (when (or (= :seon.fn/sym k)
-                                                (function-value-schema? node #{})) k))))
-                         (into #{} (comp (mapcat keys) (filter #(contains? forms %))) maps))]
+  "Literal targets of explicitly declared invocation attributes."
+  [attributes values first-party-functions]
+  (let [maps (filter map? (mapcat #(tree-seq coll? seq %) values))]
     (reduce
      (fn [targets value]
        (if (map? value)
@@ -588,9 +565,20 @@
      {} maps)))
 
 (defn- declared-calls-by-caller
-  [used-keywords targets]
-  (update-vals used-keywords
+  [invocations targets]
+  (update-vals invocations
                #(into #{} (mapcat targets) %)))
+
+(defn- invocation-attributes
+  "Read explicit invocation metadata; malformed declarations never disappear."
+  {:malli/schema [:=> [:cat :map] :seon.fn/invokes]}
+  [metadata]
+  (if-let [[_ attributes] (find metadata :seon.fn/invokes)]
+    (if (and (set? attributes) (every? qualified-keyword? attributes))
+      attributes
+      (throw (ex-info "Invocation metadata must be a set of qualified attribute names."
+                      {:seon.fn/index-refused true :seon.fn/invokes attributes})))
+    #{}))
 
 (defn- var-row
   [contexts namespace-contexts
@@ -598,6 +586,7 @@
   (let [namespace-name (::analyzer/ns entry)
         qualified (symbol (str namespace-name) (str (::analyzer/name entry)))
         metadata (::analyzer/meta entry)
+        invokes (invocation-attributes (or metadata {}))
         namespace-metadata (:namespace-meta
                             (get namespace-contexts namespace-name))
         source (exact-source contexts entry)
@@ -663,6 +652,7 @@
                :seon.fn/arglists (str "(" (str/join " " (::analyzer/arglist-strs entry)) ")")
                :seon.fn/private? (boolean (::analyzer/private entry))}
         (true? (:seon.fn/internal? metadata)) (assoc :seon.fn/internal? true)
+        (seq invokes) (assoc :seon.fn/invokes invokes)
         (::analyzer/macro entry) (assoc :seon.fn/macro? true)
         ;; WHO WROTE THIS BODY IS A FACT, NOT A NAME. clj-kondo already tells
         ;; the indexer which form interned the var; keeping it means a
@@ -915,8 +905,10 @@
                          %)
                       (::analyzer/var-definitions analysis))
                 subject (or (:seon.test/subject program-row)
-                            (test-subject (::analyzer/meta definition)))]
+                            (test-subject (::analyzer/meta definition)))
+                invokes (invocation-attributes (or (::analyzer/meta definition) {}))]
             (cond-> {}
+              (seq invokes) (assoc :seon.fn/invokes invokes)
               (::analyzer/macro definition) (assoc :seon.fn/macro? true)
               (seq (get calls-by-caller program-symbol))
               (assoc :seon.fn/calls
@@ -938,6 +930,7 @@
               subject (assoc :seon.test/subject subject))))
         merged-row (when program-row
                      (merge (dissoc program-row :seon.fn/calls :seon.fn/references
+                                    :seon.fn/invokes
                                     :seon.fn/keywords :seon.fn/writes :seon.fn/call-arities)
                             program-facts))]
     [(if program-row
@@ -1119,19 +1112,28 @@
   [analysis first-party-functions contexts declared-attributes projection]
   (let [forms (:seon.schema.projection/forms projection)
         used-keywords (keywords-by-holder analysis)
+        invocations (into {}
+                          (keep (fn [entry]
+                                  (when-let [attributes (seq (invocation-attributes (or (::analyzer/meta entry) {})))]
+                                    [(symbol (str (::analyzer/ns entry)) (str (::analyzer/name entry)))
+                                     (set attributes)])))
+                          (::analyzer/var-definitions analysis))
+        invoked-attributes (into #{} (mapcat val) invocations)
         schema-targets (declared-function-targets
-                        projection (keep forms (into #{} (mapcat val) used-keywords))
+                        invoked-attributes (vals forms)
                         first-party-functions)
-        keywords-by-file (group-by ::analyzer/filename (::analyzer/keywords analysis))
         declared-calls
         (reduce-kv
          (fn [calls filename context]
            (let [values (map kondo.utils/sexpr
                              (:children (kondo.utils/parse-string-all (:text context))))
                  targets (merge-with set/union schema-targets
-                                     (declared-function-targets projection values first-party-functions))
-                 holders (keywords-by-holder
-                          {::analyzer/keywords (get keywords-by-file filename)})]
+                                     (declared-function-targets invoked-attributes values first-party-functions))
+                 holders (select-keys invocations
+                                      (keep (fn [entry]
+                                              (when (= filename (::analyzer/filename entry))
+                                                (symbol (str (::analyzer/ns entry)) (str (::analyzer/name entry)))))
+                                            (::analyzer/var-definitions analysis)))]
              (merge-with set/union calls (declared-calls-by-caller holders targets))))
          {} contexts)
         calls-by-caller
@@ -1348,12 +1350,13 @@
      [?caller :seon.fn/sym]
      [?target :seon.fn/sym]]
     [(declared-edge ?caller ?target)
-     [?declaration :seon.fn/reference-to :seon.fn/sym]
-     [?declaration :seon.schema/key ?attribute]
+     [?caller :seon.fn/invokes ?attribute]
      [?holder ?attribute ?target]
-     (not [?holder :seon.fn/sym])
-     [?target :seon.fn/sym]
-     [?caller :seon.fn/keywords ?attribute]]])
+     [?target :seon.fn/sym]]
+    [(declared-edge ?caller ?target)
+     [?caller :seon.fn/invokes ?attribute]
+     [?holder ?attribute ?symbol]
+     [?target :seon.fn/sym ?symbol]]])
 
 (def ^:private test-reach-rules
   (into declared-reference-rules
@@ -1398,48 +1401,15 @@
        (call-edge ?caller ?target)]]))
 
 (defn- declared-reference-edges
-  "A function declaration owns its declared function references. References
-  on data rows retain conservative attribute-consumer reach because those
-  rows do not identify a calling function. Keyword mentions never replace
-  the known owner of a function declaration."
+  "Owned handlers and explicit invokers reach their current declared targets.
+  Data rows may name a target by symbol or reference; keyword readers do not
+  become invokers. The indexed walk and Datalog consumers share these rules."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or [:set [:tuple :int :int]] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [database]
-  (let [attributes (db/q '[:find [?attribute ...]
-                            :where
-                            [?declaration :seon.fn/reference-to :seon.fn/sym]
-                            [?declaration :seon.schema/key ?attribute]] database)
-        capabilities (db/q '[:find ?caller ?target
-                              :where
-                              [?caller :seon.effect/capability ?symbol]
-                              [?target :seon.fn/sym ?symbol]
-                              [?caller :seon.fn/sym]] database)]
-    (cond
-      (map? attributes) attributes
-      (map? capabilities) capabilities
-      :else
-      (reduce
-       (fn [edges attribute]
-         ;; Bind the declared attribute before reading its rows. Datahike's
-         ;; search selects AEVT here, then EAVT for the bound row identities.
-         (let [owned (db/q '[:find ?caller ?target
-                            :in $ ?attribute
-                            :where
-                            [?caller ?attribute ?target]
-                            [?target :seon.fn/sym]
-                            [?caller :seon.fn/sym]] database attribute)
-               observed (db/q '[:find ?caller ?target
-                               :in $ ?attribute
-                               :where
-                               [?holder ?attribute ?target]
-                               [?target :seon.fn/sym]
-                               (not [?holder :seon.fn/sym])
-                               [?caller :seon.fn/keywords ?attribute]] database attribute)]
-           (cond
-             (map? owned) (reduced owned)
-             (map? observed) (reduced observed)
-             :else (into (into edges owned) observed))))
-       capabilities attributes))))
+  (db/q '[:find ?caller ?target :in $ %
+          :where (declared-edge ?caller ?target)]
+        database declared-reference-rules))
 
 (defn- gate-set-in
   "Reverse-walk names, including a seed whose definition has been removed."

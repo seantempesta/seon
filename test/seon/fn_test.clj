@@ -2766,16 +2766,35 @@
               handler (:db/id (db/pull database [:db/id]
                                        [:seon.fn/sym (symbol "sample.call-declarations" "handler")]))
               declared-only (:db-after (d/with database [[:db/retract owner :seon.fn/calls (symbol "sample.call-declarations" "handler")]]))]
-          (is (= #{[owner handler]}
-                 (set (filter #(= handler (second %))
-                              (#'seon.fn/declared-reference-edges declared-only))))
-              "the declaration's owner, not every mention of its attribute, reaches the handler")
-          (is (= #{[owner]}
+          (is (contains? (#'seon.fn/declared-reference-edges declared-only) [owner handler])
+              "The owning capability preserves its handler without a lexical call.")
+          (is (= (into #{} (comp (filter #(= handler (second %)))
+                                 (map #(vector (first %))))
+                       (#'seon.fn/declared-reference-edges declared-only))
                  (db/q '[:find ?caller :in $ % ?target
                          :where (call-edge ?caller ?target)]
                        declared-only @#'seon.fn/test-reach-rules handler)))
           (is (= [(quote sample.call-declarations/reaches-declarations)]
-                 (seon.fn/tests-reaching declared-only (symbol "sample.call-declarations" "handler")))))
+                 (filterv #(= "sample.call-declarations" (namespace %))
+                          (seon.fn/tests-reaching declared-only (symbol "sample.call-declarations" "handler"))))))
+        (let [database @connection
+              selected (fn [target]
+                         (set (filter #(= "sample.call-declarations" (namespace %))
+                                      (seon.fn/tests-reaching database target))))]
+          (is (= #{'sample.call-declarations/reaches-leaf}
+                 (selected 'sample.call-declarations/leaf))
+              "A descriptive operation symbol does not select diagnostic readers.")
+          (is (= #{'sample.call-declarations/reaches-leaf 'sample.call-declarations/reaches-shared}
+                 (selected 'sample.call-declarations/shared))
+              "A real shared dependency retains both callers' tests.")
+          (doseq [[reader target] [['sample.call-declarations/diagnostic-reader 'sample.call-declarations/leaf]
+                                   ['sample.call-declarations/renderer-reader 'sample.call-declarations/render-target]]]
+            (let [row (db/pull database '[:seon.fn/calls :seon.fn/references]
+                               [:seon.fn/sym reader])]
+              (is (not (contains? (into (set (:seon.fn/calls row)) (:seon.fn/references row)) target)))))
+          (is (= #{'sample.call-declarations/reaches-declarations}
+                 (selected 'sample.call-declarations/render-target))
+              "The declared invoker remains selected; a renderer-existence reader does not."))
         (doseq [[caller target] [["capability" "handler"] ["graph" "step"]
                                  ["render-owner" "render-target"] ["task-owner" "task-target"]]]
           (let [caller (symbol "sample.call-declarations" caller)
@@ -2786,7 +2805,35 @@
             (is (contains? (set (:seon.fn/calls row)) target))
             (is (not-any? #(= target (first %)) (:seon.fn/call-arities row)))
             (is (= [(quote sample.call-declarations/reaches-declarations)]
-                   (seon.fn/tests-reaching @connection target)))))))))
+                   (filterv #(= "sample.call-declarations" (namespace %))
+                            (seon.fn/tests-reaching @connection target))))))))))
+(deftest invocation-metadata-survives-admission-and-exact-replacement
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection [{:seon.ns/name 'sample.invocation}])
+     (let [database (db/db connection)
+           projection (db/carried-projection database)
+           shapes (program/shapes-in projection)
+           analyze (fn [source]
+                     (seon.fn/source-rows (db/db connection) shapes
+                       {:seon.ns/name 'sample.invocation} source
+                       (set (keys (:seon.schema.projection/forms projection)))))
+           source "(defn invoke {:seon.fn/invokes #{:seon.render/ai}} [value] ((requiring-resolve (:seon.render/ai value)) value))"
+           rows (analyze source)]
+       (is (= #{:seon.render/ai} (:seon.fn/invokes (first rows))))
+       (test-support/transacted! connection rows)
+       (let [current (db/pull (db/db connection) '[*] [:seon.fn/sym 'sample.invocation/invoke])
+             desired (first (analyze "(defn invoke [value] (:seon.render/ai value))"))]
+         (is (not (contains? desired :seon.fn/invokes)))
+         (test-support/transacted! connection (program/exact-replacement-tx-in shapes current desired))
+         (is (nil? (:seon.fn/invokes
+                    (db/pull (db/db connection) '[:seon.fn/invokes]
+                             [:seon.fn/sym 'sample.invocation/invoke])))))
+       (doseq [invalid [nil false :seon.render/ai #{:unqualified}]]
+         (let [refusal (test-support/refusal-data
+                        #(analyze (str "(defn invalid {:seon.fn/invokes " (pr-str invalid) "} [x] x)")))]
+           (is (true? (:seon.fn/index-refused refusal)) (pr-str refusal))))))))
+
 (deftest unresolved-call-shapes-preserve-reference-edges-and-reach
   (with-provenance-file
     "sample/call_references.clj"

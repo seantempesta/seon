@@ -5,6 +5,7 @@
           :source-path [:string {:min 1}],
           :arglists :string,
           :reference-to [:qualified-keyword {:description "Identity attribute of the function named by a declared reference value; enables call-graph joins from attribute consumers to the referenced identity."}]
+          :invokes [:set {:description "Function-valued attributes this declaration actually invokes. Candidate targets derive from their declarations; merely reading or reporting a symbol does not assert invocation. Attribute names are values, so removing an attribute does not erase this dependency declaration."} :qualified-keyword]
           :file [:and {:description "Indexed source file shared by function and test declarations; absent on agent-admitted definitions."} :seon.db/ref],
           :form-span [:tuple {:description "Half-open UTF-8 byte offsets of this declaration's exact source within its indexed file."} :int :int],
           :internal? [:boolean {:description "Omit this implementation helper from the Tools summary; callability is unchanged."}],
@@ -133,6 +134,7 @@
            [:seon.fn/defined-by {:optional true} :seon.fn/defined-by]
            [:seon.fn/spec {:optional true} :seon.fn/spec]
            [:seon.fn/calls {:optional true} :seon.fn/calls]
+           [:seon.fn/invokes {:optional true} :seon.fn/invokes]
            [:seon.fn/destroys {:optional true} :seon.fn/destroys]
            [:seon.fn/references {:optional true} :seon.fn/references]
            [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]

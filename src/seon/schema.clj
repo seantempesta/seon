@@ -3747,7 +3747,8 @@
 
 (defn identity-only-projection-in
   "Project a registered reference value to its declared identity data."
-  {:malli/schema
+  {:seon.fn/invokes #{:seon.schema/identity-projection}
+   :malli/schema
    [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :map]]}
   [projection value]
   (some

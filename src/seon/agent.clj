@@ -10,7 +10,7 @@
 
 (defn identity
   "Read stable identity values without projecting a stored ref as a scalar."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :my.agent/identity :seon.error/value]]}
   [database agent-id]
   (let [row (db/pull database
@@ -32,7 +32,7 @@
 
 (defn archived?
   "Whether this retained agent has a positive archival transaction."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :boolean :seon.error/value]]}
   [database agent-id]
   (let [row (db/pull database [:seon.agent/id :seon.agent/archived-tx]
@@ -46,7 +46,7 @@
 
 (defn open?
   "Whether this existing agent is not archived; this does not describe graph liveness."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :boolean :seon.error/value]]}
   [database agent-id]
   (let [archived (archived? database agent-id)]
@@ -74,7 +74,7 @@
 
 (defn settings
   "Read your setting overrides; omitted settings inherit the cluster defaults."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :my.agent/settings :seon.error/value]]}
   [database agent-id]
   (ai/agent-overlay database agent-id))
@@ -118,7 +118,7 @@
   "Read effective actionable settings on demand.
   Set :seon.config.agent/show-all-settings true to include every effective dial."
   {:malli/schema
-   [:=> [:cat :seon.db/db :seon.agent/id]
+   [:=> [:cat :seon.db/database-value :seon.agent/id]
     [:or [:vector [:map-of :qualified-keyword :seon.schema/value]] :seon.error/value]]}
   [database agent-id]
   (let [cluster-name (db/q '[:find ?name . :where [_ :seon.config/cluster ?name]] database)

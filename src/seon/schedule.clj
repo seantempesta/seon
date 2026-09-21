@@ -680,6 +680,7 @@
      [[:db.fn/call #'settle-call request]])))
 
 (defn- invoke-handler
+  {:seon.fn/invokes #{:seon.schedule.task/function}}
   [function request]
   (try
     (let [handler (requiring-resolve (symbol function))]

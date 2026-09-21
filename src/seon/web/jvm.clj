@@ -391,7 +391,8 @@
   (some-> symbol requiring-resolve deref))
 
 (defn- search
-  {:malli/schema
+  {:seon.fn/invokes #{:seon.config.web/search-result-projection}
+   :malli/schema
    [:=> [:cat :my.web/search-request :seon.config/effective]
     [:or :my.web/search-result :my.web/error]]}
   [request effective]

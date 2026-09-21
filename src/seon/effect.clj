@@ -786,7 +786,8 @@
         :seon.effect/missing-bound :seon.config.effect.background/time-limit-ms}))))
 
 (defn- request*
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value :seon.effect/execution-options] :seon.effect/request-result]}
+  {:seon.fn/invokes #{:seon.effect/capability}
+   :malli/schema [:=> [:cat :seon.schema/value :seon.schema/value :seon.effect/execution-options] :seon.effect/request-result]}
   [owner request execution]
   (let [owner-sym (owner-symbol owner)]
      (cond
