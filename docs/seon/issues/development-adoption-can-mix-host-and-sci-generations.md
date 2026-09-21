@@ -19,6 +19,13 @@ redefinition for cluster/agent overrides. B2 §2a now requires matching
 executable dependencies too, and context-local installation of affected callers.
 This is a plan correction; implementation and the composed isolation proof remain.
 
+The subsequent contract-only exemption also fails for indirect calls. A real
+SCI/Malli probe refused a direct invalid call, accepted it through a copied JVM
+caller, then refused it after interpreting only that caller. The callee's
+compiled body can be reused; context-specific contract enforcement still needs
+affected-call routing. Exact 42 ms probe:
+[deep-review verification](../../research/agent-platform/repl-verification-deep-review-2026-09-21.md).
+
 Extracted on 2026-09-08 from the instrumentation ownership issue: stable
 JVM wrappers and projection-local contracts do not make source reload atomic.
 The following dated evidence remains a separate adoption-owner obligation.
