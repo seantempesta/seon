@@ -2475,3 +2475,47 @@ bytes: **0 deleted, 779 added**. Before row stays **5695.306 ms**;
 after publication measurement is still owed. While the shape lane held
 `fn.clj`, work continued on namespace selection in `cluster.clj`; its separate
 uncommitted diff is excluded from this commit.
+
+## Item 5 measured after export repair — 2026-09-23
+
+The owned scratch root was rebuilt from an archive of `3c552f3bc`, including
+`dbb6c4864`'s schema reader fix, without the uncommitted items 6/8. Complete
+publication took 195349 ms, the cold fork command 9322 ms, and boot 12826 ms.
+These are the once-only construction costs, not edit costs. The host was
+downed before the next fast JVM. No default or foreign process was operated.
+
+The existing prepl measurement script reports these summed progress spans:
+
+| Request | Before | After |
+|---|---:|---:|
+| One-file docstring edit | 5695.306 ms | 4320.171 ms |
+| Restore that file | — | 3663.290 ms |
+| Repeat docstring edit | — | 2723.412 ms |
+| Restore that file again | — | 3739.017 ms |
+| No change | — | 264.119 ms, head unmoved |
+
+Raw evidence is `one-jvm-manifest-after{,-reverse,-warm,-warm-reverse}-2026-09-23.edn`
+and `one-jvm-manifest-no-change-2026-09-23.edn` beside this note. These are
+iteration measurements under shared-machine load, not the orchestrator's
+quiet landing row. The target remains unmet.
+
+In the 2723 ms row, source build is 553 ms, analysis/artifact replacement
+475 ms, publication reconciliation 303 ms, adoption reconciliation 406 ms,
+and instrumentation 76 ms. No whole stored manifest is read or validated.
+The committed read probe selects **one file**: `published-index-rows` takes
+21.890 ms, the two indexed identity reads total 0.619 ms, and selected
+artifact derivation totals 28.741 ms. Materializing the Datahike commit is
+1.711 ms. However `source/database` then derives the complete projection
+again: **248.417 ms for 1560 function contracts**, O(program) on each newly
+materialized database value. This remains work to dissolve at the database
+value's projection acquisition seam. The 475 ms analysis interval still
+needs a narrower probe; naming the interval is not an algorithmic explanation.
+One initial selected-artifact observation was 990 ms; subsequent direct
+measurement was 29 ms, so the initial observation is not evidence of a
+stable whole-program scan in that reader.
+
+This evidence-only checkpoint deletes **0 source bytes**. Namespace load
+completed without an exception; the next fast run verifies the report and
+reload changes separately. The latest base still advertises `2c3e6b2247…`;
+`3c552f3bc` fixes the live export request, and a new explicit preparation is
+needed to exercise that fix. No prior red is relabelled green here.

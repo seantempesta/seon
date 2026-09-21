@@ -1,0 +1,1 @@
+#:seon.source{:materialize-ms 1.710958, :projection-ms 248.417167, :selected-artifacts-ms 28.740708, :function-contract-count 1560, :selected-file-count 1, :read-calls {seon.fn/file-identities [2 0.618916], seon.fn/published-index-rows [1 21.889708], seon.fn.signature/declaration-metadata [4 0.114374], seon.fn/declaration-digests [1 0.497292], seon.fn/manifest-data [1 0.039]}}
