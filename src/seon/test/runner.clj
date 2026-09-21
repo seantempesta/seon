@@ -2083,17 +2083,25 @@
     (when (and (map? base) (contains? base :seon.error/at))
       (throw (ex-info "A test worker could not prepare its canonical fixture base."
                       base)))
-    ;; Realize the lazy context handle. The task boundary acquires its program
-    ;; before resolution; plain database fixtures need no interpreter program.
-    (let [context @(:seon.test-support/sci-context base)]
+    ;; Acquire shared worker state before readiness and the first drift
+    ;; snapshot. Task execution still handles standalone lazy contexts.
+    (let [context @(:seon.test-support/sci-context base)
+          connection (:seon.test-support/connection base)
+          database (db/db connection)
+          acquired ((requiring-resolve 'seon.test/with-test-loader)
+                    (clojure.lang.RT/baseLoader)
+                    #((requiring-resolve 'seon.sci.eval/acquire!)
+                      {:seon.sci.eval/ctx context :seon.db/db database}))]
+      (when-let [failure (or (:seon.sci.eval/acquisition-recording-error acquired)
+                             (first (:seon.sci.eval/acquisition-refusals acquired)))]
+        (throw (ex-info "A test worker could not acquire its canonical SCI program."
+                        failure)))
       (write-protocol! writer {::worker-event :ready
                               ::worker-id worker-id
                               ::fixture-preparation-ms
                               (quot (- (System/nanoTime) started) 1000000)
                               ::exchange-id (str worker-id "/readiness")})
-      (let [connection (:seon.test-support/connection base)
-            database (db/db connection)
-            task-executor
+      (let [task-executor
             (Executors/newSingleThreadExecutor
              (reify ThreadFactory
                (newThread [_ runnable]

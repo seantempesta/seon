@@ -56,3 +56,28 @@ without replacing that context's acquired database.
 Verification pending: only `git diff --check` ran in this bounded lane.
 The owner will include `seon.test.runner-test` and `seon.test-test` in the
 one rerun of the combined checkpoint. No JVM, tests, operator commands, or commits ran here.
+
+### Worker readiness must include shared acquisition
+
+The repaired combined checkpoint on `98d1a8ede` reached test bodies, but its
+first task reported SCI namespace additions as worker-global drift:
+[log](../../prds/agent-platform/landing/fresh-start-combined-gate-repaired.log),
+line 96, at 20:15:39. The examples were `my.agent absent->4` and
+`my.background absent->4`. This is the first acquisition of the worker's shared
+context, not a mutation originating in the selected test body:
+`sci-base-namespace-sizes` observes a realized context delay, while
+`serve-worker-commands!` captures its initial sizes before `run-task!` acquires
+the previously empty program.
+
+Worker initialization now acquires that shared program through the existing
+SCI and test-loader owners before readiness and therefore before any task's
+drift snapshot. Readiness's fixture-preparation measurement includes the work. Acquisition
+row refusals and refusal-recording errors throw before readiness is emitted.
+The existing `a-cold-worker-does-not-arm-its-base-around-host-test-bodies`
+regression now performs the same real acquisition before its snapshot and
+checks that the host body leaves those SCI namespace sizes unchanged.
+Standalone task execution keeps its first-use acquisition. The snapshot and
+drift comparison are unchanged, so subsequent namespace additions/removals
+remain observable. No test/JVM was launched alongside the owner's checkpoint;
+static diff checking passed. The next owner source-load check and checkpoint
+must verify this initialization placement.

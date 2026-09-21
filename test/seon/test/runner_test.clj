@@ -93,6 +93,11 @@
            base (schema/call-with-projection
                  projection
                  #(deref (var-get #'test-support/database-base)))
+           _base-acquired (sci.eval/acquire!
+                           {:seon.sci.eval/ctx @(::test-support/sci-context base)
+                            :seon.db/db (db/db (::test-support/connection base))})
+           sizes-before (#'runner/sci-base-namespace-sizes
+                         (var-get #'test-support/database-base))
            _selected-init (#'runner/initialize-contracts!
                            "arm-extent-regression"
                            ['seon.test.runner-test] projection)
@@ -116,6 +121,12 @@
                        [probe])]
            (is (= [:inside] @observed)
                "worker initialization must not leave its base armed across a host test body")
+           (is (nil? (#'runner/ambient-drift
+                      {::runner/snapshot-sci-base sizes-before}
+                      {::runner/snapshot-sci-base
+                       (#'runner/sci-base-namespace-sizes
+                        (var-get #'test-support/database-base))}))
+               "worker program acquisition precedes the test's drift snapshot")
            (is (= 0 (:seon.test/fail-count (first result))) (pr-str result))
            (is (= 0 (:seon.test/error-count (first result))) (pr-str result))
            (is (= :after
