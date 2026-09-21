@@ -7,6 +7,23 @@ tags: [issue, test, render, wave/contract-gate]
 
 # Render fixture failures print the entire SCI context
 
+## Re-observation — test-system bound baseline, 2026-09-23
+
+The platform-namespace fast snapshot at HEAD `9c02384c8` plus the per-test
+duration reporter produced a **3,793,976,526-byte** log before its last
+namespace completed. `seon.test-runner-test/gate-completions-travel-as-a-file-not-as-code`
+submitted 2,000 synthetic results; later runner failures printed transaction
+refusal data containing captured execution evidence. This is another instance
+of failed fixture assertions producing unusable output. The size is measured;
+the exact contribution of each failing assertion is not established.
+
+The bounded event summary and duration offenders are retained in the
+[test-system landing note](../../prds/steward-platform/research/test-system-fork-2026-09-23.md).
+No extra presentation clipping was added to the runner. The regression's
+transport assertion should compare constant form size across input sizes,
+and recording assertions should inspect the specific refusal fields instead
+of printing the entire transaction value.
+
 At HEAD `3e84110bc`, `SEON_TEST_WORKERS=3 bin/test-fast --paths AGENTS.md --
 seon.render-simplification-test` reproduced **21 tests / 116 assertions,
 17 failures / 5 errors**. The HEAD-only log was **1,143,148,974 bytes**.

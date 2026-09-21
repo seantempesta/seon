@@ -23,7 +23,10 @@
                       :description "The declared reason this namespace's tests are fixture material another test asserts over, never gate members: a deliberate failure, an assertionless example, a usage sample. Declared once on the ns form and lifted onto every test row, so bare selection excludes it by fact instead of by a filename that does not end in _test."}],
             :long-ms
             [:int {:min 1
-                   :description "The declared completion allowance in milliseconds for a :seon.test/long test. The cold runner widens that test's per-worker-exchange bound to it, so the bound derives from the declaration instead of standing in for it. Absent means the ordinary per-exchange bound applies."}],
+                   :description "Per-test completion bound in milliseconds. Only a positive allowance accompanied by a nonblank :seon.test/long reason may exceed the default; exceeding the bound is a test failure."}],
+            :time-limit-ms
+            [:int {:min 1 :default 5000
+                   :description "Default per-test body bound in milliseconds. The runner reads this declaration once per run and carries it with reporter options. Only :seon.test/long with a reason and :seon.test/long-ms can raise it; overruns are recorded assertion failures."}],
             :pass-count [:int {:min 0}],
             :fail-count [:int {:min 0}],
             :error-count [:int {:min 0}],
@@ -258,6 +261,11 @@
            [:seon.test/long :seon.test/long]
            [:seon.test/command :seon.test/command]]]
  :seon.test/elapsed-ms [:double {:min 0}]
+ :seon.test/duration-failure
+ [:map {:description "Clojure test reporter failure event for a measured body duration exceeding its declaration."}
+  [:type [:= :fail]] [:var :seon.test/var] [:message :string]
+  [:expected [:map [:seon.test/time-limit-ms :seon.test/time-limit-ms]]]
+  [:actual [:map [:seon.test/elapsed-ms :seon.test/elapsed-ms]]]]
  :seon.test/expired
  [:and {:description "The declared check bound fired with runs already recorded. It names what never returned; the verdicts it accompanies are the tests that did complete."}
   :seon.error/base

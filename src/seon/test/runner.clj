@@ -126,7 +126,9 @@
     (assoc (select-keys configuration
                         [:seon.print/length :seon.print/level])
            :seon.render/profile
-           (render/agent-render-profile configuration))))
+           (render/agent-render-profile configuration)
+           :seon.test/time-limit-ms
+           (get-in (schema.edn/packaged-forms) [:seon.test/time-limit-ms 1 :default]))))
   ([supplied]
    (merge (or (::report-options supplied) (report-options))
           (select-keys supplied
@@ -269,10 +271,14 @@
                      event-type (:type event)]
                  (case event-type
                    :begin-test-var
-                   (assoc-in current [::results test-symbol :seon.test.member/began?] true)
+                   (-> current
+                       (assoc-in [::results test-symbol :seon.test.member/began?] true)
+                       (assoc-in [::results test-symbol ::started-nanos] (System/nanoTime)))
 
                    :end-test-var
-                   (assoc-in current [::results test-symbol :seon.test.member/ended?] true)
+                   (-> current
+                       (assoc-in [::results test-symbol :seon.test.member/ended?] true)
+                       (assoc-in [::results test-symbol ::ended-nanos] (System/nanoTime)))
 
                    :pass
                    (update-in current [::results test-symbol
@@ -350,12 +356,40 @@
          :expected '(pos? assertion-count)
          :actual assertion-count}))))
 
+(defn- duration-failures
+  "Turn an observed body overrun into ordinary, durably recorded assertion evidence."
+  {:malli/schema [:=> [:cat :seon.test/var :seon.test/elapsed-ms :seon.test/time-limit-ms]
+                  [:vector :seon.test/duration-failure]]}
+  [test-var elapsed ordinary]
+  (let [metadata (meta test-var)
+        declaration (program/test-markers metadata (meta (:ns metadata)))
+        reason (:seon.test/long declaration)
+        allowance (:seon.test/long-ms declaration)
+        limit (if (and (string? reason) (not (str/blank? reason))
+                       (integer? allowance) (pos? allowance))
+                (max ordinary allowance) ordinary)]
+    (if (> elapsed limit)
+      [{:type :fail :var test-var
+        :message (str "Test " (var-symbol test-var) " exceeded its declared duration: "
+                      elapsed " ms; bound " limit " ms.")
+        :expected {:seon.test/time-limit-ms limit}
+        :actual {:seon.test/elapsed-ms elapsed}}]
+      [])))
+
 (defn- capture-and-report-event!
   [options capture selected-namespaces default-report reported-signatures event]
   (capture-event! options capture selected-namespaces event)
   (when-let [failure (assertionless-failure capture event)]
     (capture-event! options capture selected-namespaces failure)
     (report-event! options default-report reported-signatures failure))
+  (when (= :end-test-var (:type event))
+    (when-let [started (get-in @capture [::results (event-symbol event) ::started-nanos])]
+      (doseq [failure (duration-failures (:var event)
+                                       (/ (double (- (get-in @capture [::results (event-symbol event) ::ended-nanos])
+                                                     started)) 1e6)
+                                       (:seon.test/time-limit-ms options))]
+        (capture-event! options capture selected-namespaces failure)
+        (report-event! options default-report reported-signatures failure))))
   (report-event! options default-report reported-signatures event))
 
 (defn- announce!
@@ -608,7 +642,7 @@
      (let [result (get results test-symbol)
            messages (::failure-messages result)
            identities (::failure-identities result)]
-       (cond-> (dissoc result ::failure-messages ::failure-identities)
+       (cond-> (dissoc result ::failure-messages ::failure-identities ::started-nanos ::ended-nanos)
          (seq identities)
          (assoc :seon.test/failing-assertions (vec (sort identities)))
          (seq messages)

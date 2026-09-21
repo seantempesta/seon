@@ -627,3 +627,89 @@ and its scratch snapshot was removed. The abandoned zero-byte Git index
 lock that briefly refused slice (2)'s commit had no Git process or open file
 descriptor; it was preserved under tmp while retrying, then removed after
 the successful commit. No default operation or cold test gate was run.
+
+### Default per-test duration is an assertion failure
+
+The single default is `:seon.test/time-limit-ms` in
+`resources/seon/schemas/seon.test.edn`: **5000 ms**. Reporter options acquire
+it once and carry it into each test. Clojure test emits `:begin-test-var`
+and `:end-test-var` around the body (`reference-code/clojure/src/clj/clojure/test.clj:710–737`);
+the existing capture stores those monotonic timestamps and emits an ordinary
+`:fail` when their difference exceeds the bound. Existing failure recording
+stores `{:seon.test/time-limit-ms bound}` as expected and
+`{:seon.test/elapsed-ms measured}` as actual. There is no new execution loop.
+Only a nonblank `:seon.test/long` reason together with positive
+`:seon.test/long-ms` raises the default. An allowance alone does not.
+
+The focused reporter regression uses an already elapsed timestamp, not a
+sleep. Initial fast run `dfcaed01191c`: **2 tests, 23 assertions, no failures
+or errors**; bodies **244.053 ms** and **349.029 ms**.
+
+For the requested baseline, namespaces were derived from the newest exported
+manifest's rows with `:seon.test/platform` and `:seon.test/sym`, excluding
+`:seon.test/fixture`, then passed together to `bin/test-fast --paths
+resources/seon/schemas/seon.test.edn src/seon/test/runner.clj
+test/seon/test/duration_test.clj -- <derived namespaces>`. The snapshot
+was HEAD `9c02384c8` plus exactly those three paths; the exported program
+was 15 commits behind HEAD. No pending fn.clj changes were included.
+
+Recorded run `7aa326277331`: **167 executed, 1183 assertions, 42 failures,
+16 errors**. All 18 duration failures below have a 5000 ms bound:
+
+| Test | Measured ms |
+|---|---:|
+| `seon.cluster.registry-test/reset-returns-a-cluster-to-source-state` | 5148.969416 |
+| `seon.cluster.registry-test/retiring-one-cluster-reclaims-only-its-own-tail` | 7063.822625 |
+| `seon.cluster.registry-test/two-clusters-write-independently` | 5307.07325 |
+| `seon.cluster.source-lineage-test/existing-clusters-remain-on-their-chosen-source-commit` | 11080.855292 |
+| `seon.cluster.source-lineage-test/stale-incremental-upsert-preserves-the-newer-publication` | 8986.837833 |
+| `seon.cluster.source-test/incremental-first-party-publication-retains-complete-scalar-rows` | 7250.634 |
+| `seon.cluster.source-test/incremental-publication-does-not-change-an-existing-cluster` | 6276.569292 |
+| `seon.cluster.source-test/incremental-upsert-derives-scalar-safety-from-the-installed-schema` | 5963.102291 |
+| `seon.cluster.source-test/incremental-upsert-records-source-identity-on-the-expected-commit` | 5704.52025 |
+| `seon.flow-configuration-test/every-built-graph-proc-declares-a-specific-workload` | 11876.568208 |
+| `seon.test-runner-test/gate-completions-travel-as-a-file-not-as-code` | 11834.050834 |
+| `seon.test-support-test/simultaneous-fixture-bases-never-open-the-published-store` | 6542.267291 |
+| `seon.test.runner-test/no-double-execution` | 5116.56675 |
+| `seon.test.runner-test/platform-claims-and-original-bounds-govern-bulk` | 30929.636792 |
+| `seon.test.runner-test/selection-is-one-function-on-both-hosts` | 13917.317125 |
+| `seon.test.selection-test/fileless-sci-tests-use-the-same-selection` | 6337.354667 |
+| `seon.test.selection-test/named-selection-reuses-green-members-by-reachable-content` | 14137.68825 |
+| `seon.test.selection-test/omitted-dirty-callers-use-head-and-carry-recordable-provenance` | 15795.023541 |
+
+A thread sample during `selection-derives-bases-obligations-and-exact-symbol-reach`
+showed `runner/reach-refresh` → `db/pull-many` → `decode-pull-entity`;
+its first two selections measured **23327.387 ms** and **23194.119 ms**.
+This test already declares a 900000 ms allowance; it is not a default-bound
+offender, and that declaration does not explain the work. The pending
+declared-reference improvement is a separate measured query change.
+
+The baseline also exposed existing publication and nested execution errors
+at `schema/projection-registry` (`:malli.core/invalid-schema`), operator
+assertion failures, and stale runner assertions. Their causes are not inferred
+from the stack alone. The multi-gigabyte diagnostic is recorded in
+[the existing output issue](../../../seon/issues/render-fixtures-dump-context-on-stale-assertions.md).
+
+The final recorder confirmed all 167 results. The 16 errors comprise 14
+[Malli schema acquisition errors](../../../seon/issues/platform-fixtures-refuse-function-schema-acquisition.md),
+one operator boot error (the same test identity as the resolved
+[operator issue](../../../seon/issues/isolated-reset-boot-test-closes-readiness-during-recovery.md)),
+and one declared-reference error-schema contract refusal. Operator source
+preflight assertions share test identities with the resolved
+[absolute Git-directory fixture issue](../../../seon/issues/preflight-source-fixture-rejects-absolute-git-common-directory.md); these historical reports do not establish
+the causes of this run’s operator failures.
+The reporter-options default recomputation introduced during this slice was
+removed before landing: supplied options are carried unchanged. Remaining
+fixture-population and recorder assertions are retained reds, not claimed green.
+The 3.79 GB raw log was deleted after extracting the bounded event summary;
+the recorded run retains the failure facts. No foreign process was operated.
+
+Final focused run `ffe963b4ba1e`, after preserving carried reporter options
+and measuring the end event before reporter work: **2 tests, 23 assertions,
+zero failures or errors**. Both results were durably recorded.
+Final bodies: **180.675 ms** and **308.035 ms**. The pre-commit
+`clojure -M:test -e` require of `seon.test-support`, `seon.test`,
+`seon.test.runner` and `seon.test.duration-test` exited zero. The fast
+snapshot independently loaded HEAD plus only the three item-1 code paths.
+Markdown validation reports two pre-existing Datahike gitlink citations in
+wave-3a and wave-3bc plan documents; this slice does not edit those owners.
