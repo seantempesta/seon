@@ -1214,3 +1214,22 @@ currently hold `src/seon/config.clj`, its resource and `src/seon/schema/edn.clj`
 none was included or edited. This is an additional verification boundary,
 not a result for either duration regression. The last executed duration
 regressions passed in `ac51f1a8b816`.
+
+### Writer log ruling implemented — 2026-09-23
+
+Owner selected option 1. Datahike fork **7e1af7ddbe697d7cf7a0291ad432faf683b7d2bc**
+was pushed to `seantempesta/datahike` `main`. `writer.cljc:85` derives
+exception class/message/stack without exception data; `:141` logs that value
+instead of invocation/arguments. Branch and commit come from the writer's
+immutable database. Explicit cluster, test, run and error identities are retained
+from the request, transaction metadata or error evidence when supplied; absent
+application identities are not guessed. The callback retains the original
+exception and offending objects. The retired discriminator and truncated-message
+branch were deleted. This supersedes the earlier draft patch.
+
+The maintained-fork regression ran in **28.875 ms**, **12 assertions, zero
+failures/errors**. It checks branch/commit, supplied cluster/test identity,
+exception type/message/stack, absence of invocation/argument/exception-data
+fields, and identical callback exception. Dependency namespace load passed.
+Fast overlay admission excludes gitlinks (`--paths` accepts first-party files),
+so the fork pin lands before measuring the six on that HEAD.
