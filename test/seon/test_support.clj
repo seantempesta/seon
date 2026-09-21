@@ -734,10 +734,14 @@
               (schema/projection-from-database (db/db connection))))))))
 
 (defn await-event!
-  "Await one channel, latch, future, or watched reference with a loud backstop."
+  "Await one channel, latch, future, or watched reference with a loud backstop.
+  The fourth argument supplies the observation bound in milliseconds."
   ([event-source event]
    (await-event! event-source event (constantly true)))
   ([event-source event accept?]
+   (await-event! event-source event accept?
+                 (.toMillis TimeUnit/SECONDS event-backstop-seconds)))
+  ([event-source event accept? timeout-ms]
    (cond
      (instance? clojure.lang.IRef event-source)
      (let [watch-key (Object.)
@@ -749,26 +753,26 @@
                   (fn [_ _ _ value] (publish! value)))
        (try
          (publish! @event-source)
-         (first (await-event! accepted event))
+         (first (await-event! accepted event (constantly true) timeout-ms))
          (finally
            (remove-watch event-source watch-key)
            (async/close! accepted))))
 
      (instance? CountDownLatch event-source)
      (if (.await ^CountDownLatch event-source
-                 event-backstop-seconds
-                 TimeUnit/SECONDS)
+                 timeout-ms
+                 TimeUnit/MILLISECONDS)
        true
        (throw
         (ex-info
          "The test did not observe its required latch event."
-         {::event event})))
+         {::event event ::timeout-ms timeout-ms})))
 
      (instance? Future event-source)
      (try
        (.get ^Future event-source
-             event-backstop-seconds
-             TimeUnit/SECONDS)
+             timeout-ms
+             TimeUnit/MILLISECONDS)
        (catch ExecutionException failure
          (throw (.getCause failure)))
        (catch TimeoutException timeout
@@ -776,13 +780,12 @@
          (throw
           (ex-info
            "The test future did not publish its required completion."
-           {::event event}
+           {::event event ::timeout-ms timeout-ms}
            timeout))))
 
      (satisfies? async.impl/ReadPort event-source)
      (let [backstop
-           (async/timeout
-            (.toMillis TimeUnit/SECONDS event-backstop-seconds))]
+           (async/timeout timeout-ms)]
        (loop []
          (let [[value selected] (async/alts!! [event-source backstop])]
            (cond
@@ -790,7 +793,7 @@
              (throw
               (ex-info
                "The test channel did not publish its required event."
-               {::event event}))
+               {::event event ::timeout-ms timeout-ms}))
 
              (nil? value)
              (throw

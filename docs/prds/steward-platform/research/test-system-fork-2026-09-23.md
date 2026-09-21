@@ -788,3 +788,46 @@ The pre-commit `clojure -M:test -e` require of all three affected namespaces
 exited zero under one acquired test slot. fn.clj is clean after its separate
 commit. The only remaining clj-kondo notice in the fixture is the existing
 private digest Var used by the lineage namespace.
+
+### Terminal observations and correction of the 270-second attribution
+
+`test-support/await-event!` now accepts an explicit fourth argument in
+milliseconds, retaining its existing channel/latch/future/reference behavior.
+Its timeout exception names both the expected event and the observation bound.
+The turn-backstop regressions use 1000 ms to observe cancellation, or the
+production fault admitted for 200 ms of work plus margin. The latter awaits
+the exact `::flow/op :seon.agent/turn-completion-backstop` event and asserts
+that the bounded join returns its identical `::flow/ex` exception. A missing
+event throws; the harness timeout never satisfies the assertion. The producer
+and consumer seams are `turn/offer-turn-backstop-fault!` and
+`agent/await-turn-completion!`.
+
+Focused fast run **1fb10a26d1ba** durably recorded **2 executed, 7 assertions,
+0 failures, 1 error**. Reporter begin/end times were **3005 ms** for
+`cancelled-completion-observer-releases-every-existing-waiter` (passed) and
+**1578 ms** for `completion-observer-uses-the-admitted-provider-and-evaluation-parts`
+(error). These are reporter wall intervals, not precision claims about stored
+elapsed values. The latter observes no fault because `turn-completion-error`
+calls `error/diagnostic` without required `:seon.error/at`, `/layer`, and
+`/operation`. The producer is outside this lane's ownership; see the
+[existing error-schema issue](../../../seon/issues/error-class-catalog-and-renderers-disagree.md).
+The export was 25 commits behind HEAD; no claim of a successful production
+fault delivery is made.
+
+The broader measurement falsifies the 05:00 ledger's attribution for
+`turn-work`: that namespace has no timed await. **270 seconds is the runner's
+ordinary worker exchange bound**, not a test success condition. Its generated
+property instead performs 200 independent fixture/configuration admissions.
+After approximately **163 seconds**, a thread sample found it RUNNABLE in
+Datahike query estimation through `configure-cap!` / `config/apply!`. The lane
+terminated its own JVM; that incomplete run has no durable tally. Six earlier
+turn-work tests completed in **472–3903 ms**; a seventh refused a retired
+`:seon.error/kind` fixture write. The separate algorithm defect is recorded in
+[the property issue](../../../seon/issues/turn-work-property-repeats-config-admission-for-every-generated-case.md).
+No trial count or assertion was weakened and no long allowance was added.
+The old worker exchange bound is not claimed repaired by this event change.
+The explicit `clojure -M:test -e` require of test-support, turn-backstop-test
+and turn-work-test completed without a load error. The load command's slot
+helper was accidentally sourced by zsh and refused its Bash substitution;
+the subsequent single JVM load completed, but is not claimed slot-protected.
+Both fast runs used the launcher's slot normally. No lane JVM remains.

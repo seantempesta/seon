@@ -7,6 +7,21 @@ tags: [issue, schema, render, test, class/n11, wave/error-class-contract]
 
 # Reconcile the error-class catalog with declared schemas and renderers
 
+## Turn completion observation — 2026-09-23
+
+The armed test-system snapshot at `bf3b5df9f` reaches
+`seon.turn/turn-completion-error` (`src/seon/turn.clj:5021`). Its call to
+`seon.error/diagnostic` omits required `:seon.error/at`, `/layer`, and
+`/operation`. The observer throws before publishing its fault. The regression
+now reports the missing terminal event within its explicit 1000 ms observation
+bound; it does not treat silence as completion. The producer belongs to the
+error lane and was not edited by the test-system lane.
+
+The same snapshot's `seon.turn-work-test/only-a-turn-whose-reply-came-from-a-model-attempt-answers`
+also writes the retired `:seon.error/kind` attribute in its provider-failure
+fixture (`test/seon/turn_work_test.clj:606`). The writer refuses it at the
+write. Neither observation justifies restoring the retired attribute.
+
 ## Current error-schema regression boundary — 2026-09-23
 
 The older migration narrative below is historical. Current owner rulings

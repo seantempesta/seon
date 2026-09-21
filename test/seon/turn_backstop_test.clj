@@ -1,5 +1,6 @@
 (ns seon.turn-backstop-test
   (:require [seon.schema] [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.ai :as ai]
@@ -7,6 +8,10 @@
             [seon.cluster.agent :as agent]
             [seon.test-support :as test-support]
             [seon.turn :as turn]))
+
+(def ^:private observation-ms
+  "One second bounds observing cancellation or the admitted 200 ms fault."
+  1000)
 
 (deftest cancelled-completion-observer-releases-every-existing-waiter
   (test-support/with-database
@@ -27,7 +32,8 @@
        (is (identical? observer @state))
        (try
          (async/offer! (:seon.agent/cancel observer) :seon.agent/completed)
-         (is (nil? (test-support/await-event! completion ::observer-cancelled)))
+         (is (nil? (test-support/await-event! completion ::observer-cancelled
+                                             (constantly true) observation-ms)))
          (is (nil? @state))
          (finally
            (async/offer! (:seon.agent/cancel observer) :seon.agent/completed)))))))
@@ -66,7 +72,11 @@
                          :seon.agent/agent-id "missing-evaluation"
                          :seon.agent/run-id (atom "missing-evaluation-turn")})]
           ((:seon.turn.loop/await-part observer) expected 100)
-          (let [failure (try
+          (let [fault (test-support/await-event!
+                       @faults ::backstop-fault
+                       #(= :seon.agent/turn-completion-backstop (::flow/op %))
+                       observation-ms)
+                joined (future (try
                           (#'agent/await-turn-completion!
                            (atom {:seon.agent/fault-channel @faults})
                            {:seon.agent/id "missing-evaluation"
@@ -74,6 +84,10 @@
                             :seon.agent/turn-backstop-state state
                             :seon.turn.loop/cluster {:seon.db/connection connection}})
                           nil
-                          (catch clojure.lang.ExceptionInfo failure failure))]
+                          (catch clojure.lang.ExceptionInfo failure failure)))
+                failure (test-support/await-event! joined ::backstop-joined
+                                                   (constantly true) observation-ms)]
+            (is (identical? (::flow/ex fault) failure)
+                "The join reports the exact fault the observer published.")
             (is (str/includes? (ex-message failure) message))
             (is (= 200 (:seon.config.agent/turn-completion-backstop-ms (ex-data failure)))))))))))
