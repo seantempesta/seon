@@ -7169,3 +7169,17 @@ stored applied-manifest digest is deleted if nothing else reads it.
 **Finding:** `default` JVM at 15.3 GB resident, 4.5 GB live after a forced
 GC (`MaxRAMPercentage=12.5` → 16 GB max). Not on the critical path; to
 be explained (what holds 4.5 GB for a program graph) once slice 4 lands.
+
+### 2026-09-23 ~19:50 — ruling: every publication input is a file row with its digest
+
+Lane found 788 publication inputs, 402 stored digests, 386 absent (schema
+resources, analyzer config, launchers, pinned dependency entries); "source
+build" hashed them all on every edit (909 ms). Ruled option 1 of
+`publication-input-digests-are-not-all-database-facts.md`: every input is
+a file row carrying its digest; a request hashes only its changed paths;
+analysis membership is derived from the program graph's file references,
+never from a file row's existence; the merged schema declaration is
+derived, not an input; the aggregate `:seon.source/test-input-digest`
+goes when nothing reads it. `d726468e0` accepted: the validator reads
+only the report's touched rows (849/518 → 77/8 ms); docstring edit
+8.83 → 5.42 s on the lane's own root.
