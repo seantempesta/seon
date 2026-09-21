@@ -1302,3 +1302,86 @@ it before that removal. Its published row is therefore stale relative to HEAD;
 this lane does not operate the shared publication to retract it. Subsequent
 iterations select the original maintained test namespaces directly. No temporary
 test namespace will be recreated in the shared tree.
+
+### Refreshed export: covered members pass; reach reads follow requested tests
+
+The refreshed export is `f0f25b5f3b991e835f81854fd95296c84e7053d484f4b53b59e98eff75fbac75`.
+Run **e63e0d5af33e**, original maintained namespaces, executed 34 tests / 371
+assertions / 5 failures / 2 errors. The covered-member correction is now verified:
+`no-double-execution` passed in **4,686 ms**, including the two report and four
+completed-member counts across admitted/covered membership. Platform claims
+passed in **2,709 ms**. The deliberate nested failure/error events in those
+fixtures are expected inputs, not outer failures.
+
+Two assigned durations remained: both-host SCI selection **15,814.632 ms** and
+named selection **5,638.320 ms**. Operation instrumentation was applied to the
+tracked original tests, preserved in
+[test-system-selection-cost-2026-09-23.patch](test-system-selection-cost-2026-09-23.patch),
+and removed after measurement. No untracked test namespace was created.
+
+Named selection acquired the entire program's reach rows twice, costing
+**992.503 / 1,189.495 ms** in `reach-refresh`. The acquisition now starts with
+the requested function/test identities and follows their stored calls,
+references, test subject and schema references. Identity queries bind one
+attribute and its requested values; row reads bind the resulting entity ids.
+Datahike's AVET/EAVT dispatch is `reference-code/datahike/src/datahike/db/search.cljc:140–157`.
+No new cache was added. The existing retained entries still skip program reads
+after result-only writes; a new regression refuses any such read. The private
+`reach-refresh` callers were updated together with its requested-symbol argument.
+
+A combined heterogeneous identity-relation query refused with a null-comparison
+exception. The shipped read groups identity values by attribute before querying;
+the [query issue](../../../seon/issues/heterogeneous-identity-query-refuses-during-reach-acquisition.md)
+records the failed form without attributing an unverified dependency cause.
+The row-parity regression compares requested indexed rows with native pull and
+checks that the acquisition excludes the unrelated program population.
+
+Run **75801c3ccaed**, 36 original tests / 378 assertions / 4 failures / 2 errors,
+verified these six bodies (elapsed milliseconds, reporter begin/end for passes):
+
+| Test | Previous measured ms | Latest ms | Verdict |
+|---|---:|---:|---|
+| `runner-test/no-double-execution` | 26,119.140 | 4,472.982 | pass |
+| `runner-test/platform-claims-and-original-bounds-govern-bulk` | 30,307.987 | 2,639.568 | pass |
+| `runner-test/selection-is-one-function-on-both-hosts` | 58,060.672 | 15,220.769 | duration failure |
+| `selection-test/fileless-sci-tests-use-the-same-selection` | 13,030.504 | 2,722.371 | pass after the first SCI acquisition |
+| `selection-test/named-selection-reuses-green-members-by-reachable-content` | 5,638.320 | 3,133.237 | pass |
+| `selection-test/omitted-dirty-callers-use-head-and-carry-recordable-provenance` | 15,086.699 | 543.164 | pass |
+
+Named reach acquisition is now **17.559 / 3.430 ms**, with its semantic assertions
+passing. Final focused run **32fd2d583265**, including the result-only-write
+regression, passed **3 tests / 10 assertions**, zero failures/errors.
+`clojure -M:test` required runner, runner-test, selection-test, reach-test and
+test-reaching-test successfully before commit. The latter's private call was
+converted; its unrelated older fixture bodies were not claimed green.
+
+### Remaining decision: repeated config compilation during SCI namespace load
+
+The first SCI acquisition loads the published JVM namespaces. In the latest
+split, `load-core-namespaces!` took **10,780.097 ms**; actual SCI base construction
+was **466.425 ms**. Namespace initialization called `config/compile-settings`
+**35 times, 6,282.947 ms total**, including **35 complete declaration projections,
+3,428.804 ms**. These are inclusive timings, not additive components. The
+largest individual namespace load was `seon.db-test` at roughly 852 ms in the
+preceding split; the cost is spread across many initializers, not one huge test.
+`src/seon/config.clj:540–543` constructs a fresh complete declaration projection
+on each call. This is the next algorithmic target; no longer allowance, eager
+fixture publication or clock exclusion was introduced. The first SCI caller
+pays it, so the subsequent fileless pass is not a standalone acquisition proof.
+
+The lane requested ownership of `src/seon/config.clj` for that bounded correction;
+it is outside the named test-system files and was not edited. The existing
+[publication/SCI acquisition issue](../../../seon/issues/full-publication-tests-exceed-liveness-while-compiling-the-commit-projection.md)
+holds this evidence. Five assigned bodies pass under bound; the sixth still fails.
+
+The broad runs also expose older, independent reds: an unacquired task context
+in `default-red-does-not-launch-confirmation`; platform rejection of the
+publication fixtures' destructive observations (the publication lane's held
+class); and the complete-population selection regression's refusal-contract
+check plus pending members after recorded completion. These were present before
+the scoped reach change. Their issue notes below record the boundaries; the
+six-test result is not a claim that the two entire namespaces are green.
+
+Broad-run triage: [unacquired task fixture](../../../seon/issues/task-execution-fixture-has-no-acquired-sci-program.md),
+[publication fixture eligibility](../../../seon/issues/platform-tier-rejects-small-publication-fixture-observations.md),
+and [pending selection after completion](../../../seon/issues/recorded-selection-completion-leaves-changed-members-pending.md).

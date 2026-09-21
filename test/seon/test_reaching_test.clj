@@ -243,7 +243,7 @@
               s "my.agents.reach-digest/largest-customer-test"
               f "my.agents.reach-digest/largest-customer"
               before (sut/reach-digest database s)
-              index (#'runner/reach-refresh database nil)
+              index (#'runner/reach-refresh database nil [s])
               entry (#'runner/reach-entry index s)
               target (:db/id (db/pull database [:db/id] [:seon.fn/sym f]))]
           (is (contains? (:seon.test.runner/reach-dependencies entry) target)

@@ -1,0 +1,58 @@
+--- a/test/seon/test/runner_test.clj
++++ b/test/seon/test/runner_test.clj
+@@ -1322,3 +1322,26 @@
+     (is (string? (:seon.test.runner/schema-authority-unavailable (first report))))
+     (is (empty? (runner/schema-restore-drift report))
+         "an unavailable observation is not a test failure")))
++
++;; Temporary operation measurement; the wrapped test body and owners execute unchanged.
++(alter-meta! #'selection-is-one-function-on-both-hosts update :test
++ (fn [body]
++  (fn []
++   (let [times (atom {})
++         owners '[seon.test/select seon.test.runner/reach-digests
++                  seon.test.runner/reach-refresh seon.fn/source-rows
++                  seon.test-support/fork-cluster-ctx seon.test-support/seed-cluster!
++                  seon.sci.eval/acquire! seon.sci.eval/base-ctx
++                  seon.sci.eval/load-core-namespaces! seon.sci.eval/host-namespace!
++                  seon.config/compile-settings seon.schema/declaration-projection seon.sci.eval/evaluate
++                  seon.schema/projection-from-database seon.test.runner/program-digest
++                  seon.fn/gate-sets seon.db/transact!]
++         replacements (into {} (map (fn [sym]
++                                     (let [v (requiring-resolve sym) f @v]
++                                      [v (fn [& args]
++                                           (let [start (System/nanoTime)]
++                                            (try (apply f args)
++                                             (finally (swap! times update (if (= sym 'seon.sci.eval/host-namespace!) [sym (first args)] sym) (fnil conj [])
++                                                        (/ (double (- (System/nanoTime) start)) 1e6))))))])) owners))]
++     (try (with-redefs-fn replacements body)
++          (finally (println "OPERATION TIMES selection-is-one-function-on-both-hosts" @times)))))))
+--- a/test/seon/test/selection_test.clj
++++ b/test/seon/test/selection_test.clj
+@@ -629,3 +629,26 @@
+             (is (not= changed (digest))))))
+       (finally ((requiring-resolve 'seon.fs/delete-recursively!)
+                 (.getCanonicalPath (io/file "tmp")) (.getCanonicalPath root))))))
++
++;; Temporary operation measurement; the wrapped test body and owners execute unchanged.
++(alter-meta! #'named-selection-reuses-green-members-by-reachable-content update :test
++ (fn [body]
++  (fn []
++   (let [times (atom {})
++         owners '[seon.test/select seon.test.runner/reach-digests
++                  seon.test.runner/reach-refresh seon.fn/source-rows
++                  seon.test-support/fork-cluster-ctx seon.test-support/seed-cluster!
++                  seon.sci.eval/acquire! seon.sci.eval/base-ctx
++                  seon.sci.eval/load-core-namespaces! seon.sci.eval/host-namespace!
++                  seon.config/compile-settings seon.schema/declaration-projection seon.sci.eval/evaluate
++                  seon.schema/projection-from-database seon.test.runner/program-digest
++                  seon.fn/gate-sets seon.db/transact!]
++         replacements (into {} (map (fn [sym]
++                                     (let [v (requiring-resolve sym) f @v]
++                                      [v (fn [& args]
++                                           (let [start (System/nanoTime)]
++                                            (try (apply f args)
++                                             (finally (swap! times update (if (= sym 'seon.sci.eval/host-namespace!) [sym (first args)] sym) (fnil conj [])
++                                                        (/ (double (- (System/nanoTime) start)) 1e6))))))])) owners))]
++     (try (with-redefs-fn replacements body)
++          (finally (println "OPERATION TIMES named-selection-reuses-green-members-by-reachable-content" @times)))))))

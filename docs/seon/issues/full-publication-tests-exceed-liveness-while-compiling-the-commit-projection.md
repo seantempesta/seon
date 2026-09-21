@@ -204,3 +204,16 @@ The fixture still returns the supplied-connection coherence refusal above:
 `2e9031a125aa`, base `0e3ced...`, 39 commits behind HEAD. The intended arity
 mismatch diagnostic is not proven past that boundary. Full evidence and
 remaining ordered work are in the redesign landing note.
+
+## First SCI acquisition split — test-system, 2026-09-23
+
+With refreshed export `f0f25b5...`, run `75801c3ccaed` measures the first SCI
+selection body at 15,220.769 ms. `load-core-namespaces!` takes 10,780.097 ms,
+while SCI base construction takes 466.425 ms. Namespace initialization invokes
+`seon.config/compile-settings` 35 times (6,282.947 ms total), including 35
+`schema/declaration-projection` calls (3,428.804 ms). Timings are inclusive.
+`config.clj:540–543` constructs the full projection every time, even while the
+caller already carries a projection. This is repeated whole-population work,
+not evidence for raising the test bound. The timed original-test patch and
+per-test results are in the test-system landing note. Config ownership was
+requested; no config, shared process or publication fixture was changed.

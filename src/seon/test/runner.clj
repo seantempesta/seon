@@ -2178,27 +2178,71 @@
                (conj seen k)))
       seen)))
 
-(defn- reach-refresh [database previous]
+(defn- reach-facts
+  "Read only requested declarations and their transitive call/schema references."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value
+         [:sequential [:or :qualified-symbol :qualified-keyword]]]
+    [:map-of :int [:map-of :qualified-keyword :seon.schema/value]]]}
+  [database test-symbols]
+  (let [installed-schema (:schema (db/schema-database database))
+        identities (fn [tokens]
+                     (mapcat (fn [token]
+                               (if (keyword? token)
+                                 [[:seon.schema/key token]]
+                                 [[:seon.fn/sym token] [:seon.test/sym token]])) tokens))]
+    (loop [pending (set (identities test-symbols)) seen #{} rows {}]
+      (if (empty? pending)
+        rows
+        (let [entities (mapcat
+                        (fn [[attribute pairs]]
+                          (let [result (db/q '[:find [?entity ...]
+                                               :in $ ?identity [?token ...]
+                                               :where [?entity ?identity ?token]]
+                                             database attribute (mapv second pairs))]
+                            (when (map? result)
+                              (throw (ex-info "Reach identities unavailable." result)))
+                            result))
+                        (group-by first pending))
+              facts (if (seq entities)
+                      (db/q '[:find ?entity ?attribute ?value
+                              :in $ [?entity ...] ?attributes
+                              :where [?entity ?attribute ?value]
+                                     [(contains? ?attributes ?attribute)]]
+                            database (vec (distinct entities)) (set reach-attributes))
+                      [])
+              _ (when (map? facts)
+                  (throw (ex-info "Reach rows unavailable." facts)))
+              acquired (reduce (fn [result [entity attribute value]]
+                                 (if (= :db.cardinality/many
+                                        (get-in installed-schema [attribute :db/cardinality]))
+                                   (update-in result [entity attribute] (fnil conj #{}) value)
+                                   (assoc-in result [entity attribute] value)))
+                               {} facts)
+              tokens (mapcat (fn [[_ row]]
+                               (concat (:seon.fn/calls row) (:seon.fn/references row)
+                                       (when-let [subject (:seon.test/subject row)] [subject])
+                                       (:seon.fn/keywords row)
+                                       (reach-keywords (some-> (:seon.fn/spec row) edn/read-string))
+                                       (reach-keywords (some-> (:seon.schema/form row) edn/read-string))))
+                             acquired)
+              seen (into seen pending)]
+          (recur (into #{} (remove seen) (identities tokens)) seen (merge rows acquired)))))))
+
+(defn- reach-refresh [database previous test-symbols]
  (let [basis (db/basis-t database)
-       ids (if previous
-             (db/q '[:find [?e ...] :in $ [?a ...] :where [?e ?a]]
-                   (db/since (db/history database) (::reach-basis previous)) reach-attributes)
-             (db/q '[:find [?e ...] :in $ [?a ...] :where [?e ?a]]
-                   database [:seon.fn/sym :seon.test/sym :seon.schema/key]))
-       _ (when (and (map? ids) (contains? ids :seon.db/read-operation))
-           (throw (ex-info "Reach identities unavailable." ids)))
-       facts (if (seq ids)
-               (db/q '[:find ?e ?a ?v :in $ [?e ...] [?a ...]
-                       :where [?e ?a ?v]] database ids reach-attributes) [])
-       _ (when (map? facts)
-           (throw (ex-info "Reach rows unavailable." facts)))
-       installed-schema (:schema (db/schema-database database))
-       by-entity (reduce (fn [rows [entity attribute value]]
-                           (if (= :db.cardinality/many
-                                  (get-in installed-schema [attribute :db/cardinality]))
-                             (update-in rows [entity attribute] (fnil conj #{}) value)
-                             (assoc-in rows [entity attribute] value)))
-                         {} facts)
+       changed-entities (when previous
+                          (db/q '[:find [?entity ...] :in $ [?attribute ...]
+                                  :where [?entity ?attribute]]
+                                (db/since (db/history database) (::reach-basis previous))
+                                reach-attributes))]
+   (when (map? changed-entities)
+     (throw (ex-info "Reach changes unavailable." changed-entities)))
+   (if (and previous (empty? changed-entities)
+            (every? #(get-in previous [::reach-symbols %]) test-symbols))
+     (assoc previous ::reach-basis basis ::reach-updated 0 ::reach-invalidated 0)
+ (let [by-entity (reach-facts database test-symbols)
+       ids (into (set (keys (::reach-rows previous))) (keys by-entity))
        old-rows (::reach-rows previous {})
        pulled (mapv (fn [entity] (assoc (get by-entity entity {}) :db/id entity)) ids)
        changed (filterv #(not= (dissoc (get old-rows (:db/id %)) ::reach-symbol ::reach-leaf ::reach-keys) %) pulled)
@@ -2221,7 +2265,7 @@
     ::reach-symbols (if (seq changed) (into {} (keep (fn [[e r]] (when-let [s (::reach-symbol r)] [s e]))) rows) (::reach-symbols previous {}))
     ::reach-schemas schemas
     ::reach-digests kept
-    ::reach-updated (count changed) ::reach-invalidated (- (count (::reach-digests previous)) (count kept)))))
+    ::reach-updated (count changed) ::reach-invalidated (- (count (::reach-digests previous)) (count kept)))))))
 (defn- reach-entry [index test-symbol]
   (let [rows (::reach-rows index)
         symbols (::reach-symbols index)
@@ -2269,8 +2313,9 @@
        configuration (:config database)
        value-identity (db/committed-value-identity database)
        derive-index (fn [previous]
-                (let [index (if (= (db/basis-t database) (::reach-basis previous))
-                              previous (reach-refresh database previous))
+                (let [index (if (and (= (db/basis-t database) (::reach-basis previous))
+                                    (every? #(get-in previous [::reach-symbols %]) test-symbols))
+                              previous (reach-refresh database previous test-symbols))
                       missing (remove #(get-in index [::reach-digests % ::reach-refs]) test-symbols)
                       index (reduce (fn [i s] (assoc-in i [::reach-digests s] (reach-entry i s))) index missing)]
                  (assoc index ::reach-config configuration ::reach-value-identity value-identity ::reach-computed (count missing))))]
