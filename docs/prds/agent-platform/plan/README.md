@@ -366,13 +366,21 @@ keep helper details in the skill rather than duplicating them in the root file.
 Each later cut updates the affected instructions with its implementation; B4's
 runner instructions activate only when that runner and its callers actually land.
 Running lanes receive the changed guidance explicitly; new lanes read it at launch.
+Fable reviews the activation diff for dropped binding rules before the next lane
+launches. The testing skill labels each rule as enforced by the installed fixture
+or runner, partially enforced, or an author responsibility, citing the actual seam.
+Explicitly cover duration failure, refused fixture writes through `transacted!`,
+arming drift, and hand-written fixture maps. Do not claim that validating a map's
+shape detects its hand-written origin or guarantees a faithful fixture.
 
 The testing guidance must require positive setup evidence, a specific expected
 refusal plus unchanged-state evidence, and assertions that fail when the subject is
 absent. Concurrency tests exercise the contested identity and actual process/store
 boundary; a generic nonzero exit or a valid local lock object alone is insufficient.
-Bounds identify measured cold and warm work separately, await named events, and
-confirm actual termination before cleanup. Keep one regression per behavior class;
+An execution exceeding its declared test bound fails. Derive each bound from the
+measured operation and put its reason beside the declaration; distinguish cold and
+warm work. Await named events and confirm actual termination before cleanup.
+Keep one regression per behavior class;
 ordinary fixtures do not re-index the program to test a small change.
 
 Retire old authorities only after their still-binding rules, probe forms and acceptance
