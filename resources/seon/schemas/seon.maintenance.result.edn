@@ -10,7 +10,7 @@
                            :seon.db/ref],
                           :process-census-dead
                           [:vector
-                           {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/process-census-process}
+                           {:seon.db/component true :seon.db/component-schema :seon.maintenance.result/process-census-identity}
                            :seon.db/ref],
                           :process-census-unresponsive
                           [:vector

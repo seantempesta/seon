@@ -40,7 +40,8 @@
              :seon.operator.process-census/alive? true
              :seon.operator.process-census/responsive? false
              :seon.operator.process-census/advertisements ["default"])]
-     :seon.operator.process-census/dead []
+     :seon.operator.process-census/dead
+     [(process-identity 43 generation)]
      :seon.operator.process-census/unresponsive
      [(process-identity 41 generation)]
      :seon.operator.process-census/unclaimed
@@ -58,6 +59,15 @@
         projected (maintenance/result-entity (schema/handed-projection) public-result)]
     (testing "the public vector-of-map contract keeps its meaning"
       (is (true? ((schema/projection-validator (schema/handed-projection) :seon.operator.process-census/result) public-result)))
+      (let [observation (first (:seon.operator.process-census/processes public-result))
+            valid? (schema/projection-validator
+                    (schema/handed-projection)
+                    :seon.maintenance.result/process-census-process)]
+        (is (true? (valid? observation)))
+        (doseq [member [:seon.operator.process-census/alive?
+                        :seon.operator.process-census/responsive?]]
+          (is (false? (valid? (dissoc observation member)))
+              "full observations still require both liveness fields")))
       (is (= 'seon.maintenance/project-process-census-result
              (:seon.maintenance/result-projection
               (malli.core/properties (mr/schema (:seon.schema.projection/registry (seon.schema/handed-projection)) :seon.operator.process-census/result))))))
@@ -99,6 +109,18 @@
                   [?process :seon.dev.process/pid ?pid]
                   [?process :seon.dev.process/root ?root]]
                 @connection)))
+        (testing "dead process identities persist without fabricated observations"
+          (is (= #{[43 "/repo/operator"]}
+                 (db/q
+                  '[:find ?pid ?root
+                    :where
+                    [?result :seon.maintenance.result/id "census-result/1"]
+                    [?result :seon.maintenance.result/process-census-dead ?process]
+                    [?process :seon.dev.process/pid ?pid]
+                    [?process :seon.dev.process/root ?root]
+                    (not [?process :seon.operator.process-census/alive?])
+                    (not [?process :seon.operator.process-census/responsive?])]
+                  @connection))))
         (is (= #{["claim.edn" "Unreadable claim."]}
                (db/q
                 '[:find ?path ?message
