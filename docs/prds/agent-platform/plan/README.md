@@ -356,6 +356,25 @@ or landing material outside `plan/`. The writer brief is background research, no
 second set of implementation instructions. Architecture explains mechanisms and links
 directly to the specs; the proposed instructions hold durable working laws.
 
+**Shared-instruction activation is part of the B1b integration checkpoint, before
+the next implementation lane launches.** The orchestrator owns replacing root
+`AGENTS.md` from the proposed rewrite after correcting its links and distinguishing
+installed commands from future targets. `CLAUDE.md` remains its symlink, not a second
+instruction authority. Reconcile the testing and REPL skills in the same checkpoint:
+remove obsolete command/owner claims, carry §6's cut-level verification policy, and
+keep helper details in the skill rather than duplicating them in the root file.
+Each later cut updates the affected instructions with its implementation; B4's
+runner instructions activate only when that runner and its callers actually land.
+Running lanes receive the changed guidance explicitly; new lanes read it at launch.
+
+The testing guidance must require positive setup evidence, a specific expected
+refusal plus unchanged-state evidence, and assertions that fail when the subject is
+absent. Concurrency tests exercise the contested identity and actual process/store
+boundary; a generic nonzero exit or a valid local lock object alone is insufficient.
+Bounds identify measured cold and warm work separately, await named events, and
+confirm actual termination before cleanup. Keep one regression per behavior class;
+ordinary fixtures do not re-index the program to test a small change.
+
 Retire old authorities only after their still-binding rules, probe forms and acceptance
 conditions have a surviving home. Preserve the publication measurement script before
 removing its old directory. Update incoming links in the same slice. Do not delete a
