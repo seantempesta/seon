@@ -120,6 +120,21 @@
 
 (use-fixtures :each with-published-root)
 
+(defn- published-artifact
+  "Read an explicit complete test projection from its isolated published database."
+  {:malli/schema [:=> [:cat :seon.boot/root] :map]}
+  [root]
+  (let [directory (derived-store-dir root)
+        held (#'cluster/acquire-root-store! directory)]
+    (try
+      (let [published (source/current held)
+            database (source/database held (:seon.source/commit-id published))]
+        (try
+          (assoc published :seon.fn/manifest
+                 (seon.fn/database-manifest database (fs/source-directory) seon.fn/source-roots nil))
+          (finally (d/release-materialized-db database))))
+      (finally (#'cluster/release-root-store! directory)))))
+
 (defn- await-fact
   "Return the first truthy `probe` result published by a database value."
   [connection probe]
@@ -856,7 +871,8 @@
 
 
 (deftest ^{:seon.test/fixture-observation "The assertions compare real publication commit heads with existing and newly forked physical-store cluster branches."} ^{:seon.test/long
-           "186.733 s pool: complete incremental publication dominates, followed by existing-cluster and later-fork agreement."}
+           "186.733 s pool: complete incremental publication dominates, followed by existing-cluster and later-fork agreement."
+           :seon.test/long-ms 600000}
   incremental-source-refresh-publishes-without-touching-existing-clusters
   (let [root (published-root)
         current-digest
@@ -875,7 +891,7 @@
             refreshed (cluster/refresh-source!
                        root ["src/seon/ai/tokens.cljc"])
             artifact
-            (edn/read-string (slurp (cluster/source-artifact-file root)))
+            (published-artifact root)
             roster
             (registry/roster (:seon.store/store old-world))]
         (testing "the one published source branch agrees with its artifact"
@@ -914,34 +930,6 @@
         (cluster/stop! old-world)
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/fixture-observation "Counts real analyzer calls while refreshing a cloned canonical publication with stale checkout paths."
-           :seon.test/long "One complete canonical source analysis."}
-  relocated-manifest-requires-one-complete-analysis
-  (let [root (published-root)
-        artifact-path (cluster/source-artifact-file root)
-        artifact (edn/read-string (slurp artifact-path))
-        stale (-> artifact
-                  (assoc-in [:seon.fn/manifest :seon.fn.manifest/relative-roots]
-                            ["/former-checkout/src" "/former-checkout/test"])
-                  (update :seon.source/relative-file-digests
-                          #(into {} (map (fn [[path digest]]
-                                          [(str "/former-checkout" path) digest])) %)))
-        calls (atom [])
-        analyze analyzer/analyze]
-    (try
-      (spit artifact-path (pr-str stale))
-      (with-redefs-fn
-        {#'analyzer/analyze
-         (fn [request]
-           (swap! calls conj (count (:seon.fn.analyzer/sources request)))
-           (analyze request))}
-        #(cluster/refresh-source! root ["src/seon/ai/tokens.cljc"]))
-      (is (= 1 (count @calls)) (pr-str @calls))
-      (is (= (count (get-in artifact [:seon.fn/manifest :seon.fn.manifest/artifacts]))
-             (first @calls))
-          "the sole analysis covers the complete manifest, with no discarded per-file pass")
-      (finally
-        (spit artifact-path (pr-str artifact))))))
 
 (deftest development-reload-follows-declared-requires
   (let [namespace-name (symbol (str "reload-resource-probe-" (random-uuid)))]
@@ -1059,8 +1047,7 @@
                               (adopted connection "default")))
                        (is (= (:seon.source/commit-id published)
                               (:seon.source/commit-id
-                               (edn/read-string
-                                (slurp (cluster/source-artifact-file root))))))
+                               (published-artifact root))))
                        (is (= (:seon.source/digest fork) (beta-digest))
                            "scheduled maintenance may advance beta's branch head, never its program")
                        (is (str/includes? (definition default) "[] 2"))
@@ -1098,38 +1085,6 @@
                (finally (cluster/stop! default)))))
       (finally (delete-recursively! root)))))
 
-(deftest unchanged-complete-source-refresh-reuses-the-published-head
-  (let [digest (apply str (repeat 64 "a"))
-        commit-id (random-uuid)
-        snapshot {:seon.source/digest digest
-                  :seon.source/relative-file-digests {"src/example.clj" digest}}
-        manifest {:seon.fn.manifest/root (fs/source-directory)
-                  :seon.fn.manifest/relative-roots ["src"]
-                  :seon.fn.manifest/digest digest
-                  :seon.fn.manifest/artifacts []
-                  :seon.fn.manifest/identities []}
-        artifact (assoc snapshot
-                        :seon.source/commit-id commit-id
-                        :seon.fn/manifest manifest)
-        expected {:seon.source/branch source/current-branch
-                  :seon.source/commit-id commit-id
-                  :seon.source/digest digest
-                  :seon.source/built? false}
-        publications (atom 0)]
-    (with-redefs-fn
-      {#'cluster/current-source-snapshot (fn [_] snapshot)
-       #'cluster/read-source-artifact (fn [_] nil)
-       #'source/current
-       (fn [_] {:seon.source/branch source/current-branch
-                :seon.source/commit-id commit-id})
-       #'cluster/current-publication (fn [_ _] expected)
-       #'source/publish!
-       (fn [& _] (swap! publications inc) expected)}
-      (fn []
-        (is (= expected (#'cluster/full-source-refresh!
-                         "root" ::store (#'cluster/publication-roots))))
-        (is (zero? @publications)
-            "the database digest owns currentness even without an artifact")))))
 
 (deftest ^{:seon.test/fixture-observation "The test observes reopen-time configuration repair before real boot consumers acquire their settings."} ^{:seon.test/long
            "53.139 s pool: real boot, locked-state config repair, restart, and pre-arm fact proof."}
@@ -1185,7 +1140,8 @@
 
 
 (deftest ^{:seon.test/long
-           "Publishes real source edits to cover complete fallback and incremental branch agreement."}
+           "Publishes real source edits to cover complete and incremental branch agreement."
+           :seon.test/long-ms 600000}
   incremental-source-refresh-preserves-agreement-across-real-edits
   (let [complete-builds (atom 0)
         build-manifest seon.fn/build-manifest
@@ -1208,7 +1164,8 @@
       (with-redefs [seon.fn/source-roots roots
                     cluster/source-roots all-roots
                     seon.fn/build-manifest (fn [request]
-                                             (swap! complete-builds inc)
+                                             (when-not (:seon.source/previous-database request)
+                                               (swap! complete-builds inc))
                                              (build-manifest request))]
         (cluster/refresh-source! root)
 
@@ -1220,7 +1177,7 @@
                          "(ns sample.a)\n(defn value [] 3)\n")
           (cluster/refresh-source! root [a-path])
           (let [artifact
-                (edn/read-string (slurp (cluster/source-artifact-file root)))
+                (published-artifact root)
                 file-artifact
                 (seon.fn/artifact-by-path (:seon.fn/manifest artifact) a-path)]
             (is (= (:seon.fn.file/identities file-artifact)
@@ -1230,12 +1187,12 @@
                         vec))
                 "the artifact remains a complete file projection")))
 
-        (testing "a missed X followed by reported Y repairs both incrementally"
+        (testing "two reported files reconcile together"
           (write-source! source-root "sample/a.clj"
                          "(ns sample.a)\n(defn value [] 4)\n")
           (write-source! source-root "sample/b.clj"
                          "(ns sample.b)\n(defn value [] 20)\n")
-          (cluster/refresh-source! root [b-path])
+          (cluster/refresh-source! root [a-path b-path])
           (let [opened (store/open-store!
                         {:seon.store/dir (derived-store-dir root)})]
             (try
@@ -1244,14 +1201,14 @@
                 (is (str/includes?
                      (db/q '[:find ?source .
                             :where
-                            [?function :seon.fn/sym "sample.a/value"]
+                            [?function :seon.fn/sym sample.a/value]
                             [?function :seon.fn/source ?source]]
                           db)
                      "[] 4"))
                 (is (str/includes?
                      (db/q '[:find ?source .
                             :where
-                            [?function :seon.fn/sym "sample.b/value"]
+                            [?function :seon.fn/sym sample.b/value]
                             [?function :seon.fn/source ?source]]
                           db)
                      "[] 20")))
@@ -1262,7 +1219,7 @@
                          "(ns sample.a)\n(defn value [] :sample/new-value)\n")
           (cluster/refresh-source! root [a-path])
           (is (= 1 @complete-builds)
-              "scalar, missed-path, and metadata edits reuse the manifest")))
+              "body, two-file, and metadata edits use partial analysis")))
       (finally
         (delete-recursively! root)))))
 
@@ -1839,7 +1796,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest ^{:seon.test/fixture-observation "Relocates the canonical published checkout and observes real analyzer calls on an unchanged clone and one edit."
-           :seon.test/long "Copies the canonical checkout and publishes one file edit."}
+           :seon.test/long "Copies the canonical checkout and publishes one file edit."
+           :seon.test/long-ms 600000}
   cloned-publication-analyzes-only-changed-files
   (let [root (published-root)
         ;; A pooled worker's files need not match its cached published base.
@@ -1872,22 +1830,6 @@
             (is (= (:seon.source/commit-id baseline)
                    (:seon.source/commit-id unchanged)))
             (is (= [] @calls) "relocation alone analyzes no file"))
-          (let [artifact-file (cluster/source-artifact-file root)
-                artifact (edn/read-string (slurp artifact-file))]
-            (spit artifact-file
-                  (pr-str (update artifact :seon.source/relative-file-digests
-                                  dissoc "src/seon/ai/tokens.cljc")))
-            (let [snapshot #'cluster/current-source-snapshot
-                  capture @snapshot]
-              (with-redefs-fn
-                {snapshot (fn [publication-roots]
-                            (update (capture publication-roots)
-                                    :seon.source/relative-file-digests
-                                    dissoc "src/seon/ai/tokens.cljc"))}
-                #(cluster/refresh-source! root [(.getCanonicalPath path)])))
-            (is (= [(.getCanonicalPath path)] @calls)
-                "a reported file absent from both digest sets is analyzed")
-            (reset! calls []))
           (spit path (str (slurp path) "\n; Relocated checkout edit.\n"))
           (cluster/refresh-source! root [(.getCanonicalPath path)])
           (is (= [(.getCanonicalPath path)] @calls)

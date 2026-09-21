@@ -2403,15 +2403,14 @@
 
 (deftest every-indexed-file-carries-the-root-the-indexer-walked
   ;; The canonical fixture population is walked from seon.fn/source-roots, so
-  ;; the root is a fact on every file entity in it and the set of roots IS the
-  ;; declared roots. Scoped to that population deliberately: the changed-path
-  ;; seam indexes any file it is handed, and a file under no declared root
-  ;; carries no root rather than a fabricated one.
+  ;; analyzed files are selected through declaration refs. Publication input
+  ;; rows also include resources and dependencies, which are not lint inputs.
   (test-support/with-database
     (fn [connection]
       (let [database (db/db connection)
             files (into #{} (map first)
-                        (db/q '[:find ?p :where [?f :seon.fn.file/relative-path ?p]] database))
+                        (db/q '[:find ?p :where [_ :seon.fn/file ?f]
+                                 [?f :seon.fn.file/relative-path ?p]] database))
             rooted (into #{} (map first)
                          (db/q '[:find ?p :where [?f :seon.fn.file/relative-path ?p]
                                  [?f :seon.fn.file/relative-root _]] database))

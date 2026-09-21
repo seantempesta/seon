@@ -1768,16 +1768,6 @@
   [root]
   (str (io/file root "build" "current-src.edn")))
 
-(defn- read-source-artifact
-  [root]
-  (try
-    (let [value (edn/read-string (slurp (source-artifact-file root)))]
-      (when (and (map? value)
-                 (map? (:seon.source/relative-file-digests value))
-                 (vector? (get-in value [:seon.fn/manifest :seon.fn.manifest/relative-roots])))
-        value))
-    (catch Throwable _ nil)))
-
 (defn- write-source-artifact!
   [root artifact]
   (let [target (.toPath (io/file (source-artifact-file root)))
@@ -1822,15 +1812,6 @@
              :seon.source/digest digest :seon.source/built? false}))
         (finally (when database (d/release-materialized-db database)))))))
 
-(defn- valid-source-manifest?
-  [manifest]
-  (and (map? manifest)
-       (try
-         (schema/valid-candidate-value?
-          (schema/declaration-projection (schema.edn/packaged-forms))
-          :seon.fn.manifest/manifest manifest)
-         (catch Throwable _ false))))
-
 (defn- full-source-refresh!
   "One publication path: reconcile changed artifacts on the current lineage."
   [root store roots]
@@ -1869,16 +1850,12 @@
                       :seon.source/digest (id/digest 64 [(into (sorted-map) inputs)])
                       :seon.source/test-input-digest (test.cache/test-input-digest directory inputs)}
             digest (:seon.source/digest snapshot)]
-      (let [cached (read-source-artifact root)
-            _ (report-source-progress! "published manifest read")
-            valid? (valid-source-manifest? (:seon.fn/manifest cached))
-            _ (report-source-progress! "published manifest validation")
-            previous (when (and published
-                                (= (:seon.source/digest published) (:seon.source/digest cached))
-                                valid?)
-                       (:seon.fn/manifest cached))
-            database (when published (source/database store (:seon.source/commit-id published)))
-            _ (report-source-progress! "published database acquisition")]
+      (let [database (when published (source/database store (:seon.source/commit-id published)))
+            selected (when database (into changed (seon.fn/caller-files database changed)))
+            previous (when database
+                       (seon.fn/database-manifest database (:seon.fn/root roots)
+                                                  (:seon.fn/roots roots) (vec selected)))
+            _ (report-source-progress! "published selected rows read")]
         (try
           (let [_ (report-source-progress! "analysis started")
                 manifest (seon.fn/build-manifest
@@ -1889,7 +1866,8 @@
                                    :seon.source/changed-paths (vec changed)}
                             previous
                             (assoc :seon.fn/previous-manifest previous
-                                            :seon.source/previous-database database)))
+                                   :seon.fn/changed-paths selected
+                                   :seon.source/previous-database database)))
                 _ (report-source-progress! "analysis complete")
                 prior-artifacts (into {} (map (juxt :seon.fn.file/relative-path identity))
                                       (:seon.fn.manifest/artifacts previous))
@@ -1906,7 +1884,7 @@
                                        (filter :seon.lint/id))
                                  (:seon.fn.manifest/artifacts value)))
                 previous-findings (when database
-                                    (source/file-rows database (vec paths) :seon.lint/file))
+                                    (seon.fn/file-rows database (vec paths) :seon.lint/file))
                 _ (when (:seon.error/at previous-findings)
                     (refused! "Published findings could not be read." previous-findings))
                 _ (report-analysis-warnings! previous-findings (findings manifest))
@@ -1937,7 +1915,6 @@
                                         :seon.fn/changed-paths paths
                                         :seon.source/change-classes classes))})]
             (report-source-progress! "branch publication complete")
-            (write-source-artifact! root (source-artifact result manifest snapshot))
             result)
           (finally (when database (d/release-materialized-db database))))))))
       (finally (when committed (d/release-materialized-db committed))))))
@@ -2253,16 +2230,15 @@
               (report-source-progress! "publication export")
               (export/export! {:seon.store/store held
                                :seon.export/parent-dir (str (io/file destination "data"))})
-              (let [artifact (read-source-artifact root)]
-                (when-not (= (:seon.source/digest artifact)
-                             digest)
-                  (refused! "The publication artifact does not identify the exported program."
-                            {:seon.boot/root root}))
-                ;; Result recording advances the branch without changing the
-                ;; program. Export the current history with the same manifest.
+              (let [manifest (seon.fn/database-manifest database directory
+                                                        (:seon.fn/roots (publication-roots)) nil)
+                    inputs (into {} (db/q '[:find ?path ?digest
+                                            :where [?file :seon.fn.file/relative-path ?path]
+                                                   [?file :seon.fn.file/digest ?digest]] database))]
                 (write-source-artifact! destination
-                  (assoc artifact :seon.source/commit-id (:seon.source/commit-id published)))
-                (spit (io/file destination "manifest.edn") (pr-str (:seon.fn/manifest artifact))))
+                  (source-artifact (assoc published :seon.source/digest digest) manifest
+                                   {:seon.source/relative-file-digests inputs}))
+                (spit (io/file destination "manifest.edn") (pr-str manifest)))
               (spit (io/file destination "provenance.edn")
                     (pr-str {:seon.test.run/program-digest digest
                              :seon.test.run/basis-t (db/basis-t database)

@@ -213,3 +213,32 @@ boundary but cannot turn an old exported declaration into the current one.
 A refreshed orchestrator export is required before claiming the five bodies
 or covered-member correction pass. No old attribute was restored and no host
 schema was substituted for the database's declarations.
+
+## Selected database artifact contracts — 2026-09-23
+
+Fast run `de2a2099de86` (snapshot `run.SmRZfz`, published base announced four
+commits behind) executed 71 tests / 372 assertions, with 9 failures and 18
+errors. Recording succeeds after the config reset. The selected implementation
+changes `seon.fn/analyzed-artifacts` to take a database value or nil in its
+fifth argument and adds a three-argument `seon.fn/published-index-rows` arity
+that omits compiled arity components. The supplied base still declares the
+previous set argument and one/two arities. Exact refusals:
+
+- `seon.fn/analyzed-artifacts refused database at []: expected a set, got nil.
+  Fix: Supply a set at []. Called from seon.fn (fn.clj:2362).`
+- `seon.fn/published-index-rows refused argument count at []: expected the
+  declared arglists, got an argument count of 3. Fix: Call one of the declared
+  arglists.`
+
+The latter prevents both
+`seon.cluster.publication-test/previous-file-artifacts-derive-from-published-facts`
+and
+`seon.cluster.publication-inputs-test/file-row-selection-follows-declaration-and-finding-refs`
+from reaching their assertions. `src/seon/instrument.clj:740` selects the
+supplied projection's function contract before the loaded authored fallback;
+`:885` selects that supplied projection at invocation. Neither mechanism was
+weakened. The orchestrator clarified that base preparation uses HEAD only. Item 5
+will commit before base preparation and the same fast namespaces will rerun.
+None of the 27 unsuccessful outcomes is a verified red against that fresh
+base, and this does not attribute all of them to this issue.
+Raw iteration log: `tmp/one-jvm-item5-fast.log`.

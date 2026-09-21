@@ -118,13 +118,13 @@
    (fn [connection]
      (let [database (db/db connection)
            path "src/my/note.clj"
-           declarations (source/file-rows database [path] :seon.fn/file)]
+           declarations (functions/file-rows database [path] :seon.fn/file)]
        (is (= #{'my.note/add! 'my.note/forget! 'my.note/notes}
               (into #{} (keep :seon.fn/sym) declarations)))
        (is (every? #(= [:seon.fn.file/relative-path path] (:seon.fn/file %))
                    declarations))
-       (is (empty? (source/file-rows database ["resources/seon/schemas/seon.fn.edn"]
+       (is (empty? (functions/file-rows database ["resources/seon/schemas/seon.fn.edn"]
                                      :seon.fn/file))
            "a publication input row alone does not declare an analysis input")
-       (is (empty? (source/file-rows database [] :seon.lint/file)))
-       (is (empty? (source/file-rows database ["missing-file.clj"] :seon.fn/file)))))))
+       (is (empty? (functions/file-rows database [] :seon.lint/file)))
+       (is (empty? (functions/file-rows database ["missing-file.clj"] :seon.fn/file)))))))

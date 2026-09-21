@@ -2379,3 +2379,32 @@ An explicit `(require 'seon.cluster 'seon.cluster.source
 only the selected files overlaid. This proves loading, not the unexecuted
 regression. The archive was removed after its JVM exited; no scratch host
 or shell is retained.
+
+
+## Item 5: database-selected artifacts — 2026-09-23
+
+Before-edit evidence is [one-jvm-manifest-before-2026-09-23.edn](one-jvm-manifest-before-2026-09-23.edn), produced by the existing adoption measurement script through the advertised prepl of `tmp/one-jvm-redesign-root`, cluster `s`. Source archive HEAD was `1020775ab`; the host was downed before fast verification. Phase sum is **5695.306 ms**. These are iteration numbers under shared-machine load, not a quiet landing row.
+
+| Completed phase | Before ms |
+|---|---:|
+| source build | 609.226 |
+| published manifest read | 176.024 |
+| published manifest validation | 439.466 |
+| analysis caller files | 742.041 |
+| analysis selected files | 201.576 |
+| analysis complete | 597.474 |
+| publication reconciliation transaction | 357.021 |
+| branch publication complete | 788.773 |
+| development changed program rows | 79.790 |
+| adoption reconciliation transaction | 407.245 |
+| JVM instrumentation | 197.590 |
+
+The earlier 1047 ms changed-program read expands portable rows and their component refs; the authored-shape change reduces this same read to 79.790 ms in this observation. It is selected by report identities, not a whole-program read. The branch-complete span includes extraction/reconciliation of publication results and scoped issue work; the remaining caller expansion is still pre-transaction and remains item 6, not claimed fixed here.
+
+Item 5 removes the on-disk manifest read, validation and ordinary-publication write. `seon.fn/database-manifest` selects file identities through declaration refs and acquires only those declarations/findings through the existing portable-row reader, omitting compiled arity components. The complete manifest remains an explicitly requested test-base export. Partial analysis acquires known names through an indexed query of the analyzed file's referenced names; ordinary contract projection reuses the database's carried projection. Capability checks compare the selected declaration facts and query their referrers; unchanged docstrings do not walk the capability graph. No second analysis cache is added.
+
+Production `(require 'seon.fn 'seon.cluster.source 'seon.cluster)` passed. An earlier load command also named test namespaces without the test alias and failed because those namespaces were not on that classpath; the subsequent production load is the valid load result. Fast run `de2a2099de86`: 71 executed, 372 assertions, 9 failures, 18 errors. Two exact old-contract boundaries and affected selected-file regressions are recorded in [the existing fixture issue](../../../seon/issues/canonical-fixture-retains-old-function-contracts-after-adoption.md). `a-refused-reference-read-refuses-gate-set-derivation` separately reports `seon.fn/declared-reference-edges returned undeclared error facets #{:seon.schema/validation-refusal}.` The test that enumerated all file rows as lint inputs has now been corrected to join `:seon.fn/file`; this correction has not yet been rerun. Other failures remain unclassified; this is not a green claim.
+
+Current production/test diff bytes (before this note): **12584 deleted, 17881 added**. The orchestrator authorized committing this item on namespace loading and clean clj-kondo checks, then preparing a HEAD-only base. After-measurement and armed assertions remain owed. The 9 failures and 18 errors are unverified against this implementation until that fresh-base rerun; no claim attributes all of them to stale contracts. Foreign dirty files are the test-system runner and its tests; none were edited. The lane's scratch host is down. Report-directed caller lint and changed-namespace reload remain subsequent commits, as ordered.
+
+Commit verification repeated after the ruling: production namespaces load; clj-kondo reports **0 errors, 61 warnings** across the selected production/test paths. Thus “clean” here means no blocking errors, not warning-free source. No retired reader or `seon.cluster.source/file-rows` callers remain under `src`, `test`, or `script`. The next action is the orchestrator’s HEAD-only base preparation, followed by the same fast namespaces; surviving reds must be fixed before items 6 and 8.
