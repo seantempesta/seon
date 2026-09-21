@@ -54,3 +54,26 @@ made before this decision.
 
 This is the AGENTS.md §2.2 missing-fact boundary, not a foreign-lane failure.
 The owner selects how the absent input observations belong in the database.
+
+## Owner ruling (2026-09-23)
+
+Option 1, with corrections: only real input paths become rows; the merged
+schema declaration is derived and gets no row. Analysis membership comes
+from a declaration's file reference, never file-row presence. Changed-path
+requests hash only their named paths. Aggregate identities do not decide
+publication once per-path facts exist; the test-input digest may be removed
+only after its readers are converted.
+
+The consumer audit found that existing declaration queries already join
+`:seon.fn/file`. Namespace rows currently have no file reference
+(`src/seon/fn.clj:293`, `resources/seon/schemas/seon.ns.edn`); namespace-only
+inputs therefore need that existing relation populated too. The test
+admission owner still reads `:seon.source/test-input-digest` at
+`src/seon/test.clj:916`, `:1365`, and `:2161`.
+
+The changed-Git-pin case needs the existing pin reader in
+`src/seon/test/cache.clj:190`. It is private, and the public
+`toolchain-dependencies` also hashes `deps.edn` even when only a Git pin
+changed. The lane requested release of the pin-reader seam rather than
+copying Git/snapshot parsing into publication; that file is outside its
+assigned ownership.

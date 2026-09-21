@@ -1852,3 +1852,102 @@ The lane stops at this permitted data-model decision. Items 2, 4, 5, 6,
 8 and config remain open in the assigned order. Item 1 commit is
 `d726468e0`; docstring is 5416.485 ms, not the subsecond target. The scratch
 JVM was downed and its root removed; no default operation was performed.
+
+### Input-row ruling: retained test boundary evidence
+
+The item-1 fast run `2e9031a125aa` had these two boundaries (not attributed
+to a cause without a separate proof):
+
+- `seon.publication-validation-test/changed-call-facts-still-refuse-an-invalid-arity`
+  received `:seon.error/operation seon.call-preparation/incoherent`,
+  `:seon.call-preparation/incoherent-key :seon.db/connection`, and
+  `:seon.db/transaction-refused true`. Exact message: "The supplied default
+  :seon.db/connection is not admissible: seon.db/supplied-connection's declared
+  return does not agree with the row's value schema :seon.db/connection."
+  The expected `:seon.fn/arity-mismatches` was absent.
+- `seon.cluster.publication-delta-test/reloading-one-file-preserves-unrelated-wrappers`
+  errored before its wrapper assertions: `clojure.lang.ExceptionInfo: The
+  loaded function contract cannot compile.` The stack names
+  `seon.instrument/apply!` at `instrument.clj:1019`; the printed exception
+  supplied no offending function identity.
+
+The owner chose file rows for all publication inputs, excluding the derived
+merged schema entry. Existing analysis-input queries in `seon.test/check-admission`,
+`seon.fn/caller-files`, `seon.issue.detect/declarations`, and `seon.program/overrides`
+join declarations through `:seon.fn/file`; none selects lint inputs merely
+from file-row existence. `:seon.source/test-input-digest` still has readers in
+`seon.test` (selection admission and provenance); its conditional retirement
+cannot delete those readers' input while that owner is outside this lane.
+
+### Fresh input-row baseline, before production changes
+
+At `10c28c885`, an isolated HEAD archive and its own root/cluster `s`
+completed cold publication in 275,256 ms (initial indexing authorized).
+The 107,580-operation population transaction took 130,373 ms; complete
+analysis took 10,282 ms. Fork without a live host took 10,237 ms including
+the authorized cold JVM; boot took 12,859 ms. Through that host prepl,
+one `my.note` docstring edit took **6,174.993 ms**, with three functions.
+The existing measurement script produced [raw progress and result](one-jvm-input-rows-before-2026-09-23.edn).
+
+| Completed phase | ms |
+|---|---:|
+| request | 1.367 |
+| request accepted | 1.694 |
+| bootstrap configuration | 103.608 |
+| store acquisition | 0.536 |
+| source build | 926.705 |
+| published manifest read | 124.704 |
+| published manifest validation | 340.389 |
+| published database acquisition | 0.120 |
+| analysis started | 13.392 |
+| analysis input inventory | 115.473 |
+| analysis caller files | 548.050 |
+| analysis selected files | 133.320 |
+| analysis replace artifacts | 69.982 |
+| analysis manifest complete | 12.394 |
+| analysis complete | 1.195 |
+| findings in analyzed files: 0; added=0; resolved=0 | 497.843 |
+| branch publication started: 1 inputs | 147.686 |
+| program rows started | 171.650 |
+| contract projection started: 3336 schemas, 3 functions | 0.109 |
+| contract projection complete | 0.780 |
+| contract rows: 1/5 | 5.913 |
+| contract rows: 2/5 | 4.223 |
+| contract rows: 3/5 | 3.588 |
+| contract rows: 4/5 | 0.229 |
+| contract rows: 5/5 | 33.382 |
+| development reconciliation transaction | 501.586 |
+| program rows complete | 0.141 |
+| publication source identity | 35.369 |
+| publication branch head | 48.750 |
+| branch publication complete | 556.058 |
+| development changed program rows | 483.429 |
+| development reconciliation transaction | 557.738 |
+| development loaded definitions | 2.963 |
+| development JVM instrumentation | 177.838 |
+| development source verification | 472.738 |
+| development adoption record | 79.309 |
+| development cluster converged | 0.744 |
+
+The source build and both verification spans still hash whole inventories;
+selected-file analysis itself is 133.320 ms. No individual measured span
+exceeds 2 s. Their sum remains above target; this does not justify leaving
+the O(program) work in place. A live query found zero file rows without
+a `:seon.fn/file` referrer among the 402 current analysis inputs. The
+namespace-only relation is needed for that admitted future case, not
+evidence that current files were omitted.
+
+Production edits await release of the existing private Git-pin reader
+in `src/seon/test/cache.clj`: the public alternative hashes unrelated
+`deps.edn`, while copying its parser would duplicate the protected owner.
+The owner question is pending; no private-reader bypass was installed.
+
+Verification/cleanup: `(require 'seon.cluster 'seon.cluster.source 'seon.fn
+'seon.db)` passed in one foreground JVM after the scratch host was down.
+No tests were changed or rerun in this evidence-only checkpoint. Production
+bytes deleted/added: **0/0**. The raw measurement is 3,859 UTF-8 bytes.
+`down` confirmed the store flock free and every recorded own-root JVM stopped;
+the own archive/root and disposable thread sample were removed. Foreign
+edits in the testing skill, selection tests, `test_support.clj`, and turn-work
+tests were preserved. The orchestrator still owes the cold proof for the
+accepted validator commits and attribution of the two exact refusals above.
