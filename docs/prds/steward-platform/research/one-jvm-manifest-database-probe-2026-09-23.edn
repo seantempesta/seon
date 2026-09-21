@@ -1,0 +1,1 @@
+#:seon.source{:artifact-row-count 5, :database-row-count 5, :row-differences {[:seon.fn/sym my.note/add!] #{:seon.fn/arities}, [:seon.fn/sym my.note/forget!] #{:seon.fn/arities}, [:seon.fn/sym my.note/notes] #{:seon.fn/arities}}, :schema-digests-agree? true, :manifest-schema-count 3336, :database-schema-count 3336}

@@ -2124,3 +2124,39 @@ errors**. The private-store test retains its declared 10 s fixture bound.
 no live own-root JVM concurrent with that load or fast run. The own host
 was started only after both exited. Foreign shape/instrumentation edits
 remain excluded; the orchestrator owns the cold proof.
+
+
+## Item 5 probe and shared-file boundary
+
+The [database probe](one-jvm-manifest-database-probe-2026-09-23.clj), run
+through the own scratch cluster's prepl, compared the stored artifact with
+`seon.fn/published-index-rows` over that published database value. Its
+[complete result](one-jvm-manifest-database-probe-2026-09-23.edn) has five
+artifact rows and five database rows. Only `:seon.fn/arities` differs on
+`my.note/add!`, `my.note/forget!`, and `my.note/notes`: those are the compiled
+contract rows. All 3,336 manifest schema declaration digests equal the
+digests derived from the database value's carried projection. This probe
+found no missing schema provenance requiring a new fact or owner decision.
+It does not yet prove equivalence for every declaration or finding shape.
+
+Item 5 has no production edit yet. Its remaining work is to select the
+changed files' declaration/finding rows by their existing file refs, use
+the carried projection, preserve capability validation against the database
+call graph, and derive the offline exported manifest only at the export
+seam. Reconstructing every artifact on each edit would retain O(program)
+work and would not satisfy the ruling.
+
+At this checkpoint `src/seon/fn.clj` has a foreign unstaged line in
+`add-contract-facts`: `(schema-shape/prepare-forms projection)`.
+`src/seon/instrument.clj` has foreign unstaged edits (8 added / 10 deleted
+lines). Neither was changed by this lane. The slice 4 assignment explicitly
+says to STOP and name instrumentation when it is dirty; this checkpoint
+honors that boundary. No claim that the probe exposed a design gap or that
+slice 4 is landed.
+
+The own scratch root was downed through `bin/seon --root
+tmp/one-jvm-redesign-root down`: recorded PID 95239 exited and the operator
+reported the store flock free. The own source/load archives were removed
+after that exit. No default or foreign root was operated. This checkpoint
+adds evidence only; the last production load/fast proof remains the item 4
+proof above. Production bytes changed here: **0**.
