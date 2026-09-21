@@ -7,7 +7,8 @@
 (deftest indexed-reach-rows-retain-the-pulled-facts
   (support/with-database
    (fn [connection]
-     (let [database (db/db connection)
+     (let [current (db/db connection)
+           database (db/as-of current (db/basis-t current))
            index (#'runner/reach-refresh database nil)
            identities [[:seon.fn/sym 'seon.id/id]
                        [:seon.test/sym 'seon.id-test/data-shape-and-explicit-length-determine-identity]
@@ -23,7 +24,8 @@
                            (fn [result attribute value]
                              (assoc result attribute
                                     (if (= :db.cardinality/many
-                                           (get-in database [:schema attribute :db/cardinality]))
+                                           (get-in (db/schema-database database)
+                                                   [:schema attribute :db/cardinality]))
                                       (set value) value)))
                            {} row)]
            (is (= (#'runner/reach-row normalized)

@@ -899,8 +899,9 @@ in **4777.401 ms**, including first fixture acquisition.
 
 Fast run **9d5265c4e61d** recorded **68 executed, 438 assertions, 14 failures,
 10 errors**. This is not a green selection proof. The unchanged Malli
-function-schema acquisition failures and SCI contract refusals remain;
-the named-selection edit expectations also fail. Reporter intervals:
+function-schema acquisition failures and SCI contract refusals remain.
+The named-selection failure in this run was introduced by this indexed-row
+change, as diagnosed and corrected below. Reporter intervals:
 
 | Test | Before ms | After ms | Current outcome |
 |---|---:|---:|---|
@@ -919,3 +920,15 @@ test's old 900000 ms declaration is not justification for this work. No new
 long allowance was added to hide these remaining overruns. The snapshot used
 HEAD bytes for the concurrently edited SCI caller, explicitly excluding its
 working-tree changes. The exported base was 30 commits behind HEAD.
+
+#### Temporal cardinality correction
+
+The first indexed-row change incorrectly read `:schema` directly from an
+`as-of` wrapper. That collapsed cardinality-many values to scalars, producing
+“Don't know how to create ISeq from: clojure.lang.Keyword” during named reuse.
+This failure was ours, not foreign breakage. The query now obtains installed
+cardinality through `db/schema-database`, which follows Datahike's origin.
+The parity regression now acquires the complete index through an `as-of`
+value and compares its selected rows with the original pull selector.
+Run **6ac7a28556dd** recorded **1 test, 4 assertions, 0 failures, 0 errors**;
+reporter duration **4718.540 ms** including initial fixture acquisition.

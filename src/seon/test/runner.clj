@@ -2190,9 +2190,10 @@
                        :where [?e ?a ?v]] database ids reach-attributes) [])
        _ (when (map? facts)
            (throw (ex-info "Reach rows unavailable." facts)))
+       installed-schema (:schema (db/schema-database database))
        by-entity (reduce (fn [rows [entity attribute value]]
                            (if (= :db.cardinality/many
-                                  (get-in database [:schema attribute :db/cardinality]))
+                                  (get-in installed-schema [attribute :db/cardinality]))
                              (update-in rows [entity attribute] (fnil conj #{}) value)
                              (assoc-in rows [entity attribute] value)))
                          {} facts)
