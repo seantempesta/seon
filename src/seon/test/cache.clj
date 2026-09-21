@@ -42,7 +42,8 @@
   (let [digest (.digest (MessageDigest/getInstance "SHA-256") source-bytes)]
     (apply str (map #(format "%02x" (bit-and 0xff %)) digest))))
 
-(defn- input-paths
+(defn input-paths
+  "Git's input paths, or the exact inventory carried by an exported snapshot."
   {:malli/schema [:=> [:cat :string] [:vector :string]]}
   [directory]
   (let [root (io/file directory)

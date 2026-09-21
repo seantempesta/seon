@@ -2217,10 +2217,24 @@
   [root directory destination]
   (with-source-refresh-monitor!
     (fn []
-      (refresh-source! root [] nil directory)
       (let [store-dir (:seon.boot/store-dir (resolve-bootstrap {:seon.boot/root root}))
             held (acquire-root-store! store-dir)]
         (try
+          ;; An export names a complete checkout, not an empty edit request.
+          ;; Include stored paths so files removed from that checkout retract.
+          (let [paths (set (test.cache/input-paths directory))
+                published (source/current held)
+                database (when published (source/database held (:seon.source/commit-id published)))
+                paths (try
+                        (if database
+                          (let [stored (db/q '[:find [?path ...]
+                                               :where [_ :seon.fn.file/relative-path ?path]] database)]
+                            (when (:seon.error/at stored)
+                              (refused! "The exported publication's input paths could not be read." stored))
+                            (into paths stored))
+                          paths)
+                        (finally (when database (d/release-materialized-db database))))]
+            (refresh-source! root (vec (sort paths)) nil directory))
           (let [published (source/current held)
                 database (source/database held (:seon.source/commit-id published))
                 digest (db/q database '[:find ?digest . :where [_ :seon.source/digest ?digest]])]

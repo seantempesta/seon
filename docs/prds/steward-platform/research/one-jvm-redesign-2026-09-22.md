@@ -2408,3 +2408,41 @@ Production `(require 'seon.fn 'seon.cluster.source 'seon.cluster)` passed. An ea
 Current production/test diff bytes (before this note): **12584 deleted, 17881 added**. The orchestrator authorized committing this item on namespace loading and clean clj-kondo checks, then preparing a HEAD-only base. After-measurement and armed assertions remain owed. The 9 failures and 18 errors are unverified against this implementation until that fresh-base rerun; no claim attributes all of them to stale contracts. Foreign dirty files are the test-system runner and its tests; none were edited. The lane's scratch host is down. Report-directed caller lint and changed-namespace reload remain subsequent commits, as ordered.
 
 Commit verification repeated after the ruling: production namespaces load; clj-kondo reports **0 errors, 61 warnings** across the selected production/test paths. Thus “clean” here means no blocking errors, not warning-free source. No retired reader or `seon.cluster.source/file-rows` callers remain under `src`, `test`, or `script`. The next action is the orchestrator’s HEAD-only base preparation, followed by the same fast namespaces; surviving reds must be fixed before items 6 and 8.
+
+
+## Explicit export must inspect its checkout — 2026-09-23
+
+Fresh-base rerun `d4ea3973438d`: **71 executed, 372 assertions, 8 failures,
+18 errors**. Base `5cfdc9ae3d…` reports zero commits behind `d1fa4561d`, but
+its `base/manifest.edn` contains the old `analyzed-artifacts` set argument
+and only two `published-index-rows` arities. This is a real export defect:
+`publication-base!` passed an empty changed-path list, and the ruled empty
+request correctly inspects no files. The preparation label therefore did not
+prove that the export contained HEAD. The exact refusals and source evidence
+are in [the fixture issue](../../../seon/issues/canonical-fixture-retains-old-function-contracts-after-adoption.md).
+
+The fix uses the existing `seon.test.cache/input-paths` inventory (now public
+and contracted), unions stored input paths for removed files, then calls the
+same `refresh-source!`. This explicit complete-checkout request hashes those
+paths once at `source/path-digests`; normal edits retain their original
+changed-path bound. No file cache or second publication operation is added.
+The export regression starts with the canonical published base and checks
+that its exported reader contract matches the checked-out declaration.
+
+Production `seon.cluster` and `seon.test.cache` load. Focused fast run
+`f9536b35fff9`: **1 test, 2 assertions, 0 failures, 2 errors**. The first is
+`seon.fn/published-index-rows refused argument count at []: expected the
+declared arglists, got an argument count of 3`, at the selected-row read
+before analysis. The second was reading the absent export after that refusal;
+the regression now lets the export exception terminate its body, avoiding
+that misleading secondary error. The final test edit is linted, not yet
+rerun. This fix must be active in the publisher before another base
+preparation can establish new program contracts. A prepared label alone is
+not that evidence.
+
+Changed-line bytes for production plus regression: **269 deleted,
+1996 added**. Before measurement remains **5695.306 ms**; no after row is
+claimed while the published source/contract mismatch blocks the assertions.
+Other surviving test failures remain pending diagnosis against the actual
+updated program. The scratch host is down; no foreign runner or test-system
+file was edited. Items 6 and 8 remain ordered after this verification.

@@ -242,3 +242,27 @@ will commit before base preparation and the same fast namespaces will rerun.
 None of the 27 unsuccessful outcomes is a verified red against that fresh
 base, and this does not attribute all of them to this issue.
 Raw iteration log: `tmp/one-jvm-item5-fast.log`.
+
+## HEAD-labelled export retains old source: confirmed cause — 2026-09-23
+
+The rerun after HEAD `d1fa4561d` base preparation, `d4ea3973438d`, announces
+`5cfdc9ae3df109cd8958f336cc62d2d96009643ce188ee0d0ccb1281cad2d01f`, zero
+commits behind. It records 71 executed / 372 assertions / 8 failures / 18
+errors. The set-argument and three-arity refusals above survive.
+
+The export's `base/manifest.edn` itself contains the old source:
+`analyzed-artifacts` has `[:set :qualified-symbol]` and the argument named
+`known-functions`; `published-index-rows` has only its one/two-argument
+contracts. This is upstream of fixture acquisition. `publication-base!`
+called `(refresh-source! root [] nil directory)`, while
+`full-source-refresh!` deliberately hashes only requested paths and returns
+the stored publication for an empty request. Thus preparation could label an
+old program with the new checkout identity without analyzing the changed
+checkout. No instrumentation behavior needs to change to explain this result.
+
+The correction makes explicit export submit the complete Git/snapshot path
+inventory, unioned with stored paths for deletions, to the existing refresh
+owner. Only this explicit complete-checkout operation enumerates all paths;
+normal changed-path requests retain their bounded file hashing. The existing
+export regression now starts with a canonical published base and checks the
+exported function contract against the checked-out Var's declaration.
