@@ -1117,12 +1117,28 @@
   (if (or *candidate-forms-overlay* *packaged-forms* *projection*
           *projection-state*)
     (candidate-forms)
-    (throw
-     (ex-info
-      "Schema declaration resolution requires the projection handed to the operation."
-      {:seon.error/message
-       "No declaration projection was handed to this schema operation."
-       :seon.error/data {:seon.schema/caller (fallback-caller)} :seon.schema/missing-projection true}))))
+    (let [caller (fallback-caller)
+          diagnostic
+          (error.refusal/diagnostic
+           {:seon.error/at (java.util.Date.)
+            :seon.error/layer :seon.schema/derivation
+            :seon.error/operation 'seon.schema/declaration-population
+            :seon.error/message
+            "No declaration projection was handed to this schema operation."
+            :seon.error/data {:seon.schema/caller caller}
+            :seon.schema/missing-projection true
+            :seon.schema/refused-value nil
+            :seon.schema/expected-value :seon.schema/projection
+            :seon.error/diagnostic-layer :schema-derivation
+            :seon.error/diagnostic-operation
+            'seon.schema/declaration-population
+            :seon.error/diagnostic-member :seon.schema/projection
+            :seon.error/diagnostic-expected :seon.schema/projection
+            :seon.error/diagnostic-offending nil
+            :seon.error/diagnostic-cause :seon.schema/missing-projection
+            :seon.error/diagnostic-evidence
+            {:seon.schema/caller caller}})]
+      (throw (ex-info (:seon.error/message diagnostic) diagnostic)))))
 
 (defn call-with-forms
   "Call `f` with one immutable declaration population for this operation."

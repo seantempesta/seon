@@ -117,8 +117,8 @@
           ;; undeclared worker resolves to the developer's checkout
           authority root]
       (replace-directory! authority source-store store)
-      (cluster.export/reidentify!
-       store)
+      (cluster.export/reidentify-branches!
+       store #{source/current-branch})
       root)
     (do
       (cluster/refresh-source! (str root))
@@ -136,7 +136,11 @@
     (let [source-store (io/file base "data" "store")
           store (io/file root "data" "store")]
       (replace-directory! root source-store store)
-      (cluster.export/reidentify! (str store))
+      ;; An operator opens :db for store custody, then forks the published
+      ;; :current-src head. Exact retained commits are never branch sources in
+      ;; this fixture copy.
+      (cluster.export/reidentify-branches!
+       (str store) #{:db source/current-branch})
       (str root))
     (do
       (cluster/refresh-source! (str (io/file root "data" "clusters")))
@@ -375,7 +379,11 @@
     (try
       (let [private-store (clone-directory! (io/file base "data" "store")
                                              (io/file private-root "store"))
-            _ (cluster.export/reidentify! private-store)
+            ;; Ordinary fixtures open and branch only from the published head.
+            ;; Its retained commit ancestry is export work proportional to the
+            ;; publication's whole history, not fixture acquisition work.
+            _ (cluster.export/reidentify-branches!
+               private-store #{source/current-branch})
             source-configuration (store/datahike-configuration private-store)
             ;; The worker owns this file-store copy. Datahike's tiered
             ;; ready-store copies every backend key into memory on connect;

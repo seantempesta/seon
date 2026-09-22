@@ -242,7 +242,11 @@
   move that publishes it is the last step and a mis-identified store is
   never reachable under a name anything opens. Every other caller
   passes one directory twice."
-  [store-dir identity-dir]
+  {:malli/schema
+   [:=> [:cat :seon.store/dir :seon.store/dir
+         [:maybe [:sequential :seon.store/branch]] :boolean]
+    :seon.store/dir]}
+  [store-dir identity-dir selected-record-keys follow-related?]
   (let [path (.getCanonicalPath (io/file store-dir))
         identity-path (.getCanonicalPath (io/file identity-dir))
         konserve (filestore/connect-fs-store path :opts {:sync? true})
@@ -262,13 +266,20 @@
     ;; Branching from an exact commit reads that immutable commit record, not
     ;; the branch head. Walk heads -> their own commit IDs -> parents so every
     ;; value Datahike may later use as a branch source carries the new identity.
-    (loop [pending (seq (conj (set branches) :db))
+    (loop [pending (seq (or selected-record-keys
+                            (conj (set branches) :db)))
            visited #{}]
       (when-let [record-key (first pending)]
         (if (contains? visited record-key)
           (recur (next pending) visited)
           (let [record (k/get konserve record-key nil {:sync? true})
-                related (when record
+                _ (when (and selected-record-keys (nil? record))
+                    (refuse! ::no-branch-head
+                             (str "there is no " record-key
+                                  " branch head at " path)
+                             {:seon.store/dir path
+                              ::no-branch-head record-key}))
+                related (when (and record follow-related?)
                           (conj (set (get-in record [:meta :datahike/parents]))
                                 (get-in record [:meta :datahike/commit-id])))]
             (when record
@@ -300,7 +311,24 @@
   export must never carry forward)."
   {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/dir]}
   [store-dir]
-  (reidentify-at! store-dir store-dir))
+  (reidentify-at! store-dir store-dir nil true))
+
+(defn reidentify-branches!
+  "Rewrite selected copied-store branch heads to match their new path.
+
+  This bounded form is for a caller that opens and branches only from the
+  selected heads. It deliberately does not rewrite retained commit records:
+  branching from an exact commit in this copy would therefore be invalid.
+  The caller must name every branch head that the copy will open.
+  Its work is proportional to selected heads rather than retained ancestry.
+  Full exports continue through [[reidentify!]], which rewrites every branch
+  head and reachable commit."
+  {:malli/schema
+   [:=> [:cat :seon.store/dir
+         [:set {:min 1} :seon.store/branch]]
+    :seon.store/dir]}
+  [store-dir branches]
+  (reidentify-at! store-dir store-dir (seq branches) false))
 
 (defn export!
   "Copy an open store to `<parent-dir>/store` as an independent store.
@@ -334,7 +362,7 @@
         (progress! "copy started")
         (copy-store! store (.getPath temp))
         (progress! "copy complete; re-identification started")
-        (reidentify-at! (.getPath temp) (.getPath target))
+        (reidentify-at! (.getPath temp) (.getPath target) nil true)
         (progress! "re-identification complete")
         ; the temp name is the fence: only a complete, re-identified
         ; store ever takes the name anything opens
