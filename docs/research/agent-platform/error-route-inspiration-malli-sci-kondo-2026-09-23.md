@@ -96,3 +96,14 @@ Paths are relative to `reference-code/`. Read directly; nothing was run.
    - One render multimethod on kind with a default (`virhe.cljc:190-192`), which the MCP/status tool and log lines share; plus an EDN form agents can query (clj-kondo `:edn`, `core.clj:46-52`).
 6. **Sentinels always propagate** (sci `interrupt-ex?` `utils.cljc:51-56`; kaocha fail-fast pass-through `var.clj:25-27`): `report!` rethrows interrupt, cancel and panic markers before recording.
 7. **Kinds as a hierarchy** (`derive`; kaocha `hierarchy.clj`): owner routing and severity dispatch on parents.
+
+## Addendum: upstream docs and issues (web, same lane)
+- **malli** function-schemas docs: `:report` is a side-effecting `key data -> any`, defaulting to `m/-fail!`; `dev/start!` re-instruments on schema change; `pretty/reporter` prints and `pretty/thrower` throws, with a bounded printer, e.g. `(pretty/-printer {:width 80 :print-length 30})`.
+- **SCI and babashka** issues:
+  - [#1771](https://github.com/babashka/babashka/issues/1771): user ex-data is hidden behind the `:sci/error` wrapper, so the route must walk `ex-cause`.
+  - [#1515](https://github.com/babashka/babashka/issues/1515) (open): bb does not print causes.
+  - [sci #942](https://github.com/babashka/sci/issues/942): wrong location in lazy seqs.
+  - [sci #871](https://github.com/babashka/sci/issues/871): stack trace without throwing.
+  - `sci/stacktrace` and `format-stacktrace` are the supported way to build reports.
+- **clj-kondo** hooks docs: `api/reg-finding!` with a custom `:type` and exact range is preferred over throwing from a hook; the level is set per type in config. Enforcing the one route through a hook fits this model.
+- **kaocha** plugin hooks: `config pre-load post-load pre-run post-run wrap-run pre-test post-test pre-report post-summary`. `pre-report` rewrites every event before any reporter; that is the global enrichment point.
