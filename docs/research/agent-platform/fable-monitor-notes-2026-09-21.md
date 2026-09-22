@@ -304,3 +304,16 @@ tree"). Default is restarted after both land.
   separate Malli defect at 10:25:52Z — both for the cold gate to name.
 - Chain running: `bin/seon start` → `--prepare-head-base` → `bin/test` bare
   (`tmp/cold-gate-2026-09-22c.log`).
+
+## 2026-09-22 06:45 local — platform tier executes again; three reds to a lane
+
+Default pid 38968 (7.3 s warm boot) on the settle fix; no new `entity-id/missing`;
+store stable at 7.5 GB with publication paused. Fixture base prepared in 34 s.
+`789eb63b0` (`fixture-observations`) declared twelve truthful fixture observations so
+selection admits the bulk tier (platform 83, bulk 1807, not reached 110). The platform
+tier then ran 83 and is RED on three (`tmp/cold-gate-2026-09-22d.log`):
+`declaration-population-test:105` (the unhanded-projection refusal lost
+`:seon.schema/expected-value`, suspect the kind cut's schema.clj conversions) and two
+`test-support-test` durations at 5.3 s / 5.7 s over the 5 s bound. Lane
+`platform-reds` (sol medium) owns all three; the cold gate reruns after it lands; the
+1.1 constructor lane launches on a green checkpoint.
