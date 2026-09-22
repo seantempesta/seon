@@ -206,7 +206,15 @@
             (is (= (schema/sha-256 [(.getBytes content "UTF-8")]) digest))
             (is (= content (blob/get connection digest)))
             (is (= digest (blob/put! connection content))
-                "the content address is stable and an existing blob is not rewritten"))
+                "the content address is stable and an existing blob is not rewritten")
+            (k/bassoc (:store @connection) digest
+                      (.getBytes "corrupt" "UTF-8") {:sync? true})
+            (let [failure (try
+                            (blob/get connection digest)
+                            nil
+                            (catch clojure.lang.ExceptionInfo error error))]
+              (is (= digest
+                     (:seon.blob/content-digest-mismatch (ex-data failure))))))
           (finally
             (d/release connection))))
       (finally

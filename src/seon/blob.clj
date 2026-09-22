@@ -105,13 +105,23 @@
   [^MessageDigest digest]
   (.formatHex (HexFormat/of) (.digest digest)))
 
+(defn- stored-binary
+  "Unwrap Konserve's binary callback value."
+  {:malli/schema
+   [:=>
+    [:cat [:or :seon.blob/octet-array
+           [:map [:input-stream :seon.blob/input-stream]]]]
+    [:or :seon.blob/octet-array :seon.blob/input-stream]]}
+  [binary]
+  (if (map? binary) (:input-stream binary) binary))
+
 (defn- stored-digest-and-size
   [store content-digest buffer-size]
   (let [digester (MessageDigest/getInstance "SHA-256")]
     (k/bget
      store content-digest
      (fn [binary]
-       (let [payload (if (map? binary) (:input-stream binary) binary)]
+       (let [payload (stored-binary binary)]
        (if (instance? (class (byte-array 0)) payload)
          (do
            (.update digester ^bytes payload)
@@ -371,8 +381,8 @@
              (k/bget
               (konserve-store connection)
               content-digest
-              (fn [{:keys [input-stream]}]
-                (read-octets input-stream))
+              (fn [binary]
+                (read-octets (stored-binary binary)))
               {:sync? true})]
     (let [actual (schema/sha-256 [octets])]
       (when-not (= content-digest actual)

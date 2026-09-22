@@ -108,7 +108,7 @@
   "The store's branch roster, read through its main connection.
   The roster is the FACT: a branch in it exists, a branch absent from
   it does not, whatever blobs are on disk
-  (`reference-code/datahike/src/datahike/versioning.cljc:206-214`)."
+  (`reference-code/datahike/src/datahike/versioning.cljc:182-189`)."
   {:malli/schema [:=> [:cat :seon.store/store] :seon.cluster.registry/roster]}
   [store]
   (set (d/branches (:seon.store/connection-object store))))
@@ -146,10 +146,6 @@
   [connection branch]
   (get-in (head-record (:store @connection) branch)
           [:meta :datahike/commit-id]))
-
-(defn- commit-present?
-  [store commit-id]
-  (some? (head-record (konserve-store store) commit-id)))
 
 (defn active-branch-connection
   "The active connection to `:seon.store/branch`, or nil when absent.
@@ -267,12 +263,6 @@
     source-commit :seon.source/commit-id
     projection :seon.schema/projection
     reachability-permit :datahike.gc-guard/reachability-permit}]
-  (when-not (commit-present? store source-commit)
-    (refuse! ::source-absent
-             (str "the source commit " source-commit " is unavailable")
-             {::dir (:seon.store/dir store)
-              :seon.source/commit-id source-commit
-              :seon.boot/cluster-name cluster-name}))
   (let [result (branch! {:seon.store/store store
                          :seon.cluster.registry/from source-commit
                          :seon.store/branch (cluster-branch cluster-name)
@@ -301,12 +291,6 @@
   (let [branch (cluster-branch cluster-name)
         current-commit (branch-commit-id {:seon.store/store store
                                           :seon.store/branch branch})]
-    (when-not (commit-present? store source-commit)
-      (refuse! ::source-absent
-               (str "the source commit " source-commit " is unavailable")
-               {::dir (:seon.store/dir store)
-                :seon.source/commit-id source-commit
-                :seon.boot/cluster-name cluster-name}))
     (when (branch-connected? store branch)
       (refuse! ::cluster-connected
                (str "branch " branch " still has a connection in this process")
@@ -327,34 +311,34 @@
 (defn retire-branch!
   "Remove one branch from the roster. Idempotent; data survives until GC.
   `delete-branch!` removes the roster entry only
-  (`versioning.cljc:261-289`); the bytes go when `collect!` runs, and a
+  (`versioning.cljc:279-320`); the bytes go when `collect!` runs, and a
   branch absent from the roster is ALREADY DONE — Datahike's
   `:branch-does-not-exist` is the success path for a re-run, not an
   error (the mid-delete crash row).
-  Refuses `::cluster-connected` (a live connection to that branch in
-  this process) and `::cannot-retire-main` (`:db` — the genesis branch
-  is the store, and Datahike refuses it too). Descendant branches do
+  Translates Datahike's `:branch-has-active-connection` to
+  `::cluster-connected` and `:cannot-delete-main-db-branch` to
+  `::cannot-retire-main`. Descendant branches do
   not prevent retirement: each remaining roster branch independently
   roots its head and parent commits during collection
   (`gc.cljc:22-81`), so deleting an ancestor's roster name cannot make
   a descendant lose data."
   {:malli/schema [:=> [:cat :seon.cluster.registry/retire-request] :nil]}
   [{:keys [:seon.store/store :seon.store/branch]}]
-  (when (= :db branch)
-    (refuse! ::cannot-retire-main
-             "the main :db branch is the store; it is never retired"
-             {::dir (:seon.store/dir store) :seon.store/branch branch}))
-  (when (contains? (roster store) branch)
-    (when (branch-connected? store branch)
-      (refuse! ::cluster-connected
-               (str "branch " branch " still has a connection in this process")
-               {::dir (:seon.store/dir store) :seon.store/branch branch}))
-    (try
-      (d/delete-branch! (:seon.store/connection-object store) branch)
-      (catch clojure.lang.ExceptionInfo failure
+  (try
+    (d/delete-branch! (:seon.store/connection-object store) branch)
+    (catch clojure.lang.ExceptionInfo failure
+      (case (:type (ex-data failure))
         ; the roster is the fact: a branch already gone is already done
-        (when-not (= :branch-does-not-exist (:type (ex-data failure)))
-          (throw failure)))))
+        :branch-does-not-exist nil
+        :cannot-delete-main-db-branch
+        (refuse! ::cannot-retire-main
+                 "the main :db branch is the store; it is never retired"
+                 {::dir (:seon.store/dir store) :seon.store/branch branch})
+        :branch-has-active-connection
+        (refuse! ::cluster-connected
+                 (str "branch " branch " still has a connection in this process")
+                 {::dir (:seon.store/dir store) :seon.store/branch branch})
+        (throw failure))))
   nil)
 
 (defn- blob-digest-attributes
