@@ -3486,7 +3486,10 @@
   (try
     (operation)
     (catch Throwable failure
-      (merge {:seon.error/message
+      (merge {:seon.error/at (java.util.Date.)
+              :seon.error/layer :seon.turn/phase
+              :seon.error/operation 'seon.turn/phase
+              :seon.error/message
               (or (ex-message failure) (.getName (class failure))) :seon.turn.loop/phase-failed true}
              (error/refusal failure)))))
 

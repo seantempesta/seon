@@ -90,7 +90,7 @@
                    :seon.render/ai seon.error/render-ai,
                    :seon.render/html seon.error/render-html,
                    :error/message
-                   "must carry the :seon.turn.loop/phase-failed class marker"}
+                   "must carry the :seon.turn.loop/phase-failed distinguishing member"}
                   [:seon.turn.loop/phase-failed
                    :seon.turn.loop/phase-failed]
                   [:seon.error/message :seon.error/message]],

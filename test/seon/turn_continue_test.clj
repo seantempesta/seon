@@ -26,6 +26,7 @@
     (#'ai/streamed-completion body nil)))
 
 (defn- prove-session
+  {:malli/schema [:=> [:cat :keyword [:vector :seon.schema/value] [:int {:min 1}] [:int {:min 1}] [:or :nil :keyword]] :nil]}
   [scenario replies limit expected disposition]
   (let [refusal (provider-refusal)]
       (testing (name scenario)
@@ -81,8 +82,7 @@
                  (let [settings (get-in (db/pull @connection '[{:seon.agent/settings [:db/id]}]
                                                 [:seon.agent/id "juniper"])
                                         [:seon.agent/settings :db/id])]
-                   (is (nil? (:seon.error/kind
-                              (db/transact! connection
+                   (is (some? (:db-after (db/transact! connection
                                             [[:db/retract settings :seon.config.ai/no-provider true]
                                              [:db/add settings :seon.config.run/max-episode-runs limit]
                                              [:db/add settings :seon.config.eval/time-limit-ms 10000]
@@ -218,7 +218,7 @@
 
 (deftest provider-refusal-defers-the-trigger
   (let [refusal (provider-refusal)]
-    (is (= :seon.ai/unparseable-body (:seon.error/kind refusal)))
+    (is (string? (:seon.ai/unreadable-response-member refusal)))
     (prove-session :refusal [refusal] 3 1 nil)))
 
 (deftest continuation-stops-at-the-turn-bound

@@ -89,6 +89,7 @@
 
 (defn- agent-evaluations
   "Read agent-authored evaluations in turn and ordinal order, excluding system reads."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :map]]}
   [database]
   (let [rows (db/q '[:find ?turn-t ?ordinal (pull ?evaluation [* {:seon.cluster.eval/ns [:seon.ns/name]}])
                      :where
@@ -97,7 +98,7 @@
                      [?turn :seon.turn/id _ ?turn-t]
                      [?evaluation :seon.cluster.eval/ordinal ?ordinal]]
                    database)]
-    (when (:seon.error/kind rows)
+    (when (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
       (throw (ex-info "The evaluation observation was refused." rows)))
     (mapv #(nth % 2) (sort-by #(subvec % 0 2) rows))))
 
@@ -171,6 +172,7 @@
   here. `with-redefs` is the right seam and a dynamic binding is not: a real
   graph evaluates on its proc's own virtual thread, which a thread binding
   never reaches."
+  {:malli/schema [:function [:=> [:cat [:=> [:cat :map] :seon.schema/value]] :seon.schema/value] [:=> [:cat [:or :nil [:=> [:cat :map] :map]] [:=> [:cat :map] :seon.schema/value]] :seon.schema/value]]}
   ([body] (with-cluster nil body))
   ([evaluator body]
   (test-support/with-database
@@ -206,11 +208,11 @@
                :seon.config.ai.retry/maximum-delay-ms 1
                :seon.config.ai.retry/maximum-retries 0
                :seon.config.ai.retry/maximum-total-delay-ms 0}})]
-        (when (:seon.error/kind result)
+        (when (or (:seon.config/error-key result) (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
           (throw (ex-info "Turn fixture configuration was refused." result))))
       (let [result (cluster/ensure-cluster-entity!
                     connection "turn-test" cluster/boot-process-identity)]
-        (when (:seon.error/kind result)
+        (when (or (:seon.config/error-key result) (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
           (throw (ex-info "Turn fixture cluster was refused." result))))
       (let [result
             (db/transact! connection
@@ -219,7 +221,7 @@
                    {:seon.ns/name 'seon.schema}
                    (agent-row "agent-a")
                    {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets"}])]
-        (when (:seon.error/kind result)
+        (when (or (:seon.config/error-key result) (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
           (throw (ex-info "Turn fixture seed was refused." result))))
       (with-render-context-proc
          connection
@@ -402,7 +404,7 @@
                          :seon.boot/cluster-name "turn-test"
                          :seon.config/manifest
                          {:seon.config.test/auto-check-cases 3}})]
-        (is (nil? (:seon.error/kind configured)))
+        (is (boolean? (:seon.reconcile/converged? configured)))
         (with-redefs [ai/complete
                       (fn [_projection _]
                         {:seon.ai/text
@@ -722,7 +724,7 @@
                                    (str/includes? "ns-unmap"))))
                     tx-data)]
                (if namespace-mutation?
-                 {:seon.error/kind :seon.db/rejected
+                 {:seon.db.write.attempt/request-id "namespace-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
                   :seon.error/message "injected namespace refusal"
                   :seon.error/data {:error :transact/namespace}}
                  (transact! target transaction))))]
@@ -809,7 +811,7 @@
                :seon.fn/ns [:seon.ns/name 'seon.config]
                :seon.fn/source "(defn defaults [] {})"
                :seon.fn/spec "[:=> [:cat] :map]"}])]
-              (when (:seon.error/kind seed)
+              (when (:seon.db.write.attempt/request-id seed)
                 (throw (ex-info "Terminal refusal fixture seed was refused." seed))))
             ;; This test plants a pre-existing program row directly rather
             ;; than producing it through eval. Finish that cold fixture setup
@@ -843,7 +845,7 @@
                                          :seon.program/delete-identities]))))
                         tx-data)]
                    (if (and (identical? target connection) deletion?)
-                     {:seon.error/kind :seon.db/rejected
+                     {:seon.db.write.attempt/request-id "program-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
                       :seon.error/message
                       "injected terminal program refusal"
                       :seon.error/data {:error :transact/program}}
@@ -869,10 +871,10 @@
                     "the refusal closes in its terminal pass")
                 (is (= 1 (count evaluations)))
                 (is (turn/terminal? (first evaluations)))
-                (is (= :seon.db/rejected
-                       (:seon.error/kind (first evaluations))))
-                (is (= :seon.db/rejected
-                       (:seon.error/kind
+                (is (= "injected terminal program refusal"
+                       (:seon.cluster.eval/error (first evaluations))))
+                (is (= "injected terminal program refusal"
+                       (:seon.error/message
                         (edn/read-string
                          (:seon.eval/shown
                           (first evaluations))))))
@@ -1218,7 +1220,7 @@
                                        :seon.schema/key]))))
                     tx-data)]
                (if declaration?
-                 {:seon.error/kind :seon.db/rejected
+                 {:seon.db.write.attempt/request-id "declaration-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
                   :seon.error/message "injected declaration refusal"
                   :seon.error/data {:error :transact/schema}}
                  (transact! target transaction))))
@@ -1431,12 +1433,11 @@
           (drive-agent! cluster "agent-b" 2)
           (let [evaluations
                 (db/q '[:find [(pull ?evaluation
-                                   [:seon.error/kind
+                                   [:seon.cluster.eval/error
                                     :seon.eval/shown]) ...]
                        :where
                        [?evaluation :seon.cluster.eval/id _]
-                       [?evaluation :seon.error/kind
-                        :seon.instrument/contract-violated]]
+                       [?evaluation :seon.cluster.eval/error _]]
                      @connection)]
             (is (= 1 (count evaluations)))
             (is (str/includes?
@@ -1487,7 +1488,7 @@
                                        :seon.fn/sym]))))
                     tx-data)]
                (if refused-definition?
-                 {:seon.error/kind :seon.db/rejected
+                 {:seon.db.write.attempt/request-id "definition-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
                   :seon.error/message "injected definition refusal"
                   :seon.error/data {:error :transact/program}}
                  (transact! target transaction))))]
@@ -1599,7 +1600,7 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
-                      (fn [_projection _] {:seon.error/kind :seon.ai/no-credential
+                      (fn [_projection _] {:seon.ai/missing-credential-variable "DEEPSEEK_API_KEY" :seon.error/at (java.util.Date.) :seon.error/layer :seon.ai/invocation :seon.error/operation 'seon.ai/complete
                                :seon.error/message
                                "The environment variable DEEPSEEK_API_KEY is not set."
                                :seon.error/data {}})]
@@ -1632,7 +1633,7 @@
                                 [{:seon.message/id "m-2"
                                   :seon.message/to [:seon.agent/id "agent-a"]
                                   :seon.message/content "try again"}])]
-              (is (nil? (:seon.error/kind seeded))
+              (is (some? (:db-after seeded))
                   "the wake that reopens the agent must commit"))
             (with-redefs [ai/complete
                           (fn [_projection request]
@@ -1962,7 +1963,7 @@
                    (mapv :seon.turn.loop/outcome reports)))
             (is (nil? (turn/next-agent-work @connection (request connection)))
                 "and nothing is derivable afterwards: no spin")
-            (is (empty? (db/q '[:find ?e :where [?e :seon.error/kind _]]
+            (is (empty? (db/q '[:find ?e :where [?e :seon.error/id _]]
                              @connection))
                 "no error facts — the old path committed one per pass")
             (is (nil? (db/q '[:find ?a . :where
@@ -1993,6 +1994,7 @@
    :seon.ai/timeout-ms 200})
 
 (defn- configure-backup!
+  {:malli/schema [:=> [:cat :seon.db/connection] :seon.db/transaction-report]}
   [connection]
   (let [report
         (db/transact!
@@ -2004,7 +2006,7 @@
                 :seon.config.ai.backup/api-key-variable
                 (:seon.ai/api-key-variable backup-target)
                 :seon.config.ai.backup/timeout-ms (:seon.ai/timeout-ms backup-target)}))]
-    (when (:seon.error/kind report)
+    (when (:seon.db.write.attempt/request-id report)
       (throw (ex-info "The fixture backup configuration was refused." report)))
     report))
 
@@ -2234,7 +2236,7 @@
             usage {"prompt_tokens" 104
                    "completion_tokens" 8
                    "completion_tokens_details" {"reasoning_tokens" 8}}
-            failure {:seon.error/kind :seon.ai/token-starvation
+            failure {:seon.ai/exhausted-finish-reason "length" :seon.error/at (java.util.Date.) :seon.error/layer :seon.ai/invocation :seon.error/operation 'seon.ai/complete
                      :seon.error/message
                      "The provider exhausted the completion budget before replying."
                      :seon.error/data
@@ -2264,7 +2266,7 @@
                 (= "all reasoning" (:seon.ai.attempt/reasoning row))
                 (not (contains? row :seon.ai.attempt/reasoning)))
               "reasoning-only starvation still persists the settled trace")
-          (is (= :seon.ai/token-starvation (:seon.error/kind error-fact))
+          (is (string? (:seon.ai/exhausted-finish-reason error-fact))
               "the attempt points at the named starvation error fact")))))))
 
 (deftest reasoning-only-time-limit-persists-its-flat-diagnostic
@@ -2275,7 +2277,11 @@
             sent-body
             "{\"thinking\":{\"type\":\"disabled\"},\"stream\":true}"
             failure
-            {:seon.error/kind :seon.ai/stream-truncated
+            {
+    :seon.ai/interrupted-text-count 0
+    :seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.ai/completion
+    :seon.error/operation 'seon.ai/complete
              :seon.error/message
              (str "The provider streamed 8 characters of reasoning but no "
                   "assistant text before the configured time limit fired.")
@@ -2300,7 +2306,7 @@
           (is (= 1 (count rows)))
           (is (nil? (:seon.ai.attempt/sent-body row)))
           (is (true? (:seon.ai/output-observed? row)))
-          (is (= :seon.ai/stream-truncated (:seon.error/kind error-fact)))
+          (is (nat-int? (:seon.ai/interrupted-text-count error-fact)))
           (is (= 8 (get-in recorded
                            [:seon.error/data :seon.ai/reasoning-received])))
           (is (zero? (get-in recorded
@@ -2490,6 +2496,7 @@
     (assoc ::delay-ms (:seon.ai.attempt/delay-ms row))))
 
 (defn- generated-turn-agrees-with-durable-facts?
+  {:malli/schema [:=> [:cat :map] :boolean]}
   [scenario]
   (with-cluster
     (fn [cluster]
@@ -2537,7 +2544,7 @@
                    (:seon.ai/api-key-variable backup-target)
                    :seon.config.ai.backup/timeout-ms
                    (:seon.ai/timeout-ms backup-target)))])]
-          (when (:seon.error/kind report)
+          (when (:seon.db.write.attempt/request-id report)
             (throw (ex-info "The generated scenario seed was refused." report))))
         (with-redefs [ai/complete complete!]
           (drive! cluster 12))
@@ -2644,7 +2651,7 @@
           (drive-agent! cluster "agent-a" 2))
         (let [database (db/db connection)
               evaluations (agent-evaluations database)]
-          (is (= :seon.message/unknown-recipient (:seon.error/kind @actual-value)))
+          (is (string? (:seon.message/unknown-recipient @actual-value)))
           (is (= 2 (count evaluations)))
           (is (str/includes? (:seon.eval/shown (first evaluations)) "missing-agent"))
           (is (= "There is no agent named \"missing-agent\"."
@@ -2790,7 +2797,7 @@
                              evaluated)))))
             (is (= prefix-count @evaluations))
             (is (= [0 1 2] (unsettled-ordinals @connection run-id)))
-            (is (nil? (:seon.error/kind (recover-cut-run! connection run-id))))
+            (is (some? (:db-after (recover-cut-run! connection run-id))))
             (is (empty? (unsettled-ordinals @connection run-id)))
             (let [row (db/pull @connection [:seon.turn/closed-tx]
                                [:seon.turn/id run-id])
@@ -3058,9 +3065,7 @@
           (is (= #{:my.agents.agent-a/item} (set direct-contract-keys)))
           (is (= #{:my.agents.agent-a/item-id} (set child-schema-keys))
               "the stored contract and registry references expose child keys")
-          (is (= :seon.db/invalid-read
-                 (:seon.error/kind
-                  (db/q '[:find ?entity
+          (is (true? (:seon.db/invalid-read (db/q '[:find ?entity
                           :where [?entity :seon.db/read-result _]]
                         database)))
               "the removed attribute cannot admit a read-result datom")
@@ -3181,7 +3186,10 @@
                        :seon.db.process/id process}
               generated (turn/next-agent-work @connection request)
               failure
-              {:seon.error/kind :seon.bootstrap/root-acquisition-empty
+              {:seon.render.walk/missing-lookup [:seon.agent/id "agent-a"]
+               :seon.error/at now
+               :seon.error/layer :seon.render.walk/neighborhood
+               :seon.error/operation 'seon.render.walk/neighborhood
                :seon.error/message
                "The generated opening root pull returned no membership data."
                :seon.error/data
@@ -3219,9 +3227,11 @@
             (let [sample (swap! sequence-number inc)
                   run-id (str "phase-failure-" sample)
                   evaluation? (= :evaluate failed-phase)
-                  failure {:seon.error/kind
-                           (keyword "seon.turn.phase"
-                                    (name failed-phase))
+                  failure {
+    :seon.turn.loop/phase-failed true
+    :seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.turn/phase
+    :seon.error/operation 'seon.turn/phase
                            :seon.error/message
                            (str "injected " (name failed-phase) " failure")
                            :seon.error/data {:seon.turn.loop/phase
@@ -3780,8 +3790,8 @@
                             :seon.turn/opened-tx "datomic.tx"
                             :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]
                             :seon.turn/trigger [:seon.message/id "m-1"]})))]
-        (is (nil? (:seon.error/kind seeded)) (pr-str (:seon.error/kind seeded)))
-        (when (:seon.error/kind seeded) (throw (ex-info "Budget fixture refused" seeded)))
+        (is (some? (:db-after seeded)) (pr-str (:seon.db.write.attempt/request-id seeded)))
+        (when (:seon.db.write.attempt/request-id seeded) (throw (ex-info "Budget fixture refused" seeded)))
         (is (= 0 (turn/episode-runs (db/db connection) "agent-a")))
         (is (= 1 (turn/turns-left (db/db connection) "agent-a")))
         (with-redefs [ai/complete (fn [_projection _] (swap! calls inc) {:seon.ai/text "(+ 20 22)"})]

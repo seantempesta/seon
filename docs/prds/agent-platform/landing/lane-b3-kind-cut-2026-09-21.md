@@ -12,6 +12,46 @@ No final green or live default settlement claim is made.
 
 ## Commits and changed paths
 
+- `f7f5c36ef`: class metadata retirement and native schema parity (39 paths),
+  including deletion of `error_class_schema_test`. Prescribed load exited 0.
+- `b730705ef`: operator script and hook caller conversion (8 paths).
+  Prescribed load exited 0.
+
+### Final settlement verification, 2026-09-22 07:00 UTC
+
+The four-namespace turn request completed `seon.cluster.turn-test` (60 tests,
+33 reported failures, 58 errors), `seon.turn-test` (34 tests, 9 failures,
+16 errors), and `seon.turn-loop-test` (26 tests, 7 failures, 9 errors).
+It then reached the installed no-progress bound in
+`seon.turn-continue-test/comment-only-refusal-arrives-before-done` and exited
+124. These are observed event counts, not a recorded green result.
+
+That run exposed an incomplete base value in the existing `phase` exception
+translation: ordinary `ex-data` lacked the members required by the settlement
+failure contract. `phase` now supplies `at`, `layer`, and `operation` before
+merging the exception's refusal data. It retains `phase-failed true` and the
+original exception message and members. This is the existing exception boundary,
+not a new propagation mechanism.
+
+The subsequent request `3c3b9919d05d` ran `seon.cluster.turn-test` and
+`seon.schema.datahike-test`: **74 tests, 218 assertions, 49 failures, 57 errors**.
+The recording authority refused the result; no recorded green is claimed.
+The no-forms regression completed at `06:56:54.902423Z`: its durable evaluation,
+declared-attribute transaction report, and unparked-proc assertions passed, but
+the required error text assertion failed. It stored `:malli.core/invalid-schema`
+instead of the no-forms text. The canonical fixture still carries publication
+`b771bf4fa00eea263a2b679e89aa58fce34471659c38a5c1e11c7c43786797e0`, while the
+selected source requires the newly declared turn error schemas. The earlier
+Slice A no-forms pass remains valid only for that slice. It is **not** a final-cut
+pass. The fixture acquisition path explicitly copies the published store and
+derives its projection from that database; selecting newer source paths does
+not publish those declarations into the fixture.
+
+**RESTART NEEDED.** The orchestrator owns default replacement and the published
+fixture/cold gate. This lane has neither restarted default nor replaced that
+fixture, and continues the remaining namespace requests without claiming that
+missing evidence is green.
+
 - `aba6d445e`: accepted fails-before regression, unchanged. The prescribed ten-
   namespace HEAD load exited 0 immediately after this commit.
 - `19827d2b0`: Slice A (required HEAD load exited 0): `src/seon/turn.clj`, `src/seon/cluster/reply.clj`,

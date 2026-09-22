@@ -68,9 +68,10 @@
                            attempt)]
           (is (= {:seon.ai/model model :seon.ai.attempt/at observed-at} row)))))))
 
-(defn- checked-transact! [connection transaction]
+(defn- checked-transact! {:malli/schema [:=> [:cat :seon.db/connection :seon.store/transaction] :seon.db/transaction-report]}
+  [connection transaction]
   (let [result (db/transact! connection transaction)]
-    (when (:seon.error/kind result) (throw (ex-info (pr-str result) result)))
+    (when (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result)) (throw (ex-info (pr-str result) result)))
     result))
 
 (defn- evaluations [database agent-id]
@@ -159,7 +160,7 @@
                     :seon.cluster.reply/sources [{:seon.cluster.eval/source source}]}
            fault (try (turn/evaluate-sources request) nil
                       (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
-       (is (= :seon.turn/generated-read-depends-on-turns (:seon.error/kind fault))
+       (is (seq (:seon.turn/generated-read-attributes fault))
            (pr-str fault))
        (is (= source (get-in fault [:seon.error/data :seon.error/diagnostic-offending])))
        (is (= #{:seon.turn/id}
@@ -255,7 +256,7 @@
      (let [before (db/basis-t @connection)
            result (turn/compact! {:seon.db/connection connection
                                   :seon.agent/id "busy"})]
-       (is (some? (:seon.error/kind result)) (pr-str result))
+       (is (some? (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))) (pr-str result))
        (is (= before (db/basis-t @connection)))
        (is (= 1 (count (evaluations @connection "busy"))))))))
 
@@ -323,7 +324,7 @@
              _ (checked-transact! connection
                                   [[:db.fn/retractEntity [:seon.cluster.eval/id evaluation-id]]
                                    [:db.fn/retractEntity [:seon.turn/id run-id]]])
-             refusal {:seon.error/kind :seon.turn/refused
+             refusal {
                       :seon.turn/transition `turn/close-call
                       :seon.turn/rule :seon.turn/no-such-run
                       :seon.turn/refused :seon.turn/no-such-run
@@ -336,23 +337,22 @@
                           :seon.cluster.eval/ordinal 0
                           :seon.error/value refusal})
              database (db/db connection)
-             kinds (set (db/q '[:find [?kind ...]
-                                :where [?error :seon.error/kind ?kind]] database))]
+             rules (set (db/q '[:find [?rule ...]
+                                :where [?error :seon.turn/rule ?rule]] database))]
          ;; The class: a settlement whose run-dependent half can no longer
          ;; apply must still commit the durable outcome. Re-issuing the close
          ;; that just refused made the second refusal identical by
          ;; construction and threw into the agent's flow proc.
          (is (map? settlement) (pr-str settlement))
-         (is (nil? (:seon.error/kind (:seon.turn.loop/outcome settlement)))
+         (is (some? (:db-after (:seon.turn.loop/outcome settlement)))
              (pr-str settlement))
-         (is (contains? kinds :seon.turn/refused)
+         (is (contains? rules :seon.turn/no-such-run)
              "the refusal the loop actually met is the durable fact")
          (is (nil? (db/pull database [:db/id] [:seon.turn/id run-id]))
              "late settlement does not recreate the vanished turn")
          (is (nil? (db/pull database [:db/id] [:seon.cluster.eval/id evaluation-id]))
              "late settlement records the error without recreating an orphan evaluation")
-         (is (not (contains? kinds
-                             :seon.turn.loop/terminal-refusal-settlement-refused))
+         (is (empty? (db/q '[:find ?e :where [?e :seon.error/operation seon.turn/settle!]] database))
              "no core fault about the recording replaces the outcome")
          (is (nil? (:db/id (db/pull database [:db/id] [:seon.turn/id run-id])))
              "nothing resurrects the retracted turn"))))))
@@ -388,7 +388,7 @@
                  :seon.turn.loop/report (fn [& arguments] (swap! reported conj (vec arguments)))})
              database (db/db connection)
              refusals (db/q '[:find [?error ...]
-                              :where [?error :seon.error/kind :seon.turn/refused]]
+                              :where [?error :seon.turn/rule _]]
                              database)]
          ;; Turn PRD §3/§14: a wake arriving while a turn is open has `:t`
          ;; greater than that turn's basis and opens the NEXT turn, answered
@@ -447,7 +447,7 @@
                                    :seon.agent/routing routing
                                    :seon.agent/id id
                                    :seon.cluster.reply/text source})
-                          turn-id (when-not (:seon.error/kind result)
+                          turn-id (when-not (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
                                     (:seon.turn/id
                                      (db/pull @connection [:seon.turn/id]
                                               (get-in (last (evaluation/of-agent @connection id))
@@ -483,7 +483,7 @@
                seeded (checked-transact!
                        connection
                        [{:seon.turn/id previous-id :seon.turn/agent [:seon.agent/id "a"] :seon.turn/opened-tx "datomic.tx"}])]
-           (is (nil? (:seon.error/kind seeded)) (pr-str seeded))
+           (is (some? (:db-after seeded)) (pr-str seeded))
            (is (nil? (:seon.turn/closed-tx
                       (db/pull @connection '[*]
                                [:seon.turn/id previous-id]))))
@@ -529,8 +529,7 @@
              (is (not (str/includes? html "items, depth")) html)
              (is (not (str/includes? html "read-evidence")) html))
            (is (= basis (db/basis-t @connection)))
-           (is (= :seon.eval/agent-not-found
-                  (:seon.error/kind (evaluation/of-agent database "absent")))))
+           (is (string? (:seon.agent/no-such-agent (evaluation/of-agent database "absent")))))
          (let [a (evaluations @connection "a")
                b (evaluations @connection "b")]
            (is (= 1 (count a)))
@@ -539,8 +538,7 @@
                       (:seon.eval/shown
                        (db/pull @connection [:seon.eval/shown]
                                 (first a))))))
-           (is (nil? (:seon.error/kind
-                      (turn/compact! {:seon.db/connection connection
+           (is (some? (:db-after (turn/compact! {:seon.db/connection connection
                                       :seon.agent/id "a"}))))
            (is (empty? (evaluations @connection "a")))
            (is (= b (evaluations @connection "b")))
@@ -622,7 +620,7 @@
                opening-sources (mapv :seon.cluster.eval/source
                                      (filter #(= :none (:seon.turn/status %))
                                              (:seon.turn/forms opening)))]
-           (is (nil? (:seon.error/kind opening)) (pr-str opening))
+           (is (vector? (:seon.turn/forms opening)) (pr-str opening))
            (is (seq opening-sources) (pr-str opening))
            (is (string? (:seon.turn/id opening)))
            (let [rendered (transcript/render-ledger-turn
@@ -885,7 +883,7 @@
                             (range 2) rows)))
              saved (db/pull @connection '[:seon.test/subject]
                             [:seon.test/sym 'fixture.batch/target-test])]
-         (is (nil? (:seon.error/kind result)) (pr-str result))
+         (is (some? (:db-after result)) (pr-str result))
          (is (= 'fixture.batch/target (:seon.test/subject saved))))))))
 
 ;; Deterministic clock: every generated time is an offset from t0.
@@ -905,10 +903,11 @@
 
 (defn- transact-or-refusal
   "Commit tx-data; a refusal returns its deepest ex-data as a value."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/transaction] [:or [:= :seon.turn-test/committed] :map]]}
   [connection tx-data]
   (try
     (let [result (db/transact! connection tx-data)]
-      (if (:seon.error/kind result)
+      (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
         result
         ::committed))
     (catch Exception e
@@ -1250,7 +1249,7 @@
                                           [:seon.ns/name 'replay.start]))))
             (is (nil? (db/pull opening [:seon.ns/name]
                               [:seon.ns/name 'replay.later]))))
-          (is (:seon.error/kind (turn/opening-db @connection "absent-run")))
+          (is (:seon.turn/missing-opening-datom (turn/opening-db @connection "absent-run")))
           (is (= 'replay.start
                  (get-in run [::turn/starting-ns :seon.ns/name]))))
       (is (= :system
@@ -1356,7 +1355,7 @@
               {::turn/id "macro-call-run"
                :seon.cluster.eval/ordinal 0
                :seon.eval/shown "nil"}))]
-        (is (not (:seon.error/kind result))
+        (is (some? (:db-after result))
             "the settlement transaction commits"))
       (let [form (db/pull @connection
                           [:seon.fn/calls]
@@ -1373,7 +1372,7 @@
               {::turn/id "macro-call-run"
                :seon.cluster.eval/ordinal 1
                :seon.cluster.eval/error "Could not resolve missing.target/nope"}))]
-        (is (not (:seon.error/kind result))
+        (is (some? (:db-after result))
             "the error settlement commits without a dangling lookup ref"))
       (is (= #{['missing.target/nope]}
              (db/q '[:find ?target
@@ -1402,7 +1401,7 @@
                 :seon.ns/source "(require 'unindexed.required)"
                 :seon.ns/requires
                 #{'unindexed.required}}}))]
-        (is (not (:seon.error/kind result))
+        (is (some? (:db-after result))
             "an unresolved required namespace stores as a symbol value"))
       (is (nil? (:db/id (db/pull @connection [:db/id]
                                  [:seon.ns/name 'unindexed.required])))
@@ -1433,7 +1432,7 @@
                       :seon.eval/shown "nil"
                       :seon.program/row row}))
             report (seon.fn/unresolved-callers @connection)]
-        (is (not (:seon.error/kind result)) (pr-str result))
+        (is (some? (:db-after result)) (pr-str result))
         (is (not-any? #(= 'missing.target/nope (:seon.fn/callee %))
                       (:seon.program/unresolved-callers report))
             "a namespace without a program row is outside the unresolved-call report")
@@ -1482,7 +1481,7 @@
             (doseq [terminal [settle
                               (assoc settle
                                      :seon.eval/shown
-                                     "{:seon.error/kind :x}"
+                                     "{:seon.error/message \"failed\"}"
                                      :seon.cluster.eval/error "changed")]]
               (is (not= ::committed
                         (transact-or-refusal connection
@@ -2112,7 +2111,7 @@
          connection
          (error/commit-tx
           (db/db connection)
-          (cond-> {:seon.error/source {:seon.error/kind kind :seon.error/message message}
+          (cond-> {:seon.error/source { :seon.error/message message}
                    :seon.error/id message :seon.error/at (java.util.Date. millis)
                    :seon.error/process cluster/boot-process-identity
                    :seon.sci.admit/caps (config/result-caps (support/effective-config))
@@ -2205,8 +2204,7 @@
               parked (pass! before-park)]
           (is (some? (:seon.turn.loop/parked parked))
               "the agent is parked once the declared bound is reached")
-          (is (= :seon.turn.loop/write-refusals-exhausted
-                 (:seon.error/kind (:seon.turn.loop/parked parked))))
+          (is (= bound (:seon.turn.loop/write-refusals (:seon.turn.loop/parked parked))))
           (is (= bound (:seon.turn.loop/write-refusals
                         (:seon.turn.loop/parked parked))))
           (is (= bound (:seon.config.agent/write-refusal-bound
@@ -2214,8 +2212,7 @@
           (is (nil? (async/poll! wake-channel))
               "a parked proc offers no self-rewake")
           (let [fault (support/await-event! fault-channel ::write-refusal-fault)]
-            (is (= :seon.turn.loop/write-refusals-exhausted
-                   (:seon.error/kind (ex-data (:clojure.core.async.flow/ex fault)))))
+            (is (= bound (:seon.turn.loop/write-refusals (ex-data (:clojure.core.async.flow/ex fault)))))
             (is (= agent-id (:seon.agent/id fault)))
             (is (str/includes? (ex-message (:clojure.core.async.flow/ex fault))
                                (str bound)))

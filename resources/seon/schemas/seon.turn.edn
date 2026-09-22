@@ -33,7 +33,7 @@
               :seon.render/ai seon.error/render-ai,
               :seon.render/html seon.error/render-html,
               :error/message
-              "must carry the :seon.turn/missing-opening-datom class marker"}
+              "must carry the :seon.turn/missing-opening-datom distinguishing member"}
              [:seon.turn/missing-opening-datom
               :seon.turn/missing-opening-datom]
              [:seon.error/message :seon.error/message]],

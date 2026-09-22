@@ -106,7 +106,7 @@
                :seon.ai/finish-reason "length"}}})))))
 
 (deftest attempt-request-assembles-evidence-and-optional-provenance
-  (let [failure {:seon.error/kind :provider/refused
+  (let [failure {
                  :seon.error/message "refused"}
         evidence {:seon.ai/usage {"prompt_tokens" 3}
                   :seon.ai.model/last-latency-ms 42
@@ -364,8 +364,8 @@
         asked [{:my.message/to "agent-2" :my.message/content "deliver"}
                {:my.message/to "missing" :my.message/content "refuse"}]
         rows [{:seon.message/id "delivered"}]
-        failures [{:seon.error/kind :failure/one}
-                  {:seon.error/kind :failure/two}]
+        failures [{:seon.error/message "first refusal"}
+                  {:seon.error/message "second refusal"}]
         cluster {:seon.config.message/max-chain 8}
         requests (atom [])]
     (with-redefs-fn
@@ -378,11 +378,11 @@
        (fn [actual-cluster actual-db failure actual-now attribution]
          (swap! requests conj
                 [:error actual-cluster actual-db failure actual-now attribution])
-         [[:error/tx (:seon.error/kind failure)]])}
+         [[:error/tx (:seon.error/message failure)]])}
       (fn []
         (is (= {:seon.message/rows rows
                 :seon.error/values-tx
-                [[:error/tx :failure/one] [:error/tx :failure/two]]}
+                [[:error/tx "first refusal"] [:error/tx "second refusal"]]}
                ((private-loop-fn 'delivery-rows)
                 {:seon.db/db db
                  :seon.turn.loop/cluster cluster
@@ -591,7 +591,7 @@
            run-id "bootstrap:generated-agent"
            message-id "generated-trigger"
            provider-calls (atom 0)
-           refusal {:seon.error/kind :seon.cluster.prompt/budget-exceeded
+           refusal {:seon.cluster.prompt/budget-exceeded 1 :seon.error/at (java.util.Date.) :seon.error/layer :seon.cluster.prompt/invocation :seon.error/operation 'seon.cluster.prompt/prompt
                     :seon.error/message "The generated opening did not fit."}
            cluster (test-support/cluster-handle
                    {:seon.db/connection connection
@@ -640,7 +640,7 @@
            (is (= :error (:seon.turn.loop/outcome report)))
            (is (inst? (test-support/turn-closed-at @connection run-id)))
            (is (= 0 @provider-calls))
-           (is (= (:seon.error/kind refusal) (:seon.error/kind capture)))
+           (is (= (:seon.cluster.prompt/budget-exceeded refusal) (:seon.cluster.prompt/budget-exceeded capture)))
            (is (= (:seon.error/message refusal)
                   (:seon.error/message capture)))
            (is (int? (:seon.context.capture/basis-t capture)))
@@ -797,7 +797,7 @@
                     (config/result-caps (test-support/effective-config))
                     :seon.config.error/recurrence-limit 3
                     :seon.config.message/max-chain 8})
-           unpaid {:seon.error/kind :seon.ai/transport-failure
+           unpaid {:seon.ai/transport-failure "http://127.0.0.1:1/v1" :seon.error/at (java.util.Date.) :seon.error/layer :seon.ai/invocation :seon.error/operation 'seon.ai/complete
                    :seon.error/message "connection refused"
                    :seon.error/data
                    {:seon.ai/error-class :transport-before-send
@@ -834,7 +834,7 @@
        (let [opening (turn/system-turn {:seon.turn.loop/cluster cluster
                                         :seon.agent/id agent-id
                                         :seon.turn/write? true})]
-         (is (nil? (:seon.error/kind opening)) (pr-str opening)))
+         (is (vector? (:seon.turn/forms opening)) (pr-str opening)))
        (prepare-call! cluster agent-id "settings-run-1" "settings-message-1")
        (with-render-context-proc
         cluster
@@ -948,6 +948,7 @@
   "Settle one refused `:prompt` phase and return who the transaction mails.
   COMMITS, because the recurrence fence is a query over committed facts:
   a preparation that never lands cannot recur."
+  {:malli/schema [:=> [:cat :seon.db/connection :string :string] [:vector :string]]}
   [connection escalate-to agent-id]
   (let [refusal-terminal-data (private-loop-fn 'refusal-terminal-data)
         prepared
@@ -961,7 +962,11 @@
           :seon.config.error/recurrence-limit 3
           :seon.sci.admit/caps (config/result-caps config/defaults)})
          @connection now agent-id nil process nil nil
-         {:seon.error/kind :seon.turn.phase/prompt
+         {
+    :seon.turn.loop/phase-failed true
+    :seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.turn/phase
+    :seon.error/operation 'seon.turn/phase
           :seon.error/message "injected prompt failure"
           :seon.error/data {:seon.turn.loop/phase :prompt}})
         before (set (db/q '[:find [?id ...] :where [?m :seon.message/id ?id]] @connection))]
@@ -1048,7 +1053,7 @@
          (turn/disposition (seon.schema/handed-projection) (seon.run/complete "done"))))
   (testing "and anything else is not a disposition"
     (doseq [value [42 nil "done" {:my.turn/disposition :invented}
-                   {:seon.error/message "boom" :seon.error/kind :x}
+                   {:seon.error/message "boom" }
                    {:my.turn/disposition :completed}]]
       (is (nil? (turn/disposition (seon.schema/handed-projection) value))
           (str "must not read as a disposition: " (pr-str value))))))
@@ -1251,7 +1256,7 @@
                                 :seon.cluster.eval/ordinal 1
                                 :seon.cluster.eval/at now
                                 :seon.cluster.eval/error "boom"
-                                :seon.eval/shown "{:seon.error/kind :x}"}]))))
+                                :seon.eval/shown "{:seon.error/message \"failed\"}"}]))))
       (testing "the refs really are refs — a follow, not a string"
         (is (= "alice"
                (db/q '[:find ?id .
@@ -1403,10 +1408,10 @@
                   @connection "run-1" 0)
             stored-value (edn/read-string
                           (:seon.eval/shown receipt))]
-        (is (= :seon.turn.loop/phase-failed
-               (:seon.error/kind gate-refusal)
-               (get-in terminal [:seon.error/value :seon.error/kind])
-               (:seon.error/kind stored-value)))
+        (is (= true
+               (:seon.turn.loop/phase-failed gate-refusal)
+               (get-in terminal [:seon.error/value :seon.turn.loop/phase-failed])
+               (:seon.turn.loop/phase-failed stored-value)))
         (is (= "install gate broke after evaluation"
                (:seon.cluster.eval/error receipt)))
         (is (inst? (test-support/turn-closed-at @connection "run-1")))))))
@@ -1544,8 +1549,7 @@
              not as the seq a `(seq …)` branch produced")
         (is (empty? @handed)
             "private values never stage blobs")
-        (is (nil? (:seon.error/kind
-                   (:seon.turn.loop/outcome terminal)))
+        (is (some? (:db-after (:seon.turn.loop/outcome terminal)))
             "the settlement committed")
         (is (inst? (closed-at connection))
             "the run closed")))))
@@ -1568,8 +1572,7 @@
                                               {:seon.test/commit-broke true}))
                               (publish conn staged-writes commit-roots!)))]
               (settle-staged-def! connection "loop-blob-refused"))]
-        (is (= :seon.turn.loop/phase-failed
-               (get-in terminal [:seon.error/value :seon.error/kind]))
+        (is (true? (get-in terminal [:seon.error/value :seon.turn.loop/phase-failed]))
             "a host failure in the commit is a refused phase, not an escape")
         (is (inst? (closed-at connection))
             "AND THE RUN IS CLOSED: a settlement that cannot commit may not
@@ -1658,8 +1661,8 @@
                                                 {:tx-data [{:db/id [:seon.agent/id "agent-a"]
                                                             :seon.agent/id 42}]})]
                                   (is (inst? (:seon.error/at refusal)) (pr-str refusal))
-                                  ;; Kind is optional; keep the real writer's diagnostic.
-                                  (dissoc refusal :seon.error/kind)))
+                                  ;; Keep the real writer's diagnostic.
+                                  refusal))
                               (publish conn staged-writes commit-roots!)))]
               ((private-loop-fn 'settle-batch!) cluster requests))
             database @connection
@@ -1673,11 +1676,10 @@
                     [?evaluation :seon.cluster.eval/error ?error]]
                   database "run-1")]
         (if (= :throw failure-mode)
-          (is (= :seon.turn.loop/phase-failed
-                 (:seon.error/kind (:refused-outcome settled)))
+          (is (true? (:seon.turn.loop/phase-failed (:refused-outcome settled)))
               "A host failure in the batch commit is a refused phase.")
           (do
-            (is (nil? (:seon.error/kind (:refused-outcome settled))))
+            (is (string? (:seon.db.write.attempt/request-id (:refused-outcome settled))))
             (is (inst? (:seon.error/at (:refused-outcome settled))))
             (is (string? (:seon.db.write.attempt/request-id (:refused-outcome settled)))
                 "The writer's original refusal is retained, including its request identity.")))

@@ -2827,7 +2827,7 @@
   [message member expected offending cause evidence]
   (diagnostic
    {::diff-refused true
-    
+
     :seon.error/message message
     :seon.error/diagnostic-layer :agent-boundary
     :seon.error/diagnostic-operation 'seon.db/diff

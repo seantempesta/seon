@@ -53,7 +53,7 @@
               :response
               [:or :seon.search/results :seon.search/unavailable-error]
  :seon.search/missing-resource [:= true]
- :seon.search/missing-resource-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.search/missing-resource class marker"} [:seon.search/missing-resource :seon.search/missing-resource] [:seon.error/message :seon.error/message]]
+ :seon.search/missing-resource-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.search/missing-resource distinguishing member"} [:seon.search/missing-resource :seon.search/missing-resource] [:seon.error/message :seon.error/message]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.search/error
