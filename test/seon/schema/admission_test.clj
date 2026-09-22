@@ -8,10 +8,34 @@
             [seon.cluster.store :as store]
             [seon.program :as program]
             [seon.schema :as schema]
+            [seon.schema.admission :as schema.admission]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]))
 
 (def ^:private seal-digest (apply str (repeat 64 "a")))
+
+(deftest natural-name-tokens-remain-admission-behavior
+  (is (= ["invoice" "line" "item" "count"]
+         (schema.admission/tokens :invoice.line/item-count)))
+  (is (= ["seon" "schema" "admission" "tokens"]
+         (schema.admission/tokens 'seon.schema.admission/tokens))))
+
+(deftest similar-identity-warning-remains-admission-behavior
+  (let [findings
+        (schema.admission/admit
+         {::schema.admission/declarations
+          {:invoice.line/item-count :int}
+          ::schema.admission/registry
+          {:invoice.item/count :string
+           :unrelated.namespace/value :boolean}})]
+    (is (= [{:seon.schema.admission/declaration :invoice.line/item-count
+             :seon.schema.admission/similar-key :invoice.item/count
+             :seon.schema.admission/shared-tokens 3}]
+           (mapv #(select-keys %
+                               [:seon.schema.admission/declaration
+                                :seon.schema.admission/similar-key
+                                :seon.schema.admission/shared-tokens])
+                 (filter #(= :schema-name-overlap (:type %)) findings))))))
 
 (defn- with-history-policy [keep-history? body]
   (let [configuration

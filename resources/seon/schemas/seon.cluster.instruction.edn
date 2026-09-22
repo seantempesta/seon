@@ -14,4 +14,4 @@
                            [:vector
                             :seon.cluster.instruction/instruction],
                            :text
-                           [:string {:min 1, :seon.search/index :text}]}
+                           [:string {:min 1}]}

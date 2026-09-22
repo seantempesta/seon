@@ -947,7 +947,7 @@
   (instrumented!
    (fn [_]
      (let [database-form
-           [:symbol {:seon.db/identity true :seon.search/index :symbol}]]
+           [:symbol {:seon.db/identity true}]]
        (is (= database-form
               (m/form (schema.datahike/storage-schema (schema/structural-schema database-form))))
            "compiled storage navigation remains callable under instrumentation")

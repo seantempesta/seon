@@ -19,7 +19,6 @@
    live in `seon.schema.internal`, outside agent context."
   (:require [malli.core :as m]
             [seon.id :as id]
-            [seon.error.refusal :as error.refusal]
             [malli.registry :as mr]
             [clojure.core.reducers :as reducers]
             [clojure.set :as set]
@@ -189,8 +188,8 @@
    at boot. A declaration naming a predicate added since then resolves to
    nothing, so every publication is refused — including the one whose own
    adoption would have reloaded the owner. That is the pre-read the owner
-   law forbids, and it wedged `default` on 2026-09-16 for
-   `seon.search/handle?` (filed as
+   law forbids, and it wedged `default` on 2026-09-16 for a newly declared
+   core predicate (filed as
    `docs/seon/issues/a-new-core-predicate-and-its-schema-cannot-be-adopted-in-place.md`).
 
    So the resolver converges instead of refusing: a namespace this process
@@ -1811,7 +1810,7 @@
                     [:seon.render/function :qualified-symbol]]
          [:map [:seon.schema/render-contract :seon.schema/value]
                [:seon.schema/render-input :seon.schema/value]
-               [:seon.schema/render-contract-cause :qualified-keyword]]]
+               [:seon.schema/render-contract-cause :seon.schema/render-contract-cause]]]
     :nil]}
   [{schema-key :seon.schema/key
     property :seon.render/property
@@ -1822,10 +1821,14 @@
           :seon.error/layer :seon.schema/admission
           :seon.error/operation 'seon.schema/render-contract-refusal!
           :seon.schema/refused-value renderer
+          :seon.schema/render-contract-cause render-contract-cause
           :seon.schema/expected-value schema-key
           :seon.error/message (str "Schema publication refused " schema-key ": " property
-               " names " renderer " whose declared input "
-               (pr-str render-input) " does not accept the declaring shape.")
+               " names " renderer
+               (if (= :seon.schema/render-function-has-no-declared-contract render-contract-cause)
+                 " which has no declared contract."
+                 (str " whose declared input " (pr-str render-input)
+                      " does not accept the declaring shape.")))
           :seon.error/data {:seon.schema/key schema-key
            :seon.render/property property
            :seon.render/function renderer

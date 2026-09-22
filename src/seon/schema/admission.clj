@@ -10,7 +10,6 @@
             [clojure.string :as str]
             [clojure.tools.reader.edn :as reader.edn]
             [clojure.tools.reader.reader-types :as reader-types]
-            [seon.search :as search]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -19,6 +18,51 @@
 
 (def ^:private generator-properties
   #{:gen/schema :gen/elements :gen/gen :gen/return})
+
+(defn tokens
+  "Split a keyword, symbol, or string on its natural non-alphanumeric
+  separators."
+  {:malli/schema [:=> [:cat [:or :keyword :symbol :string]] [:vector :string]]}
+  [value]
+  (let [flush-token
+        (fn [{:keys [parts token]}]
+          {:parts (cond-> parts (seq token) (conj token))
+           :token ""})]
+    (:parts
+     (flush-token
+      (reduce
+       (fn [{:keys [token] :as state} character]
+         (if (Character/isLetterOrDigit ^char character)
+           (assoc state :token
+                  (str token (Character/toLowerCase ^char character)))
+           (flush-token state)))
+       {:parts [] :token ""}
+       (str value))))))
+
+(defn similar-identities
+  "Rank qualified schema keys by shared natural name tokens. At least one
+  local-name token must overlap, so a common namespace alone stays silent."
+  {:malli/schema
+   [:=> [:cat :qualified-keyword [:sequential :qualified-keyword]
+         [:int {:min 1}]]
+    [:vector [:map [:seon.schema.admission/similar-key :qualified-keyword]
+              [:seon.schema.admission/shared-tokens [:int {:min 1}]]]]]}
+  [candidate existing limit]
+  (let [candidate-all (set (tokens candidate))
+        candidate-local (set (tokens (name candidate)))]
+    (->> existing
+         (keep
+          (fn [existing-key]
+            (let [local-shared
+                  (count (filter candidate-local (tokens (name existing-key))))
+                  shared (count (filter candidate-all (set (tokens existing-key))))]
+              (when (pos? local-shared)
+                {:seon.schema.admission/similar-key existing-key
+                 :seon.schema.admission/shared-tokens shared}))))
+         (sort-by (juxt (comp - :seon.schema.admission/shared-tokens)
+                        (comp str :seon.schema.admission/similar-key)))
+         (take limit)
+         vec)))
 
 (defn- finding
   [file level finding-type message extra]
@@ -329,7 +373,7 @@
   (into []
         (mapcat
          (fn [[declaration-key _]]
-           (->> (search/similar-identities
+           (->> (similar-identities
                  declaration-key
                  (remove #{declaration-key} (keys registry))
                  3)

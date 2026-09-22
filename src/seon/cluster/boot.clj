@@ -21,8 +21,7 @@
             [seon.operator.runtime :refer [running-instances]]
             [seon.problems :as problems]
             [seon.schema :as schema]
-            [seon.sci.eval :as sci.eval]
-            [seon.search :as search]))
+            [seon.sci.eval :as sci.eval]))
 
 (defn- stand-cluster-runtime!
   {:malli/schema
@@ -49,11 +48,6 @@
            process (cluster/process-identity (:seon.boot/advertisement instance))
            _ (cluster/ensure-cluster-entity! connection cluster-name process)
            _ (cluster/seed-root-agent! connection cluster-name process)
-           search-path (:seon.search/path
-                        (cluster/cluster-paths (:seon.boot/root config) cluster-name))
-           instance (publish!
-                     (assoc instance :seon.search/handle
-                            (search/open! connection search-path)))
            boot-dials (config/effective (db/db connection) cluster-name)
            arm-request {:seon.flow/commit-fault!
                         #(cluster/commit-fault! connection cluster-name process
@@ -69,7 +63,6 @@
             (env/environment
              {:seon.boot/cluster-name cluster-name
               :seon.db/connection connection
-              :seon.search/handle (:seon.search/handle instance)
               :seon.schema/projection
               (:seon.schema/projection @projection-state)
               :seon.db/basis-t (:seon.db/basis-t @projection-state)
@@ -196,12 +189,13 @@
 
 (defn diagnostic
   "Preserve the underlying evidence at the operator boundary."
-  {:malli/schema [:=> [:cat :string :seon.schema/value :seon.schema/value] :seon.error/base]}
+  {:malli/schema [:=> [:cat :string :seon.schema/value :seon.cluster.boot/disposition] :seon.cluster.boot/operation-error]}
   [message offending cause]
   {:seon.error/at (java.util.Date.)
     :seon.error/layer :seon.operator/operation
     :seon.error/operation 'seon.cluster.boot/request!
     :seon.error/message message
+    :seon.cluster.boot/disposition cause
     :seon.error/offending offending
     :seon.error/expected :completed-operation})
 

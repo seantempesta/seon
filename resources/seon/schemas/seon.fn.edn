@@ -107,7 +107,7 @@
 
           :external-sink
           [:enum :ai-visible-text :html-response :codec-storage],
-          :doc [:string #:seon.search{:index :text}],
+          :doc :string,
           :keywords
           [:set
            {:description
@@ -187,7 +187,7 @@
           :spec :string,
           :sym
           [:qualified-symbol
-           {:seon.db/identity true, :seon.search/index :symbol,
+           {:seon.db/identity true,
             :seon.program/row-schema :seon.fn/fn,
             :seon.program/source-attribute :seon.fn/source}],
           :workload [:enum :io :compute],

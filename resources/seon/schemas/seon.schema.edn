@@ -74,7 +74,7 @@
               :compiled-validator fn?,
               :key
               [:keyword
-               {:seon.db/identity true, :seon.search/index :symbol,
+               {:seon.db/identity true,
                 :seon.program/row-schema :seon.schema/schema,
                 :seon.program/source-attribute :seon.schema/form}],
               :form :string,
@@ -158,6 +158,9 @@
               :single-segment-namespace-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the single-segment namespace that cannot own durable data"} [:seon.schema/single-segment-namespace :seon.schema/single-segment-namespace] [:seon.error/message :seon.error/message]]
  :seon.schema/missing-projection [:= true]
  :seon.schema/missing-projection-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema/missing-projection distinguishing member"} [:seon.schema/missing-projection :seon.schema/missing-projection] [:seon.error/message :seon.error/message]]
+ :seon.schema/render-contract-cause
+ [:enum :seon.schema/render-input-does-not-accept-declaring-shape
+  :seon.schema/render-function-has-no-declared-contract]
  :seon.schema/render-contract-incoherent [:= true]
  :seon.schema/render-contract-incoherent-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema/render-contract-incoherent distinguishing member"} [:seon.schema/render-contract-incoherent :seon.schema/render-contract-incoherent] [:seon.error/message :seon.error/message]]
  ; Additive error declaration manifest, 2026-09-18.
@@ -177,6 +180,7 @@
   :seon.error/base
   [:map
    [:seon.schema/refused-value :seon.schema/refused-value]
+   [:seon.schema/render-contract-cause {:optional true} :seon.schema/render-contract-cause]
    [:seon.schema/expected-value :seon.schema/expected-value]]]
 
  :seon.schema/declaration-expectation

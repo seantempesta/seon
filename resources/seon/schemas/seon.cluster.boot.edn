@@ -1,0 +1,6 @@
+#:seon.cluster.boot
+{:disposition [:enum :refused :boot-failed :non-edn-response :operation-failed]
+ :operation-error
+ [:and :seon.error/base
+  [:map {:seon.db/attributes true}
+   [:seon.cluster.boot/disposition :seon.cluster.boot/disposition]]]}

@@ -127,7 +127,7 @@
                  {:optional true}
                  :seon.message/id]],
                :chain-limit :seon.message/limit,
-               :content [:string {:min 1, :seon.search/index :text}],
+               :content [:string {:min 1}],
                :size [:int {:min 0}],
                :content-too-large-error
                [:map

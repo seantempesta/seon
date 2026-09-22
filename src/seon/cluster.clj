@@ -67,8 +67,7 @@
             [seon.schema.edn :as schema.edn]
             [malli.core :as m]
             [malli.registry :as mr]
-            [seon.schema.internal :as internal]
-            [seon.search :as search])
+            [seon.schema.internal :as internal])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file CopyOption Files InvalidPathException LinkOption Paths
             StandardCopyOption]
@@ -776,15 +775,13 @@
                   [:map
                    [:seon.boot/cluster-dir :string]
                    [:seon.boot/advertisement-file :string]
-                   [:seon.boot/log-dir :string]
-                   [:seon.search/path :string]]]}
+                   [:seon.boot/log-dir :string]]]}
   [root cluster-name]
   (let [cluster-dir (io/file root cluster-name)]
     {:seon.boot/cluster-dir (str cluster-dir)
      :seon.boot/advertisement-file
      (str (io/file cluster-dir "prepl.edn"))
-     :seon.boot/log-dir (str (io/file cluster-dir "logs"))
-     :seon.search/path (str (io/file cluster-dir "derived" "lucene"))}))
+     :seon.boot/log-dir (str (io/file cluster-dir "logs"))}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The instance lifecycle
@@ -2852,7 +2849,7 @@
 
 (defn- cluster-graph-definition
   "The cluster's OWN small graph (F1 R7, F2 §1): armer, render, and the
-  derived search-index proc — a schedule proc later. One graph per cluster,
+  render proc — a schedule proc later. One graph per cluster,
   so the components that arm agents and derive pages have exactly the
   ping/error/pause uniformity every other proc has. The render proc's
   channels are external ports (created by `arm-agents!`, carried on the
@@ -2871,16 +2868,6 @@
                      (env/carry (assoc view
                                        :seon.turn.loop/cluster handle
                                        :seon.agent/routing routing)
-                                environment))}
-             :seon.search/index
-             {:proc (flow/var-process
-                     #'search/index-step :io
-                     (env/carry {:seon.search/handle
-                                 (:seon.search/handle environment)
-                                 :seon.search/channel
-                                 (:seon.search/channel view)
-                                 :seon.search/completion
-                                 (:seon.search/completion view)}
                                 environment))}}
      :conns []
      :io-exec (:seon.flow/executor handle)}))
@@ -2924,7 +2911,6 @@
         ;; completion — all process-local, all free to lose
         render-channel (async/chan (async/sliding-buffer 1))
         runtime-eval-channel (async/chan (async/sliding-buffer 1))
-        search-channel (async/chan (async/sliding-buffer 1))
         pages-channel (async/chan (async/sliding-buffer 1))
         latest-packages (atom {})
         render-interest (atom :all)
@@ -2936,8 +2922,6 @@
               :seon.render.web/interest render-interest
               :seon.render.web/completion (async/promise-chan)
               :seon.render.web/root-agent-id "root"
-              :seon.search/channel search-channel
-              :seon.search/completion (async/promise-chan)
               :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
               :seon.config.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms handle)
@@ -3003,7 +2987,6 @@
                   :seon.cluster.wake/armer-channel armer-channel
                   :seon.cluster.wake/render-channel render-channel
                   :seon.render.web/interest render-interest
-                  :seon.cluster.wake/search-channel search-channel
                   :seon.cluster.wake/fault-channel
                   (:seon.flow/fault-channel fanout)
                   :seon.cluster.wake/key :seon.agent/route})
@@ -3034,8 +3017,7 @@
             :seon.agent/routing routing
             :seon.render.web/pages-mult pages-mult
             :seon.render.web/fault-channel
-            (:seon.flow/fault-channel fanout))
-     :seon.search/completion (:seon.search/completion view)}))
+            (:seon.flow/fault-channel fanout))}))
 
 (defn disarm-agents!
   "Unwind the armed layers of ONE instance, newest first.
@@ -3103,13 +3085,7 @@
                 (:seon.turn.loop/cluster instance)))
     (some-> (get-in instance [:seon.render.web/view
                               :seon.render.web/completion])
-            async/<!!)
-    (some-> (:seon.search/completion instance) async/<!!))
-  ;; A degraded boot can open the index before the graph stands. Then no proc
-  ;; owns its close transition yet, so this layer releases it directly.
-  (when (and (:seon.search/handle instance)
-             (nil? (:seon.flow/graph instance)))
-    (search/close! (:seon.search/handle instance)))
+            async/<!!))
   (when-let [fanout (:seon.flow/error-fanout instance)]
     (flow/stop-error-fanout! fanout))
   (when-let [handle (:seon.turn.loop/cluster instance)]
