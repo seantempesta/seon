@@ -869,7 +869,7 @@
             (is (= schema-key (:seon.schema/identity data)))
             (is (= [schema-key schema-key]
                    (:seon.schema/cycle-path data)))
-            (is (= :user-input (:seon.error/kind data)))
+            (is (= schema-key (:seon.schema/identity data)))
             (is (str/includes? (ex-message failure)
                                (pr-str [schema-key schema-key]))
                 "the refusal names the complete cycle")
@@ -945,11 +945,11 @@
 (deftest canonical-rows-carry-arbitrary-namespaced-properties
   (let [schema-key :seon.schema-test/class
         definition
-        [:map {:seon.error/class true
+        [:map {:seon.config/dial true
                :gen/schema :string
                :seon.unknown/property :ignored}
          [:seon.error/message :seon.error/message]]
-        forms {:seon.error/class [:= true]
+        forms {:seon.config/dial :boolean
                :gen/schema :seon.schema/definition
                schema-key definition}
         row (some #(when (= schema-key (:seon.schema/key %)) %)
@@ -957,7 +957,7 @@
                    (schema/build-projection
                     (merge (:seon.schema.projection/forms (schema/handed-projection)) forms))
                    forms))]
-    (is (= true (:seon.error/class row)))
+    (is (= true (:seon.config/dial row)))
     (is (not (contains? row :gen/schema))
         "a declared but non-storable property remains compile-time Malli data")
     (is (not (contains? row :seon.unknown/property))
@@ -973,8 +973,7 @@
                [:map [:seon.error/message :seon.error/message]]
                :seon.schema-test/refused [:= true]
                :seon.schema-test/refused-error
-               [:and {:seon.error/class true
-                      :seon.render/ai 'seon.error/refusal-prose}
+               [:and {:seon.render/ai 'seon.error/refusal-prose}
                 :seon.error/refusal-value
                 [:map
                  [:seon.schema-test/refused

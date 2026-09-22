@@ -206,6 +206,7 @@
     :seon.error/data evidence}))
 
 (defn- dependency-error
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :qualified-keyword] :seon.error/throwable] :seon.db/error-result]}
   [operation error]
   (if (:seon.schema/expected-value (ex-data error))
     (ex-data error)

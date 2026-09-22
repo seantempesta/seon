@@ -193,6 +193,7 @@
     paths))
 
 (defn- schema-resource-paths
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
   [resource]
   (let [url (or (io/resource resource) (unreadable-file! resource))]
     (if (or (= "jar" (.getProtocol url))

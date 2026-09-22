@@ -200,7 +200,7 @@
     (try
       (let [failure
             (try
-              (enumerate "empty-schema-directory" (.toURL (.toURI directory)))
+              (enumerate "empty-schema-directory" (.toExternalForm (.toURL (.toURI directory))))
               nil
               (catch clojure.lang.ExceptionInfo error
                 error))]
@@ -325,8 +325,7 @@
              (= error (or (::schema.edn/error refusal)
                           (:seon.schema/error refusal)))
              (= attribute (or (::schema.edn/attribute refusal)
-                              (:seon.schema/key refusal)))
-             (= :user-input (:seon.error/kind refusal)))))
+                              (:seon.schema/key refusal))))))
     :seed 202607280703)
    "schema population admission"))
 

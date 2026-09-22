@@ -80,8 +80,9 @@
                      (slurp (io/resource "seon/schema/datahike_parity.edn")))
            initial (:seon.bridge.parity/initial-baseline expected)
            ;; This is the previously admitted historical population, including
-           ;; observations now refused at admission. Materialize its exact
-           ;; captured definitions to compare storage, without readmitting it.
+           ;; observations now refused at admission. Retired non-storable class
+           ;; properties are removed; the original native storage oracle stays.
+           ;; Materialize those historical definitions without readmitting them.
            initial-projection (schema/materialize-projection
                                {:seon.schema.projection/forms
                                 (:seon.bridge.parity/forms initial)})
@@ -272,21 +273,21 @@
                (fixture-projection) ::literal)))))))
 
 (deftest schema-row-properties-lift-only-when-their-declarations-are-storable
-  (let [forms {:seon.error/class [:= true]
+  (let [forms {:seon.config/dial :boolean
                :gen/schema :seon.schema/definition
                :seon.error/message :string
                ::error
-               [:map {:seon.error/class true
+               [:map {:seon.config/dial true
                       :gen/schema :string}
                 [:seon.error/message :seon.error/message]]}
         projection (schema/build-projection
                     (merge (:seon.schema.projection/forms (schema/handed-projection)) forms))
         attributes (set (schema.datahike/database-attributes-in projection))]
     (is (schema.datahike/storable-attribute-in?
-         projection :seon.error/class))
+         projection :seon.config/dial))
     (is (not (schema.datahike/storable-attribute-in?
               projection :gen/schema)))
-    (is (contains? attributes :seon.error/class))
+    (is (contains? attributes :seon.config/dial))
     (is (not (contains? attributes :gen/schema)))))
 
 (deftest compiled-storage-navigation-reuses-retained-roots
@@ -338,7 +339,8 @@
                    (catch clojure.lang.ExceptionInfo error
                      (ex-data error)))]
         (and (map? data)
-             (= :user-input (:seon.error/kind data)))))
+             (= ::refused (or (:seon.schema.datahike/attr data)
+                              (:seon.schema/nilable-value-schema data))))))
     :seed 202607280702)
    "unsupported database attribute refusal"))
 

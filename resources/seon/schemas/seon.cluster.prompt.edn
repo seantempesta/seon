@@ -27,15 +27,15 @@
                       :text [:string {:min 1}],
                       :rule :keyword,
                       :no-trigger [:= true]
-                      :no-trigger-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a prompt request with no trigger"} [:seon.cluster.prompt/no-trigger :seon.cluster.prompt/no-trigger] [:seon.error/message :seon.error/message]]
+                      :no-trigger-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a prompt request with no trigger"} [:seon.cluster.prompt/no-trigger :seon.cluster.prompt/no-trigger] [:seon.error/message :seon.error/message]]
                       :refused :seon.cluster.prompt/rule
-                      :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.cluster.prompt/refused :seon.cluster.prompt/refused] [:seon.error/message :seon.error/message]] :error/message "must identify the refused prompt rule"} :seon.error/refusal-value [:map [:seon.cluster.prompt/refused :seon.cluster.prompt/refused]]]
+                      :refused-error [:and { :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.cluster.prompt/refused :seon.cluster.prompt/refused] [:seon.error/message :seon.error/message]] :error/message "must identify the refused prompt rule"} :seon.error/refusal-value [:map [:seon.cluster.prompt/refused :seon.cluster.prompt/refused]]]
                       :missing-cluster :seon.agent/id
-                      :missing-cluster-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose prompt has no cluster configuration"} [:seon.cluster.prompt/missing-cluster :seon.cluster.prompt/missing-cluster] [:seon.error/message :seon.error/message]]
+                      :missing-cluster-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose prompt has no cluster configuration"} [:seon.cluster.prompt/missing-cluster :seon.cluster.prompt/missing-cluster] [:seon.error/message :seon.error/message]]
                       :budget-exceeded :seon.ai/tokens
-                      :budget-exceeded-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the prompt token budget that was exceeded"} [:seon.cluster.prompt/budget-exceeded :seon.cluster.prompt/budget-exceeded] [:seon.error/message :seon.error/message]]
+                      :budget-exceeded-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the prompt token budget that was exceeded"} [:seon.cluster.prompt/budget-exceeded :seon.cluster.prompt/budget-exceeded] [:seon.error/message :seon.error/message]]
  :seon.cluster.prompt/missing-config :seon.agent/id
- :seon.cluster.prompt/missing-config-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose effective prompt configuration is absent"} [:seon.cluster.prompt/missing-config :seon.cluster.prompt/missing-config] [:seon.error/message :seon.error/message]]
+ :seon.cluster.prompt/missing-config-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose effective prompt configuration is absent"} [:seon.cluster.prompt/missing-config :seon.cluster.prompt/missing-config] [:seon.error/message :seon.error/message]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.cluster.prompt/derivation-observation

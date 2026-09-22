@@ -36,7 +36,7 @@
          :invalid-url [:= true]
          :invalid-url-error
          [:map
-          {:seon.error/class true
+          {
            :seon.render/ai seon.error/render-ai
            :seon.render/html seon.error/render-html
            :error/message "must identify a malformed or unsupported web URL"}
@@ -48,7 +48,7 @@
          :missing-location [:= true]
          :missing-location-error
          [:map
-          {:seon.error/class true
+          {
            :seon.render/ai seon.error/render-ai
            :seon.render/html seon.error/render-html
            :error/message "must identify a redirect with no Location header"}
@@ -59,7 +59,7 @@
          :no-credential [:= true]
          :no-credential-error
          [:map
-          {:seon.error/class true
+          {
            :seon.render/ai seon.error/render-ai
            :seon.render/html seon.error/render-html
            :error/message "must identify a missing search-provider credential"}
@@ -69,7 +69,7 @@
          :projection-failed [:= true]
          :projection-failed-error
          [:map
-          {:seon.error/class true
+          {
            :seon.render/ai seon.error/render-ai
            :seon.render/html seon.error/render-html
            :error/message "must identify an unavailable or failed search projection"}
@@ -79,7 +79,7 @@
          :provider-failed [:= true]
          :provider-failed-error
          [:map
-          {:seon.error/class true
+          {
            :seon.render/ai seon.error/render-ai
            :seon.render/html seon.error/render-html
            :error/message "must identify a non-successful search-provider response"}
@@ -93,7 +93,7 @@
          :redirect-limit [:= true]
          :redirect-limit-error
          [:map
-          {:seon.error/class true
+          {
            :seon.render/ai seon.error/render-ai
            :seon.render/html seon.error/render-html
            :error/message "must identify a redirect chain beyond its configured bound"}
@@ -103,7 +103,7 @@
          :redirect-loop [:= true]
          :redirect-loop-error
          [:map
-          {:seon.error/class true
+          {
            :seon.render/ai seon.error/render-ai
            :seon.render/html seon.error/render-html
            :error/message "must identify a repeated URL in one redirect chain"}
@@ -114,7 +114,7 @@
          :response-limit [:= true]
          :response-limit-error
          [:map
-          {:seon.error/class true
+          {
            :seon.render/ai seon.error/render-ai
            :seon.render/html seon.error/render-html
            :error/message "must identify a web response beyond its configured byte bound"}
@@ -141,7 +141,7 @@
          :timeout [:= true]
          :timeout-error
          [:map
-          {:seon.error/class true
+          {
            :seon.render/ai seon.error/render-ai
            :seon.render/html seon.error/render-html
            :error/message "must identify a remote web request whose deadline fired"}
@@ -152,7 +152,7 @@
          :transport-failed [:= true]
          :transport-failed-error
          [:map
-          {:seon.error/class true
+          {
            :seon.render/ai seon.error/render-ai
            :seon.render/html seon.error/render-html
            :error/message "must identify a web request that failed in transport"}
@@ -163,7 +163,7 @@
          :unparseable-response [:= true]
          :unparseable-response-error
          [:map
-          {:seon.error/class true
+          {
            :seon.render/ai seon.error/render-ai
            :seon.render/html seon.error/render-html
            :error/message "must identify an unreadable successful search response"}

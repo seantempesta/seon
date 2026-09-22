@@ -1,6 +1,6 @@
 #:seon.message{:blank-content-error
                [:map
-                {:seon.error/class true,
+                {,
                  :seon.render/ai seon.error/render-ai,
                  :seon.render/html seon.error/render-html,
                  :error/message
@@ -51,7 +51,7 @@
                 :seon.message/pulled],
                :no-limit-error
                [:map
-                {:seon.error/class true,
+                {,
                  :seon.render/ai seon.error/render-ai,
                  :seon.render/html seon.error/render-html,
                  :error/message
@@ -131,7 +131,7 @@
                :size [:int {:min 0}],
                :content-too-large-error
                [:map
-                {:seon.error/class true,
+                {,
                  :seon.render/ai seon.error/render-ai,
                  :seon.render/html seon.error/render-html,
                  :error/message
@@ -141,7 +141,7 @@
                 [:seon.error/message :seon.error/message]],
                :chain-limit-error
                [:map
-                {:seon.error/class true,
+                {,
                  :seon.render/ai seon.error/render-ai,
                  :seon.render/html seon.error/render-html,
                  :error/message
@@ -156,7 +156,7 @@
                 [:seon.error/values [:vector :seon.error/value]]],
                :unknown-recipient-error
                [:map
-                {:seon.error/class true,
+                {,
                  :seon.render/ai seon.error/render-ai,
                  :seon.render/html seon.error/render-html,
                  :error/message
