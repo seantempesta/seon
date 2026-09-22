@@ -389,3 +389,15 @@ three questions, not chased. Opus read-only diff review running
 lane (resumed `error-facets` under the explicit-union ruling: each producer declares its
 exact union, wrapper validates against the arity's union, `facet` renamed out of
 src/test/resources). Then `turn-shapes` (hang), then step 1.2.
+
+## 2026-09-22 11:00 local — ruling: A2 c1+c2 pulled into cut 1 (parallel track 1.3c)
+
+Owner: more parallelism. Wave A = error-schema lane (instrument/error/admit/kernel),
+1.2 digest (program.cljc, `var-row`, three schema resources, selection reader), A2 c1+c2
+(db.clj, store.clj, registry, GC). Wave B = 1.3 wrappers, 1.5 search deletion,
+turn-shapes. Wave C = 1.4 alone. Wave D = 1.4b, then RESET batch 1. SCI candidates
+(branch + fork) isolate agent-level work after D1 (cut 3); the platform's own plumbing
+cannot be hosted in a fork, so cut 1 isolates by file ownership and snapshots.
+Platform tier after 1.1: 83 executed, 3 failures in one test (`env_test.clj:349,367,380`
+expects the retired nested `:seon.error/data` path) — `constructor-slice` resumed to
+fix the expectation or hand a wrapper defect to the error-schema lane by name.
