@@ -321,7 +321,7 @@
        (doseq [[_ {:keys [ai html]}] faces]
          (is (one-to-three-lines? ai))
          (is (card? "seon-family-entry seon-effect-receipt-entry" html))
-         (is (str/includes? ai owner-symbol))
+         (is (str/includes? ai (str owner-symbol)))
          (is (str/includes? ai run-id))
          (is (not (str/includes? ai ":db/id"))))
        (let [pending-ai (get-in faces [:pending :ai])
@@ -376,7 +376,7 @@
                        :seon.render/distance 1})
                face (:seon.render/output (first units))]
            (is (some? face))
-           (is (str/includes? (str face) owner-symbol))
+           (is (str/includes? (str face) (str owner-symbol)))
            (is (vector? face)
                "the walk's own request shape reaches a total render")))))))
 

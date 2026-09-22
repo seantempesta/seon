@@ -52,7 +52,7 @@
   [connection]
   (let [subjects (seon.issue.detect/public-without-doc (seon.db/db connection))
         sym (first (sort (map :seon.fn/sym subjects)))]
-    (clojure.test/is (string? sym)
+    (clojure.test/is (qualified-symbol? sym)
                      "the canonical fixture holds at least one public function with no docstring")
     sym))
 

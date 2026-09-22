@@ -108,7 +108,7 @@
 
 (defn- function-row
   [namespace-name function-name source options]
-  (merge (cond-> {:seon.fn/sym (symbol (str namespace-name) function-name)
+  (merge (cond-> {:seon.fn/sym (symbol (str namespace-name) (str function-name))
           :seon.schema.admission/source :core
           :seon.fn/ns [:seon.ns/name namespace-name]
           :seon.fn/private? false}

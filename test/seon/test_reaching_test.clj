@@ -307,7 +307,7 @@
                                            :seon.test/changed [observed-symbol cheap-symbol]})
                         deferred [{:seon.test/sym observed-symbol
                                    :seon.test/fixture-observation reason
-                                   :seon.test/command ["bin/test-check" "default" "--test" observed-symbol]}]
+                                   :seon.test/command ["bin/test-check" "default" "--test" (str observed-symbol)]}]
                         feedback (sut/feedback result)]
                     (is (= [cheap-symbol] (:seon.test/tests result)) (pr-str result))
                     (is (= [cheap-symbol] (:seon.test/passed result)))

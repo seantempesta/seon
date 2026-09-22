@@ -121,7 +121,7 @@
                                    (seon.issue.detect/public-without-reaching-test
                                     database {:seon.fn.file/relative-root "src"})))
             problem (:seon.issue/problem subject)]
-        (clojure.test/is (some? subject) untested-fn)
+        (clojure.test/is (some? subject) (str untested-fn))
         (clojure.test/is (= #{source-ns} (:seon.issue/namespaces subject))
                          "the finding cites the namespace responsible for it")
         (clojure.test/is (clojure.string/includes? problem (str (seon.db/basis-t database)))
@@ -153,8 +153,8 @@
             contract (into #{} (map :seon.fn/sym)
                            (seon.issue.detect/public-without-contract
                             database {:seon.fn.file/relative-root "src"}))]
-        (clojure.test/is (not (contains? contract shared)) shared)
-        (clojure.test/is (not (contains? contract sibling)) sibling)
+        (clojure.test/is (not (contains? contract shared)) (str shared))
+        (clojure.test/is (not (contains? contract sibling)) (str sibling))
         (clojure.test/is (contains? contract uncontracted-fn)
                          "a declaration owning its own form is still a subject")))))
 
