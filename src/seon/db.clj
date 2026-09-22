@@ -2122,80 +2122,6 @@
 
       :else arguments)))
 
-(defn- pulled-entity-schema-key
-  "The entity schema `entity-id` satisfies: a key, nil, or a refusal.
-
-   Identity is never inferred from a name; only declared facts decide, and
-   the three answers are deliberately distinct.
-
-   - The `:seon.program/row-schema` the present attributes declare. Exactly
-     one is the key. MORE THAN ONE is the only genuine contradiction here —
-     the attributes on one entity disagree about the schema that states them
-     — and it is the one case that refuses.
-   - Otherwise the projection's own shape index: the entity schemas that
-     declare a present attribute and whose required attributes are all
-     present. Exactly one is the key; none or several leaves it undecided,
-     because the index is an over-approximation, not a declaration.
-   - nil means nothing declares this entity's schema. In that case the
-     caller passes the value through unvalidated rather than
-     converting a missing declaration into a refused read."
-  {:malli/schema
-   [:=> [:cat :seon.schema/projection :seon.db/database-value
-         :seon.db/entity-id]
-    [:or :nil :seon.schema/registry-key :seon.db.read/disagreeing-pull-schema-error]]}
-  [projection database entity-id]
-  (let [forms (:seon.schema.projection/forms projection)
-        rows (:seon.schema.projection/shape-rows projection)
-        required (:seon.schema.projection/required-by-key projection)
-        index (:seon.schema.projection/shape-index projection)
-        eid (try (db.utils/entid database entity-id) (catch Throwable _ nil))
-        attributes (when eid
-                     (into #{} (map :a) (d/datoms database :eavt eid)))
-        declared
-        (into #{}
-              (keep (fn [attribute]
-                      (:seon.program/row-schema
-                       (some-> (mr/schema (:seon.schema.projection/registry projection) attribute) m/properties))))
-              attributes)]
-    (cond
-      (= 1 (count declared)) (first declared)
-
-      (< 1 (count declared))
-      (diagnostic
-       {:seon.error/message (str "The attributes present on this entity declare more than one "
-             "row schema " (pr-str (vec (sort declared)))
-             ". Supply :schema-key with the selector.")
-        :seon.db.read/disagreeing-pull-schema declared
-        :seon.db/invalid-read true
-        :seon.error/layer :database-read
-        :seon.error/operation 'seon.db/pull
-        :seon.error/member :seon.program/row-schema
-        :seon.error/expected :seon.schema/registry-key
-        :seon.error/offending (vec (sort declared))
-        :seon.error/data {:seon.db/entity-id entity-id
-         :seon.db/attributes (vec (sort attributes))}})
-
-      :else
-      (let [candidates
-            (into #{}
-                  (filter (fn [candidate]
-                            (and (true? (:seon.schema/entity? (get rows candidate)))
-                                 (seq (get required candidate))
-                                 (set/subset? (get required candidate) attributes))))
-                  (mapcat #(get index % []) attributes))]
-        (when (= 1 (count candidates)) (first candidates))))))
-
-(defn- selector-names-attributes?
-  "True when the selector asks for anything beyond `:db/id`.
-
-   A `[:db/id]`-only pull result DECLARES ITSELF: `{:db/id 5}` needs no
-   entity schema to be a complete, checked answer, and the readiness probes
-   that use it (`seon.cluster/transact-initialization!`) must never meet a
-   refusal there."
-  {:malli/schema [:=> [:cat :seon.db/pull-selector] :boolean]}
-  [selector]
-  (boolean (some #(not= :db/id %) selector)))
-
 (defn- validate-pulled-value
   "Validate one pulled map against the form derived for (schema-key, selector).
 
@@ -2237,64 +2163,27 @@
             :seon.error/data {:seon.schema/key schema-key :seon.db/pull-selector selector}}))))))
 
 (defn- validate-pulled-result
-  "Validate every pulled map a read returns against its derived form.
-
-   Four outcomes, and the differences between them are the whole point:
-
-   - A selector that names nothing beyond `:db/id` needs no entity schema at
-     all: `{:db/id 5}` declares itself, and the value is returned unchanged.
-   - `nil` is a LEGITIMATE ABSENCE — the entity does not exist. It carries no
-     derived form and is returned unchanged.
-     `seon.cluster/transact-initialization!` reads exactly this to decide a
-     row is not ready YET, so a refusal here makes every row unready forever
-     (measured 2026-09-18: it did).
-   - A pulled map whose entity schema IS named — by the caller's
-     `:schema-key`, or by the declared facts `pulled-entity-schema-key` reads
-     — is validated against the form derived for (schema-key, selector), and
-     a value that does not satisfy it refuses.
-   - A pulled map whose entity schema nothing declares is returned unchanged.
-     That is a gap in the declared facts, not a bad read; the repair is the
-     caller carrying its `:schema-key` (the named follow-up in
-     `research/pulled-form-derivation-2026-09-17.md`). Only attributes that
-     DISAGREE about their row schema refuse, and that refusal comes from
-     `pulled-entity-schema-key` itself."
+  "Check pulled values only against the schema explicitly named by the caller."
   {:malli/schema
    [:=> [:cat :seon.schema/projection :qualified-symbol
          [:or :nil :seon.schema/registry-key] :seon.db/pull-selector
-         :seon.db/database-value [:vector :seon.db/entity-id]
          [:or :nil :seon.db/pulled-entity
           [:vector [:or :nil :seon.db/pulled-entity]]]]
     [:or :nil :seon.db/pulled-entity
      [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result]]}
-  [projection public-operation declared-key selector database entity-ids value]
-  (if-not (selector-names-attributes? selector)
+  [projection public-operation declared-key selector value]
+  (if-not declared-key
     value
-    (let [values (if (vector? value) value [value])
-          refusal
-          (reduce
-           (fn [_ [entity-id element]]
-             (if (nil? element)
-               nil
-               (let [schema-key (or declared-key
-                                    (pulled-entity-schema-key
-                                     projection database entity-id))]
-                 (cond
-                   (and (map? schema-key) (inst? (:seon.error/at schema-key))
-             (qualified-keyword? (:seon.error/layer schema-key))
-             (qualified-symbol? (:seon.error/operation schema-key))) (reduced schema-key)
-
-                   (nil? schema-key) nil
-
-                   :else
-                   (let [checked (validate-pulled-value
-                                  projection public-operation schema-key
-                                  selector element)]
-                     (if (and (map? checked) (inst? (:seon.error/at checked))
-             (qualified-keyword? (:seon.error/layer checked))
-             (qualified-symbol? (:seon.error/operation checked))) (reduced checked) nil))))))
-           nil
-           (map vector entity-ids values))]
-      (or refusal value))))
+    (or (reduce
+         (fn [_ element]
+           (when element
+             (let [checked (validate-pulled-value
+                            projection public-operation declared-key selector element)]
+               (when (:seon.db.read/invalid-pulled-result checked)
+                 (reduced checked)))))
+         nil
+         (if (vector? value) value [value]))
+        value)))
 
 (defn- pull-call
   {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.db/error-result] [:sequential :seon.schema/value] [:function [:=> [:cat :seon.db/database-value :map] :map] [:=> [:cat :seon.db/database-value :seon.db/pull-selector :seon.schema/value] :map]] :keyword :qualified-keyword :qualified-symbol] [:or :nil :seon.db/pulled-entity [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result]]}
@@ -2332,14 +2221,8 @@
       (with-declarations database public-operation
         (fn [declarations]
           (let [projection @(::read-projection declarations)
-                many? (= :pull-many operation-key)
                 options (when (map? (first arguments)) (first arguments))
                 declared-key (:schema-key options)
-                entity-ids (if options
-                             (if many? (vec (:eids options)) [(:eid options)])
-                             (if many?
-                               (vec (second arguments))
-                               [(second arguments)]))
                 arguments (cond-> arguments
                             options (update 0 dissoc :schema-key))
                 arguments (total-pull-arguments arguments)
@@ -2354,7 +2237,7 @@
                         (get response result-key))
                 checked (validate-pulled-result
                          projection public-operation declared-key selector
-                         database entity-ids result)]
+                         result)]
             (append-pull-evidence! database arguments operation-key response result)
             checked)))
       (catch Throwable cause

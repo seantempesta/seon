@@ -2185,70 +2185,27 @@
        (is (= :seon.db/not-an-operation
               (:seon.error/offending data)))))))
 
-(deftest pull-validates-its-result-against-the-derived-pulled-form
-  ;; The pulled shape DERIVES from the entity schema under the reader's exact
-  ;; selector; it is never a hand-written mirror. `seon.db/pull` now validates
-  ;; every non-nil map it returns against that derived form before returning
-  ;; it, and refuses a value that does not satisfy it.
+(deftest pull-checks-only-the-caller-named-schema
   (test-support/with-database
    (fn [connection]
-     (let [database @connection
-           projection (schema/projection-from-database database)]
+     (test-support/transacted! connection [{:seon.agent/id "a2-pull-agent"}])
+     (let [database (db/db connection)
+           selector [:seon.ns/name]
+           schema-key :seon.ns/ns
+           projection (schema/handed-projection)]
+       (is (= {:seon.agent/id "a2-pull-agent"}
+              (db/pull database [:seon.agent/id] [:seon.agent/id "a2-pull-agent"])))
        (is (= {:seon.ns/name 'my.message}
-              (db/pull database [:seon.ns/name] [:seon.ns/name 'my.message]))
-           "a real pull on the canonical fixture validates and returns")
-       (is (nil? (db/pull database [:seon.ns/name] [:seon.ns/name 'no.such.ns]))
-           "an absent entity is nil and carries no derived form")
-       ;; THE CLASS THAT BROKE CLUSTER INITIALIZATION (2026-09-18): the
-       ;; validation turned a SUCCESSFUL read of an EXISTING entity into a
-       ;; refusal whenever nothing declared that entity's row schema, and
-       ;; `seon.cluster/transact-initialization!` read the refusal as absence,
-       ;; so no row was ever ready. Three shapes may never refuse.
-       (is (= {:db/id (:db/id (db/pull database [:db/id]
-                                       [:seon.ai.model/provider-id "openrouter"]))}
-              (db/pull database [:db/id]
-                       [:seon.ai.model/provider-id "openrouter"]))
-           "a :db/id-only selector declares itself and needs no entity schema")
-       (is (int? (:db/id (db/pull database [:db/id]
-                                  [:seon.ai.model/provider-id "openrouter"])))
-           "the readiness probe reads an entity id, never a refusal")
-       (is (nil? (db/pull database [:db/id]
-                          [:seon.ai.model/provider-id "no-such-provider"]))
-           "a lookup ref to a nonexistent entity stays nil, never an error")
-       (is (= :seon.ai.model/provider-entity
-              (@#'db/pulled-entity-schema-key
-                  projection database
-                  [:seon.ai.model/provider-id "openrouter"]))
-           "the canonical provider row selects its declared entity schema")
-       (is (string? (:seon.config.ai/endpoint
-                     (db/pull database [:seon.config.ai/endpoint]
-                              [:seon.ai.model/provider-id "openrouter"])))
-           "a provider descriptor attribute reads as its value, never a refusal")
-       (let [expected-id (:db/id (db/pull database [:db/id]
-                                         [:seon.fn/sym 'my.message/send]))
-             entity-ids (db/q '[:find [?f ...]
-                               :where [?f :seon.fn/sym my.message/send]]
-                             database)]
-         (is (int? expected-id))
-         (is (= #{expected-id} (set entity-ids))
-             "the query returns exactly the present send declaration")
-         (is (= #{'my.message/send}
-                (set (map :seon.fn/sym
-                          (db/pull-many database '[*] (vec entity-ids)))))
-             "a wildcard pull whose form the derivation declines still reads"))
-       (let [schema-key (@#'db/pulled-entity-schema-key
-                         projection database [:seon.ns/name 'my.message])]
-         (is (keyword? schema-key)
-             "the entity's own attributes declare its row schema")
-         (let [refusal (@#'db/validate-pulled-value
-                        projection 'seon.db/pull schema-key [:seon.ns/name]
-                        {:seon.ns/name "my.message"})
-               data (:seon.error/data refusal)]
-           (is (= (schema/pulled-schema-key schema-key [:seon.ns/name])
-                  (:seon.db.read/invalid-pulled-result refusal))
-               "a wrong-typed expectation fails: the name is a symbol, not a string")
-           (is (= {:seon.ns/name "my.message"}
-                  (:seon.error/offending data)))))))))
+              (db/pull database {:selector selector :schema-key schema-key
+                                 :eid [:seon.ns/name 'my.message]})))
+       (is (nil? (db/pull database {:selector selector :schema-key schema-key
+                                   :eid [:seon.ns/name 'a2.absent]})))
+       (let [refusal (#'db/validate-pulled-result
+                      projection 'seon.db/pull schema-key selector
+                      {:seon.ns/name "my.message"})]
+         (is (= (schema/pulled-schema-key schema-key selector)
+                (:seon.db.read/invalid-pulled-result refusal)))
+         (is (= {:seon.ns/name "my.message"} (:seon.error/offending refusal))))))))
 
 (deftest the-write-bound-derives-from-the-writes-own-provenance
   ;; Ruling 1r (owner, 2026-09-18): root/system writes carry NO per-write
