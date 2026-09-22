@@ -20,6 +20,8 @@ Read Git history before designing: earlier implementations are evidence, not bag
 Read the vendored dependency seam and its first-party caller before adding code.
 Record its pinned revision, source location, guarantee, supplied inputs,
 recomputation event and work proportionality. Load the matching skill at design time.
+A skill's every claim carries `file:line` and is verified when touched; an unverifiable
+claim is deleted, never hedged; a stale skill is a high-priority defect.
 
 Start every Clojure change at a running system. Check `bin/seon status` and MCP
 `runtime_status`; use `eval_clj` with an explicit root and cluster. JVM mode has no
@@ -41,9 +43,13 @@ by the cut's end. Normally HEAD loads and the named REPL probe answers; B1b has 
 owner's explicit temporary boot/MCP/REPL breakage exception. Report its limits.
 The [testing skill](.agents/skills/clojure-testing/SKILL.md) distinguishes installed
 commands and enforcement from B4 targets. Never pretend a planned API is installed.
+Gate inputs are DECLARED (`seon.test.cache/input-roots`): a documentation edit never
+publishes and never widens a gate; a tool that behaves otherwise is fixed first.
 
 Evidence, changed paths, commit ids, sizes and verification limits belong in the
-owning landing note under `docs/prds/agent-platform/landing/`. Commit measurement
+owning landing note under `docs/prds/agent-platform/landing/`. No publication-path
+slice lands without its clock row from the committed measurement script
+(`docs/prds/steward-platform/research/measure-publication-path-2026-09-22.sh`). Commit measurement
 scripts; disposable probes live in repository `tmp/`, reusable checks in `test/`.
 Load [data-oriented-clojure](.agents/skills/data-oriented-clojure/SKILL.md) before
 Clojure design/edits; use the matching REPL, testing, datahike, data-modeling and
@@ -170,7 +176,10 @@ first, recommendation marked, each with guarantee, cost and what it gives up.
 
 Use immutable transformations, fully namespaced keys and one declared schema per
 identity. Stored absence is no key, never nil. A symbol stays a symbol. An entity is
-its attributes and relations, not a stamped kind. A bounded enum describes a real
+its attributes and relations, not a stamped kind. A symbol-valued attribute stores a
+Datahike symbol, never a string: `(str sym)` on write or `(symbol s)` on read is the
+defect sighting. `contains?` checks INDICES on a vector and answers true for a nil-valued
+map key; since nothing stores nil, prefer `get` with a sentinel or `find`. A bounded enum describes a real
 state or dependency grammar; it never selects an invented entity taxonomy.
 
 Retraction deletes; history answers what existed. Required refs refuse a deletion
@@ -213,7 +222,9 @@ is a literal token; `:seon.message/from` marks an inside wake. Before each turn,
 refresh every distinct changed read using its latest evidence; never rerun writes or
 effects. Compaction wipes evaluations and regenerates the opening.
 
-`seon.db` owns database operations. `my.*` is a thin surface over the same facts and
+`seon.db` owns database operations; direct `datahike.api` calls survive only inside
+`seon.db`, the store/registry and classified branch-custody owners, and system-side
+listeners. `my.*` is a thin surface over the same facts and
 writers. Config reconciles differences and resolves function symbols to current rows.
 Provenance belongs to transactions; write bounds derive from it, and bounded refusals
 retain the proposed transaction data. Use `seon.id` for identity, never a new generator.
@@ -273,9 +284,19 @@ A bounded lane works directly, preserves other lanes' files and sessions, and
 follows its explicit stop boundary. Protected means concurrently edited only.
 Codex uses native collaboration; read the lane skill before `bin/codex-agent`.
 Use Astra low for bounded slices, medium for design/review, never high; Sol low for
-mechanical sweeps. Report usage-limit stops and resume the same lane after owner
+mechanical sweeps; Opus never for implementation. Specs use verify / falsify / probe,
+never adversarial verbs, which trip model safety filters. A launch cites the issue or
+plan entry it extends, one lane per defect class after a query, and the spec carries
+raw evidence paths, never an attribution. At most four processes probe `default`'s
+prepl at once, the peer session's gate included. Report usage-limit stops and resume the same lane after owner
 authorization, never relaunch under a new name. No sandboxing a lane's assigned work.
 
+A clj-kondo "Unresolved var" on a protocol or dependency name is a stale dependency
+cache until proven otherwise: repopulate with the publication classpath
+(`clj-kondo --lint "$(clojure -Spath)" --dependencies --skip-lint --copy-configs`),
+never the test alias's `.` entry, and never rewrite a correct reference to satisfy a
+cache. A schema resource and its loaded consumer land in one publication or not at
+all: the resource is live on disk for every reader the moment it is written.
 Pause hook publication during a coordinated source cut; the orchestrator records
 pause and resumption. Shell edits do not publish themselves. Verify adoption and
 arming before calling edits live; never claim an old JVM ran new source. Missing
@@ -293,5 +314,6 @@ Source comments use `;` for prose, `;;` above forms, `;;;` for runtime structure
 [Architecture](docs/seon/architecture/architecture.md) and specialized skills own
 mechanisms; the [data guide](docs/seon/architecture/data-modeling-guide.md) owns
 modeling details. Search existing issue classes before opening or assigning work;
-verify their current status. Report broken things first, exact proof boundaries,
+verify their current status; the index is the owner's ranked schedule and lanes never
+edit it. Report broken things first, exact proof boundaries,
 and linked artifacts. Do not push or merge beyond the owner's authorized scope.
