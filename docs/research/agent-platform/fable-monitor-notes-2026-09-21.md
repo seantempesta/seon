@@ -317,3 +317,20 @@ tier then ran 83 and is RED on three (`tmp/cold-gate-2026-09-22d.log`):
 `test-support-test` durations at 5.3 s / 5.7 s over the 5 s bound. Lane
 `platform-reds` (sol medium) owns all three; the cold gate reruns after it lands; the
 1.1 constructor lane launches on a green checkpoint.
+
+## 2026-09-22 08:05 local — first full cold gate on the branch: platform GREEN, bulk 514 red
+
+`platform-reds` (`c1d059abb`, `732866ead`, `67a0e940b`): the schema refusal carries its
+declared members again; fixture acquisition re-identified 266 retained commit records
+instead of the branch heads it opens (now ~1.0 s, no bound relaxed). Cold gate
+`tmp/cold-gate-2026-09-22e.log` at `67a0e940b`: platform 83 green; bulk 1,807 executed
+in 2,762 s; **514 distinct failing tests** (916 FAIL, 323 ERROR lines), of which 145
+are duration failures over the 5 s bound. Largest groups by test: `schema_audit_test`
+(38, permissive graph positions lacking justification), `run6_db_test`/`string.clj`
+query-contract (37), `db_test:643` public reads preserving an upstream database error
+(13, the subset-guard class the kind-cut review named), `issue_settlement_test` (8),
+`instrument.clj:766` receipt transitions (10). An Opus read-only triage groups all of
+them by root-cause class with owner seams and a lane plan
+(`docs/research/agent-platform/cold-gate-triage-2026-09-22.md`). No cut-1 step 1.1
+lane launches until the classes in B3's files are down. Store 7.6 GB, publication
+paused, default pid 38968.
