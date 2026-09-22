@@ -87,6 +87,7 @@
             "ordinary inline absence is stored as an analyzed false")
         (is (= '#{sample.reload.base/literal-value sample.reload.base/literal-data}
                (set (db/q '[:find [?sym ...] :where [?e :seon.fn/constant? true]
+                            [?e :seon.fn/ns ?ns] [?ns :seon.ns/name sample.reload.base]
                             [?e :seon.fn/sym ?sym]] database)))
             "literal defs are declarations; a computed initializer is not a constant")
         (doseq [sym '[sample.reload.base/inlined sample.reload.base/literal-value
@@ -103,7 +104,10 @@
       (let [before (db/db connection)]
         (support/transacted! connection
                              [[:db/retract [:seon.fn/sym 'sample.reload.base/value]
-                               :seon.fn/inline? false]])
+                               :seon.fn/inline? false]
+                              ;; An edited declaration whose new row lacks the fact.
+                              [:db/add [:seon.fn/sym 'sample.reload.base/value]
+                               :seon.program/definition-digest (apply str (repeat 64 "e"))]])
         (is (= '#{sample.reload.base sample.reload.impl sample.reload.caller}
                (cluster/development-namespaces before (db/db connection)
                                                [[:seon.fn/sym 'sample.reload.base/value]]))))
@@ -124,4 +128,23 @@
         (is (= '#{sample.reload.base sample.reload.impl sample.reload.caller}
                (cluster/development-namespaces before database [[:seon.ns/name 'sample.reload.base]]))
             "a namespace absent from one value seeds its dependents"))
+      nil)))
+
+(deftest ^{:seon.test/long "Canonical fixture cold acquisition and namespace analysis previously measured 12 seconds in publication-delta-test."
+           :seon.test/long-ms 20000}
+  a-moved-macro-reloads-no-dependents
+  (with-program
+    (fn [connection]
+      (let [before (db/db connection)
+            macro [:seon.fn/sym 'sample.reload.base/expanded]
+            moved (:db-after (support/transacted!
+                              connection [[:db/add macro :seon.fn/form-span [0 1]]]))
+            edited (:db-after (support/transacted!
+                               connection [[:db/add macro :seon.program/definition-digest
+                                            (apply str (repeat 64 "a"))]]))]
+        (is (= '#{sample.reload.base}
+               (cluster/development-namespaces before moved [macro]))
+            "an equal definition digest is no edit, whatever its span")
+        (is (= '#{sample.reload.base sample.reload.impl sample.reload.caller}
+               (cluster/development-namespaces moved edited [macro]))))
       nil)))

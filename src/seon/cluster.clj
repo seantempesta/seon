@@ -1879,7 +1879,8 @@
   Both program values contribute: retirement must retain the old compiler fact.
   A namespace form that changed in place (docstring, requires) compiles nothing
   into callers; a namespace created or retired between the values seeds its
-  dependents."
+  dependents. A declaration whose definition digest is equal in both values
+  was only moved or re-analyzed and seeds nothing."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.fn.file/identities] [:set :seon.ns/name]]
@@ -1908,6 +1909,22 @@
                          (into {} (map (fn [[symbol head inline?]]
                                          [symbol (declaration-reload-rule head inline?)])) facts)))
                      databases)
+         ;; Moving a declaration within its file changes its stored span, not
+         ;; its definition digest; an equal digest in both values is no edit.
+         digests (when (= 2 (count databases))
+                   (mapv (fn [database]
+                           (let [rows (db/q '[:find ?symbol ?digest :in $ [?symbol ...]
+                                              :where [?e :seon.fn/sym ?symbol]
+                                                     [?e :seon.program/definition-digest ?digest]]
+                                            database symbols)]
+                             (when (:seon.error/at rows)
+                               (refused! "Declaration definition digests could not be read." rows))
+                             (into {} rows)))
+                         databases))
+         unedited? (fn [symbol]
+                     (and digests
+                          (let [[before after] (map #(get % symbol) digests)]
+                            (and (some? before) (= before after)))))
          namespace-names (into [] (keep (fn [[attribute value]]
                                           (when (= :seon.ns/name attribute) value))) identities)
          present (mapv (fn [database]
@@ -1924,11 +1941,12 @@
                        (case attribute
                          :seon.ns/name (when-not (every? #(contains? % value) present) value)
                          :seon.fn/sym
-                         (when (some (fn [rules]
+                         (when (and (not (unedited? value))
+                                    (some (fn [rules]
                                        (case (get rules value :seon.reload/unknown)
                                          :seon.reload/compiled-into-callers true
                                          :seon.reload/var-indirection false
-                                         :seon.reload/unknown true)) rules)
+                                         :seon.reload/unknown true)) rules))
                            (symbol (namespace value)))
                          nil)))
                identities)]

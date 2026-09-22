@@ -42,13 +42,15 @@
 
 (defn -main
   "Exercise actual hook events against an already booted isolated snapshot."
-  {:malli/schema [:=> [:cat :string] :nil]}
-  [root]
+  {:malli/schema [:function [:=> [:cat :string] :nil] [:=> [:cat :string :string] :nil]]}
+  ([root] (-main root "default"))
+  ([root cluster]
   (let [root (operator/canonical-root root)
         checkout (.getCanonicalPath (io/file "."))]
-    (assert (and (str/ends-with? root "/tmp/reload-per-decl-root")
+    (assert (and (some #(str/ends-with? root %) ["/tmp/reload-per-decl-root" "/tmp/reload-b-root"])
                  (some #(str/ends-with? checkout %)
-                       ["/tmp/reload-per-declaration-wt" "/tmp/reload-per-declaration-b-wt"]))
+                       ["/tmp/reload-per-declaration-wt" "/tmp/reload-per-declaration-b-wt"
+                        "/tmp/reload-b-wt"]))
             "This probe edits only its dedicated disposable source snapshot.")
     (binding [*ns* (the-ns 'user) *in* (java.io.StringReader. "{}")
               *out* (java.io.StringWriter.)]
@@ -58,16 +60,18 @@
                   :docstring-lint {:enabled false} :review {:enabled false}
                   :schema-admission {:enabled false}
                   :shell-writes {:enabled true :roots ["src/my/note.clj"]}
-                  :current-source {:enabled true :root root :cluster "default"
+                  :current-source {:enabled true :root root :cluster cluster
                                    :timeout-seconds 120 :check-tests false}
                   :feedback {:max-tokens 10000}}
-          endpoint (operator/advertisement root "default")
+          endpoint (operator/advertisement root cluster)
           original-client operator/prepl-value!
           read-state (fn []
                        (original-client
                         endpoint
                         (pr-str
-                         '(do
+                         (walk/postwalk-replace
+                          {"default" cluster}
+                          '(do
                             (seon.cluster/project-next-prepl-value!
                              {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
                             (let [database (seon.db/db (seon.cluster.boot/connection "default"))
@@ -88,7 +92,7 @@
                                                     transaction))
                                :seon.probe/heap-used-bytes
                                (- (.totalMemory (Runtime/getRuntime))
-                                  (.freeMemory (Runtime/getRuntime)))}))) 120000))
+                                  (.freeMemory (Runtime/getRuntime)))})))) 120000))
           event (fn [path]
                   (cond-> {:hook_event_name "PostToolUse" :session_id "reload-per-declaration-clocks"
                            :tool_name (if path "Edit" "exec")}
@@ -166,4 +170,4 @@
                                           :seon.probe/caller-root-unchanged true})) 120000))
         (finally
           (spit leaf leaf-before)
-          (spit core core-before))))))
+          (spit core core-before)))))))

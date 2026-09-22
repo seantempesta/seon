@@ -71,7 +71,10 @@
          (let [before (db/db connection)
                _ (support/transacted!
                   connection [[:db/retract [:seon.ns/name 'sample.reload.caller]
-                               :seon.ns/requires 'sample.reload.leaf]])
+                               :seon.ns/requires 'sample.reload.leaf]
+                              ;; The macro was edited in the same publication.
+                              [:db/add [:seon.fn/sym 'sample.reload.leaf/expanded]
+                               :seon.program/definition-digest (apply str (repeat 64 "e"))]])
                after (db/db connection)]
            (is (= #{'sample.reload.leaf}
                   (cluster/development-namespaces after [[:seon.fn/sym 'sample.reload.leaf/expanded]])))
