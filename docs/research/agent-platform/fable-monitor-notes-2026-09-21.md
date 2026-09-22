@@ -429,3 +429,12 @@ fix the expectation or hand a wrapper defect to the error-schema lane by name.
 - Owner ruling: tests run as agents run — branch fixture, forked SCI context, custody injection, on the shared JVM, lane edits reaching the branch through the index function; B4 c1+c2 into cut 1 as 1.3d (`51b4ba78b`). Opus data pack requested: `docs/research/agent-platform/tests-as-agents-data-pack-2026-09-22.md`; the orchestrator adapts B4/B2 §2a/D1 from it.
 - `bin/test --prepare-head-base` refused (dirty resources vs HEAD snapshot); not chased.
 - Running: error-facets, b4-fixture-open-store, search-deletion, constructor-repair. Next launch: 1.2b (B1 commits 2–10) once search-deletion and constructor-repair free `cluster.clj`.
+
+## 2026-09-22 14:10 — data pack + astra review in; track 1.3d rewritten; four lanes reported
+
+- Data pack `docs/research/agent-platform/tests-as-agents-data-pack-2026-09-22.md` (Opus) and astra review `2b1f1911d`: every lifecycle primitive is an installed Seon function; B4's own execution lifecycle is the accretion; B2 §2a steps 1–3 are unimplemented (the crux); `publish!` hard-codes `:current-src`; `refresh-source!` implies a process-wide reload (`cluster.clj:1984`). README §4 row 1.3d rewritten to six commits, agent seam first (`ffb1c4872`); §7 gained the pending shared-reload decision (three options; owner asked what "admitted work" means — answered: an evaluation or test mid-flight on a fork sharing the JVM's compiled Vars).
+- `error-facets` landed `a86e93e21` (declared outputs validated; named identity through recording) + `ec04dd436`; still running.
+- `constructor-repair` partial: `59e9642b1` (operator dispositions, dead reply args) + `1a19fbef7`; remainder prepared, uncommitted behind shared files.
+- `search-deletion` complete in tree, uncommitted behind shared files (`cluster.clj`, `seon.db.edn`, `seon.effect.edn`, `seon.error.edn`).
+- `b4-fixture-open-store`: branch fixture works (41.64 ms first, 34.88 ms p50 later) but the legacy runner hands no execution connection; ruled option 3 per the new order (test callers last) and shelved to `tmp/b4-c1-partial-2026-09-22.patch` with a landing note; no custody bridge in the runner (would be a test-side copy).
+- Working tree loads (`seon.effect`, `seon.cluster`, `seon.schema.admission`). Commit sequencing once error-facets lands: search-deletion first (its files may carry the repair's coherent hunks; HEAD must load), then the repair remainder.
