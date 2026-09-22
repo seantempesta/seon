@@ -1,6 +1,6 @@
 ---
 type: landing
-status: implementation verified; authorized carried hunks landing
+status: landed; source commit archive loads
 created: 2026-09-22
 ---
 
@@ -213,3 +213,23 @@ acquisition and names repeated reconstruction as the optimization target. This
 regression times acquisition as a whole; it does not separately attribute every
 millisecond to projection work. The measured closure remains **3 of 4,440**;
 the installed armed proof remains **21 passes, 0 failures, 0 errors**.
+
+## Landed commit and archive proof
+
+Implementation commit: **`39a337013`** — Interpret branch overrides and their affected
+callers in SCI. Its body lists all three carried paths with
+“carried from f6b175e6d (schema-retirement-refusal lane)”. It contains only the eight
+authorized paths listed in its stat; no root-seed-digest source is included.
+
+`git archive 39a337013` was extracted to `tmp/realities-archive-39a337013`; vendored
+dependencies were linked from the repository. In that archive, the exact required
+command completed with **exit 0**:
+
+```
+clojure -M -e "(require 'seon.sci.eval 'seon.sci.admit 'seon.sci.kernel)"
+```
+
+Log: `tmp/realities-archive-load.log`. This checks committed source, without the
+root-seed-digest lane's working-tree changes. The follow-up documentation commit
+records this evidence; it changes no runtime source. Default remains untouched and
+hook publication paused. No running shell or JVM is retained for this slice.
