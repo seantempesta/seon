@@ -13,7 +13,7 @@ The complete kind/class cut still requires Slices B and C. No final green claim.
 
 - `aba6d445e`: accepted fails-before regression, unchanged. The prescribed ten-
   namespace HEAD load exited 0 immediately after this commit.
-- Slice A: `src/seon/turn.clj`, `src/seon/cluster/reply.clj`,
+- `19827d2b0`: Slice A (required HEAD load exited 0): `src/seon/turn.clj`, `src/seon/cluster/reply.clj`,
   `src/seon/cluster/agent.clj`, `src/seon/context.clj`, `src/seon/fn.clj`,
   `resources/seon/schemas/seon.fn.edn`, and the cluster turn/reply tests.
   Evaluation and context facts no longer project the retired attribute. Reply
@@ -241,10 +241,10 @@ Counts use matching lines, as `rg -c` does. Current counts are the Slice A worki
 | `src/seon/effect.clj` | 0 | 0 | 0 | 0 | 2 | 2 |
 | `src/seon/eval/drive.clj` | 4 | 4 | 0 | 0 | 0 | 0 |
 | `src/seon/eval.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
-| `src/seon/fn/analyzer.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
-| `src/seon/fn/schema_shape.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
-| `src/seon/fn/signature.cljc` | 1 | 1 | 0 | 0 | 0 | 0 |
-| `src/seon/fn.clj` | 25 | 23 | 0 | 0 | 0 | 0 |
+| `src/seon/fn/analyzer.clj` | 1 | 0 | 0 | 0 | 0 | 0 |
+| `src/seon/fn/schema_shape.clj` | 2 | 0 | 0 | 0 | 0 | 0 |
+| `src/seon/fn/signature.cljc` | 1 | 0 | 0 | 0 | 0 | 0 |
+| `src/seon/fn.clj` | 25 | 0 | 0 | 0 | 0 | 0 |
 | `src/seon/fs/jvm.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
 | `src/seon/fs.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
 | `src/seon/issue/detect.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
@@ -261,10 +261,10 @@ Counts use matching lines, as `rg -c` does. Current counts are the Slice A worki
 | `src/seon/render.clj` | 0 | 0 | 0 | 0 | 6 | 6 |
 | `src/seon/repl.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
 | `src/seon/run.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
-| `src/seon/schema/datahike.clj` | 5 | 5 | 0 | 0 | 0 | 0 |
-| `src/seon/schema/edn.clj` | 12 | 12 | 0 | 0 | 0 | 0 |
-| `src/seon/schema/internal.cljc` | 4 | 4 | 0 | 0 | 0 | 0 |
-| `src/seon/schema.clj` | 29 | 29 | 0 | 0 | 0 | 0 |
+| `src/seon/schema/datahike.clj` | 5 | 0 | 0 | 0 | 0 | 0 |
+| `src/seon/schema/edn.clj` | 12 | 0 | 0 | 0 | 0 | 0 |
+| `src/seon/schema/internal.cljc` | 4 | 0 | 0 | 0 | 0 | 0 |
+| `src/seon/schema.clj` | 29 | 0 | 0 | 0 | 0 | 0 |
 | `src/seon/sci/eval.clj` | 0 | 0 | 0 | 0 | 13 | 13 |
 | `src/seon/sci/kernel.clj` | 0 | 0 | 0 | 0 | 1 | 1 |
 | `src/seon/search.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
@@ -403,3 +403,33 @@ Counts use matching lines, as `rg -c` does. Current counts are the Slice A worki
 | `resources/seon/schemas/seon.search.edn` | 0 | 0 | 2 | 2 | 0 | 0 |
 | `resources/seon/schemas/seon.turn.edn` | 0 | 0 | 1 | 1 | 0 | 0 |
 | `resources/seon/schemas/seon.turn.loop.edn` | 0 | 0 | 4 | 4 | 0 | 0 |
+
+## Schema and analysis constructor group
+
+Removed all kind construction members in schema, schema.edn, schema.internal,
+schema.datahike, fn.analyzer, fn.schema-shape and fn.signature. Existing owned
+refusal members remain. No decision branch was introduced. Touched private
+functions now declare their argument and result contracts. Reference-cycle
+inspection and contract diagnostic construction accept bound declaration values,
+including host predicates; requiring serialized Malli definitions there was
+falsified by the canonical reference-map test and corrected. Directory resource
+inspection accepts the caller's exact external URL string to keep its contract
+concrete without introducing a host-object predicate.
+
+Focused command: `bin/test-fast --paths src/seon/schema.clj src/seon/schema/edn.clj src/seon/schema/internal.cljc src/seon/schema/datahike.clj src/seon/fn/analyzer.clj src/seon/fn/schema_shape.clj src/seon/fn/signature.cljc -- seon.schema-test seon.schema.edn-test seon.schema.datahike-test seon.fn.analyzer-test seon.fn.schema-shape-test`.
+Execution: 86 tests, 11886 assertions, 31 failures, 2 errors. Per namespace:
+schema 39/10/1; edn 18/6/0; datahike 14/15/1; analyzer 8/0/0; shape 7/0/0
+(tests/failures/errors). After the bound-declaration correction, the same paths
+with `-- seon.schema-test`: 39 tests, 11443 assertions, 9 failures, zero errors.
+Both runners exited 1; immutable report recording refused, so neither run is
+recorded green. Logs: `tmp/b3-schema-group.log`, `tmp/b3-schema-correction.log`.
+Remaining assertions include retired-kind expectations, schema snapshots and
+existing render declaration fixtures; these are not certified as baseline-
+equivalent. Test-site conversions remain assigned to Slice C.
+
+Publication `71541a29-2d18-4bc8-ba24-034d30cfd75e`:
+04:23:29.839560 → 04:24:10.227841Z, **40.388281 s**, SOURCE_BATCH,
+adopted `6ab202d9-ae7d-5986-93c0-b2ce04592b0b`.
+Correction `448ff696-59ec-4b86-bb68-c5f350b5966b`:
+04:25:12.163086 → 04:25:57.423021Z, **45.259935 s**, SOURCE_BATCH,
+adopted `6ab20344-9717-54fc-accd-2331b3054ae1`. Both exceed ten seconds.

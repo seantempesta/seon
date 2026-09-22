@@ -182,6 +182,7 @@
     (visit compiled [] false false #{})))
 
 (defn- contract-error!
+  {:malli/schema [:=> [:cat :keyword :seon.schema/value [:seqable :seon.schema/value] :qualified-keyword :string :map] :nil]}
   [identity definition path error message data]
   (throw
    (ex-info
@@ -192,7 +193,7 @@
       :seon.schema/identity identity
       :seon.schema/definition definition
       :seon.schema/path (vec path)
-      :seon.error/kind :user-input}
+      }
      data))))
 
 (defn- guarded-predicate-symbol
@@ -454,7 +455,7 @@
                  (cond-> {:seon.schema/error :seon.schema/invalid-schema
                           :seon.schema/key   k
                           :seon.schema/definition v
-                          :seon.error/kind   :user-input :seon.schema/invalid-schema k}
+                          :seon.schema/invalid-schema k}
                    missing
                    (assoc :seon.schema/missing-reference missing
                           :seon.schema/missing-reference-namespace
@@ -492,7 +493,7 @@
                {:seon.schema/error :seon.schema/nilable-value-schema
                 :seon.schema/key   k
                 :seon.schema/definition v
-                :seon.error/kind   :user-input :seon.schema/nilable-value-schema k})))))
+                :seon.schema/nilable-value-schema k})))))
 
 (defn assert-multi-segment-namespace!
   "register!-time gate: reject attrs whose keyword NAMESPACE is
@@ -517,4 +518,4 @@
                {:seon.schema/error :seon.schema/single-segment-namespace
                 :seon.schema/single-segment-namespace k
                 :seon.schema/key   k
-                :seon.error/kind   :user-input})))))
+                })))))

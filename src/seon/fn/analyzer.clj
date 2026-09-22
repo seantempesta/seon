@@ -429,7 +429,7 @@
   [{::keys [paths sources cache-root config-root]}]
   (when-not (or (seq paths) (seq sources))
     (throw (ex-info "Analysis requires either captured sources or paths."
-                    {:seon.error/kind ::analysis-refused})))
+                    {})))
   ;; A trusted diagnostic must preserve each call as one coherent record.
   ;; clj-kondo's parallel analysis has combined an outer call's location and
   ;; arity with an inner call's resolved var, then emitted the corruption

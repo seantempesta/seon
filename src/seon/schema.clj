@@ -106,6 +106,7 @@
 
 (defn- assert-acyclic-references!
   "Refuse cycles in a canonical schema-reference graph."
+  {:malli/schema [:=> [:cat [:map-of :keyword :seon.schema/value] [:seqable :keyword] [:map-of :keyword [:set :keyword]]] :nil]}
   [forms roots reference-graph]
   (when-let [cycle-path (reference-cycle reference-graph roots)]
     (let [identity (first cycle-path)]
@@ -123,7 +124,7 @@
          :seon.schema/identity identity
          :seon.schema/definition (get forms identity)
          :seon.schema/cycle-path cycle-path
-         :seon.error/kind :user-input})))))
+         })))))
 
 (defn- predicate-symbols-in [value]
   (cond
@@ -336,7 +337,7 @@
              (cond-> {:seon.schema/error :seon.schema/unresolved-predicate
                       :seon.schema/unresolved-predicate predicate
                       :seon.schema/predicate predicate
-                      :seon.error/kind :user-input}
+                      }
                ;; Name the namespace that must define it: after
                ;; `converged-predicate-var` has loaded and reloaded that
                ;; source, an unresolved predicate is a declaration naming a
@@ -532,7 +533,7 @@
                 {:seon.schema/error :seon.schema/noncanonical-definition
                  :seon.schema/noncanonical-definition ::unnamed-callable
                  :seon.schema/value value
-                 :seon.error/kind :core-bug}))))
+                 }))))
         callable?
         (fn [value]
           (and (ifn? value)
@@ -580,7 +581,7 @@
                                       ::callable-property
                                       :seon.schema/property k
                                       :seon.schema/value v
-                                      :seon.error/kind :core-bug})))
+                                      })))
                                  [(canonicalize k false)
                                   (canonicalize v
                                                 (when (= :gen/gen k)
@@ -611,7 +612,7 @@
         {:seon.schema/error :seon.schema/noncanonical-definition
          :seon.schema/noncanonical-definition ::non-edn
          :seon.schema/value canonical
-         :seon.error/kind :core-bug})))
+         })))
     decoded))
 
 (defn- reference-registry
@@ -708,6 +709,7 @@
   (framed tag (apply str (map canonical-value-string values))))
 
 (defn- canonical-value-string
+  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
   [value]
   (cond
     (nil? value) "n"
@@ -745,7 +747,7 @@
                     {:seon.schema/error
                      :seon.schema/noncanonical-projection-data
                      :seon.schema/value value
-                     :seon.error/kind :core-bug :seon.schema/noncanonical-projection-data true}))))
+                     :seon.schema/noncanonical-projection-data true}))))
 
 
 (defn canonical-data-string
@@ -1118,7 +1120,7 @@
     (throw
      (ex-info
       "Schema declaration resolution requires the projection handed to the operation."
-      {:seon.error/kind ::missing-projection
+      {
        :seon.error/message
        "No declaration projection was handed to this schema operation."
        :seon.error/data {:seon.schema/caller (fallback-caller)} :seon.schema/missing-projection true}))))
@@ -1182,7 +1184,7 @@
          :seon.schema/unresolved-predicate predicate
          :seon.schema/predicate predicate
          :seon.schema/resolved resolved
-         :seon.error/kind :core-bug}))))
+         }))))
   predicate)
 
 (defn core-predicate-registered?
@@ -1193,7 +1195,9 @@
 
 (register-core-predicate! 'seon.schema/byte-array? byte-array?)
 
-(defn- update-candidate-forms! [f & args]
+(defn- update-candidate-forms!
+  {:malli/schema [:=> [:cat [:=> [:cat :map [:* :seon.schema/value]] :map] [:* :seon.schema/value]] :map]}
+  [f & args]
   (if *candidate-forms-overlay*
     (apply swap! *candidate-forms-overlay* f args)
     (throw
@@ -1201,7 +1205,7 @@
               {:seon.schema/error
                :seon.schema/registration-outside-delta
                :seon.schema/registration-outside-delta true
-               :seon.error/kind :user-input}))))
+               }))))
 
 (defn- assert-config-display!
   "Refuse a per-agent dial whose declaration cannot name its settings row."
@@ -1412,7 +1416,7 @@
                  :seon.schema/unproved-predicate-purity predicate
                  :seon.schema/identity identity
                  :seon.schema/predicate predicate
-                 :seon.error/kind :user-input}))))
+                 }))))
         registry (or registry
                      (mr/composite-registry
                       (m/default-schemas)
@@ -1584,7 +1588,7 @@
                         {:seon.schema/error :seon.schema/unreadable-form
                          :seon.schema/key k
                          :seon.schema/definition v
-                         :seon.error/kind :user-input :seon.schema/unreadable-form k}
+                         :seon.schema/unreadable-form k}
                         e))))]
     (when-not (= v decoded)
       (throw
@@ -1594,7 +1598,7 @@
           {:seon.schema/error :seon.schema/non-round-tripping-form
            :seon.schema/key k
            :seon.schema/definition v
-           :seon.error/kind :user-input :seon.schema/non-round-tripping-form k}))))
+           :seon.schema/non-round-tripping-form k}))))
   ;; The schema authority's own shapes are the computed bootstrap population:
   ;; they must exist before the EDN loader and its admission gate can compile.
   ;; Every other JVM registration flows through seon.schema.edn/admit once that
@@ -1624,7 +1628,7 @@
       "schema/unregister! requires an evaluation registration delta."
       {:seon.schema/error :seon.schema/unregister-outside-delta
        :seon.schema/key k
-       :seon.error/kind :user-input :seon.schema/unregister-outside-delta k})))
+       :seon.schema/unregister-outside-delta k})))
   (swap! *candidate-forms-overlay* dissoc k)
   k)
 
@@ -2585,7 +2589,7 @@
                                   {:seon.schema/error
                                    :seon.schema/malformed-projection-row
                                    :seon.schema/row row
-                                   :seon.error/kind :core-bug :seon.schema/malformed-projection-row true})))
+                                   :seon.schema/malformed-projection-row true})))
                 (let [[raw-identity form-string _asserting-tx-eid] row
                       identity (identity-fn raw-identity)]
                   (when-not (string? form-string)
@@ -2594,7 +2598,7 @@
                                     {:seon.schema/error
                                      :seon.schema/malformed-projection-form
                                      :seon.schema/row row
-                                     :seon.error/kind :core-bug :seon.schema/malformed-projection-form true})))
+                                     :seon.schema/malformed-projection-form true})))
                   (when (contains? parsed identity)
                     (throw (ex-info (str "Duplicate committed " identity-label
                                          " " identity ".")
@@ -2602,7 +2606,7 @@
                                      :seon.schema/duplicate-projection-row
                                      :seon.schema/duplicate-projection-row identity
                                      :seon.schema/identity identity
-                                     :seon.error/kind :core-bug})))
+                                     })))
                   (assoc parsed identity
                          {:seon.schema.parsed/form
                           (edn/read-string form-string)
@@ -2619,7 +2623,7 @@
                                       {:seon.schema/error
                                        :seon.schema/malformed-projection-identity
                                        :seon.schema/identity identity
-                                       :seon.error/kind :core-bug :seon.schema/malformed-projection-identity true}))))
+                                       :seon.schema/malformed-projection-identity true}))))
                   "schema" :seon.schema/key)
           contracts
           (parse-rows function-contract-rows
@@ -2634,13 +2638,13 @@
                                           {:seon.schema/error
                                            :seon.schema/malformed-projection-identity
                                            :seon.schema/identity identity
-                                           :seon.error/kind :core-bug :seon.schema/malformed-projection-identity true}))))
+                                           :seon.schema/malformed-projection-identity true}))))
                       :else
                       (throw (ex-info "Committed function identity is malformed."
                                       {:seon.schema/error
                                        :seon.schema/malformed-projection-identity
                                        :seon.schema/identity identity
-                                       :seon.error/kind :core-bug :seon.schema/malformed-projection-identity true}))))
+                                       :seon.schema/malformed-projection-identity true}))))
                    "function contract" :seon.fn/sym)
           source-admissions
           (reduce
@@ -2650,7 +2654,7 @@
                                {:seon.schema/error
                                 :seon.schema/malformed-projection-row
                                 :seon.schema/row row
-                                :seon.error/kind :core-bug :seon.schema/malformed-projection-row true})))
+                                :seon.schema/malformed-projection-row true})))
              (let [[raw-identity source _asserting-tx-eid] row
                    identity (cond
                               (qualified-symbol? raw-identity) raw-identity
@@ -2661,7 +2665,7 @@
                                  {:seon.schema/error
                                   :seon.schema/malformed-projection-row
                                   :seon.schema/row row
-                                  :seon.error/kind :core-bug :seon.schema/malformed-projection-row true})))
+                                  :seon.schema/malformed-projection-row true})))
                (when (contains? admissions identity)
                  (throw (ex-info (str "Duplicate committed function source "
                                       identity ".")
@@ -2669,7 +2673,7 @@
                                   :seon.schema/duplicate-projection-row
                                   :seon.schema/duplicate-projection-row identity
                                   :seon.schema/identity identity
-                                  :seon.error/kind :core-bug})))
+                                  })))
                (assoc admissions identity
                       (admission-for-identity :seon.fn/sym raw-identity))))
            {}
@@ -2688,14 +2692,14 @@
                                        {:seon.schema/error
                                         :seon.schema/malformed-artifact-export
                                         :seon.schema/export export
-                                        :seon.error/kind :core-bug :seon.schema/malformed-artifact-export true}))))
+                                        :seon.schema/malformed-artifact-export true}))))
                          :else
                          (throw
                           (ex-info "Artifact export is malformed."
                                    {:seon.schema/error
                                     :seon.schema/malformed-artifact-export
                                     :seon.schema/export export
-                                    :seon.error/kind :core-bug :seon.schema/malformed-artifact-export true})))))
+                                    :seon.schema/malformed-artifact-export true})))))
                 artifact-exports)
           forms
           (into {} (map (fn [[k row]]
@@ -3210,7 +3214,7 @@
         (assoc blockers
                :seon.schema/error :seon.schema/schema-in-use
                :seon.schema/key schema-key
-               :seon.error/kind :user-input))))
+               ))))
     (build-projection
      (dissoc (:seon.schema.projection/forms projection) schema-key)
      (:seon.schema.projection/function-contracts projection)
@@ -3686,14 +3690,17 @@
                      :seon.schema/missing-reference schema-key
                      :seon.schema/missing-reference-namespace (namespace schema-key)}))))
 
-(defn- shape-projection []
+(defn- shape-projection
+  {:malli/schema [:=> [:cat] :seon.schema/projection]}
+  []
   (or (handed-projection)
       (throw
        (ex-info "Shape inspection requires the operation's schema projection."
-                {:seon.error/kind ::missing-projection
+                {
                  :seon.schema/missing-projection true}))))
 
 (defn- identity-only-descriptors-in
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:vector [:map [:seon.schema/key :keyword] [:seon.schema.identity-only/validator :seon.schema/compiled-validator] [:seon.schema/identity-projection [:fn clojure.core/var?]]]]]}
   [projection]
   (into
    []
@@ -3711,7 +3718,7 @@
                       {:seon.schema/key schema-key
                        :seon.schema/identity-projection projection-symbol
                        :seon.schema/invalid-identity-projection true
-                       :seon.error/kind :core-bug})))
+                       })))
                 projection-var (requiring-resolve projection-symbol)]
             (when-not (ifn? (var-get projection-var))
               (throw
@@ -3721,7 +3728,7 @@
                 {:seon.schema/key schema-key
                  :seon.schema/identity-projection projection-symbol
                  :seon.schema/invalid-identity-projection true
-                 :seon.error/kind :core-bug})))
+                 })))
             {:seon.schema/key schema-key
              :seon.schema.identity-only/validator
              (projection-validator projection schema-key)
@@ -3870,7 +3877,7 @@
     (throw (ex-info (str "Unknown projected map schema " schema-key ".")
                     {:seon.schema/error :seon.schema/unknown-shape
                      :seon.schema/key schema-key
-                     :seon.error/kind :core-bug :seon.schema/unknown-shape schema-key})))
+                     :seon.schema/unknown-shape schema-key})))
   ((projection-explainer projection schema-key) value))
 
 (defn explain-shape

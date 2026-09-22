@@ -149,7 +149,7 @@
                          (registration-form attribute :string)
                          " with the intended concrete type before transacting it.")
                     {::attr attribute ::attribute-absent attribute
-                     :seon.error/kind :user-input})))
+                     })))
         {::keys [value-type cardinality properties tuple-types refusal]}
         (compiled-storage root)
         value-type (if (= :seon.db/ref attribute) :db.type/ref value-type)
@@ -163,11 +163,11 @@
                       "The Malli form has no Datahike value type. Register a concrete storable shape.")]
         (throw (ex-info message {::attr attribute ::form form
                                  reason (if (= reason ::nilable-attribute) ::form true)
-                                 :seon.error/kind :user-input}))))
+                                 }))))
     (when (and secondary? (not (#{:db.type/float :db.type/double} value-type)))
       (throw (ex-info "A secondary-only attribute must contain floats."
                       {::attr attribute ::invalid-secondary-attribute attribute
-                       :seon.error/kind :user-input})))
+                       })))
     (cond-> {:db/ident attribute
              :db/valueType (if secondary? :db.type/tuple value-type)
              :db/cardinality (if secondary? :db.cardinality/one cardinality)}
@@ -192,7 +192,7 @@
                           (m/properties (m/schema declaration {:registry registry}))))]
         (throw (ex-info
                 "An error observation cannot carry an entity's upsert identity."
-                {:seon.error/kind :user-input
+                {
                  :seon.schema/error :seon.schema/invalid-schema
                  :seon.schema/identity schema-key
                  :seon.schema/member attribute})))))
@@ -289,6 +289,7 @@
      (::edn? (compiled-storage compiled)))))
 
 (defn- refuse-slot!
+  {:malli/schema [:=> [:cat :qualified-keyword :qualified-keyword :seon.schema/value] :nil]}
   [rule attr value]
   (throw
    (ex-info
@@ -297,7 +298,7 @@
      ::attr attr
      ::value value
      rule (if (= ::schema-invalid rule) attr true)
-     :seon.error/kind :user-input})))
+     })))
 
 (defn- validate-logical-slot-in!
   [projection attr value]

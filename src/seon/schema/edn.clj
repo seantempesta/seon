@@ -119,6 +119,7 @@
       (when (keyword? value) value))))
 
 (defn- unreadable-file!
+  {:malli/schema [:=> [:cat :string] :nil]}
   [resource]
   (throw
    (ex-info
@@ -126,7 +127,7 @@
     {::error ::unreadable-file
      ::file resource
      ::unreadable-file resource
-     :seon.error/kind :user-input})))
+     })))
 
 (defn- filesystem-safe-namespace?
   [schema-namespace]
@@ -145,8 +146,10 @@
              (not (str/ends-with? resource ".edn"))))))
 
 (defn- directory-resource-paths
-  [resource directory-url]
-  (let [paths
+  {:malli/schema [:=> [:cat :string :string] [:vector :string]]}
+  [resource directory-location]
+  (let [directory-url (java.net.URL. directory-location)
+        paths
         (case (.getProtocol directory-url)
     "file"
     (let [directory (io/file directory-url)]
@@ -178,7 +181,7 @@
       {::error ::unreadable-file
        ::file (.toExternalForm directory-url)
        ::unreadable-file (.toExternalForm directory-url)
-       :seon.error/kind :user-input})))]
+       })))]
     (when (empty? paths)
       (throw
        (ex-info
@@ -186,7 +189,7 @@
         {::error ::unreadable-file
          ::file (.toExternalForm directory-url)
          ::unreadable-file (.toExternalForm directory-url)
-         :seon.error/kind :user-input})))
+         })))
     paths))
 
 (defn- schema-resource-paths
@@ -195,10 +198,11 @@
     (if (or (= "jar" (.getProtocol url))
             (and (= "file" (.getProtocol url))
                  (.isDirectory (io/file url))))
-      (directory-resource-paths resource url)
+      (directory-resource-paths resource (.toExternalForm url))
       [resource])))
 
 (defn- read-schema-resource
+  {:malli/schema [:=> [:cat :string] [:map [:seon.schema.edn/file :string] [:seon.schema.edn/resource :string] [:seon.schema.edn/forms :map]]]}
   [resource]
   (let [url (or (io/resource resource) (unreadable-file! resource))
         file (.toExternalForm url)
@@ -216,7 +220,7 @@
                    ::attribute attribute
                    ::file file
                    ::duplicate-attribute attribute
-                   :seon.error/kind :user-input}
+                   }
                   error))
                 (throw
                  (ex-info
@@ -224,7 +228,7 @@
                   {::error ::unreadable-file
                    ::file file
                    ::unreadable-file file
-                   :seon.error/kind :user-input}
+                   }
                   error))))
             (catch Exception error
               (throw
@@ -233,7 +237,7 @@
                 {::error ::unreadable-file
                  ::file file
                  ::unreadable-file file
-                 :seon.error/kind :user-input}
+                 }
                 error))))]
     (when-not (map? value)
       (throw
@@ -242,7 +246,7 @@
         {::error ::not-a-map
          ::file file
          ::not-a-map file
-         :seon.error/kind :user-input})))
+         })))
     {::file file ::resource resource ::forms value}))
 
 (defn- resource-filename
@@ -251,6 +255,7 @@
     (subs resource (inc separator))))
 
 (defn- validate-resource-placement!
+  {:malli/schema [:=> [:cat [:seqable [:map [:seon.schema.edn/file :string] [:seon.schema.edn/resource :string] [:seon.schema.edn/forms :map]]]] :nil]}
   [loaded]
   (doseq [{file ::file resource ::resource forms ::forms} loaded
           :let [filename (resource-filename resource)
@@ -267,7 +272,7 @@
          ::file file
          ::namespace file-namespace
          ::unsafe-namespace (keyword file-namespace "resource")
-         :seon.error/kind :user-input})))
+         })))
     (doseq [registry-key (keys forms)
             :let [schema-namespace (when (qualified-keyword? registry-key)
                                      (namespace registry-key))]]
@@ -282,7 +287,7 @@
            ::file file
            ::namespace schema-namespace
            ::unsafe-namespace registry-key
-           :seon.error/kind :user-input})))
+           })))
       (when-not (or unqualified?
                     (= file-namespace schema-namespace))
         (throw
@@ -294,9 +299,10 @@
            ::file file
            ::expected-file (str schema-namespace ".edn")
            ::misplaced-attribute registry-key
-           :seon.error/kind :user-input}))))))
+           }))))))
 
 (defn- merge-schema-resources
+  {:malli/schema [:=> [:cat [:seqable [:map [:seon.schema.edn/file :string] [:seon.schema.edn/resource :string] [:seon.schema.edn/forms :map]]]] [:map [:seon.schema.edn/forms :map] [:seon.schema.edn/files-by-key [:map-of :keyword :string]]]]}
   [loaded]
   (reduce
    (fn [{::keys [forms files-by-key]} {file ::file incoming ::forms}]
@@ -312,7 +318,7 @@
             ::file file
             ::files [first-file file]
             ::duplicate-attribute attribute
-            :seon.error/kind :user-input}))))
+            }))))
      {::forms (merge forms incoming)
       ::files-by-key
       (merge files-by-key (zipmap (keys incoming) (repeat file)))})
@@ -456,6 +462,7 @@
     :else []))
 
 (defn- refusal!
+  {:malli/schema [:=> [:cat :qualified-keyword :keyword :seon.schema/definition :map] :nil]}
   [error identity declaration extra]
   (let [file (get (::files-by-key (resource-population default-resource))
                   identity)
@@ -474,7 +481,7 @@
          ::attribute identity
          error (if (= ::unreadable-file error) file identity)
          :seon.schema/definition declaration
-         :seon.error/kind :user-input}
+         }
         extra)
         file (assoc ::file file))))))
 

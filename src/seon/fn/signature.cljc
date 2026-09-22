@@ -5,10 +5,11 @@
                    (java.io PushbackReader StringReader))))
 
 (defn- refused!
+  {:malli/schema [:=> [:cat :keyword :map] :nil]}
   [reason data]
   (throw
    (ex-info "Function source and Malli contract do not join bijectively."
-            (merge {:seon.error/kind :seon.fn/signature-refused
+            (merge {
                     :seon.fn.signature/reason reason :seon.fn/signature-refused true}
                    data))))
 

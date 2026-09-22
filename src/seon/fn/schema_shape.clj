@@ -196,6 +196,7 @@
       ::reference-fingerprints references})))
 
 (defn- key-kind
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema.map-entry/key-kind]}
   [value]
   (cond
     (nil? value) :nil
@@ -214,7 +215,7 @@
     :else
     (throw
      (ex-info "Schema map entry has an unsupported non-EDN key."
-              {:seon.error/kind :seon.schema.shape/unsupported-map-key
+              {
                :seon.schema.map-entry/key-edn (pr-str value) :seon.schema.shape/unsupported-map-key true}))))
 
 (defn typed-key-facts
@@ -462,7 +463,7 @@
           :when (> (count forms) 1)]
     (throw
      (ex-info "A schema fingerprint identifies distinct normalized forms."
-              {:seon.error/kind :seon.schema.shape/fingerprint-collision
+              {
                :seon.schema.shape/fingerprint shape-fingerprint
                :seon.schema.shape/forms forms :seon.schema.shape/fingerprint-collision true})))
   rows)
