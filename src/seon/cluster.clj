@@ -2334,6 +2334,10 @@
                                  :current-commit (:seon.source/commit-id (source/current held-store))})
       :else
       (let [previous-database (db/db connection)
+        ;; Every adoption write is derived from this published commit and
+        ;; refuses at the writer once another publication moves the head.
+        expected-head {:seon.source/branch source/current-branch
+                       :seon.source/expected-commit-id (:seon.source/commit-id published)}
         published-database (source/database held-store (:seon.source/commit-id published))]
        (try
         (let [published-projection (db/carried-projection published-database)
@@ -2351,7 +2355,8 @@
              forms
              #(require-committed!
                (db/transact! connection
-                             {:tx-data [[:db.fn/call
+                             {:tx-data [[:db.fn/call registry/head-guard-tx expected-head]
+                                        [:db.fn/call
                                          (fn [database]
                                            (declaration-changes database published-projection))]]})
                {:seon.boot/population :seon.schema/declarations})))
@@ -2365,6 +2370,7 @@
                :seon.schema/projection published-projection
                :seon.source/database published-database
                :seon.source/previous-database previous-database
+               :seon.source/expected-head expected-head
                :seon.reconcile/adopt-identities program-identities}
               *source-progress!*))
              {:seon.boot/population :seon.fn/population}))

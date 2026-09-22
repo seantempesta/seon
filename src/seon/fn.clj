@@ -5,6 +5,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.walk :as walk]
+            [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.error :as error]
             [seon.fn.analyzer :as analyzer]
@@ -3504,7 +3505,8 @@
    (index! request (constantly nil)))
   ([{connection :seon.db/connection process :seon.db/process
      previous-database :seon.source/previous-database
-     source-database :seon.source/database :as request}
+     source-database :seon.source/database
+     expected-head :seon.source/expected-head :as request}
     progress!]
    (let [request (cond-> request
                    (not source-database) (assoc :seon.program/rows (rows request)))
@@ -3584,7 +3586,7 @@
               (db/transact!
                connection
                (cond-> {:tx-data
-                        [[:db.fn/call
+                        (cond->> [[:db.fn/call
                           (fn [database]
                             (let [tx-data
                                   (schema/call-with-projection
@@ -3599,7 +3601,11 @@
                                 (throw
                                  (ex-info (:seon.error/message tx-data)
                                           tx-data))
-                                tx-data)))]]}
+                                tx-data)))]]
+                          ;; Rows derived from one published commit refuse at
+                          ;; the writer once another publication moved its head.
+                          expected-head (cons [:db.fn/call registry/head-guard-tx expected-head])
+                          true vec)}
                  process (assoc :tx-meta {:seon.db/process process})))
               :seon.fn/population)
              changed-identities (require-committed! (report-identities report)

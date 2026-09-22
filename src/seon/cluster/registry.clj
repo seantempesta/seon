@@ -139,6 +139,25 @@
   (get-in (head-record (konserve-store store) branch)
           [:meta :datahike/commit-id]))
 
+(defn head-guard-tx
+  "Transaction data that refuses, inside the writer, unless `branch` still
+  names `expected-commit-id` in the transacting database's physical store.
+
+  A write derived from one published commit therefore never commits after
+  another publication moved the head; the transactor orders the rest. The
+  refusal carries Datahike's own `:stale-branch-head` data
+  (`reference-code/datahike/src/datahike/versioning.cljc:374`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/expected-head] [:= []]]}
+  [database {branch :seon.source/branch expected :seon.source/expected-commit-id}]
+  (let [current (get-in (head-record (:store database) branch) [:meta :datahike/commit-id])]
+    (when-not (= expected current)
+      (throw (ex-info "Branch head changed before this derived write."
+                      {:type :stale-branch-head
+                       :branch branch
+                       :expected-current-commit expected
+                       :current-commit current})))
+    []))
+
 (defn connection-branch-commit-id
   "Read a branch head through an already supplied connection's physical store."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.store/branch]

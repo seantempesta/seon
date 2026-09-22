@@ -37,6 +37,10 @@
               [:map [:seon.source/roots :seon.source/roots]
                     [:seon.fn/root {:optional true} :string]],
               :expected-commit-id :uuid,
+              :expected-head
+              [:map
+               [:seon.source/branch :seon.source/branch]
+               [:seon.source/expected-commit-id :seon.source/expected-commit-id]],
               :relative-file-digests [:map-of :string :seon.source/digest],
               :populate :qualified-symbol,
               ;; The owner that installs one changed input's facts: a Clojure

@@ -2,9 +2,12 @@
   (:require [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [seon.cluster :as cluster]
+            [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
+            [seon.cluster.store :as store]
             [seon.cluster.source-test :as source-test]
             [seon.db :as db]
+            [seon.fn :as fn]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch]))
 
@@ -168,3 +171,102 @@
             (is (= (:seon.source/commit-id base) (:seon.source/prior-commit-id refusal))
                 "a record whose starting adoption was replaced refuses"))
           (finally (d/release-materialized-db database)))))))
+
+(deftest ^{:seon.test/fixture-observation
+           "Two adoptions admitted at one head write a cluster branch of the same physical store."}
+  stale-adoption-row-writes-refuse-at-the-writer
+  (#'source-test/with-store
+    (fn [opened]
+      (let [base (#'source-test/publish opened @#'source-test/digest-a)
+            h1 (:seon.source/commit-id base)
+            cluster-name "adoption-contest"
+            _ (registry/ensure-cluster! {:seon.store/store opened
+                                         :seon.boot/cluster-name cluster-name
+                                         :seon.source/commit-id h1})
+            connection (store/open-branch! opened (registry/cluster-branch cluster-name))
+            first-source (source/database opened h1)]
+        (try
+          (let [sym (db/q '[:find ?s . :where [_ :seon.fn/sym ?s]] first-source)
+                adopt (fn [source-database commit]
+                        (try
+                          (fn/index! {:seon.db/connection connection
+                                      :seon.schema/projection (:seon.schema/projection opened)
+                                      :seon.source/database source-database
+                                      :seon.source/previous-database (db/db connection)
+                                      :seon.source/expected-head
+                                      {:seon.source/branch source/current-branch
+                                       :seon.source/expected-commit-id commit}
+                                      :seon.reconcile/adopt-identities #{[:seon.fn/sym sym]}})
+                          (catch clojure.lang.ExceptionInfo failure failure)))
+                ;; Both adoptions were admitted at h1; a newer publication then
+                ;; moves the head to h2 before the first one's row write.
+                moved (#'source-test/publish opened @#'source-test/digest-b
+                                             'seon.cluster.source-test/populate-from-data!
+                                             {:seon.source/expected-commit-id h1
+                                              :seon.source.test/marker "moved"})
+                h2 (:seon.source/commit-id moved)
+                before (db/basis-t (db/db connection))
+                stale (adopt first-source h1)]
+            (is (symbol? sym))
+            (is (instance? clojure.lang.ExceptionInfo stale) (pr-str stale))
+            (is (some #(= :stale-branch-head (:type (ex-data %)))
+                      (take-while some? (iterate ex-cause stale)))
+                "the refusal is the writer's stale-head refusal")
+            (is (= before (db/basis-t (db/db connection)))
+                "the stale adoption committed nothing")
+            (let [second-source (source/database opened h2)]
+              (try
+                (let [current (adopt second-source h2)]
+                  (is (not (instance? Throwable current)) (pr-str current))
+                  (is (= (db/pull second-source '[:seon.fn/sym :seon.program/definition-digest]
+                                  [:seon.fn/sym sym])
+                         (db/pull (db/db connection) '[:seon.fn/sym :seon.program/definition-digest]
+                                  [:seon.fn/sym sym]))
+                      "the surviving row is the newer publication's"))
+                (finally (d/release-materialized-db second-source)))))
+          (finally
+            (d/release-materialized-db first-source)
+            (d/release connection)))))))
+
+(deftest ^{:seon.test/fixture-observation
+           "A schema adoption transaction on a cluster branch races a publication of the same physical store."}
+  schema-adoption-refuses-at-the-writer-after-a-publication-moves-the-head
+  (#'source-test/with-store
+    (fn [opened]
+      (let [base (#'source-test/publish opened @#'source-test/digest-a)
+            h1 (:seon.source/commit-id base)
+            cluster-name "schema-adoption-contest"
+            _ (registry/ensure-cluster! {:seon.store/store opened
+                                         :seon.boot/cluster-name cluster-name
+                                         :seon.source/commit-id h1})
+            connection (store/open-branch! opened (registry/cluster-branch cluster-name))
+            attribute :seon.cluster.publication-lock-test/adopted
+            declaration {:db/ident attribute :db/valueType :db.type/string
+                         :db/cardinality :db.cardinality/one}
+            adopt (fn [commit]
+                    (try
+                      @(d/transact! connection
+                                    {:tx-data [[:db.fn/call registry/head-guard-tx
+                                                {:seon.source/branch source/current-branch
+                                                 :seon.source/expected-commit-id commit}]
+                                               declaration]})
+                      (catch Exception failure failure)))]
+        (try
+          ;; Admitted at h1; a publication moves current-src to h2 first.
+          (let [moved (#'source-test/publish opened @#'source-test/digest-b
+                                             'seon.cluster.source-test/populate-from-data!
+                                             {:seon.source/expected-commit-id h1
+                                              :seon.source.test/marker "moved"})
+                h2 (:seon.source/commit-id moved)
+                before (db/basis-t (db/db connection))
+                stale (adopt h1)]
+            (is (instance? Exception stale) (pr-str stale))
+            (is (some #(= {:type :stale-branch-head :expected-current-commit h1 :current-commit h2}
+                          (select-keys (ex-data %) [:type :expected-current-commit :current-commit]))
+                      (take-while some? (iterate ex-cause stale))))
+            (is (= before (db/basis-t (db/db connection))) "the stale schema change committed nothing")
+            (is (nil? (get (:schema (db/db connection)) attribute)))
+            (let [current (adopt h2)]
+              (is (some? (:db-after current)) (pr-str current))
+              (is (= :db.type/string (get-in (:schema (db/db connection)) [attribute :db/valueType])))))
+          (finally (d/release connection)))))))
