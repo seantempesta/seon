@@ -253,3 +253,5 @@ Reset of `default` itself was not run (the stop hang above would wedge it).
 Leftover: the `:cluster-rtest` branch stays in the store's roster (stopped).
 `reference-code/babashka-process` `src/babashka/process.cljc` (+5/−1,
 uncommitted) is not this lane's; untouched.
+
+**Census site.** `script/seon/dev/docstring.clj:164` `safe-sexpr` now asks `n/sexpr-able?` (rewrite-clj `protocols.cljc:34`) instead of `(catch Exception _ nil)`; the scan over 198 files answers identically before and after (194 files, 2,419 fns, 1,084 findings, 1.4 s).
