@@ -347,7 +347,7 @@
                      {:seon.flow/configuration launcher-configuration}))]
       (is (= :input (:seon.instrument/check refusal)))
       (is (= 'seon.flow/start-work-launcher!
-             (:seon.error/diagnostic-operation
+             (:seon.error/operation
               (:seon.error/data refusal))))))
 
   (let [environment (test-support/environment "refusal")
@@ -365,7 +365,7 @@
                           :seon.flow/complete! (fn [_])}))]
           (is (= :input (:seon.instrument/check refusal)))
           (is (= 'seon.flow/submit!
-                 (:seon.error/diagnostic-operation
+                 (:seon.error/operation
                   (:seon.error/data refusal))))))
 
       (testing "the compute submission"
@@ -378,7 +378,7 @@
                           :seon.flow/work-fn (fn [_] ::unreached)}))]
           (is (= :input (:seon.instrument/check refusal)))
           (is (= 'seon.flow/submit!!
-                 (:seon.error/diagnostic-operation
+                 (:seon.error/operation
                   (:seon.error/data refusal))))))
       (finally
         (flow/stop-work-launcher! launcher)))))

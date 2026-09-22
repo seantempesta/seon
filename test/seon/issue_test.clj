@@ -397,7 +397,7 @@
      (clojure.test/is (= :seon.agent/id (:seon.issue/non-test-reference-member (seon.issue/add! (assoc request :seon.issue/title "Invalid success ref" :seon.issue/tests #{[:seon.agent/id "issue-author"]})))))
      (let [refused (seon.issue/start! start)]
        (clojure.test/is (= issue-id (:seon.issue/unverifiable-issue-id refused)))
-       (clojure.test/is (= :seon.issue/unverifiable-issue-id (get-in refused [:seon.error/data :seon.error/diagnostic-member]))))
+       (clojure.test/is (= :seon.issue/unverifiable-issue-id (get-in refused [:seon.error/data :seon.error/member]))))
      (clojure.test/is (let [observed (seon.issue/tests! {:seon.db/connection c :seon.agent/id "issue-author"
                                                                :seon.issue/id issue-id :seon.issue/tests #{test-ref}})] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))))
      (let [started (seon.issue/start! start)

@@ -114,21 +114,14 @@
                      :seon.ns/requires]}]
                  [:seon.agent/id agent-id])]
     (if-not (:seon.agent/id agent-row)
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.bootstrap/opening
         :seon.error/operation 'seon.bootstrap/situation
         :seon.error/message "Create the requested agent before deriving its opening."
         :seon.error/offending agent-id
-        :seon.error/diagnostic-layer :seon.bootstrap/opening
-        :seon.error/diagnostic-operation 'seon.bootstrap/situation
-        :seon.error/diagnostic-member :seon.agent/id
         :my.plan/refused-member :seon.agent/id
-        :seon.error/diagnostic-expected :seon.agent/entity
-        :seon.error/diagnostic-offending agent-id
-        :seon.error/diagnostic-cause :seon.agent/id
-        :seon.error/diagnostic-evidence agent-id
-        :my.plan/missing-agent-id agent-id})
+        :my.plan/missing-agent-id agent-id
+        :seon.error/expected :seon.agent/entity}
       (let [namespace-row (:seon.agent/namespace agent-row)
             run (when-let [id (turn/open-for-agent database [:seon.agent/id agent-id])]
                   (db/pull database
@@ -395,23 +388,16 @@
       (or (:seon.config/error-key budget) (and (:seon.error/at budget) (:seon.error/layer budget) (:seon.error/operation budget))) budget
       (int? budget) budget
       :else
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.bootstrap/opening
         :seon.error/operation 'seon.bootstrap/beyond-closure-budget
         :seon.error/message "Declare the opening intent token budget in the cluster configuration."
         :seon.error/offending budget
-        :seon.error/diagnostic-layer :seon.bootstrap/opening
-        :seon.error/diagnostic-operation 'seon.bootstrap/beyond-closure-budget
-        :seon.error/diagnostic-member attribute
-        :seon.error/diagnostic-expected "a configured integer token budget"
-        :seon.error/diagnostic-offending budget
-        :seon.error/diagnostic-cause attribute
-        :seon.error/diagnostic-evidence budget
         :seon.error/expected-key attribute
         :seon.config/error-key attribute
         :seon.config/rule :seon.config/required-absent
-        :seon.config/required-absent attribute}))))
+        :seon.config/required-absent attribute
+        :seon.error/expected "a configured integer token budget"})))
 
 (defn- demonstrated-namespace-names
   [database agent-id]
@@ -606,20 +592,14 @@
       root
 
       (or (nil? root) (empty? order))
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.bootstrap/opening
         :seon.error/operation 'seon.bootstrap/pull-result
         :seon.error/message "Acquire the opening root and membership before generating entries."
         :seon.error/offending acquisition
-        :seon.error/diagnostic-layer :seon.bootstrap/opening
-        :seon.error/diagnostic-operation 'seon.bootstrap/pull-result
-        :seon.error/diagnostic-member :seon.render.walk/lookup
-        :seon.error/diagnostic-expected "a root with acquired membership"
-        :seon.error/diagnostic-offending acquisition
-        :seon.error/diagnostic-cause :seon.render.walk/lookup
-        :seon.error/diagnostic-evidence acquisition
-        :seon.bootstrap/acquired-member-count (count (:seon.render.walk/members acquisition))})
+        :seon.bootstrap/acquired-member-count (count (:seon.render.walk/members acquisition))
+        :seon.error/member :seon.render.walk/lookup
+        :seon.error/expected "a root with acquired membership"}
 
       :else
       (let [agent-id (second (:seon.render.walk/lookup request))
@@ -713,21 +693,15 @@
                               "A stored generated form is outside the pull."]
                           (throw
                            (ex-info message
-                                    (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+                                    {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.bootstrap/opening
         :seon.error/operation 'seon.bootstrap/next-entry-in
         :seon.error/message "Rebuild the opening from its stored evaluation sources."
         :seon.error/offending source
-        :seon.error/diagnostic-layer :seon.bootstrap/opening
-        :seon.error/diagnostic-operation 'seon.bootstrap/next-entry-in
-        :seon.error/diagnostic-member :seon.cluster.eval/source
-        :seon.error/diagnostic-expected "a source in the acquired opening"
-        :seon.error/diagnostic-offending source
-        :seon.error/diagnostic-cause :seon.cluster.eval/source
-        :seon.error/diagnostic-evidence source
         :seon.bootstrap/unmatched-source source
-        :seon.error/run [:seon.turn/id turn-id]})))))
+        :seon.error/run [:seon.turn/id turn-id]
+        :seon.error/member :seon.cluster.eval/source
+        :seon.error/expected "a source in the acquired opening"}))))
                       {:seon.repl/key (:seon.repl/key candidate)
                        :seon.sci.admit/print-node (edn/read-string result)}))
                   rows)
@@ -743,22 +717,15 @@
                 "Rebuild the opening after its stored prefix changed."]
             (throw
              (ex-info message
-                      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+                      {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.bootstrap/opening
         :seon.error/operation 'seon.bootstrap/next-entry-in
         :seon.error/message "Rebuild the opening after its stored prefix changed."
         :seon.error/offending prior-sources
-        :seon.error/diagnostic-layer :seon.bootstrap/opening
-        :seon.error/diagnostic-operation 'seon.bootstrap/next-entry-in
-        :seon.error/diagnostic-member :seon.bootstrap/expected-prefix-count
-        :seon.error/diagnostic-expected expected-sources
-        :seon.error/diagnostic-offending prior-sources
-        :seon.error/diagnostic-cause :seon.bootstrap/expected-prefix-count
-        :seon.error/diagnostic-evidence prior-sources
         :seon.error/run [:seon.turn/id turn-id]
         :seon.bootstrap/expected-prefix-count (count expected-sources)
-        :seon.bootstrap/actual-prefix-count (count prior-sources)})))))
+        :seon.bootstrap/actual-prefix-count (count prior-sources)
+        :seon.error/expected expected-sources}))))
         (nth episode index nil)))))
 
 (defn next-entry
