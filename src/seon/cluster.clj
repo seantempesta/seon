@@ -1930,8 +1930,27 @@
   [identities]
   (into [] (filter (comp adoption-identity-attribute? first)) identities))
 
+(def ^:private compiled-into-callers
+  "Clojure expands macros/inline bodies and embeds protocol/type interfaces at
+  caller compilation. Constants can be read by macros at compilation too.
+  These form heads therefore require the stored reverse dependency closure.
+  Ordinary defn remains unknown until its inline metadata is indexed."
+  '#{clojure.core/defmacro clojure.core/defprotocol clojure.core/deftype
+     clojure.core/defrecord clojure.core/definterface clojure.core/definline
+     clojure.core/def})
+
+(defn- declaration-reload-rule
+  "Missing compiler facts are unknown, never evidence for excluding callers."
+  {:malli/schema [:=> [:cat [:maybe :qualified-symbol]]
+                  [:enum :seon.reload/compiled-into-callers :seon.reload/unknown]]}
+  [defined-by]
+  (if (compiled-into-callers defined-by)
+    :seon.reload/compiled-into-callers
+    :seon.reload/unknown))
+
 (defn development-namespaces
-  "Changed declaration namespaces and their dependents in either program value."
+  "Changed namespaces plus dependents of compiled or unknown declarations.
+  Both program values contribute: retirement must retain the old compiler fact."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.fn.file/identities] [:set :seon.ns/name]]
@@ -1945,10 +1964,36 @@
                                   :seon.ns/name value
                                   (:seon.fn/sym :seon.test/sym) (symbol (namespace value))
                                   nil))) identities)
-         databases (if (identical? previous database) [database] [previous database])]
-     (loop [selected selected pending selected]
+         databases (if (identical? previous database) [database] [previous database])
+         symbols (into [] (keep (fn [[attribute value]]
+                                  (when (= :seon.fn/sym attribute) value))) identities)
+         rules (mapv (fn [database]
+                       (let [facts (db/q '[:find ?symbol ?head
+                                           :in $ [?symbol ...]
+                                           :where [?e :seon.fn/sym ?symbol]
+                                                  [?e :seon.fn/defined-by ?head]]
+                                         database symbols)]
+                         (when (:seon.error/at facts)
+                           (refused! "Declaration reload facts could not be read." facts))
+                         (into {} (map (fn [[symbol head]]
+                                         [symbol (declaration-reload-rule head)])) facts)))
+                     databases)
+         dependent-seeds
+         (into #{}
+               (keep (fn [[attribute value]]
+                       (case attribute
+                         :seon.ns/name value
+                         :seon.fn/sym
+                         (when (some (fn [rules]
+                                       (case (get rules value :seon.reload/unknown)
+                                         :seon.reload/compiled-into-callers true
+                                         :seon.reload/unknown true)) rules)
+                           (symbol (namespace value)))
+                         nil)))
+               identities)]
+     (loop [dependents dependent-seeds pending dependent-seeds]
        (if (empty? pending)
-         selected
+         (into selected dependents)
          (let [callers (into #{}
                              (mapcat
                               (fn [value]
@@ -1960,8 +2005,8 @@
                                     (refused! "Development namespace dependents could not be read." result))
                                   result)))
                              databases)
-               added (set/difference callers selected)]
-           (recur (into selected added) added)))))))
+               added (set/difference callers dependents)]
+           (recur (into dependents added) added)))))))
 
 (defn- verify-development-sources!
   "Refuse adoption when a reloaded namespace no longer has its published bytes."

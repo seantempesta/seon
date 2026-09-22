@@ -69,7 +69,7 @@
                          (db/db connection) [[:seon.fn/sym 'sample.reload.leaf/value]])]
            (is (= #{'sample.reload.leaf 'sample.reload.caller 'sample.reload.outer}
                   selected)
-               "Ordinary edits retain conservative compile-time dependent reload.")
+               "Missing inline facts are unknown and retain dependent reload.")
            (is (empty? (cluster/development-namespaces (db/db connection) []))))
          (let [before (db/db connection)
                _ (support/transacted!
