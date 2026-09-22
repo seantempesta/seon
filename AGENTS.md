@@ -291,7 +291,7 @@ are observed separately. Do not claim a disabled hook published an edit.
 Preserve unrelated edits. Own explicit paths; no `git add -A`, `reset --hard`, shared
 file restore or structural-edit worktree. Commit coherent path-limited slices. Native
 Codex collaboration or the documented CLI launcher handles lanes; do not nest delegation
-inside a bounded assignment. At most three editing lanes and two test JVMs; no lane
+inside a bounded assignment. Lanes are bounded by disjoint file ownership, the two-JVM test slot and four prepl probers, not by a count (five is the working ceiling); a shared file is committed only by the lane whose hunks are alone in it. No lane
 overlaps its own test/probe JVMs. Check live holders before deleting disposable roots;
 recursive deletion never follows symlinks. Paid provider runs are deliberate.
 

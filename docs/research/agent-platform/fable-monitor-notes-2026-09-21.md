@@ -415,3 +415,9 @@ fix the expectation or hand a wrapper defect to the error-schema lane by name.
 - `definition-digest` stopped and resumed (sol low) with the shared-file rule: never commit a file carrying the other lane's hunks; wait for the rename commit.
 - Launched `a2-storage-retention` (astra medium): f4 dry-run sweep → c10 → declared retention cutoff (proposal to §7) → `:db/noHistory` on churn attributes (RESET) → f8/c12 → §6.2 comparator proof → f1 → c2. Goal: an adoption grows the store by its datoms; hook publication re-enabled when measured cheap.
 - Lesson: I resumed a lane with `&` and a redirect; stopped and relaunched bare (panel rule).
+
+## 2026-09-22 12:05 — 1.2 landed; concurrency ruled by files not count; B1 publication and D1 candidates pulled forward
+
+- Step 1.2 LANDED: `f27b96c19` (declaration constructors, required schemas, stored B4 reader, regression), evidence `3f58fd991`; rename prerequisite `6d84f27fa`. RESET NEEDED (batch 1). Its focused runs could not publish the canonical fixture: the published base's cached projection still names retired `seon.error/facet-counts-agree?` — the base is stale after the rename; B4 c1 (fixture on the open store) dissolves that class, launched now.
+- Owner ruling (question tool): five lanes + reorder. README §4 and AGENTS.md now say concurrency is bounded by disjoint files, the two-JVM slot and four probers, five the working ceiling; a shared file is committed only by the lane whose hunks are alone in it. New rows 1.2b (B1 commits 2–10, incremental publication, after 1.2) and 1.4c (D1 candidate acquisition, after 1.4, merge orchestrator-manual until cut 3).
+- Launching now: `b4-fixture-open-store` (sol low), `search-deletion` (sol low), `constructor-repair` (astra low, review F1/F2/F6–F14). Running: `a2-storage-retention`, `error-facets`.
