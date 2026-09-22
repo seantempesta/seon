@@ -55,7 +55,7 @@ describes the removed default cap. Those claims are now false for the pinned
 fork; explicit limits still truncate by request. The skill was not edited
 outside this lane's ownership.
 
-## c3 boundary awaiting scope decision
+## First-pass c3 scope boundary — resolved below
 
 `rg` over production Clojure found only `turn.clj`'s map-arity `db/diff`
 call. The multi-arity callers are the obsolete tests. However,
@@ -73,7 +73,7 @@ Per §8's stop rule, options supplied to the owner:
 
 No c3 production edit or scratch-root reset has run pending that decision.
 
-## c4 boundary awaiting presentation decision
+## First-pass c4 presentation boundary — resolved below
 
 f2 is proven. The Seon deletion remains pending because the existing
 `:seon.print/elision` schema requires a positive omitted count, profile id and
@@ -252,7 +252,7 @@ dependency-data, revising the requested cause representation; (3) coordinate
 an owned error-schema change first, preserving the requested cause semantics
 at broader scope and cost.
 
-## Landing boundary and cleanup
+## First-pass landing boundary and cleanup — superseded below
 
 - **f2:** fork `41c79c1a`, pushed; Seon pin `59e86fd8b`.
 - **c5:** `4fe00e120`; source −117, schema comments −19, tests −43 net.
@@ -381,3 +381,88 @@ with their previously recorded boundaries retained. The new missing-query
 assertion and eight value-diff round-trip assertions passed in this run.
 Automatic result recording again refused `:seon.test/report-conflict`;
 this run is red and unrecorded, never claimed green.
+
+
+## Current landing boundary after the rulings
+
+| Row | Commit / candidate | Net source | §8 comparison | Evidence |
+|---|---|---:|---|---|
+| f2 | fork `41c79c1a`, pushed; pin `59e86fd8b` | 0 | prerequisite | 45 assertions, default 1001 complete, explicit limits preserved |
+| c3 | `f1e55a824` | −378 | planned −330 | committed load; from-zero boot; armed changed-read system turn |
+| c5 | `4fe00e120` | −117 | planned −120 | armed agent/named-schema probes; canonical fixture correction included in c4 candidate |
+| c13 | **`b6fe3ffa1`** | −18 | conditional −450/+10 not justified by table | typed missing-query row delegated; other seven kept |
+| c4 | **validated, not committed**; `tmp/a2-c4-ready.patch` | −56 | −82/+26 versus planned −70/+10 | raw-selector probe F; typed budget refusal; from-zero boot; five focused regressions |
+
+During c13's commit, a concurrent edit inserted foreign projection-cache and
+writer hunks into the shared `db.clj`. The initial commit's isolated load
+positively failed on `schema/load-projection` absent from its committed
+consumer. Corrected **only the commit**, preserving all foreign working-tree
+bytes: `b6fe3ffa1` was reconstructed from its parent plus the exact c13
+patch, then inspected: source **+2/−20**, tests **+6/−8**. Superseded
+`56bae6708` and `fe374f1ef` are not the landed slice. The final committed
+HEAD load is recorded separately in `tmp/a2-c13-final-head-load.log`.
+No foreign session, source file or process was operated.
+
+### c4 proposed resource, tested before the scope decision
+
+The named error remains in `seon.db.edn`. The minimal scope addition is
+`resources/seon/schemas/datahike.budget.edn`, four lines declaring the three
+required members. This is required by both resource placement
+(`schema/edn.clj`, `validate-resource-placement!`) and error-member storage
+(`schema/internal.cljc`, `owned-storage!`); neither owner was weakened.
+The proposed file exists only in the retained patch, not the shared tree.
+The question offers exactly three choices: add this resource (recommended),
+rename the members into `:seon.db/*` (changes the requested interface), or
+expand schema-placement/admission ownership (broader rule change).
+**No answer has been received; no scope grant is inferred from elapsed time.**
+
+The proposed four-file c4 patch was applied only to an isolated snapshot of
+`b6fe3ffa1`. From-zero command:
+`bin/seon --root /Users/sean/src/seon/tmp/a2-db-root reset --force`.
+Pid/start **94743 / 2026-09-22T20:12:01.287Z**, ready **152951 ms**,
+source commit `6ab2e1ad-7147-5929-b376-148efc122e61`, observed RSS
+**3725248 KiB** at 58 seconds. No missing readiness layers. Then
+`instrument/apply!` armed **1821** Vars. In **559 ms**:
+
+- Probe F found `seon.turn/step`, eid 6264: **29 pulled members = 29 datoms**,
+  with raw `[:seon.fn/calls]`; no selector rewriting family remains.
+- `pull` with `:max-work 1` returned the named error with
+  `:datahike.budget/name :query-work`, `observed 2`, `allowed 1`, exactly
+  matching Datahike's exception members. Its schema validator returned true.
+- The default attribute renderer showed all three budget members, operation,
+  layer, message and time. No partial entity or elision/count was fabricated.
+- The same agent pull without the bound returned `{:seon.agent/id "root"}`;
+  `seon.db/pull` was positively armed.
+
+Forms/envelopes: `tmp/a2-c4-probe.clj`, `tmp/a2-c4-probe-result.json`.
+The five focused fixture regressions initially gave 37 passes/one error:
+the c5 fixture's bare agent row lacked the now-required `:seon.agent/branch`.
+Three-question answer: a retired fixture assumption, fixed with the canonical
+`agent/creation-tx`, not a writer guard. The candidate also asserts the
+rendered budget members. After reloading only the test namespace on the
+scratch JVM: **5 tests, 46 assertions, zero failures/errors, 7715.006 ms**.
+This includes value-diff, c5 named-schema, c4 budget+render, c13 malformed
+requests, and the changed-read system turn. Files:
+`tmp/a2-c4-focused-probe.clj`, `tmp/a2-c4-focused-green.json`.
+This direct armed fixture proof is distinct from the red/stale-base
+`bin/test-fast` result above; no suite green or platform proof is claimed.
+
+Candidate deltas: source +26/−82; db schema +6; proposed attribute resource
++4; tests +37/−77 (includes removing the obsolete totalization fixture and
+correcting the c5 fixture). `tmp/a2-c4-ready.patch` is the complete reviewable
+candidate. Earlier `tmp/a2-c4-pending.patch` is superseded by it.
+All c4 edits were removed from the shared tree by reversing only their exact
+hunks while retaining the foreign `db.clj` changes. No `print`, renderer,
+turn, codec or writer edit is included in the candidate.
+
+Scratch stop observed exact pid/start and `:process-exit? true`
+(`tmp/a2-c4-stop.log`); the held shell exited. No live Java/Babashka holder
+remained before deleting its root and isolated checkout; the dependency
+symlink was unlinked first. Runtime log retained as `tmp/a2-c4-runtime.log`.
+Original default remains **51528**, same start identity, no missing layers,
+same **14** errored receipts. No default publication, reload, stop or reset.
+
+Final clean committed `b6fe3ffa1` namespace load exited **0**; its shell
+exited and its detached checkout was removed. All owned shell sessions have
+terminated. Retained fast-run evidence belongs to the runner; no shared
+cache or another lane's root was swept.
