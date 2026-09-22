@@ -599,7 +599,8 @@
       "a node carrying a stable representation keeps it beside the class")
   (let [nameless (print/emit-text {:seon.print/face :seon.print/object} no-cuts)]
     (is (not= "#object[]" nameless))
-    (is (str/includes? nameless ":seon.print/object-without-class")
+    (is (= "The object print node names no class."
+           (:seon.error/message (edn/read-string nameless)))
         "a node that names no class says so instead of printing nothing")))
 
 (deftest canonical-order-belongs-to-print-nodes

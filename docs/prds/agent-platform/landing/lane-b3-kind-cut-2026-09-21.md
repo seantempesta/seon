@@ -10,6 +10,87 @@ created: 2026-09-21
 The requested scan is empty. Seven earlier-contract debt boundaries are listed below.
 No final green or live default settlement claim is made.
 
+## From-zero publication correction, 2026-09-22
+
+The orchestrator restarted default on the cut (pid 15000, ready-ms 6025), then
+`bin/test --prepare-head-base` exposed a publication defect introduced here.
+`tmp/prepare-head-base-2026-09-22b.log:37` records the exact refusal:
+`Function source and Malli contract do not join bijectively.` with
+`{:seon.fn.signature/reason :analyzer-disagreement, :seon.fn/signature-refused true,
+:seon.fn.signature/source-arglists [[node _sink _options _depth _path]],
+:seon.fn.signature/analyzed-arglists ()}`. The contracted `defmulti emit` reached
+`seon.program/contract-facts` with no analyzer arglists. Incremental adoption and
+namespace loading had not proved this full-publication boundary.
+
+Removed the dispatch Var's `:malli/schema`, preserving `^:private`. Audited
+`git diff aba6d445e~1 bc70a82e3 | rg -n 'defmulti|\(def '` and surrounding
+hunks (also with eight context lines): this was the only added Malli schema on
+a `defmulti` or plain `def`. Other hits were unchanged declarations, changed
+fixture values, deleted class-test constants, parser support and source strings.
+No other dispatch/value Var contract required removal.
+
+Read-only MCP JVM probe, explicit root `/Users/sean/src/seon`, cluster `default`:
+`(select-keys (meta (ns-resolve 'seon.print 'emit)) [:private :malli/schema :arglists])`.
+Before: `{:private true, :malli/schema [:=> [:cat :map :seon.print/sink
+:seon.print/options :int :seon.render.data/path] :seon.schema/value]}` (1 ms).
+After hook adoption: `{:private true}` (2 ms). Default was not restarted by this lane.
+
+Hook clock: publication `c1d1a975-45ba-49a7-8b93-7c170a399e73`, edit
+08:18:49.752498Z, convergence 08:19:16.141592Z, **26.389094 seconds**.
+The reported phase was `SOURCE_BATCH`; its interval includes queue/publication/adoption,
+not a separately measured inner phase. Converged source commit
+`6ab239f9-fff1-571c-869d-240f38e517d3`. This exceeds ten seconds and is a finding.
+
+Print-map audit (original cut line numbers; all three maps remain reader-valid):
+
+| Construction | Reader / decision | Result |
+|---|---|---|
+| print.cljc:738, nameless object | Terminal text/HTML sinks; print-test checked retired kind text, no production decision reader | Keep message and node evidence. Test now reads the exact `:seon.error/message`; no discriminator needed. |
+| print.cljc:785, unknown face | Terminal sinks; print-test reads shown text and node keys, no production decision reader | Existing declared `:seon.print/unknown-face` member remains. The `: ?_current-ns_? /face` lookup (spaces added here) already existed before `aba6d445e`; its nil value is not proof of a valid typed error. No claim that this pre-existing diagnostic shape satisfies its named error schema. |
+| print.cljc:1036, missing elision coordinates | Exception data; no specific production decision reader found | Existing `::elision-without-requery-coordinates true`, path, offset and unit remain. No new member or contract widening. |
+
+First required command `bin/test-fast --paths src/seon/print.cljc -- seon.print-test`
+completed run `bedd46d32c09`: **18 executed, 0 reused, 89 assertions, 2 failures,
+0 errors**, exit 1. Contracts armed: 1681 registered/instrumented, 1675 program-armable.
+Failures: subprocess byte-stability test took 15211.619458 ms against its existing
+5000 ms bound; nameless-object assertion expected the removed kind text. The latter
+assertion is corrected in this follow-up; the subprocess bound was not relaxed.
+
+Fresh-root proof: the first command refused the absent directory, so created the
+empty `tmp/kind-cut-pub` directory and reran
+`bin/seon --root tmp/kind-cut-pub start kind-cut`. Exit **0**; pid **17523**,
+start instant **2026-09-22T08:20:06.366Z**, prepl port **49962**, readiness
+`{:seon.boot/ready-ms 89423, :seon.agent/count 1, :seon.boot/missing-layers []}`,
+source commit **6ab23a94-1877-5538-a0df-a41d2a32efc5**. This proves the fresh
+root passed full source publication and reached boot readiness. Its 89.423-second
+boot exceeds ten seconds; this owner-requested cold operation was authorized.
+No inner phase duration was emitted by this start command. The committed measurement
+script's `start`/lifecycle boundary is the same CLI operation; its worktree/init/edit
+sequence was not run because this request specifies a fresh-root start only.
+
+A subsequent status returned `No live exact-root JVM`; PID 17523 was absent.
+`bin/seon --root tmp/kind-cut-pub down` exited 0 with
+`#:seon.operator{:stopped-processes []}`. Readiness is an observed completed boot,
+not a claim that the process remained alive after the launcher session ended.
+The orchestrator still owns `bin/test --prepare-head-base` and the cold gate;
+neither was run here. No default restart was performed or needed for the metadata
+probe: hook adoption was observed. The earlier broader RESTART NEEDED entries
+remain historical evidence; the owner has since performed that restart.
+
+Final focused rerun:
+`bin/test-fast --paths src/seon/print.cljc test/seon/print_test.clj -- seon.print-test`,
+run **8cc3bab26d59**, **18 executed, 0 reused, 89 assertions, 1 failure, 0 errors**,
+exit 1. The corrected nameless-object assertion and unknown/absent-face test pass.
+The remaining failure is the existing subprocess byte-stability duration bound;
+there is no green namespace claim. Both test JVMs exited before the next owned JVM.
+Test-edit adoption `4a7f9bd0-4a3f-4b6a-b4cb-68fe8b3c716c` took **6.891029 seconds**
+(08:20:16.278210Z to 08:20:23.169239Z), converged commit
+`6ab23a45-9bef-5ff8-871e-8cf42732c772`.
+
+Scratch-root cleanup: exact PID absent, operator down completed, `lsof +D` returned
+no holders; deleted only owned `tmp/kind-cut-pub` without following symlinks.
+Foreign dirty and untracked paths were preserved. No contract was widened.
+
 ## Commits and changed paths
 
 - `f7f5c36ef`: class metadata retirement and native schema parity (39 paths),

@@ -647,8 +647,7 @@
         (-token sink ::elision "..."))
       (-close sink descriptor))))
 
-(defmulti ^{:private true
-            :malli/schema [:=> [:cat :map :seon.print/sink :seon.print/options :int :seon.render.data/path] :seon.schema/value]} emit
+(defmulti ^:private emit
   (fn [node _sink _options _depth _path]
     (::face node)))
 
