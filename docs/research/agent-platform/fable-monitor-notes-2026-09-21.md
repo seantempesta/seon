@@ -105,3 +105,18 @@ is NOT established; record what the system turn's read evidence named before bla
 for the measured `adopt-noncore ≤ 700 ms` row and one observed live hook adoption;
 neither is recorded. Record the next real hook event's adoption time in the landing
 note, or disable again if an edit costs the old 60–150 s.
+
+## 21:15 local — Fable orchestrates; kind-cut lane launched; platform tier unblocked
+
+Owner handed orchestration to Fable (Codex lanes implement through `bin/codex-agent`).
+Actions: (1) `efc3f4e39` removes the namespace-level `:seon.test/platform` declaration
+from `seon.cluster.source-test`, `source-lineage-test` and `source-evidence-test`
+(every test there reaches the destructive published-root fixture; the runner guard
+refused the whole tier). `bin/test --platform` is running as the cut-1 checkpoint
+(`tmp/platform-gate-2026-09-21.log`). (2) Lane `kind-cut` (gpt-6-astra, medium)
+implements B3 commit 4 in full: delete every `:seon.error/kind` and `:seon.error/class
+true` site (730 lines), convert the 167 propagation guards, one class regression
+(no-forms reply settles as a fact; fails before, passes after), landing note
+`landing/lane-b3-kind-cut-2026-09-21.md`. Default is restarted by the orchestrator
+after it lands. (3) A vigilance check every 20 minutes reviews each lane commit as a
+principal engineer would and resumes a drifting lane with the exact defect.
