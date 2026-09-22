@@ -171,14 +171,14 @@
         :seon.ns/name namespace-name})
       (support/transacted!
               connection
-              [{:seon.fn/sym (str namespace-name "/current-items")
+              [{:seon.fn/sym (symbol (str namespace-name) "current-items")
                 :seon.schema.admission/source :core
                 :seon.fn/ns [:seon.ns/name namespace-name]
                 :seon.fn/source "(defn current-items [items] items)"
                 :seon.fn/arglists "([items])"
                 :seon.fn/private? false
                 :seon.fn/spec "[:=> [:cat [:vector :int]] [:vector :int]]"}
-               {:seon.test/sym (str namespace-name "/current-items-test")
+               {:seon.test/sym (symbol (str namespace-name) "current-items-test")
                 :seon.schema.admission/source :core
                 :seon.test/ns [:seon.ns/name namespace-name]
                 :seon.test/source "(deftest current-items-test)"
@@ -243,14 +243,14 @@
         :seon.ns/name namespace-name})
       (support/transacted!
        connection
-       [{:seon.fn/sym (str namespace-name "/current-items")
+       [{:seon.fn/sym (symbol (str namespace-name) "current-items")
          :seon.schema.admission/source :core
          :seon.fn/ns [:seon.ns/name namespace-name]
          :seon.fn/source "(defn current-items [items] items)"
          :seon.fn/arglists "([items])"
          :seon.fn/private? false
          :seon.fn/spec "[:=> [:cat [:vector :int]] [:vector :int]]"}
-        {:seon.test/sym (str namespace-name "/current-items-test")
+        {:seon.test/sym (symbol (str namespace-name) "current-items-test")
          :seon.schema.admission/source :core
          :seon.test/ns [:seon.ns/name namespace-name]
          :seon.test/source "(deftest current-items-test)"
@@ -307,20 +307,20 @@
       (support/transacted!
               connection
               [{:seon.ns/name 'fixture.intent}
-               {:seon.fn/sym "fixture.intent/target"
+               {:seon.fn/sym 'fixture.intent/target
                 :seon.schema.admission/source :core
                 :seon.fn/ns [:seon.ns/name 'fixture.intent]
                 :seon.fn/source "(defn target [x] (inc x))"
                 :seon.fn/arglists "([x])"
                 :seon.fn/private? false
                 :seon.fn/spec "[:=> [:cat :int] :int]"}
-               {:seon.test/sym "fixture.intent/target-usage"
+               {:seon.test/sym 'fixture.intent/target-usage
                 :seon.schema.admission/source :core
                 :seon.test/ns [:seon.ns/name 'fixture.intent]
                 :seon.test/source
                 "(clojure.test/deftest target-usage (clojure.test/is (= 2 (target 1))))"
                 :seon.test/usage true
-                :seon.fn/calls [[:seon.fn/sym "fixture.intent/target"]]
+                :seon.fn/calls ['fixture.intent/target]
                 :seon.test/pass-count 1
                 :seon.test/fail-count 0
                 :seon.test/error-count 0
@@ -356,7 +356,7 @@
               "the prose that introduces a generated form is its own fact")
           (is (some #(str/includes? % "target-usage") delta)
               "first real use carries its call-edge usage demonstration")
-          (is (= [[:seon.fn/sym "fixture.intent/target"]]
+          (is (= [[:seon.fn/sym 'fixture.intent/target]]
                  (:my.plan/intent-subjects after)))
           (is (= (set delta)
                  (set (remove before-sources (candidate-sources after))))

@@ -24,7 +24,7 @@
 (def ^:private cluster-name "render-coverage")
 (def ^:private agent-id "render-coverage-agent")
 (def ^:private run-id "render-coverage-run")
-(def ^:private owner-symbol "my.fs/read")
+(def ^:private owner-symbol 'my.fs/read)
 (def ^:private opened-at (Date. 1000))
 (def ^:private settled-at (Date. 1012))
 (def ^:private interrupted-at (Date. 1015))

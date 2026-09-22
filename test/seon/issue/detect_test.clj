@@ -19,7 +19,7 @@
 (def ^:private source-ns 'seon.detect-fixture)
 (def ^:private helper-ns 'seon.detect-fixture-helpers)
 
-(defn- sym-in [namespace-name simple] (str namespace-name "/" simple))
+(defn- sym-in [namespace-name simple] (symbol (str namespace-name) simple))
 
 (def ^:private complete-fn (sym-in source-ns "complete"))
 (def ^:private uncontracted-fn (sym-in source-ns "uncontracted"))
@@ -68,7 +68,7 @@
           (function-row helper-fn helper-ns helper-file {})
           {:seon.test/sym (sym-in 'seon.detect-fixture-test "covers")
            :seon.schema.admission/source :core
-           :seon.fn/calls #{[:seon.fn/sym complete-fn] [:seon.fn/sym uncontracted-fn]}}])]
+           :seon.fn/calls #{complete-fn uncontracted-fn}}])]
     (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
     report))
 

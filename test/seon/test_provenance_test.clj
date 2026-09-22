@@ -9,7 +9,7 @@
   [database passes]
   (let [run (runner/provenance database)]
     {:seon.test.runner/results
-     [{:seon.test/sym "provenance.example/check"
+     [{:seon.test/sym 'provenance.example/check
        :seon.test/pass-count passes
        :seon.test/fail-count (if (pos? passes) 0 1)
        :seon.test/error-count 0}]
@@ -38,7 +38,7 @@
         (is (= "second-provenance-run"
                (get-in (db/pull @connection
                                 '[{:seon.test/run [:seon.test.run/id]}]
-                                [:seon.test/sym "provenance.example/check"])
+                                [:seon.test/sym 'provenance.example/check])
                        [:seon.test/run :seon.test.run/id])))
         (let [basis (db/basis-t @connection)
               refusal (support/refusal-data
@@ -54,7 +54,7 @@
   (support/with-database
     (fn [connection]
       (support/transacted! connection
-                           [{:seon.test/sym "provenance.example/check"
+                           [{:seon.test/sym 'provenance.example/check
                              :seon.schema.admission/source :core
                              :seon.test/source "(deftest check (is true))"}])
       (let [before (runner/program-digest @connection)
@@ -63,7 +63,7 @@
         (is (= before (runner/program-digest @connection)))
         (is (:db-after
              (db/transact! connection
-                           [[:db/add [:seon.test/sym "provenance.example/check"]
+                           [[:db/add [:seon.test/sym 'provenance.example/check]
                              :seon.test/source "(deftest check (is false))"]])))
         (is (not= before (runner/program-digest @connection)))
         (is (= before (:seon.test.run/program-digest
@@ -72,7 +72,7 @@
 (deftest verified-requires-the-subject-positive-assertions-and-exact-program
   (support/with-database
     (fn [connection]
-      (let [symbol "provenance.example/check"
+      (let [symbol 'provenance.example/check
             digest (runner/program-digest @connection)]
         (is (false? (seon-test/verified? @connection symbol digest)))
         (support/transacted! connection

@@ -23,12 +23,12 @@
      :seon.source/test-input-digest (id/digest 64 [::failure-inputs])}])
   (let [namespace-name (symbol (str "failure.probe" (id/id)))
         namespace-object (create-ns namespace-name)
-        test-symbol (str namespace-name "/probe")
+        test-symbol (symbol (str namespace-name) "probe")
         mode (atom :red)
         test-var (intern namespace-object 'probe)
         path (get-in (db/pull (db/db connection)
                        '[{:seon.fn/file [:seon.fn.file/relative-path]}]
-                       [:seon.test/sym "seon.test-failure-facts-test/recorded-reach-belongs-to-the-tested-value-and-is-replaced"])
+                       [:seon.test/sym 'seon.test-failure-facts-test/recorded-reach-belongs-to-the-tested-value-and-is-replaced])
                      [:seon.fn/file :seon.fn.file/relative-path])]
     (alter-meta! test-var assoc :test
       (fn []
@@ -179,7 +179,7 @@
           (reset! mode :red)
           (let [red (run-probe connection v)
                 namespace-name (symbol (namespace (symbol s)))
-                reached (str namespace-name "/reached")
+                reached (symbol (str namespace-name) "reached")
                 tx (db/transact! connection
                      [{:seon.fn/sym reached :seon.schema.admission/source :core
                        :seon.fn/ns [:seon.ns/name namespace-name]
@@ -251,32 +251,32 @@
 (deftest publication-replaces-cardinality-many-tuples
   (support/with-database
     (fn [connection]
-      (let [s "reach.facts/tuple-owner"]
+      (let [s 'reach.facts/tuple-owner]
         (is (:db-after (transact! connection
                         [{:seon.fn/sym s :seon.fn/call-arities
-                          #{["clojure.core/inc" 1] ["clojure.core/+" 2] ["clojure.core/str" 1]}}])))
+                          #{['clojure.core/inc 1] ['clojure.core/+ 2] ['clojure.core/str 1]}}])))
         (let [current (db/pull (db/db connection) '[*] [:seon.fn/sym s])]
           (is (:db-after (db/transact! connection
                           (program/exact-replacement-tx current
-                            (assoc (dissoc current :db/id) :seon.fn/call-arities #{["clojure.core/dec" 1]})))))
-          (is (= #{["clojure.core/dec" 1]}
+                            (assoc (dissoc current :db/id) :seon.fn/call-arities #{['clojure.core/dec 1]})))))
+          (is (= #{['clojure.core/dec 1]}
                  (set (:seon.fn/call-arities
                         (db/pull (db/db connection) [:seon.fn/call-arities] [:seon.fn/sym s]))))))))))
 
 (deftest recorded-reach-belongs-to-the-tested-value-and-is-replaced
   (support/with-database
     (fn [connection]
-      (let [s "reach.facts/check"
-            a "reach.facts/a" b "reach.facts/b"]
+      (let [s 'reach.facts/check
+            a 'reach.facts/a b 'reach.facts/b]
         (is (:db-after (transact! connection
                         [{:db/id "a" :seon.fn/sym a}
                          {:db/id "b" :seon.fn/sym b}
-                         {:seon.test/sym s :seon.fn/calls ["a"]}])))
+                         {:seon.test/sym s :seon.fn/calls [a]}])))
         (let [tested (db/db connection)
               captured (completion tested s 1)]
           (is (:db-after (db/transact! connection
                           [[:db.fn/retractAttribute [:seon.test/sym s] :seon.fn/calls]
-                           [:db/add [:seon.test/sym s] :seon.fn/calls [:seon.fn/sym b]]])))
+                           [:db/add [:seon.test/sym s] :seon.fn/calls b]])))
           (is (vector? (runner/commit-results! connection captured)))
           (is (= #{a} (set (db/q '[:find [?s ...] :in $ ?test
                                   :where [?t :seon.test/sym ?test]
@@ -294,12 +294,12 @@
 (deftest what-made-it-red-names-changed-functions
   (support/with-database
     (fn [connection]
-      (let [s "changed.facts/check" a "changed.facts/a" b "changed.facts/b"]
+      (let [s 'changed.facts/check a 'changed.facts/a b 'changed.facts/b]
         (is (:db-after (transact! connection
                         [{:db/id "a" :seon.fn/sym a :seon.fn/source "old"
                           :seon.fn/spec "[:=> [:cat] :int]"}
                          {:db/id "b" :seon.fn/sym b :seon.fn/source "old"}
-                         {:seon.test/sym s :seon.fn/calls ["a"]}])))
+                         {:seon.test/sym s :seon.fn/calls [a]}])))
         (runner/commit-results! connection (completion (db/db connection) s 1))
         (is (string? (:seon.test/unknown (sut/changed-since-green (db/db connection) s))))
         (runner/commit-results! connection (completion (db/db connection) s 0))
@@ -317,12 +317,12 @@
   (support/with-database
     (fn [connection]
       (let [database (db/db connection)
-            captured (assoc-in (completion database "branch.facts/check" 0)
+            captured (assoc-in (completion database 'branch.facts/check 0)
                               [:seon.test.run/provenance :seon.test.run/branch]
                               :building-source-retired)
             _ (is (vector? (runner/commit-results! connection captured)))
             row (db/pull (db/db connection)
-                        '[{:seon.test/run [*]}] [:seon.test/sym "branch.facts/check"])
+                        '[{:seon.test/run [*]}] [:seon.test/sym 'branch.facts/check])
             run (:seon.test/run row)]
         (is (= (get-in database [:config :branch]) (:seon.test.run/branch run)))
         (is (= :building-source-retired (:seon.test.run/tested-branch run)))
@@ -334,7 +334,7 @@
 (deftest explicit-namespace-completion-commits-with-membership-unknown
   (support/with-database
     (fn [connection]
-      (let [s "namespace.completion/check"
+      (let [s 'namespace.completion/check
             _ (is (:db-after (transact! connection [{:seon.test/sym s}])))
             database (db/db connection)
             digest (get (runner/reach-digests database [s]) s)
@@ -362,9 +362,9 @@
     (support/with-database
       {:seon.test-support/extra-schema (reported-path-schema)}
       (fn [connection]
-        (let [s "absent.facts/check"
-              present "absent.facts/present"
-              deleted "absent.facts/deleted"]
+        (let [s 'absent.facts/check
+              present 'absent.facts/present
+              deleted 'absent.facts/deleted]
           (is (:db-after (transact! connection [{:seon.fn/sym present}
                                                 {:seon.test/sym s}])))
           (let [database (db/db connection)
@@ -416,14 +416,14 @@
   ;; evidence must write nothing at all.
   (support/with-database
     (fn [connection]
-      (let [s "delta.facts/check" t "delta.facts/other"
-            a "delta.facts/a" b "delta.facts/b"
+      (let [s 'delta.facts/check t 'delta.facts/other
+            a 'delta.facts/a b 'delta.facts/b
             assertion-id (id/id [s "first claim" 0] 64)]
         (is (:db-after (transact! connection
                         [{:db/id "a" :seon.fn/sym a}
                          {:db/id "b" :seon.fn/sym b}
-                         {:seon.test/sym s :seon.fn/calls ["a" "b"]}
-                         {:seon.test/sym t :seon.fn/calls ["a"]}])))
+                         {:seon.test/sym s :seon.fn/calls [a b]}
+                         {:seon.test/sym t :seon.fn/calls [a]}])))
         (let [tested (db/db connection)
               run (runner/provenance tested)
               ;; No :seon.db/db — `commit-results!` resolves the tested value
@@ -470,11 +470,11 @@
   ;; datoms per run.
   (support/with-database
     (fn [connection]
-      (let [s "member.facts/check" a "member.facts/a" b "member.facts/b"]
+      (let [s 'member.facts/check a 'member.facts/a b 'member.facts/b]
         (is (:db-after (transact! connection
                         [{:db/id "a" :seon.fn/sym a}
                          {:db/id "b" :seon.fn/sym b}
-                         {:seon.test/sym s :seon.fn/calls ["a" "b"]}])))
+                         {:seon.test/sym s :seon.fn/calls [a b]}])))
         (let [tested (db/db connection)
               run (runner/provenance tested)
               captured (fn [members]

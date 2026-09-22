@@ -32,7 +32,7 @@
                                   [:seon.issue/id "class-classification-is-inferred-from-hand-lists"])]
      (clojure.test/is (= 3 (count selected-real)))
      (clojure.test/is (= 3 (:seon.issue/count report)) (pr-str report))
-     (clojure.test/is (some #(= "seon.search-test/index-step-contract-has-durable-generative-host-predicates"
+     (clojure.test/is (some #(= 'seon.search-test/index-step-contract-has-durable-generative-host-predicates
                                (:seon.test/sym %)) (:seon.issue/tests search-value)))
      (clojure.test/is (some #{"5deb40e4e"} (:seon.issue/commits member)))
      (clojure.test/is (some #(= "agent-form-calls-to-core-namespaces-are-not-indexed" (:seon.issue/id %))
@@ -193,7 +193,7 @@
      (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
      (clojure.test/is (= #{"com.cognitect/transit-clj" "java.lang.Thread/sleep" "seon.cluster.loop/settle!"}
                         (set (:seon.issue/unresolved row))))
-     (clojure.test/is (some #(= "seon.db/pull" (:seon.fn/sym %)) (:seon.issue/functions row)))
+     (clojure.test/is (some #(= 'seon.db/pull (:seon.fn/sym %)) (:seon.issue/functions row)))
      (clojure.test/is (= (count selected) (:seon.issue/count report)))
      (clojure.test/is (pos? (count (:seon.issue/unresolved report))))
      (clojure.test/is (every? #(and (string? (key %)) (pos-int? (val %))) (:seon.issue/unresolved report)))))))
@@ -266,7 +266,7 @@
  (seon.test-support/with-database
   (fn [c]
    (seon.test-support/seed-cluster! c "issue-family-opening")
-   (let [test-name "seon.issue-test/issue-worker-creation-is-atomic"
+   (let [test-name 'seon.issue-test/issue-worker-creation-is-atomic
          issue-id "issue-family-opening"
          aid (seon.id/id [issue-id])]
     (seon.test-support/transacted! c [{:seon.issue/id issue-id :seon.issue/title "Verify issue opening"
@@ -316,7 +316,8 @@
                                   untaught))))
           (clojure.test/is (and issue-index (<= 0 plan-index)) (pr-str sources))
           (clojure.test/is (empty? (keep :seon.cluster.eval/error entries)))
-          (clojure.test/is (clojure.string/includes? (str (:seon.eval/shown (get entries issue-index))) test-name)))
+          (clojure.test/is (clojure.string/includes? (str (:seon.eval/shown (get entries issue-index)))
+                                                     (str test-name))))
         (finally
          (seon.cluster.agent/disarm! request)
          (clojure.core.async/close! faults)
@@ -327,7 +328,7 @@
   (seon.test-support/with-database
    (fn [connection]
      (seon.test-support/seed-cluster! connection "issue-family")
-     (let [detector "seon.issue.detect/public-without-doc"
+     (let [detector 'seon.issue.detect/public-without-doc
            subject (:seon.fn/sym
                     (first (sort-by :seon.fn/sym
                                     (seon.issue.detect/public-without-doc

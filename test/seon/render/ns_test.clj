@@ -108,7 +108,7 @@
 
 (defn- function-row
   [namespace-name function-name source options]
-  (merge (cond-> {:seon.fn/sym (str namespace-name "/" function-name)
+  (merge (cond-> {:seon.fn/sym (symbol (str namespace-name) function-name)
           :seon.schema.admission/source :core
           :seon.fn/ns [:seon.ns/name namespace-name]
           :seon.fn/private? false}
@@ -157,7 +157,7 @@
           (is (reader-valid? (the-ns 'seon.flow) ai1)))
         (testing "distance two is an ordinary public API value"
           (let [rendered (edn/read-string ai2)]
-            (is (some #(= "seon.flow/start-work-launcher!"
+            (is (some #(= 'seon.flow/start-work-launcher!
                           (:seon.fn/sym %))
                       rendered))
             (is (some :seon.schema/key rendered))
@@ -407,7 +407,7 @@
                           %)
                       rendered))
             (is (not (str/includes? ai2 "seon.error/render-ai")))
-            (is (some #(= "fixture.closure/uses-own" (:seon.fn/sym %))
+            (is (some #(= 'fixture.closure/uses-own (:seon.fn/sym %))
                       rendered))
             (is (not (comment-framed? rendered))))
           (is (not (str/includes? ai2
@@ -518,7 +518,7 @@
         (testing "the namespace renderer preserves declared data for the value projection"
           (is (apply = rendered))
           (let [rows (edn/read-string (first rendered))]
-            (is (= #{"fixture.budget/a" "fixture.budget/b"}
+            (is (= #{'fixture.budget/a 'fixture.budget/b}
                    (into #{} (keep :seon.fn/sym) rows)))
             (is (some :seon.schema/key rows))))))))
 

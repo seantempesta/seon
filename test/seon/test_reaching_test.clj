@@ -32,11 +32,11 @@
 (deftest reach-digests-follow-only-changed-closures
  (support/with-database
   (fn [connection]
-   (let [a "reach.fixture/a" b "reach.fixture/b" ta "reach.fixture/a-test" tb "reach.fixture/b-test"
+   (let [a 'reach.fixture/a b 'reach.fixture/b ta 'reach.fixture/a-test tb 'reach.fixture/b-test
          rows [{:db/id "fn-a" :seon.fn/ns [:seon.ns/name 'seon.test-reaching-test] :seon.schema.admission/source :core :seon.fn/sym a :seon.fn/source "(defn a [x] x)" :seon.fn/spec "[:=> [:cat :seon.test/sym] :seon.test/sym]"}
                {:db/id "fn-b" :seon.fn/ns [:seon.ns/name 'seon.test-reaching-test] :seon.schema.admission/source :core :seon.fn/sym b :seon.fn/source "(defn b [x] x)" :seon.fn/spec "[:=> [:cat :int] :int]"}
                {:seon.schema.admission/source :core :seon.test/sym ta :seon.test/source "(deftest a-test (is (= \"x\" (a \"x\"))))" :seon.test/subject "fn-a"}
-               {:seon.schema.admission/source :core :seon.test/sym tb :seon.test/source "(deftest b-test (is (= 1 (b 1))))" :seon.fn/calls ["fn-b"]}]
+               {:seon.schema.admission/source :core :seon.test/sym tb :seon.test/source "(deftest b-test (is (= 1 (b 1))))" :seon.fn/calls [b]}]
          _ (is (:db-after (db/transact! connection rows)))
          initial (runner/reach-digests (db/db connection) [ta tb])
          stats (fn [] (select-keys (:seon.test.runner/reach-index
@@ -65,9 +65,9 @@
       (let [database (db/db connection)
             actual (sut/reaching {:seon.db/db database
                                   :seon.test/changed ['my.note/add!]})]
-        (is (:db/id (db/pull database [:db/id] [:seon.fn/sym "my.note/add!"])))
+        (is (:db/id (db/pull database [:db/id] [:seon.fn/sym 'my.note/add!])))
         (is (vector? actual))
-        (is (= (set (functions/tests-reaching database "my.note/add!")) (set actual)))
+        (is (= (set (functions/tests-reaching database 'my.note/add!)) (set actual)))
         (is (string? (:seon.test/unknown (sut/reaching {:seon.db/db database
                                :seon.test/changed ['absent.function/no-row]}))))))))
 
@@ -86,7 +86,7 @@
   (support/seed-cluster! connection "default")
   (let [namespace-name (symbol (str "reaching.probe" (id/id)))
         namespace-object (create-ns namespace-name)
-        test-symbol (str namespace-name "/probe")
+        test-symbol (symbol (str namespace-name) "probe")
         source (list 'clojure.test/deftest 'probe body)
         test-var (binding [*ns* namespace-object]
                    (clojure.core/refer 'clojure.core)
@@ -95,6 +95,16 @@
       (with-indexed-tests connection namespace-name [source]
         #(assertion test-symbol test-var))
       (finally (remove-ns namespace-name)))))
+
+(deftest fixture-built-test-symbol-is-qualified-at-the-write
+  (support/with-database
+    (fn [connection]
+      (with-test connection '(clojure.test/is true)
+        (fn [test-symbol _]
+          (let [written (:seon.test/sym
+                         (db/pull (db/db connection) [:seon.test/sym]
+                                  [:seon.test/sym test-symbol]))]
+            (is (qualified-symbol? written) (pr-str written))))))))
 
 (deftest unchanged-closures-reuse-green-results
   (support/with-database
@@ -126,7 +136,7 @@
   (support/with-database
     (fn [connection]
       (let [database (db/db connection)
-            s "seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol"
+            s 'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol
             completion (assoc (runner/provenance database)
                               :seon.test.runner/results [{:seon.test/sym s
                                 :seon.test/pass-count 1 :seon.test/fail-count 0 :seon.test/error-count 0}])
@@ -238,15 +248,15 @@
             (when row
               (is (:db-after (db/transact! connection [(dissoc row :seon.sci.eval/evaluated?)]))))))
         (let [database (db/db connection)
-              s "my.agents.reach-digest/largest-customer-test"
-              f "my.agents.reach-digest/largest-customer"
+              s 'my.agents.reach-digest/largest-customer-test
+              f 'my.agents.reach-digest/largest-customer
               before (sut/reach-digest database s)
               index (#'runner/reach-refresh database nil [s])
               entry (#'runner/reach-entry index s)
               target (:db/id (db/pull database [:db/id] [:seon.fn/sym f]))]
           (is (contains? (:seon.test.runner/reach-dependencies entry) target)
               (pr-str (db/pull database
-                        '[:seon.test/source {:seon.fn/calls [:seon.fn/sym]}
+                        '[:seon.test/source :seon.fn/calls
                           {:seon.test/subject [:seon.fn/sym]}]
                         [:seon.test/sym s])))
           (is (:db-after (db/transact! connection
@@ -378,7 +388,7 @@
                                   {:seon.test.run/provenance provenance
                                    :seon.test/remaining-ms 50}))]
             (is (= 1 (:seon.test/error-count result)) (pr-str result))
-            (is (.contains (:seon.test/failure-message result "") test-symbol))
+            (is (.contains (:seon.test/failure-message result "") (str test-symbol)))
             (is (= 1 (:seon.test/error-count
                        (db/pull (db/db connection) '[*] [:seon.test/sym test-symbol]))))))))))
 
@@ -428,7 +438,7 @@
 ;; cold gate's platform tier refuses the same class from its own side; these
 ;; regressions own the in-process half.
 
-(def ^:private destructive-owner "seon.test-support/populate-published-root!")
+(def ^:private destructive-owner 'seon.test-support/populate-published-root!)
 
 (defn- owner-destroys
   "What the declared owner says it destroys, read from its program row."
@@ -445,7 +455,7 @@
   (support/seed-cluster! connection "default")
   (let [namespace-name (symbol (str "destructive.probe" (id/id)))
         namespace-object (create-ns namespace-name)
-        test-symbol (str namespace-name "/probe")
+        test-symbol (symbol (str namespace-name) "probe")
         marker (clojure.java.io/file "tmp" (str "destructive-probe-" (id/id)))
         source (list 'clojure.test/deftest 'probe
                      (list 'clojure.test/is
@@ -462,7 +472,7 @@
         (fn []
           (support/transacted! connection
                                [{:seon.test/sym test-symbol
-                                 :seon.fn/calls [[:seon.fn/sym destructive-owner]]}])
+                                 :seon.fn/calls [destructive-owner]}])
           (assertion test-symbol test-var marker)))
       (finally
         (support/delete-recursively! marker)
@@ -502,7 +512,7 @@
               (is (= :seon.test.host/isolated-snapshot (:seon.test/host report)) (pr-str report))
               (is (= destructive-owner (:seon.fn/sym report)))
               (is (seq (:seon.fn/destroys report)) (pr-str report))
-              (is (.contains (sut/host-text database test-symbol) destructive-owner)))
+              (is (.contains (sut/host-text database test-symbol) (str destructive-owner))))
             (is (= ["bin/test" "--" (namespace (symbol test-symbol))]
                    (:seon.test/command result)))
             (is (.contains (:seon.error/message result "") working) (pr-str result))
@@ -554,7 +564,7 @@
                        excluded)
                     (pr-str result))
                 (is (.contains feedback "destructive-excluded 1") feedback)
-                (is (.contains feedback destructive-owner) feedback)
+                (is (.contains feedback (str destructive-owner)) feedback)
                 (is (not (.exists marker)) "the excluded test executed nothing")
                 (is (nil? (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
                                                    [:seon.test/sym test-symbol]))))
@@ -583,12 +593,12 @@
         (is (:db-after removed) (pr-str removed))
         (is (string? (:seon.test/unknown derived)) (pr-str derived))
         (is (.contains (:seon.error/message derived "") ":seon.fn/destroys") (pr-str derived))
-        (is (string? (:seon.test/unknown (sut/host after "seon.id-test/anything")))
+        (is (string? (:seon.test/unknown (sut/host after 'seon.id-test/anything)))
             "an unanswerable declaration never answers in-process")
         (is (:seon.test/destructive-path (#'sut/destructive-refusal
                                after
                                (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
-                               "seon.id-test/does-not-matter"))
+                               'seon.id-test/does-not-matter))
             "an unanswerable reach refuses the run instead of admitting it")))))
 
 (deftest a-test-with-no-program-row-is-unknown-and-is-never-run-in-process
@@ -598,7 +608,7 @@
       (let [database (db/db connection)
             namespace-name (symbol (str "unindexed.probe" (id/id)))
             namespace-object (create-ns namespace-name)
-            test-symbol (str namespace-name "/probe")
+            test-symbol (symbol (str namespace-name) "probe")
             marker (clojure.java.io/file "tmp" (str "unindexed-probe-" (id/id)))
             test-var (binding [*ns* namespace-object]
                        (clojure.core/refer 'clojure.core)
@@ -649,7 +659,7 @@
             (is (not (.contains what "\n")) what)
             (is (.contains ai line) ai)
             (is (.contains html line) html))
-          (let [cheap (str "render.probe" (id/id) "/cheap")]
+          (let [cheap (symbol (str "render.probe" (id/id)) "cheap")]
             (support/transacted! connection
                                  [{:seon.test/sym cheap
                                    :seon.schema.admission/source :core
@@ -660,7 +670,7 @@
 
 (deftest reused-results-render-the-recording-basis-as-data
   (let [unit {:seon.render/value
-              {:seon.test/sym "seon.test-reaching-test/reused-results-render-the-recording-basis-as-data"
+              {:seon.test/sym 'seon.test-reaching-test/reused-results-render-the-recording-basis-as-data
                :seon.test/pass-count 1 :seon.test/fail-count 0 :seon.test/error-count 0
                :seon.test/run-basis-t 42 :seon.test/recorded-basis-t 43
                :seon.test/unchanged true}}
@@ -696,7 +706,7 @@
   (support/seed-cluster! connection "default" manifest)
   (let [namespace-name (symbol (str "long.probe" (id/id)))
         namespace-object (create-ns namespace-name)
-        test-symbol (str namespace-name "/probe")
+        test-symbol (symbol (str namespace-name) "probe")
         marker (clojure.java.io/file "tmp" (str "long-probe-" (id/id)))
         source (list 'clojure.test/deftest
                      (with-meta 'probe {:seon.test/long long-declaration})
@@ -743,7 +753,7 @@
                        excluded)
                     (pr-str result))
                 (is (.contains feedback "long-excluded 1") feedback)
-                (is (.contains feedback test-symbol) feedback)
+                (is (.contains feedback (str test-symbol)) feedback)
                 (is (.contains feedback long-declaration) feedback)
                 (is (not (.exists marker)) "the excluded test executed nothing")
                 (is (nil? (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
@@ -777,9 +787,9 @@
   (support/seed-cluster! connection "default" {:seon.test/check-time-limit-ms 120000})
   (let [namespace-name (symbol (str "expiry.probe" (id/id)))
         namespace-object (create-ns namespace-name)
-        calibration (str namespace-name "/m-calibration")
-        completed (str namespace-name "/a-completes")
-        unreturned (str namespace-name "/z-never-returns")
+        calibration (symbol (str namespace-name) "m-calibration")
+        completed (symbol (str namespace-name) "a-completes")
+        unreturned (symbol (str namespace-name) "z-never-returns")
         sources {calibration (list 'clojure.test/deftest 'm-calibration
                                    (list 'clojure.test/is true))
                  completed (list 'clojure.test/deftest 'a-completes

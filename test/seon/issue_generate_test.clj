@@ -7,7 +7,7 @@
             [seon.issue.detect]
             [seon.test-support]))
 
-(def ^:private detector "seon.issue.detect/public-without-doc")
+(def ^:private detector 'seon.issue.detect/public-without-doc)
 
 (defn bare-entity-subject
   "Probe detector naming its subject by an entity id, which a refork changes."
@@ -157,15 +157,15 @@
                    :seon.render/value (issue-row connection (subject-issue-id subject))}
              text (seon.issue/render-ai unit)]
          (clojure.test/is (empty? (:seon.issue/tests view)) (pr-str view))
-         (clojure.test/is (= (list (symbol detector) '(seon.db/db))
+         (clojure.test/is (= (list detector '(seon.db/db))
                              (:seon.issue/check-form view))
                           "the form that decides done re-evaluates the detector, never an empty check")
          (clojure.test/is (not (clojure.string/includes? text "my.test/check"))
                           (str "a detector issue must not promise tests it does not have: " text))
-         (clojure.test/is (clojure.string/includes? text detector) text)
+         (clojure.test/is (clojure.string/includes? text (str detector)) text)
          (clojure.test/is (clojure.string/includes?
                            (pr-str (seon.issue/render-html unit))
-                           detector)
+                           (str detector))
                           "the block names the detector too"))))))
 
 (clojure.test/deftest the-docstring-standard-scopes-on-the-source-root-fact
