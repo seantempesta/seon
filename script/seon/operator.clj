@@ -46,7 +46,7 @@
   (let [manifest (:seon.config/manifest options)]
     (case (:seon.operator/command options)
       :export (operator-export-bound-ms manifest)
-      :init (operator-boot-bound-ms manifest)
+      (:init :reset) (operator-boot-bound-ms manifest)
       (operator-silence-backstop-ms manifest))))
 
 (defn diagnostic
@@ -64,11 +64,16 @@
     :seon.operator/disposition cause
     :seon.error/member :seon.operator/request
     :seon.error/expected :completed-operation
-    :seon.error/offending evidence
-    :seon.error/data (merge evidence {:seon.error/layer :seon.operator/client})})
+    :seon.error/offending evidence})
   ([message evidence cause throwable]
-   (refusal/diagnostic
-    (assoc (diagnostic message evidence cause) :seon.error/throwable throwable))))
+   ;; The outermost link's ex-data is usually the evidence itself; it is
+   ;; carried once, as `:seon.error/offending`, never again inside the chain.
+   (update (refusal/diagnostic
+            (assoc (diagnostic message evidence cause) :seon.error/throwable throwable))
+           :seon.error/chain
+           (fn [links]
+             (mapv #(if (= evidence (:seon.error/data %)) (dissoc % :seon.error/data) %)
+                   links)))))
 
 (defn- fail! [message evidence]
   (throw (ex-info message (diagnostic message evidence :refused))))
@@ -417,12 +422,28 @@
       (command! ["tar" "-xf" (str tar) "-C" (str destination)] repository 120000)
       (finally (.delete tar)))))
 
+(defn- committed-repository
+  "The operator's own checkout (derived from this script's location, never the
+  cwd), required to be a Git top level: a nuke builds from committed inputs."
+  []
+  (let [repository (repository-root)
+        top (try (str/trim (command! ["git" "rev-parse" "--show-toplevel"] repository 30000))
+                 (catch clojure.lang.ExceptionInfo cause
+                   (throw (ex-info "The operator's checkout is not inside a Git repository; a nuke builds from committed inputs and has none."
+                                   (diagnostic "The operator's checkout is not inside a Git repository; a nuke builds from committed inputs and has none."
+                                               {:seon.operator/repository repository} :refused cause)
+                                   cause))))]
+    (when-not (= (.getCanonicalPath (io/file top)) (.getCanonicalPath (io/file repository)))
+      (fail! "The operator's checkout is not a Git top level (a frozen archive inside another repository?); a nuke builds from committed inputs and this checkout has none."
+             {:seon.operator/repository repository :seon.operator/enclosing-repository top}))
+    repository))
+
 (defn committed-source!
   "A commit's program (HEAD by default) as a directory of committed bytes,
   built once per commit."
   ([root] (committed-source! root "HEAD"))
   ([root revision]
-  (let [repository (repository-root)
+  (let [repository (committed-repository)
         sha (str/trim (command! ["git" "rev-parse" "--verify" (str revision "^{commit}")] repository 30000))
         parent (io/file root "data/source")
         target (io/file parent sha)]
@@ -489,32 +510,135 @@
           :seon.boot/advertisement (:seon.boot/advertisement outcome)
           :seon.operator/terminated terminated}}))))
 
+(def ^:private nuke-derived-paths
+  "Every root-relative derived path the code writes, deleted by a nuke so the
+  rebuild reads no prior derived state (owner 2026-09-23: \"nuke nukes
+  everything including all caches\"). The store itself is deleted by the
+  replacement JVM under its flock (`seon.cluster.store/open-store!`
+  `:seon.store/destroy?`), which retains the lock file.
+  - data/source: this operator's committed archives (`committed-source!`).
+  - target/dev-dependency-*: the development class cache (`dev_cache.clj:13-19`).
+  - target/test-published-bases, target/test-classpaths: published test bases
+    and classpaths of the retired gate launcher (no current producer).
+  - .clj-kondo/.cache: the analyzer and lint cache (`seon.fn.analyzer`
+    `cache-directory`, `seon.fn` analysis cache-root, `bin/seon-hook:236`,
+    `script/seon/dev/clj_kondo.clj:36`).
+  - .cpcache: tools.deps' computed classpaths."
+  ["data/source"
+   "target/dev-dependency-classes" "target/dev-dependency-classes.next"
+   "target/dev-dependency-cache-result.edn" "target/dev-dependency-cache-current.edn"
+   "target/dev-dependency-cache-processes" "target/dev-dependency-cache.lock"
+   "target/dev-dependency-cache-references.lock"
+   "target/test-published-bases" "target/test-classpaths"
+   ".clj-kondo/.cache" ".cpcache"])
+
+(defn- wipe-derived-state!
+  "Delete every derived path under `root` (never following links) and each
+  cluster's advertisement file; return what existed and was deleted."
+  [root]
+  (into (into []
+              (keep (fn [relative]
+                      (let [file (io/file root relative)]
+                        (when (fs/exists? file {:nofollow-links true})
+                          (fs/delete-tree file)
+                          relative))))
+              nuke-derived-paths)
+        (keep (fn [directory]
+                (let [file (io/file directory "prepl.edn")]
+                  (when (.isFile file)
+                    (fs/delete file)
+                    (str "data/clusters/" (.getName directory) "/prepl.edn")))))
+        (or (.listFiles (io/file root "data/clusters")) [])))
+
+(def ^:private nuke-fallback-boots
+  "Distinct older programs a nuke boots after HEAD fails twice (plan §7, B)."
+  4)
+
+(defn- same-program?
+  "Whether two commits' trees agree outside documentation."
+  [repository a b]
+  (let [child (.start (doto (ProcessBuilder. ^java.util.List
+                                             ["git" "diff" "--quiet" a b "--" "." ":(exclude)docs"])
+                        (.directory (io/file repository))
+                        (.redirectErrorStream true)))]
+    (when-not (.waitFor child 30000 TimeUnit/MILLISECONDS)
+      (.destroyForcibly child)
+      (fail! "git diff did not exit within its bound." {:seon.operator/commits [a b]}))
+    (case (.exitValue child)
+      0 true
+      1 false
+      (fail! "git diff failed." {:seon.operator/commits [a b] :seon.operator/exit (.exitValue child)
+                                 :seon.operator/output (slurp (.getInputStream child))}))))
+
+(defn- program-candidates
+  "Newest first-parent commits from `revision`, one per distinct program."
+  [revision]
+  (let [repository (committed-repository)
+        shas (str/split-lines
+              (command! ["git" "rev-list" "--first-parent" "-n" "64"
+                         (str revision "^{commit}")] repository 30000))]
+    (reduce (fn [kept sha]
+              (cond
+                (<= (inc nuke-fallback-boots) (count kept)) (reduced kept)
+                (and (seq kept) (same-program? repository (peek kept) sha)) kept
+                :else (conj kept sha)))
+            [] shas)))
+
 (defn nuke!
-  "Delete the store and rebuild `default` from committed HEAD. Never leaves a
-  JVM with a deleted store: readiness, or no JVM and every attempt's cause."
+  "Delete the store and every derived cache, then rebuild `default` from
+  committed inputs. Never leaves a JVM with a deleted store and never stops
+  at stale state: HEAD twice, then the newest older distinct programs, each
+  terminated when it does not reach readiness. HEAD's failure is reported first."
   [request]
   (let [began (System/nanoTime)
+        root (:seon.operator/managed-root request)
+        ;; Committed inputs are resolved before anything is stopped or deleted.
         ;; A drill may name another committed revision; the CLI always builds HEAD.
-        source (committed-source! (:seon.operator/managed-root request)
-                                  (get request :seon.source/revision "HEAD"))
-        source-ms (elapsed-ms began)
-        attempts (loop [attempts []]
-                   (let [result (nuke-attempt! request (:seon.operator/source-root source))
+        candidates (program-candidates (get request :seon.source/revision "HEAD"))
+        began-down (System/nanoTime)
+        stopped (down! request (selected-processes root))
+        down-ms (elapsed-ms began-down)
+        wiped (wipe-derived-state! root)
+        wipe-ms (- (elapsed-ms began-down) down-ms)
+        plan (into [(first candidates) (first candidates)] (rest candidates))
+        attempts (loop [[sha & more] plan attempts []]
+                   (let [started (System/nanoTime)
+                         source (committed-source! root sha)
+                         source-ms (elapsed-ms started)
+                         result (assoc (nuke-attempt! request (:seon.operator/source-root source))
+                                       :seon.operator/source source
+                                       :seon.operator/source-ms source-ms)
                          attempts (conj attempts result)]
-                     (if (and (:seon.operator/failed-attempt result) (< (count attempts) 2))
-                       (recur attempts)
+                     (if (and (:seon.operator/failed-attempt result) (seq more))
+                       (recur more attempts)
                        attempts)))
         final (peek attempts)
-        failures (mapv :seon.operator/failed-attempt (filter :seon.operator/failed-attempt attempts))
-        report {:seon.operator/source source
-                :seon.operator/source-ms source-ms
-                :seon.operator/total-ms (elapsed-ms began)}]
-    (if (:seon.operator/failed-attempt final)
-      (assoc (diagnostic "Nuclear rebuild from committed HEAD failed twice; no JVM of this root remains."
+        failures (into [] (keep (fn [attempt]
+                                  (when-let [failed (:seon.operator/failed-attempt attempt)]
+                                    (assoc failed :seon.operator/source (:seon.operator/source attempt)))))
+                       attempts)
+        report {:seon.operator/stopped-processes (:seon.operator/stopped-processes stopped)
+                :seon.operator/wiped wiped
+                :seon.operator/phases {:seon.operator/down-ms down-ms :seon.operator/wipe-ms wipe-ms}
+                :seon.operator/candidates candidates
+                :seon.operator/total-ms (elapsed-ms began)}
+        head (first candidates)
+        ready-sha (get-in final [:seon.operator/source :seon.source/git-sha])]
+    (cond
+      (:seon.operator/failed-attempt final)
+      (assoc (diagnostic (str "Nuclear rebuild failed on HEAD " head " and every older distinct program tried; no JVM of this root remains.")
                          (merge report {:seon.operator/failed-attempts failures}) :client-failed)
              :seon.operator/process-exit? true)
-      (cond-> (merge final report)
-        (seq failures) (assoc :seon.operator/failed-attempts failures)))))
+      (= head ready-sha)
+      (cond-> (merge (dissoc final :seon.operator/phases) report
+                     {:seon.operator/attempt-phases (:seon.operator/phases final)})
+        (seq failures) (assoc :seon.operator/failed-attempts failures))
+      :else
+      (merge (dissoc final :seon.operator/phases) report
+             {:seon.operator/head-failure (first failures)
+              :seon.operator/fallback-from head
+              :seon.operator/failed-attempts failures
+              :seon.operator/attempt-phases (:seon.operator/phases final)}))))
 
 (defn request! [request]
   (try
@@ -523,10 +647,14 @@
                (connected! request) (launch! request))
       :stop (if (:seon.operator/force? request) (force-stop! request) (connected! request))
       :down (down! request (selected-processes (:seon.operator/managed-root request)))
-      ;; `reset` stays the nuke until the fresh-branch reset (plan §7) replaces it.
-      (:reset :nuke) (do (when-not (:seon.operator/force? request)
-                           (fail! "Nuclear rebuild requires --force." request))
-                         (nuke! request))
+      ;; reset = the running JVM unlinks the branch and forks a fresh one,
+      ;; keeping every cache; nuke = delete the store and every cache.
+      :reset (do (when-not (:seon.operator/force? request)
+                   (fail! "Reset requires --force." request))
+                 (connected! request))
+      :nuke (do (when-not (:seon.operator/force? request)
+                  (fail! "Nuclear rebuild requires --force." request))
+                (nuke! request))
       :logs (let [path (io/file (:seon.operator/managed-root request) "data/clusters"
                                 (:seon.boot/cluster-name request) "logs/seon.log")]
               (when-not (.isFile path) (fail! "Requested log is unavailable." request))
@@ -584,7 +712,8 @@
             (:status :down :reset :nuke)
             (do (when (seq positionals) (fail! "Command takes no cluster name." request))
                 (when (and (#{:reset :nuke} command) (not (:seon.operator/force? request)))
-                  (fail! "Nuclear rebuild requires --force." request)) request)
+                  (fail! (str (if (= :reset command) "Reset" "Nuclear rebuild") " requires --force.")
+                         request)) request)
             (:start :init :open :stop :logs)
             (do (when (< 1 (count positionals)) (fail! "Command takes at most one cluster name." request))
                 (cond-> request
@@ -609,7 +738,10 @@
           (when-not (zero? (.exitValue child)) (fail! "OS opener failed." result)))
         :else (prn result))
       (shutdown-agents)
-      (System/exit (if (:seon.error/message result) 1 0)))
+      ;; 3: stable and ready, but on an older program because HEAD failed.
+      (System/exit (cond (:seon.error/message result) 1
+                         (:seon.operator/fallback-from result) 3
+                         :else 0)))
     (catch Exception cause
       (binding [*out* *err*] (prn (diagnostic (ex-message cause) (or (ex-data cause) {}) :argv-failed cause)))
       (System/exit 1))))

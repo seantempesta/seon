@@ -208,8 +208,14 @@
     :seon.error/offending offending
     :seon.error/expected :completed-operation})
   ([message offending cause throwable]
-   (refusal/diagnostic
-    (assoc (diagnostic message offending cause) :seon.error/throwable throwable))))
+   ;; The outermost link's ex-data is usually the evidence itself; it is
+   ;; carried once, as `:seon.error/offending`, never again inside the chain.
+   (update (refusal/diagnostic
+            (assoc (diagnostic message offending cause) :seon.error/throwable throwable))
+           :seon.error/chain
+           (fn [links]
+             (mapv #(if (= offending (:seon.error/data %)) (dissoc % :seon.error/data) %)
+                   links)))))
 
 (defn- refuse!
   {:malli/schema [:=> [:cat :string :map] :nil]}
@@ -414,6 +420,35 @@
                 {:seon.boot/cluster-name n
                  :seon.operator/stopped? true
                  :seon.operator/process-exit? (empty? @running-instances)})
+        ;; Reset = unlink the cluster's branch and fork a fresh one from the
+        ;; published program rows (plan §7), in this JVM, keeping every cache:
+        ;; the store stays held across stop and start, so nothing reopens.
+        :reset (let [instance (selected-instance name)
+                     config (:seon.boot/config instance)
+                     n (:seon.boot/cluster-name config)
+                     dir (:seon.boot/store-dir config)
+                     began (System/nanoTime)
+                     held (cluster/acquire-root-store! dir)]
+                 (try
+                   (stop! instance)
+                   (let [stopped-ms (quot (- (System/nanoTime) began) 1000000)
+                         _ (registry/retire-branch! {:seon.store/store held
+                                                     :seon.store/branch (registry/cluster-branch n)})
+                         unlinked-ms (quot (- (System/nanoTime) began) 1000000)
+                         started (start! (-> config
+                                             (dissoc :seon.store/destroy? :seon.operator/force?
+                                                     :seon.operator/command :seon.boot/log-dir
+                                                     :seon.boot/store-dir)
+                                             (assoc :seon.boot/prepl-port 0)))]
+                     (merge identity
+                            {:seon.boot/cluster-name n
+                             :seon.boot/readiness (readiness started)
+                             :seon.operator/phases
+                             {:seon.operator/stop-ms stopped-ms
+                              :seon.operator/unlink-ms (- unlinked-ms stopped-ms)
+                              :seon.operator/total-ms (quot (- (System/nanoTime) began) 1000000)}}
+                            (select-keys started [:seon.source/commit-id])))
+                   (finally (cluster/release-root-store! dir))))
         :down (do (doseq [instance (filter map? (vals @running-instances))] (stop! instance))
                   {:seon.operator/stopped-processes [identity]
                    :seon.operator/process-exit? (empty? @running-instances)})
