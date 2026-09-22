@@ -34,9 +34,16 @@
   ([schema]
    (generatable? schema {}))
   ([schema options]
+   ;; Malli answers "cannot generate" with two typed ex-infos:
+   ;; `::mg/no-generator` (reference-code/malli/src/malli/generator.cljc:501,
+   ;; and `-create-from-gen` for a declaration yielding no generator) and
+   ;; `::m/invalid-schema` (`malli.core/-fail!`). Anything else propagates.
    (try
      (boolean (mg/generator schema options))
-     (catch Throwable _ false))))
+     (catch clojure.lang.ExceptionInfo failure
+       (if (#{::mg/no-generator ::m/invalid-schema} (:type (ex-data failure)))
+         false
+         (throw failure))))))
 
 (defn schema-row
   "Accrete the derived generatability fact onto one canonical schema row."
@@ -48,7 +55,10 @@
            (try
              (generatable? (m/schema (:seon.schema/key row)
                                      {:registry registry}))
-             (catch Throwable _ false)))))
+             (catch clojure.lang.ExceptionInfo failure
+               (if (= ::m/invalid-schema (:type (ex-data failure)))
+                 false
+                 (throw failure)))))))
 
 (defn non-generatable-advisory
   "One teaching line for an admitted schema that cannot generate values."

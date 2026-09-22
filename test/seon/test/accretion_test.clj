@@ -410,3 +410,18 @@
                  (:seon.test.accretion/executed-count effectful-check)))
           (is (= #{"fixture.auto-check/capability"}
                  (:seon.test.accretion/capabilities effectful-check))))))))
+
+(deftest every-packaged-schema-answers-generatability-as-a-boolean
+  ;; 169 packaged schemas (e.g. :seon.sci.eval/evaluation) named their
+  ;; generator by symbol in `:gen/gen`; malli handed the symbol to gen/fmap and
+  ;; threw an AssertionError that only a catch-everything hid. The fork now
+  ;; resolves the symbol, and any other "cannot generate" is a typed ex-info.
+  (let [forms (schema.edn/packaged-forms)
+        answers (into {} (map (fn [schema-key]
+                                [schema-key (:seon.schema/generatable?
+                                             (accretion/schema-row forms {:seon.schema/key schema-key}))]))
+                      (keys forms))]
+    (is (every? boolean? (vals answers)))
+    (is (true? (answers :seon.sci.eval/evaluation))
+        "a map whose member names its generator by symbol generates")
+    (is (true? (answers :seon.test/var)))))
