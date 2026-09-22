@@ -223,6 +223,8 @@ defect (its content-keyed memo is uncommitted `db.clj`).
 | regression body, lane | 43.3 s — **DEFECT >10 s** | fixture ready 15.8–23.4 s; two ordinary turn passes 29–39 s; only 2 SCI acquisitions (605 ms total) inside the drive; stack samples dominated by `seon.schema/projection-from-rows`, `canonical-coll-string` and `projection-rows` (projection derivation) |
 | regression body, HEAD | 43.7 s — **DEFECT >10 s** | same fixture and drive |
 | `mixed-plan-…` lane | 51.0 s — **DEFECT >10 s** | same fixture and drive class |
+| `declaration-body` lane | 31.9 s — **DEFECT >10 s** | same fixture and drive class |
+| HEAD-load snapshot JVM | 16.9 s — **DEFECT >10 s** | require 15.3 s, cold source load, classpath cache miss |
 | `delimiter-repair-…` lane | 93.8 s — **DEFECT >10 s**, ended in OOM | concurrent foreign test run in the same JVM |
 
 Issue to file (the orchestrator folds lane rows into shared notes): "the turn
@@ -234,7 +236,16 @@ the lane receipt settlement is 0.06 ms of analysis instead of about 200 ms.
 
 One commit, "Receipts assert no program call edges": `src/seon/turn.clj`,
 `src/seon/fn.clj`, `test/seon/cluster/turn_test.clj` and this note. Its id is
-recorded by the follow-up note commit below.
+`f2e6285cc`.
+
+HEAD `f2e6285cc` loads in a fresh JVM. The check ran on a `git archive`
+snapshot with `reference-code` and `target/dev-dependency-classes` symlinked
+(both unlinked before the snapshot was deleted), using
+`clojure -M:test -e "(require 'seon.turn 'seon.fn 'seon.cluster.turn-test)"`.
+Require took 15,344 ms and the wall time was 16.9 s. That is a **DEFECT >10 s**
+in the cold source-load class
+(`docs/seon/issues/a-focused-test-jvm-spends-twenty-seconds-before-its-first-test.md`),
+with a classpath-cache miss for the fresh snapshot directory.
 
 RESET NEEDED: no. Default was restored to its published code; it adopts this
 commit at the orchestrator's next checkpoint.
