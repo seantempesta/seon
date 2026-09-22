@@ -13,7 +13,7 @@
                        :seon.wake/opens-turn? false}
                       :seon.db/ref],
                      :fire
-                     [:map {:seon.db/attributes true}
+                     [:map {:seon.db/attributes true :seon.program/partition :seon.data}
                       [:seon.schedule.fire/id :seon.schedule.fire/id]
                       [:seon.schedule.fire/task :seon.schedule.fire/task]
                       [:seon.schedule.fire/agent :seon.schedule.fire/agent]

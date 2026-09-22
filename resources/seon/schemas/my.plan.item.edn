@@ -63,7 +63,7 @@
                  :seon.render/ai seon.plan/render-item-ai,
                  :seon.render/html seon.plan/render-item-html,
                  :description
-                 "One plan step's own attributes. Ownership is the incoming component edge from :my.plan/steps or :my.plan.item/steps, never a stored backlink."}
+                 "One plan step's own attributes. Ownership is the incoming component edge from :my.plan/steps or :my.plan.item/steps, never a stored backlink." :seon.program/partition :seon.data}
                 [:my.plan.item/id :my.plan.item/id]
                 [:my.plan.item/title :my.plan.item/title]
                 [:my.plan.item/position {:optional true} :my.plan.item/position]

@@ -5,7 +5,7 @@
                           :properties :string,
                           :row
                           [:map
-                           #:seon.db{:attributes true}
+                           #:seon.db{:attributes true :seon.program/partition :seon.program}
                            [:seon.schema.shape.entry/id
                             :seon.schema.shape.entry/id]
                            [:seon.schema.shape.entry/order

@@ -44,7 +44,7 @@
                [:int {:min 0 :description "Remaining ordinary turns derived for this view, never stored."}]]]
              :issue [:map {:seon.db/attributes true
                            :seon.render/units [:seon.issue/functions :seon.issue/tests :seon.issue/errors :seon.issue/members]
-                           :seon.render/ai seon.issue/render-ai :seon.render/html seon.issue/render-html}
+                           :seon.render/ai seon.issue/render-ai :seon.render/html seon.issue/render-html :seon.program/partition :seon.data}
                      [:seon.issue/id :seon.issue/id] [:seon.issue/title :seon.issue/title]
                      [:seon.issue/status :seon.issue/status] [:seon.issue/severity :seon.issue/severity]
                      [:seon.issue/problem :seon.issue/problem]

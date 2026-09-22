@@ -6,7 +6,7 @@
  :seon.issue.citation/row [:int {:min 1 :description "First cited line."}]
  :seon.issue.citation/end-row [:int {:min 1 :description "Last cited line of a span; absent for a single line or a bare path."}]
  :seon.issue.citation/citation
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.program/partition :seon.data}
   [:seon.issue.citation/id :seon.issue.citation/id]
   [:seon.issue.citation/file :seon.issue.citation/file]
   [:seon.issue.citation/row {:optional true} :seon.issue.citation/row]

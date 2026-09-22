@@ -4,7 +4,7 @@
                    :description
                    "One namespace import binding, equivalent to one entry of a Clojure ns :import clause.",
                    :seon.render/ai seon.render.ns/render-import-ai,
-                   :seon.render/html seon.render.ns/render-import-html}
+                   :seon.render/html seon.render.ns/render-import-html :seon.program/partition :seon.program}
                   [:seon.ns.import/local :seon.ns.import/local]
                   [:seon.ns.import/target-class
                    {:optional true}

@@ -3,7 +3,7 @@
                        [:map
                         {:seon.db/attributes true,
                          :seon.render/ai seon.context/capture-ai,
-                         :seon.render/html seon.context/capture-html}
+                         :seon.render/html seon.context/capture-html :seon.program/partition :seon.data}
                         [:seon.context.capture/id
                          :seon.context.capture/id]
                         [:seon.context.capture/run

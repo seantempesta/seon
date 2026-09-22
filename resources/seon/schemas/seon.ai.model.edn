@@ -42,7 +42,7 @@
  [:map
   {:seon.db/attributes true
    :seon.render/ai seon.ai/provider-ai
-   :seon.render/html seon.ai/provider-html}
+   :seon.render/html seon.ai/provider-html :seon.program/partition :seon.data}
   [:seon.ai.model/provider-id :seon.ai.model/provider-id]
   [:seon.config.ai/endpoint :seon.config.ai/endpoint]
   [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
@@ -52,7 +52,7 @@
    :seon.ai.model/output-token-wire-key]]
 
  :seon.ai.model/deepseek-window-entity
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.program/partition :seon.data}
   [:seon.ai.model/deepseek-window-id
    :seon.ai.model/deepseek-window-id]
   [:seon.ai.model/deepseek-utc-start
@@ -68,7 +68,7 @@
  [:map
   {:seon.db/attributes true
    :seon.render/ai seon.ai/model-ai
-   :seon.render/html seon.ai/model-html}
+   :seon.render/html seon.ai/model-html :seon.program/partition :seon.data}
   [:seon.ai.model/id :seon.ai.model/id]
   [:seon.ai.model/provider :seon.ai.model/provider]
   [:seon.ai.model/context-window-tokens

@@ -4,7 +4,7 @@
  :seon.test.report/symbol
  [:qualified-symbol {:description "Test name observed for this report, retained after program deletion."}]
  :seon.test.report/report
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.program/partition :seon.data}
   [:seon.test.report/id :seon.test.report/id]
   [:seon.test.report/symbol :seon.test.report/symbol]
   [:seon.test/failure-identity :seon.test/failure-identity]

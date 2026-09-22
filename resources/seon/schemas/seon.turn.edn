@@ -3,7 +3,7 @@
             [:map
              {:seon.db/attributes true,
               :seon.render/ai seon.render.transcript/render-run-ai,
-              :seon.render/html seon.render.transcript/render-run-html}
+              :seon.render/html seon.render.transcript/render-run-html :seon.program/partition :seon.data}
              [:seon.turn/id :seon.turn/id]
              [:seon.turn/agent :seon.turn/agent]
              [:seon.turn/attempts {:optional true} :seon.turn/attempts]

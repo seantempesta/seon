@@ -5,7 +5,7 @@
                              :seon.render/ai
                              seon.cluster.instruction/instruction-ai,
                              :seon.render/html
-                             seon.cluster.instruction/instruction-html}
+                             seon.cluster.instruction/instruction-html :seon.program/partition :seon.data}
                             [:seon.cluster.instruction/id
                              :seon.cluster.instruction/id]
                             [:seon.cluster.instruction/text

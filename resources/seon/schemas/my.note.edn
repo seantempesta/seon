@@ -10,7 +10,7 @@
            {:seon.db/attributes true,
             :seon.render/ai seon.note/render-note-ai,
             :seon.render/html seon.note/render-note-html,
-            :seon.render/form seon.note/render-note-form}
+            :seon.render/form seon.note/render-note-form :seon.program/partition :seon.data}
            [:my.note/id :my.note/id]
            [:my.note/agent :my.note/agent]
            [:my.note/content :my.note/content]

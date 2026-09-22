@@ -97,7 +97,7 @@
               [:map
                {:seon.db/attributes true,
                 :seon.program/projected-properties true,
-                :seon.render/form seon.render.ns/schema-form}
+                :seon.render/form seon.render.ns/schema-form :seon.program/partition :seon.program}
                [:seon.schema/key :seon.schema/key]
                [:seon.program/definition-digest :seon.program/definition-digest]
                [:seon.schema.admission/source

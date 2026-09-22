@@ -83,7 +83,7 @@
             [:map
              {:seon.db/attributes true
               :seon.render/ai seon.render.test/render-ai
-              :seon.render/html seon.render.test/render-html}
+              :seon.render/html seon.render.test/render-html :seon.program/partition :seon.program}
              [:seon.test/sym :seon.test/sym]
              [:seon.program/definition-digest :seon.program/definition-digest]
              [:seon.program/analyzed-source-digest :seon.program/analyzed-source-digest]

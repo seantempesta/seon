@@ -216,7 +216,7 @@
               [:map
                {:seon.db/attributes true,
                 :seon.render/ai seon.effect/render-ai,
-                :seon.render/html seon.effect/render-html}
+                :seon.render/html seon.effect/render-html :seon.program/partition :seon.data}
                [:seon.effect/id :seon.effect/id]
                [:seon.effect/run :seon.effect/run]
                [:seon.effect/eval {:optional true} :seon.effect/eval]

@@ -26,7 +26,7 @@
                     :ordinal [:int {:min 0 :seon.wake/context-inert true}],
                     :receipt
                     [:map
-                     #:seon.db{:attributes true}
+                     #:seon.db{:attributes true :seon.program/partition :seon.data}
                      [:seon.cluster.eval/id :seon.cluster.eval/id]
                      [:seon.cluster.eval/run :seon.cluster.eval/run]
                      [:seon.cluster.eval/ordinal

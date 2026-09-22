@@ -33,7 +33,7 @@
   [:seon.test.failure/throwable {:optional true} :seon.test.failure/throwable]]
  :reports [:vector :seon.test.failure/report]
  :failure
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.program/partition :seon.data}
   [:seon.test.failure/id :seon.test.failure/id]
   [:seon.test.failure/test :seon.test.failure/test]
   [:seon.test.failure/type :seon.test.failure/type]

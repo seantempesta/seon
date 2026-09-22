@@ -26,12 +26,11 @@
   [:seon.program/analyzed-count :seon.program/analyzed-count]
   [:seon.program/unresolved-callers :seon.program/unresolved-callers]
   [:seon.program/stale-test-reach :seon.program/stale-test-reach]]
- :seon.program/identity-attribute
- [:enum :seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym
-  :seon.fn.file/relative-path :seon.lint/id]
- :seon.program/source-attribute
- [:enum :seon.ns/source :seon.fn/source :seon.schema/form :seon.test/source
-  :seon.fn.file/digest :seon.lint/message]
+ :seon.program/partition
+ [:enum {:description "Explicit entity-schema ownership: declarations and their analysis are program; execution state and observations are data. Missing ownership is refused, never defaulted."}
+  :seon.program :seon.data]
+ :seon.program/identity-attribute :qualified-keyword
+ :seon.program/source-attribute :qualified-keyword
  :seon.program/row-schema
  [:qualified-keyword
   {:description

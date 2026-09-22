@@ -121,7 +121,7 @@
           [:and
            {:seon.db/attributes true,
             :seon.render/ai seon.render.ns/function-ai
-            :seon.render/html seon.render.ns/function-html}
+            :seon.render/html seon.render.ns/function-html :seon.program/partition :seon.program}
            [:map
            [:seon.fn/sym :seon.fn/sym]
            [:seon.program/definition-digest :seon.program/definition-digest]

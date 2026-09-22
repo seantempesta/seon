@@ -7,7 +7,7 @@
            :description
            "The walked source directory relative to the publication root. Absent means the file lies under no declared source directory."}]
  :seon.fn.file/file
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.program/partition :seon.program}
   [:seon.fn.file/relative-path :seon.fn.file/relative-path]
   [:seon.fn.file/digest :seon.fn.file/digest]
   [:seon.fn/unresolved-references {:optional true} :seon.fn/unresolved-references]

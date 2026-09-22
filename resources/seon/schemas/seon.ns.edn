@@ -12,7 +12,7 @@
            {:seon.db/attributes true,
             :seon.render/ai seon.render.ns/render-ai,
             :seon.render/html seon.render.ns/render-html,
-            :seon.render/form seon.render.ns/namespace-form}
+            :seon.render/form seon.render.ns/namespace-form :seon.program/partition :seon.program}
            [:seon.ns/name :seon.ns/name]
            [:seon.program/definition-digest :seon.program/definition-digest]
            [:seon.fn/file {:optional true} :seon.fn/file]

@@ -4,7 +4,7 @@
                         [:and {:seon.db/component true :seon.db/component-schema :seon.fn.binding/row} :seon.db/ref],
                         :row
                         [:map
-                         #:seon.db{:attributes true}
+                         #:seon.db{:attributes true :seon.program/partition :seon.program}
                          [:seon.fn.binding.child/order
                           :seon.fn.binding.child/order]
                          [:seon.fn.binding.child/role

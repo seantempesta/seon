@@ -13,7 +13,7 @@
                 :output-refs [:set {:seon.db/index true} :qualified-keyword],
                 :row
                 [:map
-                 #:seon.db{:attributes true}
+                 #:seon.db{:attributes true :seon.program/partition :seon.program}
                  [:seon.fn.arity/order :seon.fn.arity/order]
                  [:seon.fn.arity/arity :seon.fn.arity/arity]
                  [:seon.fn.arity/min :seon.fn.arity/min]

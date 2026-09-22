@@ -19,7 +19,7 @@
                            :interrupted-at
                            [:and #:seon.db{:index true} :inst],
                            :receipt
-                           [:map {:seon.db/attributes true}
+                           [:map {:seon.db/attributes true :seon.program/partition :seon.data}
                             [:seon.maintenance.receipt/id
                              :seon.maintenance.receipt/id]
                             [:seon.maintenance.receipt/fire

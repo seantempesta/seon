@@ -341,7 +341,7 @@
           [:map
            {:seon.db/attributes true,
             :seon.render/ai seon.ai/attempt-ai,
-            :seon.render/html seon.ai/attempt-html}
+            :seon.render/html seon.ai/attempt-html :seon.program/partition :seon.data}
            [:seon.ai.attempt/id :seon.ai.attempt/id]
            [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
            [:seon.ai.attempt/at :seon.ai.attempt/at]

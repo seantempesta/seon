@@ -4,7 +4,7 @@
                   :description
                   "One namespace refer binding, equivalent to the :refer portion of a Clojure require libspec.",
                   :seon.render/ai seon.render.ns/render-refer-ai,
-                  :seon.render/html seon.render.ns/render-refer-html}
+                  :seon.render/html seon.render.ns/render-refer-html :seon.program/partition :seon.program}
                  [:seon.ns.refer/local :seon.ns.refer/local]
                  [:seon.ns.refer/target-ns :seon.ns.refer/target-ns]
                  [:seon.ns.refer/target-name

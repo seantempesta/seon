@@ -9,7 +9,7 @@
                                :description "Authored index patterns: attribute with optional entity and value constraints."} :seon.db/ref]
                :entity [:map {:seon.db/attributes true
                               :seon.render/ai seon.render.transcript/render-runtime-ai
-                              :seon.render/html seon.render.transcript/render-runtime-html}
+                              :seon.render/html seon.render.transcript/render-runtime-html :seon.program/partition :seon.data}
                         [:seon.runtime/agent :seon.runtime/agent]
                         [:seon.runtime/turns {:optional true} :seon.runtime/turns]
                         [:seon.runtime/trigger {:optional true} :seon.runtime/trigger]

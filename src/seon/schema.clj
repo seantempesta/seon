@@ -1346,6 +1346,28 @@
 ;;; Registration API
 ;;; ---------------------------------------------------------------------------
 
+(defn- assert-entity-partition!
+  "Identity-bearing stored entity schemas must declare their partition."
+  {:malli/schema [:=> [:cat :seon.schema/registry-key
+                       [:fn malli.core/schema?] [:fn malli.registry/registry?]] :nil]}
+  [schema-key compiled registry]
+  (let [properties (internal/entity-properties compiled)]
+    (when (and (:seon.db/attributes properties)
+               (some (fn [[attribute _ _]]
+                       (some-> (mr/schema registry attribute)
+                               m/properties :seon.db/identity))
+                     (internal/entity-entries compiled))
+               (not (#{:seon.program :seon.data}
+                     (:seon.program/partition properties))))
+      (throw
+       (ex-info "An identity-bearing entity schema must declare its partition."
+                {:seon.error/operation 'seon.schema/build-projection
+                 :seon.schema/identity schema-key
+                 :seon.schema/member :seon.program/partition
+                 :seon.schema/expected #{:seon.program :seon.data}
+                 :seon.schema/offending properties}))))
+  nil)
+
 (defn assert-complete-contract!
   "Assert that a schema or function contract is complete.
 
@@ -1516,6 +1538,8 @@
                          (#{:=> :function} (first definition)))
                   (m/function-schema compiled-definition compile-options)
                   (m/schema compiled-definition compile-options)))]
+        (when (keyword? identity)
+          (assert-entity-partition! identity compiled registry))
         (walk-function compiled identity definition default-admission)))))
 
 (def ^:dynamic ^:private *contract-validation-fold-size* 64)

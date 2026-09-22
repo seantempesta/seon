@@ -6,7 +6,7 @@
                         :default-edn :string,
                         :row
                         [:map
-                         #:seon.db{:attributes true}
+                         #:seon.db{:attributes true :seon.program/partition :seon.program}
                          [:seon.fn.binding.entry/order
                           :seon.fn.binding.entry/order]
                          [:seon.fn.binding.entry/spelling

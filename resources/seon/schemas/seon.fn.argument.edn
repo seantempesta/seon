@@ -11,7 +11,7 @@
                    :label-symbol :symbol,
                    :row
                    [:map
-                    #:seon.db{:attributes true}
+                    #:seon.db{:attributes true :seon.program/partition :seon.program}
                     [:seon.fn.argument/order :seon.fn.argument/order]
                     [:seon.fn.argument/index :seon.fn.argument/index]
                     [:seon.fn.argument/rest? :seon.fn.argument/rest?]

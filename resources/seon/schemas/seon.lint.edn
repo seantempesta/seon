@@ -9,7 +9,7 @@
  :seon.lint/row [:int {:min 1}]
  :seon.lint/col [:int {:min 1}]
  :seon.lint/finding
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.program/partition :seon.program}
   [:seon.lint/id :seon.lint/id]
   [:seon.lint/fn {:optional true} :seon.lint/fn]
   [:seon.lint/file :seon.lint/file]

@@ -2,6 +2,7 @@
   "Recurring proof for the one build/runtime declaration contract."
   (:require [seon.schema.internal] [clojure.core.async :as async]
             [clojure.java.io :as io]
+            [clojure.set :as set]
             [clojure.string :as str]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
@@ -675,11 +676,14 @@
         (let [event (one-event source)]
           ;; Expected data is literal. It is not produced by another path that
           ;; shares `seon.program`'s canonicalizer.
-          (is (= expected (program/declaration-row (seon.schema/handed-projection) event :all :agent)))
+          (let [row (program/declaration-row (seon.schema/handed-projection) event :all :agent)]
+            (is (= 64 (count (:seon.program/definition-digest row))))
+            (is (= expected (dissoc row :seon.program/definition-digest))))
           (if (= "private uncontracted function" label)
             (is (nil? (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)))
             (is (= expected
-                   (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)))))))))
+                   (dissoc (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)
+                           :seon.program/definition-digest)))))))))
 
 (deftest every-declaration-row-satisfies-its-own-output-contract
   ;; The class: `declaration-row` emitting a row its own declared output
@@ -798,10 +802,10 @@
 
 (deftest runtime-schema-declarations-project-namespaced-properties
   (let [event (one-event
-               "(seon.schema/register! ::error [:map {:seon.db/attributes false :seon.render/ai sample/render-ai} [:seon.error/message :seon.error/message]])")
+               "(seon.schema/register! ::error [:map {:seon.db/attributes false :seon.render/ai seon.render.value/render-ai} [:seon.error/message :seon.error/message]])")
         row (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)]
     (is (= false (:seon.db/attributes row)))
-    (is (= 'sample/render-ai (:seon.render/ai row)))
+    (is (= 'seon.render.value/render-ai (:seon.render/ai row)))
     (is (= :agent (:seon.schema.admission/source row)))))
 
 (deftest arbitrary-qualified-deftest-is-not-a-test-declaration
@@ -1004,15 +1008,53 @@
     (is (seq declaring) "declarations were found")
     (is (= (set program/identity-attributes) declaring)
         "seon.program/identity-attributes names exactly the declared families")
-    (is (= (set program/identity-attributes)
-           (set (schema/enum-members projection :seon.program/identity-attribute)))
-        "the identity-attribute enum does not drift from the declarations")
-    (is (= (into #{}
-                 (map #(:seon.program/source-attribute
-                        (program/shape shapes %)))
-                 program/identity-attributes)
-           (set (schema/enum-members projection :seon.program/source-attribute)))
-        "the source-attribute enum does not drift from the declarations")))
+    (is (schema/valid-candidate-value? projection :seon.program/identity-attribute :example/id))
+    (is (schema/valid-candidate-value? projection :seon.program/source-attribute :example/source))))
+
+(deftest program-partition-selects-roots-and-components-with-one-query
+  (test-support/with-database
+    (fn [connection]
+    (let [database @connection
+          projection (schema/handed-projection)
+          attributes (program/program-attributes projection)
+          rows (set (db/q '[:find [?e ...] :in $ [?a ...] :where [?e ?a]]
+                          database attributes))
+          census-attributes #{:seon.fn/sym :seon.ns/name :seon.test/sym
+                              :seon.schema/key :seon.fn.file/relative-path
+                              :seon.lint/id :seon.fn.arity/order
+                              :seon.fn.argument/order :seon.fn.binding/form
+                              :seon.ns.alias/local :seon.ns.import/local
+                              :seon.ns.refer/local :seon.schema.shape/fingerprint
+                              :seon.schema.shape.child/id :seon.schema.shape.entry/id}
+          installed (set (db/q '[:find [?a ...] :where [_ ?a]] database))
+          census-attributes (set/intersection census-attributes installed)
+          expected (set (db/q '[:find ?a (count ?e) :in $ [?a ...] :where [?e ?a]]
+                              database census-attributes))
+          selected (set (db/q '[:find ?a (count ?e) :in $ [?a ...] [?e ...]
+                               :where [?e ?a]] database census-attributes rows))]
+      (is (seq rows))
+      (is (>= (count expected) 12) "The canonical census contains roots and components")
+      (is (= expected selected) "The single program query retains the complete schema census")
+      (is (every? attributes #{:seon.fn/sym :seon.ns.alias/local
+                              :seon.schema.map-entry/key-edn
+                              :seon.program/definition-digest
+                              :seon.render/ai :seon.render/html}))
+      (is (not-any? attributes #{:seon.test/failures
+                                 :seon.test/adoption-inputs :seon.schedule.task/id
+                                 :seon.turn/id :seon.message/id}))))))
+
+(deftest identity-bearing-entity-refuses-an-undeclared-partition
+  (let [forms {:partition.example/id [:string {:seon.db/identity true}]
+               :partition.example/row
+               [:map {:seon.db/attributes true}
+                [:partition.example/id :partition.example/id]]}
+        refusal (refusal-data #(schema/build-projection forms))]
+    (is (= :partition.example/row (:seon.schema/identity refusal)))
+    (is (= :seon.program/partition (:seon.schema/member refusal)))
+    (doseq [partition [:seon.program :seon.data]]
+      (is (map? (schema/build-projection
+                 (assoc-in forms [:partition.example/row 1 :seon.program/partition]
+                           partition)))))))
 
 (deftest resolved-shapes-match-the-current-declarations
   (is (= (program/shapes-in (seon.schema/build-projection (schema/registered-schemas)))

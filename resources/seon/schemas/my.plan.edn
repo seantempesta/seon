@@ -5,7 +5,7 @@
           :entity
           [:map {:seon.db/attributes true
                  :seon.render/ai seon.plan/render-plan-ai
-                 :seon.render/html seon.plan/render-plan-html}
+                 :seon.render/html seon.plan/render-plan-html :seon.program/partition :seon.data}
            [:my.plan/agent :my.plan/agent]
            [:my.plan/objective {:optional true} :my.plan/objective]
            [:my.plan/steps {:optional true} :my.plan/steps]
@@ -47,7 +47,7 @@
           [:map
            {:seon.db/attributes true,
             :description
-            "The agent's one owned plan component."}
+            "The agent's one owned plan component." :seon.program/partition :seon.data}
            [:seon.agent/id :seon.agent/id]
            [:seon.agent/plan {:optional true} :seon.agent/plan]],
           :parent-step

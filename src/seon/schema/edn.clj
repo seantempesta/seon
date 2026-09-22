@@ -86,12 +86,14 @@
              (into [:map] effective-entries)
              :seon.config/agent-overlay
              (into [:map {:seon.db/attributes true
+                          :seon.program/partition :seon.data
                           :seon.render/ai 'seon.agent/render-settings-ai
                           :seon.render/html 'seon.agent/render-settings-html}]
                    agent-overlay-entries)
              :seon.config/entity
              (into
               [:map {:seon.db/attributes true
+                     :seon.program/partition :seon.data
                      :seon.render/ai 'seon.config/render-ai
                      :seon.render/html 'seon.config/render-html}
                [:seon.config/cluster :seon.config/cluster]]

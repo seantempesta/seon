@@ -15,9 +15,42 @@
             #?(:clj [seon.schema.edn :as schema.edn])))
 
 (def identity-attributes
-  "Program-row identity attributes in deterministic admission order."
-  [:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym
-   :seon.fn.file/relative-path :seon.lint/id])
+  "Source declaration identities, derived from their authored row-schema links.
+   Program components and other analysis rows are selected by program-attributes."
+  (into (sorted-set)
+        (keep (fn [[attribute definition]]
+                (when (and (vector? definition)
+                           (map? (second definition))
+                           (:seon.program/row-schema (second definition)))
+                  attribute)))
+        #?(:clj (schema.edn/packaged-forms)
+           :cljs (schema/registered-schemas))))
+
+(defn program-attributes
+  "Attributes declared by program entity schemas in this compiled projection.
+   Other writers' entries are excluded. Schema-row properties come from the
+   same bridge that projects them onto stored schema declarations."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
+  [projection]
+  (let [registry (:seon.schema.projection/registry projection)
+        forms (:seon.schema.projection/forms projection)
+        definitions (map #(mr/schema registry %) (keys forms))
+        program (filter #(= :seon.program
+                            (:seon.program/partition
+                             (internal/entity-properties %))) definitions)
+        properties? (some #(:seon.program/projected-properties
+                            (internal/entity-properties %)) program)]
+    (into
+     (into #{}
+           (comp (mapcat internal/entity-entries)
+                 (remove (fn [[_ properties _]] (:seon.program/written-by properties)))
+                 (map first))
+           program)
+     #?(:clj
+        (when properties?
+          (let [project (requiring-resolve 'seon.schema.datahike/storable-properties-in)]
+            (mapcat #(keys (project projection %)) (keys forms))))
+        :cljs []))))
 
 (defn edn-round-trip-symbol?
   "Whether `value` is a symbol whose printed EDN reads back as that symbol.
@@ -217,7 +250,9 @@
   (into {}
         (map (fn [identity-attribute]
                [identity-attribute (derived-shape projection identity-attribute)]))
-        identity-attributes))
+        (filter #(some-> (mr/schema (:seon.schema.projection/registry projection) %)
+                         m/properties :seon.program/row-schema)
+                (keys (:seon.schema.projection/forms projection)))))
 
 #?(:clj (defonce ^:private !authored-shapes (atom nil)))
 

@@ -42,7 +42,7 @@
                        :seon.render/ai
                        seon.cluster.agent/render-identity-ai,
                        :seon.render/html
-                       seon.cluster.agent/render-identity-html}
+                       seon.cluster.agent/render-identity-html :seon.program/partition :seon.data}
                       [:seon.agent/id :seon.agent/id]
                       [:seon.agent/branch :seon.agent/branch]
                       [:seon.agent/archived-tx {:optional true} :seon.agent/archived-tx]

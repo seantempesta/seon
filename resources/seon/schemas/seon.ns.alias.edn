@@ -4,7 +4,7 @@
                   :description
                   "One namespace alias binding, equivalent to the :as portion of a Clojure require libspec.",
                   :seon.render/ai seon.render.ns/render-alias-ai,
-                  :seon.render/html seon.render.ns/render-alias-html}
+                  :seon.render/html seon.render.ns/render-alias-html :seon.program/partition :seon.program}
                  [:seon.ns.alias/local :seon.ns.alias/local]
                  [:seon.ns.alias/target-ns :seon.ns.alias/target-ns]],
                 :local

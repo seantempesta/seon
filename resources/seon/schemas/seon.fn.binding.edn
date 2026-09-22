@@ -7,7 +7,7 @@
                   [:vector {:seon.db/component true :seon.db/component-schema :seon.fn.binding.entry/row} :seon.db/ref],
                   :row
                   [:map
-                   #:seon.db{:attributes true}
+                   #:seon.db{:attributes true :seon.program/partition :seon.program}
                    [:seon.fn.binding/form :seon.fn.binding/form]
                    [:seon.fn.binding/shape :seon.fn.binding/shape]
                    [:seon.fn.binding/symbol

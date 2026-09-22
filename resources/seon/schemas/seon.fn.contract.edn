@@ -19,7 +19,7 @@
  :caller-count [:int {:min 0}]
  :finding-row
  [:map
-  [:seon.fn/sym :seon.fn/sym]
+  {:seon.program/partition :seon.program} [:seon.fn/sym :seon.fn/sym]
   [:seon.fn.contract/position :seon.fn.contract/position]
   [:seon.fn.contract/form :seon.fn.contract/form]
   [:seon.fn.contract/finding :seon.fn.contract/finding]

@@ -195,7 +195,7 @@
              :error
              [:map {:seon.db/attributes true
                     :seon.render/ai seon.error/render-ai
-                    :seon.render/html seon.error/render-html}
+                    :seon.render/html seon.error/render-html :seon.program/partition :seon.data}
               [:seon.error/layer :seon.error/layer]
               [:seon.error/operation :seon.error/operation]
               [:seon.error/signature :seon.error/signature]

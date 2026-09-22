@@ -1,8 +1,8 @@
 #:seon.error.occurrence
 {:id [:string {:min 12 :max 12 :seon.db/identity true}]
- :count [:int {:min 1}]
+ :count [:int {:min 1 :seon.db/no-history? true}]
  :first-at :inst
- :last-at :inst
+ :last-at [:and {:seon.db/no-history? true} :inst]
  :process :seon.db/ref
  :agent :seon.db/ref
  :turn :seon.db/ref
@@ -10,11 +10,11 @@
  :data-blob :seon.db/ref
  :message :string
  :blob-digest [:and {:seon.db/identity true} :seon.blob/digest]
- :blob [:map {:seon.db/attributes true}
+ :blob [:map {:seon.db/attributes true :seon.program/partition :seon.data}
         [:seon.error.occurrence/blob-digest :seon.error.occurrence/blob-digest]
         [:seon.error/data-blob :seon.error/data-blob]]
  :occurrence
- [:map {:seon.db/attributes true}
+ [:map {:seon.db/attributes true :seon.program/partition :seon.data}
   [:seon.error.occurrence/id :seon.error.occurrence/id]
   [:seon.error.occurrence/count :seon.error.occurrence/count]
   [:seon.error.occurrence/first-at :seon.error.occurrence/first-at]

@@ -66,7 +66,7 @@
                 {:seon.db/attributes true,
                  :seon.render/ai seon.cluster.message/render-ai,
                  :seon.render/html seon.cluster.message/render-html,
-                 :seon.render/form seon.render.transcript/message-form}
+                 :seon.render/form seon.render.transcript/message-form :seon.program/partition :seon.data}
                 [:seon.message/id :seon.message/id]
                 [:seon.message/to :seon.message/to]
                 [:seon.message/content :seon.message/content]

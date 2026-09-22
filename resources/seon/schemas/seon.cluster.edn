@@ -2,7 +2,7 @@
                [:map
                 {:seon.db/attributes true
                  :seon.render/ai seon.cluster/render-ai
-                 :seon.render/html seon.cluster/render-html}
+                 :seon.render/html seon.cluster/render-html :seon.program/partition :seon.data}
                 [:seon.cluster/name :seon.cluster/name]
                 [:seon.cluster/config :seon.cluster/config]
                 [:seon.cluster/instructions {:optional true} :seon.cluster/instructions]
