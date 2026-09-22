@@ -88,11 +88,11 @@
 
 (defn- with-store
   [body]
+  (let [projection (schema/handed-projection)]
   (test-support/with-database
-   (fn [canonical]
+   (fn [_canonical]
      (let [root (str "tmp/source-test/" (random-uuid))
-           dir (str root "/data/store")
-           projection (db/carried-projection (db/db canonical))]
+           dir (str root "/data/store")]
        (.mkdirs (io/file root))
        (try
          (test-support/populate-published-operator-root!
@@ -113,11 +113,13 @@
                         (db/q '[:find [?source ...] :where [?source :seon.source/digest]]
                               (db/db connection))))
                  (finally (d/release connection))))
-             (body (assoc opened
-                          :seon.schema/projection projection
-                          :seon.fn/manifest (fixture-program! (str root "/program"))))
+             (schema/call-with-projection
+              projection
+              #(body (assoc opened
+                            :seon.schema/projection projection
+                            :seon.fn/manifest (fixture-program! (str root "/program")))))
              (finally (store/release-store! opened))))
-         (finally (test-support/delete-recursively! root)))))))
+         (finally (test-support/delete-recursively! root))))))))
 
 (defn- publish
   ([opened digest]
@@ -192,51 +194,6 @@
           (refusal #(source/digest
                      {:seon.source/roots
                       [(str "tmp/source-test/absent-" (random-uuid))]}))))))
-
-(deftest concurrent-source-refresh-is-bounded-and-names-the-holder-phase
-  (test-support/with-database
-    (fn [_connection]
-      (let [entered (CountDownLatch. 1)
-            release (CountDownLatch. 1)
-            acquisition-bound-ms 50
-            acquisition-bound-var
-            (ns-resolve 'seon.cluster 'source-refresh-acquisition-bound-ms)
-            resolve-bootstrap-var (ns-resolve 'seon.cluster 'resolve-bootstrap)]
-        (with-redefs-fn
-          {acquisition-bound-var (constantly acquisition-bound-ms)
-           resolve-bootstrap-var
-           (fn [_]
-             (.countDown entered)
-             (test-support/await-event! release "release first source refresh")
-             (throw (ex-info "first refresh stopped after holding the monitor"
-                             {::first-refresh-stopped true})))}
-          (fn []
-            (let [first-refresh
-                  (future (refusal #(cluster/refresh-source! "tmp/source-refresh-first")))]
-              (test-support/await-event! entered "first source refresh acquired monitor")
-              (try
-                (let [second-refresh
-                      (future (refusal #(cluster/refresh-source! "tmp/source-refresh-second")))
-                      second-result
-                      (test-support/await-event!
-                       second-refresh "second source refresh completed or refused")
-                      holder (:seon.operator.lock/holder second-result)]
-                  (is (some? (:seon.operator.lock/holder second-result)))
-                  (is (= "bootstrap configuration"
-                         (:seon.operator.lock/phase holder)))
-                  (is (<= acquisition-bound-ms
-                          (:seon.operator.lock/waited-ms second-result)))
-                  (is (= acquisition-bound-ms
-                         (:seon.operator.lock/acquisition-timeout-ms second-result)))
-                  (is (re-find #"bootstrap configuration"
-                               (:seon.error/message second-result))))
-                (finally
-                  (.countDown release)
-                  (is (= {::first-refresh-stopped true}
-                         (test-support/await-event!
-                          first-refresh "first source refresh released"))))))))))))
-
-
 
 (deftest ^{:seon.test/fixture-observation
            "A database branch cannot isolate the physical-store scratch branch whose refused publication must be retired."}

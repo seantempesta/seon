@@ -72,8 +72,7 @@
            [java.nio.file CopyOption Files InvalidPathException LinkOption Paths
             StandardCopyOption]
            [java.util Date]
-           [java.util.concurrent Executor TimeUnit]
-           [java.util.concurrent.locks ReentrantLock]))
+           [java.util.concurrent Executor]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bootstrap configuration — the CLOSED pre-store key set.
@@ -88,22 +87,9 @@
 (def ^:dynamic ^:private *source-progress!*
   (constantly nil))
 
-(def ^:dynamic ^:private *source-refresh-holder-token*
-  nil)
-
-(declare source-refresh-holder)
-
 (defn- report-source-progress!
   {:malli/schema [:=> [:cat :string] :nil]}
   [phase]
-  (when *source-refresh-holder-token*
-    (swap! source-refresh-holder
-           (fn [holder]
-             (if (identical? *source-refresh-holder-token* (::holder-token holder))
-               (assoc holder
-                      :seon.operator.lock/phase phase
-                      :seon.operator.lock/progress-at (Date.))
-               holder))))
   (*source-progress!* phase)
   ;; Clojure prepl writes through PrintWriter, which records an IOException
   ;; instead of throwing it. A departed observer must not leave queued
@@ -1519,71 +1505,6 @@
    :seon.source/roots source-roots
    :seon.fn/roots seon.fn/source-roots})
 
-(defonce ^:private source-refresh-monitor
-  ;; One JVM may receive overlapping editor events. Serialize analysis,
-  ;; publication, and artifact replacement as one operation; the Datahike
-  ;; expected-head guard remains the cross-plan correctness fence.
-  (ReentrantLock.))
-
-(defonce ^:private source-refresh-holder
-  (atom nil))
-
-(defn- source-refresh-acquisition-bound-ms
-  []
-  (:seon.config.operator/event-silence-backstop-ms config/defaults))
-
-(defn- source-refresh-holder-view
-  [holder]
-  (some-> holder (dissoc ::holder-token)))
-
-(defn- with-source-refresh-monitor!
-  {:malli/schema [:=> [:cat [:=> [:cat] :seon.schema/value]] :seon.schema/value]}
-  [transition]
-  (if (.isHeldByCurrentThread ^ReentrantLock source-refresh-monitor)
-    (transition)
-    (let [bound-ms (source-refresh-acquisition-bound-ms)
-          started-ms (System/currentTimeMillis)
-          waiter (assoc (cluster.process/current-identity)
-                        :seon.operator.lock/command "source publication"
-                        :seon.operator.lock/waiting-since (Date. started-ms)
-                        :seon.operator.lock/acquisition-timeout-ms bound-ms)]
-      (if-not (.tryLock ^ReentrantLock source-refresh-monitor
-                        bound-ms TimeUnit/MILLISECONDS)
-        (let [waited-ms (- (System/currentTimeMillis) started-ms)
-              holder (source-refresh-holder-view @source-refresh-holder)]
-          (throw
-           (ex-info
-            (str "Timed out after " waited-ms
-                 " ms waiting for source publication held in phase "
-                 (pr-str (:seon.operator.lock/phase holder)) ".")
-            {:seon.error/message
-             (str "Source publication waited " waited-ms " ms, exceeding the "
-                  bound-ms " ms acquisition bound while the holder was in phase "
-                  (pr-str (:seon.operator.lock/phase holder)) ".")
-             :seon.source/source-refresh-acquisition-timeout true
-             :seon.operator.lock/waited-ms waited-ms
-             :seon.operator.lock/acquisition-timeout-ms bound-ms
-             :seon.operator.lock/holder holder
-             :seon.operator.lock/waiter waiter})))
-        (let [token (Object.)
-              acquired-at (Date.)
-              holder (assoc (cluster.process/current-identity)
-                            ::holder-token token
-                            :seon.operator.lock/command "source publication"
-                            :seon.operator.lock/phase "request accepted"
-                            :seon.operator.lock/acquired-at acquired-at
-                            :seon.operator.lock/acquisition-timeout-ms bound-ms)]
-          (reset! source-refresh-holder holder)
-          (try
-            (binding [*source-refresh-holder-token* token]
-              (transition))
-            (finally
-              (.unlock ^ReentrantLock source-refresh-monitor)
-              (swap! source-refresh-holder
-                     (fn [current]
-                       (when-not (identical? token (::holder-token current))
-                         current))))))))))
-
 (defn- current-source!
   "The exact published source commit new clusters fork.
   Boot never indexes files: absent publication tells the operator to run
@@ -2217,8 +2138,6 @@
    (refresh-source! root changed-paths development-cluster (fs/source-directory)))
   ([root changed-paths development-cluster directory]
    (report-source-progress! "request accepted")
-   (with-source-refresh-monitor!
-    (fn []
      (report-source-progress! "bootstrap configuration")
      (let [instance (when development-cluster
                       (get @running-instances development-cluster))
@@ -2240,20 +2159,20 @@
           (schema/declaration-projection (schema.edn/packaged-forms))
           (fn []
             (let [published (full-source-refresh! root held-store roots)]
-              (merge published
+              (if (:seon.error/at published)
+                published
+                (merge published
                      (if instance
                        (development-source-refresh! held-store instance published changed-paths roots)
                        {:seon.source/reloaded-namespaces []
-                        :seon.source/arming-identities #{}})))))
+                        :seon.source/arming-identities #{}}))))))
          (finally
-           (release-root-store! store-dir))))))))
+           (release-root-store! store-dir))))))
 
 (defn publication-base!
   "Export the common publication and its exact manifest for isolated workers."
   {:malli/schema [:=> [:cat :seon.boot/root :string :string] :string]}
   [root directory destination]
-  (with-source-refresh-monitor!
-    (fn []
       (let [store-dir (:seon.boot/store-dir (resolve-bootstrap {:seon.boot/root root}))
             held (acquire-root-store! store-dir)]
         (try
@@ -2271,7 +2190,9 @@
                             (into paths stored))
                           paths)
                         (finally (when database (d/release-materialized-db database))))]
-            (refresh-source! root (vec (sort paths)) nil directory))
+            (let [result (refresh-source! root (vec (sort paths)) nil directory)]
+              (when (:seon.error/at result)
+                (throw (ex-info (:seon.error/message result) result)))))
           (let [published (source/current held)
                 database (source/database held (:seon.source/commit-id published))
                 digest (db/q database '[:find ?digest . :where [_ :seon.source/digest ?digest]])
@@ -2306,7 +2227,7 @@
                              :seon.test.run/branch source/current-branch}))
               destination
               (finally (d/release-materialized-db database))))
-          (finally (release-root-store! store-dir)))))))
+          (finally (release-root-store! store-dir)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Recovery — the pass that runs before anything resumes

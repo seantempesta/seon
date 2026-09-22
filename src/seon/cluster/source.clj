@@ -280,6 +280,27 @@
                               :seon.store/branch scratch})
     (catch Throwable _ nil)))
 
+(defn- stale-publication-error
+  "Translate Datahike's stale-head refusal once; unrelated failures propagate."
+  {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable] :seon.source/publication-error]}
+  [operation failure]
+  (let [data (some (fn [cause]
+                     (let [data (ex-data cause)]
+                       (when (= :stale-branch-head (:type data)) data)))
+                   (take-while some? (iterate ex-cause failure)))]
+    (if data
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.source/publication
+       :seon.error/operation operation
+       :seon.error/message "The source head changed before publication."
+       :seon.error/expected (:expected-current-commit data)
+       :seon.error/offending (:current-commit data)
+       :seon.error/data data
+       :seon.source/branch (:branch data)
+       :seon.source/expected-commit-id (:expected-current-commit data)
+       :seon.source/commit-id (:current-commit data)}
+      (throw failure))))
+
 (defn- record-results-at-head!
   {:malli/schema [:=> [:cat :seon.store/store :seon.source/test-recording-request]
                   :seon.source/test-recording-result]}
@@ -349,15 +370,16 @@
       (finally (retire-scratch! held-store scratch)))))
 
 (defn record-results!
-  "Admit and publish test completions under the source publication monitor.
-  The current head is acquired after the monitor, so publication cannot
-  invalidate the recording transaction's expected head."
+  "Admit and publish test completions against the acquired source head.
+  Datahike refuses a concurrent head change at publication."
   {:malli/schema
    [:=> [:cat :seon.store/store :seon.source/test-recording-request]
     :seon.source/test-recording-result]}
   [held-store completion]
-  ((requiring-resolve 'seon.cluster/with-source-refresh-monitor!)
-   (fn [] (record-results-at-head! held-store completion))))
+  (try
+    (record-results-at-head! held-store completion)
+    (catch Exception failure
+      (stale-publication-error 'seon.cluster.source/record-results! failure))))
 
 (defn- index-issues!
   [connection source-digest directory paths]
@@ -390,7 +412,7 @@
 (defn publish!
   "Reconcile and atomically publish on the current source database history."
   {:malli/schema [:=> [:cat :seon.source/publish-request]
-                  :seon.source/published]}
+                  :seon.source/publish-result]}
   [{:keys [:seon.store/store :seon.db/process]
     directory :seon.fn/root
     source-digest :seon.source/digest
@@ -402,8 +424,6 @@
     populate-request :seon.source/populate-request
     progress! :seon.source/progress!
     :or {progress! (constantly nil)}}]
-  ((requiring-resolve 'seon.cluster/with-source-refresh-monitor!)
-   (fn []
   (let [published (current store)
         note-paths (when (and published changed-paths)
                      (filterv (requiring-resolve 'seon.issue/note-path?) changed-paths))
@@ -537,4 +557,4 @@
             expected-commit (assoc :seon.source/expected-commit-id expected-commit))))
         (catch Throwable failure
           (retire-scratch! store scratch)
-          (throw failure)))))))))
+          (stale-publication-error 'seon.cluster.source/publish! failure)))))))

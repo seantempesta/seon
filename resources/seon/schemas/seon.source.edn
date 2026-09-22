@@ -19,7 +19,7 @@
                [:seon.test/remaining-ms {:optional true} [:int {:min 1}]]],
               :test-recording-request [:or :seon.test.run/completion :seon.source/test-selection-request],
               :test-recording-result
-              [:or :seon.test.run/admission :seon.test/results :seon.source/test-evidence-error],
+              [:or :seon.test.run/admission :seon.test/results :seon.source/test-evidence-error :seon.source/publication-error],
               :built-at :inst,
               :built? :boolean,
               :commit-id :uuid,
@@ -83,7 +83,15 @@
               [:map
                [:seon.source/reloaded-namespaces :seon.source/reloaded-namespaces]
                [:seon.source/arming-identities :seon.source/arming-identities]],
-              :refresh-result [:and :seon.source/published :seon.source/adoption-result],
+              :publication-error
+              [:and :seon.error/base
+               [:map
+                [:seon.source/branch :seon.source/branch]
+                [:seon.source/expected-commit-id :seon.source/expected-commit-id]
+                [:seon.source/commit-id :seon.source/commit-id]]],
+              :publish-result [:or :seon.source/published :seon.source/publication-error],
+              :refresh-result [:or [:and :seon.source/published :seon.source/adoption-result]
+                               :seon.source/publication-error],
               :published
               [:map
                [:seon.source/branch :seon.source/branch]
