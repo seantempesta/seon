@@ -1,4 +1,6 @@
 #:seon.config.operator{:event-silence-backstop-ms
                        [:int {:seon.config/display-label "Event silence backstop" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1, :seon.config/dial true}]
                        :boot-bound-ms
-                       [:int {:seon.config/display-label "Cold boot bound" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1 :seon.config/dial true}]}
+                       [:int {:seon.config/display-label "Cold boot bound" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1 :seon.config/dial true}]
+                       :export-bound-ms
+                       [:int {:seon.config/optional true :seon.config/display-label "Store export bound" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1 :seon.config/dial true}]}

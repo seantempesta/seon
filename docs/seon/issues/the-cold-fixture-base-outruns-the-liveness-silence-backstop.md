@@ -183,3 +183,25 @@ projection object. The landing note records the complete split and prior
 failed measurements. Plain database fixture acquisition now meets all three
 targets; this issue remains open for the separate cold SCI readiness and
 obsolete liveness allowances, now owned by `src/seon/test/bounds.clj`.
+
+## Base-export client boundary — 2026-09-22
+
+A distinct preparation failure at `5361d0dfb` occurred after publication:
+`prepare-base!` sent one compound PREPL form under the 300,000 ms boot
+socket allowance, then a silent full-store export exceeded that interval.
+The two SOURCE sequences were internal refreshes, not separate socket
+requests. The thread sample showed active Fressian serialization in
+`seon.cluster.export/reidentify-at!`; the source had 898,237 entries and
+occupied approximately 248 GiB. The read-only reproduction timed out at
+300 s, and the export completed approximately 484.34 s after it began.
+
+The export owner now reports completed work, and the client explicitly
+selects the export config fact shared with the existing clone child bound.
+The redundant preliminary refresh was removed: `publication-base!` already
+includes deleted stored paths in its complete checkout refresh. A canonical
+older-base preparation exposed that preliminary refresh reading a deleted
+caller; the complete preparation succeeds after its removal.
+
+See [the landing evidence](../../prds/agent-platform/landing/lane-base-export-timeout-2026-09-22.md)
+for the real-socket regression and in-process preparation proof. This closes
+that client/export instance, not every historical liveness surface above.

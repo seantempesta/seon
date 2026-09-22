@@ -4,7 +4,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.error.refusal :as refusal])
-  (:import [java.net Socket ServerSocket InetSocketAddress]
+  (:import [java.net Socket ServerSocket InetSocketAddress SocketTimeoutException]
            [java.io PushbackReader]
            [java.util.concurrent CompletableFuture TimeUnit]
            [java.util.function Supplier Function]))
@@ -27,6 +27,26 @@
                    (:seon.config.operator/boot-bound-ms @shipped-default-decisions))]
     (when-not (pos-int? value) (throw (ex-info "Missing operator boot bound." manifest)))
     value))
+
+(defn operator-export-bound-ms
+  {:malli/schema [:=> [:cat [:maybe :seon.config/manifest]] [:int {:min 1}]]}
+  [manifest]
+  (let [value (get manifest :seon.config.operator/export-bound-ms
+                   (:seon.config.operator/export-bound-ms @shipped-default-decisions))]
+    (when-not (pos-int? value) (throw (ex-info "Missing operator export bound." manifest)))
+    value))
+
+(defn operation-bound-ms
+  {:malli/schema [:=> [:cat [:map
+                            [:seon.operator/command {:optional true} :keyword]
+                            [:seon.config/manifest {:optional true} :seon.config/manifest]]]
+                  [:int {:min 1}]]}
+  [options]
+  (let [manifest (:seon.config/manifest options)]
+    (case (:seon.operator/command options)
+      :export (operator-export-bound-ms manifest)
+      :init (operator-boot-bound-ms manifest)
+      (operator-silence-backstop-ms manifest))))
 
 (defn diagnostic [message evidence cause]
   (refusal/diagnostic
@@ -104,7 +124,13 @@
      (with-open [writer (io/writer socket) reader (PushbackReader. (io/reader socket))]
        (.write writer (str form "\n")) (.flush writer)
        (loop []
-         (let [event (edn/read {:eof ::eof} reader)]
+         (let [event (try
+                       (edn/read {:eof ::eof} reader)
+                       (catch SocketTimeoutException _
+                         (fail! "PREPL emitted no next output or terminal result within its declared bound; outcome unknown."
+                                (assoc advertisement
+                                       :seon.operator/event :prepl-output-or-result
+                                       :seon.operator/timeout-ms timeout-ms))))]
            (when (and observe! (= :out (:tag event))) (observe! (:val event)))
            (when (= ::eof event) (fail! "PREPL closed without a terminal result; outcome unknown." advertisement))
            (if (= :ret (:tag event))
@@ -120,10 +146,8 @@
    (if-let [endpoint (advertisement root nil)]
      {:seon.operator/live-process? true
       :seon.operator/value
-      (if-let [observe! (:seon.operator/observe-output! options)]
-        (prepl-value! endpoint form
-                      (operator-boot-bound-ms {}) observe!)
-        (prepl-value! endpoint form))}
+      (prepl-value! endpoint form (operation-bound-ms options)
+                    (:seon.operator/observe-output! options))}
      (let [identities (selected-processes root)]
        (if (seq identities)
          (fail! "An exact-root JVM is alive but its endpoint is unavailable."
@@ -148,9 +172,8 @@
                (assoc request :seon.operator/processes (vec identities)))))
     (prepl-value! endpoint
                   (request-form (merge request (select-keys endpoint [:seon.boot/pid :seon.boot/start-instant])))
-                  (if (#{:init :export} (:seon.operator/command request))
-                    (operator-boot-bound-ms {})
-                    (operator-silence-backstop-ms {})))))
+                  (operation-bound-ms request)
+                  (fn [text] (print text) (flush)))))
 
 (defn terminate! [identity bound]
   (when-let [handle (matching-handle identity)]

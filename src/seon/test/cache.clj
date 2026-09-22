@@ -411,21 +411,19 @@
   (let [source (.getCanonicalPath (io/file source))
         snapshot (.getCanonicalPath (io/file snapshot))
         base (.getCanonicalPath (io/file base))
-        paths (input-paths snapshot)
         form (pr-str
                `(do
                   (require 'seon.cluster)
                   (with-bindings
                     {(ns-resolve 'seon.cluster (symbol "*source-progress!*"))
                      (fn [phase#] (println "bin/test: SOURCE" phase#) (flush))}
-                    ((ns-resolve 'seon.cluster (symbol "refresh-source!"))
-                     ~(str (io/file source "data/clusters")) ~paths nil ~snapshot)
                     ((ns-resolve 'seon.cluster (symbol "publication-base!"))
                      ~(str (io/file source "data/clusters")) ~snapshot ~base))))
         ;; BB loads the operator after this cache namespace is complete. The
         ;; same advertisement/send authority is used by result recording.
         live ((requiring-resolve 'seon.operator/live-root-value!)
-              source form {:seon.operator/observe-output!
+              source form {:seon.operator/command :export
+                           :seon.operator/observe-output!
                            (fn [text] (print text) (flush))})]
     (if (:seon.operator/live-process? live)
       (when-not (= base (:seon.operator/value live))

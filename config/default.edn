@@ -329,6 +329,13 @@
  ; Ordinary socket/process events retain the separate silence bound above.
  :seon.config.operator/boot-bound-ms 300000
 
+ ; Full-store export copies every file and re-identifies every reachable commit.
+ ; The 2026-09-22 store had 898,237 entries / 248 GiB; export was still
+ ; serializing commit records at 491 s. Retain the export clone owner
+ ; allowance of ten minutes, shared by its child and client event waits.
+ ; Completed export phases/records renew the client wait, not a duration clock.
+ :seon.config.operator/export-bound-ms 600000
+
  ; THE VIEW'S PORT IS EXPLICITLY ABSENT, and absence is the state: with
  ; no dial the port is DERIVED from the cluster name (7700-7999, FNV-1a
  ; over the name — `seon.render.web/derived-port`), so every named

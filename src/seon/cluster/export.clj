@@ -68,6 +68,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.fs :as fs]
+            [seon.config :as config]
             [seon.cluster.process :as operator.process]
             [seon.schema.edn :as schema.edn])
   (:import [java.nio.file CopyOption Files StandardCopyOption]))
@@ -78,18 +79,12 @@
 
 (schema.edn/load! {})
 
-(def ^:private clone-deadline-ms
-  "Last-resort bound on the clone child, in milliseconds.
-
-   The observable this stands in for is the copy child's own exit, which
-   `seon.operator.process/run-process!` already waits on; this value only bounds
-   a child that never exits at all, so an export can never wedge the operator
-   (AGENTS.md section 2.3). Unit: milliseconds of total child lifetime.
-   Provenance: none measured. A clone's duration scales with store size, and
-   the export seam takes a store value with no cluster database in reach, so
-   this is not a cluster config dial and is deliberately far above any clone
-   this repository has observed rather than tuned to one."
-  600000)
+(defn- progress!
+  "Report completed export work to the request's PREPL output stream."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [phase]
+  (println "seon: EXPORT" phase)
+  (flush))
 
 (defn- refuse!
   "Refuse loudly with the one export error shape."
@@ -133,7 +128,8 @@
     (let [result
           (operator.process/run-process!
            {:seon.operator.subprocess/argv command
-            :seon.operator.subprocess/deadline-ms clone-deadline-ms
+            :seon.operator.subprocess/deadline-ms
+            (:seon.config.operator/export-bound-ms config/defaults)
             :seon.operator.subprocess/merge-error? true})
           output (:seon.operator.subprocess/output result)
           exit (:seon.operator.subprocess/exit result)]
@@ -179,6 +175,7 @@
                                       (nil? active-reader))]
               (try
                 (migrate/export-db reader (.getPath file))
+                (progress! (str "exported branch " branch))
                 (finally
                   (when opened-reader?
                     (d/release reader))))
@@ -187,6 +184,7 @@
                              (d/connect (assoc configuration :branch branch)))]
                 (try
                   (migrate/import-db writer (.getPath file))
+                  (progress! (str "imported branch " branch))
                   (finally
                     (when-not (= :db branch)
                       (d/release writer)))))))
@@ -280,7 +278,9 @@
                            (assoc-in [:config :store :path] identity-path))
                        {:sync? true}))
             (recur (concat (next pending) (remove nil? related))
-                   (conj visited record-key))))))
+                   (do
+                     (progress! (str "re-identified records: " (inc (count visited))))
+                     (conj visited record-key)))))))
     identity-path))
 
 (defn reidentify!
@@ -331,12 +331,16 @@
     (.mkdirs (io/file parent))
     (let [temp (io/file parent (str ".store." (random-uuid) ".tmp"))]
       (try
+        (progress! "copy started")
         (copy-store! store (.getPath temp))
+        (progress! "copy complete; re-identification started")
         (reidentify-at! (.getPath temp) (.getPath target))
+        (progress! "re-identification complete")
         ; the temp name is the fence: only a complete, re-identified
         ; store ever takes the name anything opens
         (Files/move (.toPath temp) (.toPath target)
                     (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE]))
+        (progress! "store published")
         (.getCanonicalPath target)
         (catch Throwable failure
           (fs/delete-recursively! (.getPath temp) (.getPath temp))

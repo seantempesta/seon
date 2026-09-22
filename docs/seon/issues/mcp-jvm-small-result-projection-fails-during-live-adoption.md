@@ -90,3 +90,15 @@ message and the offending class `clojure.lang.PersistentHashMap`.
 Repeating the read under the instance's `:seon.sci.eval/projection-state`
 returned the cluster name in 7 ms. This establishes a refused diagnostic
 render, not a failed cluster read with the correct supplied projection.
+
+## Export-bound hot reload observation — 2026-09-22
+
+On PID 15000, rebuilding the shipped default constant and reloading/arming
+`seon.cluster.export` returned an MCP projection refusal:
+`seon.cluster/mcp-effective refused return value at []: expected nil, got a map`.
+Raw PREPL separately returned export bound 600000 and showed the config map
+valid under the live database projection. Before recovery completed, the
+orchestrator replaced default with PID 21908; this lane did not restart it.
+That replacement initially reported missing cluster projection state. Exact
+forms and scope are in the [export landing](../../prds/agent-platform/landing/lane-base-export-timeout-2026-09-22.md).
+No cause in the unrelated in-flight source edits is asserted.
