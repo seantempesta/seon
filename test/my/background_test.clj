@@ -5,7 +5,7 @@
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
 
-(deftest background-error-renderers-cover-every-declared-facet
+(deftest background-error-renderers-cover-every-declared-declared-schema
   (doseq [[schema-key observation message]
           [[:my.background/invalid-call-error
             [:my.background/call-source "((+ 1 2 3))"]
@@ -19,7 +19,7 @@
     (let [[member value] observation
           error {:seon.error/at #inst "2026-09-21T00:00:00.000-00:00"
                  :seon.error/layer :my.background/test
-                 :seon.error/operation 'my.background-test/facet
+                 :seon.error/operation 'my.background-test/declared-schema
                  :seon.error/message message
                  member value}
           ai (background/render-ai error)

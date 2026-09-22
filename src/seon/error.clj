@@ -1,10 +1,10 @@
 (ns seon.error
   "Error observations, complete declared component reads, and writer-owned recurrence.
 
-  D12: errors are structural base values with composable declared facets.
+  D12: errors are structural base values with composable declared declared-schemas.
   Callers branch on their boundary's required members; no general error
   predicate or stored classification is used here. D13 identity derives from
-  layer, operation, satisfied facets, Throwable class/frame, violated schema
+  layer, operation, satisfied declared-schemas, Throwable class/frame, violated schema
   and location. Message, time, process and offending bytes do not identify a bug.
 
   Normalization receives its projection and evidence policy. Recording acquires
@@ -195,10 +195,10 @@
       [(symbol (.getClassName frame)) (symbol (.getMethodName frame))
        file (long (.getLineNumber frame))])))
 
-(declare facets facet-keys stored-observation observation-selector latest-fact)
+(declare declared-schemas declared-schema-keys stored-observation observation-selector latest-fact)
 
 (defn- signature
-  "D13: identity of the observed site, satisfied facets, violated schema and path.
+  "D13: identity of the observed site, satisfied declared-schemas, violated schema and path.
   Incidental time, process, message and offending bytes never enter this tuple."
   {:malli/schema [:=> [:cat :seon.schema/projection :map
                        [:or :nil :symbol] [:or :nil :seon.error/frame]]
@@ -218,7 +218,7 @@
                path)]
     (id/id [(:seon.error/layer observation)
             (:seon.error/operation observation)
-            (into (sorted-set) (facets projection observation))
+            (into (sorted-set) (declared-schemas projection observation))
             throwable-class frame
             (into (sorted-map)
                   (select-keys observation [:seon.error/expected-key :seon.error/expected-shape]))
@@ -790,7 +790,7 @@
 
 (defn normalize
   "Normalize one observation with a supplied projection and bounded evidence.
-  The signature is D13's stable tuple; complete source facets remain on the
+  The signature is D13's stable tuple; complete source declared-schemas remain on the
   owned occurrence, while this fact carries the root's site and evidence link."
   {:malli/schema [:=> [:cat :seon.error/normalize-request]
                   [:or :seon.error/fact :seon.error/base]]}
@@ -1582,7 +1582,7 @@
                             (schema/projection-from-database database))
         diagnostic-attributes
         (schema/projection-cache-value
-         projection ::facet-attributes
+         projection ::declared-schema-attributes
          (fn []
            (into #{}
                  (comp (mapcat (fn [schema-key]
@@ -1590,7 +1590,7 @@
                                    (when (:seon.db/attributes (internal/entity-properties compiled))
                                      (map first (internal/entity-entries compiled))))))
                        (filter #(schema.datahike/storable-attribute-in? projection %)))
-                 (conj (facet-keys projection) :seon.error/base))))
+                 (conj (declared-schema-keys projection) :seon.error/base))))
         replacements (mapv (fn [attribute]
                              [:db.fn/retractAttribute occurrence-ref attribute])
                            (filter diagnostic-attributes (keys old)))
@@ -1621,7 +1621,7 @@
                                    (when (and (map? source) (base? source))
                                      (let [attributes (into #{}
                                                             (mapcat #(map first (internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) %))))
-                                                            (conj (facets projection source) :seon.error/base))]
+                                                            (conj (declared-schemas projection source) :seon.error/base))]
                                        (select-keys source (filter diagnostic-attributes attributes)))))
                                  {:seon.error.occurrence/id occurrence-id
                                   :seon.error.occurrence/count count
@@ -1752,7 +1752,7 @@
    (fn []
      (let [forms (:seon.schema.projection/forms projection)
            storable? #(schema.datahike/storable-attribute-in? projection %)
-           observation-keys (conj (facet-keys projection)
+           observation-keys (conj (declared-schema-keys projection)
                                   :seon.error/base :seon.error.occurrence/occurrence)]
        (letfn [(members [schemas]
                  (sort (into #{} (comp (mapcat #(let [compiled (mr/schema (:seon.schema.projection/registry projection) %)]
@@ -1898,13 +1898,13 @@
 
 
 
-(defn facet-keys
+(defn declared-schema-keys
   "Canonical base-extension declarations in this projection, excluding aliases.
   The immutable projection retains the derived population, never error values."
   {:malli/schema [:=> [:cat :map] [:set :qualified-keyword]]}
   [projection]
   (schema/projection-cache-value
-   projection ::facet-keys
+   projection ::declared-schema-keys
    (fn []
      (let [forms (:seon.schema.projection/forms projection)]
        (into #{}
@@ -1916,21 +1916,21 @@
                        k)))
              forms)))))
 
-(defn facets
-  "All canonical error facets satisfied by a complete value in projection.
+(defn declared-schemas
+  "All canonical error declared-schemas satisfied by a complete value in projection.
   Validators derive once from the supplied declarations, including at boot
-  before a program-graph shape catalog exists. Every facet predicate runs."
+  before a program-graph shape catalog exists. Every declared-schema predicate runs."
   {:malli/schema [:=> [:cat :map :seon.schema/value] [:set :qualified-keyword]]}
   [projection value]
   (let [validators
         (schema/projection-cache-value
-         projection ::facet-validators
+         projection ::declared-schema-validators
          (fn []
-           (mapv (fn [facet]
-                   [facet (schema/projection-validator projection facet)])
-                 (sort (facet-keys projection)))))]
+           (mapv (fn [declared-schema]
+                   [declared-schema (schema/projection-validator projection declared-schema)])
+                 (sort (declared-schema-keys projection)))))]
     (into #{}
-          (keep (fn [[facet valid?]] (when (valid? value) facet)))
+          (keep (fn [[declared-schema valid?]] (when (valid? value) declared-schema)))
           validators)))
 
 
@@ -2417,8 +2417,8 @@
                               (> n maximum))))))
                (:seon.instrument/declared-arities value))))
 
-(defn facet-counts-agree?
-  "Declared and actual facet counts each describe their own optional sets."
+(defn declared-schema-counts-agree?
+  "Declared and actual declared-schema counts each describe their own optional sets."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (and (map? value)
@@ -2428,8 +2428,8 @@
                         (if (zero? n) (not (contains? value set-key))
                             (and (set? (get value set-key))
                                  (= n (count (get value set-key))))))))
-               [[:seon.instrument/declared-facet-count :seon.instrument/declared-facets]
-                [:seon.instrument/actual-facet-count :seon.instrument/actual-facets]])))
+               [[:seon.instrument/declared-declared-schema-count :seon.instrument/declared-declared-schemas]
+                [:seon.instrument/actual-declared-schema-count :seon.instrument/actual-declared-schemas]])))
 
 (defn config-expectation-present?
   "A config refusal identifies at least one actual expected constraint."
@@ -2604,17 +2604,17 @@
                                 :seon.error.basis/commit #uuid "00000000-0000-0000-0000-000000000002"
                                 :seon.error.basis/t 1}))))
 
-(def facet-counts-agree-generator
+(def declared-schema-counts-agree-generator
   (gen/let [base error-base-generator projection projection-complete-generator
             declared (gen/set (gen/elements [:seon.agent/error :seon.turn/error :seon.turn/refused-error]))
             actual (gen/set (gen/elements [:seon.db.read/error :seon.config/error]))]
     (cond-> (assoc base :seon.instrument/fn 'seon.id/valid? :seon.instrument/arity 2
                    :seon.instrument/returned-error projection
-                   :seon.instrument/declared-facet-digest (apply str (repeat 64 "0"))
-                   :seon.instrument/declared-facet-count (count declared)
-                   :seon.instrument/actual-facet-count (count actual))
-      (seq declared) (assoc :seon.instrument/declared-facets declared)
-      (seq actual) (assoc :seon.instrument/actual-facets actual))))
+                   :seon.instrument/declared-declared-schema-digest (apply str (repeat 64 "0"))
+                   :seon.instrument/declared-declared-schema-count (count declared)
+                   :seon.instrument/actual-declared-schema-count (count actual))
+      (seq declared) (assoc :seon.instrument/declared-declared-schemas declared)
+      (seq actual) (assoc :seon.instrument/actual-declared-schemas actual))))
 
 (def ordered-failures-generator
   (gen/fmap (fn [items]

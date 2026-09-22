@@ -202,7 +202,7 @@
   [projection]
   (let [registry (:seon.schema.projection/registry projection)
         roots (mapv #(mr/schema registry %) (keys (:seon.schema.projection/forms projection)))
-        facets #{:seon.db/identity :seon.db/unique :seon.db/index
+        properties #{:seon.db/identity :seon.db/unique :seon.db/index
                  :seon.db/component :seon.db/no-history? :db.secondary/only}
         core
         (reduce
@@ -219,7 +219,7 @@
                               (map first) (filter qualified-keyword?))
                              (internal/entity-entries root))
                        attributes)
-               (and (qualified-keyword? k) (some #(contains? properties %) facets))
+               (and (qualified-keyword? k) (some #(contains? properties %) properties))
                (conj k))))
          #{} (map vector (keys (:seon.schema.projection/forms projection)) roots))
         properties

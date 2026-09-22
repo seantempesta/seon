@@ -156,7 +156,7 @@
                @connection
                (dissoc request :seon.config.error/max-evidence-bytes)))
             data (:seon.error/data refusal)]
-        (is (contains? (error/facets (schema/handed-projection) refusal)
+        (is (contains? (error/properties (schema/handed-projection) refusal)
                        :seon.instrument/contract-error)
             "the contract refuses before the recorder is reached")
         (is (= :input (:seon.instrument/check refusal)))
@@ -175,10 +175,10 @@
         (is (empty? (committed-fault-ids @connection))
             "and the refused call committed nothing")))))
 
-(deftest a-dropped-storage-facet-refuses-reopening-the-branch-in-place
+(deftest a-dropped-storage-property-refuses-reopening-the-branch-in-place
   ;; The canonical population is the installed declaration set, so the
   ;; converged case asserts what production reopening does: no declaration
-  ;; change at all. Dropping a facet the branch still carries is the class
+  ;; change at all. Dropping a property the branch still carries is the class
   ;; this regression kills — comparing only the current declaration's keys
   ;; read that absence as health and kept the stale uniqueness installed
   ;; (2026-09-16 blocker: every publication then refused with "multiple
@@ -205,11 +205,11 @@
                          forms
                          (fn [] (changes stale (schema/handed-projection) "stale-fixture"))))]
           (is (true? (:seon.boot/refused refusal))
-              "a facet the current declaration no longer carries refuses")
+              "a property the current declaration no longer carries refuses")
           (is (= attribute (:seon.boot/attribute (:seon.boot/offense refusal))))
           (is (= :db.unique/identity
                  (:db/unique (:seon.boot/installed (:seon.boot/offense refusal))))
-              "and the refusal carries the installed facet as evidence")
+              "and the refusal carries the installed property as evidence")
           (is (str/includes? (:seon.error/message refusal)
                              "bin/seon init stale-fixture --force")
               "naming the refork that resolves it"))))))

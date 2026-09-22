@@ -164,7 +164,7 @@
      (is (nil? (optional-positional nil))
          "a :maybe positional is validated as nil, not as its child schema"))))
 
-(deftest host-boundaries-enforce-per-arity-facets-in-both-modes
+(deftest host-boundaries-enforce-per-arity-declared-schemas-in-both-modes
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "host-error-wrapper")
@@ -175,10 +175,10 @@
                      [:=> [:cat :map :int] [:or :int :seon.agent/error]]]
            base {:seon.error/at #inst "2026-09-18T00:00:00Z"
                  :seon.error/layer :seon.instrument-test/body
-                 :seon.error/operation 'seon.instrument-test/host-facet}
+                 :seon.error/operation 'seon.instrument-test/host-declared-schema}
            domain (assoc base :seon.agent/error-agent-id "observed-agent")
            calls (atom 0)
-           candidate-name (symbol (str "host-facet-" (random-uuid)))
+           candidate-name (symbol (str "host-declared-schema-" (random-uuid)))
            candidate (intern 'seon.instrument-test candidate-name
                              (fn [value & _] (swap! calls inc) value))
            committed (atom [])
@@ -201,22 +201,22 @@
                  arity (if (= :panic mode)
                          (test-support/refusal-data #(candidate)) (candidate))]
              (is (= before @calls) "Input and arity checks precede the body.")
-             (doseq [[refusal facet] [[input :seon.instrument/contract-error]
+             (doseq [[refusal declared-schema] [[input :seon.instrument/contract-error]
                                       [arity :seon.instrument/arity-error]]]
-               (is ((schema/projection-validator projection facet) refusal)
+               (is ((schema/projection-validator projection declared-schema) refusal)
                    (pr-str refusal))))
            (let [refusal (if (= :panic mode)
                            (test-support/refusal-data #(candidate domain)) (candidate domain))]
-             (is (= #{:seon.agent/error} (:seon.instrument/actual-facets refusal)) (pr-str refusal))
+             (is (= #{:seon.agent/error} (:seon.instrument/actual-declared-schemas refusal)) (pr-str refusal))
              (is (= 1 (:seon.instrument/arity refusal)))
              (is ((schema/projection-validator projection :seon.instrument/undeclared-error) refusal))
              (when (= :record mode)
                (is (identical? refusal (first (peek @committed)))
                    "The call returns the exact flat value handed to the committer."))
-             (is (= domain (candidate domain 1)) "Only the declaring arity permits this facet."))
+             (is (= domain (candidate domain 1)) "Only the declaring arity permits this declared-schema."))
            (let [refusal (if (= :panic mode)
                            (test-support/refusal-data #(candidate base)) (candidate base))]
-             (is (= 0 (:seon.instrument/actual-facet-count refusal)))
+             (is (= 0 (:seon.instrument/actual-declared-schema-count refusal)))
              (is ((schema/projection-validator projection :seon.instrument/undeclared-error) refusal))))
          (is (= 4 (count @committed)))
          (doseq [[value [_fact outcome]] @committed]
@@ -321,7 +321,7 @@
     (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) (test-support/refusal-data (fn* [] (instrument/wrap-interpreted (quote my.agents.contract/value) "[:=> [:cat [:fn clojure.core/int?]] :int]" projection :record caps wrapped))))
         ":record cannot arm without acquired recording custody")))
 
-(deftest sci-installed-contracts-enforce-facets-and-refusals-in-both-dials
+(deftest sci-installed-contracts-enforce-declared-schemas-and-refusals-in-both-dials
   (test-support/with-database
    (fn [connection]
      (doseq [mode [:panic :record]]
@@ -341,17 +341,17 @@
                                    :seon.flow/commit-fault! recorder})
              domain {:seon.error/at #inst "2026-09-18T00:00:00Z"
                      :seon.error/layer ::sci-body
-                     :seon.error/operation 'user/sci-facet
+                     :seon.error/operation 'user/sci-declared-schema
                      :seon.agent/error-agent-id "sci-agent"}
              contract [:function [:=> [:cat :map] :map]
                        [:=> [:cat :map :int] [:or :int :seon.agent/error]]]]
          (sci/eval-string* ctx "(def calls (atom 0))")
-         (doseq [[label args facet ran?]
+         (doseq [[label args declared-schema ran?]
                  [[:input [42] :seon.instrument/contract-error false]
                   [:arity [] :seon.instrument/arity-error false]
                   [:undeclared [domain] :seon.instrument/undeclared-error true]
                   [:declared [domain 1] nil true]]]
-           (let [name (symbol (str "sci-facet-" (clojure.core/name mode) "-" (clojure.core/name label)))
+           (let [name (symbol (str "sci-declared-schema-" (clojure.core/name mode) "-" (clojure.core/name label)))
                  qualified (symbol "user" (str name))
                  source (str "(defn ^{:malli/schema " (pr-str contract) "} " name
                              " [value & extras] (swap! calls inc) value)")
@@ -364,16 +364,16 @@
                            (fn [_]
                              (let [invoke #(sci/eval-form
                                             ctx (cons name (map (fn [value] (list 'quote value)) args)))]
-                               [(if (and facet (= :panic mode))
+                               [(if (and declared-schema (= :panic mode))
                                   (test-support/refusal-data invoke) (invoke))])))]
              (is (= (+ before (if ran? 1 0)) (sci/eval-string* ctx "@calls")))
-             (if facet
+             (if declared-schema
                (do
-                 (is ((schema/projection-validator projection facet) result))
+                 (is ((schema/projection-validator projection declared-schema) result))
                  (is (= qualified (:seon.instrument/fn result)))
                  (is (= (count args) (:seon.instrument/arity result)))
                  (when (= :undeclared label)
-                   (is (= #{:seon.agent/error} (:seon.instrument/actual-facets result))))
+                   (is (= #{:seon.agent/error} (:seon.instrument/actual-declared-schemas result))))
                  (when (= :record mode)
                    (let [[value [_ outcome]] (peek @recorded)]
                      (is (= :seon.flow/committed outcome)
@@ -1134,19 +1134,19 @@
                (get-in refusal [:seon.error/data :seon.error/problems 0 :seon.error/offending]))
             "The consumer refuses its input and retains the causal value.")))))
 
-(deftest semantic-admission-explicitly-declares-every-error-facet
+(deftest semantic-admission-explicitly-declares-every-error-declared-schema
   (let [projection (schema/handed-projection)]
     (doseq [candidate [#'admit/semantic-value #'error/refusal #'error/latest-fact
                        #'kernel/failure-value]]
       (let [output (last (:malli/schema (meta candidate)))
             declared (#'instrument/declared-result projection output)]
-        (is (= (error/facet-keys projection) (:seon.instrument/declared declared))
+        (is (= (error/declared-schema-keys projection) (:seon.instrument/declared declared))
             (str candidate " missing declarations: "
                  (pr-str (remove (:seon.instrument/declared declared)
-                                 (error/facet-keys projection)))))
+                                 (error/declared-schema-keys projection)))))
         (is (true? (:seon.instrument/base? declared)))))))
 
-(deftest hot-host-facet-check-measurement
+(deftest hot-host-declared-schema-check-measurement
   (let [projection (schema/handed-projection)
         caps (config/result-caps (test-support/effective-config))
         samples 20000
@@ -1172,9 +1172,9 @@
             timings (mapv (fn [_] {:before-us (measured before value)
                                    :after-us (measured after value)}) (range 3))]
         (is (= value (after value)))
-        (prn {::facet-overhead label ::samples samples ::timings timings})))))
+        (prn {::declared-schema-overhead label ::samples samples ::timings timings})))))
 
-(deftest hot-sci-facet-check-measurement
+(deftest hot-sci-declared-schema-check-measurement
   (let [projection (schema/handed-projection)
         caps (config/result-caps (test-support/effective-config))
         ctx (sci.eval/build-base-ctx projection)
@@ -1203,7 +1203,7 @@
                timings (mapv (fn [_] {:before-us (measured before value)
                                       :after-us (measured after value)}) (range 3))]
            (is (= value (after value)))
-           (prn {::sci-facet-overhead label ::samples samples ::timings timings})))))))
+           (prn {::sci-declared-schema-overhead label ::samples samples ::timings timings})))))))
 
 (deftest the-work-launcher-api-is-collected-without-an-allowlist
   (instrumented!
@@ -1348,13 +1348,13 @@
         composed (assoc complete :seon.test/unknown "seon.instrument-test/absent")
         refusal (test-support/refusal-data #(wrapped base))]
     (is (= complete (wrapped complete)))
-    (is (every? (error/facets projection composed)
+    (is (every? (error/declared-schemas projection composed)
                 #{:seon.agent/error :seon.test/unknown-error}))
     (is (= composed (wrapped composed))
-        "A complete declared facet permits additional facets on the same open map.")
+        "A complete declared declared-schema permits additional declared-schemas on the same open map.")
     (is ((schema/projection-validator projection :seon.instrument/undeclared-error)
          refusal)
-        "An ordinary map success arm cannot satisfy the promised error facet.")))
+        "An ordinary map success arm cannot satisfy the promised error declared-schema.")))
 
 (deftest instrumentation-observations-do-not-carry-legacy-class-stamps
   (let [projection (schema/handed-projection)

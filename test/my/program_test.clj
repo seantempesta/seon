@@ -151,7 +151,7 @@
        (is (not (:seon.cluster.eval/error read-evaluation)) (pr-str read-evaluation))
        (is (seq (get-in read-evaluation [:seon.sci.admit/value :seon.program/callers])))))))
 
-(deftest program-refusals-carry-complete-distinguishable-facets
+(deftest program-refusals-carry-complete-distinguishable-declared-schemas
   (support/with-database
    (fn [connection]
      (let [projection (schema/handed-projection)
@@ -160,19 +160,19 @@
                    'my.program/callers
                    #(throw (ex-info "The read failed." {:sample/evidence 42})))
            missing (program/supplied-context
-                    (env/environment {:seon.boot/cluster-name "program-facets"}))
+                    (env/environment {:seon.boot/cluster-name "program-declared-schemas"}))
            absent (program/callers {:seon.db/db (db/db connection)
                                     :seon.program/subject 'sample/missing})]
-       (is (contains? (error/facets projection failed) :seon.program/read-refused-error))
+       (is (contains? (error/declared-schemas projection failed) :seon.program/read-refused-error))
        (is (= 'my.program/callers (:seon.program/read-operation failed)))
        (is (= {:sample/evidence 42}
               (get-in failed [:seon.error/data ])))
-       (is (contains? (error/facets projection missing) :seon.program/context-unavailable-error))
+       (is (contains? (error/declared-schemas projection missing) :seon.program/context-unavailable-error))
        (is (= #{:my.program/executing-ctx :my.program/base-ctx :seon.db/connection}
               (:seon.program/missing-context-members missing)))
-       (is (contains? (error/facets projection absent) :seon.program/not-found-error))
+       (is (contains? (error/declared-schemas projection absent) :seon.program/not-found-error))
        (is (= 'sample/missing (:seon.program/not-found absent)))
-       (is (empty? (error/facets projection
+       (is (empty? (error/declared-schemas projection
                                 {:seon.error/at (java.util.Date.)
                                  :seon.error/layer :seon.program/read
                                  :seon.error/operation 'my.program/callers})))))))

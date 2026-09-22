@@ -29,7 +29,7 @@
                   seon.schema.datahike/encode-transaction-in
                   seon.db/retention-snapshot seon.db/retention-check seon.db/retention-report-check
                   seon.error/stored-observation seon.error/signature
-                  seon.error/facets seon.error/bounded-error-admission
+                  seon.error/declared-schemas seon.error/bounded-error-admission
                   seon.schema/projection-from-database
                   seon.render.value/prepare seon.render.value/render-ai-data
                   seon.blob/put! seon.sci.eval/bind-result!

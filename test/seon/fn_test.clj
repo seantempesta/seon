@@ -2179,11 +2179,11 @@
                     "obsolete findings retract completely")))))))))
 
 ;;; --------------------------------------------------------------------------
-;;; Analysis facets — :seon.fn/writes and :seon.fn/call-arities
+;;; Analysis attributes — :seon.fn/writes and :seon.fn/call-arities
 ;;; --------------------------------------------------------------------------
 
 (def ^:private writer-fixture-source
-  (str "(ns sample.facets\n"
+  (str "(ns sample.attributes\n"
        "  (:require [seon.db :as db]))\n"
        "\n"
        "(defn helper [value] value)\n"
@@ -2191,46 +2191,46 @@
        "(defn record-agent!\n"
        "  [connection id]\n"
        "  (db/transact! connection [{:seon.agent/id id\n"
-       "                             :sample.facets/undeclared true\n"
-       "                             :seon.ns/name (helper 'sample.facets)}]))\n"
+       "                             :sample.attributes/undeclared true\n"
+       "                             :seon.ns/name (helper 'sample.attributes)}]))\n"
        "\n"
        "(defn reads-only\n"
        "  [database]\n"
        "  (db/q '[:find ?e :where [?e :seon.agent/id _]] database))\n"))
 
-(defn- facet-rows
-  ([] (facet-rows writer-fixture-source))
+(defn- attribute-rows
+  ([] (attribute-rows writer-fixture-source))
   ([source]
    (let [root (fixture-root)]
-     (write-source! root "sample/facets.clj" source)
+     (write-source! root "sample/attributes.clj" source)
      (into {}
            (keep (fn [row]
                    (when-let [function-symbol (:seon.fn/sym row)]
                      [function-symbol row])))
            (seon.fn/rows {:seon.fn/roots [(.getPath root)]})))))
 
-(deftest writes-facet-names-every-attribute-a-declaration-transacts
-  (let [rows (facet-rows)]
+(deftest writes-attribute-names-every-attribute-a-declaration-transacts
+  (let [rows (attribute-rows)]
     (testing "the attributes inside a transact! call's own span, as keyword values"
       (is (= #{:seon.agent/id :seon.ns/name}
-             (:seon.fn/writes (get rows (quote sample.facets/record-agent!))))))
+             (:seon.fn/writes (get rows (quote sample.attributes/record-agent!))))))
     (testing "an undeclared keyword has no :seon.schema/key row to name"
-      (is (not (contains? (:seon.fn/writes (get rows (quote sample.facets/record-agent!)))
-                          :sample.facets/undeclared))))
+      (is (not (contains? (:seon.fn/writes (get rows (quote sample.attributes/record-agent!)))
+                          :sample.attributes/undeclared))))
     (testing "reading an attribute is not writing it"
-      (is (nil? (:seon.fn/writes (get rows (quote sample.facets/reads-only))))
+      (is (nil? (:seon.fn/writes (get rows (quote sample.attributes/reads-only))))
           "the read names :seon.agent/id but transacts nothing")
-      (is (contains? (:seon.fn/keywords (get rows (quote sample.facets/reads-only)))
+      (is (contains? (:seon.fn/keywords (get rows (quote sample.attributes/reads-only)))
                      :seon.agent/id)
-          "the conflating keyword facet still carries it"))
+          "the conflating keyword attribute still carries it"))
     (testing "a declaration that never reaches the write seam carries no set"
-      (is (nil? (:seon.fn/writes (get rows (quote sample.facets/helper))))))))
+      (is (nil? (:seon.fn/writes (get rows (quote sample.attributes/helper))))))))
 
 (deftest call-arities-refine-exactly-the-stored-call-edges
-  (let [rows (facet-rows)
-        writer (get rows (quote sample.facets/record-agent!))
-        reader (get rows (quote sample.facets/reads-only))]
-    (is (= #{[(quote seon.db/transact!) 2] [(quote sample.facets/helper) 1]}
+  (let [rows (attribute-rows)
+        writer (get rows (quote sample.attributes/record-agent!))
+        reader (get rows (quote sample.attributes/reads-only))]
+    (is (= #{[(quote seon.db/transact!) 2] [(quote sample.attributes/helper) 1]}
            (:seon.fn/call-arities writer)))
     (is (= #{[(quote seon.db/q) 2]} (:seon.fn/call-arities reader)))
     (testing "every refined callee is a target the reach index already carries"
@@ -2239,25 +2239,25 @@
                (set (:seon.fn/calls row)))
             (str (:seon.fn/sym row)
                  " refines exactly its :seon.fn/calls targets"))))
-    (is (nil? (:seon.fn/call-arities (get rows (quote sample.facets/helper))))
+    (is (nil? (:seon.fn/call-arities (get rows (quote sample.attributes/helper))))
         "a declaration with no call edge carries no tuple")))
 
-(deftest static-index-and-runtime-admission-agree-on-analysis-facets
+(deftest static-index-and-runtime-admission-agree-on-analysis-attributes
   (test-support/with-database
     (fn [connection]
-      (let [namespace-ref [:seon.ns/name 'sample.facets]
-            static (get (facet-rows) (quote sample.facets/record-agent!))
+      (let [namespace-ref [:seon.ns/name 'sample.attributes]
+            static (get (attribute-rows) (quote sample.attributes/record-agent!))
             definition
             (str "(defn record-agent!\n"
                  "  [connection id]\n"
                  "  (seon.db/transact! connection"
                  " [{:seon.agent/id id\n"
-                 "     :sample.facets/undeclared true\n"
-                 "     :seon.ns/name (helper 'sample.facets)}]))")
-            program-row (test-support/program-fn-row (db/db connection) (quote sample.facets/record-agent!) definition)]
+                 "     :sample.attributes/undeclared true\n"
+                 "     :seon.ns/name (helper 'sample.attributes)}]))")
+            program-row (test-support/program-fn-row (db/db connection) (quote sample.attributes/record-agent!) definition)]
         (transact-fixture!
          connection
-         [{:seon.ns/name 'sample.facets}
+         [{:seon.ns/name 'sample.attributes}
           {:seon.ns/name 'seon.db}])
         (transact-fixture!
          connection
@@ -2266,7 +2266,7 @@
            :seon.fn/arglists "([request])"
            :seon.fn/private? false
            :seon.schema.admission/source :core}
-          (test-support/program-fn-row (db/db connection) (quote sample.facets/helper) "(defn helper [value] value)")])
+          (test-support/program-fn-row (db/db connection) (quote sample.attributes/helper) "(defn helper [value] value)")])
         (let [[_ admitted]
               (first (seon.fn/analyze-forms
                       (db/db connection)
@@ -2364,14 +2364,14 @@
               (is (pos-int? (:seon.fn/arity-checked report)))
               (is (nat-int? (:seon.fn/arity-unchecked report))))))))))
 
-(deftest re-index-replaces-analysis-facets-exactly
+(deftest re-index-replaces-analysis-attributes-exactly
   (with-provenance-file
-    "sample/facets.clj" writer-fixture-source
+    "sample/attributes.clj" writer-fixture-source
     (fn [connection file rows]
-      (let [target (symbol "sample.facets" "record-agent!")
+      (let [target (symbol "sample.attributes" "record-agent!")
             before (some #(when (= target (:seon.fn/sym %)) %) rows)
             narrowed (str/replace writer-fixture-source
-                                  "\n                             :seon.ns/name (helper 'sample.facets)}]))"
+                                  "\n                             :seon.ns/name (helper 'sample.attributes)}]))"
                                   "}]))")]
         (is (contains? (:seon.fn/writes before) :seon.ns/name))
         (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) rows []))
@@ -2474,9 +2474,9 @@
 
 (deftest the-indexer-emits-no-attribute-the-program-row-schema-drops
   ;; The 2026-09-16 class, twice in one day (7cfe02790, 925ca19fe): the
-  ;; analyzer derived an owned facet, and the canonical row silently dropped
+  ;; analyzer derived an owned attribute, and the canonical row silently dropped
   ;; it because a second literal list did not name it. This compares the rows
-  ;; the analysis emits with the rows the artifact carries, so a dropped facet
+  ;; the analysis emits with the rows the artifact carries, so a dropped attribute
   ;; is a red regression rather than an absent fact nobody notices.
   (let [root (fixture-root)
         source (str "(ns indexed.sample\n"
@@ -2509,7 +2509,7 @@
         (str "the analysis emitted a rich row set, not an empty one: "
              (pr-str (sort emitted-attributes))))
     (is (contains? emitted-attributes :seon.fn/writes)
-        "the write facet is among the emitted attributes")
+        "the write attribute is among the emitted attributes")
     (is (empty? (remove kept-attributes emitted-attributes))
         (str "attributes the analysis emitted and the canonical row dropped: "
              (pr-str (sort (remove kept-attributes emitted-attributes)))))

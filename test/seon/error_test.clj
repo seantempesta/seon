@@ -892,30 +892,30 @@
           (is (nil? (db/pull database [:db/id] [:seon.ns/name 'my.mint]))))))))
 
 
-(deftest new-error-facets-compose-and-report-missing-members
+(deftest new-error-declared-schemas-compose-and-report-missing-members
   (test-support/with-database
    (fn [connection]
      (let [projection (db/carried-projection (db/db connection))
            base {:seon.error/at #inst "2026-09-18T00:00:00Z"
                  :seon.error/layer :seon.db/read :seon.error/operation 'seon.db/q}
-           matching (partial error/facets projection)
+           matching (partial error/declared-schemas projection)
            read-error (gen/generate error/read-operation-agrees-generator 4 20260918)
            combined (assoc read-error :seon.agent/error-agent-id "manifest-agent"
                            :seon.turn/error-turn-id "manifest-turn")
            missing (dissoc combined :seon.agent/error-agent-id)]
        (is ((schema/projection-validator projection :seon.error/base) base))
-       (is (= #{} (matching base)) "Valid base-only error: no domain facet matched.")
+       (is (= #{} (matching base)) "Valid base-only error: no domain declared-schema matched.")
        (is (= #{} (matching (dissoc combined :seon.error/operation)))
-           "A malformed base cannot satisfy a facet.")
+           "A malformed base cannot satisfy a declared-schema.")
        (is (not ((matching combined) :seon.error/base)))
-       (is (identical? (error/facet-keys projection) (error/facet-keys projection))
+       (is (identical? (error/declared-schema-keys projection) (error/declared-schema-keys projection))
            "Only projection-derived population is memoised.")
        (is (every? (matching combined) [:seon.db.read/error :seon.turn/error :seon.agent/error]))
        (is (false? ((schema/projection-validator projection :seon.turn/error) missing)))
        (is (some #(= [:seon.agent/error-agent-id] (:in %))
                  (:errors ((schema/projection-explainer projection :seon.turn/error) missing))))))))
 
-(deftest arity-facet-preserves-real-refusal-observations
+(deftest arity-declared-schema-preserves-real-refusal-observations
   (test-support/with-database
    (fn [connection]
      (let [projection (db/carried-projection (db/db connection))
@@ -1083,7 +1083,7 @@
         refusal (ex-info "Refused" observation underlying)]
     (is (= observation (error/refusal (ex-info "Wrapper" {:seon.error-test/wrapper true} refusal))))))
 
-(deftest error-facets-persist-through-the-real-occurrence-owner
+(deftest error-declared-schemas-persist-through-the-real-occurrence-owner
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "error-family-1a")
@@ -1102,7 +1102,7 @@
        (prn {::unowned-refusal unowned})
        (is ((schema/projection-validator projection :seon.instrument/arity-error) armed)
            (pr-str armed))
-       (doseq [[source required-facets]
+       (doseq [[source required-declared-schemas]
                [[observed #{:seon.agent/error :seon.turn/error}]
                 [armed #{:seon.instrument/arity-error}]
                 [(assoc observed :seon.error/location
@@ -1122,23 +1122,23 @@
                root (db/pull database (error/observation-selector projection) (:seon.error/ref recording))
                occurrence (first (:seon.error/occurrences root))]
            (is (seq (:tx-data report)))
-           (is (= required-facets (error/facets projection source)))
+           (is (= required-declared-schemas (error/declared-schemas projection source)))
            ;; Stored entity contracts and pull-result contracts have distinct
            ;; collection grammars. Validate the read through its derived form.
-           (doseq [facet required-facets]
+           (doseq [declared-schema required-declared-schemas]
              (let [occurrence-selector
                    (some #(when (map? %)
                             (get % [:seon.error/occurrences :limit nil]))
                          (error/observation-selector projection))
-                   pulled-form (schema/pulled-form-in projection facet occurrence-selector)
+                   pulled-form (schema/pulled-form-in projection declared-schema occurrence-selector)
                    registry (:seon.schema.projection/registry projection)
                    scalar-attributes
                    (remove #(some-> (mr/schema registry %) malli.core/properties
                                 :seon.db/component)
-                           (map first (schema.internal/entity-entries (mr/schema registry facet))))]
+                           (map first (schema.internal/entity-entries (mr/schema registry declared-schema))))]
                (is (true? (malli.core/validate pulled-form occurrence
                                                (:seon.schema.projection/compile-options projection)))
-                   (pr-str {:facet facet :location-length
+                   (pr-str {:declared-schema declared-schema :location-length
                             (get-in occurrence [:seon.error/location :seon.error.location/length])}))
                (is (= (select-keys source scalar-attributes)
                       (select-keys occurrence scalar-attributes)))))
@@ -1164,9 +1164,9 @@
            ;; Record the acquisition question without asserting that a stored
            ;; entity validator is a pull-result validator.
            (when-not (:seon.error/location source)
-             (prn {::stored-occurrence occurrence ::required-facets required-facets
-                   ::authored-facets (error/facets projection source)
-                   ::pulled-facets (error/facets projection occurrence)}))))))))
+             (prn {::stored-occurrence occurrence ::required-declared-schemas required-declared-schemas
+                   ::authored-declared-schemas (error/declared-schemas projection source)
+                   ::pulled-declared-schemas (error/declared-schemas projection occurrence)}))))))))
 
 (deftest recurrence-identity-is-the-complete-observations-stable-evidence
   (test-support/with-database
@@ -1205,10 +1205,10 @@
          (is (= (:seon.error/ref first-record) (:seon.error/ref third-record)))
          (is (= 3 (:seon.error/occurrence-count (error/latest-fact (root first-record))))))
        (let [before (root first-record)
-             added-facet (record! (assoc (error/latest-fact before)
+             added-declared-schema (record! (assoc (error/latest-fact before)
                                         :seon.turn/error-turn-id "observed-turn")
                                  "d13-process-a")
-             other-facet (record! (-> observed
+             other-declared-schema (record! (-> observed
                                      (dissoc :seon.agent/error-agent-id)
                                      (assoc :seon.turn/error-turn-id "observed-turn"))
                                  "d13-process-a")
@@ -1225,8 +1225,8 @@
                                             :seon.error.key/bound-bytes 256}}}})
                                 "d13-process-a")]
          (is (= 5 (count (set (map :seon.error/ref
-                                   [first-record added-facet other-facet other-schema other-path])))))
-         (is (= before (root first-record)) "Adding a facet leaves prior occurrences untouched.")
+                                   [first-record added-declared-schema other-declared-schema other-schema other-path])))))
+         (is (= before (root first-record)) "Adding a declared-schema leaves prior occurrences untouched.")
          (is (= 5 (count (db/q '[:find ?root :where [?root :seon.error/signature]]
                                (db/db connection))))))))))
 

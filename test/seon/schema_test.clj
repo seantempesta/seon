@@ -168,7 +168,7 @@
                   :sealed-entries (count (mr/schemas registry))
                   :providers (count @calls) :provider-max (apply max (vals @calls))})))))
 
-(deftest base-extending-facet-compiles-without-enumerating-the-registry
+(deftest base-extending-declared-schema-compiles-without-enumerating-the-registry
   (test-support/with-database
     (fn [connection]
       (let [current-projection (schema/projection-from-database
@@ -177,16 +177,16 @@
             function-contracts
             (:seon.schema.projection/function-contracts current-projection)
             forms (assoc population
-                         ::facet-member :string
-                         ::facet [:and :seon.error/base
-                                  [:map [::facet-member ::facet-member]]])
+                         ::declared-schema-member :string
+                         ::declared-schema [:and :seon.error/base
+                                  [:map [::declared-schema-member ::declared-schema-member]]])
             started (System/nanoTime)
             projection (test-support/await-event!
                         (future
                           (schema/build-projection
                            forms
                            function-contracts))
-                        ::base-extending-facet-projection)
+                        ::base-extending-declared-schema-projection)
             elapsed-ms (/ (- (System/nanoTime) started) 1e6)
             enumerations (atom 0)
             registry (:seon.schema.projection/registry projection)
@@ -196,21 +196,21 @@
               (-schemas [_]
                 (swap! enumerations inc)
                 (mr/-schemas registry)))
-            validate (m/validator ::facet {:registry observed-registry})
+            validate (m/validator ::declared-schema {:registry observed-registry})
             value {:seon.error/at (java.util.Date.)
                    :seon.error/layer ::boundary
-                   :seon.error/operation 'seon.schema-test/facet
-                   ::facet-member "evidence"}]
-        (is (contains? (:seon.schema.projection/forms projection) ::facet))
+                   :seon.error/operation 'seon.schema-test/declared-schema
+                   ::declared-schema-member "evidence"}]
+        (is (contains? (:seon.schema.projection/forms projection) ::declared-schema))
         (is (seq function-contracts)
             "The fixture must supply the real program's function contracts")
         (is (< elapsed-ms (* 1000 test-support/event-backstop-seconds)))
         (is (validate value))
         (is (not (validate (dissoc value :seon.error/operation))))
-        (is (not (validate (assoc value ::facet-member 42))))
+        (is (not (validate (assoc value ::declared-schema-member 42))))
         (is (zero? @enumerations)
             "Ref validation must not enumerate/merge the complete registry")
-        (println "base-extending facet projection:"
+        (println "base-extending declared-schema projection:"
                  {:elapsed-ms elapsed-ms
                   :function-contracts (count function-contracts)
                   :validator-registry-merges @enumerations})))))
@@ -1496,34 +1496,34 @@
                  [:map {:seon.db/attributes true} [::raw-payload ::raw-payload]]]]]
          (let [outcome (try (schema/build-projection
                             (assoc forms ::domain-marker :boolean ::raw-payload :map
-                                   ::invalid-facet definition))
+                                   ::invalid-declared-schema definition))
                            nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
            (is (map? outcome) (str "Declaration must refuse: " definition))))
        (let [raw (schema/build-projection
                   (assoc forms ::raw-payload :map
-                         ::raw-facet [:and {:seon.db/attributes false} :seon.error/base
+                         ::raw-declared-schema [:and {:seon.db/attributes false} :seon.error/base
                                       [:map [::raw-payload ::raw-payload]]]))
              observation {:seon.error/at (java.util.Date.)
                           :seon.error/layer ::admission
                           :seon.error/operation 'seon.schema-test/error-declarations-expand-all-inherited-members
                           ::raw-payload {::observed (Object.)}}]
-         (is ((schema/projection-validator raw ::raw-facet) observation))
+         (is ((schema/projection-validator raw ::raw-declared-schema) observation))
          (is (not (some #{::raw-payload}
                         (seon.schema.datahike/database-attributes-core-in raw)))))))))
 
-(deftest error-facets-and-their-owned-members-are-storable
+(deftest error-declared-schemas-and-their-owned-members-are-storable
   (test-support/with-database
    (fn [connection]
      (let [projection (schema/projection-from-database (seon.db/db connection))
            forms (:seon.schema.projection/forms projection)
-           facets (into #{:seon.error/base}
+           declared-schemas (into #{:seon.error/base}
                         (keep (fn [[k definition]]
                                 (when (and (vector? definition)
                                            (:seon.db/attributes (seon.schema.internal/entity-properties (mr/schema (:seon.schema.projection/registry projection) k)))
                                            (seon.schema.internal/extends-schema? (mr/schema (:seon.schema.projection/registry projection) k) :seon.error/base)) k)))
                         forms)
            declarations
-           (loop [pending (seq (conj facets :seon.failure/entity
+           (loop [pending (seq (conj declared-schemas :seon.failure/entity
                                       :seon.error.disposition/observation)) seen #{}]
              (if-let [k (first pending)]
                (if (seen k) (recur (next pending) seen)
@@ -1531,7 +1531,7 @@
                          targets (keep #(some-> (mr/schema (:seon.schema.projection/registry projection) %) m/properties
                                                 :seon.db/component-schema) members)]
                      (recur (concat (next pending) targets) (conj seen k)))) seen))]
-       (is (facets :seon.db.read/error))
+       (is (declared-schemas :seon.db.read/error))
        (is (declarations :seon.instrument.arity/bounds))
        (is (declarations :seon.error.key/entity))
        (doseq [k declarations
@@ -1543,7 +1543,7 @@
            (is (schema.datahike/storable-attribute-in? projection attribute) (str k " " attribute))
            (is (nil? (:db/unique (schema.datahike/malli->datahike-attr-in projection attribute)))
                (str "An observation cannot upsert its domain subject: " attribute))))
-       (println "ERROR-MANIFEST declarations" {:facets (count facets) :owned-closure (count declarations)})
+       (println "ERROR-MANIFEST declarations" {:declared-schemas (count declared-schemas) :owned-closure (count declarations)})
        (doseq [k declarations
                :let [symbols (into #{} (keep #(when (map? %) (:gen/gen %)))
                                    (tree-seq coll? seq (get forms k)))]

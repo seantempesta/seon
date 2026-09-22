@@ -1072,7 +1072,7 @@
                         tx-pairs)
                 "the schema row and terminal receipt are one commit")
             (is (contains? (:schema db) persistent-key)
-                "an explicit persistence facet installs the Datahike attribute")
+                "an explicit persistence property installs the Datahike attribute")
             (is (not (contains? (:schema db) value-key))
                 "a value schema does not invent a Datahike attribute")
             (when (contains? (:schema db) persistent-key)

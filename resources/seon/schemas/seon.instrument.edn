@@ -50,10 +50,10 @@
 
  ; Additive error declaration manifest, 2026-09-18.
 
- :seon.instrument/actual-facet-count
+ :seon.instrument/actual-declared-schema-count
  [:int {:min 0}]
 
- :seon.instrument/actual-facets
+ :seon.instrument/actual-declared-schemas
  [:set :qualified-keyword]
 
  :seon.instrument/arity
@@ -105,13 +105,13 @@
  :seon.instrument/declared-arity-count
  [:int {:min 1}]
 
- :seon.instrument/declared-facet-count
+ :seon.instrument/declared-declared-schema-count
  [:int {:min 0}]
 
- :seon.instrument/declared-facet-digest
+ :seon.instrument/declared-declared-schema-digest
  [:string {:min 64, :max 64}]
 
- :seon.instrument/declared-facets
+ :seon.instrument/declared-declared-schemas
  [:set :qualified-keyword]
 
  :seon.instrument/explanations
@@ -158,20 +158,20 @@
    [:seon.instrument/fn :seon.instrument/fn]
    [:seon.instrument/arity :seon.instrument/arity]
    [:seon.instrument/returned-error :seon.instrument/returned-error]
-   [:seon.instrument/declared-facet-digest
-    :seon.instrument/declared-facet-digest]
-   [:seon.instrument/declared-facet-count
-    :seon.instrument/declared-facet-count]
-   [:seon.instrument/actual-facet-count
-    :seon.instrument/actual-facet-count]
-   [:seon.instrument/declared-facets
+   [:seon.instrument/declared-declared-schema-digest
+    :seon.instrument/declared-declared-schema-digest]
+   [:seon.instrument/declared-declared-schema-count
+    :seon.instrument/declared-declared-schema-count]
+   [:seon.instrument/actual-declared-schema-count
+    :seon.instrument/actual-declared-schema-count]
+   [:seon.instrument/declared-declared-schemas
     {:optional true}
-    :seon.instrument/declared-facets]
-   [:seon.instrument/actual-facets
+    :seon.instrument/declared-declared-schemas]
+   [:seon.instrument/actual-declared-schemas
     {:optional true}
-    :seon.instrument/actual-facets]]]
+    :seon.instrument/actual-declared-schemas]]]
  [:fn
-  {:error/message "facet-counts-agree?",
-   :gen/gen seon.error/facet-counts-agree-generator}
-  seon.error/facet-counts-agree?]]
+  {:error/message "declared-schema-counts-agree?",
+   :gen/gen seon.error/declared-schema-counts-agree-generator}
+  seon.error/declared-schema-counts-agree?]]
 }

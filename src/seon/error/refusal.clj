@@ -28,12 +28,9 @@
   "Deepest structural error in `ex-data`, retaining its exception message;
   else deepest non-empty data, or nil.
 
-  This is a genuine pass-through: the data it returns is the data some other
-  operation put on a throwable, so under program-facts PRD §1q it enumerates
-  the COMPLETE canonical facet population alongside the base error schema and
-  the ordinary `ex-data` map. The enumeration is explicit, never a
-  projection-derived catch-all; `seon.error.refusal-test` fails on drift
-  against `seon.error/facet-keys`."
+  This reader returns another operation's exception data, preserving its
+  declared domain members and ordinary ex-data maps. Its copied output
+  alternatives await conversion to the error-handling base contract."
   {:malli/schema
    [:=> [:cat [:maybe :seon.error/throwable]]
     [:or

@@ -531,7 +531,7 @@
 
 (defn failure-value
   "Preserve an existing structural refusal and accrete guard evidence.
-  Otherwise return the kernel facet with the observed evaluation duration;
+  Otherwise return the kernel declared-schema with the observed evaluation duration;
   the complete diagnostic record retains whether the deadline fired."
   {:malli/schema
    [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record]
@@ -581,7 +581,7 @@
                           :seon.sci.admit/record diagnostic-record}
                    subject (assoc :seon.fn/sym subject))
         existing (error.refusal/refusal throwable)]
-    (if (and (map? existing) (contains? existing :seon.error/at) (contains? existing :seon.error/layer) (contains? existing :seon.error/operation)) ;; debt: seon.error.refusal/refusal declares the generic :seon.error/base output (:seon.error/value's target) alongside its facets.
+    (if (and (map? existing) (contains? existing :seon.error/at) (contains? existing :seon.error/layer) (contains? existing :seon.error/operation)) ;; debt: seon.error.refusal/refusal declares the generic :seon.error/base output (:seon.error/value's target) alongside its declared-schemas.
       ;; The refusal is already the boundary value. Wrapping it copied its
       ;; data, its ex-data (the whole refusal), and its throw-site message into
       ;; a `:nested-refusal` envelope, so the terminal renderer fitted six

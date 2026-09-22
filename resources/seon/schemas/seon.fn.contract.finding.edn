@@ -1,9 +1,9 @@
 {
  ; Additive error declaration manifest, 2026-09-18.
 
- :seon.fn.contract.finding/error-facet-analysis-unavailable
- [:= :seon.fn.contract.finding/error-facet-analysis-unavailable]
+ :seon.fn.contract.finding/error-declared-schema-analysis-unavailable
+ [:= :seon.fn.contract.finding/error-declared-schema-analysis-unavailable]
 
- :seon.fn.contract.finding/undeclared-error-facet
- [:= :seon.fn.contract.finding/undeclared-error-facet]
+ :seon.fn.contract.finding/undeclared-error-declared-schema
+ [:= :seon.fn.contract.finding/undeclared-error-declared-schema]
 }

@@ -1,4 +1,7 @@
-{:seon.program/analyzed-source-digest
+{:seon.program/definition-digest
+ [:string {:min 64 :max 64
+           :description "Canonical identity of one declaration's authored definition, resolver context and effective semantic metadata."}]
+ :seon.program/analyzed-source-digest
  [:string {:min 64 :max 64
            :description "Digest of the exact analyzed input, including resolver context. Its presence records completed analysis even when the computed relations have no members."}]
  :seon.program/analyzed-count [:int {:min 0}]
@@ -248,20 +251,20 @@
   [:seon.program/error-subject :seon.program/error-subject]
   [:seon.program/source-observation :seon.program/source-observation]]]
 
- :seon.program/error-facet-arity
+ :seon.program/error-declared-schema-arity
  [:map
  [:seon.fn.arity/min :seon.fn.arity/min]
  [:seon.fn.arity/max {:optional true} :seon.fn.arity/max]
- [:seon.fn.arity/error-facets
+ [:seon.fn.arity/error-declared-schemas
   {:optional true}
-  :seon.fn.arity/error-facets]
- [:seon.fn.arity/error-facet-digest :seon.fn.arity/error-facet-digest]]
+  :seon.fn.arity/error-declared-schemas]
+ [:seon.fn.arity/error-declared-schema-digest :seon.fn.arity/error-declared-schema-digest]]
 
- :seon.program/error-facet-result
+ :seon.program/error-declared-schema-result
  [:map
  [:seon.fn/sym :seon.fn/sym]
- [:seon.fn/error-facets {:optional true} :seon.fn/error-facets]
- [:seon.fn/arities [:vector :seon.program/error-facet-arity]]]
+ [:seon.fn/error-declared-schemas {:optional true} :seon.fn/error-declared-schemas]
+ [:seon.fn/arities [:vector :seon.program/error-declared-schema-arity]]]
 
  :seon.program/error-subject
  [:and

@@ -201,7 +201,7 @@
                 "and the loop cannot mistake it for a delivery")))))))
 
 (deftest the-error-value-is-the-registered-one
-  ;; Every returned refusal satisfies its declared facet and base. A function
+  ;; Every returned refusal satisfies its declared declared-schema and base. A function
   ;; that returns a bare message map is outside its own contract. This
   ;; assertion is what stops that hole opening here — and `my.turn`'s
   ;; own error values now satisfy the same schema (the canary that

@@ -120,6 +120,7 @@
             :seon.render/html seon.render.ns/function-html}
            [:map
            [:seon.fn/sym :seon.fn/sym]
+           [:seon.program/definition-digest :seon.program/definition-digest]
            [:seon.program/analyzed-source-digest :seon.program/analyzed-source-digest]
            [:seon.test/subject {:optional true} :seon.test/subject]
            [:seon.schema.admission/source
@@ -235,7 +236,7 @@
   [:seon.fn/error-subject :seon.fn/error-subject]
   [:seon.fn/analysis-phase :seon.fn/analysis-phase]]]
 
- :seon.fn/error-facets
+ :seon.fn/error-declared-schemas
  [:set {:seon.db/index true} :qualified-keyword]
 
  :seon.fn/error-subject

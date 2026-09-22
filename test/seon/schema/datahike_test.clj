@@ -32,19 +32,19 @@
            (is (= ::identity-observation (:seon.schema/identity refusal)))
            (is (= :seon.turn/id (:seon.schema/member refusal)))))))))
 
-(deftest optional-unstorable-facet-members-remain-in-memory
+(deftest optional-unstorable-property-members-remain-in-memory
   (support/with-database
    (fn [connection]
      (let [forms (:seon.schema.projection/forms (schema/handed-projection))
-           facet (fn [optional?]
+           property (fn [optional?]
                    [:and {:seon.db/attributes true} :seon.error/base
                     [:map [::subject ::subject]
                      [:seon.error/offending {:optional optional?} :seon.schema/value]]])
-           candidate (assoc forms ::subject :string ::observation (facet true))
+           candidate (assoc forms ::subject :string ::observation (property true))
            projection (schema/build-projection candidate)
            value {:seon.error/at (java.util.Date.)
                   :seon.error/layer ::bridge
-                  :seon.error/operation 'seon.schema.datahike-test/optional-unstorable-facet-members-remain-in-memory
+                  :seon.error/operation 'seon.schema.datahike-test/optional-unstorable-property-members-remain-in-memory
                   ::subject "producer"
                   :seon.error/offending (Object.)}]
        (is ((schema/projection-validator projection ::observation) value))
@@ -61,7 +61,7 @@
                       (::schema.datahike/attributes
                        (#'schema.datahike/compiled-attribute-selection projection)))))
        (let [refusal (try
-                       (schema/build-projection (assoc candidate ::observation (facet false)))
+                       (schema/build-projection (assoc candidate ::observation (property false)))
                        nil
                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
          (is (= :seon.error/offending (:seon.schema/member refusal))))))))
@@ -184,7 +184,7 @@
   (gen/elements
    [:string :int :double :float :keyword :boolean :inst :uuid :symbol]))
 
-(def ^:private facet-generator
+(def ^:private property-generator
   (gen/let [indexed? gen/boolean
             no-history? gen/boolean
             uniqueness (gen/elements [nil :identity :value])]
@@ -197,7 +197,7 @@
 (def ^:private supported-form-generator
   (gen/one-of
    [(gen/let [base scalar-generator
-              properties facet-generator]
+              properties property-generator]
       {:base base :properties properties})
     (gen/let [head (gen/elements [:vector :set :sequential])
               child scalar-generator

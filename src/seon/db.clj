@@ -1767,7 +1767,7 @@
    [:function
     ;; A SUPPLIER'S DECLARED RETURN IS READ BY `seon.call-preparation`, which
     ;; refuses a default whose declaration is wider than the argument it fills.
-    ;; Widening these three to the full facet union made every prepared
+    ;; Widening these three to the full declared-schema union made every prepared
     ;; `:seon.db/db` and `:seon.db/connection` inadmissible, and `seon.db/diff`
     ;; then reported `:seon.db/database-input-absent` (measured 2026-09-18).
     [:=> [:cat]

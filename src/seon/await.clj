@@ -122,7 +122,7 @@
   {:malli/schema
    [:=> [:cat :seon.await/request]
     ;; Completion is genuinely polymorphic and preserves complete errors from
-    ;; arbitrary work. Only this boundary's own failures have await facets.
+    ;; arbitrary work. Only this boundary's own failures have await declared-schemas.
     [:or :seon.schema/value :seon.error/base
      :seon.await/timeout-error :seon.await/closed-error]]}
   [{java-future :seon.await/future

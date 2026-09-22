@@ -3504,20 +3504,23 @@
      (mapv
       (fn [schema-key]
         (let [references (get reference-graph schema-key)]
-          (cond->
-           (merge (@schema-datahike-storable-properties-in projection schema-key)
-                  {:seon.schema/key schema-key
-                   :seon.schema/form
-                   (binding [*print-namespace-maps* false] (pr-str (get forms schema-key)))
-                   :seon.schema.admission/source :core})
-            (seq references) (assoc :seon.schema/references (set references)))))
+          (let [row
+                (cond->
+                 (merge (@schema-datahike-storable-properties-in projection schema-key)
+                        {:seon.schema/key schema-key
+                         :seon.schema/form
+                         (binding [*print-namespace-maps* false] (pr-str (get forms schema-key)))
+                         :seon.schema.admission/source :core})
+                  (seq references) (assoc :seon.schema/references (set references)))]
+            (assoc row :seon.program/definition-digest
+                   ((requiring-resolve 'seon.program/definition-digest) row)))))
       (dependency-first-schema-keys ordering-graph materialized-keys)))))
 
 (defn canonical-database-attributes
   "Compute the complete production database-attribute population.
 
    Entity-map entries are attributes by construction. Standalone registered
-   forms join that population only when they carry a persistence facet."
+   forms join that population only when they carry a persistence property."
   {:malli/schema [:=> [:cat ::projection] [:vector :qualified-keyword]]}
   [projection]
   (@schema-datahike-database-attributes-in projection))

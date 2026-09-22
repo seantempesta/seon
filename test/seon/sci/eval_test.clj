@@ -2364,7 +2364,7 @@
     (is (= 'unresolved-member
            (:seon.error/offending failure)))))
 
-(deftest a-refusal-keeps-its-declared-facet-at-both-entrances
+(deftest a-refusal-keeps-its-declared-declared-schema-at-both-entrances
   ;; A refusal our own guarded machinery raised already says what went
   ;; wrong. One classifier means neither entrance can flatten it into a
   ;; generic failure while the other preserves it.
@@ -2447,7 +2447,7 @@
                      (assoc reader-row :seon.schema/form "[:int {:seon.db/identity true}]")))
             "a genuinely different declaration is still not the committed one")))))
 
-(deftest returned-errors-require-a-complete-declared-facet
+(deftest returned-errors-require-a-complete-declared-declared-schema
   (test-support/with-database
     (fn [connection]
       (let [ctx (test-support/fork-cluster-ctx connection)
@@ -2462,8 +2462,8 @@
             malformed (assoc complete :seon.error/message [:seon.ns/name 'user])
             failed (run-in ctx (str "'" (pr-str complete)) 5000)
             ordinary (run-in ctx (str "'" (pr-str malformed)) 5000)]
-        (is (contains? (error/facets projection complete) :seon.sci.kernel/error))
-        (is (empty? (error/facets projection malformed)))
+        (is (contains? (error/declared-schemas projection complete) :seon.sci.kernel/error))
+        (is (empty? (error/declared-schemas projection malformed)))
         (is (string? (:seon.cluster.eval/error failed)))
         (is (= complete (:seon.sci.admit/value failed)))
         (is (= 12 (get-in failed [:seon.sci.admit/value

@@ -611,7 +611,7 @@
   {:malli/schema [:=> [:cat :map :seon.schema/value] :map]}
   [projection output]
   (let [forms (:seon.schema.projection/forms projection)
-        facets ((mi/-f->original error/facet-keys) projection)]
+        declared-schemas ((mi/-f->original error/declared-schema-keys) projection)]
     (letfn [(walk-result [node seen]
               (cond
                 (= node :seon.error/base) #{:seon.error/base}
@@ -623,9 +623,9 @@
                                    :seon.error/operation 'seon.instrument/declared-result
                                    :seon.error/expected-key node}))
                   (let [inherited (walk-result (get forms node) (conj seen node))]
-                    ;; Extending the base promises this complete facet. It does
+                    ;; Extending the base promises this complete declared-schema. It does
                     ;; not separately permit an incomplete base-only result.
-                    (if (facets node)
+                    (if (declared-schemas node)
                       (conj (disj inherited :seon.error/base) node)
                       inherited)))
                 (vector? node)
@@ -771,16 +771,16 @@
                                       arities)))
                         permission (nth permissions index)
                         declared (::declared permission)
-                        actual ((mi/-f->original error/facets) projection value)]
+                        actual ((mi/-f->original error/declared-schemas) projection value)]
                     (when (and (not (::base? permission))
                                (empty? (set/intersection actual declared)))
                       (reject!
                        (cond->
                         {:seon.error/message
                          (if (empty? actual)
-                           (str function-symbol " returned a base error without a complete declared facet."
-                                " Declared facets: " (pr-str declared) ".")
-                           (str function-symbol " returned undeclared error facets "
+                           (str function-symbol " returned a base error without a complete declared declared-schema."
+                                " Declared declared-schemas: " (pr-str declared) ".")
+                           (str function-symbol " returned undeclared error declared-schemas "
                                 (pr-str (set/difference actual declared)) "."))
                          :seon.error/at (java.util.Date.)
                          :seon.error/layer :seon.instrument/invocation
@@ -788,11 +788,11 @@
                          :seon.instrument/fn function-symbol
                          :seon.instrument/arity arity
                          :seon.instrument/returned-error (error/project-observation caps value)
-                         :seon.instrument/declared-facet-digest (::digest permission)
-                         :seon.instrument/declared-facet-count (count declared)
-                         :seon.instrument/actual-facet-count (count actual)}
-                         (seq declared) (assoc :seon.instrument/declared-facets declared)
-                         (seq actual) (assoc :seon.instrument/actual-facets actual))))))
+                         :seon.instrument/declared-declared-schema-digest (::digest permission)
+                         :seon.instrument/declared-declared-schema-count (count declared)
+                         :seon.instrument/actual-declared-schema-count (count actual)}
+                         (seq declared) (assoc :seon.instrument/declared-declared-schemas declared)
+                         (seq actual) (assoc :seon.instrument/actual-declared-schemas actual))))))
                 value)) options)]
        (fn [& arguments]
          (try (apply wrapped arguments)

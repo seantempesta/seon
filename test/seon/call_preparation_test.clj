@@ -788,14 +788,14 @@
 
 
 (defn malformed-base-supplier
-  "Return ordinary map data which satisfies no declared error facet."
+  "Return ordinary map data which satisfies no declared error declared-schema."
   {:malli/schema [:=> [:cat :seon.env/environment] :map]}
   [_environment]
   {:seon.error/at "not-an-instant"
    :seon.error/layer :seon.call-preparation/test
    :seon.error/operation 'seon.call-preparation-test/malformed-base-supplier})
 
-(deftest supplier-failures-have-facets-and-malformed-claims-remain-data
+(deftest supplier-failures-have-declared-schemas-and-malformed-claims-remain-data
   (test-support/with-database
    (fn [connection]
      (let [current (cp/snapshot (db/db connection) (projection))
@@ -808,16 +808,16 @@
                               (assoc slot :seon.call-preparation/supplier-symbol
                                      'sample/absent-supplier) 'sample/target)
            cause (get-in missing [:seon.error/data :seon.call-preparation/cause])]
-       (is (contains? (error/facets (projection) value)
+       (is (contains? (error/declared-schemas (projection) value)
                       :seon.call-preparation/invalid-supplied-value-error))
        (is (= :seon.db/db (:seon.call-preparation/invalid-key value)))
        (is (= :seon.db/database-value (:seon.call-preparation/schema-key value)))
-       (is (empty? (error/facets (projection) (:seon.error/offending value))))
+       (is (empty? (error/declared-schemas (projection) (:seon.error/offending value))))
        (is (= 'seon.call-preparation-test/malformed-base-supplier
               (:seon.error/operation (:seon.error/offending value))))
-       (is (contains? (error/facets (projection) missing)
+       (is (contains? (error/declared-schemas (projection) missing)
                       :seon.call-preparation/unavailable-error))
        (is (= 'sample/target (:seon.call-preparation/target-symbol missing)))
-       (is (contains? (error/facets (projection) cause)
+       (is (contains? (error/declared-schemas (projection) cause)
                       :seon.call-preparation/unresolved-supplier-error))
        (is (= 'sample/absent-supplier (:seon.call-preparation/unresolved-symbol cause)))))))

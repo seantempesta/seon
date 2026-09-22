@@ -551,7 +551,7 @@
      :seon.blob/staged-writes (cond-> [] staged (conj staged))}))
 
 (defn- handler-refusal-validators
-  "Validators for this loaded handler's result-position facets, excluding payloads."
+  "Validators for this loaded handler's result-position declared-schemas, excluding payloads."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value]
                   [:vector :seon.effect/result-validator]]}
   [projection handler-var]

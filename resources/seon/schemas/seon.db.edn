@@ -2,7 +2,7 @@
           ;; Database operations preserve classified failures raised by schema
           ;; validation, transaction functions, and dependency callbacks.  The
           ;; union is deliberately explicit: the contract wrapper derives its
-          ;; permissions from these facet keys and refuses an unlisted facet.
+          ;; permissions from these declared-schema keys and refuses an unlisted declared-schema.
           :error-result
           [:or
            :seon.error/value :seon.error/base

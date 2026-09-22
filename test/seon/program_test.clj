@@ -907,19 +907,19 @@
              :seon.fn/source "(defn f [] 1)"
              :seon.fn/arglists "([])"
              :seon.fn/private? false
-             :sample/facet "carried"}
+             :sample/declared-schema "carried"}
         declared (update-in forms [:seon.fn/fn 2] conj
-                         [:sample/facet {:optional true} :string])]
-    (is (nil? (:sample/facet
+                         [:sample/declared-schema {:optional true} :string])]
+    (is (nil? (:sample/declared-schema
                (program/canonical-row (program/shapes-in (seon.schema/build-projection forms)) row)))
         "an undeclared attribute is not a program row attribute")
-    (is (= "carried" (:sample/facet
+    (is (= "carried" (:sample/declared-schema
                       (program/canonical-row (program/shapes-in (seon.schema/build-projection declared)) row)))
         "declaring it on :seon.fn/fn is sufficient — no code names it")
     (is (contains? (set (program/changed-attributes
                          (program/shapes-in (seon.schema/build-projection declared))
-                         row (dissoc row :sample/facet)))
-                   :sample/facet)
+                         row (dissoc row :sample/declared-schema)))
+                   :sample/declared-schema)
         "and an exact replacement retracts it when the source stops carrying it"))
   (testing "an entry naming another writer stays out of the indexer's hands"
     (let [forms (schema/registered-schemas)

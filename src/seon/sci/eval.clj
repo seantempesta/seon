@@ -2555,7 +2555,7 @@
       (:seon.render.call/selected-producer projection)
       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
       (when-let [declared (render/request-projection request)]
-        (seq (error/facets declared value)))
+        (seq (error/declared-schemas declared value)))
       (assoc :seon.cluster.eval/error (failure-text value))
       record (assoc :seon.sci.admit/record record))))
 

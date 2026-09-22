@@ -955,14 +955,14 @@
           value)))
 
 (defn unknown-ai
-  "Render the declared unknown facet and its stable observation fields.
+  "Render the declared unknown declared-schema and its stable observation fields.
 
-  The facet line follows the error message grammar. Sorted observation data
+  The declared-schema line follows the error message grammar. Sorted observation data
   keeps timing and other transient invocation measurements out of the shown
   text while the complete refusal remains available as diagnostic evidence."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
-  (str "Facets: [:seon.render/unknown]\n"
+  (str "Declared schemas: [:seon.render/unknown]\n"
        (admit/canonical-edn (unknown-evidence-of unit))))
 
 (defn unknown-html
@@ -1648,7 +1648,7 @@
   "Prepare one refused render's OUTPUT values and its owner message.
 
   Both audiences read the SAME typed unknown, so the page and the prompt say
-  the same thing about the same absence: `unknown-ai` names the facet and stable observation for
+  the same thing about the same absence: `unknown-ai` names the declared-schema and stable observation for
   the agent, `unknown-html` the labeled block for a person. The anonymous
   sentence `Renderer unavailable.` that used to stand here named neither the
   producer nor why it stopped, so it taught the reader nothing and hid which

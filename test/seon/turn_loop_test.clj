@@ -1162,7 +1162,7 @@
 ;;; fixture installs an EXPLICIT attribute list and so bypasses the rule
 ;;; the boot path actually uses: `canonical-database-attributes`
 ;;; installs entity-map entries by construction and standalone forms
-;;; only when they carry a persistence facet. Four families had no
+;;; only when they carry a persistence property. Four families had no
 ;;; entity map and therefore installed exactly one attribute each.
 ;;;
 ;;; These two tests are the recurring surface for that class. The subset

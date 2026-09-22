@@ -38,11 +38,11 @@
   This is a generic pass-through: the entity handed in is returned in
   transaction shape, so an error entity — `seon.error/latest-fact`'s
   projection reaches here through `seon.error/rendered-error-value` — comes
-  back carrying its own base and facets. Per the program-facts PRD §1q the
-  output therefore enumerates `:seon.error/base` and every canonical facet
+  back carrying its own base and declared-schemas. Per the program-facts PRD §1q the
+  output therefore enumerates `:seon.error/base` and every canonical declared-schema
   explicitly, exactly as `seon.error/latest-fact` does. Nothing here
   constructs an error; `node-id`, `window`, and `prepare` name their exact
-  render-value facets."
+  render-value declared-schemas."
   {:malli/schema
    [:function
     [:=> [:catn [::entity :map]]

@@ -1039,8 +1039,8 @@
     (`reference-code/datahike/src/datahike/schema.cljc:264`).
 
   A DROP is never accretive here, even where Datahike would accept the update:
-  transacting the current declaration cannot retract a facet the branch still
-  carries, so reading a drop as compatible would leave the stale facet
+  transacting the current declaration cannot retract a property the branch still
+  carries, so reading a drop as compatible would leave the stale property
   installed (2026-09-16,
   `docs/seon/issues/adoption-misses-a-dropped-uniqueness-on-an-installed-attribute.md`).
   Every other property — `:db/valueType`, `:db/unique`, `:db/tupleType`… —
@@ -1055,15 +1055,15 @@
     false))
 
 (defn- declaration-property-changes
-  "Every storage facet where the installed attribute and the declaration differ.
+  "Every storage property where the installed attribute and the declaration differ.
 
-  The comparison is the UNION of both declarations' facets. Selecting only the
-  keys the CURRENT declaration carries read a DROPPED facet as compatible — the
+  The comparison is the UNION of both declarations' properties. Selecting only the
+  keys the CURRENT declaration carries read a DROPPED property as compatible — the
   branch kept an installed `:db/unique` the bridge no longer derives, and the
   stale identity surfaced much later as a program-indexing conflict naming the
   wrong cause (2026-09-16,
   `docs/seon/issues/adoption-misses-a-dropped-uniqueness-on-an-installed-attribute.md`).
-  Absence of the facet IS the signal, so it is compared rather than skipped.
+  Absence of the property IS the signal, so it is compared rather than skipped.
   Datahike's `:schema` entry holds exactly the declaration datoms transacted
   for that attribute plus its `:db/ident`
   (`reference-code/datahike/src/datahike/db/transaction.cljc:90`), so the two
@@ -1086,12 +1086,12 @@
 (defn- declaration-changes
   "Missing declarations plus the accretive updates, refusing the rest.
 
-  An attribute already installed on the branch is compared facet by facet
-  rather than by whole-map equality: a change every differing facet is
+  An attribute already installed on the branch is compared property by property
+  rather than by whole-map equality: a change every differing property is
   accretive under `accretive-property-change?` is ADOPTED IN PLACE by
   transacting the declaration, which is how adding `:db/index` to a live
   attribute reaches Datahike's atomic AVET backfill instead of forcing a
-  destructive refork of an existing cluster. A facet Datahike would not apply
+  destructive refork of an existing cluster. A property Datahike would not apply
   refuses, naming that property and both of its values."
   [db projection cluster-name]
   (into

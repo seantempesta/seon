@@ -686,13 +686,13 @@
             (is (= (:seon.effect/id receipt) (:seon.effect/recorded-effect-id second-result)))
             (is (= 1 (count @handler-calls)))))))))
 
-(deftest effect-pass-through-enumerates-the-canonical-facets
+(deftest effect-pass-through-enumerates-the-canonical-declared-schemas
   (test-support/with-database
    (fn [connection]
      (let [projection (schema/projection-from-database (db/db connection))
            declared (get (:seon.schema.projection/forms projection)
                          :seon.effect/request-result)]
-       (is (= (error/facet-keys projection)
+       (is (= (error/declared-schema-keys projection)
               (disj (set (rest declared)) :seon.schema/value :seon.db/error-result)))))))
 
 (deftest settlement-records-only-successful-handler-result-attributes

@@ -111,8 +111,8 @@
  ;; The error owner requires call preparation. Resolve its inspection Vars
 ;; once after loading, as seon.error does for its SCI dependency. The supplied
 ;; projection remains the authority; no error population is copied here.
-(def ^:private error-facets (delay (requiring-resolve 'seon.error/facets)))
-(def ^:private error-facet-keys (delay (requiring-resolve 'seon.error/facet-keys)))
+(def ^:private error-declared-schemas (delay (requiring-resolve 'seon.error/declared-schemas)))
+(def ^:private error-declared-schema-keys (delay (requiring-resolve 'seon.error/declared-schema-keys)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The declared row attributes — a query over the declaration, not a list
@@ -161,7 +161,7 @@
 (def ^:private supplier-shape-query
   ;; A supplier's declared call shape and return shape, for the coherence
   ;; proof: one argument (this cluster's environment) and an `:or`
-  ;; return — the row's value shape plus declared error facets.
+  ;; return — the row's value shape plus declared error declared-schemas.
   '[:find ?order ?count ?argument-fingerprint ?return-type
     :in $ ?sym
     :where
@@ -266,7 +266,7 @@
           (not= :or return-type)
           (incoherent candidate
                       (str supplier " must declare a union return: its "
-                           "value schema or declared error facets. It declares a "
+                           "value schema or declared error declared-schemas. It declares a "
                            (pr-str return-type) ".")
                       {:seon.call-preparation/supplier-symbol supplier})
 
@@ -446,7 +446,7 @@
                          :where [?schema :seon.schema/key ?key]
                          [?schema :seon.schema/shape ?shape]
                          [?shape :seon.schema.shape/fingerprint ?fingerprint]]
-                       (conj (@error-facet-keys projection) :seon.error/value)))
+                       (conj (@error-declared-schema-keys projection) :seon.error/value)))
             candidates
             (mapv (fn [[default-key schema-key fingerprint supplier]]
                     {:seon.call-preparation/key default-key
@@ -1126,7 +1126,7 @@
             valid? (get (:seon.call-preparation/validators current)
                         default-key)]
         (cond
-          (seq (@error-facets (:seon.schema/projection current) produced)) (unavailable sym slot produced)
+          (seq (@error-declared-schemas (:seon.schema/projection current) produced)) (unavailable sym slot produced)
 
           (or (nil? valid?) (valid? produced)) produced
 
