@@ -79,3 +79,8 @@ The shared base is prepared by the DEFAULT JVM's loaded `seon.fn`, so
   are the definitions holding `:seon.fn/invokes` of that attribute.
 - `seon.fn/source-rows` (agent-submitted forms) filters declared targets by the
   submitted batch's functions only, the same shape the analyzed-artifacts fix removed.
+
+Sighting 2026-09-22 21:10Z (lane validator-single-pass): `bin/test --prepare-head-base` at
+HEAD `4135c518a` refused with the same `seon.db/render-diff-ai` ←
+`seon.render/invoke-selected` referrer (37 s, exit 1); default pid 51528 still runs code
+older than `f31074521`. RESET NEEDED (or reload of `seon.fn`/`seon.cluster` in default).

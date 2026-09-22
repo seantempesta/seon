@@ -40,3 +40,8 @@ tests of `seon.cluster.source-test` / `seon.cluster.publication-lock-test`
 refused on `:my.note/note`. The lane built its own base with
 `cluster/publication-base!` inside a `git archive` snapshot and ran the named
 namespaces under armed contracts without recording; see its landing note.
+
+Sighting 2026-09-22 21:05Z (lane validator-single-pass): overlay `d73e0a6c…` 67 commits
+behind HEAD `f31074521`; `bin/test-fast --paths src/seon/db.clj
+test/seon/owned_value_test.clj -- seon.owned-value-test` (runs `5995c1bd98eb`,
+`3a17ec42b5a4`) errored in fixture setup with the same `:my.note/note` partition refusal.

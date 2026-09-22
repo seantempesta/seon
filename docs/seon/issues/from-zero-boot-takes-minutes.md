@@ -55,3 +55,6 @@ the launching shell's; load is `uptime`'s one-minute average at start.
 | 2026-09-22 | same live JVM, second cluster `fzb2` forked from `current-src` | new cluster | 4,256 | 4.42 | 8.54 | same |
 | 2026-09-22 | `fe624bf22` archive + oversight follow-up (booted before the lane read the no-from-zero ruling) | from-zero | 128,569 | 142.38 | — | [lane-oversight-owning-instance](../../prds/agent-platform/landing/lane-oversight-owning-instance-2026-09-23.md) |
 | 2026-09-22 | same root, `start` | warm restart | 14,774 | 31.53 | — | same |
+| 2026-09-22 | `6bf3bde78` frozen archive: one-pass arity-gate grouping in `write-owned-values-error` (measurement, not a gate) | from-zero | **74,027** (was 170,338) | 89.17 | 7.44 | [lane-validator-single-pass](../../prds/agent-platform/landing/lane-validator-single-pass-2026-09-23.md) |
+| 2026-09-22 | same: program-rows transaction, `:db/txInstant` of that transaction to the next | program write | **29,865 ms** (was ~125,500) | — | — | same |
+| 2026-09-22 | same root, `down` then `start` | warm restart | 14,469 | 30.12 | ~11 | same |
