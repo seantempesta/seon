@@ -56,18 +56,18 @@
   not exceptions escaping a liveness derivation."
   {:malli/schema [:=> [:cat :seon.cluster.process/identity] :boolean]}
   [{:seon.boot/keys [pid start-instant]}]
-  (try
-    (let [optional (java.lang.ProcessHandle/of (long pid))]
-      (boolean
-       (when (.isPresent optional)
-         (let [handle (.get optional)
-               start (.startInstant (.info handle))]
-           (and (.isAlive handle)
-                (.isPresent start)
-                (= (inst-ms start-instant)
-                   (.toEpochMilli ^java.time.Instant (.get start))))))))
-    (catch Throwable _
-      false)))
+  ;; No parse happens here: an absent process is an empty Optional, never
+  ;; an exception, so there is no declared case to catch and a platform
+  ;; failure propagates whole.
+  (let [optional (java.lang.ProcessHandle/of (long pid))]
+    (boolean
+     (when (.isPresent optional)
+       (let [handle (.get optional)
+             start (.startInstant (.info handle))]
+         (and (.isAlive handle)
+              (.isPresent start)
+              (= (inst-ms start-instant)
+                 (.toEpochMilli ^java.time.Instant (.get start)))))))))
 
 (defn process-start-instant
   "Return the OS start instant for a live PID."

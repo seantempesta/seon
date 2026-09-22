@@ -1343,10 +1343,10 @@
 
 (defn- process-alive?
   [pid]
-  (try
-    (let [process (java.lang.ProcessHandle/of (long pid))]
-      (and (.isPresent process) (.isAlive (.get process))))
-    (catch Exception _ false)))
+  ;; An absent process is an empty Optional; nothing is parsed, so a
+  ;; platform failure propagates.
+  (let [process (java.lang.ProcessHandle/of (long pid))]
+    (and (.isPresent process) (.isAlive (.get process)))))
 
 (defn- read-review-worker-unlocked []
   (try

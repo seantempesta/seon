@@ -179,6 +179,21 @@
       (:seon.db/component properties) (assoc :db/isComponent true)
       (:seon.db/no-history? properties) (assoc :db/noHistory true))))
 
+(defn- declared-storable?
+  "Whether `attribute`'s declaration maps to a Datahike attribute.
+  False only for this owner's declared refusals, each of which names the
+  attribute under `::attr` (`malli->datahike-attr-in`); any other failure
+  propagates whole."
+  {:malli/schema [:=> [:cat :map :qualified-keyword] :boolean]}
+  [projection attribute]
+  (try
+    (malli->datahike-attr-in projection attribute)
+    true
+    (catch clojure.lang.ExceptionInfo failure
+      (if (= attribute (::attr (ex-data failure)))
+        false
+        (throw failure)))))
+
 (defn assert-storable-schema!
   "Refuse an error declaration whose members could upsert another entity."
   {:malli/schema [:=> [:cat :keyword [:fn malli.core/schema?]] :nil]}
@@ -213,9 +228,7 @@
                              (comp
                               (filter (fn [[attribute properties _]]
                                         (or (not (:optional properties))
-                                            (try (malli->datahike-attr-in projection attribute)
-                                                 true
-                                                 (catch clojure.lang.ExceptionInfo _ false)))))
+                                            (declared-storable? projection attribute))))
                               (map first) (filter qualified-keyword?))
                              (internal/entity-entries root))
                        attributes)
@@ -226,8 +239,7 @@
         (into (sorted-set)
               (comp (mapcat #(keys (m/properties %)))
                     (filter qualified-keyword?)
-                    (filter #(try (malli->datahike-attr-in projection %) true
-                                  (catch clojure.lang.ExceptionInfo _ false))))
+                    (filter #(declared-storable? projection %)))
               roots)]
     {::core (vec (sort-by str core))
      ::properties properties
@@ -245,10 +257,7 @@
   [projection attr]
   (boolean
    (when (contains? (:seon.schema.projection/forms projection) attr)
-     (try
-       (malli->datahike-attr-in projection attr)
-       true
-       (catch clojure.lang.ExceptionInfo _ false)))))
+     (declared-storable? projection attr))))
 
 (defn storable-properties-in
   "Namespaced properties whose own declarations are database-storable."
@@ -344,7 +353,8 @@
   [value]
   (try
     (= value (edn/read-string (canonical-print-string value)))
-    (catch Throwable _ false)))
+    ;; clojure.edn declares "not readable EDN" as a RuntimeException (EdnReader.java:130, :174-177); every other failure propagates.
+    (catch RuntimeException _ false)))
 
 (defn- storage-data
   "Replace inexpressible identifiers and impose canonical collection order."

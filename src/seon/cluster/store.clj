@@ -371,8 +371,12 @@
     (boolean
      (and (.isDirectory dir)
           (seq (.list dir))
-          (try (genesis-complete? (str store-dir))
-               (catch Throwable _ false))))))
+          ;; konserve writes each key to a `.new` file and moves it with
+          ;; ATOMIC_MOVE (reference-code/konserve/src/konserve/filestore.clj:307,
+          ;; `:in-place? false` at :901), so a kill leaves the roster absent,
+          ;; never half-written; absence reads as nil. A read that fails is
+          ;; damage, not incompleteness, and propagates.
+          (genesis-complete? (str store-dir))))))
 
 (defn- create-store!
   "Create a fresh store at `store-dir`, verifying genesis completed.
