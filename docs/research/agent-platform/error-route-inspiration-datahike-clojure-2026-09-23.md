@@ -105,3 +105,11 @@ Paths are under `reference-code/` unless marked `src/`. Read directly; nothing w
 - **The dial:** one config fact read by the seam, like `:caught`. A data key can pick the policy for one error (datastar `on-exception`, `:babashka/exit`).
 - **Doesn't fit:** a log-and-throw `raise` (double report), classification by message text, and handlers that silently drop their own errors (`Agent.java:100`, `listeners.clj:231`, konserve hooks).
 - **Check `src/seon/error.clj` first.** It is 2,334 lines and already has `signature` (`:151`), `root-cause` (`:105`), bounded admission (`:247-316`) and `prepare` (`:515`); look for overlap before adding a seam.
+
+## Addendum: web and second pass (same lane)
+- **Clojure 1.12:** nothing new for ex-triage or clojure.main reporting. The design dates from 1.10/1.10.1 (changes.md: CLJ-2463, 2497, 2504; the 1.12 items CLJ-2726 and CLJ-2739 are narrow fixes). [REPL and main entry points](https://clojure.org/reference/repl_and_main).
+- **Fingerprint shape:** `[phase class symbol source]` plus the ex-data `:error`/`:type` keyword. EXCLUDE the message (it contains runtime values) and the line (it moves with edits). Compare against Seon's `signature` (`src/seon/error.clj:151`).
+- **core.async:** `thread-call` (`async.clj:509-529`) has no catch; the thread dies and the channel closes, so only the uncaught handler sees it. The default handler therefore covers raw threads, go blocks and xforms, but NOT futures, agents, flow or superv go-try. Each of those needs explicit wiring.
+- **datahike upstream** `doc/logging_and_error_handling.md` still describes Timbre and `tools/raise`, stale against the fork. There is no upstream issue on write-error routing or counter upserts. Batching amortizes write amplification ([datahike.io note](https://datahike.io/notes/why-search-needs-versioning/)).
+- **Fork fix suggested:** `log/raise` should take a cause and NOT log at the raise site; logging belongs to the one route.
+- Spool-file fallback when the database is down: **REJECTED** by the owner's ruling (panic, production included).
