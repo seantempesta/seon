@@ -77,6 +77,34 @@ subject's absence as unknown or failure, never health. Conversation memory is ne
 the only record: integrate decisions into the plan, evidence into landing notes,
 and defects into the existing issue authority in the same coherent commit.
 
+**How every duplicate mechanism in this codebase was built (2026-09-22, from the
+night that removed most of them).** Four habits, each locally correct, each adding a
+mechanism. Recognise them in your own next edit:
+
+1. **Fetching at call time instead of holding the value.** A function that was not
+   handed the projection or the connection recomputed it; then someone cached the
+   recomputation; then a dynamic var carried the cache. That is the ambient projection
+   transport (350 lines, 75 sites) and the schema-shape family (30,000 datoms with no
+   reader). The cure is an argument, or a read of the value already held.
+2. **Reading silence as health, then hardening against it.** A check returned nil, so a
+   fallback appeared; a wait hung, so a bound appeared; a race happened, so a lock
+   appeared. The old operator's lifecycle lock, claim files and truth-repair pass were
+   that loop run ten times. The store reached 248 GB because the fault recorder's own
+   refusal fed the fault recorder. The cure is the typed unknown at the seam and one
+   regression asserting the wanted behavior — never another guard.
+3. **Fixing at the site instead of the owner.** Guards reading two of sixty declared
+   alternatives; fixture acquisition re-identifying 266 retained commits because one
+   caller once needed one; a whole-store export used as a test fixture. Each fix was
+   right for its caller. The cure is the producer's declared schema or the owner's one
+   function, and a test that fails without it.
+4. **Retiring without converting.** `:seon.error/kind` left the schema with 730 live
+   writers and surfaced only when a reset built a store without it. A retirement and
+   every caller are one loadable slice, proven by a from-zero boot, not by a warm JVM.
+
+Underneath all four: the dependency's source was not the first read. SCI keeps a live
+env, Datahike has per-attribute revisions and branch heads, konserve has GC. Before
+building, name the seam in `reference-code/` that already does it, with `file:line`.
+
 ## The system
 
 One JVM runs the CLJ system, REPL-first. Boot opens the REPL before store acquisition,
