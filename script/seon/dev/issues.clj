@@ -19,9 +19,10 @@
 
 (defn exit-code
   "Nonzero means the index has refusals or the live database was unavailable."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:enum 0 1]]}
   [result]
   (if (and (map? result) (number? (:seon.issue/count result))
-           (not (:seon.error/kind result)) (empty? (:seon.issue/refusals result)))
+           (empty? (:seon.issue/refusals result)))
     0 1))
 
 (defn run!

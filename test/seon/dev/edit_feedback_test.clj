@@ -47,7 +47,7 @@
 (deftest publication-diagnostics-come-from-the-operator-result
   (let [directory (fixture-directory)
         path (io/file directory "operator.edn")
-        failure {:seon.error/kind :publication-failed
+        failure {
                  :seon.error/message "missing schema"
                  :seon.operator/exception-data {:schema :example/input}}
         program

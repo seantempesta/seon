@@ -129,6 +129,7 @@
 
 (defn analyze-host
   "Return source-analysis facts and findings without publishing program rows."
+  {:malli/schema [:=> [:cat :string] :map]}
   [root]
   (if-not (fs/which "clj-kondo")
     {:seon.dev.changed-test/host-status :unavailable
@@ -163,9 +164,8 @@
         (cond->
          {:seon.dev.changed-test/host-status :unavailable
           :seon.dev.changed-test/reason (.getMessage error)}
-          (:seon.error/kind (ex-data error))
-          (assoc :seon.error/kind (:seon.error/kind (ex-data error))
-                 :seon.error/data (ex-data error)))))))
+          (seq (ex-data error))
+          (assoc :seon.error/data (ex-data error)))))))
 
 (defn- prune-logs! [directory]
   (doseq [path (->> (fs/list-dir directory "changed-*.log")
@@ -190,7 +190,9 @@
           (recur (drop 4 lines) (conj excerpts block)))
         (recur (rest lines) excerpts)))))
 
-(defn- run-command! [root boundary argv environment]
+(defn- run-command!
+  {:malli/schema [:=> [:cat :string :keyword [:vector :string] [:map-of :string :string]] :map]}
+  [root boundary argv environment]
   (let [log-dir (fs/path root "tmp/test-changed")
         log (fs/path log-dir
                      (str "changed-" (name boundary) "-"
@@ -208,8 +210,7 @@
              :seon.operator.subprocess/merge-error? true
              :seon.operator.subprocess/output-file (str log)})}
           (catch clojure.lang.ExceptionInfo failure
-            (if (= :seon.operator.subprocess/deadline-exceeded
-                   (:seon.error/kind (ex-data failure)))
+            (if (:seon.operator.subprocess/phase (ex-data failure))
               {:seon.dev.changed-test/deadline-error (ex-data failure)}
               (throw failure))))
         process-result (:seon.dev.changed-test/process execution)

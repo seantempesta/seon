@@ -271,8 +271,7 @@
                            ::no-refusal
                            (catch clojure.lang.ExceptionInfo failure
                              (ex-data failure)))]
-          (is (= :seon.dev-cache/dependency-pins-unavailable
-                 (:seon.error/kind refusal)))
+          (is (= :seon.dev-cache/no-pin-source (get-in refusal [:seon.error/data :seon.error/diagnostic-cause])))
           (is (= :seon.dev-cache/no-pin-source
                  (get-in refusal [:seon.error/data
                                   :seon.error/diagnostic-cause])))

@@ -102,9 +102,13 @@
 
 (defn- pins-unavailable
   "The flat refusal for a root whose dependency pins no source can state."
+  {:malli/schema [:=> [:cat :seon.schema/value]
+                  [:and :seon.error/base [:map [:seon.error/data :map]]]]}
   [root]
   (let [directory (canonical-file root)]
-    {:seon.error/kind :seon.dev-cache/dependency-pins-unavailable
+    {:seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.dev-cache/dependency-configuration
+     :seon.error/operation 'seon.dev.dependency-digest/dependency-pins
      :seon.error/message
      (str "The dependency pins of " (.getCanonicalPath directory)
           " cannot be read: it is not a git work tree that states them, and it"

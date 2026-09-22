@@ -113,8 +113,7 @@
                 child (some-> (java.lang.ProcessHandle/of child-pid)
                               (.orElse nil))]
             (try
-              (is (= :seon.operator.subprocess/deadline-exceeded
-                     (:seon.error/kind data)))
+              (is (keyword? (:seon.operator.subprocess/phase data)))
               (is (= :process-exit
                      (:seon.operator.subprocess/phase data)))
               (is (true? (:seon.operator.subprocess/reaped? data)))
@@ -132,8 +131,7 @@
          #((var-get #'operator.process/run-process!)
             {:seon.operator.subprocess/argv
              ["/a/foreign/process/that/must/not/be-launched"]}))]
-    (is (= :seon.operator.subprocess/deadline-undeclared
-           (:seon.error/kind (ex-data failure))))))
+    (is (= :seon.operator.subprocess/deadline-ms (:seon.operator.subprocess/deadline-member (ex-data failure))))))
 
 (deftest foreign-process-deadline-covers-output-capture
   (let [release-capture (promise)
@@ -149,8 +147,7 @@
                #(operator.process/run-process!
                  {:seon.operator.subprocess/argv ["/usr/bin/true"]
                   :seon.operator.subprocess/deadline-ms 100})))]
-        (is (= :seon.operator.subprocess/deadline-exceeded
-               (:seon.error/kind (ex-data failure))))
+        (is (keyword? (:seon.operator.subprocess/phase (ex-data failure))))
         (is (= :stdout
                (:seon.operator.subprocess/phase (ex-data failure))))
         (is (true? (:seon.operator.subprocess/reaped? (ex-data failure)))))

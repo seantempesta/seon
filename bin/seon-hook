@@ -1483,16 +1483,19 @@
            (absolute-file-path file-path))
         (schema-resource-path? file-path))))
 
-(defn- publication-result [path]
+(defn- publication-result
+  {:malli/schema [:=> [:cat :seon.schema/value] :map]}
+  [path]
   (let [result (edn/read-string (slurp path))]
     (when-not (and (map? result)
-                   (or (:seon.error/at result) (:seon.error/kind result)
+                   (or (:seon.error/at result)
                        (:seon.source/commit-id result)))
       (throw (ex-info "Operator returned no typed publication evidence."
                       {:seon.hook/result-path (str path)})))
     result))
 
 (defn- publication-failure-message
+  {:malli/schema [:=> [:cat :map :map] :string]}
   [result failure]
   (let [output (str (:out result) "\n" (:err result))
         evidence (root-file "logs/current-source-failure.log")
@@ -1511,7 +1514,7 @@
     (str "ADVISORY — current-src publication failed. Diagnostic: "
          (.getPath evidence) ". "
          (if-let [message (:seon.error/message failure)]
-           (str (pr-str (:seon.error/kind failure)) " " message
+           (str message
                 (when (seq failure-data) (str " " (pr-str failure-data))) ".")
            (str "Operator exit " (:exit result)
                 " with no typed failure in its result."))
@@ -1519,6 +1522,7 @@
 
 (defn- publish-source-paths
   "Publish one admitted union of paths and return its terminal feedback."
+  {:malli/schema [:=> [:cat [:sequential :string] :map :string] :string]}
   [paths config publication-id]
   (try
         (let [timeout-ms (* 1000 (required-positive-config config [:current-source :timeout-seconds]))
@@ -1551,13 +1555,15 @@
                        result)
               terminal (if (.isFile result-path)
                          (publication-result result-path)
-                         {:seon.error/kind :seon.hook/publication-result-unavailable
+                         {:seon.error/at (java.util.Date.)
+                          :seon.error/layer :seon.hook/publication
+                          :seon.error/operation 'user/publish-source-paths
                           :seon.error/message (str "Operator returned no result; exit " (:exit result))})]
           (doseq [progress (:seon.operator/progress terminal)]
             (log! "SOURCE_PROGRESS" (str "publication=" publication-id)
                   (str "paths=" (pr-str paths))
                   (pr-str (:seon.source/progress progress))))
-          (if (and (zero? (:exit result)) (not (:seon.error/kind terminal)))
+          (if (and (zero? (:exit result)) (:seon.source/commit-id terminal))
               (str (if (get-in config [:current-source :cluster]) "converged: " "published: ")
                    (pr-str (dissoc terminal :seon.operator/progress))
                    (when (and (get-in config [:current-source :check-tests] true)

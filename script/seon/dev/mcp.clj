@@ -478,6 +478,7 @@
          (list 'clojure.core/eval (list 'quote form)))))
 
 (defn- sci-evaluation-form
+  {:malli/schema [:=> [:cat :string :string :symbol :boolean] :string]}
   [source cluster namespace-symbol read-only?]
   (pr-str
    `(do
@@ -490,7 +491,10 @@
       (if-not (and instance#
                    (:seon.sci.eval/ctx instance#)
                    cluster#)
-        {:seon.error/kind :seon.dev.mcp/cluster-degraded
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.dev.mcp/evaluation
+         :seon.error/operation 'seon.sci.eval/evaluate
+         :seon.dev.mcp/cluster-degraded ~cluster
          :seon.error/message
          ~(str "Cluster '" cluster
                "' has a live JVM REPL, but its cluster layer is degraded; "
