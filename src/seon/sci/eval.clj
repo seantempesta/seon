@@ -83,11 +83,10 @@
   N3 needs —
   `clojure.core` and `clojure.string` in their interrupt-aware form
   plus bare `help`, the two `my.turn` dispositions, and both `my.message`
-  values — and a caller may pass its own. `acquire!` then intersects core-provenanced
-  program namespaces with the JVM's loaded namespace set and binds their
-  actual compiled Vars. The set is computed, never listed. Agent-authored
-  program rows retain the interpreted installation path after those host
-  bindings are present. `cluster-ctx` performs that fact-derived install
+  values — and a caller may pass its own. `acquire!` compares program definition
+  digests with the JVM's loaded source commit. Changed declarations and their
+  affected callers interpret stored source; all other declarations bind the
+  actual compiled Vars. The set is computed, never listed. `cluster-ctx` performs that fact-derived install
   only at cluster boot or recovery; the turn path never reacquires it.
 
   Crash walk: this namespace owns no durable state. A kill during an
@@ -98,6 +97,7 @@
   happened. Nothing re-executes."
   (:require
             [clojure.edn :as edn]
+            [datahike.api :as d]
             [clojure.java.io :as io]
             [clojure.main :as main]
             [clojure.string :as str]
@@ -422,7 +422,8 @@
                      (seon.fn/source-rows
                       database
                       (program/shapes-in projection)
-                      namespace-row source
+                      (assoc namespace-row :seon.program/definition-digest
+                             (program/definition-digest namespace-row)) source
                       (set (keys (:seon.schema.projection/forms projection))))))
              event
              (when analysed-row
@@ -826,11 +827,83 @@
         (kernel/mark-installed! ctx function-symbol)
         true))))
 
+(defn- interpretation-error
+  "Refuse a row whose branch definition cannot execute in this context."
+  {:malli/schema [:=> [:cat :qualified-symbol :string]
+                  :seon.sci.eval/interpretation-error]}
+  [sym reason]
+  {:seon.error/at (java.util.Date.)
+   :seon.error/layer :seon.sci.eval/program
+   :seon.error/operation 'seon.sci.eval/install-row!
+   :seon.error/message (str "Cannot interpret " sym ": " reason)
+   :seon.error/expected :seon.sci.eval/interpretable-definition
+   :seon.sci.eval/refused-function sym
+   :seon.sci.eval/interpretation-reason reason})
+
+(defn- loaded-program
+  "Materialize the source commit recorded by the cluster that loaded the JVM.
+   A source-branch constructor already receives that immutable program value;
+   forks carry this value, rather than treating their edited branch as loaded."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.db/database-value]}
+  [database]
+  (let [commits (db/q '[:find [?commit ...]
+                        :where [_ :seon.source/commit-id ?commit]] database)]
+    (cond
+      (= 1 (count commits))
+      (or (some-> (d/commit-as-db database (first commits) {:secondary-indices? false})
+                  (vary-meta assoc :seon.schema/projection (db/carried-projection database)))
+          (throw (ex-info "The JVM's recorded source commit is unavailable."
+                          {:seon.source/commit-id (first commits)})))
+      (= :current-src (get-in database [:config :branch])) database
+      :else (throw (ex-info "The JVM's loaded source commit is unknown."
+                            {:seon.error/expected :seon.source/commit-id
+                             :seon.error/offending commits})))))
+
+(defn- row-definition-digest
+  {:malli/schema [:=> [:cat :map] :seon.program/definition-digest]}
+  [row]
+  (or (:seon.program/definition-digest row) (program/definition-digest row)))
+
+(defn- function-digests
+  "Read stored definition identities in one query; only legacy rows need a pull."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:map-of :qualified-symbol :seon.program/definition-digest]]}
+  [database]
+  (let [rows (db/q '[:find ?sym ?digest
+                     :where [?row :seon.fn/sym ?sym]
+                            [(get-else $ ?row :seon.program/definition-digest "") ?digest]]
+                   database)]
+    (when (:seon.db/invalid-read rows)
+      (throw (ex-info "Definition identities could not be read." rows)))
+    (into {} (map (fn [[sym digest]]
+                    [sym (if (seq digest) digest
+                           (row-definition-digest (db/pull database '[*] [:seon.fn/sym sym])))]))
+          rows)))
+
+(defn- overridden-row?
+  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] :map] :boolean]}
+  [loaded row]
+  (let [previous (when loaded (db/pull loaded '[*] [:seon.fn/sym (:seon.fn/sym row)]))]
+    (or (nil? (:seon.fn/sym previous))
+        (not= (row-definition-digest row) (row-definition-digest previous)))))
+
+(defn- host-bound-row?
+  "Form-head half of host binding. Body-reference facts belong to the indexer.
+   Type declarations also retain host identity even where SCI can
+   construct a distinct SciType. Their generated constructors cannot be replaced."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [row]
+  (boolean
+   (#{'clojure.core/reify 'clojure.core/proxy 'clojure.core/definterface
+          'clojure.core/deftype 'clojure.core/defrecord}
+        (:seon.fn/defined-by row))))
+
 (defn install-row!
   "Install one declaration from the terminal transaction's db-after.
   The exact committed row is resolved by identity; saved evaluation results
   are never consulted."
-  {:malli/schema [:=> [:cat :seon.sci.eval/install-request] :map]}
+  {:malli/schema [:=> [:cat :seon.sci.eval/install-request]
+                  [:or :seon.sci.eval/install-result :seon.sci.eval/interpretation-error]]}
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
     row :seon.program/row
@@ -890,35 +963,45 @@
           ::function-private? (:seon.fn/private? committed)
           ::function-admission admission
           ::agent-authored? (= :agent admission)})
-        (let [state
-              (if (= :core admission)
-                (if (install-jvm-root! ctx function-symbol)
-                  :jvm
-                  :unavailable)
-                (try
-                  (if (or evaluated? (::evaluated? row))
-                    (do
-                      (kernel/mark-installed! ctx function-symbol)
-                      (when (:seon.fn/spec committed)
-                        (install-function-contract! ctx committed next-projection db)))
-                    (install-function-from-database! ctx db function-symbol))
-                  :interpreted
-                  (catch Throwable failure
-                    (when (:seon.instrument/registration-observation (error/refusal failure))
-                      (throw failure))
-                    (if (install-jvm-root! ctx function-symbol)
-                      {:seon.sci.eval/load-state :jvm-fallback
-                       :seon.fn/sym (:seon.fn/sym committed)
-                       :seon.error/message (or (.getMessage failure) (str (class failure)))}
-                      (throw failure)))))]
-          {:seon.schema/projection next-projection
-           :seon.sci.eval/installed (if (= :unavailable state) 0 1)
-           :seon.sci.eval/load-state
-           (if (map? state) (:seon.sci.eval/load-state state) state)
-           :seon.sci.eval/load-result
-           (if (map? state) state
-               {:seon.sci.eval/load-state state
-                :seon.fn/sym (:seon.fn/sym committed)})}))
+        (let [snapshot @(::kernel/program-snapshot ctx)
+              interpreted? (or (get (::interpreted snapshot) function-symbol)
+                               (overridden-row? (::loaded-database snapshot) committed))
+              host-row (when interpreted?
+                         (if (host-bound-row? committed)
+                           committed
+                           (when-let [loaded (::loaded-database snapshot)]
+                             (let [previous (db/pull loaded '[*] [:seon.fn/sym function-symbol])]
+                               (when (and previous (host-bound-row? previous)) previous)))))
+              refusal (when host-row
+                        (interpretation-error function-symbol
+                          (str "Host-bound declaration " (:seon.fn/defined-by host-row)
+                               " must change through the loaded source files.")))
+              result
+              (or refusal
+                  (if-not interpreted?
+                    (if (install-jvm-root! ctx function-symbol) :jvm :unavailable)
+                    (try
+                      (if (or evaluated? (::evaluated? row))
+                        (do
+                          (kernel/mark-installed! ctx function-symbol)
+                          (when (:seon.fn/spec committed)
+                            (install-function-contract! ctx committed next-projection db)))
+                        (install-function-from-database! ctx db function-symbol))
+                      :interpreted
+                      (catch Throwable failure
+                        (when (:seon.instrument/registration-observation (error/refusal failure))
+                          (throw failure))
+                        (interpretation-error function-symbol
+                          (or (ex-message failure) (.getName (class failure))))))))]
+          (if (map? result)
+            (do (sci/eval-form ctx (list 'ns-unmap (list 'quote namespace-name)
+                                       (list 'quote (symbol (name function-symbol)))))
+                result)
+            {:seon.schema/projection next-projection
+             :seon.sci.eval/installed (if (= :unavailable result) 0 1)
+             :seon.sci.eval/load-state result
+             :seon.sci.eval/load-result
+             {:seon.sci.eval/load-state result :seon.fn/sym function-symbol}})))
 
       :seon.schema/key
       {:seon.schema/projection
@@ -979,8 +1062,8 @@
                                        [:namespaces namespace-name binding-name]
                                        value)))
                          environment namespace-state))))
-      (advance-context-projection!
-       ctx db (:seon.schema/projection installed))
+      (when-let [installed-projection (:seon.schema/projection installed)]
+        (advance-context-projection! ctx db installed-projection))
       installed)))
 
 (defn- evaluate-native!
@@ -1016,12 +1099,14 @@
 (defn acquired-program
   "Return the database and refusal report actually acquired by this context.
 
-  Evidence follows the existing program snapshot through reacquisition and
-  forks. A resolvable Var alone is not evidence of an acquired program."
+  Evidence, including :seon.sci.eval/interpreted-count, follows the existing
+  program snapshot through reacquisition and forks. A resolvable Var alone is not evidence of an acquired program."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.test/acquisition]}
   [ctx]
   (let [snapshot (some-> (::kernel/program-snapshot ctx) deref)]
     (assoc (select-keys snapshot [:seon.db/db :seon.test/class-loader])
+           :seon.sci.eval/interpreted-count
+           (get-in snapshot [::acquisition :seon.sci.eval/interpreted-count] 0)
            :seon.test/acquisition-refusals
            (vec (get-in snapshot [::acquisition ::acquisition-refusals])))))
 
@@ -1132,7 +1217,7 @@
                 :seon.program/row program-row
                 ::evaluated? true
                 ::prepared-projection next-projection})]
-          {:projection (:seon.schema/projection result)
+          {:projection (or (:seon.schema/projection result) projection)
            :installed (conj installed result)}))
       {:projection (context-projection ctx)
        :installed []}
@@ -1288,7 +1373,7 @@
 (defn- install-first-party-namespaces!
   "Bind every first-party program namespace as its actual compiled JVM Vars.
 
-  Namespace membership comes from core-provenanced program rows. The cluster
+  Namespace membership comes from admitted program rows. The cluster
   caller loads compiled namespaces before construction; this pure derivation
   only reads the JVM Vars already present. Every admitted identity is added,
   including native Vars without stored source or a privacy declaration.
@@ -1304,16 +1389,7 @@
   [ctx namespace-assertions _namespace-rows
    function-rows]
   (let [first-party-names
-        (into #{}
-              (comp
-               (filter (fn [[_ _ admission]]
-                         (= :core admission)))
-               (map first))
-              (concat namespace-assertions
-                      (keep (fn [[_ source namespace-name admission _]]
-                              (when (seq source)
-                                [namespace-name source admission]))
-                            function-rows)))
+        (into (set (map first namespace-assertions)) (map #(nth % 2)) function-rows)
         indexed-function-names
         (reduce (fn [by-namespace [function-symbol _source namespace-name
                                   _admission _private?]]
@@ -1622,14 +1698,17 @@
 (defn- acquisition-refusal
   "A flat agent-mistake value naming one row that could not be installed."
   {:malli/schema [:=> [:cat :map [:or :map :seon.error/throwable]]
-                  :seon.sci.eval/row-acquisition-error]}
+                  [:or :seon.sci.eval/row-acquisition-error
+                   :seon.sci.eval/interpretation-error]]}
   [row failure]
   (let [identity (program-row-identity row)
         failure-data (if (map? failure) failure (error/refusal failure))
         cause-message (or (:seon.error/message failure-data)
                           (when (instance? Throwable failure) (ex-message failure))
                           (.getName (class failure)))]
-    {:seon.error/at (java.util.Date.)
+    (if (:seon.sci.eval/refused-function failure-data)
+      failure-data
+      {:seon.error/at (java.util.Date.)
       :seon.error/layer ::acquisition
       :seon.error/operation 'seon.sci.eval/acquisition-refusal
       :seon.sci.eval/row-member (second identity)
@@ -1641,14 +1720,15 @@
         failure-data (assoc ::acquisition-failure failure-data)
         (instance? Throwable failure)
         (assoc ::acquisition-throwable-class (.getName (class failure))))
-      :seon.error/expected ::installed}))
+      :seon.error/expected ::installed})))
 
 (defn- acquisition-refusal-id
   [refusal]
   (id/digest 64
              [::acquisition-refused
               (get-in refusal [:seon.error/data ::acquisition-row])
-              (:seon.sci.eval/row-member refusal)
+              (or (:seon.sci.eval/refused-function refusal)
+                  (:seon.sci.eval/row-member refusal))
               (:seon.error/operation refusal)
               (get-in refusal [:seon.error/data ::acquisition-cause-message])]))
 
@@ -1661,7 +1741,10 @@
       state
       (if commit-fault!
         (let [outcomes (mapv #(commit-fault! {:seon.error/source %
-                                             :seon.error/declared-schema :seon.sci.eval/row-acquisition-error}) refusals)
+                                             :seon.error/declared-schema
+                                             (if (:seon.sci.eval/refused-function %)
+                                               :seon.sci.eval/interpretation-error
+                                               :seon.sci.eval/row-acquisition-error)}) refusals)
               failed (first (remove #(= :seon.flow/committed (second %)) outcomes))]
           (cond-> (assoc state ::acquisition-refusals-recorded? (nil? failed))
             failed (assoc ::acquisition-recording-error (second failed))))
@@ -1687,7 +1770,9 @@
                    db
                    (cond->
                     {:seon.error/source refusal
-                     :seon.error/declared-schema :seon.sci.eval/row-acquisition-error
+                     :seon.error/declared-schema
+                     (if (:seon.sci.eval/refused-function refusal)
+                       :seon.sci.eval/interpretation-error :seon.sci.eval/row-acquisition-error)
                      :seon.error/id (acquisition-refusal-id refusal)
                      :seon.error/at (java.util.Date.)
                      :seon.error/process acquisition-process
@@ -1707,10 +1792,10 @@
         (assoc state ::acquisition-refusals-recorded? false))))))
 
 (defn- acquire-program!
-  "Acquire program declarations by their current identity's admission.
+  "Acquire definitions against the JVM's loaded program value.
 
-  Core function roots come from loaded JVM Vars; agent function source is
-  interpreted regardless of namespace. Private evaluation objects are never
+  Overridden rows and their affected callers interpret stored source; matching
+  definitions bind compiled Vars regardless of authorship. Private evaluation objects are never
   read from the database. Failed source loads remain typed acquisition results."
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx
@@ -1762,12 +1847,21 @@
                 [?function :seon.schema.admission/source ?admission]
                 [(get-else $ ?function :seon.fn/private? false) ?private]]
               db))
-        function-rows
-        (into []
-              (filter
-               (fn [[_sym _ _ admission _]]
-                 (agent-authored? admission)))
-              all-function-rows)
+        loaded (or (::loaded-database @(::kernel/program-snapshot ctx))
+                   (loaded-program db))
+        loaded-digests (function-digests loaded)
+        branch-digests (function-digests db)
+        overridden
+        (into #{} (keep (fn [[sym digest]]
+                          (when (not= digest (get loaded-digests sym)) sym)))
+              branch-digests)
+        closure (if (seq overridden)
+                  (seon.fn/reverse-closure {:seon.db/db db :seon.fn/seeds overridden})
+                  {:seon.fn/affected #{} :seon.fn/tests []})
+        _ (when (:seon.db/invalid-read closure)
+            (throw (ex-info "Cannot acquire the affected function closure." closure)))
+        interpreted (into overridden (:seon.fn/affected closure))
+        function-rows (filterv (fn [[sym]] (interpreted sym)) all-function-rows)
         _ (install-program-doc! ctx db projection)
         selected-namespace-names
         (into (into #{} (map #(nth % 2)) function-rows)
@@ -1831,6 +1925,8 @@
                           ::agent-authored? (agent-authored? admission)}]))
                  all-function-rows)
            all-namespace-row-by-name)
+        _ (swap! (::kernel/program-snapshot ctx) assoc
+                 ::loaded-database loaded ::interpreted interpreted)
         _ (when-let [recorder recording-operation]
             (swap! (::kernel/program-snapshot ctx) assoc
                    :seon.flow/commit-fault! recorder))
@@ -1896,7 +1992,8 @@
                     :seon.db/db db
                     ::prepared-projection (:seon.schema/projection state)
                     :seon.program/row row})]
-              (if (contains? installed :seon.instrument/check)
+              (if (or (contains? installed :seon.instrument/check)
+                      (:seon.sci.eval/refused-function installed))
                 (update state ::acquisition-refusals (fnil conj [])
                         (acquisition-refusal row installed))
                 (cond-> (assoc state
@@ -1907,15 +2004,7 @@
                           (:seon.sci.eval/installed installed)))
                   (:seon.sci.eval/load-result installed)
                   (update :seon.sci.eval/load-results (fnil conj [])
-                          (:seon.sci.eval/load-result installed))
-                  (= :jvm-fallback (:seon.sci.eval/load-state installed))
-                  (update ::acquisition-refusals (fnil conj [])
-                          (acquisition-refusal
-                           row
-                           (ex-info
-                            (str "SCI source could not load; using the loaded JVM definition: "
-                                 (get-in installed [:seon.sci.eval/load-result :seon.error/message]))
-                            {:seon.sci.eval/load-state :jvm-fallback}))))))
+                          (:seon.sci.eval/load-result installed)))))
             (catch Throwable failure
               (when (:seon.instrument/registration-observation (error/refusal failure))
                 (throw failure))
@@ -1936,6 +2025,13 @@
     (install-first-party-namespaces!
      ctx namespace-assertions all-namespace-rows
      all-function-rows)
+    ;; Copy inherited Vars into this generation before analyzing any caller.
+    ;; SCI definitions then replace roots in those same Vars; a caller analyzed
+    ;; before its callee must not retain the old generation's copied root.
+    (doseq [sym interpreted
+            :let [candidate (sci/resolve ctx sym)]
+            :when candidate]
+      (sci/bind-root! ctx candidate @candidate))
     ;; The bare REPL name refers to the acquired macro itself. Keeping the
     ;; boot-time copy here would preserve its old expansion after adoption.
     (sci/add-namespace! ctx 'clojure.core
@@ -1943,11 +2039,13 @@
     (let [functions-installed
           (reduce
            (fn [state namespace-name]
-             ;; Refer Vars are installed only after all target namespaces on
-             ;; this dependency edge have published their functions.
-             (when-let [row (get namespace-row-by-name namespace-name)]
-               (sci/install-namespace-bindings!
-                ctx namespace-name (row-bindings row)))
+             ;; Each function installs its exact bindings inside the named
+             ;; refusal boundary. A refused dependency must not escape here
+             ;; as an unclassified namespace-binding exception.
+             (when (empty? (get function-rows-by-ns namespace-name))
+               (when-let [row (get namespace-row-by-name namespace-name)]
+                 (sci/install-namespace-bindings!
+                  ctx namespace-name (row-bindings row))))
              (reduce
               install-row
               (cond-> state
@@ -1968,6 +2066,7 @@
                    (sort-by first
                             (get function-rows-by-ns namespace-name)))))
            {:seon.schema/projection projection
+            :seon.sci.eval/interpreted-count (count interpreted)
             :seon.sci.eval/installed 0
             :seon.sci.eval/load-results
             (into []
@@ -2150,8 +2249,8 @@
 (defn base-ctx
   "Derive the program-only SCI context from one database value.
 
-  Core definitions copy the loaded JVM Var root. Agent definitions interpret
-  their admitted source. Acquisition refusals remain values on the context;
+  Matching definitions copy the loaded JVM Var root. Overrides and affected
+  callers interpret their admitted source. Acquisition refusals remain values on the context;
   construction has no connection, writes no facts, and restores no private state."
   {:malli/schema
    [:function
@@ -2172,7 +2271,7 @@
                         :seon.schema/projection projection
                         ::kernel/install-function! install-function-from-database!)
              _ (swap! (::kernel/program-snapshot ctx) merge
-                      (select-keys arm-request [:seon.flow/commit-fault!]))
+                      (select-keys arm-request [:seon.flow/commit-fault! ::loaded-database]))
              acquired (acquire-program! {:seon.sci.eval/ctx ctx
                                  :seon.db/db database
                                  :seon.schema/projection projection})]
@@ -2209,7 +2308,7 @@
         (let [commit-fault! (or commit-fault! (:seon.flow/commit-fault! snapshot))
               _ (load-core-namespaces! database)
               generated (base-ctx database
-                                  (cond-> {} commit-fault!
+                                  (cond-> {::loaded-database (::loaded-database snapshot)} commit-fault!
                                     (assoc :seon.flow/commit-fault! commit-fault!)))
               acquired (::acquisition generated)]
           ;; SCI stamps later definitions with this generation. Installing the
@@ -2274,7 +2373,8 @@
                                 connection (assoc :seon.db/connection connection)
                                 (nil? connection) (assoc :seon.db/db db)))
          _ (swap! (::kernel/program-snapshot ctx) merge
-                  (select-keys arm-request [:seon.flow/commit-fault!]))
+                  {::loaded-database (loaded-program db)}
+                  (select-keys arm-request [:seon.flow/commit-fault! ::loaded-database]))
          projection-state (or supplied-projection-state
                               (projection-state db projection))
          ctx (call-preparation/install
@@ -2328,7 +2428,7 @@
                       ::kernel/program-snapshot
                       (atom (merge (dissoc @(::kernel/program-snapshot base-ctx)
                                            :seon.flow/commit-fault!)
-                                   (select-keys arm-request [:seon.flow/commit-fault!])))
+                                   (select-keys arm-request [:seon.flow/commit-fault! ::loaded-database])))
                       ::custody {:seon.db/connection connection}
                       :seon.schema/projection projection)
                projection-state))]
@@ -2823,8 +2923,10 @@
     (schema/call-with-projection-state
      projection-state
      (fn []
-       (with-bindings {#'db/*conn* connection
-                       ;; The bound read value carries this evaluation's
+       (db/call-with-custody
+        (cond-> {} connection (assoc :seon.db/connection connection))
+        (fn []
+         (with-bindings {;; The bound read value carries this evaluation's
                        ;; projection state: interpreted reads run past the
                        ;; dynamic binding above, and a bare value rebuilds
                        ;; the projection per read (measured 2026-09-15).
@@ -2914,10 +3016,15 @@
               (when-not (acquired-database? evaluation-ctx database)
                 (let [base (or (::base-ctx evaluation-ctx) evaluation-ctx)
                       result (acquire! {:seon.sci.eval/ctx base :seon.db/db database})]
+                  (when-let [failure (first (::acquisition-refusals result))]
+                    (throw (ex-info "SCI program acquisition refused a declaration." failure)))
                   (when-let [failure (::acquisition-recording-error result)]
                     (throw (ex-info "SCI acquisition could not record a row fault." failure)))
                   (when (::base-ctx evaluation-ctx)
                     (regenerate-agent-context! evaluation-ctx base))))))
+          (when-let [failure (first (:seon.test/acquisition-refusals
+                                    (acquired-program evaluation-ctx)))]
+            (throw (ex-info "SCI program acquisition refused a declaration." failure)))
           (let [before-reader-context
             (reader-context evaluation-ctx namespace-name)
             event (or (:seon.sci.eval/event request)
@@ -3091,7 +3198,7 @@
         (catch Throwable throwable
           (if @arm-state
             (throw throwable)
-            (failure-result throwable))))))))))
+            (failure-result throwable))))))))))))
 
 (defn fork-candidate-ctx
   "Fork one candidate through the generation-aware turn path.

@@ -1,4 +1,8 @@
-#:seon.fn{:namespace-unresolvable [:= true]
+#:seon.fn{:affected [:set :seon.fn/sym]
+ :tests [:vector :seon.test/sym]
+ :reverse-closure-result
+ [:map [:seon.fn/affected :seon.fn/affected] [:seon.fn/tests :seon.fn/tests]]
+ :namespace-unresolvable [:= true]
           :namespace-unresolvable-error
           [:and :seon.error/base
            [:map

@@ -113,6 +113,20 @@
  :seon.program/declaration-refused-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
  [:map [:seon.program/identity-attributes :seon.program/identity-attributes]]]
+ :seon.program/referrers
+ [:vector {:min 1}
+  [:map
+   [:seon.program/subject :seon.program/subject]
+   [:seon.program/relation :qualified-keyword]
+   [:seon.program/referrer [:map-of :qualified-keyword :seon.schema/value]]
+   [:db/id :int]]]
+ :seon.program/deletion-refused-error
+ [:and {:seon.db/attributes false
+        :description "Transient final-transaction evidence; the write recorder owns durable projection of the refused request and its referrers."}
+  :seon.error/base
+  [:map {:description "A final program still names a removed declaration. Referrers identify the surviving writers, callers or schema dependencies."}
+   [:seon.db/transaction-refused :seon.db/transaction-refused]
+   [:seon.program/referrers :seon.program/referrers]]]
  :seon.program/subject
  [:or {:description "A function or test symbol, namespace symbol, or schema key."}
   :symbol :qualified-keyword]

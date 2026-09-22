@@ -3888,7 +3888,7 @@
 
 (defn- removed-definition-error
   "Check surviving names against the identities removed by an admitted change."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :map] [:set :qualified-keyword]] [:or :nil :seon.error/base]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :map] [:set :qualified-keyword]] [:or :nil :seon.program/deletion-refused-error]]}
   [database removed identity-attrs]
   (let [breaks
         (into []
@@ -3929,7 +3929,10 @@
       (let [breaks (vec (sort-by pr-str breaks))]
         (diagnostic
          {::transaction-refused true
-          :seon.error/message "Program deletion leaves surviving referrers. Repair or retract every named referrer in the same transaction."
+          :seon.program/referrers breaks
+          :seon.error/message (str "Program deletion leaves surviving referrers: "
+                                   (pr-str breaks)
+                                   ". Repair or retract them in the same transaction.")
           :seon.error/data {:seon.program/referrers breaks}
           :seon.error/layer :database-write
           :seon.error/operation 'seon.db/transact!

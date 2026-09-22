@@ -1,9 +1,24 @@
-#:seon.sci.eval{:private-state
+#:seon.sci.eval{:interpreted-count [:int {:min 0}]
+ :refused-function :qualified-symbol
+ :interpretation-reason :string
+ :interpretation-error
+ [:and {:seon.db/attributes true
+        :seon.render/ai seon.error/render-ai
+        :seon.render/html seon.error/render-html}
+  :seon.error/base
+  [:map
+   [:seon.sci.eval/refused-function :seon.sci.eval/refused-function]
+   [:seon.sci.eval/interpretation-reason :seon.sci.eval/interpretation-reason]]]
+ :install-result
+ [:map
+  [:seon.schema/projection :seon.schema/projection]
+  [:seon.sci.eval/installed :int]]
+ :private-state
                 [:enum {:description "In-process regeneration preserves private Var roots, atoms, result objects and captured values by identity. A fresh agent or JVM restart has no private layer to restore; only admitted program facts are loaded."}
                  :preserved-in-memory :absent],
                 :load-state
-                [:enum {:description "Current core admission copies the JVM root; agent admission interprets source. An unevaluable agent source uses the loaded JVM root only with jvm-fallback and its diagnostic. Unavailable means no loaded root could be installed."}
-                 :jvm :interpreted :jvm-fallback :unavailable],
+                [:enum {:description "Matching definitions copy the JVM root. Overridden definitions and affected callers interpret source; failed interpretation refuses. Unavailable means no loaded root could be installed."}
+                 :jvm :interpreted :unavailable],
                 :load-result
                 [:map
                  [:seon.sci.eval/load-state :seon.sci.eval/load-state]

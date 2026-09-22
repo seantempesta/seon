@@ -470,14 +470,15 @@
              (and (= row (long end-row)) (<= col (long end-col)))))))
 
 (defn- writes-by-writer
-  "Declared attributes each declaration asserts at a write-seam call site.
+  "Literal qualified keywords each declaration carries at a write-seam call site.
 
   The join is span containment over facts the analyzer already reports:
   a qualified keyword whose position lies inside the span of a
   `seon.db/transact!` usage is transaction data that call carries.
-  `declared-key?` admits only attributes the schema population owns, so
-  every emitted value resolves to a `:seon.schema/key` row."
-  [analysis declared-key?]
+  These source facts survive absent schema declarations. Computed keys and
+  transaction data constructed outside the call span are not inferred."
+  {:malli/schema [:=> [:cat :map] [:map-of :qualified-symbol [:set :qualified-keyword]]]}
+  [analysis]
   (let [keywords-by-file
         (group-by ::analyzer/filename (::analyzer/keywords analysis))]
     (reduce
@@ -492,7 +493,6 @@
                               (keyword (str keyword-namespace)
                                        (str keyword-name)))]
               (if (and attribute
-                       (declared-key? attribute)
                        (span-contains? usage entry))
                 (update writes caller (fnil conj (sorted-set)) attribute)
                 writes)))
@@ -898,7 +898,7 @@
     ::analyzer/findings]))
 
 (defn- analyzed-form
-  [analysis function-rows declared-key? resolver-context program-row]
+  [analysis function-rows resolver-context program-row]
   (let [program-symbol (or (:seon.fn/sym program-row)
                            (:seon.test/sym program-row))
         first-party-functions
@@ -908,7 +908,7 @@
         (call-targets-by-caller analysis first-party-functions)
         references (references-by-caller analysis first-party-functions)
         used-keywords (keywords-by-holder analysis)
-        writes (writes-by-writer analysis declared-key?)
+        writes (writes-by-writer analysis)
         call-arities
         (call-arities-by-caller
          analysis
@@ -1014,17 +1014,11 @@
              spans :seon.fn/source-spans
              analyzed-source :seon.fn/source
              function-rows :seon.fn/function-rows}
-            (runtime-analysis-batch database resolved)
-            declared-key?
-            (into #{}
-                  (db/q '[:find [?key ...]
-                          :where [_ :seon.schema/key ?key]]
-                        database))]
+            (runtime-analysis-batch database resolved)]
         (mapv (fn [request [first-row last-row]]
                 (analyzed-form
                  (source-analysis analysis first-row last-row)
                  function-rows
-                 declared-key?
                  (:resolver-context request)
                  (some-> (:seon.program/row request)
                          (assoc :seon.program/analyzed-source-digest
@@ -1126,14 +1120,8 @@
                        :seon.fn/index-refused true})))))
 
 (defn- analysis-rows-by-file
-  "Rows by file, owning declared writes by the operation's own population.
-
-  `declared-attributes` is the key set of the declaration population the
-  operation resolved ONCE (see [[declaration-forms]]). Re-resolving it here
-  re-read the authored resources a SECOND time per file, at 18 ms a call,
-  against a population that cannot change while one operation runs
-  (AGENTS.md 2.1)."
-  [analysis first-party-functions contexts declared-attributes projection]
+  "Rows by file, with source-observed writes independent of schema membership."
+  [analysis first-party-functions contexts projection]
   (let [forms (:seon.schema.projection/forms projection)
         used-keywords (keywords-by-holder analysis)
         invocations (into {}
@@ -1174,7 +1162,7 @@
         edges {:calls-by-caller calls-by-caller
                :references references
                :used-keywords used-keywords
-               :writes (writes-by-writer analysis declared-attributes)
+               :writes (writes-by-writer analysis)
                :call-arities (call-arities-by-caller analysis calls-by-caller)}
         namespace-contexts
         (into {}
@@ -1210,7 +1198,7 @@
          :seon.ns/ns
          :string [:set :keyword]]
      :seon.program/rows]}
-  [database row-shapes namespace-row source declared-attributes]
+  [database row-shapes namespace-row source _declared-attributes]
   (let [namespace-name (:seon.ns/name namespace-row)
         {analysis :seon.fn/analysis
          text :seon.fn/source
@@ -1225,7 +1213,7 @@
                         (map :seon.fn/sym) function-rows)
         rows (analysis-rows-by-file
               (source-analysis analysis first-row last-row)
-              functions {"<stdin>" (text-context text)} declared-attributes
+              functions {"<stdin>" (text-context text)}
               (db/carried-projection database))]
     (into []
           (comp
@@ -1442,7 +1430,7 @@
                        [:map-of :int :qualified-symbol] [:set :qualified-symbol]
                        [:map-of :qualified-symbol [:set :qualified-symbol]]
                        [:sequential :qualified-symbol]]
-                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
+                  [:or :seon.fn/reverse-closure-result :seon.db/invalid-read-error]]}
   [database identities tests incoming seeds]
   (loop [pending (vec seeds) seen #{}]
     (if-let [target (peek pending)]
@@ -1458,15 +1446,16 @@
                                  (keep #(get identities (:e %)))
                                  (concat calls references subjects))]
               (recur (into (pop pending) referrers) (conj seen target))))))
-      (vec (sort (set/intersection tests seen))))))
+      {:seon.fn/affected (set/difference (set/intersection (set (vals identities)) seen) tests)
+       :seon.fn/tests (vec (sort (set/intersection tests seen)))})))
 
 (defn- gate-sets-in
   "Select tests through surviving named edges in one immutable database.
    Acquire identity and genuine declaration-ref joins once per operation."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:sequential :qualified-symbol] :boolean]
-                  [:or [:vector :seon.test/sym]
-                   [:map-of :qualified-symbol [:vector :seon.test/sym]] :seon.db/invalid-read-error]]}
+                  [:or :seon.fn/reverse-closure-result
+                   [:map-of :qualified-symbol :seon.fn/reverse-closure-result] :seon.db/invalid-read-error]]}
   [database function-symbols union?]
   (let [identity-rows (db/q '[:find ?entity ?symbol
                              :where (or [?entity :seon.fn/sym ?symbol]
@@ -1503,6 +1492,15 @@
                       (assoc result function-symbol selected))))
                 {} (distinct function-symbols)))))))
 
+(defn reverse-closure
+  "Return affected function declarations and reaching tests from one reverse walk.
+   Reference and declared invocation edges conservatively participate, exactly as
+   they do in test selection. No result is retained beyond this database value."
+  {:malli/schema [:=> [:cat :seon.fn/gate-request]
+                  [:or :seon.fn/reverse-closure-result :seon.db/invalid-read-error]]}
+  [{database :seon.db/db seeds :seon.fn/seeds}]
+  (gate-sets-in database (vec seeds) true))
+
 (defn gate-sets
   "Select tests through the shared reverse graph. The map arity seeds one
   frontier with all changed symbols; the positional arity retains per-seed results."
@@ -1513,9 +1511,13 @@
     [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
      [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.db/invalid-read-error]]]}
   ([{database :seon.db/db seeds :seon.fn/seeds}]
-   (gate-sets-in database (vec seeds) true))
+   (let [result (reverse-closure {:seon.db/db database :seon.fn/seeds seeds})]
+     (if (:seon.db/invalid-read result) result (:seon.fn/tests result))))
   ([database function-symbols]
-   (gate-sets-in database function-symbols false)))
+   (let [result (gate-sets-in database function-symbols false)]
+     (if (:seon.db/invalid-read result)
+       result
+       (into {} (map (fn [[sym closure]] [sym (:seon.fn/tests closure)])) result)))))
 
 (defn unresolved-callers
   "Report calls into indexed namespaces with no current function definition.
@@ -2139,7 +2141,7 @@
                   (containing-root directory (or roots source-roots) file)
                   (get contexts canonical-path)
                   (get (analysis-rows-by-file analysis first-party-functions
-                                              contexts (set (keys forms)) projection)
+                                              contexts projection)
                        canonical-path
                        [])
                   findings)))))
@@ -2245,7 +2247,7 @@
           functions (into (set known) (first-party-function-symbols analysis))
           _ (assert-clean-analysis! analysis functions)
           findings (group-by ::analyzer/filename (publication-findings analysis functions))
-          rows (analysis-rows-by-file analysis functions contexts (set (keys forms)) projection)
+          rows (analysis-rows-by-file analysis functions contexts projection)
           row-shapes (program/shapes-in projection)]
       (mapv (fn [file]
               (let [path (.getCanonicalPath ^java.io.File file)]
