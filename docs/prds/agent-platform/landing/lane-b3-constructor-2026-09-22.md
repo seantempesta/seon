@@ -386,3 +386,18 @@ Owned changed paths (including this note):
 - `test/seon/transact_feedback_test.clj`
 - `test/seon/turn_test.clj`
 - `docs/prds/agent-platform/landing/lane-b3-constructor-2026-09-22.md`
+
+### First owner group
+
+`20ee7864b` committed the 79 literal construction sites in config, env,
+bootstrap, issue and plan, plus the two changed test files. Effect's 15 sites
+remain with the constructor group because its handler failure supplies a Throwable.
+The prescribed require exited **0** from a clean `git archive` of HEAD
+`2ccf5bc90` (which includes `20ee7864b`), using only the pinned dependency links,
+not the remaining uncommitted source. Log: `tmp/b3-head-first-load.log`.
+No worktree was used. The archive's JVM exited before further verification.
+
+The pre-ruling focused correction request was interrupted by TERM with no tally
+or run id (`tmp/b3-render-correction.log`); it is not evidence of a pass.
+The existing schema-discovery tests and all calls to that deferred owner remain
+byte-identical. Their new rule and retirement belong to the later lane.
