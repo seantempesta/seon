@@ -2373,3 +2373,110 @@ Read-only `cache/newest-base` still selects
 `b771bf4fa00eea263a2b679e89aa58fce34471659c38a5c1e11c7c43786797e0`
 (36 commits behind the then-HEAD). This positively verifies that the fresh fixture
 input is unavailable; it is not an assumption based on silence.
+
+### Effect hang: second-request reproduction and writer repair
+
+The prior 318 ms diagnostic covered only the first request. The canonical test
+also requests the SAME effect identity again. That second request reproduces the
+hang on a fresh scratch root, without needing the stale canonical fixture base.
+
+`bin/seon --root tmp/kind-review-effect-root start kind-review` reached
+missing-layers [] in **87852 ms**, pid 27881, start 09:48:18.471Z, published
+commit `6ab24f3e-54d9-55b0-96d5-ae23be6c2451`. At boot elapsed 44.66 s the main
+thread was waiting on the index transaction; this is whole-program publication
+work, separate from effect timing. The first disposable form refused compilation
+because it dereferenced a private test Var directly; corrected to `var-get` before
+any fixture work ran.
+
+The corrected probe printed `first request`, then `second request`, and failed
+to complete. `jcmd 27881 Thread.print` at request elapsed **5.44 s** shows:
+`Clojure Connection seon.cluster/kind-review 2` WAITING on
+`CompletableFuture.get` → `datahike.tools/throwable-promise` →
+`seon.db/transact-call:4371` → `seon.effect/request*:965` (the second request).
+The missing event is **the accepted writer invocation's callback**, not handler
+completion and not work proportional to the program.
+
+The same root's supervisor logged:
+`IllegalArgumentException: find not supported on type: java.lang.String`,
+`clojure.core/select-keys` → `datahike.writer/write-error-log:90` → writer catch
+`:142`. `effect/open-call` rejects a duplicate identity with scalar diagnostic
+evidence (the effect-id string). The logger selected identity keys from that
+string before delivering the original exception. Its exception killed the writer
+and left the current callback undelivered. This is now live cause evidence;
+the earlier inconclusive first-request probe did not establish it.
+
+The owning maintained fork was clean at `006e634a`. Read `writer.cljc`, its
+first-party caller `effect/open-call`, and existing writer-error regressions.
+`6dd49e5e` now filters diagnostic identity sources to maps and puts the original
+failure on its callback BEFORE logging. Inputs remain the actual immutable
+writer database, invocation and exception. Work is four fixed identity-source
+maps per failed invocation, never a program walk; no cache, bound or retry was
+added. A failing logger remains visible through the existing writer shutdown
+path, which already fails buffered operations.
+
+Focused dependency regressions: **2 tests / 77 assertions / 0 failures / 0
+errors**, `tmp/kind-review-writer-tests.log`. Cases include map, string, keyword,
+vector and nil evidence; identical exception delivery; a later successful commit;
+and a deliberately failing diagnostic sink followed by another admitted request.
+Executed directly with clojure.test against the dependency's own memory fixture;
+this is diagnostic dependency evidence, not a Seon recorded run or matrix pass.
+
+The hung root was stopped via `bin/seon ... down` (exit 0) before the dependency
+edit. Restarting the same owned root loaded the changed fork, pid 28071, start
+09:55:07.356Z, ready **5699 ms**, missing-layers []. After retracting ONLY the
+probe's previous effect receipt, the two-request form completed in **850 ms**
+(prepl; client elapsed 0.854484 s): first returned value 7 on a virtual thread;
+second returned `:seon.effect/recorded-effect-id "157eb244b062"`, original message
+`Use a new effect identity; this request was already recorded.`, and
+`:seon.db/transaction-refused true`. The receipt has opened/settled instants and
+handler calls are exactly `[#:seon.effect-test{:value 7}]`. No request stall
+occurred, so there is no after-stall thread sample. No effect bound was raised.
+The canonical effect namespace and final matrix still require the fresh base.
+
+Exact corrected before form (the after form first retracts that one probe receipt):
+
+```clojure
+(do
+  (require 'seon.effect-test 'seon.test-support)
+  (let [connection (seon.cluster.boot/connection "kind-review")
+        projection (seon.db/carried-projection (seon.db/db connection))]
+    (seon.schema/call-with-projection
+     projection
+     (fn []
+       (println "effect-probe: fixture write")
+       (seon.test-support/transacted!
+        connection
+        [(#'seon.effect-test/cluster-config 600000)
+         {:seon.turn/id "effect-run"
+          :seon.turn/agent {:seon.agent/id "effect-agent"}
+          :seon.turn/opened-tx "datomic.tx"}])
+       (println "effect-probe: capability installation")
+       (#'seon.effect-test/install-capability! connection)
+       (println "effect-probe: first request")
+       (let [first-result
+             (binding [seon.effect/*request-context*
+                       (#'seon.effect-test/request-context connection)]
+               (seon.effect/request! #'seon.effect-test/capability-owner
+                                     {:seon.effect-test/value 7}))
+             receipt (seon.db/pull
+                      (seon.db/db connection) '[* {:seon.effect/owner [:seon.fn/sym]}]
+                      [:seon.effect/id (seon.id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
+         (println "effect-probe: second request")
+         (let [second-result
+               (binding [seon.effect/*request-context*
+                         (#'seon.effect-test/request-context connection)]
+                 (seon.effect/request! #'seon.effect-test/capability-owner
+                                       {:seon.effect-test/value 7}))]
+           {:first first-result
+            :second second-result
+            :receipt (select-keys receipt [:seon.effect/id :seon.effect/opened-at :seon.effect/settled-at])
+            :calls @(var-get #'seon.effect-test/handler-calls)}))))))
+```
+
+Both retained scratch process identities were stopped through `bin/seon down`;
+`ps` confirms neither remains. Both held shells and the socket-probe process
+exited. The root was deleted only after those checks; the runtime log and thread
+samples remain outside it as evidence. Prescribed production require with fork
+`6dd49e5e` exited 0 (`tmp/kind-review-head-datahike-6dd49e5e.log`).
+The latest first-party follow-through commit is `6eb1d5317`, whose prescribed
+load also exited 0 (`tmp/kind-review-head-followthrough.log`).

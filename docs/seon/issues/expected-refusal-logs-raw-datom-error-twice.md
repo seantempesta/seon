@@ -145,3 +145,29 @@ request's completion and namespace observations are recorded in the
 No dependency code or writer policy was changed by this lane. The logging
 owner's regression needs a scalar diagnostic-evidence case and positive callback
 delivery evidence, in addition to the existing bounded-output cases.
+
+## Scalar-evidence hang reproduced and repaired — 2026-09-22
+
+The B3 follow-up reproduced the effect test's SECOND request on an isolated
+operator root (pid 27881, start 09:48:18.471Z). The first request settled; the
+same identity's second request waited in `seon.db/transact!` for Datahike's
+completion promise. A five-second `jcmd Thread.print` sample records that wait.
+The writer supervisor simultaneously reported `find not supported on type:
+java.lang.String` at `write-error-log:90`. The original refusal is now identified:
+`seon.effect/open-call` reports its already-recorded effect id as scalar evidence.
+
+Fork commit `6dd49e5e` selects log identities only from map-shaped sources and
+delivers the original refusal callback before invoking the logger. A logging
+failure can no longer strand the currently accepted request; the existing outer
+writer failure path resolves buffered requests and closes the queues.
+
+Two focused dependency regressions passed (2 tests, 77 assertions, 0 failures,
+0 errors): map/string/keyword/vector/nil evidence preserves exception identity
+and permits a subsequent commit; a deliberately failing log sink cannot strand
+the current or subsequent invocation. The real two-request effect probe then
+completed in 850 ms, returning the exact recorded-effect refusal and one handler
+call. This is dependency/direct-runtime evidence, not the pending canonical
+`seon.effect-test` namespace result. See the
+[B3 landing note](../../prds/agent-platform/landing/lane-b3-kind-cut-2026-09-21.md).
+The older double-log `log/raise` issue remains open; this closes the scalar-evidence
+callback-loss defect within it.
