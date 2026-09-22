@@ -119,7 +119,7 @@ RESET NEEDED: no.
 | HEAD `da2086452` load check: git-archive snapshot, `clojure -M -e "(require 'seon.oversight 'seon.render.web 'seon.cluster 'seon.cluster.agent)"` | 19.2 s | load only; printed `:loaded nil` (the search Var does not resolve) |
 
 Everything over 10 s here is loading before work starts. Filed as
-`docs/seon/issues/a-focused-test-jvm-spends-twenty-seconds-before-its-first-test.md` (rows appended).
+`docs/seon/issues/a-focused-test-jvm-spends-thirty-seconds-before-its-first-test.md`.
 Live read-only probe on `default`: 3 ms.
 
 ## Commits
@@ -240,8 +240,8 @@ and the stale base above also still stands. The updated
 | live SSE wake: note to root package | 1.68 s | join first package 588 ms |
 
 Everything over 10 s is filed:
-`a-focused-test-jvm-spends-twenty-seconds-before-its-first-test.md` (rows
-appended; this lane's duplicate thirty-seconds note is deleted into it),
+`a-focused-test-jvm-spends-thirty-seconds-before-its-first-test.md` (kept,
+since other notes cite it; it now points to the twenty-second note of the same class),
 `from-zero-boot-takes-minutes.md` (rows appended), and the new
 `a-three-file-changed-path-publication-takes-a-minute.md`. The 1.68 s wake is
 over 1 s and under 10 s; its split between the note transaction, the wake and
