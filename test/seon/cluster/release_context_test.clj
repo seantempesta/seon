@@ -18,7 +18,7 @@
 (defn- release-failure
   "The Throwable `release-context!` raised for `handle`, or nothing."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle]
-                  [:or :nil [:fn #(instance? Throwable %)]]]}
+                  [:or :nil :seon.error/throwable]]}
   [handle]
   (try (agent/release-context! handle) nil
        (catch Throwable failure failure)))
