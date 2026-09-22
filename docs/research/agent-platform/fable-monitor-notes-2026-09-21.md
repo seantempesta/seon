@@ -131,3 +131,23 @@ regression) and declared the selection lifecycle test's bound from three measure
 (6,336 / 5,067 / 4,903 ms → 8,000 ms with reason). Cut 1 now has a checkpoint gate.
 Lane `kind-cut` committed the fails-before regression (`aba6d445e`) and is converting
 the settle path (turn, reply, cluster/agent dirty); RESTART NEEDED follows slice A.
+
+## 2026-09-22 00:05 local — kind-cut landed (bc70a82e3); `stop` leaves a zombie JVM
+
+Lane `kind-cut` reports zero `:seon.error/kind` / `:seon.error/class true` matches,
+`;; debt:` 167 → 7 (each named), HEAD loads, 21 commits, 192 files, +4,195/−1,818.
+Its green proof is blocked by (a) a stale published fixture base (schema members were
+added; `bin/test --prepare-head-base` is running) and (b) a Datahike logging failure in
+effect tests (to be read from the note). An Opus read-only review of the whole diff is
+running; its report lands at `docs/research/agent-platform/kind-cut-diff-review-2026-09-22.md`.
+
+**B1b defect found on the first real restart.** `bin/seon stop default` stopped the
+instance (`:seon.operator/stopped? true`) but the JVM stayed alive at `@(promise)` with
+no advertisement and a closed prepl; `bin/seon start` then refused with "An exact-root
+JVM is alive but its endpoint is unavailable" (`script/seon/operator.clj:278` routes
+start to `connected!` whenever `selected-processes` is non-empty). Smallest fix: in
+`seon.cluster.boot/request!` `:stop`, when `running-instances` is empty after the stop,
+the JVM exits after replying (the launch form's promise is the only thing keeping it
+alive; `src/seon/cluster/boot.clj:380-392`), and one drill asserts that `stop` of the
+sole instance ends the process and a following `start` launches cold. Recovery used:
+`bin/seon down` then `bin/seon start`.
