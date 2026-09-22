@@ -151,3 +151,28 @@ the JVM exits after replying (the launch form's promise is the only thing keepin
 alive; `src/seon/cluster/boot.clj:380-392`), and one drill asserts that `stop` of the
 sole instance ends the process and a following `start` launches cold. Recovery used:
 `bin/seon down` then `bin/seon start`.
+
+## 2026-09-22 02:40 local — kind-cut review verdict; publication-from-zero defect; loop parks on boot
+
+- Opus read-only review of `aba6d445e~1..bc70a82e3`
+  ([report](kind-cut-diff-review-2026-09-22.md), `0a03fbafd`): KEEP with fixes. Clean:
+  no renamed discriminator, general predicates died with their callers, debt 167 → 7,
+  contracts added not removed. Blockers: replacement guards are hand-written SUBSETS of
+  the producer's declared union — `src/my/program.clj` (27 sites) reads 2 of ~60
+  `:seon.db/error-result` alternatives; `src/seon/agent.clj:135` omits the config
+  refusal member so a refusal flows into `ai/settings` as data. Unproved: only
+  `seon.cluster.reply-test` recorded green; the effect blocker is a 320 s no-progress
+  hang at `request-commits-before-io-dispatch-and-settles-once`, not a logging failure.
+- Publication from zero refuses at `src/seon/print.cljc:647`: the lane put a
+  `:malli/schema` on a `defmulti`; the signature analyzer derives no arglists for it
+  (`:analyzer-disagreement`), so `bin/test --prepare-head-base` fails and no cold gate
+  can run. Incremental adoption did not exercise the path. Lane resumed with the fix
+  and a from-zero scratch-root proof.
+- The turn proc parks eleven seconds after EVERY fresh boot (pid 15000, 08:13:02Z →
+  `seon.log:23174`), independent of the kind cut: three "generated context read
+  depends on the agent's own turn-taking" refusals. Lane `turn-parks-on-boot` (astra
+  medium) is diagnosing with live probes. Four `seon.cluster.wake/deliver!` contract
+  refusals (`expected a string, got a keyword :seon.agent/route`) and one core-fault
+  channel overflow are in the same brief.
+- B1b: `stop` of the sole instance leaves a zombie JVM that refuses `start` (recorded
+  above); fix queued for a lane after the current three land.
