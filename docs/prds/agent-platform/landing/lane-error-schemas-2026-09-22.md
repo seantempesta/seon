@@ -235,3 +235,13 @@ lint; the stable snapshot avoided that concurrent edit.
 
 The requested summary is updated separately under `tmp/orchestrator/`. Historical
 observations remain **RESET NEEDED**; no migration was introduced.
+
+Follow-up implementation commit: `373820ffd3078bc25c48e4fdb6e791b6e9ba542e` (8 paths, +239/-21).
+An archive of that exact committed HEAD passed the prescribed four-namespace
+require plus `seon.turn`, exit 0: `tmp/error-recorder-head-load.log`.
+All owned JVMs exited. `lsof -nP +D` reported no scratch-root holders
+(`tmp/error-recorder-root-holders.log`); the scratch root was then deleted.
+The runtime log survives as `tmp/error-recorder-runtime.log`, alongside the
+retained fault and regression evidence. Default and foreign source edits were
+untouched. Stable source archives remain as proof evidence. The HEALTHY limit
+above remains unresolved; first-turn closure is not whole-process health.
