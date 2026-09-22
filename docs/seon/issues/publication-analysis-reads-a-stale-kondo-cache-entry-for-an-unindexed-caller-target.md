@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: blocking
 created: 2026-09-22
 tags: [issue, publication, analysis, tooling]
@@ -38,3 +38,7 @@ refuses or re-analyzes when that source's current bytes differ from the bytes
 the entry was built from. A caller's arity is then never checked against an
 older definition. Add one regression: change a `script/` callee's arity and
 publish only its `test/` caller.
+
+## Closed 2026-09-23 by ea9a4e3e9
+
+`seon.fn.analyzer/analyze` now checks only the cache entries of namespaces the analysis used (the ones clj-kondo loads, `reference-code/clj-kondo/src/clj_kondo/impl/cache.clj:127-144`). An entry is stale if its source changed after it was written (mtime), is gone, is stdin, moved to another file, or is a foreign in-checkout copy. Stale entries are rebuilt from the current bytes and the analysis runs once more; if entries are still stale after that, it refuses and names them. Counts are returned as `::cache {::examined ::stale ::rebuilt}`. The regression (`test/seon/cluster/publication_inputs_test.clj`) fails on HEAD's analyzer (4 failures) and passes with the fix. Limit: mtime, not content. Changed bytes with an older mtime are not detected; content keys need a clj-kondo fork change (its cache is keyed by namespace name).
