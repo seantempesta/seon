@@ -3,8 +3,42 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [clojure.walk :as walk]
             [cheshire.core :as json]
             [seon.operator :as operator]))
+
+(defn- measured-request
+  "Observe one request through its existing progress binding; leaf spans include nested time."
+  {:malli/schema [:=> [:cat :string :boolean] :string]}
+  [form detailed?]
+  (pr-str
+   (walk/postwalk-replace
+    {'request-body (edn/read-string form) 'detailed-spans? detailed?}
+    '(let [spans (atom {})
+           targets (when detailed-spans?
+                     {(ns-resolve 'seon.cluster.source 'capture-paths) :seon.probe/capture
+                      (ns-resolve 'seon.cluster.source 'classify-paths) :seon.probe/classify
+                      (ns-resolve 'seon.fn 'analyze-rows) :seon.probe/analyze
+                      (ns-resolve 'seon.fn 'index!) :seon.probe/index
+                      (ns-resolve 'seon.db 'transact!) :seon.probe/transact
+                      (ns-resolve 'seon.cluster 'load-development-definitions!) :seon.probe/reload
+                      (ns-resolve 'seon.instrument 'apply!) :seon.probe/re-arm})
+           wrappers (into {}
+                          (map (fn [[v phase]]
+                                 (let [f @v]
+                                   [v (fn [& args]
+                                        (let [start (System/nanoTime)]
+                                          (try (apply f args)
+                                               (finally (swap! spans update phase (fnil + 0.0)
+                                                               (/ (- (System/nanoTime) start) 1e6))))))])))
+                          targets)
+           result (with-bindings
+                    {(ns-resolve 'seon.cluster '*source-progress!*)
+                     (fn [phase]
+                       (swap! @(ns-resolve 'user 'reload-phases) conj [phase (System/nanoTime)])
+                       nil)}
+                    (with-redefs-fn wrappers (fn [] request-body)))]
+       (assoc result :seon.probe/nested-phase-ms @spans)))))
 
 (defn -main
   "Exercise actual hook events against an already booted isolated snapshot."
@@ -13,7 +47,8 @@
   (let [root (operator/canonical-root root)
         checkout (.getCanonicalPath (io/file "."))]
     (assert (and (str/ends-with? root "/tmp/reload-per-decl-root")
-                 (str/ends-with? checkout "/tmp/reload-per-declaration-wt"))
+                 (some #(str/ends-with? checkout %)
+                       ["/tmp/reload-per-declaration-wt" "/tmp/reload-per-declaration-b-wt"]))
             "This probe edits only its dedicated disposable source snapshot.")
     (binding [*ns* (the-ns 'user) *in* (java.io.StringReader. "{}")
               *out* (java.io.StringWriter.)]
@@ -68,7 +103,8 @@
                             #'operator/prepl-value!
                             (fn [& args]
                               (swap! calls conj (second args))
-                              (apply original-client args))}
+                              (apply original-client (assoc (vec args) 1
+                                                           (measured-request (second args) (= label :adopt-noncore)))))}
                            #(binding [*ns* (the-ns 'user)
                                       *in* (java.io.StringReader. (json/generate-string event))]
                               (with-out-str ((hook '-main)))))
@@ -104,13 +140,6 @@
                                   (intern 'user 'reload-caller-root @(ns-resolve 'seon.reload-probe 'caller))
                                   (assert (false? ((deref (ns-resolve 'seon.reload-probe 'caller)))))
                                   (intern 'user 'reload-phases (atom []))
-                                  (add-watch @(ns-resolve 'seon.cluster 'source-refresh-holder)
-                                             :reload-measure
-                                             (fn [_ _ before after]
-                                               (when (not= (:seon.operator.lock/phase before)
-                                                           (:seon.operator.lock/phase after))
-                                                 (swap! @(ns-resolve 'user 'reload-phases) conj
-                                                        [(:seon.operator.lock/phase after) (System/nanoTime)]))))
                                   nil)) 120000)
       (try
         (let [before (read-state)
@@ -136,6 +165,5 @@
                                           :seon.probe/caller-var-unchanged true
                                           :seon.probe/caller-root-unchanged true})) 120000))
         (finally
-          (original-client endpoint "(do (remove-watch @(ns-resolve 'seon.cluster 'source-refresh-holder) :reload-measure) nil)" 120000)
           (spit leaf leaf-before)
           (spit core core-before))))))

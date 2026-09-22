@@ -25,8 +25,9 @@
 (def ^:private uncontracted-fn (sym-in source-ns "uncontracted"))
 (def ^:private untested-fn (sym-in source-ns "untested"))
 (def ^:private helper-fn (sym-in helper-ns "helper"))
+(def ^:private constant-var (sym-in source-ns "constant"))
 
-(def ^:private fixture-symbols #{complete-fn uncontracted-fn untested-fn helper-fn})
+(def ^:private fixture-symbols #{complete-fn uncontracted-fn untested-fn helper-fn constant-var})
 
 (defn- digest
   "A 64-character digest, the width `:seon.fn.file/digest` declares."
@@ -66,6 +67,10 @@
           (function-row untested-fn source-ns source-file
                         {:seon.fn/spec "[:=> [:cat :int] :int]"})
           (function-row helper-fn helper-ns helper-file {})
+          ;; A literal constant has no body: no standard names it.
+          (function-row constant-var source-ns source-file
+                        {:seon.fn/constant? true :seon.fn/defined-by 'clojure.core/def
+                         :seon.fn/source "(def constant 7)"})
           {:seon.test/sym (sym-in 'seon.detect-fixture-test "covers")
            :seon.schema.admission/source :core
            :seon.fn/calls #{complete-fn uncontracted-fn}}])]

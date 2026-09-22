@@ -147,17 +147,21 @@
   over-report, not a name-based exclusion. A root joins POSITIVELY on
   `:seon.fn.file/relative-root`, the fact the indexer wrote for the source
   directory it walked the file under, so a declaration under no declared root
-  is scoped out rather than assumed to be production."
+  is scoped out rather than assumed to be production. A literal constant
+  (`:seon.fn/constant?`) is a declaration without a body: no contract, reach
+  or function docstring standard applies to it."
   {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.fn.file/relative-root]] [:or [:sequential [:tuple :qualified-symbol :symbol]] :seon.db/error-result]]}
   [database root]
   (let [rows (if root
                (db/q '[:find ?sym ?name :in $ ?root :where
                        [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
+                       (not [?f :seon.fn/constant? true])
                        [?f :seon.fn/file ?file] [?file :seon.fn.file/relative-root ?root]
                        [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]]
                      database root)
                (db/q '[:find ?sym ?name :where
                        [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
+                       (not [?f :seon.fn/constant? true])
                        [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]]
                      database))]
     (if (and (map? rows) (:seon.error/at rows)

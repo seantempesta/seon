@@ -125,7 +125,7 @@
     (present-values
      entry
      [:ns :name :defined-by :defined-by->lint-as :arglist-strs :doc :meta
-      :private :macro :test :fixed-arities :varargs-min-arity :lang]))))
+      :private :macro :test :fixed-arities :varargs-min-arity :lang :literal-def?]))))
 
 (defn- var-usage
   [entry]
@@ -393,14 +393,41 @@
                   (assoc :var-quote true)))))
           usages)))
 
-(defn- var-quote-spans
+(defn- literal-value?
+  "Self-evaluating values and quoted data need no initializer execution."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (boolean
+   (or (nil? value) (boolean? value) (number? value) (string? value)
+       (char? value) (keyword? value)
+       (and (seq? value) (= 'quote (first value)) (= 2 (count value)))
+       (and (or (vector? value) (set? value)) (every? literal-value? value))
+       (and (map? value) (every? literal-value? (mapcat identity value))))))
+
+(defn- parsed-facts
+  "Use the existing kondo node parse for var quotes and literal def initializers."
+  {:malli/schema [:=> [:cat :string :string]
+                  [:map [:seon.fn.analyzer/var-quotes [:vector :map]]
+                   [:seon.fn.analyzer/literal-defs [:set [:tuple :int :int]]]]]}
   [filename source]
-  (into []
-        (comp (filter #(= :var (:tag %)))
-              (map #(assoc (meta %) :filename filename)))
-        (tree-seq (comp seq :children) :children
-                  (binding [kondo.reader/*reader-exceptions* (atom [])]
-                    (kondo.utils/parse-string-all source)))))
+  (let [nodes (tree-seq (comp seq :children) :children
+                        (binding [kondo.reader/*reader-exceptions* (atom [])]
+                          (kondo.utils/parse-string-all source)))]
+    {::var-quotes
+     (into [] (comp (filter #(= :var (:tag %)))
+                    (map #(assoc (meta %) :filename filename))) nodes)
+     ::literal-defs
+     (into #{}
+           (keep (fn [node]
+                   ;; Only a def head is converted to data; other lists are skipped.
+                   (when (and (= :list (:tag node))
+                              (#{'def 'clojure.core/def} (:value (first (:children node)))))
+                     (let [form (kondo.utils/sexpr node)]
+                       (when (and (or (= 3 (count form))
+                                      (and (= 4 (count form)) (string? (nth form 2))))
+                                  (literal-value? (last form)))
+                         [(:row (meta node)) (:col (meta node))])))))
+           nodes)}))
 
 (defn analyze
   "Analyze captured source text, complete source roots, or individual files.
@@ -468,13 +495,23 @@
                  (finally
                    (when mirror-root (delete-tree! mirror-root))))
         raw-analysis (:analysis result)
-        quotes (mapcat (fn [filename]
-                         (var-quote-spans
-                          filename
-                          (or (get sources (analyzed-source-path filename))
-                              stdin-source
-                              (slurp filename))))
-                       (distinct (map :filename (:var-usages raw-analysis))))
+        spans (into {}
+                    (map (fn [filename]
+                           [filename
+                            (parsed-facts filename
+                                          (or (get sources (analyzed-source-path filename))
+                                              stdin-source (slurp filename)))]))
+                    (distinct (map :filename (concat (:var-usages raw-analysis)
+                                                     (:var-definitions raw-analysis)))))
+        raw-analysis (update raw-analysis :var-definitions
+                             (fn [definitions]
+                               (mapv (fn [entry]
+                                       (cond-> entry
+                                         (and (= 'clojure.core/def (:defined-by entry))
+                                              (get-in spans [(:filename entry) ::literal-defs
+                                                             [(:row entry) (:col entry)]]))
+                                         (assoc :literal-def? true))) definitions)))
+        quotes (mapcat ::var-quotes (vals spans))
         attributed (group-by #(if (:class %) :java-class-usages :var-usages)
                              (attributed-usages (assoc raw-analysis :var-quotes quotes)))
         analysis (merge raw-analysis attributed)]

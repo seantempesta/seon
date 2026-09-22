@@ -324,7 +324,8 @@
 
 (defn- function-definition?
   [entry]
-  (or (seq (::analyzer/arglist-strs entry))
+  (or (::analyzer/literal-def? entry)
+      (seq (::analyzer/arglist-strs entry))
       (= 'clojure.core/defmulti (::analyzer/defined-by->lint-as entry))))
 
 (defn- stored-namespace-context
@@ -667,6 +668,11 @@
         (true? (:seon.fn/internal? metadata)) (assoc :seon.fn/internal? true)
         (seq invokes) (assoc :seon.fn/invokes invokes)
         (::analyzer/macro entry) (assoc :seon.fn/macro? true)
+        ;; Explicit false distinguishes completed inline analysis from an older
+        ;; row without the fact. The compiler reads this metadata, not the head.
+        (#{'clojure.core/defn 'clojure.core/defn-} (::analyzer/defined-by entry))
+        (assoc :seon.fn/inline? (boolean (:inline metadata)))
+        (::analyzer/literal-def? entry) (assoc :seon.fn/constant? true)
         ;; WHO WROTE THIS BODY IS A FACT, NOT A NAME. clj-kondo already tells
         ;; the indexer which form interned the var; keeping it means a
         ;; `deftype` constructor and a `defprotocol` method — vars with no

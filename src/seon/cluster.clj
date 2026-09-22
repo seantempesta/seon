@@ -1855,19 +1855,24 @@
   "Clojure expands macros/inline bodies and embeds protocol/type interfaces at
   caller compilation. Constants can be read by macros at compilation too.
   These form heads therefore require the stored reverse dependency closure.
-  Ordinary defn remains unknown until its inline metadata is indexed."
+  Ordinary defn uses Var indirection when analyzed inline metadata is false."
   '#{clojure.core/defmacro clojure.core/defprotocol clojure.core/deftype
      clojure.core/defrecord clojure.core/definterface clojure.core/definline
      clojure.core/def})
 
 (defn- declaration-reload-rule
   "Missing compiler facts are unknown, never evidence for excluding callers."
-  {:malli/schema [:=> [:cat [:maybe :qualified-symbol]]
-                  [:enum :seon.reload/compiled-into-callers :seon.reload/unknown]]}
-  [defined-by]
-  (if (compiled-into-callers defined-by)
+  {:malli/schema [:=> [:cat [:maybe :qualified-symbol]
+                           [:or :boolean [:= :seon.reload/unknown]]]
+                  [:enum :seon.reload/compiled-into-callers
+                   :seon.reload/var-indirection :seon.reload/unknown]]}
+  [defined-by inline?]
+  (cond
+    (or (compiled-into-callers defined-by) (true? inline?))
     :seon.reload/compiled-into-callers
-    :seon.reload/unknown))
+    (and (#{'clojure.core/defn 'clojure.core/defn-} defined-by) (false? inline?))
+    :seon.reload/var-indirection
+    :else :seon.reload/unknown))
 
 (defn development-namespaces
   "Changed namespaces plus dependents of compiled or unknown declarations.
@@ -1889,15 +1894,16 @@
          symbols (into [] (keep (fn [[attribute value]]
                                   (when (= :seon.fn/sym attribute) value))) identities)
          rules (mapv (fn [database]
-                       (let [facts (db/q '[:find ?symbol ?head
+                       (let [facts (db/q '[:find ?symbol ?head ?inline
                                            :in $ [?symbol ...]
                                            :where [?e :seon.fn/sym ?symbol]
-                                                  [?e :seon.fn/defined-by ?head]]
+                                                  [?e :seon.fn/defined-by ?head]
+                                                  [(get-else $ ?e :seon.fn/inline? :seon.reload/unknown) ?inline]]
                                          database symbols)]
                          (when (:seon.error/at facts)
                            (refused! "Declaration reload facts could not be read." facts))
-                         (into {} (map (fn [[symbol head]]
-                                         [symbol (declaration-reload-rule head)])) facts)))
+                         (into {} (map (fn [[symbol head inline?]]
+                                         [symbol (declaration-reload-rule head inline?)])) facts)))
                      databases)
          dependent-seeds
          (into #{}
@@ -1908,6 +1914,7 @@
                          (when (some (fn [rules]
                                        (case (get rules value :seon.reload/unknown)
                                          :seon.reload/compiled-into-callers true
+                                         :seon.reload/var-indirection false
                                          :seon.reload/unknown true)) rules)
                            (symbol (namespace value)))
                          nil)))

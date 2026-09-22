@@ -25,6 +25,10 @@
           [:boolean
            {:description
             "Asserts clj-kondo's ::analyzer/macro fact at indexing; absent means the function is not a macro."}],
+          :inline?
+          [:boolean {:description "The analyzer observed :inline metadata on this defn. Explicit false records completed analysis; absence on an older row is unknown for reload selection."}]
+          :constant?
+          [:boolean {:description "The analyzer observed a plain def whose initializer is literal data. Such a declaration has no body, contract or test reach; macros may read its value at caller compilation. Absent means not a literal constant."}]
           :host-bound?
           [:boolean {:seon.db/index true
                      :description "Derived per declaration from its defining form and its own analyzed references to classes or forms unavailable in SCI. Ordinary callers do not inherit this fact."}]
@@ -145,6 +149,8 @@
            [:seon.fn/internal? {:optional true} :seon.fn/internal?]
            [:seon.fn/doc-order {:optional true} :seon.fn/doc-order]
            [:seon.fn/macro? {:optional true} :seon.fn/macro?]
+           [:seon.fn/inline? {:optional true} :seon.fn/inline?]
+           [:seon.fn/constant? {:optional true} :seon.fn/constant?]
            [:seon.fn/host-bound? {:optional true} :seon.fn/host-bound?]
            [:seon.fn/defined-by {:optional true} :seon.fn/defined-by]
            [:seon.fn/spec {:optional true} :seon.fn/spec]

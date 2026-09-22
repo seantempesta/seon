@@ -14,7 +14,7 @@
     (.mkdirs (io/file root "src"))
     (try
       (doseq [[file text]
-              {"base.clj" "(ns sample.reload.base)\n(defn value [] 1)\n(defmacro expanded [] 1)\n(defprotocol P (p [this]))"
+              {"base.clj" "(ns sample.reload.base)\n(defn value [] 1)\n(def literal-value 7)\n(def literal-data {:a [1 true nil]})\n(def dynamic-value (str \"x\"))\n(defn inlined {:inline (fn [x] x)} [x] x)\n(defmacro expanded [] 1)\n(defprotocol P (p [this]))"
                "impl.clj" "(ns sample.reload.impl (:require [sample.reload.base :as base]))\n(defrecord R [] base/P (p [_] (base/value)))"
                "caller.clj" "(ns sample.reload.caller (:require [sample.reload.base :as base] [sample.reload.impl :as impl]))\n(defn result [] (+ (base/expanded) (base/p (impl/->R))))"
                "unrelated.clj" "(ns sample.reload.unrelated)\n(defn value [] 0)"}]
@@ -34,10 +34,10 @@
 
 (deftest ^{:seon.test/long "Canonical fixture cold acquisition and namespace analysis previously measured 12 seconds in publication-delta-test."
            :seon.test/long-ms 20000}
-  missing-inline-facts-widen
+  ordinary-defn-reloads-only-its-namespace
   (with-program
     (fn [connection]
-      (is (= '#{sample.reload.base sample.reload.impl sample.reload.caller}
+      (is (= '#{sample.reload.base}
              (cluster/development-namespaces (db/db connection)
                                              [[:seon.fn/sym 'sample.reload.base/value]])))
       nil)))
@@ -70,6 +70,41 @@
     (doseq [head '[clojure.core/defmacro clojure.core/defprotocol
                    clojure.core/deftype clojure.core/defrecord
                    clojure.core/definterface clojure.core/definline clojure.core/def]]
-      (is (= :seon.reload/compiled-into-callers (rule head))))
+      (is (= :seon.reload/compiled-into-callers (rule head :seon.reload/unknown))))
     (doseq [head [nil 'clojure.core/defn 'sample/defining-macro]]
-      (is (= :seon.reload/unknown (rule head))))))
+      (is (= :seon.reload/unknown (rule head :seon.reload/unknown))))))
+
+(deftest ^{:seon.test/long "Canonical fixture cold acquisition and namespace analysis previously measured 12 seconds in publication-delta-test."
+           :seon.test/long-ms 20000}
+  inline-and-literal-def-facts-drive-reload
+  (with-program
+    (fn [connection]
+      (let [database (db/db connection)]
+        (is (= #{['sample.reload.base/value false] ['sample.reload.base/inlined true]}
+               (set (db/q '[:find ?sym ?inline :where
+                            [?e :seon.fn/sym ?sym] [?e :seon.fn/inline? ?inline]
+                            [(contains? #{sample.reload.base/value sample.reload.base/inlined} ?sym)]] database)))
+            "ordinary inline absence is stored as an analyzed false")
+        (is (= '#{sample.reload.base/literal-value sample.reload.base/literal-data}
+               (set (db/q '[:find [?sym ...] :where [?e :seon.fn/constant? true]
+                            [?e :seon.fn/sym ?sym]] database)))
+            "literal defs are declarations; a computed initializer is not a constant")
+        (doseq [sym '[sample.reload.base/inlined sample.reload.base/literal-value
+                     sample.reload.base/literal-data]]
+          (is (= '#{sample.reload.base sample.reload.impl sample.reload.caller}
+                 (cluster/development-namespaces database [[:seon.fn/sym sym]]))))
+      nil))))
+
+(deftest ^{:seon.test/long "Canonical fixture cold acquisition and namespace analysis previously measured 12 seconds in publication-delta-test."
+           :seon.test/long-ms 20000}
+  retired-or-missing-inline-facts-widen
+  (with-program
+    (fn [connection]
+      (let [before (db/db connection)]
+        (support/transacted! connection
+                             [[:db/retract [:seon.fn/sym 'sample.reload.base/value]
+                               :seon.fn/inline? false]])
+        (is (= '#{sample.reload.base sample.reload.impl sample.reload.caller}
+               (cluster/development-namespaces before (db/db connection)
+                                               [[:seon.fn/sym 'sample.reload.base/value]]))))
+      nil)))

@@ -67,9 +67,8 @@
                         :seon.fn/roots ["src"]}))
          (let [selected (cluster/development-namespaces
                          (db/db connection) [[:seon.fn/sym 'sample.reload.leaf/value]])]
-           (is (= #{'sample.reload.leaf 'sample.reload.caller 'sample.reload.outer}
-                  selected)
-               "Missing inline facts are unknown and retain dependent reload.")
+           (is (= #{'sample.reload.leaf} selected)
+               "Known non-inline defn uses Var indirection.")
            (is (empty? (cluster/development-namespaces (db/db connection) []))))
          (let [before (db/db connection)
                _ (support/transacted!
@@ -77,10 +76,10 @@
                                :seon.ns/requires 'sample.reload.leaf]])
                after (db/db connection)]
            (is (= #{'sample.reload.leaf}
-                  (cluster/development-namespaces after [[:seon.fn/sym 'sample.reload.leaf/value]])))
+                  (cluster/development-namespaces after [[:seon.fn/sym 'sample.reload.leaf/expanded]])))
            (is (= #{'sample.reload.leaf 'sample.reload.caller 'sample.reload.outer}
                   (cluster/development-namespaces before after
-                                                  [[:seon.fn/sym 'sample.reload.leaf/value]])))
+                                                  [[:seon.fn/sym 'sample.reload.leaf/expanded]])))
            (support/transacted!
             connection [[:db/add [:seon.ns/name 'sample.reload.caller]
                          :seon.ns/requires 'sample.reload.leaf]]))
