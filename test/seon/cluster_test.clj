@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
+            [seon.cluster.boot]
             [seon.config :as config]
             [seon.flow :as seon.flow]
             [seon.db :as db]
@@ -350,10 +351,11 @@
         phase-of (ns-resolve 'seon.cluster 'source-change-phase)
         progress (ns-resolve 'seon.cluster '*source-progress!*)
         analysis-failure (analysis-source-change-failure)
-        adoption-failure (ex-info "Source changed during development adoption."
-                                  {
-                                   :seon.boot/offense
-                                   {:seon.source/digest-before "c0"}})
+        adoption-failure (try
+                           (#'cluster/refused! "Source changed during development adoption."
+                                              {:seon.cluster.source/phase :adoption
+                                               :seon.source/digest-before "c0"})
+                           (catch clojure.lang.ExceptionInfo failure failure))
         reported (atom [])
         attempts (atom 0)
         converging (fn [failure]
@@ -365,6 +367,13 @@
         "the captured span read genuinely refuses instead of returning source")
     (is (true? (:seon.fn/index-refused (ex-data analysis-failure))))
     (is (vector? (:seon.fn/analysis-span (ex-data analysis-failure))))
+    (is (= :analysis (:seon.cluster.source/phase (ex-data analysis-failure))))
+    (is (= :adoption (:seon.cluster.source/phase (ex-data adoption-failure))))
+    (is (nil? (get-in (ex-data adoption-failure) [:seon.boot/offense :seon.cluster.source/phase])))
+    (is (nil? (phase-of (ex-info "Digest alone is not a declared phase."
+                                 {:seon.boot/offense {:seon.source/digest-before "c0"}}))))
+    (is (not ((schema/projection-validator (schema/handed-projection) :seon.cluster.source/phase)
+              :unrecognized)))
     (is (= [:analysis :adoption nil]
            [(phase-of analysis-failure)
             (phase-of adoption-failure)
@@ -382,11 +391,12 @@
       (is (= {:seon.source/commit-id "converged"}
              (retrying (converging adoption-failure)))
           "the adoption compare keeps its own single retry")
+      (is (= 2 @attempts) "a digest-change refusal retries exactly once")
       (let [surviving (test-support/refusal-data
                        #(retrying (fn [] (throw analysis-failure))))]
         (is (true? (:seon.boot/refused surviving))
             "a second change refuses rather than rebuilding")
-        (is (= :analysis (get-in surviving [:seon.boot/offense :seon.source/change-phase]))
+        (is (= :analysis (:seon.cluster.source/phase surviving))
             "naming the phase that changed under the retry")
         (is (= (:seon.fn/analysis-span (ex-data analysis-failure))
                (get-in surviving [:seon.boot/offense :seon.fn/analysis-span]))
@@ -447,3 +457,27 @@
           (is (= "seon.cluster-test/provider"
                  (get-in pulled [:seon.ai.model/provider :seon.ai.model/provider-id]))
               (pr-str pulled)))))))
+
+(deftest render-contract-refusals-retain-the-cause-and-name-the-missing-contract
+  (doseq [[cause fragment]
+          [[:seon.schema/render-function-has-no-declared-contract "has no declared contract"]
+           [:seon.schema/render-input-does-not-accept-declaring-shape "does not accept the declaring shape"]]]
+    (let [refusal (test-support/refusal-data
+                   #(#'schema/render-contract-refusal!
+                     {:seon.schema/key :seon.agent/id
+                      :seon.render/property :seon.render/ai
+                      :seon.render/function 'seon.cluster-test/render-probe}
+                     {:seon.schema/render-contract nil
+                      :seon.schema/render-input nil
+                      :seon.schema/render-contract-cause cause}))]
+      (is (= cause (:seon.schema/render-contract-cause refusal)))
+      (is (str/includes? (:seon.error/message refusal) fragment))
+      (is ((schema/projection-validator (schema/handed-projection)
+                                       :seon.schema/validation-refusal) refusal)))))
+
+(deftest boot-refusals-retain-the-operator-disposition
+  (doseq [disposition [:refused :boot-failed :non-edn-response :operation-failed]]
+    (let [refusal (seon.cluster.boot/diagnostic "Operator failed." {} disposition)]
+      (is (= disposition (:seon.cluster.boot/disposition refusal)))
+      (is ((schema/projection-validator (schema/handed-projection)
+                                       :seon.cluster.boot/operation-error) refusal)))))

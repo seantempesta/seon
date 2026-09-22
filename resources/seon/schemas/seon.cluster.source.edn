@@ -1,4 +1,5 @@
-{:seon.cluster.source/rule :keyword
+{:seon.cluster.source/phase [:enum :analysis :adoption]
+ :seon.cluster.source/rule :keyword
  :seon.cluster.source/root-absent :seon.source/path
  :seon.cluster.source/root-absent-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the absent source root"} [:seon.cluster.source/root-absent :seon.cluster.source/root-absent] [:seon.error/message :seon.error/message]]
  :seon.cluster.source/invalid-source-seal :seon.source/digest

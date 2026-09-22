@@ -189,3 +189,38 @@ assertions together. Its resource definitions were carried by `434c01f4c`.
 F6 and F9 boot production fixes also belong to `434c01f4c`; their prepared
 assertions land with the source-phase group in the one cluster test file.
 No test infrastructure owner is edited.
+
+`e2e3b7473` lands the database group (F1/F2/F7/F10), 3 files,
+93 insertions / 8 deletions including this note. The prescribed archive load
+is `tmp/constructor-repair/head-e2e3b7473-load.log`.
+
+F8 writes the one declared phase at the analysis span producer and the digest
+comparison producer. `refused!` carries that explicitly supplied member to the
+flat error and removes it from the offense map, so it is not duplicated. The
+retry reader reads only `:seon.cluster.source/phase`, and the final repeated
+refusal uses the same member. The owning `seon.fn/index-refused-error` and
+`seon.boot/refused-error` declare its optional presence; the enum belongs to
+`seon.cluster.source.edn`. Digest presence alone no longer selects a retry.
+
+The source-phase regression uses the real span refusal and the boot refusal
+producer, checks both phase values, rejects an undeclared enum value, verifies
+no nested duplicate, and asserts a digest-change refusal makes exactly two
+attempts. The existing historical behavior change remains explicit: the
+constructor cut enabled the previously dormant adoption retry; this repair
+retains that behavior through an authored member.
+
+Read-only JVM source-body form `tmp/constructor-repair/f8-resume-probe.clj`
+passed six assertions in 154 ms: analysis/adoption phases, no digest heuristic,
+convergence, two attempts, no nested duplicate. It compiled only local functions;
+no live Var or cluster context was replaced. This is algorithm proof, not
+publication timing or adoption proof.
+
+The resumed canonical `bin/test-fast --paths ... -- seon.db-test seon.await-test
+seon.cluster-test` completed **85 tests / 193 assertions / 13 failures / 71 errors**,
+then refused result recording (`tmp/constructor-repair/resume-test-fast.log`).
+The stale canonical base now names deleted `seon.search/ping-map-fn?`, not the
+previous facet-count predicate. No base rebuild or fixture edit was attempted.
+The pure diff-disposition, source-retry, render-contract and boot-disposition
+regressions and all await tests have completion events without fail/error events.
+The database fixture tests still did not reach their assertions. The repeated
+upstream read failures are unchanged db_test.clj:633, outside this repair.

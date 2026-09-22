@@ -664,24 +664,22 @@
   {:malli/schema [:=> [:cat :string :seon.schema/value] :nil]}
   [message offense]
   (throw (ex-info message
-                  {:seon.boot/refused true
-                   :seon.error/message message
-                   ;; A projection is execution input, not refusal evidence.
-                   :seon.boot/offense
-                   (if (map? offense)
-                     (dissoc offense :seon.schema/projection)
-                     offense)})))
+                  (merge
+                   {:seon.boot/refused true
+                    :seon.error/message message
+                    ;; A projection is execution input, not refusal evidence.
+                    :seon.boot/offense
+                    (if (map? offense)
+                      (dissoc offense :seon.schema/projection :seon.cluster.source/phase)
+                      offense)}
+                   (when (map? offense)
+                     (select-keys offense [:seon.cluster.source/phase]))))))
 
 (defn- source-change-phase
-  "Read the producer's captured-span or publication-digest observation."
-  {:malli/schema [:=> [:cat :seon.error/throwable] [:maybe [:enum :analysis :adoption]]]}
+  "Read the producer's declared source-change phase."
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:maybe :seon.cluster.source/phase]]}
   [failure]
-  (let [data (ex-data failure)
-        offense (:seon.boot/offense data)]
-    (cond
-      (and (:seon.fn/index-refused data) (:seon.fn/analysis-span data)
-           (:seon.fn/source-path data)) :analysis
-      (:seon.source/digest-before offense) :adoption)))
+  (:seon.cluster.source/phase (ex-data failure)))
 
 (defn- retrying-source-change
   "Run one publication attempt, retrying ONCE when the source changed under it.
@@ -703,7 +701,7 @@
                                  " through the one retry; the next edit must converge it.")
                             (assoc (or (:seon.boot/offense (ex-data failure))
                                        (ex-data failure))
-                                   :seon.source/change-phase phase)))
+                                   :seon.cluster.source/phase phase)))
                 (throw failure))))]
       (if-let [phase (::retry-phase outcome)]
         (do (report-source-progress!
@@ -1900,7 +1898,8 @@
                                (if partial? (source/path-digests directory requested)
                                    (:seon.source/relative-file-digests (current-source-snapshot roots))))
                     (refused! "Source changed during publication; retry."
-                              {:seon.source/digest-before digest}))
+                              {:seon.cluster.source/phase :adoption
+                               :seon.source/digest-before digest}))
                 _ (report-source-progress! (str "branch publication started: "
                                                 (if paths (count paths) (count (:seon.fn.manifest/artifacts manifest)))
                                                 " inputs"))

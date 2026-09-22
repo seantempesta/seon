@@ -158,6 +158,7 @@
      (ex-info
       "Source changed during analysis; a declaration span does not fit the analyzed text."
       (merge {:seon.fn/index-refused true
+              :seon.cluster.source/phase :analysis
               :seon.fn/source-path path
               :seon.fn.file/captured-digest (:seon.fn.file/digest context)
               :seon.fn.file/captured-length (count (:text context))
