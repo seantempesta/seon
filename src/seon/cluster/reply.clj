@@ -51,21 +51,14 @@
      :seon.cluster.reply/unreadable-error
      :seon.cluster.reply/refused-tag-error]]}
   [kind marker message data]
-  (error/diagnostic
-   (merge marker
+  (merge marker
           {::text (::text data)
            :seon.error/at (java.util.Date.)
            :seon.error/layer :seon.cluster.reply/source
            :seon.error/operation 'seon.cluster.reply/sources
            :seon.error/message message
            :seon.error/data data
-           :seon.error/diagnostic-layer :seon.cluster.reply/source
-           :seon.error/diagnostic-operation 'seon.cluster.reply/sources
-           :seon.error/diagnostic-member ::text
-           :seon.error/diagnostic-expected :seon.cluster.reply/sources
-           :seon.error/diagnostic-offending (::text data)
-           :seon.error/diagnostic-cause kind
-           :seon.error/diagnostic-evidence data})))
+           :seon.error/expected :seon.cluster.reply/sources}))
 
 (defn- parsed-events
   "Read events for `source` from THE ONE reader, or its flat error value.

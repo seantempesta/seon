@@ -52,21 +52,17 @@
                    :seon.render.profile/max-children 10
                    :seon.render.profile/max-string-length 256
                    :seon.render.profile/composition :multiline}}
-            diagnostic (error/diagnostic
-                        {
-                         :seon.error/message "Invalid selector."
-                         :seon.error/diagnostic-layer :database-read
-                         :seon.error/diagnostic-operation 'seon.db/pull
-                         :seon.error/diagnostic-member :selector
-                         :seon.error/diagnostic-expected :string
-                         :seon.error/diagnostic-offending 42
-                         :seon.error/diagnostic-cause :invalid-selector
-                         :seon.error/diagnostic-evidence {}})
+            diagnostic {:seon.error/message "Invalid selector."
+                         :seon.error/layer :database-read
+                         :seon.error/operation 'seon.db/pull
+                         :seon.error/expected :string
+                         :seon.error/offending 42
+                         :seon.error/data {:seon.error/member :selector}}
             shown (error/render-ai (assoc unit :seon.render/value diagnostic))]
         (doseq [fragment ["seon.db/pull refused :selector at []: expected a string"
                           "got an integer 42" "Fix:" "Example:"]]
           (is (str/includes? shown fragment) shown))
-        (is (not (str/includes? shown "diagnostic-evidence")) shown)
+        (is (not (str/includes? shown "seon.error/data")) shown)
         (let [refusal (db/transact! connection
                                     [{:seon.fn/sym "seon.refusal-grammar-test/incomplete"
                                       :seon.fn/doc "incomplete"}])]
@@ -86,8 +82,8 @@
                            {:seon.error/problem problem :seon.error/path []
                             :seon.error/argument "return value"})
               refusal (assoc diagnostic :seon.error/data
-                             {:seon.error/diagnostic-operation 'example/check
-                              :seon.error/problems [description]})
+                             {:seon.error/problems [description]
+                              :seon.error/operation 'example/check})
               text (error/render-ai (assoc unit :seon.render/value refusal))]
           (is (= [7] (:seon.error/input description)))
           (is (= :int (:seon.error/expected description)))

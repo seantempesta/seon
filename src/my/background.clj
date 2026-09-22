@@ -9,20 +9,14 @@
 
 (defn- invalid-call
   [forms]
-  (refusal/diagnostic
-   {:seon.error/at (java.util.Date.)
+  {:seon.error/at (java.util.Date.)
     :seon.error/layer :my.background/call
     :seon.error/operation 'my.background/background
-    :seon.error/message
-    "background refused its call at [:forms]: expected one direct capability call with one request map, optionally preceded by an options map, but observed another form shape. Fix: inspect (doc my.background/background) and supply the documented direct call."
-    :seon.error/diagnostic-layer :my.background/call
-    :seon.error/diagnostic-operation 'my.background/background
-    :seon.error/diagnostic-member :forms
-    :seon.error/diagnostic-expected '(my.background/background (capability request-map))
-    :seon.error/diagnostic-offending forms
-    :seon.error/diagnostic-cause :my.background/invalid-call
-    :seon.error/diagnostic-evidence {:my.background/authored-form forms}
-    :my.background/call-source (pr-str forms)}))
+    :seon.error/message "background refused its call at [:forms]: expected one direct capability call with one request map, optionally preceded by an options map, but observed another form shape. Fix: inspect (doc my.background/background) and supply the documented direct call."
+    :my.background/call-source (pr-str forms)
+    :seon.error/expected '(my.background/background (capability request-map))
+    :seon.error/offending forms
+    :seon.error/data (merge {:my.background/authored-form forms} {:seon.error/member :forms})})
 
 (defmacro background
   "Start one capability request without waiting for its result.

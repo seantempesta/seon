@@ -1003,8 +1003,7 @@
           (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
           (is (= :seon.agent/turn-start
                  (get-in (ex-data failure)
-                         [:seon.error/data
-                          :seon.error/diagnostic-operation])))
+                         [:seon.error/operation])))
           (is (= agent-id (:seon.agent/id (ex-data failure))))
           (is (= timeout-ms
                  (:seon.config.agent/turn-completion-backstop-ms
@@ -1058,8 +1057,7 @@
           (is (string? (:seon.agent/turn-completion-backstop (ex-data (::flow/ex fault)))))
           (is (= :seon.agent/turn-transform
                  (get-in (ex-data (::flow/ex fault))
-                         [:seon.error/data
-                          :seon.error/diagnostic-operation])))
+                         [:seon.error/operation])))
           (is (= agent-id (:seon.agent/id fault))))))))
 
 (deftest install-gate-failure-closes-with-a-durable-diagnostic

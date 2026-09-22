@@ -162,10 +162,9 @@
                       (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
        (is (seq (:seon.turn/generated-read-attributes fault))
            (pr-str fault))
-       (is (= source (get-in fault [:seon.error/data :seon.error/diagnostic-offending])))
+       (is (= source (get-in fault [:seon.error/offending])))
        (is (= #{:seon.turn/id}
-              (get-in fault [:seon.error/data :seon.error/diagnostic-evidence
-                             :datahike.read/attributes])))
+              (get-in fault [:seon.error/data :datahike.read/attributes])))
        (is (nil? (:seon.cluster.eval/read-evidence
                   (db/pull @connection [:seon.cluster.eval/read-evidence]
                            [:seon.cluster.eval/id evaluation-id]))))

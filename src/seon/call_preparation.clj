@@ -202,23 +202,16 @@
   [{default-key :seon.call-preparation/key
     supplier :seon.call-preparation/supplier-symbol
     schema-key :seon.call-preparation/schema-key} reason data]
-  (error/diagnostic
- {:seon.error/at (java.util.Date.)
- :seon.error/layer :seon.call-preparation/call
- :seon.error/operation 'seon.call-preparation/incoherent
- :seon.error/message (str "The supplied default " default-key " is not admissible: " reason)
- :seon.call-preparation/incoherent-key default-key
- :seon.call-preparation/supplier-symbol supplier
- :seon.call-preparation/schema-key schema-key
- :seon.call-preparation/coherence-expectation reason
- :seon.error/diagnostic-layer :seon.call-preparation/call
- :seon.error/diagnostic-operation 'seon.call-preparation/incoherent
- :seon.error/diagnostic-member default-key
- :seon.error/diagnostic-expected reason
- :seon.error/diagnostic-offending data
- :seon.error/diagnostic-cause :seon.call-preparation/incoherent-supplier
- :seon.error/diagnostic-evidence (assoc data :seon.call-preparation/key default-key)
- :seon.error/data (assoc data :seon.call-preparation/key default-key)}))
+  {:seon.error/at (java.util.Date.)
+  :seon.error/layer :seon.call-preparation/call
+  :seon.error/operation 'seon.call-preparation/incoherent
+  :seon.error/message (str "The supplied default " default-key " is not admissible: " reason)
+  :seon.call-preparation/incoherent-key default-key
+  :seon.call-preparation/supplier-symbol supplier
+  :seon.call-preparation/schema-key schema-key
+  :seon.call-preparation/coherence-expectation reason
+  :seon.error/data (assoc data :seon.call-preparation/key default-key)
+  :seon.error/offending data})
 
 (defn- coherent-supplier
   "Prove one row against the program graph, or refuse it as a value.
@@ -1066,26 +1059,19 @@
   {:malli/schema [:=> [:cat :seon.fn/sym :seon.call-preparation/slot :seon.schema/value]
                   :seon.call-preparation/unavailable-error]}
   [sym slot cause]
-  (error/diagnostic
- {:seon.error/at (java.util.Date.)
- :seon.error/layer :seon.call-preparation/call
- :seon.error/operation 'seon.call-preparation/unavailable
- :seon.error/message (str "Cannot call " sym ": " (:seon.call-preparation/key slot)
+  {:seon.error/at (java.util.Date.)
+  :seon.error/layer :seon.call-preparation/call
+  :seon.error/operation 'seon.call-preparation/unavailable
+  :seon.error/message (str "Cannot call " sym ": " (:seon.call-preparation/key slot)
         " is unavailable. "
         (or (:seon.error/message cause)
             "Its supplier produced no value."))
- :seon.call-preparation/target-symbol sym
- :seon.call-preparation/unavailable-key (:seon.call-preparation/key slot)
- :seon.call-preparation/supplier-symbol (:seon.call-preparation/supplier-symbol slot)
- :seon.fn.argument/index (:seon.fn.argument/index slot)
- :seon.error/diagnostic-layer :seon.call-preparation/call
- :seon.error/diagnostic-operation 'seon.call-preparation/unavailable
- :seon.error/diagnostic-member (:seon.call-preparation/key slot)
- :seon.error/diagnostic-expected "an available supplied default"
- :seon.error/offending cause
- :seon.error/diagnostic-offending cause
- :seon.error/diagnostic-cause :seon.call-preparation/unavailable
- :seon.error/diagnostic-evidence (cond-> {:seon.fn/sym sym
+  :seon.call-preparation/target-symbol sym
+  :seon.call-preparation/unavailable-key (:seon.call-preparation/key slot)
+  :seon.call-preparation/supplier-symbol (:seon.call-preparation/supplier-symbol slot)
+  :seon.fn.argument/index (:seon.fn.argument/index slot)
+  :seon.error/offending cause
+  :seon.error/data (cond-> {:seon.fn/sym sym
             :seon.call-preparation/key (:seon.call-preparation/key slot)
             :seon.call-preparation/supplier-symbol
             (:seon.call-preparation/supplier-symbol slot)
@@ -1095,16 +1081,7 @@
             (:seon.call-preparation/entry-key slot))
      (map? cause)
      (assoc :seon.call-preparation/cause cause))
- :seon.error/data (cond-> {:seon.fn/sym sym
-            :seon.call-preparation/key (:seon.call-preparation/key slot)
-            :seon.call-preparation/supplier-symbol
-            (:seon.call-preparation/supplier-symbol slot)
-            :seon.fn.argument/index (:seon.fn.argument/index slot)}
-     (:seon.call-preparation/entry-key slot)
-     (assoc :seon.call-preparation/entry-key
-            (:seon.call-preparation/entry-key slot))
-     (map? cause)
-     (assoc :seon.call-preparation/cause cause))}))
+  :seon.error/expected "an available supplied default"})
 
 (defn supply
   "Call one supplied default's supplier with this call's environment.
@@ -1125,43 +1102,27 @@
                       (catch Throwable _ nil))]
     (if-not (var? resolved)
       (unavailable sym slot
-                   (error/diagnostic
- {:seon.error/at (java.util.Date.)
- :seon.error/layer :seon.call-preparation/call
- :seon.error/operation 'seon.call-preparation/supply
- :seon.error/message (str "No callable is installed for "
+                   {:seon.error/at (java.util.Date.)
+  :seon.error/layer :seon.call-preparation/call
+  :seon.error/operation 'seon.call-preparation/supply
+  :seon.error/message (str "No callable is installed for "
                                      symbol-name ".")
- :seon.call-preparation/unresolved-symbol symbol-name
- :seon.error/diagnostic-layer :seon.call-preparation/call
- :seon.error/diagnostic-operation 'seon.call-preparation/supply
- :seon.error/diagnostic-member symbol-name
- :seon.error/diagnostic-expected "an installed callable Var"
- :seon.error/diagnostic-offending symbol-name
- :seon.error/diagnostic-cause :seon.call-preparation/unresolved-supplier
- :seon.error/diagnostic-evidence {:seon.call-preparation/supplier-symbol
+  :seon.call-preparation/unresolved-symbol symbol-name
+  :seon.error/data {:seon.call-preparation/supplier-symbol
                                  symbol-name}
- :seon.error/data {:seon.call-preparation/supplier-symbol
-                                 symbol-name}}))
+  :seon.error/expected "an installed callable Var"})
       (let [produced (try (resolved environment)
                           (catch Throwable cause
-                            (error/diagnostic
- {:seon.error/at (java.util.Date.)
- :seon.error/layer :seon.call-preparation/call
- :seon.error/operation 'seon.call-preparation/supply
- :seon.error/message (or (ex-message cause) "The supplier threw.")
- :seon.call-preparation/thrown-supplier symbol-name
- :seon.error/exception-class (symbol (.getName (class cause)))
- :seon.error/diagnostic-layer :seon.call-preparation/call
- :seon.error/diagnostic-operation 'seon.call-preparation/supply
- :seon.error/diagnostic-member symbol-name
- :seon.error/diagnostic-expected "a returned supplied value"
- :seon.error/offending cause
- :seon.error/diagnostic-offending cause
- :seon.error/diagnostic-cause :seon.call-preparation/supplier-threw
- :seon.error/diagnostic-evidence {:seon.call-preparation/supplier-symbol
+                            {:seon.error/at (java.util.Date.)
+  :seon.error/layer :seon.call-preparation/call
+  :seon.error/operation 'seon.call-preparation/supply
+  :seon.error/message (or (ex-message cause) "The supplier threw.")
+  :seon.call-preparation/thrown-supplier symbol-name
+  :seon.error/exception-class (symbol (.getName (class cause)))
+  :seon.error/offending cause
+  :seon.error/data {:seon.call-preparation/supplier-symbol
                               symbol-name}
- :seon.error/data {:seon.call-preparation/supplier-symbol
-                              symbol-name}})))
+  :seon.error/expected "a returned supplied value"}))
             valid? (get (:seon.call-preparation/validators current)
                         default-key)]
         (cond
@@ -1170,32 +1131,22 @@
           (or (nil? valid?) (valid? produced)) produced
 
           :else
-          (error/diagnostic
- {:seon.error/at (java.util.Date.)
- :seon.error/layer :seon.call-preparation/call
- :seon.error/operation 'seon.call-preparation/supply
- :seon.error/message (str symbol-name " produced a value that is not "
+          {:seon.error/at (java.util.Date.)
+  :seon.error/layer :seon.call-preparation/call
+  :seon.error/operation 'seon.call-preparation/supply
+  :seon.error/message (str symbol-name " produced a value that is not "
                 (:seon.call-preparation/schema-key
                  (get (:seon.call-preparation/supplied-defaults current)
                       default-key))
                 ". This is a fault at the supplier, not at " sym ".")
- :seon.call-preparation/target-symbol sym
- :seon.call-preparation/invalid-key default-key
- :seon.call-preparation/supplier-symbol symbol-name
- :seon.call-preparation/schema-key (:seon.call-preparation/schema-key (get (:seon.call-preparation/supplied-defaults current) default-key))
- :seon.error/offending produced
- :seon.error/diagnostic-layer :seon.call-preparation/call
- :seon.error/diagnostic-operation 'seon.call-preparation/supply
- :seon.error/diagnostic-member default-key
- :seon.error/diagnostic-expected (:seon.call-preparation/schema-key (get (:seon.call-preparation/supplied-defaults current) default-key))
- :seon.error/diagnostic-offending produced
- :seon.error/diagnostic-cause :seon.call-preparation/invalid-supplied-value
- :seon.error/diagnostic-evidence {:seon.fn/sym sym
+  :seon.call-preparation/target-symbol sym
+  :seon.call-preparation/invalid-key default-key
+  :seon.call-preparation/supplier-symbol symbol-name
+  :seon.call-preparation/schema-key (:seon.call-preparation/schema-key (get (:seon.call-preparation/supplied-defaults current) default-key))
+  :seon.error/offending produced
+  :seon.error/data {:seon.fn/sym sym
             :seon.call-preparation/key default-key
-            :seon.call-preparation/supplier-symbol symbol-name}
- :seon.error/data {:seon.fn/sym sym
-            :seon.call-preparation/key default-key
-            :seon.call-preparation/supplier-symbol symbol-name}}))))))
+            :seon.call-preparation/supplier-symbol symbol-name}})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The consumer seam
@@ -1313,33 +1264,23 @@
         (nil? answer) arguments
 
         (:seon.call-preparation/ambiguous? answer)
-        (error/diagnostic
- {:seon.error/at (java.util.Date.)
- :seon.error/layer :seon.call-preparation/call
- :seon.error/operation 'seon.call-preparation/prepare
- :seon.error/message (str "Cannot call " sym " with " supplied
+        {:seon.error/at (java.util.Date.)
+  :seon.error/layer :seon.call-preparation/call
+  :seon.error/operation 'seon.call-preparation/prepare
+  :seon.error/message (str "Cannot call " sym " with " supplied
               " arguments: more than one derived call shape fits that count, "
               "so which positions were named is not determined. Pass the "
               "declared arguments in full.")
- :seon.call-preparation/target-symbol sym
- :seon.call-preparation/supplied-count supplied
- :seon.call-preparation/candidate-count (count (:seon.call-preparation/candidates answer))
- :seon.error/diagnostic-layer :seon.call-preparation/call
- :seon.error/diagnostic-operation 'seon.call-preparation/prepare
- :seon.error/diagnostic-member sym
- :seon.error/diagnostic-expected "one uniquely determined argument placement"
- :seon.error/offending {:seon.call-preparation/candidates (:seon.call-preparation/candidates answer)
+  :seon.call-preparation/target-symbol sym
+  :seon.call-preparation/supplied-count supplied
+  :seon.call-preparation/candidate-count (count (:seon.call-preparation/candidates answer))
+  :seon.error/offending {:seon.call-preparation/candidates (:seon.call-preparation/candidates answer)
                         :seon.schema/arguments arguments}
- :seon.error/diagnostic-offending arguments
- :seon.error/diagnostic-cause :seon.call-preparation/ambiguous-call
- :seon.error/diagnostic-evidence {:seon.fn/sym sym
+  :seon.error/expected "one uniquely determined argument placement"
+  :seon.error/data (merge {:seon.fn/sym sym
           :seon.call-preparation/supplied-count supplied
           :seon.call-preparation/candidates
-          (:seon.call-preparation/candidates answer)}
- :seon.error/data {:seon.fn/sym sym
-          :seon.call-preparation/supplied-count supplied
-          :seon.call-preparation/candidates
-          (:seon.call-preparation/candidates answer)}})
+          (:seon.call-preparation/candidates answer)} {:seon.error/offending arguments})}
 
         :else
         (let [refusal (volatile! nil)

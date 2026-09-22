@@ -13,22 +13,15 @@
   {:malli/schema [:=> [:cat :qualified-keyword :string :map :map]
                   :seon.sci.reader/failure]}
   [member message data observation]
-  (error/diagnostic
-   (merge
+  (merge
     {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
      :seon.error/layer :seon.sci.reader/source
      :seon.error/operation 'seon.sci.reader/error-value
      :seon.error/message message
      :seon.error/offending (::text data data)
-     :seon.error/diagnostic-layer :seon.sci.reader/source
-     :seon.error/diagnostic-operation 'seon.sci.reader/error-value
-     :seon.error/diagnostic-member member
-     :seon.error/diagnostic-expected :seon.sci.reader/accepted-source
-     :seon.error/diagnostic-offending (::text data data)
-     :seon.error/diagnostic-cause :seon.error/unknown
-     :seon.error/diagnostic-evidence data
-     :seon.error/data data}
-    observation)))
+     :seon.error/expected :seon.sci.reader/accepted-source
+     :seon.error/data (merge data {:seon.error/member member})}
+    observation))
 
 (defn- refusal-handler
   [tag]

@@ -55,13 +55,13 @@
 (deftest a-missing-path-is-distinct-from-a-present-nil
   (let [root (lazy-seq (throw (ex-info "The root must remain unrealized." {})))
         refused (data/at root (cursor [:absent] 0))]
-    (is (identical? root (:seon.error/diagnostic-offending refused)))
+    (is (identical? root (:seon.error/offending refused)))
     (is (= [:absent] (:seon.render.data/path refused)))
     (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.render.data/no-such-path-error) refused)))
   (let [refused (data/at nested-value (cursor [:agents 99] 0))]
     (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.render.data/no-such-path-error) refused))
     (is (= [:agents 99] (:seon.render.data/path refused)))
-    (is (identical? nested-value (:seon.error/diagnostic-offending refused)))
+    (is (identical? nested-value (:seon.error/offending refused)))
     (is (= 'seon.render.data/at (:seon.error/operation refused))))
   (let [found (data/at {:present nil} (cursor [:present] 0))]
     (is (contains? found :seon.render.data/value))
@@ -102,13 +102,13 @@
        (let [refused (data/entity-observation
                       (assoc request ::data/subject [::id "absent"]))]
          (is (= ::data/subject (:seon.render.data/refused-member refused)))
-         (is (= [::id "absent"] (:seon.error/diagnostic-offending refused))))
+         (is (= [::id "absent"] (:seon.error/offending refused))))
        (let [refused (data/entity-observation
                       (assoc request ::data/subject [::id "b"]
                              ::data/outgoing-cursor cursor))]
          (is (= ::data/continuation (:seon.render.data/refused-member refused)))
-         (is (= [::id "b"] (get-in refused [:seon.error/diagnostic-offending ::data/subject])))
-         (is (= cursor (get-in refused [:seon.error/diagnostic-offending ::data/outgoing-cursor]))))
+         (is (= [::id "b"] (get-in refused [:seon.error/offending ::data/subject])))
+         (is (= cursor (get-in refused [:seon.error/offending ::data/outgoing-cursor]))))
        (is (= (:t (::data/snapshot first-page)) (db/basis-t @connection))
            "observation itself transacts nothing")
        (d/transact connection [{::id "c"}])
@@ -116,9 +116,9 @@
                       (assoc request :seon.db/db @connection
                              ::data/outgoing-cursor cursor))]
          (is (= ::data/continuation (:seon.render.data/refused-member refused)))
-         (is (= cursor (get-in refused [:seon.error/diagnostic-offending ::data/outgoing-cursor])))
+         (is (= cursor (get-in refused [:seon.error/offending ::data/outgoing-cursor])))
          (is (not= (::data/snapshot first-page)
-                   (get-in refused [:seon.error/diagnostic-offending ::data/snapshot]))))
+                   (get-in refused [:seon.error/offending ::data/snapshot]))))
        (let [incoming (data/entity-observation (assoc request ::data/limit 200))
              incoming-rows (get-in incoming [::data/incoming ::data/datoms])]
          (is (= 2 (count (filter #(= ::link (:a %)) incoming-rows)))))))))

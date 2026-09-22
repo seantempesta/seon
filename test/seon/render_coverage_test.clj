@@ -144,8 +144,7 @@
       (is (some? (:seon.render/refused-member result)))
       (is (= 'seon.render/request-profile
              (get-in result
-                     [:seon.error/data
-                      :seon.error/diagnostic-operation]))))))
+                     [:seon.error/operation]))))))
 
 (deftest only-agent-context-renders-prepare-cost-facts-for-the-caller
   (support/with-database

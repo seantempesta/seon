@@ -480,19 +480,17 @@
                                   "probe-received-connection? {:seon.db/connection 1}"))]
              (is (= :input (:seon.instrument/check refusal)))
              (is (= 'seon.call-preparation-test/probe-received-connection?
-                    (:seon.error/diagnostic-operation
+                    (:seon.error/operation
                      (:seon.error/data refusal))))
              (is (= [{:seon.db/connection 1}]
-                    (:seon.error/diagnostic-offending
-                     (:seon.error/data refusal)))
+                    (:seon.error/offending refusal))
                  "the caller's 1 reached the callee unreplaced")))
          (testing "explicit caller wins, at an exact full arity"
            (let [refusal (test-support/refusal-data
                           #(probe ctx "probe-received-database? \"a\" 1"))]
              (is (= :input (:seon.instrument/check refusal)))
              (is (= ["a" 1]
-                    (:seon.error/diagnostic-offending
-                     (:seon.error/data refusal)))
+                    (:seon.error/offending refusal))
                  "the caller's 1 reached the callee unreplaced")))
          (testing "supplied nil is a supplied value, never an absence"
            (is (true? (probe ctx "probe-nilable-second \"a\" nil"))

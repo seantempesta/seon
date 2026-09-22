@@ -271,19 +271,12 @@
                            ::no-refusal
                            (catch clojure.lang.ExceptionInfo failure
                              (ex-data failure)))]
-          (is (= :seon.dev-cache/no-pin-source (get-in refusal [:seon.error/data :seon.error/diagnostic-cause])))
-          (is (= :seon.dev-cache/no-pin-source
-                 (get-in refusal [:seon.error/data
-                                  :seon.error/diagnostic-cause])))
           (is (= (.getCanonicalPath root)
-                 (get-in refusal [:seon.error/data
-                                  :seon.error/diagnostic-offending])))
+                 (get-in refusal [:seon.error/offending])))
           (is (= (pins-file-name)
-                 (get-in refusal [:seon.error/data
-                                  :seon.error/diagnostic-expected
+                 (get-in refusal [:seon.error/expected
                                   :seon.dev-cache/recorded-pins-file])))
           (is (false? (get-in refusal [:seon.error/data
-                                       :seon.error/diagnostic-evidence
                                        :seon.dev-cache/recorded-pins-present])))))
       (finally
         (test-support/delete-recursively! root)))))

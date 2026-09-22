@@ -198,18 +198,12 @@
   "Preserve the underlying evidence at the operator boundary."
   {:malli/schema [:=> [:cat :string :seon.schema/value :seon.schema/value] :seon.error/base]}
   [message offending cause]
-  (refusal/diagnostic
-   {:seon.error/at (java.util.Date.)
+  {:seon.error/at (java.util.Date.)
     :seon.error/layer :seon.operator/operation
     :seon.error/operation 'seon.cluster.boot/request!
     :seon.error/message message
-    :seon.error/diagnostic-layer :seon.boot
-    :seon.error/diagnostic-operation 'seon.cluster.boot/request!
-    :seon.error/diagnostic-member :seon.operator/request
-    :seon.error/diagnostic-expected :completed-operation
-    :seon.error/diagnostic-offending offending
-    :seon.error/diagnostic-cause cause
-    :seon.error/diagnostic-evidence offending}))
+    :seon.error/offending offending
+    :seon.error/expected :completed-operation})
 
 (defn- refuse!
   {:malli/schema [:=> [:cat :string :map] :nil]}

@@ -5,7 +5,8 @@
   reverse connections while evaluations are reached through the
   agent's turns. Raw facts never acquire a detail level; every full, summary,
   and elided decision is derived for this call."
-  (:require [clojure.edn :as edn]
+  (:require [seon.error.refusal]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [seon.ai.tokens :as tokens]
             [seon.db :as db]
@@ -708,16 +709,12 @@
          :seon.error/layer :seon.render.transcript/render
          :seon.error/operation 'seon.render.transcript/missing-selected-run
          :seon.error/message "The selected run is unavailable because its run, agent, or database identity is missing."
-         :seon.error/diagnostic-layer :seon.render.transcript/render
-         :seon.error/diagnostic-operation 'seon.render.transcript/missing-selected-run
-         :seon.error/diagnostic-member :seon.turn/turn
-         :seon.error/diagnostic-expected [:seon.db/db :seon.turn/id :seon.agent/id]
-         :seon.error/diagnostic-offending unit
-         :seon.error/diagnostic-cause ::selected-run-unavailable
-         :seon.error/diagnostic-evidence identities
          :seon.error/fix "Supply the expected member and repeat the requested operation."
-         :seon.render.transcript/refused-member :seon.turn/turn}]
-    (merge observation (error/diagnostic observation))))
+         :seon.render.transcript/refused-member :seon.turn/turn
+         :seon.error/expected [:seon.db/db :seon.turn/id :seon.agent/id]
+         :seon.error/offending unit
+         :seon.error/data {:seon.error/source identities}}]
+    observation))
 
 (defn render-run-ai
   "Render only the selected turn's state and evaluations."
@@ -1030,16 +1027,13 @@
                :seon.error/layer :seon.render.transcript/render
                :seon.error/operation 'seon.render.transcript/runtime-owner
                :seon.error/message "The runtime component's owner could not be resolved."
-               :seon.error/diagnostic-layer :seon.render
-               :seon.error/diagnostic-operation 'seon.render.transcript/runtime-owner
-               :seon.error/diagnostic-member :seon.runtime/agent
-               :seon.error/diagnostic-expected :seon.agent/id
-               :seon.error/diagnostic-offending unit
-               :seon.error/diagnostic-cause :seon.db/not-found
-               :seon.error/diagnostic-evidence [:seon.runtime/agent]
                :seon.error/fix "Supply the expected member and repeat the requested operation."
-               :seon.render.transcript/refused-member :seon.agent/runtime}]
-          (merge observation (error/diagnostic observation))))))
+               :seon.render.transcript/refused-member :seon.agent/runtime
+               :seon.error/member :seon.runtime/agent
+               :seon.error/expected :seon.agent/id
+               :seon.error/offending unit
+               :seon.error/data {:seon.error/layer :seon.render :seon.error/source [:seon.runtime/agent]}}]
+          observation))))
 
 (defn render-runtime-ai
   "Read my runtime trigger and listens without observing turn-history churn."
@@ -2418,16 +2412,12 @@
              :seon.error/layer :seon.render.transcript/render
              :seon.error/operation 'seon.render.transcript/render-runtime-html
              :seon.error/message "The agent's runtime component is unavailable."
-             :seon.error/diagnostic-layer :seon.render
-             :seon.error/diagnostic-operation 'seon.render.transcript/render-runtime-html
-             :seon.error/diagnostic-member :seon.agent/runtime
-             :seon.error/diagnostic-expected :seon.runtime/entity
-             :seon.error/diagnostic-offending agent-id
-             :seon.error/diagnostic-cause :seon.db/not-found
-             :seon.error/diagnostic-evidence [:seon.agent/runtime]
              :seon.error/fix "Supply the expected member and repeat the requested operation."
-             :seon.render.transcript/refused-member :seon.agent/runtime}]
-        (merge observation (error/diagnostic observation)))
+             :seon.render.transcript/refused-member :seon.agent/runtime
+             :seon.error/expected :seon.runtime/entity
+             :seon.error/offending agent-id
+             :seon.error/data {:seon.error/layer :seon.render :seon.error/source [:seon.agent/runtime]}}]
+        observation)
       :else
         (let [runtime (:seon.agent/runtime row)
               turns (sort-by (juxt #(some-> (get-in % [:seon.turn/opened-tx :db/txInstant])

@@ -7,7 +7,8 @@
   Compiled validators belong to the immutable projection that defines them.
   Host calls without cluster custody use the packaged JVM program captured at
   arming; they never consult Malli's global registry."
-  (:require [clojure.edn :as edn]
+  (:require [seon.error.refusal]
+            [clojure.edn :as edn]
             [clojure.walk :as walk]
             [clojure.set :as set]
             [malli.core :as m]
@@ -373,38 +374,28 @@
            offending (if arity? (:arity data) value)
            paths (into [] (comp (map :seon.error/path) (remove empty?)) problems)
            caller (caller-frame)]
-       (error/diagnostic
-        {:seon.error/at (java.util.Date.)
+       {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.instrument/invocation
          :seon.error/operation function-symbol
-            :seon.error/message
-         (str (error/problem-sentence
+         :seon.error/message (str (error/problem-sentence
                function-symbol first-problem nil
                (error/scalar-text (:seon.error/offending first-problem)))
               (when (qualified-keyword? expected)
                 (str " Contract: " expected "."))
               (when caller (str " Called from " caller ".")))
-         :seon.error/diagnostic-layer :instrumentation
-         :seon.error/diagnostic-operation function-symbol
-         :seon.error/diagnostic-member (case arm :output :return :guard :guard
-                                              (if arity? :arity :arguments))
-         :seon.error/diagnostic-expected expected
-         :seon.error/diagnostic-offending offending
-         :seon.error/diagnostic-cause kind
-         :seon.error/diagnostic-evidence
-         (if arity?
-           (select-keys lookup [:seon.instrument.lookup/status
-                                :seon.instrument.lookup/cause ::arglists])
-           (cond-> {::problem-count (count problems)}
-             caller (assoc ::caller caller)))
-         :seon.error/data
-         (cond-> {::malli kind ::arm arm ::fn function-symbol
+         :seon.error/expected expected
+         :seon.error/offending offending
+         :seon.error/data (merge (cond-> {::malli kind ::arm arm ::fn function-symbol
                   ::problem-count (count problems)
                   :seon.error/problems problems}
            arity? (assoc ::arity (:arity data))
            arglists (assoc ::arglists arglists)
            (seq paths) (assoc ::problem-paths paths)
-           caller (assoc ::caller caller))})))
+           caller (assoc ::caller caller)) {:seon.error/layer :instrumentation :seon.error/member (case arm :output :return :guard :guard
+                                              (if arity? :arity :arguments))}
+          (when arity?
+            (select-keys lookup [:seon.instrument.lookup/status
+                                 :seon.instrument.lookup/cause])))}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Interpreted function contracts
@@ -484,13 +475,11 @@
             (registration-error
              function-symbol
              {:seon.error/message "Record-mode SCI instrumentation requires an acquired fault recorder."
-              :seon.error/diagnostic-layer :instrumentation
-              :seon.error/diagnostic-operation 'seon.instrument/wrap-interpreted
-              :seon.error/diagnostic-member :seon.flow/commit-fault!
-              :seon.error/diagnostic-expected :seon.flow/commit-fault!
-              :seon.error/diagnostic-offending ::absent
-              :seon.error/diagnostic-cause ::missing-recorder
-              :seon.error/diagnostic-evidence nil})]
+              :seon.error/layer :instrumentation
+              :seon.error/operation 'seon.instrument/wrap-interpreted
+              :seon.error/member :seon.flow/commit-fault!
+              :seon.error/expected :seon.flow/commit-fault!
+              :seon.error/offending ::absent})]
         (throw (ex-info (:seon.error/message failure) failure))))
     (when-not (and (map? caps)
                    (pos-int? (:seon.config.eval.result/max-bytes caps))
@@ -500,13 +489,11 @@
              function-symbol
              {:seon.error/message (str "Cannot arm the contract of " function-symbol
                                        ": admission caps were not acquired.")
-              :seon.error/diagnostic-layer :instrumentation
-              :seon.error/diagnostic-operation 'seon.instrument/wrap-interpreted
-              :seon.error/diagnostic-member :seon.sci.admit/caps
-              :seon.error/diagnostic-expected :seon.sci.admit/caps
-              :seon.error/diagnostic-offending caps
-              :seon.error/diagnostic-cause ::invalid-caps
-              :seon.error/diagnostic-evidence nil})]
+              :seon.error/layer :instrumentation
+              :seon.error/operation 'seon.instrument/wrap-interpreted
+              :seon.error/member :seon.sci.admit/caps
+              :seon.error/expected :seon.sci.admit/caps
+              :seon.error/offending caps})]
         (throw (ex-info (:seon.error/message failure) failure))))
       (let [wrapped (binding [*compiling-contract* true]
                       (compiled-wrapper projection function-symbol
@@ -911,18 +898,18 @@
   "Describe the particular declaration or acquisition that could not be armed."
   {:malli/schema
    [:=> [:cat :qualified-symbol
-         [:map [:seon.error/diagnostic-member [:or :qualified-keyword :qualified-symbol]]
-          [:seon.error/diagnostic-operation :qualified-symbol]]]
+         [:map [:seon.error/member [:or :qualified-keyword :qualified-symbol]]
+          [:seon.error/operation :qualified-symbol]]]
     :seon.instrument/registration-error]}
   [function-symbol request]
-  (assoc (error/diagnostic
+  (assoc (seon.error.refusal/diagnostic
           (assoc request :seon.error/at (java.util.Date.)
                          :seon.error/layer :seon.instrument/registration
-                         :seon.error/operation (:seon.error/diagnostic-operation request)))
+                         :seon.error/operation (:seon.error/operation request)))
          :seon.instrument/fn function-symbol
          :seon.instrument/registration-observation
-         {:seon.error.evidence/attribute :seon.error/diagnostic-member
-          :seon.error.evidence/value (:seon.error/diagnostic-member request)}))
+         {:seon.error.evidence/attribute :seon.error/member
+          :seon.error.evidence/value (:seon.error/member request)}))
 
 (defn apply!
   "Arm loaded Vars whose contract or referenced declarations changed.
@@ -944,41 +931,32 @@
     (and (= :record mode) (not (fn? commit-fault!)))
     (registration-error 'seon.instrument/apply!
      {:seon.error/message "Record-mode instrumentation requires an acquired fault recorder."
-      :seon.error/diagnostic-layer :instrumentation
-      :seon.error/diagnostic-operation 'seon.instrument/apply!
-      :seon.error/diagnostic-member :seon.flow/commit-fault!
-      :seon.error/diagnostic-expected :seon.flow/commit-fault!
-      :seon.error/diagnostic-offending ::absent
-      :seon.error/diagnostic-cause ::missing-recorder
-      :seon.error/diagnostic-evidence nil})
+      :seon.error/layer :instrumentation
+      :seon.error/operation 'seon.instrument/apply!
+      :seon.error/member :seon.flow/commit-fault!
+      :seon.error/expected :seon.flow/commit-fault!
+      :seon.error/offending ::absent})
 
     (not (#{:panic :record} mode))
     (registration-error 'seon.instrument/apply!
-       {:seon.error/message
-        "Instrumentation requires :panic or :record core-error mode."
-        :seon.error/diagnostic-layer :instrumentation
-        :seon.error/diagnostic-operation 'seon.instrument/apply!
-        :seon.error/diagnostic-member :seon.config/on-core-error
-        :seon.error/diagnostic-expected [:enum :panic :record]
-        :seon.error/diagnostic-offending
-        (if (nil? mode) ::nil mode)
-        :seon.error/diagnostic-cause ::invalid-mode
-        :seon.error/diagnostic-evidence
-        {:seon.instrument/accepted-modes [:panic :record]}})
+       {:seon.error/message "Instrumentation requires :panic or :record core-error mode."
+        :seon.error/layer :instrumentation
+        :seon.error/operation 'seon.instrument/apply!
+        :seon.error/member :seon.config/on-core-error
+        :seon.error/expected [:enum :panic :record]
+        :seon.error/offending (if (nil? mode) ::nil mode)
+        :seon.error/data {:seon.instrument/accepted-modes [:panic :record]}})
 
     :else
     (let [projection (or supplied-projection (schema/handed-projection))]
       (if-not projection
         (registration-error 'seon.instrument/apply!
-         {:seon.error/message
-          "Instrumentation requires a handed schema projection."
-          :seon.error/diagnostic-layer :instrumentation
-          :seon.error/diagnostic-operation 'seon.instrument/apply!
-          :seon.error/diagnostic-member :seon.schema/projection
-          :seon.error/diagnostic-expected :seon.schema/projection
-          :seon.error/diagnostic-offending :seon.instrument/missing-projection
-          :seon.error/diagnostic-cause ::missing-projection
-          :seon.error/diagnostic-evidence nil})
+         {:seon.error/message "Instrumentation requires a handed schema projection."
+          :seon.error/layer :instrumentation
+          :seon.error/operation 'seon.instrument/apply!
+          :seon.error/member :seon.schema/projection
+          :seon.error/expected :seon.schema/projection
+          :seon.error/offending :seon.instrument/missing-projection})
         (let [defaults config/defaults
               caps (or caps (config/result-caps defaults))
               policy (cond-> {:seon.config/on-core-error mode
@@ -1005,15 +983,12 @@
                       diagnostic
                       (registration-error (var-symbol candidate)
                        {:seon.error/message "The loaded function contract cannot compile."
-                        :seon.error/diagnostic-layer :instrumentation
-                        :seon.error/diagnostic-operation 'seon.instrument/apply!
-                        :seon.error/diagnostic-member (var-symbol candidate)
-                        :seon.error/diagnostic-expected authored
-                        :seon.error/diagnostic-offending
-                        (or (:schema data) (get-in data [:data :ref])
+                        :seon.error/layer :instrumentation
+                        :seon.error/operation 'seon.instrument/apply!
+                        :seon.error/expected authored
+                        :seon.error/offending (or (:schema data) (get-in data [:data :ref])
                             (get-in data [:data :schema]))
-                        :seon.error/diagnostic-cause (:type data)
-                        :seon.error/diagnostic-evidence nil})]
+                        :seon.error/member (var-symbol candidate)})]
                   (throw (ex-info (:seon.error/message diagnostic)
                                   diagnostic failure)))))
             (arm-var! candidate authored projection bootstrap caps policy))

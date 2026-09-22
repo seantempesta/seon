@@ -604,18 +604,13 @@
                     (ex-info
                      "Injected confirmation process launch refusal."
                      (assoc
-                      (error/diagnostic
-                       {:seon.error/at (java.util.Date.)
+                      {:seon.error/at (java.util.Date.)
                         :seon.error/layer :seon.test.runner/worker-process
                         :seon.error/operation 'seon.test.runner/start-worker!
                         :seon.error/message "Injected confirmation process launch refusal."
-                        :seon.error/diagnostic-layer :seon.test.runner/worker-process
-                        :seon.error/diagnostic-operation 'seon.test.runner/start-worker!
-                        :seon.error/diagnostic-member :seon.test.runner/worker-process
-                        :seon.error/diagnostic-expected "a launched worker process"
-                        :seon.error/diagnostic-offending ["clojure" "-M:test"]
-                        :seon.error/diagnostic-cause :worker-launch-failure
-                        :seon.error/diagnostic-evidence {::runner/injected? true}})
+                        :seon.error/expected "a launched worker process"
+                        :seon.error/offending ["clojure" "-M:test"]
+                        :seon.error/data {::runner/injected? true}}
                       :seon.test.runner/worker-id "confirmation-1"
                       :seon.test.runner/worker-error-log "/tmp/worker-stderr.log"
                       :seon.error/offending ["clojure" "-M:test"]

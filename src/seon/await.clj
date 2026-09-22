@@ -36,30 +36,22 @@
   (let [{attribute :seon.await/config-attribute
          backstop-ms :seon.await/config-value}
         (:seon.await/bound request)
-        observation (:seon.await/diagnostic request)
-        member (:seon.error/diagnostic-member observation)
-        evidence
-        {:seon.await/config-attribute attribute
-         :seon.await/config-value backstop-ms
-         :seon.await/observation
-         (:seon.error/diagnostic-evidence observation)}]
-    (error/diagnostic
-     (merge
-      observation
-      outcome
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.await/completion
-       :seon.error/operation 'seon.await/diagnostic
-       :seon.await/config-attribute attribute
-       :seon.await/config-value backstop-ms
-       :seon.error/offending member
-       :seon.error/message
-       (if (:seon.await/closed-operation outcome)
-         "The awaited channel closed before completion. Fix: publish the completion before closing the channel."
-         "The declared await bound fired before completion. Fix: inspect the awaited operation and its bound.")
-       :seon.error/diagnostic-cause
-       (if (:seon.await/closed-operation outcome) ::completion-closed ::backstop-fired)
-       :seon.error/diagnostic-evidence evidence}))))
+        observation (:seon.await/diagnostic request)]
+    (merge
+     observation
+     outcome
+     {:seon.error/at (java.util.Date.)
+      :seon.error/layer :seon.await/completion
+      :seon.error/operation 'seon.await/diagnostic
+      :seon.await/config-attribute attribute
+      :seon.await/config-value backstop-ms
+      :seon.error/data
+      (merge (:seon.error/data observation)
+             (select-keys observation [:seon.error/layer :seon.error/operation]))
+      :seon.error/message
+      (if (:seon.await/closed-operation outcome)
+        "The awaited channel closed before completion. Fix: publish the completion before closing the channel."
+        "The declared await bound fired before completion. Fix: inspect the awaited operation and its bound.")})))
 
 (defn- timeout-observation
   {:malli/schema [:=> [:cat :seon.await/request :int] :seon.await/timeout-error]}

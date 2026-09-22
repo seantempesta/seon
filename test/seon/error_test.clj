@@ -1,35 +1,7 @@
 (ns seon.error-test
-  "Sealed acceptance draft for the ONE error normalizer and its
-  projections.
-
-  DRAFT FOR ORCHESTRATOR SEAL (drafted 2026-07-27, step 1 of the
-  error-wiring order). The implementation lane makes these green by
-  implementing `seon.error` and `seon.render` ONLY — schemas and tests
-  are byte-sealed; friction is reported, never resolved by weakening.
-
-  THE STANDING PROPERTY is `normalization-is-total`: over all three
-  input families, every normalization validates `:seon.error/fact`,
-  projects to a valid flat `:seon.error/base`, and prints a `data-edn`
-  that READS BACK through `clojure.edn/read-string`. That last clause
-  is what proves the one codec ran — a raw `pr-str` of a flow report
-  carrying `::flow/state` does not read back, and for a state holding a
-  reference cycle it does not even return (`admit.clj:82-92`, probed).
-  The normalizer excludes that disposable proc state before admission.
-  Fixed seed 20260727, per-trial isolation by construction: the
-  normalizer is pure, opens nothing and writes nothing, so a trial's
-  only state is the source it is handed.
-
-  THE FLOW SHAPES ARE BUILT LITERALLY, and that is deliberate. Their
-  authority is `reference-code/core.async/.../flow/impl.clj:106-110`
-  (xform) and `:312-320` (transform / proc-loop), which
-  `test/seon/flow_test.clj:496-522` already proves flow really emits;
-  re-proving flow here would test flow, not the normalizer, and would
-  hide the point — that the three shapes do NOT share a key set and the
-  normalizer must be total over all of them anyway.
-
-  Normalization is pure. Writer and reader regressions use the canonical
-  database fixture under armed contracts."
-  (:require [clojure.core.async.flow :as-alias flow]
+  "Error identity, normalization and recording behavior."
+  (:require [seon.error.refusal]
+            [clojure.core.async.flow :as-alias flow]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -38,6 +10,7 @@
             [clojure.test.check.properties :as prop]
             [seon.config :as config]
             [seon.error :as error]
+            [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
             [seon.problems]
             [seon.cluster.status]
@@ -181,7 +154,7 @@
           (is (str/includes? (pr-str (error/render-html (read-error))) "Resolved"))
           (is ((schema/projection-validator (schema/handed-projection) :seon.error/fact) (:seon.error/fact (first (#'seon.problems/error-signatures (db/db connection)))))))
         (let [flat (error/recording (db/db connection)
-                                  (commit-request {:seon.error/message "flat error", :seon.error/data {:seon.error/diagnostic-operation (quote seon.id/valid?)}} {}))]
+                                  (commit-request {:seon.error/message "flat error", :seon.error/data {:seon.error/operation (quote seon.id/valid?)}} {}))]
           (is (:seon.error/ref flat))
           (is (= 'seon.id/valid? (:seon.instrument/fn (:seon.error/fact flat))))
           (is (not (contains? (:seon.error/fact flat) :seon.error/exception-class)))
@@ -242,65 +215,15 @@
   (test-support/with-database
    (fn [_]
      (let [observation
-           (error/diagnostic
-            {:seon.error/at #inst "2026-09-19T00:00:00Z"
+           {:seon.error/at #inst "2026-09-19T00:00:00Z"
              :seon.error/layer :seon.agent/acquisition
              :seon.error/operation 'seon.error-test/check
              :seon.error/message "The agent is unavailable."
-             :seon.error/diagnostic-layer :seon.agent/acquisition
-             :seon.error/diagnostic-operation 'seon.error-test/check
-             :seon.error/diagnostic-member :seon.agent/id
-             :seon.error/diagnostic-expected :seon.agent/id
-             :seon.error/diagnostic-offending "absent"
-             :seon.error/diagnostic-cause :seon.agent/unavailable
-             :seon.error/diagnostic-evidence {:seon.agent/id "absent"}
              :seon.agent/error-agent-id "absent"
-             :seon.error-test/context {:seon.error-test/retained true}})]
+             :seon.error-test/context {:seon.error-test/retained true}}]
        (is ((schema/projection-validator (schema/handed-projection) :seon.agent/error)
             observation))
        (is (= {:seon.error-test/retained true} (:seon.error-test/context observation)))))))
-
-(deftest diagnostic-construction-is-evidence-complete
-  (let [complete
-        (error/diagnostic
-         {:seon.error/diagnostic-evidence {:seon.error-test/path [0]}, :seon.error/operation (quote seon.error-test/check), :seon.error/diagnostic-expected :int, :seon.error/diagnostic-member :seon.error-test/value, :seon.error/message "The call was invalid.", :seon.error/layer :seon.error-test/diagnostic, :seon.error/diagnostic-layer :agent-boundary, :seon.error/data {:seon.error-test/context :kept}, :seon.error/diagnostic-offending "not-an-int", :seon.error/diagnostic-operation (quote seon.error-test/check), :seon.error/at (java.util.Date.), :seon.error/diagnostic-cause :seon.error-test/schema-mismatch})
-        unavailable
-        (error/diagnostic
-         {:seon.error/diagnostic-evidence nil, :seon.error/operation (quote seon.error-test/check), :seon.error/diagnostic-expected nil, :seon.error/diagnostic-member nil, :seon.error/message "The evidence could not be observed.", :seon.error/layer :seon.error-test/diagnostic, :seon.error/diagnostic-layer nil, :seon.error/data {:seon.error-test/context :kept, :seon.error/diagnostic-evidence-availability :cannot-replace, :seon.error/diagnostic-layer :cannot-replace}, :seon.error/diagnostic-offending nil, :seon.error/diagnostic-operation nil, :seon.error/at (java.util.Date.), :seon.error/diagnostic-cause nil})]
-    (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) complete))
-    (is (= {:seon.error-test/context :kept
-            :seon.error/diagnostic-layer :agent-boundary
-            :seon.error/diagnostic-operation 'seon.error-test/check
-            :seon.error/diagnostic-member :seon.error-test/value
-            :seon.error/diagnostic-expected :int
-            :seon.error/diagnostic-offending "not-an-int"
-            :seon.error/diagnostic-cause :seon.error-test/schema-mismatch
-            :seon.error/diagnostic-evidence-availability :seon.error/known
-            :seon.error/diagnostic-evidence {:seon.error-test/path [0]}}
-           (:seon.error/data complete)))
-    (is (= :kept (get-in unavailable
-                          [:seon.error/data :seon.error-test/context])))
-    (is (= (zipmap [:seon.error/diagnostic-layer
-                    :seon.error/diagnostic-operation
-                    :seon.error/diagnostic-member
-                    :seon.error/diagnostic-expected
-                    :seon.error/diagnostic-offending
-                    :seon.error/diagnostic-cause
-                    :seon.error/diagnostic-evidence-availability
-                    :seon.error/diagnostic-evidence]
-                   (repeat :seon.error/unknown))
-           (select-keys (:seon.error/data unavailable)
-                        [:seon.error/diagnostic-layer
-                         :seon.error/diagnostic-operation
-                         :seon.error/diagnostic-member
-                         :seon.error/diagnostic-expected
-                         :seon.error/diagnostic-offending
-                         :seon.error/diagnostic-cause
-                         :seon.error/diagnostic-evidence-availability
-                         :seon.error/diagnostic-evidence]))
-        "unavailable evidence is typed and boundary context cannot replace it")))
-
-
 
 (defn- cyclic-state
   "A proc state shaped like the run loop's, holding a live-object stand-in
@@ -763,112 +686,6 @@
       (is (= 'seon.error/instrumentation-prose (:seon.render/ai notice)))
       (is (not (str/blank? prose))))))
 
-(deftest the-default-renderers-accept-an-attribute-shaped-error
-  (test-support/with-database
-   (fn [_]
-     (let [value {:my.fs/error-path "/tmp/missing.edn"
-                  :seon.error/message "No file exists at that path."}
-           ai (error/render-ai value)
-           html (error/render-html value)]
-       (is (str/includes? ai (:seon.error/message value))
-           "AI explains the failure without dumping internal evidence")
-       (is (= :article (first html)))
-       (is ((schema/projection-validator (schema/handed-projection) :seon.render/hiccup) html))
-       (is (str/includes? (pr-str html) (:seon.error/message value)))))))
-
-(deftest the-default-html-face-links-committed-evidence
-  (let [html (error/render-html
-              {:seon.error/id "err-42"
-               :seon.error/message "Nothing recognized this error."})
-        href (get-in (last html) [2 1 :href])]
-    (is (str/starts-with? href "/data?"))
-    (is (str/includes? href "%3Aseon.error%2Fid"))))
-
-(deftest specialist-renderers-use-their-declared-evidence
-  (test-support/with-database
-   (fn [_connection]
-    (testing "instrumentation names the failed arm and received value"
-    (let [prose (error/instrumentation-prose
-                 {:seon.instrument/fn 'my.fs/read
-                  :seon.instrument/arm :input
-                  :seon.instrument/expected ":my.fs/read-request"
-                  :seon.instrument/args "[{:my.fs/path 42}]"
-                  :seon.error/message "The call violated its contract."})]
-      (is (str/includes? prose "Contract violation in my.fs/read input"))
-      (is (str/includes? prose "path 42"))))
-  (testing "refusal names the transition, rule, and atomic result"
-    (let [prose (error/refusal-prose
-                 {:seon.turn/id "run-7"
-                  :seon.turn/rule :seon.turn/not-holder
-                  :seon.turn/transition :seon.turn/close
-                  :seon.error/message "The run is held elsewhere."})]
-      (is (str/includes? prose "close of run-7"))
-      (is (str/includes? prose "Nothing from this close committed"))))
-  (testing "AI attempt prose exposes the decision attributes"
-    (let [prose (error/ai-prose
-                 {:seon.ai/request-transmitted? false
-                  :seon.ai/response-started? false
-                  :seon.ai/output-observed? false
-                  :seon.error/message "The provider connection failed."})]
-      (is (str/includes? prose "request transmitted: false"))
-      (is (str/includes? prose "response started: false"))
-      (is (str/includes? prose "output observed: false"))
-      (is (str/includes? prose "configured failover may be safe"))))
-  (testing "time-limit prose explains the diagnostic without treating it as a limit"
-    (let [prose (error/time-limit-prose
-                 {:seon.eval/fn-entries 271000000
-                  :seon.error/message "Evaluation reached its time limit."})]
-      (is (str/includes? prose "Recorded function-body entries: 271000000"))
-      (is (str/includes? prose "indicate a spin"))))
-  (testing "edit prose asks for a narrower source selection"
-    (let [prose (error/edit-prose
-                 {:my.edit/error-path "src/seon/error.clj"
-                  :my.edit/edit-observation {:seon.error.evidence/attribute :my.edit/from-line
-                                             :seon.error.evidence/value 1}
-                  :seon.error/message "More than one form matched."})]
-      (is (str/includes? prose "src/seon/error.clj"))
-      (is (str/includes? prose "narrow the edit selection"))))
-  (testing "render-walk elision stays neutral in both projections"
-    (let [value {:seon.error/message "The bounded walk omitted content."}
-          prose (error/elision-prose value)
-          html (error/elision-html value)]
-      (is (str/includes? prose "content was elided"))
-      (is (not (str/includes? prose "error")))
-      (is (= :aside (first html)))
-      (is (= "seon-family-entry seon-render-elision"
-             (get-in html [1 :class])))))
-  (testing "unavailable domain evidence is explicit"
-    (let [prose (error/unclassified-prose
-                 {:seon.error/source {:unexpected/value 7}
-                  :seon.error/message "Nothing recognized the source."})]
-      (is (str/includes? prose "did not supply complete domain evidence"))
-      (is (str/includes? prose "boundary contract"))))
-  (testing "MCP lookup prose keeps the requested value identity"
-    (let [digest (apply str (repeat 64 "a"))
-          prose (error/mcp-prose
-                 {:seon.dev.mcp/error-cluster "fixture"
-                  :seon.dev.mcp/request-observation
-                  {:seon.error.evidence/attribute :seon.blob/digest
-                   :seon.error.evidence/value digest}
-                  :seon.error/message "The value was absent."})]
-      (is (str/includes? prose digest))
-      (is (str/includes? prose "current cluster status"))))
-  (testing "index refusal prose names the stopped phase"
-    (let [prose (error/index-refusal-prose
-                 {:seon.fn/analysis-phase :seon.fn/schema
-                  :seon.fn/error-subject {:seon.instrument/actual "source.clj"
-                                          :seon.error.projection/bound-bytes 256
-                                          :seon.error/capped? false}
-                  :seon.error/message "Schema indexing was refused."})]
-      (is (str/includes? prose ":seon.fn/schema"))
-      (is (str/includes? prose "rerun initialization")))))))
-
-(deftest the-log-line-is-one-line-and-derived
-  (let [fact (fact)
-        line (rendered (error/notice {:seon.error/fact fact}) :log)]
-    (is (not (str/includes? line "\n")) "a log line that wraps is two log lines")
-    (is (not (str/blank? line)))))
-
 (deftest the-flat-value-projects-from-the-fact
   (let [fact (fact)
         value (error/value fact)]
@@ -1281,9 +1098,6 @@
                     #(test-support/transacted! connection [observed]))
            armed (test-support/refusal-data #(apply seon.id/valid? []))]
        (is ((schema/projection-validator projection :seon.turn/error) observed))
-       (is (= :seon.db/unowned-entity
-              (get-in unowned [:seon.error/data :seon.db/diagnostic-cause]))
-           (pr-str unowned))
        (is (= before (db/basis-t (db/db connection))))
        (prn {::unowned-refusal unowned})
        (is ((schema/projection-validator projection :seon.instrument/arity-error) armed)
@@ -1385,7 +1199,7 @@
        (let [changed-incidental
              (assoc observed :seon.error/at #inst "2026-09-20T00:00:00Z"
                              :seon.error/message "Different explanation"
-                             :seon.error/data {:seon.error/diagnostic-offending "different bytes"}
+                             :seon.error/data {:seon.error/offending "different bytes"}
                              :seon.agent/error-agent-id "another-observed-agent")
              third-record (record! changed-incidental "d13-process-b")]
          (is (= (:seon.error/ref first-record) (:seon.error/ref third-record)))

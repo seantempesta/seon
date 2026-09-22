@@ -9,12 +9,11 @@
 
 (defn- observation
   [member]
-  {:seon.error/diagnostic-layer :runtime
-   :seon.error/diagnostic-operation ::test-await
-   :seon.error/diagnostic-member member
-   :seon.error/diagnostic-expected ::published
-   :seon.error/diagnostic-offending ::absent
-   :seon.error/diagnostic-evidence {:test/member member}})
+  {:seon.error/layer :runtime
+   :seon.error/operation ::test-await
+   :seon.error/expected ::published
+   :seon.error/offending ::absent
+   :seon.error/data (merge {:test/member member} {:seon.error/member member})})
 
 (defn- bound
   [backstop-ms]
@@ -51,12 +50,10 @@
       (is (= 20 (:seon.await/config-value result)))
       (is (= ::matching-package
              (get-in result
-                     [:seon.error/data :seon.error/diagnostic-member])))
+                     [:seon.error/data :seon.error/member])))
       (is (= :seon.config.eval/time-limit-ms
              (get-in result
-                     [:seon.error/data
-                      :seon.error/diagnostic-evidence
-                      :seon.await/config-attribute]))))))
+                     [:seon.await/config-attribute]))))))
 
 (deftest future-and-promise-expiry-return-the-same-diagnostic-contract
   (doseq [[label request]
@@ -77,11 +74,7 @@
         (is (= label
                (get-in result
                        [:seon.error/data
-                        :seon.error/diagnostic-member])))
-        (is (= ::await/backstop-fired
-               (get-in result
-                       [:seon.error/data
-                        :seon.error/diagnostic-cause])))))))
+                        :seon.error/member])))))))
 
 (deftest a-port-closing-before-publication-is-not-health
   (let [completion (async/promise-chan)
@@ -95,12 +88,10 @@
     (is (= 0 (:seon.await/operation-index result)))
     (is (= ::completion
            (get-in result
-                   [:seon.error/data :seon.error/diagnostic-member])))))
+                   [:seon.error/data :seon.error/member])))))
 
 (deftest check-completion-distinguishes-expiry-from-a-completed-failure
-  (support/with-database
-   (fn [connection]
-     (let [projection (db/carried-projection (db/db connection))
+  (let [projection (schema/handed-projection)
            failure (#'test/unknown ::selection "Selection was unavailable.")
            completed (java.util.concurrent.FutureTask.
                       ^java.util.concurrent.Callable (fn [] failure))
@@ -121,4 +112,4 @@
        (is (= 20 (:seon.await/config-value expiry)))
        (is (<= (:seon.await/elapsed-ms timeout) (:seon.test/elapsed-ms expiry)))
        (is (= 'seon.test/expired-result (:seon.error/operation expiry)))
-       (is (= ::check (get-in expiry [:seon.error/data :seon.error/diagnostic-member])))))))
+       (is (= ::check (get-in expiry [:seon.error/data :seon.error/member])))))

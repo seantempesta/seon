@@ -36,21 +36,15 @@
       (throw
        (ex-info
         "current-identity refused the process start instant: expected the JVM generation timestamp, but ProcessHandle supplied none. Fix: run on a platform that exposes ProcessHandle startInstant."
-        (refusal/diagnostic
-         {:seon.error/at (java.util.Date.)
+        {:seon.error/at (java.util.Date.)
           :seon.error/layer :seon.cluster/process
           :seon.error/operation `current-identity
           :seon.error/message
           "current-identity refused the process start instant: expected the JVM generation timestamp, but ProcessHandle supplied none. Fix: run on a platform that exposes ProcessHandle startInstant."
-          :seon.refusal/diagnostic-layer :process
-          :seon.refusal/diagnostic-operation `current-identity
-          :seon.refusal/diagnostic-member :seon.boot/start-instant
-          :seon.refusal/diagnostic-expected :process-generation-timestamp
-          :seon.refusal/diagnostic-offending :seon.error/unknown
-          :seon.refusal/diagnostic-cause :start-instant-unavailable
-          :seon.refusal/diagnostic-evidence {:seon.boot/pid (.pid handle)}
+          :seon.error/member :seon.boot/start-instant
+          :seon.error/expected :process-generation-timestamp
           :seon.cluster.process/start-instant-unavailable (.pid handle)
-          :seon.boot/pid (.pid handle)}))))
+          :seon.boot/pid (.pid handle)})))
     {:seon.boot/pid (.pid handle)
      :seon.boot/start-instant (java.util.Date/from (.get start))}))
 
@@ -199,36 +193,24 @@
                  (integer? deadline-ms) (pos? deadline-ms))
     (throw
      (ex-info "Supply nonempty argv and a positive process deadline."
-              (refusal/diagnostic
-        {:seon.error/at (java.util.Date.)
+              {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.operator/lifecycle
          :seon.error/operation 'seon.cluster.process/run-process!
          :seon.error/message "Supply nonempty argv and a positive process deadline."
          :seon.error/offending request
-         :seon.refusal/diagnostic-layer :seon.operator/lifecycle
-         :seon.refusal/diagnostic-operation 'seon.cluster.process/run-process!
-         :seon.refusal/diagnostic-member :seon.operator.subprocess/deadline-ms
-         :seon.refusal/diagnostic-expected "a positive deadline and nonempty argv"
-         :seon.refusal/diagnostic-offending request
-         :seon.refusal/diagnostic-cause :seon.operator.subprocess/deadline-undeclared
-         :seon.refusal/diagnostic-evidence request
-         :seon.operator.subprocess/deadline-member :seon.operator.subprocess/deadline-ms}))))
+         :seon.error/member :seon.operator.subprocess/deadline-ms
+         :seon.error/expected "a positive deadline and nonempty argv"
+         :seon.operator.subprocess/deadline-member :seon.operator.subprocess/deadline-ms})))
   (when (and silence-ms (not (and (pos-int? silence-ms) progress observe-output!)))
     (throw (ex-info "Supply a progress atom and output observer for the silence bound."
-                    (refusal/diagnostic
-        {:seon.error/at (java.util.Date.)
+                    {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.operator/lifecycle
          :seon.error/operation 'seon.cluster.process/run-process!
          :seon.error/message "Supply a progress atom and output observer for the silence bound."
          :seon.error/offending request
-         :seon.refusal/diagnostic-layer :seon.operator/lifecycle
-         :seon.refusal/diagnostic-operation 'seon.cluster.process/run-process!
-         :seon.refusal/diagnostic-member :seon.operator.subprocess/progress
-         :seon.refusal/diagnostic-expected "a phase observation for the silence bound"
-         :seon.refusal/diagnostic-offending request
-         :seon.refusal/diagnostic-cause :seon.operator.subprocess/progress-undeclared
-         :seon.refusal/diagnostic-evidence request
-         :seon.operator.subprocess/progress-member :seon.operator.subprocess/progress}))))
+         :seon.error/member :seon.operator.subprocess/progress
+         :seon.error/expected "a phase observation for the silence bound"
+         :seon.operator.subprocess/progress-member :seon.operator.subprocess/progress})))
   (let [deadline-ns (+ (System/nanoTime) (* 1000000 (long deadline-ms)))
         last-progress (atom (System/nanoTime))
         watch-key (Object.)
@@ -288,19 +270,13 @@
         (throw
          (ex-info
           "The process and its output must finish within the declared bound."
-          (refusal/diagnostic
-        {:seon.error/at (java.util.Date.)
+          {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.operator/lifecycle
          :seon.error/operation 'seon.cluster.process/run-process!
          :seon.error/message "The process and its output must finish within the declared bound."
          :seon.error/offending argv
-         :seon.refusal/diagnostic-layer :seon.operator/lifecycle
-         :seon.refusal/diagnostic-operation 'seon.cluster.process/run-process!
-         :seon.refusal/diagnostic-member :seon.operator.subprocess/deadline-ms
-         :seon.refusal/diagnostic-expected deadline-ms
-         :seon.refusal/diagnostic-offending argv
-         :seon.refusal/diagnostic-cause :seon.operator.subprocess/deadline-exceeded
-         :seon.refusal/diagnostic-evidence argv
+         :seon.error/member :seon.operator.subprocess/deadline-ms
+         :seon.error/expected deadline-ms
 
            :seon.operator.subprocess/argv argv
            :seon.operator.subprocess/deadline-ms deadline-ms
@@ -308,7 +284,7 @@
            :seon.operator.subprocess/pid (.pid child)
            :seon.operator.subprocess/start-instant
            (:seon.boot/start-instant (first identities))
-           :seon.operator.subprocess/reaped? reaped?}))))
+           :seon.operator.subprocess/reaped? reaped?})))
       {:seon.operator.subprocess/argv argv
        :seon.operator.subprocess/exit (.exitValue child)
        :seon.operator.subprocess/output output

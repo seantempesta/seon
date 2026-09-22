@@ -31,7 +31,8 @@
 
   Crash walk: pure over a database value. Nothing here opens, commits or
   holds anything."
-  (:require [clojure.string :as str]
+  (:require [seon.error.refusal]
+            [clojure.string :as str]
             [datahike.pull-api :as pull-api]
             [seon.db :as db]
             [seon.cluster.wake :as wake]
@@ -230,14 +231,7 @@
     {:seon.render.walk/attribute attribute
      :seon.error/value
      (let [observation
-           {:seon.error/diagnostic-layer :seon.render.walk/connections
-            :seon.error/diagnostic-operation 'seon.render.walk/connection-observation
-            :seon.error/diagnostic-member :seon.render.walk/lookup
-            :seon.error/diagnostic-expected "a traversal within the requested query-work bound"
-            :seon.error/diagnostic-offending {:seon.render.walk/attribute attribute :seon.render.walk/shown shown}
-            :seon.error/diagnostic-cause :seon.render.walk/lookup
-            :seon.error/diagnostic-evidence {}
-            :seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
+           {:seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
             :seon.error/at (java.util.Date.)
             :seon.error/layer :seon.render.walk/connections
             :seon.error/operation 'seon.render.walk/connection-observation
@@ -249,8 +243,11 @@
                                    ", bounded by " bound-by)
             :seon.error/data {:seon.render.walk/attribute attribute
                                :seon.print/bound-by bound-by
-                               :seon.render.walk/shown (long shown)}}]
-       (merge observation (error/diagnostic observation)))}))
+                               :seon.render.walk/shown (long shown)}
+            :seon.error/member :seon.render.walk/lookup
+            :seon.error/expected "a traversal within the requested query-work bound"
+            :seon.error/offending {:seon.render.walk/attribute attribute :seon.render.walk/shown shown}}]
+       observation)}))
 
 (defn- acquisition-members
   [projection database root distance width query-width]
@@ -685,22 +682,18 @@
      (inc (:seon.render.walk/found-depth member))
      :seon.error/value
      (let [observation
-           {:seon.error/diagnostic-layer :seon.render.walk/distance
-            :seon.error/diagnostic-operation 'seon.render.walk/distance-cap-unit
-            :seon.error/diagnostic-member :seon.render.walk/lookup
-            :seon.error/diagnostic-expected "a traversal within the requested query-work bound"
-            :seon.error/diagnostic-offending member
-            :seon.error/diagnostic-cause :seon.render.walk/lookup
-            :seon.error/diagnostic-evidence {}
-            :seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
+           {:seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
             :seon.error/at (java.util.Date.)
             :seon.error/layer :seon.render.walk/distance
             :seon.error/operation 'seon.render.walk/distance-cap-unit
             :seon.print/bound-by :seon.render/distance
             :seon.render.walk/limit remaining
             :seon.render.walk/continuation-subject (:seon.render.walk/lookup member)
-            :seon.error/message "elided connections at the requested distance cap"}]
-       (merge observation (error/diagnostic observation)))}))
+            :seon.error/message "elided connections at the requested distance cap"
+            :seon.error/member :seon.render.walk/lookup
+            :seon.error/expected "a traversal within the requested query-work bound"
+            :seon.error/offending member}]
+       observation)}))
 
 (defn- declared-acquisition
   "Order declared concerns; an owned component has a block even before it exists."
@@ -791,16 +784,11 @@
                     :seon.error/layer :seon.render.walk/render
                     :seon.error/operation 'seon.render.walk/neighborhood
                     :seon.error/message "The requested lookup has no entity in this database."
-                    :seon.error/diagnostic-layer :seon.render.walk/render
-                    :seon.error/diagnostic-operation 'seon.render.walk/neighborhood
-                    :seon.error/diagnostic-member :seon.render.walk/lookup
-                    :seon.error/diagnostic-expected "an existing entity"
-                    :seon.error/diagnostic-offending lookup
-                    :seon.error/diagnostic-cause :seon.render.walk/lookup
-                    :seon.error/diagnostic-evidence {}
                     :seon.error/fix "Supply the expected member and repeat the requested operation."
-                    :seon.render.walk/missing-lookup lookup}]
-               (merge observation (error/diagnostic observation)))}]
+                    :seon.render.walk/missing-lookup lookup
+                    :seon.error/member :seon.render.walk/lookup
+                    :seon.error/expected "an existing entity"}]
+               observation)}]
            (into []
                  (comp
                   (take node-limit)

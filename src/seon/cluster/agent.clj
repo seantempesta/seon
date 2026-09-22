@@ -585,20 +585,13 @@
       (assoc namespace-name :seon.agent/refused-source-agent agent-id)
 
       (nil? namespace-name)
-      (error/diagnostic
-       {:seon.error/at (Date.)
+      {:seon.error/at (Date.)
         :seon.error/layer :seon.agent/source-submission
         :seon.error/operation `submit-source!
         :seon.agent/refused-source-agent agent-id
-        :seon.error/message
-        "Source submission requires an agent with an assigned namespace."
-        :seon.error/diagnostic-layer :seon.agent/source-submission
-        :seon.error/diagnostic-operation `submit-source!
-        :seon.error/diagnostic-member :seon.agent/namespace
-        :seon.error/diagnostic-expected :seon.ns/name
-        :seon.error/diagnostic-offending agent-id
-        :seon.error/diagnostic-cause :seon.agent/no-such-agent
-        :seon.error/diagnostic-evidence nil})
+        :seon.error/message "Source submission requires an agent with an assigned namespace."
+        :seon.error/member :seon.agent/namespace
+        :seon.error/expected :seon.ns/name}
 
       :else
       (let [max-source
@@ -627,23 +620,15 @@
                         (:seon.cluster.wake/channel handle))]
                 (if (async/offer! channel :seon.agent/wake)
                   {:seon.turn/id run-id}
-                  (error/diagnostic
-                   {:seon.error/at (Date.)
+                  {:seon.error/at (Date.)
                     :seon.error/layer :seon.agent/source-submission
                     :seon.error/operation `submit-source!
                     :seon.agent/refused-source-agent agent-id
-                    :seon.error/message
-                    "The source run committed, but its wake was not delivered."
-                    :seon.error/diagnostic-layer :seon.agent/source-submission
-                    :seon.error/diagnostic-operation `submit-source!
-                    :seon.error/diagnostic-member
-                    :seon.cluster.wake/channel
-                    :seon.error/diagnostic-expected :seon.agent/wake
-                    :seon.error/diagnostic-offending run-id
-                    :seon.error/diagnostic-cause
-                    :seon.agent/source-submission-undeliverable
-                    :seon.error/diagnostic-evidence
-                    {:seon.turn/id run-id}}))))))))))
+                    :seon.error/message "The source run committed, but its wake was not delivered."
+                    :seon.error/member :seon.cluster.wake/channel
+                    :seon.error/expected :seon.agent/wake
+                    :seon.error/offending run-id
+                    :seon.error/data {:seon.turn/id run-id}})))))))))
 
 (defn fenced?
   "True when this agent is QUARANTINED: armed, routed, mailbox closed.

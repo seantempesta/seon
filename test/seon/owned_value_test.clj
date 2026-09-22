@@ -57,23 +57,15 @@
 (deftest incomplete-unowned-cyclic-and-shared-components-refuse
   (with-owned-tree
     (fn [connection]
-      (is (= :seon.db/unowned-entity
-             (get-in (refuses-without-change connection [{::value 1}])
-                     [:seon.error/data :seon.db/diagnostic-cause])))
-      (is (= :seon.db/missing-component
-             (get-in (refuses-without-change connection [{::id "missing" ::children [99999999]}])
-                     [:seon.error/data :seon.db/diagnostic-cause])))
-      (is (= :seon.db/component-cycle
-             (get-in (refuses-without-change connection
+      (is (.contains ^String (:seon.error/message (refuses-without-change connection [{::value 1}])) "unowned-entity"))
+      (is (.contains ^String (:seon.error/message (refuses-without-change connection [{::id "missing" ::children [99999999]}])) "missing-component"))
+      (is (.contains ^String (:seon.error/message (refuses-without-change connection
                                             [{:db/id "a" ::id "cycle" ::children ["b"]}
-                                             {:db/id "b" ::value 1 ::children ["a"]}])
-                     [:seon.error/data :seon.db/diagnostic-cause])))
-      (is (= :seon.db/multiple-component-owners
-             (get-in (refuses-without-change connection
+                                             {:db/id "b" ::value 1 ::children ["a"]}])) "component-cycle"))
+      (is (.contains ^String (:seon.error/message (refuses-without-change connection
                                             [{:db/id "child" ::value 1}
                                              {::id "a" ::children ["child"]}
-                                             {::id "b" ::children ["child"]}])
-                     [:seon.error/data :seon.db/diagnostic-cause]))))))
+                                             {::id "b" ::children ["child"]}])) "multiple-component-owners")))))
 
 (deftest complete-values-include-the-1001st-child
   (with-owned-tree

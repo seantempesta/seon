@@ -525,8 +525,7 @@
          (is (= 'seon.schema/pulled-selector-refusal (:seon.error/operation refused)))
          (is (= {:seon.ns/steward 2}
                 (get-in refused
-                        [:seon.error/data
-                         :seon.error/diagnostic-offending]))))))))
+                        [:seon.error/offending]))))))))
 
 (defn- refusal
   [thunk]
@@ -1036,23 +1035,19 @@
              (:seon.error/operation mismatch-data)))
       (is (= shape
              (get-in mismatch-data
-                     [:seon.error/data :seon.error/diagnostic-expected])))
+                     [:seon.error/expected])))
       (is (= shape
              (get-in mismatch-data
-                     [:seon.error/data :seon.error/diagnostic-member])))
+                     [:seon.error/data :seon.error/member])))
       (is (= 'seon.schema/render-contract-refusal!
              (get-in mismatch-data
-                     [:seon.error/data :seon.error/diagnostic-operation])))
+                     [:seon.error/operation])))
       (is (= renderer
              (get-in mismatch-data
-                     [:seon.error/data :seon.error/diagnostic-offending])))
+                     [:seon.error/offending])))
       (is (= other
              (get-in mismatch-data
-                     [:seon.error/data :seon.error/diagnostic-evidence
-                      :seon.fn/input])))
-      (is (= :seon.schema/render-input-does-not-accept-declaring-shape
-             (get-in mismatch-data
-                     [:seon.error/data :seon.error/diagnostic-cause]))))
+                     [:seon.error/data :seon.fn/input]))))
     (testing "a coherent declaration admits"
       (is (= renderer
              (get-in
@@ -1578,12 +1573,10 @@
                           (ex-data failure)))]
        (is (not= ::no-refusal outcome)
            "a poisoned database value may not answer as a projection")
-       (is (= :seon.schema/invalid-projection-source
-              (get-in outcome [:seon.error/data :seon.error/diagnostic-cause])))
        (is (= :seon.schema/database-value
-              (:seon.error/diagnostic-member (:seon.error/data outcome))))
+              (:seon.error/member (:seon.error/data outcome))))
        (is (= poisoned
-              (:seon.error/diagnostic-offending (:seon.error/data outcome))))
+              (:seon.error/offending outcome)))
        (is (seq (:seon.schema.projection/forms
                  (schema/projection-from-database @connection)))
            "a real database still derives a populated projection")))))

@@ -1,6 +1,6 @@
 ---
 type: research
-status: in progress; literal owner group landing first
+status: constructor and caller implementation complete; verification limits recorded
 created: 2026-09-22
 ---
 
@@ -201,15 +201,14 @@ Exact form:
              refused (seon.instrument/wrap-interpreted 'x/refused "[:=> [:cat :map] :x/z-error]" projection :panic caps seon.error.refusal/diagnostic)
              refusal (try (refused value) (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
          {:value value :key-count (count value) :accepted (= value (accepted value))
-          :refused (select-keys refusal [:seon.error/operation :seon.error/message :seon.instrument/undeclared-return ])
+          :refused-operation (:seon.error/operation refusal)
           :refusal-valid? ((seon.schema/projection-validator projection :seon.instrument/undeclared-error) refusal)})))))
-
 ```
 
-`ret`, **169 ms**, 2026-09-22T14:32:41Z:
+`ret`, **167 ms**, 2026-09-22T14:48:20Z:
 
 ```clojure
-{:value {:seon.error/at #inst "2026-09-22T14:32:41Z"
+{:value {:seon.error/at #inst "2026-09-22T14:48:20Z"
          :seon.error/layer :x/y :seon.error/operation 'a/b :x/member 1}
  :key-count 4
  :accepted true
@@ -254,7 +253,7 @@ fixture still supplies old constructor/registration/await contracts in database
 scopes. This is the ambient projection transport boundary assigned to a later cut;
 it is not permission to restore retired keys or weaken the new input.
 The read wrapper's declared error schema refusals prevent several recording/occurrence tests from
-reaching their subject. Schema-shape/all-declared error schema enumeration and rendering-prose
+reaching their subject. Schema-shape and registry-derived complete-union checks and rendering-prose
 expectations also remain red. None was repaired by widening caller unions.
 A separate unchanged-HEAD request checks attribution of those existing reds.
 
@@ -285,7 +284,6 @@ snapshots as evidence; no uncertain shared root is deleted.
 
 Owned changed paths (including this note):
 
-- `docs/prds/agent-platform/plan/lane-b3-errors-tasks-dials.md`
 - `resources/seon/schemas/seon.await.edn`
 - `script/seon/dev/dependency_digest.clj`
 - `script/seon/operator.clj`
@@ -400,4 +398,43 @@ No worktree was used. The archive's JVM exited before further verification.
 The pre-ruling focused correction request was interrupted by TERM with no tally
 or run id (`tmp/b3-render-correction.log`); it is not evidence of a pass.
 The existing schema-discovery tests and all calls to that deferred owner remain
-byte-identical. Their new rule and retirement belong to the later lane.
+byte-identical. Their implementation of the new rule and retirement belong to the later lane.
+
+### Blob owner group and baseline comparison
+
+`e569532dd` committed all five blob sites. Its clean archived HEAD passed the
+prescribed require, exit **0**, `tmp/b3-head-blob-load.log`.
+The parity fixture check returned `{:native true :historical-native true
+:attributes true}` comparing current and historical native storage data with HEAD.
+
+The unchanged-HEAD comparison used only the unchanged error schema resource as
+its `--paths` input and selected `seon.error-test seon.instrument-test`:
+`tmp/b3-baseline-owner-reds.log`, **92 tests / 671 assertions / 11 failures /
+7 errors**. Its recording was refused. It reproduced the occurrence/read failures,
+duration failures, unavailable recording boundary and deferred schema-discovery
+checks. These are existing reds, not a reason to change a later lane's mechanism.
+The additional stale-constructor/registration errors in the edited run explicitly
+name retired input keys from the published fixture.
+
+The comparison also exposed an introduced reader error: passing at/layer through
+the evidence reader activated its existing early return and skipped value rendering.
+The reader now selects only operation/member/expected/offending alongside its
+existing data, preserving the rendering path. No rendering mechanism was added.
+
+### Final constructor/caller request
+
+`16c5872003db`, `tmp/b3-final-constructor-caller.log`: **56 executed tests,
+362 assertions, 29 failures, 5 errors**. Snapshot result recording refused the
+transition; no recorded green is claimed for this request. All four new constructor
+regressions and the five await regressions completed without failure/error events.
+The restored, unchanged schema-discovery/cause-reader tests remain red, as do
+instrumentation tests entering the old database-fixture contracts. The rendering
+value-projection regression no longer failed after the reader correction; the
+SCI-only argument-list expectation still failed under the published fixture and
+is recorded as unresolved evidence, not a proven pass.
+
+The exact seven-key scan over `src script bin test` prints nothing (exit 1).
+Changed Clojure files parse, `git diff --check` passes, and the protected discovery
+owner and its caller lines have no diff. No input/output validation was relaxed
+in response to a red test. The two unrelated dirty documents remain outside every
+commit. The plan rewrite was committed by its owner, not staged by this lane.

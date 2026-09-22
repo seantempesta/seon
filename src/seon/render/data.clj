@@ -67,25 +67,20 @@
                 :else
                 (reduced
                  (assoc
-                  (error/diagnostic
-                   {:seon.error/at (java.util.Date.)
+                  {:seon.error/at (java.util.Date.)
                     :seon.error/layer :seon.render.data/cursor
                     :seon.error/operation 'seon.render.data/at
                     :seon.error/message "The requested path has no value at this step."
-                    :seon.error/diagnostic-layer :seon.render.data/cursor
-                    :seon.error/diagnostic-operation 'seon.render.data/at
-                    :seon.error/diagnostic-member :seon.render.data/path
-                    :seon.error/diagnostic-expected "a present map key, set member, or sequence index"
-                    :seon.error/diagnostic-offending value
-                    :seon.error/diagnostic-cause :seon.render.data/absent-path
-                    :seon.error/diagnostic-evidence
-                    {:seon.render.data/step step
+                    :seon.error/member :seon.render.data/path
+                    :seon.error/expected "a present map key, set member, or sequence index"
+                    :seon.error/offending value
+                    :seon.error/data {:seon.render.data/step step
                      :seon.render.data/path path
-                     :seon.render.data/root-description (if (nil? value) "nil" (.getName (class value)))}})
+                     :seon.render.data/root-description (if (nil? value) "nil" (.getName (class value)))}}
                   :seon.render.data/path path
                   :seon.render.data/root-description (if (nil? value) "nil" (.getName (class value)))
                   :seon.render.data/requested-path-length (count path)
-                  :seon.error/diagnostic-offending value
+                  :seon.error/offending value
                   :seon.error/fix "Select a present member from the parent value.")))))
           {:seon.render.data/value value}
           path))
@@ -114,20 +109,15 @@
                   :seon.render.data/observation-error]}
   [operation member message offending]
   (assoc
-   (error/diagnostic
-    {:seon.error/at (java.util.Date.)
+   {:seon.error/at (java.util.Date.)
      :seon.error/layer :seon.render.data/observation
      :seon.error/operation operation
      :seon.error/message message
-     :seon.error/diagnostic-layer :seon.render.data/observation
-     :seon.error/diagnostic-operation operation
-     :seon.error/diagnostic-member member
-     :seon.error/diagnostic-expected "an existing subject and a continuation from the same snapshot, entity, and direction"
-     :seon.error/diagnostic-offending offending
-     :seon.error/diagnostic-cause :seon.render.data/observation-unavailable
-     :seon.error/diagnostic-evidence {member offending}})
+     :seon.error/expected "an existing subject and a continuation from the same snapshot, entity, and direction"
+     :seon.error/offending offending
+     :seon.error/data (merge {member offending} {:seon.error/member member})}
    :seon.render.data/refused-member member
-   :seon.error/diagnostic-offending offending
+   :seon.error/offending offending
    :seon.error/fix "Acquire the subject again and use the continuation returned by that observation."))
 
 (defn- continuation [snapshot eid direction offset cursor]

@@ -69,7 +69,7 @@
           (is (= (rest path) (rest (:seon.db/path result)))))
       (is (= path (:seon.db/path result))))
     (is (= before (:t @connection)) "a refusal commits nothing")
-    (is (= :database-write (get-in result [:seon.error/data :seon.error/diagnostic-layer])))
+    (is (= :database-write (get-in result [:seon.error/data :seon.error/layer])))
     result))
 
 (deftest bad-value-type

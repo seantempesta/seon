@@ -109,5 +109,5 @@
        (is (= (evaluation/of-agent @connection "absent")
               (evaluation/of-agent @connection "absent" [:seon.eval/shown]))))
      (let [refusal (evaluation/of-agent @connection "absent")]
-       (is (= :seon.agent/id (get-in refusal [:seon.error/data :seon.error/diagnostic-member])))
-       (is (= "absent" (get-in refusal [:seon.error/data :seon.error/diagnostic-offending])))))))
+       (is (= :seon.agent/id (get-in refusal [:seon.error/data :seon.error/member])))
+       (is (= "absent" (get-in refusal [:seon.error/offending])))))))

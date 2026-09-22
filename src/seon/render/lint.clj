@@ -218,22 +218,15 @@
                         node))
                     (walk root))]
     (or found
-        (error/diagnostic
-         {:seon.error/at (java.util.Date.)
+        {:seon.error/at (java.util.Date.)
           :seon.error/layer :seon.render.lint/lookup
           :seon.error/operation 'seon.render.lint/element-with-id
-          :seon.error/message
-          (str "The rendered value carries no element with id " (pr-str id) ".")
-          :seon.error/diagnostic-layer :seon.render.lint/lookup
-          :seon.error/diagnostic-operation 'seon.render.lint/element-with-id
-          :seon.error/diagnostic-member :seon.render.lint/id
-          :seon.error/diagnostic-expected id
-          :seon.error/diagnostic-offending :seon.render.lint/absent
-          :seon.error/diagnostic-cause ::absent-element
-          :seon.error/diagnostic-evidence
-          {:seon.render.lint/nodes (count (walk root))}
+          :seon.error/message (str "The rendered value carries no element with id " (pr-str id) ".")
           :seon.error/fix "Render the required element with the requested id."
-          :seon.render.lint/absent-element id}))))
+          :seon.render.lint/absent-element id
+          :seon.error/member :seon.render.lint/id
+          :seon.error/offending :seon.render.lint/absent
+          :seon.error/data {:seon.render.lint/nodes (count (walk root))}})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Delimiter balance — one scan, no regular expression

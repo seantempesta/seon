@@ -915,9 +915,9 @@
                       (catch clojure.lang.ExceptionInfo error error))
             data (ex-data failure)
             diagnostic-data (:seon.error/data data)
-            evidence (:seon.error/diagnostic-evidence diagnostic-data)
+            evidence diagnostic-data
             location (:seon.sci.eval/cause-location evidence)
-            cause-message (:seon.error/diagnostic-cause diagnostic-data)]
+            cause-message (:seon.error/source diagnostic-data)]
         (is (schema/valid-candidate-value? (schema/handed-projection)
                                           :seon.sci.eval/row-acquisition-error data))
         (is (= probe-namespace (:seon.sci.eval/row-member data)))
@@ -1654,7 +1654,7 @@
           'authored.contract/accept
           (get-in
            failure
-           [:seon.error/data :seon.error/diagnostic-operation]))
+           [:seon.error/operation]))
          moment)))
       acquired-ctx
       (eval/build-base-ctx (seon.schema/handed-projection))]
@@ -1832,12 +1832,7 @@
               "a declared write is visible to the next evaluation")
             (is
               (some? (get-in rejected [:seon.sci.admit/value :seon.db.write.attempt/request-id])))
-            (is
-              (=
-                :seon.db/attribute-not-installed
-                (get-in
-                  rejected
-                  [:seon.sci.admit/value :seon.error/data :seon.error/diagnostic-cause])))
+            (is (true? (:seon.db/invalid-read (:seon.sci.admit/value rejected))))
             (is
               (schema/valid-candidate-value? (schema/handed-projection)
                                              :seon.schema/validation-refusal
@@ -2359,15 +2354,15 @@
     (is (not (contains? (:seon.error/data failure) :seon.sci.eval/data))
         "the refusal is not copied back into itself as throwable ex-data")
     (is (not= :nested-refusal
-              (:seon.error/diagnostic-member (:seon.error/data failure))))))))
+              (:seon.error/member (:seon.error/data failure))))))))
 
 (deftest analysis-failure-exposes-scis-unresolved-symbol-as-data
   (let [failure (:seon.sci.admit/value
-                 (run "unresolved-diagnostic-member"))]
-    (is (= 'unresolved-diagnostic-member
+                 (run "unresolved-member"))]
+    (is (= 'unresolved-member
            (:seon.sci.eval/symbol (:seon.error/data failure))))
-    (is (= 'unresolved-diagnostic-member
-           (:seon.error/diagnostic-offending (:seon.error/data failure))))))
+    (is (= 'unresolved-member
+           (:seon.error/offending failure)))))
 
 (deftest a-refusal-keeps-its-declared-facet-at-both-entrances
   ;; A refusal our own guarded machinery raised already says what went

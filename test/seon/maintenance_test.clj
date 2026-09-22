@@ -331,16 +331,15 @@
                [(task-transaction collect-task collect-handler)
                 (task-transaction cleanup-task cleanup-handler)]))
         (testing "an uncollected root is the typed unknown, never absence"
-          ;; `seon.error/diagnostic` moves every diagnostic-* field into
+          ;; The refusal retains the producer observation in
           ;; `:seon.error/data`; the top level carries the observed root and base evidence.
           (let [answer (maintenance/last-collection @connection collected-root)]
             (is (= collected-root (:seon.maintenance/uncollected-root answer)))
             (is (= collected-root
-                   (get-in answer [:seon.error/data
-                                   :seon.error/diagnostic-offending])))
+                   (get-in answer [:seon.error/offending])))
             (is (= :seon.operator/managed-root
                    (get-in answer [:seon.error/data
-                                   :seon.error/diagnostic-member])))))
+                                   :seon.error/member])))))
         (test-support/transacted!
          connection
          (receipt collect-task collect-handler "collect/1" at-1

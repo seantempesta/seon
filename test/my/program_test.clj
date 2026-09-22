@@ -166,7 +166,7 @@
        (is (contains? (error/facets projection failed) :seon.program/read-refused-error))
        (is (= 'my.program/callers (:seon.program/read-operation failed)))
        (is (= {:sample/evidence 42}
-              (get-in failed [:seon.error/data :seon.error/diagnostic-evidence])))
+              (get-in failed [:seon.error/data ])))
        (is (contains? (error/facets projection missing) :seon.program/context-unavailable-error))
        (is (= #{:my.program/executing-ctx :my.program/base-ctx :seon.db/connection}
               (:seon.program/missing-context-members missing)))

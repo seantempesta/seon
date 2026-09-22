@@ -58,8 +58,7 @@
     (is (= "surface-capture-3" (:seon.render.lint/absent-element refusal)))
     (is (= 'seon.render.lint/element-with-id (:seon.error/operation refusal)))
     (is (= "surface-capture-3"
-           (get-in refusal [:seon.error/data
-                            :seon.error/diagnostic-expected])))))
+           (get-in refusal [:seon.error/expected])))))
 
 (deftest placeholder-nodes-are-findings-and-honest-blocks-are-not
   (let [page [[:article [:div {:class "seon-render-unavailable"}

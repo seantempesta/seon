@@ -447,12 +447,10 @@
     (is (number? (:seon.await/elapsed-ms result)))
     (is (= ::sut/work-launcher-proc-stopped
            (get-in result
-                   [:seon.error/data :seon.error/diagnostic-member])))
+                   [:seon.error/data :seon.error/member])))
     (is (= :seon.config.agent/turn-completion-backstop-ms
            (get-in result
-                   [:seon.error/data
-                    :seon.error/diagnostic-evidence
-                    :seon.await/config-attribute])))))
+                   [:seon.await/config-attribute])))))
 
 (deftest submission-time-limit-covers-the-pre-start-wait
   (testing "paused before start"
@@ -794,8 +792,7 @@
                                   {:registry (:seon.schema.projection/registry
                                               (schema/projection-from-database @connection))}))
                   (is (= [:source command {}]
-                         (get-in result [:seon.error/data
-                                         :seon.error/diagnostic-offending]))))))
+                         (get-in result [:seon.error/offending]))))))
             (with-redefs
               [flow-monitor/send-message
                (fn [_state message]

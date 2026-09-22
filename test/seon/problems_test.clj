@@ -77,13 +77,10 @@
        :seon.error/layer :seon.problems-test/fixture
        :seon.error/operation (symbol "seon.problems-test" (name cause))
        :seon.error/message "boom"
-       :seon.error/diagnostic-layer :seon.problems-test/fixture
-       :seon.error/diagnostic-operation 'seon.problems-test/commit-error!
-       :seon.error/diagnostic-member :seon.error/source
-       :seon.error/diagnostic-expected "a fixture diagnostic"
-       :seon.error/diagnostic-offending cause
-       :seon.error/diagnostic-cause cause
-       :seon.error/diagnostic-evidence {}}
+       :seon.error/member :seon.error/source
+       :seon.error/expected "a fixture diagnostic"
+       :seon.error/offending cause
+       :seon.error/data {:seon.error/operation 'seon.problems-test/commit-error!}}
       ;; DETERMINISTIC, because this fixture runs inside a property: a
       ;; random id would make a shrunk counterexample unreplayable even
       ;; though nothing here reads the id (review-caught)

@@ -104,7 +104,7 @@
          (let [refusal (render/render-call (request))]
            (is (= :ai (:seon.render/invalid-output refusal)))
            (is (= 'seon.render/raw-output (:seon.error/operation refusal)))
-           (is (nil? (:seon.error/diagnostic-offending refusal))))
+           (is (nil? (:seon.error/offending refusal))))
          (sci/binding [sci/ns (sci/create-ns namespace-name)]
            (replace-renderer! connection ctx '(defn namespace-ai [value]
                                 (seon.db/q '[:find ?shown .

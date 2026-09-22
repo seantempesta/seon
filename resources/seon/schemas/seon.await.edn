@@ -31,12 +31,12 @@
               [:seon.await/config-value :seon.await/config-value]]
              :diagnostic
              [:map
-              [:seon.error/diagnostic-layer :seon.schema/value]
-              [:seon.error/diagnostic-operation :seon.schema/value]
-              [:seon.error/diagnostic-member :seon.schema/value]
-              [:seon.error/diagnostic-expected :seon.schema/value]
-              [:seon.error/diagnostic-offending :seon.schema/value]
-              [:seon.error/diagnostic-evidence :seon.schema/value]]
+              [:seon.error/layer :seon.schema/value]
+              [:seon.error/operation :seon.schema/value]
+              [:seon.error/member {:optional true} :seon.schema/value]
+              [:seon.error/expected {:optional true} :seon.schema/value]
+              [:seon.error/offending {:optional true} :seon.schema/value]
+              [:seon.error/data {:optional true} :map]]
              :put-operation
              [:tuple :seon.flow/channel :seon.schema/value]
              :port-operation

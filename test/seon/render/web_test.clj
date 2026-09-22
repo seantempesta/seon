@@ -104,11 +104,10 @@
           ((web-private 'write-package!)
            ::channel ::generator (byte-array [1]) 20 ::socket-drain))]
     (is (= :seon.await/future (:seon.render.web/refused-member result)))
-    (is (= 20 (get-in result [:seon.error/data :seon.error/diagnostic-evidence
-                             :seon.await/config-value])))
+    (is (= 20 (get-in result [:seon.await/config-value])))
     (is (= ::socket-drain
            (get-in result [:seon.error/data
-                           :seon.error/diagnostic-member])))
+                           :seon.error/member])))
     (is (true? @closed?))))
 
 (defn- with-server

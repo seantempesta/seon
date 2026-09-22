@@ -72,7 +72,7 @@
     (is (str/includes? shown "my.web/no-such-fetch") shown)
     (is (str/includes? shown "Fix: Define or require this symbol.") shown)
     (is (< (tokens/estimate shown) 150) shown)
-    (is (not (str/includes? shown "diagnostic-evidence")) shown)))
+    (is (not (str/includes? shown "seon.error/data")) shown)))
 
 (deftest refusal-grammar-survives-real-evaluation
   (let [installations (atom 0)

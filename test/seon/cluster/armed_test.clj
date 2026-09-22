@@ -425,7 +425,7 @@
                   (flow/ping-proc graph :seon.agent/turn
                                   :timeout-ms 5000))))
           (is (empty? (filter #(= :seon.flow/fault-channel-overflow
-                                  (:seon.error/diagnostic-cause %))
+                                  (:clojure.core.async.flow/op %))
                               (errors @connection)))
               "and no overflow fact was needed on the way"))))))
 

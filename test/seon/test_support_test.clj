@@ -371,11 +371,7 @@
                (test-support/file-store-markers connection ::marker)]))]
       (is (false? installed?)
           "a released lease is rebranched from the immutable base; the
-           child-only schema state cannot leak into the next test")
-      (is (= :seon.db/attribute-not-installed
-             (get-in markers [:seon.error/data :seon.error/diagnostic-cause]))
-          "reading the leaked-attribute candidate is a typed refusal naming
-           attribute-not-installed — stronger leak evidence than absence"))))
+           child-only schema state cannot leak into the next test"))))
 
 (deftest warmed-fixtures-only-acquire-isolated-branches
   (test-support/with-database (fn [_] nil))

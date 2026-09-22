@@ -45,7 +45,7 @@
                                 {:seon.env/environment @test-environment})))]
     (is (= :input (:seon.instrument/check refusal)))
     (is (= 'seon.flow/var-process
-           (:seon.error/diagnostic-operation (:seon.error/data refusal))))
+           (:seon.error/operation refusal)))
     (is (str/includes? (:seon.error/message refusal)
                        "either :io or :compute"))))
 

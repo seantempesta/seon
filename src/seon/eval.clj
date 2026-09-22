@@ -32,19 +32,14 @@
     (cond
       (:seon.db/invalid-read agent-row) agent-row
       (nil? (:seon.agent/id agent-row))
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.eval/of-agent
         :seon.error/operation 'seon.eval/of-agent
         :seon.agent/no-such-agent agent-id
         :seon.error/message "Cannot read evaluations of an absent agent."
-        :seon.error/diagnostic-layer :seon.eval
-        :seon.error/diagnostic-operation 'seon.eval/of-agent
-        :seon.error/diagnostic-member :seon.agent/id
-        :seon.error/diagnostic-expected :seon.agent/id
-        :seon.error/diagnostic-offending agent-id
-        :seon.error/diagnostic-cause :seon.db/not-found
-        :seon.error/diagnostic-evidence [:seon.agent/id agent-id]})
+        :seon.error/member :seon.agent/id
+        :seon.error/expected :seon.agent/id
+        :seon.error/data {:seon.error/layer :seon.eval :seon.error/source [:seon.agent/id agent-id]}}
       :else
       (let [rows
             (db/q '[:find ?t ?turn-id ?ordinal ?evaluation-t

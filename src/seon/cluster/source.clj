@@ -265,17 +265,13 @@
                             :seon.test.run/callers-at-head :seon.source/test-selection-request])
                 missing (vec (remove #(get-in projection [:seon.schema.projection/forms %]) required))
                 result (if (seq missing)
-                         (error/diagnostic
-                          {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/recording
+                         {:seon.error/at (java.util.Date.)
+                           :seon.error/layer :seon.test/recording
                            :seon.error/operation 'seon.cluster.source/record-results!
                            :seon.error/message "The published recording authority predates snapshot result admission. The orchestrator must publish the converged schema before fast recording can be enabled."
-                           :seon.error/diagnostic-layer :test
-                           :seon.error/diagnostic-operation ::record-results!
-                           :seon.error/diagnostic-member current-branch
-                           :seon.error/diagnostic-expected required
-                           :seon.error/diagnostic-offending missing
-                           :seon.error/diagnostic-cause :recording-schema-unavailable
-                           :seon.error/diagnostic-evidence {:seon.source/commit-id expected}})
+                           :seon.error/expected required
+                           :seon.error/offending missing
+                           :seon.error/data (merge {:seon.source/commit-id expected} {:seon.error/layer :test :seon.error/operation ::record-results! :seon.error/member current-branch})}
                          (schema/call-with-projection
                         projection
                         #(if (contains? completion :seon.test.runner/results)
@@ -300,18 +296,13 @@
                                      expected (set (map :seon.test.member/symbol
                                                         (:seon.test.run/members admission)))]
                                  (if (= expected (set reserved)) admission
-                                   (error/diagnostic
-                                    {:seon.error/at (java.util.Date.)
+                                   {:seon.error/at (java.util.Date.)
                                      :seon.error/layer :seon.test/admission
                                      :seon.error/operation 'seon.cluster.source/record-results!
                                      :seon.error/message "Matching snapshot work is already admitted and has no recorded terminal result."
-                                     :seon.error/diagnostic-layer :test
-                                     :seon.error/diagnostic-operation ::record-results!
-                                     :seon.error/diagnostic-member (get-in admission [:seon.test.run/provenance :seon.test.run/id])
-                                     :seon.error/diagnostic-expected expected
-                                     :seon.error/diagnostic-offending reserved
-                                     :seon.error/diagnostic-cause :seon.test/claim-conflict
-                                     :seon.error/diagnostic-evidence {:seon.test.run/provenance (:seon.test.run/provenance admission)}}))))))))]
+                                     :seon.error/expected expected
+                                     :seon.error/offending reserved
+                                     :seon.error/data (merge {:seon.test.run/provenance (:seon.test.run/provenance admission)} {:seon.error/layer :test :seon.error/operation ::record-results! :seon.error/member (get-in admission [:seon.test.run/provenance :seon.test.run/id])})})))))))]
             (if (:seon.error/at result)
               (assoc result :seon.source/refused-test-run
                      (get-in completion [:seon.test.run/provenance :seon.test.run/id]))
@@ -351,18 +342,13 @@
   (try
     (test.cache/test-input-digest directory (test.cache/input-digests directory))
     (catch Exception failure
-      (let [refusal (error/diagnostic
-                     {:seon.error/at (java.util.Date.)
+      (let [refusal {:seon.error/at (java.util.Date.)
                       :seon.error/layer :seon.source/publication
                       :seon.error/operation 'seon.cluster.source/publish!
                       :seon.error/message "The publication input inventory is unavailable."
-                      :seon.error/diagnostic-layer :source-publication
-                      :seon.error/diagnostic-operation 'seon.cluster.source/publish!
-                      :seon.error/diagnostic-member directory
-                      :seon.error/diagnostic-expected :snapshot-input-inventory
-                      :seon.error/diagnostic-offending directory
-                      :seon.error/diagnostic-cause :seon.test/input-evidence-unavailable
-                      :seon.error/diagnostic-evidence {:seon.source/inventory-failure (str (ex-message failure))}})]
+                      :seon.error/expected :snapshot-input-inventory
+                      :seon.error/offending directory
+                      :seon.error/data (merge {:seon.source/inventory-failure (str (ex-message failure))} {:seon.error/layer :source-publication :seon.error/member directory})}]
         (throw (ex-info (:seon.error/message refusal) refusal failure))))))
 
 (defn publish!

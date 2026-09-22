@@ -69,7 +69,7 @@
                         :seon.config/on-core-error :panic})
                value (:seon.sci.admit/value result)]
            (is (= expected (:seon.program/advised-operation value)) (pr-str result))
-           (is (= expected (get-in value [:seon.error/data :seon.error/diagnostic-expected])))
+           (is (= expected (get-in value [:seon.error/expected])))
            (is (= basis (db/basis-t (db/db connection))))
            (is (true? (= (get-in before [:namespaces 'seon.turn])
                          (get-in @(:env fork) [:namespaces 'seon.turn]))))))))))

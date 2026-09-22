@@ -137,7 +137,7 @@
                 (is (= documented (:seon.error/doc value)))
                 (is (str/includes? (:seon.error/message value "") "my.note/add!"))
                 (is (str/includes? (:seon.error/message value "") ":my.note/content"))
-                (is (some? (get-in value [:seon.error/data :seon.error/diagnostic-expected])))
+                (is (some? (get-in value [:seon.error/expected])))
                 (is (empty? (db/q '[:find ?note :where [?note :my.note/id "bad-note"]] @connection))))
               (let [failed (run "(my.test/run {:seon.agent/id 17})")]
                 (is (= :input

@@ -157,9 +157,7 @@
     (throw
      (ex-info
       "Source changed during analysis; a declaration span does not fit the analyzed text."
-      (merge {
-              :seon.error/diagnostic-cause ::source-changed-during-analysis
-              :seon.fn/index-refused true
+      (merge {:seon.fn/index-refused true
               :seon.fn/source-path path
               :seon.fn.file/captured-digest (:seon.fn.file/digest context)
               :seon.fn.file/captured-length (count (:text context))
@@ -177,10 +175,10 @@
   [contexts entry row col]
   (let [{:keys [text line-starts]} (get contexts (::analyzer/filename entry))]
     (when-not (and (pos? row) (<= row (count line-starts)))
-      (span-refused! contexts entry {:seon.error/diagnostic-offending [row col]}))
+      (span-refused! contexts entry {:seon.error/offending [row col]}))
     (let [offset (+ (nth line-starts (dec row)) (dec col))]
       (when-not (<= 0 offset (count text))
-        (span-refused! contexts entry {:seon.error/diagnostic-offending [row col]}))
+        (span-refused! contexts entry {:seon.error/offending [row col]}))
       offset)))
 
 (defn- exact-source
@@ -202,7 +200,7 @@
           end (character-offset contexts entry end-row end-col)]
       (when-not (<= start end)
         (span-refused! contexts entry
-                       {:seon.error/diagnostic-offending [end-row end-col]}))
+                       {:seon.error/offending [end-row end-col]}))
       (subs text start end))))
 
 (defn- exact-form-span
@@ -215,7 +213,7 @@
                  ;; changed between the analyzer's read and this one.
                  (when-not (and (pos? row) (<= row (count line-starts)))
                    (span-refused! contexts entry
-                                  {:seon.error/diagnostic-offending [row col]}))
+                                  {:seon.error/offending [row col]}))
                  (let [start (nth line-starts (dec row))
                        stop (min (+ start (dec col))
                                  (nth line-starts row (count text)))]
@@ -966,25 +964,18 @@
              (if-let [namespace-name (:seon.ns/name namespace-row)]
                (assoc request :namespace-name namespace-name
                               :form-source source)
-               (error/diagnostic
-                {:seon.error/at (java.util.Date.)
+               {:seon.error/at (java.util.Date.)
                  :seon.error/layer :seon.fn/analysis
                  :seon.error/operation 'seon.fn/analyze-forms
                  ::namespace-unresolvable true
                  :seon.fn/source source
-                 :seon.error/message
-                 (str "Cannot analyze the form because its namespace reference "
+                 :seon.error/message (str "Cannot analyze the form because its namespace reference "
                       (pr-str namespace-ref)
                       " does not resolve to :seon.ns/name.")
-                 :seon.error/diagnostic-layer :program-analysis
-                 :seon.error/diagnostic-operation 'seon.fn/analyze-forms
-                 :seon.error/diagnostic-member :namespace-ref
-                 :seon.error/diagnostic-expected :seon.ns/name
-                 :seon.error/diagnostic-offending namespace-ref
-                 :seon.error/diagnostic-cause ::namespace-unresolvable
-                 :seon.error/diagnostic-evidence
-                 {:seon.fn/namespace-ref namespace-ref
-                  :seon.fn/namespace-row namespace-row}}))))
+                 :seon.error/expected :seon.ns/name
+                 :seon.error/offending namespace-ref
+                 :seon.error/data (merge {:seon.fn/namespace-ref namespace-ref
+                  :seon.fn/namespace-row namespace-row} {:seon.error/layer :program-analysis :seon.error/member :namespace-ref})})))
          requests)
         refusal (some #(when (::namespace-unresolvable %) %) resolved)]
     (if refusal

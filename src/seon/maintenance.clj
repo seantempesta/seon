@@ -1,6 +1,7 @@
 (ns seon.maintenance
   "Fact-derived maintenance result projection and reporting."
-  (:require [clojure.string :as str]
+  (:require [seon.error.refusal]
+            [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.edn :as edn]
             [datahike.api :as d]
@@ -48,55 +49,34 @@
       (empty? projections) result
 
       (< 1 (count projections))
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.maintenance/projection
         :seon.error/operation 'seon.maintenance/result-entity
         :seon.error/message "Maintenance requires one matching persistence producer."
-        :seon.error/diagnostic-layer :seon.maintenance/projection
-        :seon.error/diagnostic-operation 'seon.maintenance/result-entity
-        :seon.error/diagnostic-member :seon.maintenance/matching-producer-count
-        :seon.error/diagnostic-expected "one matching persistence producer"
-        :seon.error/diagnostic-offending projections
         :seon.error/offending projections
-        :seon.error/diagnostic-cause :seon.maintenance/projection-refused
-        :seon.error/diagnostic-evidence {}
-        :seon.maintenance/matching-producer-count (count projections)})
+        :seon.maintenance/matching-producer-count (count projections)
+        :seon.error/expected "one matching persistence producer"}
 
       :else
       (let [[schema-key projection] (first projections)]
         (try
           (if-let [producer (requiring-resolve projection)]
             (producer result)
-            (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+            {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.maintenance/projection
         :seon.error/operation 'seon.maintenance/result-entity
         :seon.error/message "Maintenance requires a resolving persistence producer."
-        :seon.error/diagnostic-layer :seon.maintenance/projection
-        :seon.error/diagnostic-operation 'seon.maintenance/result-entity
-        :seon.error/diagnostic-member :seon.maintenance/unresolved-producer
-        :seon.error/diagnostic-expected "a resolving persistence producer"
-        :seon.error/diagnostic-offending {:seon.schema/key schema-key :seon.maintenance/result-projection projection}
         :seon.error/offending {:seon.schema/key schema-key :seon.maintenance/result-projection projection}
-        :seon.error/diagnostic-cause :seon.maintenance/projection-refused
-        :seon.error/diagnostic-evidence {}
-        :seon.maintenance/unresolved-producer projection}))
+        :seon.maintenance/unresolved-producer projection
+        :seon.error/expected "a resolving persistence producer"})
           (catch Throwable cause
-            (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+            {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.maintenance/projection
         :seon.error/operation 'seon.maintenance/result-entity
         :seon.error/message "Maintenance requires a successful persistence projection."
-        :seon.error/diagnostic-layer :seon.maintenance/projection
-        :seon.error/diagnostic-operation 'seon.maintenance/result-entity
-        :seon.error/diagnostic-member :seon.maintenance/failed-producer
-        :seon.error/diagnostic-expected "a successful persistence projection"
-        :seon.error/diagnostic-offending {:seon.schema/key schema-key :seon.maintenance/result-projection projection :seon.error/exception cause}
         :seon.error/offending {:seon.schema/key schema-key :seon.maintenance/result-projection projection :seon.error/exception cause}
-        :seon.error/diagnostic-cause :seon.maintenance/projection-refused
-        :seon.error/diagnostic-evidence {}
-        :seon.maintenance/failed-producer projection})))))))
+        :seon.maintenance/failed-producer projection
+        :seon.error/expected "a successful persistence projection"}))))))
 
 (defn project-collect-result
   "Project one public collection value into queryable component facts."
@@ -269,22 +249,15 @@
               :seon.maintenance.receipt/id receipt-id
               :seon.maintenance.receipt/completed-at completed-at}
              (db/pull database collection-facts collection))
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.maintenance/collection
         :seon.error/operation 'seon.maintenance/last-collection-in
         :seon.maintenance/uncollected-root managed-root
         :seon.error/offending managed-root
-        :seon.error/message
-        "No completed maintenance receipt records a collection of this root."
-        :seon.error/diagnostic-layer :seon.maintenance
-        :seon.error/diagnostic-operation 'seon.maintenance/last-collection-in
-        :seon.error/diagnostic-member :seon.operator/managed-root
-        :seon.error/diagnostic-expected :seon.operator.collect/managed-root
-        :seon.error/diagnostic-offending managed-root
-        :seon.error/diagnostic-cause :seon.db/not-found
-        :seon.error/diagnostic-evidence
-        [:seon.operator.collect/managed-root managed-root]}))))
+        :seon.error/message "No completed maintenance receipt records a collection of this root."
+        :seon.error/member :seon.operator/managed-root
+        :seon.error/expected :seon.operator.collect/managed-root
+        :seon.error/data {:seon.error/layer :seon.maintenance :seon.error/source [:seon.operator.collect/managed-root managed-root]}})))
 
 (defn last-collection
   "When `managed-root` was last collected, and what that collection reclaimed.
@@ -471,21 +444,16 @@
   {:malli/schema [:=> [:cat :seon.error/throwable] :seon.operator/failed-error]}
   [failure]
   (let [data (ex-data failure)]
-    (error/diagnostic
+    (seon.error.refusal/diagnostic
      (merge data
             {:seon.error/at (java.util.Date.)
              :seon.error/layer ::operation
              :seon.error/operation 'seon.maintenance/exception-value
              :seon.operator/exception-class (symbol (.getName (class failure)))
              :seon.error/message (or (ex-message failure) "The operator call failed.")
-             :seon.error/offending failure
-             :seon.error/diagnostic-layer ::operation
-             :seon.error/diagnostic-operation 'seon.maintenance/exception-value
-             :seon.error/diagnostic-member ::request
-             :seon.error/diagnostic-expected "an operation completing without an exception"
-             :seon.error/diagnostic-offending data
-             :seon.error/diagnostic-cause failure
-             :seon.error/diagnostic-evidence data
+             :seon.error/throwable failure
+             :seon.error/member ::request
+             :seon.error/expected "an operation completing without an exception"
              :seon.error/data (or data {})}))))
 
 (defn- attempt
@@ -754,21 +722,13 @@
            (ex-message failure))
       (str "Collection did not preserve and verify every recorded root."
            (unverified-root-clause result)))
-    (error/diagnostic
-        {:seon.error/at (java.util.Date.)
+    {:seon.error/at (java.util.Date.)
          :seon.error/layer ::operation
          :seon.error/operation 'seon.maintenance/incomplete-collection!
          :seon.error/message "Collection must preserve and verify every recorded root."
          :seon.error/offending result
-         :seon.error/diagnostic-layer ::operation
-         :seon.error/diagnostic-operation 'seon.maintenance/incomplete-collection!
-         :seon.error/diagnostic-member :seon.operator.collect/result
-         :seon.error/diagnostic-expected :seon.operator.collect/roots-verified?
-         :seon.error/diagnostic-offending result
-         :seon.error/diagnostic-cause :seon.operator/collection-incomplete
-         :seon.error/diagnostic-evidence result
-
-     :seon.operator.collect/result result })
+         :seon.operator.collect/result result
+         :seon.error/expected :seon.operator.collect/roots-verified?}
     failure)))
 
 (defn- inventory-facts
@@ -967,22 +927,13 @@
        (ex-info
         (str "Collection option " supplied " is not a request key. "
              "Did you mean " declared "?")
-        (error/diagnostic
         {:seon.error/at (java.util.Date.)
          :seon.error/layer ::operation
          :seon.error/operation 'seon.maintenance/refuse-misspelled-options!
          :seon.error/message "The supplied option uses the wrong namespace; use its declared key."
          :seon.error/offending supplied
-         :seon.error/diagnostic-layer ::operation
-         :seon.error/diagnostic-operation 'seon.maintenance/refuse-misspelled-options!
-         :seon.error/diagnostic-member :seon.operator.collect/option-key
-         :seon.error/diagnostic-expected declared
-         :seon.error/diagnostic-offending supplied
-         :seon.error/diagnostic-cause :seon.operator.collect/unrecognized-option
-         :seon.error/diagnostic-evidence supplied
-
          :seon.operator.collect/option-key supplied
-         })))))
+         :seon.error/expected declared}))))
   request)
 
 

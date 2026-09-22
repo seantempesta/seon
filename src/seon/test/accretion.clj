@@ -70,18 +70,13 @@
                        "use a registered predicate schema or a quoted symbol "
                        "naming an admitted predicate.")]
       (throw (ex-info message
-                      (assoc (refusal/diagnostic
-                              {:seon.error/at (java.util.Date.)
+                      (assoc {:seon.error/at (java.util.Date.)
                                :seon.error/layer :seon.test.accretion/contract
                                :seon.error/operation `data-contract!
                                :seon.error/message message
-                               :seon.error/diagnostic-layer :seon.test.accretion/contract
-                               :seon.error/diagnostic-operation `data-contract!
-                               :seon.error/diagnostic-member :seon.fn/spec
-                               :seon.error/diagnostic-expected "a data-only function contract"
-                               :seon.error/diagnostic-offending contract
-                               :seon.error/diagnostic-cause :non-data-contract
-                               :seon.error/diagnostic-evidence {}})
+                               :seon.error/member :seon.fn/spec
+                               :seon.error/expected "a data-only function contract"
+                               :seon.error/offending contract}
                              :seon.error/offending contract)))))
   contract)
 
@@ -126,7 +121,7 @@
           :seon.config/on-core-error
           (:seon.config/on-core-error request)})
         returned (:seon.sci.admit/value invocation)
-        actual (or (:seon.error/diagnostic-offending returned) returned)
+        actual (or (:seon.error/offending returned) returned)
         explanation (m/explain output-schema actual)]
     {:seon.test.accretion/arguments arguments
      :seon.test.accretion/actual actual
@@ -340,18 +335,14 @@
     :seon.test.accretion/install-refused-error]}
   [report]
   (let [message "Fix the contract or the function and re-evaluate the defn."]
-    (merge (refusal/diagnostic
-            {:seon.error/at (java.util.Date.)
+    (merge {:seon.error/at (java.util.Date.)
              :seon.error/layer :seon.test.accretion/install
              :seon.error/operation `install-refusal
              :seon.error/message message
-             :seon.error/diagnostic-layer :seon.test.accretion/install
-             :seon.error/diagnostic-operation `install-refusal
-             :seon.error/diagnostic-member :seon.test.accretion/install?
-             :seon.error/diagnostic-expected true
-             :seon.error/diagnostic-offending false
-             :seon.error/diagnostic-cause :install-refused
-             :seon.error/diagnostic-evidence {:seon.fn/sym (:seon.fn/sym report)}})
+             :seon.error/member :seon.test.accretion/install?
+             :seon.error/expected true
+             :seon.error/offending false
+             :seon.error/data {:seon.fn/sym (:seon.fn/sym report)}}
            (assoc (dissoc report :seon.fn/sym)
                   :seon.test.accretion/function-sym (:seon.fn/sym report))
            (select-keys (get-in report [:seon.test.accretion/auto-check

@@ -96,7 +96,8 @@
   `interrupted-at` — and rows 6 and 7 of the crash walk stay
   indistinguishable, which is honest: the form's effect MAY have
   happened. Nothing re-executes."
-  (:require [clojure.edn :as edn]
+  (:require [seon.error.refusal]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.main :as main]
             [clojure.string :as str]
@@ -200,22 +201,15 @@
                                          (ns-resolve host (symbol (name qualified))))
                                        (throw (ex-info
                                                (str "The loaded JVM has no interpreter binding " qualified ".")
-                                               (error/diagnostic
-                                                {:seon.error/at (java.util.Date.)
+                                               {:seon.error/at (java.util.Date.)
                                                  :seon.error/layer :seon.sci.eval/program
                                                  :seon.error/operation 'seon.sci.eval/build-base-ctx
                                                  :seon.error/message "Interpreter binding is unavailable; load its declared JVM namespace."
                                                  :seon.error/offending qualified
-                                                 :seon.error/diagnostic-layer :seon.sci.eval/program
-                                                 :seon.error/diagnostic-operation 'seon.sci.eval/build-base-ctx
-                                                 :seon.error/diagnostic-member qualified
-                                                 :seon.error/diagnostic-expected :seon.sci.eval/loaded-binding
-                                                 :seon.error/diagnostic-offending qualified
-                                                 :seon.error/diagnostic-cause :seon.error/unknown
-                                                 :seon.error/diagnostic-evidence qualified
                                                  ::row-member qualified
                                                  ::acquisition-observation {:seon.error.evidence/attribute :seon.fn/sym
-                                                                            :seon.error.evidence/value qualified}}))))
+                                                                            :seon.error.evidence/value qualified}
+                                                 :seon.error/expected :seon.sci.eval/loaded-binding})))
                                    sci-namespace)]))
                           symbols)])))
               (group-by (comp symbol namespace)
@@ -721,20 +715,14 @@
     (when-not source
       (throw
        (ex-info "Selected function is missing from the acquired SCI program snapshot."
-                (error/diagnostic
-                 {:seon.error/at (java.util.Date.)
+                {:seon.error/at (java.util.Date.)
                   :seon.error/layer :seon.sci.eval/program
                   :seon.error/operation 'seon.sci.eval/install-function-from-database!
                   :seon.error/message "Selected function has no acquired row; acquire its declaration before installing it."
                   :seon.error/offending function-symbol
-                  :seon.error/diagnostic-layer :seon.sci.eval/program
-                  :seon.error/diagnostic-operation 'seon.sci.eval/install-function-from-database!
-                  :seon.error/diagnostic-member :seon.fn/sym
-                  :seon.error/diagnostic-expected :seon.sci.eval/acquired-function
-                  :seon.error/diagnostic-offending function-symbol
-                  :seon.error/diagnostic-cause :seon.error/unknown
-                  :seon.error/diagnostic-evidence function-symbol
-                  ::missing-function-row function-symbol :seon.fn/sym function-symbol}))))
+                  ::missing-function-row function-symbol
+                  :seon.fn/sym function-symbol
+                  :seon.error/expected :seon.sci.eval/acquired-function})))
     (let [namespace-row (kernel/program-namespace ctx namespace-name)]
       (install-declared-classes! ctx [namespace-row])
       (sci/install-namespace-bindings!
@@ -872,20 +860,14 @@
                        (get row source-attribute)
                        (get committed source-attribute)))))
       (throw (ex-info "Committed declaration source does not match install request."
-                      (error/diagnostic
-                       {:seon.error/at (java.util.Date.)
+                      {:seon.error/at (java.util.Date.)
                         :seon.error/layer :seon.sci.eval/program
                         :seon.error/operation 'seon.sci.eval/install-row!
                         :seon.error/message "Install source differs from the committed declaration; install the committed source."
                         :seon.error/offending row
-                        :seon.error/diagnostic-layer :seon.sci.eval/program
-                        :seon.error/diagnostic-operation 'seon.sci.eval/install-row!
-                        :seon.error/diagnostic-member identity-attribute
-                        :seon.error/diagnostic-expected :seon.sci.eval/committed-source
-                        :seon.error/diagnostic-offending row
-                        :seon.error/diagnostic-cause :seon.error/unknown
-                        :seon.error/diagnostic-evidence row
-                        :seon.sci.eval/installation-member value}))))
+                        :seon.sci.eval/installation-member value
+                        :seon.error/expected :seon.sci.eval/committed-source
+                        :seon.error/data {:seon.error/member identity-attribute}})))
     (let [installed
           (case identity-attribute
       :seon.ns/name
@@ -962,20 +944,14 @@
         (when-let [remaining
                    (some #(remaining-definition-facts db %) value)]
           (throw (ex-info "Deleted declaration definition facts remain after commit."
-                          (error/diagnostic
-                           {:seon.error/at (java.util.Date.)
+                          {:seon.error/at (java.util.Date.)
                             :seon.error/layer :seon.sci.eval/program
                             :seon.error/operation 'seon.sci.eval/install-row!
                             :seon.error/message "Deleted declaration still has definition facts; commit its retraction before installation."
                             :seon.error/offending remaining
-                            :seon.error/diagnostic-layer :seon.sci.eval/program
-                            :seon.error/diagnostic-operation 'seon.sci.eval/install-row!
-                            :seon.error/diagnostic-member :seon.program/definition-attributes
-                            :seon.error/diagnostic-expected :seon.sci.eval/retracted-declaration
-                            :seon.error/diagnostic-offending remaining
-                            :seon.error/diagnostic-cause :seon.error/unknown
-                            :seon.error/diagnostic-evidence remaining
-                            :seon.sci.eval/installation-member (second (:seon.program/identity remaining))}))))
+                            :seon.sci.eval/installation-member (second (:seon.program/identity remaining))
+                            :seon.error/member :seon.program/definition-attributes
+                            :seon.error/expected :seon.sci.eval/retracted-declaration})))
         (when (and (not schema-deletion?)
                    (nil? (::namespace-state row)))
           (let [event (one-event (:seon.program/source row)
@@ -1265,49 +1241,34 @@
                        cause-message
                        (when location (str " at " location)) ".")
                   diagnostic
-                  (error/diagnostic
-                   {:seon.error/at (java.util.Date.)
+                  {:seon.error/at (java.util.Date.)
                     :seon.error/layer ::acquisition
                     :seon.error/operation 'seon.sci.eval/host-namespace!
                     :seon.sci.eval/row-member namespace-name
-                    :seon.sci.eval/acquisition-observation
-                    {:seon.error.evidence/attribute :seon.error/message
+                    :seon.sci.eval/acquisition-observation {:seon.error.evidence/attribute :seon.error/message
                      :seon.error.evidence/value cause-message}
                     :seon.error/message message
-                    :seon.error/diagnostic-layer ::acquisition
-                    :seon.error/diagnostic-operation
-                    'seon.sci.eval/host-namespace!
-                    :seon.error/diagnostic-member namespace-name
-                    :seon.error/diagnostic-expected ::loaded-host-namespace
-                    :seon.error/diagnostic-offending namespace-name
-                    :seon.error/diagnostic-cause cause-message
-                    :seon.error/diagnostic-evidence
-                    {:seon.sci.eval/cause-class
+                    :seon.ns/name namespace-name
+                    :seon.error/expected ::loaded-host-namespace
+                    :seon.error/data (merge {:seon.sci.eval/cause-class
                      (symbol (.getName (class underlying)))
-                     :seon.sci.eval/cause-location location-data}
-                    :seon.ns/name namespace-name})]
+                     :seon.sci.eval/cause-location location-data} {:seon.error/source cause-message})}]
               (throw (ex-info message diagnostic failure)))))
         (or (find-ns namespace-name)
             (throw
              (ex-info
               (str "First-party program namespace " namespace-name
                    " loaded without defining a namespace.")
-              (error/diagnostic
-               {:seon.error/at (java.util.Date.)
+              {:seon.error/at (java.util.Date.)
                 :seon.error/layer :seon.sci.eval/program
                 :seon.error/operation 'seon.sci.eval/host-namespace!
                 :seon.error/message "Loaded source defined no namespace; correct its namespace declaration."
                 :seon.error/offending namespace-name
-                :seon.error/diagnostic-layer :seon.sci.eval/program
-                :seon.error/diagnostic-operation 'seon.sci.eval/host-namespace!
-                :seon.error/diagnostic-member :seon.ns/name
-                :seon.error/diagnostic-expected :seon.sci.eval/loaded-namespace
-                :seon.error/diagnostic-offending namespace-name
-                :seon.error/diagnostic-cause :seon.error/unknown
-                :seon.error/diagnostic-evidence namespace-name
                 ::row-member namespace-name
                 ::acquisition-observation {:seon.error.evidence/attribute :seon.error/message
-                                           :seon.error.evidence/value "Loaded source defined no namespace."}})))))))
+                                           :seon.error.evidence/value "Loaded source defined no namespace."}
+                :seon.error/member :seon.ns/name
+                :seon.error/expected :seon.sci.eval/loaded-namespace}))))))
 
 (defn- load-core-namespaces!
   "The effectful cluster caller loads JVM namespaces before pure construction."
@@ -1421,20 +1382,14 @@
 (defn- documentation-unavailable
   {:malli/schema [:=> [:cat :symbol] :seon.sci.eval/documentation-unavailable-error]}
   [requested]
-  (error/diagnostic
-   {:seon.error/at (java.util.Date.)
+  {:seon.error/at (java.util.Date.)
     :seon.error/layer :seon.sci.eval/program
     :seon.error/operation 'seon.sci.eval/documentation-unavailable
     :seon.error/message "No public documentation is available; request an installed public declaration."
     :seon.error/offending requested
-    :seon.error/diagnostic-layer :seon.sci.eval/program
-    :seon.error/diagnostic-operation 'seon.sci.eval/documentation-unavailable
-    :seon.error/diagnostic-member :seon.fn/sym
-    :seon.error/diagnostic-expected :seon.sci.eval/public-documentation
-    :seon.error/diagnostic-offending requested
-    :seon.error/diagnostic-cause :seon.error/unknown
-    :seon.error/diagnostic-evidence requested
-    ::documentation-unavailable requested}))
+    ::documentation-unavailable requested
+    :seon.error/member :seon.fn/sym
+    :seon.error/expected :seon.sci.eval/public-documentation})
 
 (defn- declaration-statement
   "The sentence `doc` and `dir` show in place of a declaration this row lacks."
@@ -1450,20 +1405,13 @@
    nothing, which is a claim the row does not support (AGENTS.md section 2.4)."
   {:malli/schema [:=> [:cat :qualified-keyword] :seon.sci.eval/declaration-absent-error]}
   [attribute]
-  (error/diagnostic
-   {:seon.error/at (java.util.Date.)
+  {:seon.error/at (java.util.Date.)
     :seon.error/layer :seon.sci.eval/program
     :seon.error/operation 'seon.sci.eval/declaration-absent
     :seon.error/message "The program row lacks a declaration; supply the declared member before relying on it."
     :seon.error/offending attribute
-    :seon.error/diagnostic-layer :seon.sci.eval/program
-    :seon.error/diagnostic-operation 'seon.sci.eval/declaration-absent
-    :seon.error/diagnostic-member attribute
-    :seon.error/diagnostic-expected :seon.sci.eval/present-declaration
-    :seon.error/diagnostic-offending attribute
-    :seon.error/diagnostic-cause :seon.error/unknown
-    :seon.error/diagnostic-evidence attribute
-    ::missing-declaration attribute}))
+    ::missing-declaration attribute
+    :seon.error/expected :seon.sci.eval/present-declaration})
 
 (defn docstring-parts
   "Split a declared docstring into its summary, body, and final Example section."
@@ -1682,33 +1630,19 @@
         cause-message (or (:seon.error/message failure-data)
                           (when (instance? Throwable failure) (ex-message failure))
                           (.getName (class failure)))]
-    (error/diagnostic
-     {:seon.error/at (java.util.Date.)
+    {:seon.error/at (java.util.Date.)
       :seon.error/layer ::acquisition
       :seon.error/operation 'seon.sci.eval/acquisition-refusal
       :seon.sci.eval/row-member (second identity)
-      :seon.sci.eval/acquisition-observation
-      {:seon.error.evidence/attribute :seon.error/message
+      :seon.sci.eval/acquisition-observation {:seon.error.evidence/attribute :seon.error/message
        :seon.error.evidence/value cause-message}
-      :seon.error/message
-      "Program row could not be installed; correct the reported acquisition evidence."
-      :seon.error/diagnostic-layer ::acquisition
-      :seon.error/diagnostic-operation 'seon.sci.eval/acquisition-refusal
-      :seon.error/diagnostic-member identity
-      :seon.error/diagnostic-expected ::installed
-      :seon.error/diagnostic-offending identity
-      :seon.error/diagnostic-cause
-      cause-message
-      :seon.error/diagnostic-evidence
-      {:seon.error/message cause-message
-       :seon.error/diagnostic-cause
-       cause-message}
-      :seon.error/data
-      (cond-> {::acquisition-row identity
+      :seon.error/message "Program row could not be installed; correct the reported acquisition evidence."
+      :seon.error/data (cond-> {::acquisition-row identity
                ::acquisition-cause-message cause-message}
         failure-data (assoc ::acquisition-failure failure-data)
         (instance? Throwable failure)
-        (assoc ::acquisition-throwable-class (.getName (class failure))))})))
+        (assoc ::acquisition-throwable-class (.getName (class failure))))
+      :seon.error/expected ::installed}))
 
 (defn- acquisition-refusal-id
   [refusal]
@@ -1934,20 +1868,14 @@
                 (throw
                  (ex-info
                   "Program acquisition found a namespace binding cycle."
-                  (error/diagnostic
-                   {:seon.error/at (java.util.Date.)
+                  {:seon.error/at (java.util.Date.)
                     :seon.error/layer :seon.sci.eval/program
                     :seon.error/operation 'seon.sci.eval/acquire-program!
                     :seon.error/message "Namespace bindings form a cycle; remove the cyclic dependency before acquisition."
                     :seon.error/offending remaining
-                    :seon.error/diagnostic-layer :seon.sci.eval/program
-                    :seon.error/diagnostic-operation 'seon.sci.eval/acquire-program!
-                    :seon.error/diagnostic-member :seon.ns/requires
-                    :seon.error/diagnostic-expected :seon.sci.eval/acyclic-bindings
-                    :seon.error/diagnostic-offending remaining
-                    :seon.error/diagnostic-cause :seon.error/unknown
-                    :seon.error/diagnostic-evidence remaining
-                    ::pending-namespaces (set (keys remaining))}))))
+                    ::pending-namespaces (set (keys remaining))
+                    :seon.error/member :seon.ns/requires
+                    :seon.error/expected :seon.sci.eval/acyclic-bindings})))
               (let [released (set ready)]
                 (recur
                  (into {}
@@ -2439,20 +2367,13 @@
                 (throw
                  (ex-info
                   "Schema deletion did not unregister its reader identity."
-                  (error/diagnostic
-                   {:seon.error/at (java.util.Date.)
+                  {:seon.error/at (java.util.Date.)
                     :seon.error/layer :seon.sci.eval/program
                     :seon.error/operation 'seon.sci.eval/declared-row
                     :seon.error/message "Evaluated schema identity differs from its declaration; return the declared identity."
                     :seon.error/offending schema-value
-                    :seon.error/diagnostic-layer :seon.sci.eval/program
-                    :seon.error/diagnostic-operation 'seon.sci.eval/declared-row
-                    :seon.error/diagnostic-member unregister-key
-                    :seon.error/diagnostic-expected :seon.sci.eval/registered-reader-identity
-                    :seon.error/diagnostic-offending schema-value
-                    :seon.error/diagnostic-cause :seon.error/unknown
-                    :seon.error/diagnostic-evidence schema-value
-                    ::schema-refused unregister-key}))))
+                    ::schema-refused unregister-key
+                    :seon.error/expected :seon.sci.eval/registered-reader-identity})))
               ;; Dependency validation is pure here. Current database data
               ;; is fenced by the terminal transaction against db-before.
               (schema/projection-without-schema projection unregister-key)
@@ -2464,20 +2385,13 @@
                 (throw
                  (ex-info
                   "Schema declaration did not register its reader identity."
-                  (error/diagnostic
-                   {:seon.error/at (java.util.Date.)
+                  {:seon.error/at (java.util.Date.)
                     :seon.error/layer :seon.sci.eval/program
                     :seon.error/operation 'seon.sci.eval/declared-row
                     :seon.error/message "Evaluated schema identity differs from its declaration; return the declared identity."
                     :seon.error/offending schema-value
-                    :seon.error/diagnostic-layer :seon.sci.eval/program
-                    :seon.error/diagnostic-operation 'seon.sci.eval/declared-row
-                    :seon.error/diagnostic-member schema-key
-                    :seon.error/diagnostic-expected :seon.sci.eval/registered-reader-identity
-                    :seon.error/diagnostic-offending schema-value
-                    :seon.error/diagnostic-cause :seon.error/unknown
-                    :seon.error/diagnostic-evidence schema-value
-                    ::schema-refused schema-key}))))
+                    ::schema-refused schema-key
+                    :seon.error/expected :seon.sci.eval/registered-reader-identity})))
               ;; Validate the actual evaluated value while the overlay is
               ;; isolated. The terminal transaction repeats this pure
               ;; candidate validation against its mid-transaction db value.

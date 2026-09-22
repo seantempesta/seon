@@ -197,7 +197,7 @@
          {:seon.render/value (Object.)})]
     (is (some? (:seon.render/refused-member failure)))
     (is (= :seon.render.value/root
-           (:seon.error/diagnostic-member failure)))
+           (:seon.error/member failure)))
     (is (not (re-find #"#object" (pr-str failure))))))
 
 (deftest source-output-selects-a-source-builder-before-the-terminal-floor

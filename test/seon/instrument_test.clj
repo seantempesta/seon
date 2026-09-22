@@ -84,33 +84,14 @@
                 {:seon.config/on-core-error nil})]
     (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) result))
     (is ((schema/projection-validator (schema/handed-projection)
-                                     :seon.instrument/registration-error) result))
-    (is (= {:seon.error/diagnostic-layer :instrumentation
-            :seon.error/diagnostic-operation 'seon.instrument/apply!
-            :seon.error/diagnostic-member :seon.config/on-core-error
-            :seon.error/diagnostic-expected [:enum :panic :record]
-            :seon.error/diagnostic-offending :seon.instrument/nil
-            :seon.error/diagnostic-cause :seon.instrument/invalid-mode
-            :seon.error/diagnostic-evidence-availability :seon.error/known
-            :seon.error/diagnostic-evidence
-            {:seon.instrument/accepted-modes [:panic :record]}}
-           (select-keys
-            (:seon.error/data result)
-            [:seon.error/diagnostic-layer
-             :seon.error/diagnostic-operation
-             :seon.error/diagnostic-member
-             :seon.error/diagnostic-expected
-             :seon.error/diagnostic-offending
-             :seon.error/diagnostic-cause
-             :seon.error/diagnostic-evidence-availability
-             :seon.error/diagnostic-evidence]))))
+                                     :seon.instrument/registration-error) result)))
   ;; and armed, the contract owns the same refusal at the same crossing
   (instrument/apply! {:seon.config/on-core-error :panic})
   (let [refusal (test-support/refusal-data
                  #(instrument/apply! {:seon.config/on-core-error :degrade}))]
     (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
     (is (= 'seon.instrument/apply!
-           (:seon.error/diagnostic-operation (:seon.error/data refusal))))))
+           (:seon.error/operation refusal)))))
 
 (defn- instrumented!
   "Run `body` with instrumentation on, and always take it back off."
@@ -293,12 +274,12 @@
             when this throw escapes a proc, the fault path classifies it
             from the cause chain like any other refusal")
        (is (= 'seon.error/value
-              (:seon.error/diagnostic-operation (:seon.error/data data)))
+              (:seon.error/operation data))
            "naming the function whose contract was violated")
        (is (= :arguments
-              (:seon.error/diagnostic-member (:seon.error/data data))))
+              (:seon.error/member (:seon.error/data data))))
        (is (= :seon.error/fact
-              (:seon.error/diagnostic-expected (:seon.error/data data)))
+              (:seon.error/expected data))
            "a cluster re-arm retains the JVM wrapper's bounded evidence policy")
        (is (str/includes? (ex-message failure) "refused fact at []: expected a map, got a string"))))))
 
@@ -336,7 +317,7 @@
     (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data failure)))
     (is (= 'my.agents.contract/value
            (get-in (ex-data failure)
-                   [:seon.error/data :seon.error/diagnostic-operation])))
+                   [:seon.error/operation])))
     (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) (test-support/refusal-data (fn* [] (instrument/wrap-interpreted (quote my.agents.contract/value) "[:=> [:cat [:fn clojure.core/int?]] :int]" projection :record caps wrapped))))
         ":record cannot arm without acquired recording custody")))
 
@@ -586,28 +567,7 @@
          (is (str/includes? (error/render-ai diagnostic)
                             (str function-symbol " refused argument count at []:")))
          (is (str/includes? (error/render-ai diagnostic) "([rows])"))
-         (is (str/includes? (error/render-ai diagnostic) "0"))
-         (is (= {:seon.error/diagnostic-layer :instrumentation
-                 :seon.error/diagnostic-operation function-symbol
-                 :seon.error/diagnostic-member :arity
-                 :seon.error/diagnostic-expected '([rows])
-                 :seon.error/diagnostic-offending 0
-                 :seon.error/diagnostic-cause :malli.core/invalid-arity
-                 :seon.error/diagnostic-evidence-availability
-                 :seon.error/known
-                 :seon.error/diagnostic-evidence
-                 {:seon.instrument.lookup/status :found
-                  :seon.instrument/arglists '([rows])}}
-                (select-keys
-                 (:seon.error/data diagnostic)
-                 [:seon.error/diagnostic-layer
-                  :seon.error/diagnostic-operation
-                  :seon.error/diagnostic-member
-                  :seon.error/diagnostic-expected
-                  :seon.error/diagnostic-offending
-                  :seon.error/diagnostic-cause
-                  :seon.error/diagnostic-evidence-availability
-                  :seon.error/diagnostic-evidence]))))))))
+         (is (str/includes? (error/render-ai diagnostic) "0")))))))
 
 (deftest a-violation-carries-bounded-arguments-only-when-it-can
   (let [caps (assoc (config/result-caps (test-support/effective-config))
@@ -621,10 +581,10 @@
       (let [data (try (error/value "not a fact")
                       (catch Exception thrown (ex-data thrown)))]
         (is (= ["not a fact"]
-               (:seon.error/diagnostic-offending (:seon.error/data data)))
+               (:seon.error/offending data))
             "arguments remain bounded ordinary data, never a printed value")
         (is (= :seon.error/fact
-               (:seon.error/diagnostic-expected (:seon.error/data data))))
+               (:seon.error/expected data)))
         (is (nil? (::instrument/args (:seon.error/data data)))
             "semantic evidence is not duplicated as serialized arguments"))
       (finally (instrument/remove!))))
@@ -633,7 +593,7 @@
      (let [data (try (error/value "not a fact")
                      (catch Exception thrown (ex-data thrown)))]
        (is (= ["not a fact"]
-              (:seon.error/diagnostic-offending (:seon.error/data data)))
+              (:seon.error/offending data))
            "re-arming without caps cannot replace the shared reporter")))))
 
 (deftest arglist-lookup-failures-retain-their-cause
@@ -650,7 +610,7 @@
                                      :seon.instrument/contract-error) refusal))
     (is (= :input (:seon.instrument/check refusal)))
     (is (= [observed]
-           (get-in refusal [:seon.error/data :seon.error/diagnostic-offending])))))
+           (get-in refusal [:seon.error/offending])))))
 
 (deftest contract-problems-are-semantic-once-never-a-serialized-print-tree
   (let [caps (assoc (config/result-caps (test-support/effective-config))
@@ -738,7 +698,7 @@
                  (config/result-caps (test-support/effective-config)) (constantly 1))
         refusal (try (wrapped raw) (catch Exception failure (ex-data failure)))
         offending (get-in refusal [:seon.error/data :seon.error/problems 0 :seon.error/offending])
-        checked (get-in refusal [:seon.error/data :seon.error/diagnostic-offending])
+        checked (get-in refusal [:seon.error/offending])
         unit {:seon.render/value refusal
               :seon.repl/handle 'result/eaudit
               :seon.render/profile
@@ -794,14 +754,14 @@
                          before)
             data (ex-data failure)
             instrument-data (:seon.error/data data)
-            received (first (:seon.error/diagnostic-offending instrument-data))]
+            received (first (:seon.error/offending instrument-data))]
         (is (identical? registry received)
             "the seam retains the actual object; presentation alone elides it")
         (is (< allocated allocation-ceiling)
             (str "construction allocated " allocated
                  " bytes; the issue baseline was 150,063,304"))
         (is (= 1 (:seon.instrument/problem-count instrument-data)))
-        (is (= :int (:seon.error/diagnostic-expected instrument-data)))
+        (is (= :int (:seon.error/expected instrument-data)))
         (is (identical? registry
                         (get-in instrument-data [:seon.error/problems 0 :seon.error/offending]))))
       (finally
@@ -1001,8 +961,7 @@
            (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/arity-error) (ex-data failure)))
            (is (= expected-function
                   (get-in (ex-data failure)
-                          [:seon.error/data
-                           :seon.error/diagnostic-operation]))
+                          [:seon.error/operation]))
                "each exact qualified Var symbol selects its own contract")))))))
 
 (deftest registration-failure-names-the-var-and-authored-contract
@@ -1022,17 +981,12 @@
               (catch clojure.lang.ExceptionInfo thrown thrown))
             diagnostic (ex-data failure)]
         (is (= function-symbol
-               (:seon.error/diagnostic-member
+               (:seon.error/member
                 (:seon.error/data diagnostic))))
         (is (= authored-schema
-               (:seon.error/diagnostic-expected
-                (:seon.error/data diagnostic))))
-        (is (= :malli.core/invalid-ref
-               (:seon.error/diagnostic-cause
-                (:seon.error/data diagnostic))))
+               (:seon.error/expected diagnostic)))
         (is (= :n5/missing
-               (:seon.error/diagnostic-offending
-                (:seon.error/data diagnostic)))))
+               (:seon.error/offending diagnostic))))
       (finally
         (instrument/remove!)
         (remove-ns namespace-name)))))
@@ -1173,7 +1127,7 @@
           (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
           (is (= kind (get-in refusal [:seon.error/data :seon.instrument/arm])))
           (is (= 'seon.instrument-test/private-integer-boundary
-                 (get-in refusal [:seon.error/data :seon.error/diagnostic-operation])))))
+                 (get-in refusal [:seon.error/operation])))))
       (let [refusal (test-support/refusal-data #(private-integer-boundary original-error))]
         (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
         (is (= original-error

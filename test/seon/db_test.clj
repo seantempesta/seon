@@ -291,16 +291,6 @@
   (schema.datahike/malli->datahike-schema-in
    fixture-projection [::component-root-id ::component-child ::component-value]))
 
-(def ^:private diagnostic-fields
-  #{:seon.error/diagnostic-layer
-    :seon.error/diagnostic-operation
-    :seon.error/diagnostic-member
-    :seon.error/diagnostic-expected
-    :seon.error/diagnostic-offending
-    :seon.error/diagnostic-cause
-    :seon.error/diagnostic-evidence-availability
-    :seon.error/diagnostic-evidence})
-
 (deftest transaction-success-and-refusal-shapes-are-declared
   (test-support/with-database
    (fn [connection]
@@ -1487,20 +1477,10 @@
          (doseq [refusal [identity-refusal database-refusal
                           impurity-refusal]]
            (is (true? (:seon.db/diff-refused refusal)))
-           (is (= diagnostic-fields
-                  (set (keys (:seon.error/data refusal))))))
-         (is (= :seon.db/row-identity-absent
-                (get-in identity-refusal
-                        [:seon.error/data :seon.error/diagnostic-cause])))
-         (is (= :seon.db/database-input-absent
-                (get-in database-refusal
-                        [:seon.error/data :seon.error/diagnostic-cause])))
-         (is (= :seon.db/external-sink-reachable
-                (get-in impurity-refusal
-                        [:seon.error/data :seon.error/diagnostic-cause])))
+           (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) refusal)))
          (is (= #{:ai-visible-text}
                 (get-in impurity-refusal
-                        [:seon.error/data :seon.error/diagnostic-offending]))))))))
+                        [:seon.error/offending]))))))))
 
 (deftest non-temporal-reads-return-one-flat-error-before-datahike
   (let [configuration
@@ -1559,7 +1539,7 @@
        (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
        (is (= :input (:seon.instrument/check refusal)))
        (is (= 'seon.db/pull-many
-              (:seon.error/diagnostic-operation (:seon.error/data refusal))))
+              (:seon.error/operation refusal)))
        (is (string? (:seon.error/message refusal)))))))
 
 (deftest invalid-read-identities-are-diagnostics-never-absence
@@ -1579,19 +1559,16 @@
                       [:seon.agent/id 'identity-admission-present])]
        (testing "an uninstalled query attribute names registered candidates"
          (is (true? (:seon.db/invalid-read unknown-attribute)))
-         (is (= diagnostic-fields
-                (set (keys (:seon.error/data unknown-attribute)))))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) unknown-attribute))
          (is (= 'seon.db/q
                 (get-in unknown-attribute
-                        [:seon.error/data
-                         :seon.error/diagnostic-operation])))
+                        [:seon.error/operation])))
          (is (= :seon.agent/idd
                 (get-in unknown-attribute
-                        [:seon.error/data :seon.error/diagnostic-member])))
+                        [:seon.error/data :seon.error/member])))
          (is (some #{:seon.agent/id}
                    (get-in unknown-attribute
-                           [:seon.error/data :seon.error/diagnostic-evidence
-                            :seon.db/registered-candidates]))))
+                           [:seon.error/data :seon.db/registered-candidates]))))
        (testing "wrong-typed lookup refs retain the installed declaration"
          (doseq [[operation result]
                  [['seon.db/pull wrong-pull]
@@ -1599,17 +1576,15 @@
            (is (true? (:seon.db/invalid-read result)))
            (is (= operation
                   (get-in result
-                          [:seon.error/data
-                           :seon.error/diagnostic-operation])))
+                          [:seon.error/operation])))
            (is (= :db.type/string
                   (get-in result
-                          [:seon.error/data :seon.error/diagnostic-expected
+                          [:seon.error/expected
                            :db/valueType])))
            (is (= {:seon.db/attribute :seon.agent/id
                    :seon.db/value 'identity-admission-present}
                   (get-in result
-                          [:seon.error/data
-                           :seon.error/diagnostic-offending])))))
+                          [:seon.error/offending])))))
        (testing "valid absence remains ordinary absence"
          (is (nil? (db/pull @connection '[*]
                             [:seon.agent/id
@@ -1691,11 +1666,7 @@
                        view)]
              (is (not (true? (:seon.db/invalid-read installed)))
                  "an installed attribute is never classified as uninstalled")
-             (is (true? (:seon.db/invalid-read uninstalled)))
-             (is (= :seon.db/attribute-not-installed
-                    (get-in uninstalled
-                            [:seon.error/data
-                             :seon.error/diagnostic-cause]))))))))))
+             (is (true? (:seon.db/invalid-read uninstalled))))))))))
 
 (deftest malformed-public-database-requests-name-the-public-operation
   (test-support/with-database
@@ -1716,15 +1687,13 @@
            (do (is (true? (:seon.db/invalid-request result)))
                (is (= :query (:seon.db/missing-request-member result))))
            (is (nil? (:seon.db/missing-request-member result))))
-         (is (= diagnostic-fields
-                (set (keys (:seon.error/data result)))))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) result))
          (is (= operation
                 (get-in result
-                        [:seon.error/data
-                         :seon.error/diagnostic-operation])))
+                        [:seon.error/operation])))
          (is (= member
                 (get-in result
-                        [:seon.error/data :seon.error/diagnostic-member]))))
+                        [:seon.error/data :seon.error/member]))))
        ;; `seon.db/pull` declares `:selector` required and `seon.db/transact!`
        ;; declares the shape of `:tx-data`, so under the contracts every
        ;; cluster arms the refusal lands one frame before the body — and it
@@ -1741,8 +1710,7 @@
            (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
            (is (= :input (:seon.instrument/check refusal)))
            (is (= operation
-                  (get-in refusal [:seon.error/data
-                                   :seon.error/diagnostic-operation])))
+                  (get-in refusal [:seon.error/operation])))
            (is (= path
                   (first (get-in refusal
                                  [:seon.error/data
@@ -1750,8 +1718,7 @@
        (let [malformed (first (last cases))]
          (is (= [:entity :attribute :value :transaction :added]
                 (get-in malformed
-                        [:seon.error/data
-                         :seon.error/diagnostic-expected])))
+                        [:seon.error/expected])))
          (is (not (str/includes? (pr-str malformed)
                                  "resolve-pattern-lookup-entity-id"))))))))
 
@@ -2163,8 +2130,8 @@
            data (:seon.error/data refusal)]
        (is (= 'seon.db/pull (:seon.db.read/unreadable-declarations refusal)))
        (is (= :seon.db/installed-schema
-              (:seon.error/diagnostic-member data)))
-       (is (= 'seon.db/pull (:seon.error/diagnostic-operation data)))
+              (:seon.error/member data)))
+       (is (= 'seon.db/pull (:seon.error/operation data)))
        (let [observed (@#'db/with-declarations
                        {:not :a-database} 'seon.db/pull
                        (fn [_] (reset! decoded? true) ::decoded))]
@@ -2209,9 +2176,9 @@
                            {:seon.db/read-operation :seon.db/not-an-operation})
            data (:seon.error/data unknown)]
        (is (= :seon.db/not-an-operation (:seon.db.read/unknown-read-operation unknown)))
-       (is (= :seon.db/read-operation (:seon.error/diagnostic-member data)))
+       (is (= :seon.db/read-operation (:seon.error/member data)))
        (is (= :seon.db/not-an-operation
-              (:seon.error/diagnostic-offending data)))))))
+              (:seon.error/offending data)))))))
 
 (deftest pull-validates-its-result-against-the-derived-pulled-form
   ;; The pulled shape DERIVES from the entity schema under the reader's exact
@@ -2276,7 +2243,7 @@
                   (:seon.db.read/invalid-pulled-result refusal))
                "a wrong-typed expectation fails: the name is a symbol, not a string")
            (is (= {:seon.ns/name "my.message"}
-                  (:seon.error/diagnostic-offending data)))))))))
+                  (:seon.error/offending data)))))))))
 
 (deftest the-write-bound-derives-from-the-writes-own-provenance
   ;; Ruling 1r (owner, 2026-09-18): root/system writes carry NO per-write

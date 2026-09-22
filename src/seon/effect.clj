@@ -255,20 +255,14 @@
       (throw
        (ex-info
         "This effect identity was already recorded and will not be dispatched again."
-        (error/diagnostic
-       {:seon.error/at (Date.)
+        {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/open-call
         :seon.error/message "Use a new effect identity; this request was already recorded."
         :seon.error/offending (:seon.effect/id receipt)
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/open-call
-        :seon.error/diagnostic-member :seon.effect/id
-        :seon.error/diagnostic-expected "one open effect identity"
-        :seon.error/diagnostic-offending (:seon.effect/id receipt)
-        :seon.error/diagnostic-cause :seon.effect/id
-        :seon.error/diagnostic-evidence (:seon.effect/id receipt)
-        :seon.effect/recorded-effect-id (:seon.effect/id receipt)})))
+        :seon.effect/recorded-effect-id (:seon.effect/id receipt)
+        :seon.error/member :seon.effect/id
+        :seon.error/expected "one open effect identity"}))
       (let [evaluation (evaluation-eid database receipt)]
         [(cond-> (merge receipt
                         (declared-datoms database
@@ -317,39 +311,27 @@
       (nil? receipt)
       (throw
        (ex-info "The effect receipt does not exist."
-                (error/diagnostic
-       {:seon.error/at (Date.)
+                {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/settle-call
         :seon.error/message "Open the effect before attempting settlement."
         :seon.error/offending (:seon.effect/id request)
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/settle-call
-        :seon.error/diagnostic-member :seon.effect/id
-        :seon.error/diagnostic-expected "one open effect identity"
-        :seon.error/diagnostic-offending (:seon.effect/id request)
-        :seon.error/diagnostic-cause :seon.effect/id
-        :seon.error/diagnostic-evidence (:seon.effect/id request)
-        :seon.effect/missing-effect-id (:seon.effect/id request)})))
+        :seon.effect/missing-effect-id (:seon.effect/id request)
+        :seon.error/member :seon.effect/id
+        :seon.error/expected "one open effect identity"}))
 
       (or (:seon.effect/result-edn receipt)
           (:seon.effect/interrupted-at receipt))
       (throw
        (ex-info "The effect receipt is already terminal."
-                (error/diagnostic
-       {:seon.error/at (Date.)
+                {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/settle-call
         :seon.error/message "The effect is terminal and cannot settle again."
         :seon.error/offending (:seon.effect/id request)
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/settle-call
-        :seon.error/diagnostic-member :seon.effect/id
-        :seon.error/diagnostic-expected "one open effect identity"
-        :seon.error/diagnostic-offending (:seon.effect/id request)
-        :seon.error/diagnostic-cause :seon.effect/id
-        :seon.error/diagnostic-evidence (:seon.effect/id request)
-        :seon.effect/settled-effect-id (:seon.effect/id request)})))
+        :seon.effect/settled-effect-id (:seon.effect/id request)
+        :seon.error/member :seon.effect/id
+        :seon.error/expected "one open effect identity"}))
 
       :else
       (cond->
@@ -398,39 +380,27 @@
       (nil? receipt)
       (throw
        (ex-info "The effect receipt does not exist."
-                (error/diagnostic
-       {:seon.error/at (Date.)
+                {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/interrupt-call
         :seon.error/message "Open the effect before attempting settlement."
         :seon.error/offending (:seon.effect/id request)
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/interrupt-call
-        :seon.error/diagnostic-member :seon.effect/id
-        :seon.error/diagnostic-expected "one open effect identity"
-        :seon.error/diagnostic-offending (:seon.effect/id request)
-        :seon.error/diagnostic-cause :seon.effect/id
-        :seon.error/diagnostic-evidence (:seon.effect/id request)
-        :seon.effect/missing-effect-id (:seon.effect/id request)})))
+        :seon.effect/missing-effect-id (:seon.effect/id request)
+        :seon.error/member :seon.effect/id
+        :seon.error/expected "one open effect identity"}))
 
       (or (:seon.effect/result-edn receipt)
           (:seon.effect/interrupted-at receipt))
       (throw
        (ex-info "The effect receipt is already terminal."
-                (error/diagnostic
-       {:seon.error/at (Date.)
+                {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/interrupt-call
         :seon.error/message "The effect is terminal and cannot settle again."
         :seon.error/offending (:seon.effect/id request)
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/interrupt-call
-        :seon.error/diagnostic-member :seon.effect/id
-        :seon.error/diagnostic-expected "one open effect identity"
-        :seon.error/diagnostic-offending (:seon.effect/id request)
-        :seon.error/diagnostic-cause :seon.effect/id
-        :seon.error/diagnostic-evidence (:seon.effect/id request)
-        :seon.effect/settled-effect-id (:seon.effect/id request)})))
+        :seon.effect/settled-effect-id (:seon.effect/id request)
+        :seon.error/member :seon.effect/id
+        :seon.error/expected "one open effect identity"}))
 
       :else
       (cond->
@@ -538,17 +508,14 @@
                :seon.await/config-value
                (:seon.config.eval/time-limit-ms effective)}
               :seon.await/diagnostic
-              {:seon.error/diagnostic-layer :effect
-               :seon.error/diagnostic-operation ::handler-completion
-               :seon.error/diagnostic-member
-               {:seon.effect/id effect-id
-                :seon.fn/sym owner-sym}
-               :seon.error/diagnostic-expected ::handler-result
-               :seon.error/diagnostic-offending ::pending
-               :seon.error/diagnostic-evidence
-               {:seon.effect/id effect-id
+              {:seon.error/layer :effect
+               :seon.error/operation ::handler-completion
+               :seon.error/expected ::handler-result
+               :seon.error/offending ::pending
+               :seon.error/data (merge {:seon.effect/id effect-id
                 :seon.turn/id
-                (:seon.turn/id *request-context*)}}
+                (:seon.turn/id *request-context*)} {:seon.error/member {:seon.effect/id effect-id
+                :seon.fn/sym owner-sym}})}
               :seon.await/future task})]
         (when (:seon.await/elapsed-ms result)
           (.cancel task true))
@@ -652,20 +619,14 @@
 (defn- interrupt!
   ([connection effect-id]
    (interrupt! connection effect-id
-               (error/diagnostic
-       {:seon.error/at (Date.)
+               {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/interrupt!
         :seon.error/message "The effect was interrupted before completion."
         :seon.error/offending effect-id
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/interrupt!
-        :seon.error/diagnostic-member :seon.effect/id
-        :seon.error/diagnostic-expected "completion before interruption"
-        :seon.error/diagnostic-offending effect-id
-        :seon.error/diagnostic-cause :seon.effect/id
-        :seon.error/diagnostic-evidence effect-id
-        :seon.effect/interrupted-effect-id effect-id})))
+        :seon.effect/interrupted-effect-id effect-id
+        :seon.error/member :seon.effect/id
+        :seon.error/expected "completion before interruption"}))
   ([connection effect-id value]
   (let [interrupted-at (Date.)]
     {:seon.effect/value value
@@ -684,15 +645,10 @@
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/handler-failure
         :seon.error/message "Inspect the capability handler failure before retrying."
-        :seon.error/offending failure
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/handler-failure
-        :seon.error/diagnostic-member :seon.effect/capability
-        :seon.error/diagnostic-expected "a handler completing normally"
-        :seon.error/diagnostic-offending failure
-        :seon.error/diagnostic-cause failure
-        :seon.error/diagnostic-evidence owner-sym
-        :seon.effect/failed-owner owner-sym}))
+        :seon.effect/failed-owner owner-sym
+        :seon.error/throwable failure
+        :seon.error/member :seon.effect/capability
+        :seon.error/expected "a handler completing normally"}))
 
 (defn- background-settlement-request
   "Capture everything background settlement needs on the requesting thread."
@@ -751,39 +707,25 @@
       (some? supplied)
       (if (and (int? supplied) (pos? supplied))
         supplied
-        (error/diagnostic
-       {:seon.error/at (Date.)
+        {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/background-time-limit
         :seon.error/message "Supply positive integer milliseconds for detached work."
         :seon.error/offending supplied
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/background-time-limit
-        :seon.error/diagnostic-member :seon.effect/time-limit-ms
-        :seon.error/diagnostic-expected "positive integer milliseconds"
-        :seon.error/diagnostic-offending supplied
-        :seon.error/diagnostic-cause :seon.effect/time-limit-ms
-        :seon.error/diagnostic-evidence supplied
-        :seon.effect/time-limit-attribute :seon.effect/time-limit-ms}))
+        :seon.effect/time-limit-attribute :seon.effect/time-limit-ms
+        :seon.error/expected "positive integer milliseconds"})
 
       (and (int? configured) (pos? configured))
       configured
 
       :else
-      (error/diagnostic
-       {:seon.error/at (Date.)
+      {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/background-time-limit
         :seon.error/message "Configure a background bound or supply one with the request."
         :seon.error/offending configured
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/background-time-limit
-        :seon.error/diagnostic-member :seon.config.effect.background/time-limit-ms
-        :seon.error/diagnostic-expected "a configured positive bound"
-        :seon.error/diagnostic-offending configured
-        :seon.error/diagnostic-cause :seon.config.effect.background/time-limit-ms
-        :seon.error/diagnostic-evidence configured
-        :seon.effect/missing-bound :seon.config.effect.background/time-limit-ms}))))
+        :seon.effect/missing-bound :seon.config.effect.background/time-limit-ms
+        :seon.error/expected "a configured positive bound"})))
 
 (defn- request*
   {:seon.fn/invokes #{:seon.effect/capability}
@@ -792,36 +734,23 @@
   (let [owner-sym (owner-symbol owner)]
      (cond
        (nil? *request-context*)
-       (error/diagnostic
        {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/request*
         :seon.error/message "Invoke the capability from a current evaluation."
         :seon.error/offending request
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/request*
-        :seon.error/diagnostic-member :seon.turn/id
-        :seon.error/diagnostic-expected "a current evaluation context"
-        :seon.error/diagnostic-offending request
-        :seon.error/diagnostic-cause :seon.turn/id
-        :seon.error/diagnostic-evidence request
-        :seon.effect/missing-context-member :seon.turn/id})
+        :seon.effect/missing-context-member :seon.turn/id
+        :seon.error/expected "a current evaluation context"}
 
        (nil? owner-sym)
-       (error/diagnostic
        {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/request*
         :seon.error/message "Pass the capability owner Var."
         :seon.error/offending owner
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/request*
-        :seon.error/diagnostic-member :seon.effect/owner
-        :seon.error/diagnostic-expected "the capability owner Var"
-        :seon.error/diagnostic-offending owner
-        :seon.error/diagnostic-cause :seon.effect/owner
-        :seon.error/diagnostic-evidence owner
-        :seon.effect/owner-class (if (nil? owner) 'nil (symbol (.getName (class owner))))})
+        :seon.effect/owner-class (if (nil? owner) 'nil (symbol (.getName (class owner))))
+        :seon.error/member :seon.effect/owner
+        :seon.error/expected "the capability owner Var"}
 
        :else
        (let [connection (:seon.db/connection *request-context*)
@@ -853,52 +782,34 @@
              (when background? (background-time-limit execution effective))]
          (cond
            (nil? handler-symbol)
-           (error/diagnostic
-       {:seon.error/at (Date.)
+           {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/request*
         :seon.error/message "Declare a capability handler on the owner function."
         :seon.error/offending owner-row
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/request*
-        :seon.error/diagnostic-member :seon.effect/capability
-        :seon.error/diagnostic-expected "a declared capability handler"
-        :seon.error/diagnostic-offending owner-row
-        :seon.error/diagnostic-cause :seon.effect/capability
-        :seon.error/diagnostic-evidence owner-row
-        :seon.effect/owner-without-handler owner-sym})
+        :seon.effect/owner-without-handler owner-sym
+        :seon.error/member :seon.effect/capability
+        :seon.error/expected "a declared capability handler"}
 
            (nil? handler)
-           (error/diagnostic
-       {:seon.error/at (Date.)
+           {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/request*
         :seon.error/message "Load the declared capability handler before dispatch."
         :seon.error/offending handler-symbol
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/request*
-        :seon.error/diagnostic-member :seon.effect/capability
-        :seon.error/diagnostic-expected "a loaded capability handler"
-        :seon.error/diagnostic-offending handler-symbol
-        :seon.error/diagnostic-cause :seon.effect/capability
-        :seon.error/diagnostic-evidence handler-symbol
-        :seon.effect/unavailable-handler-symbol handler-symbol})
+        :seon.effect/unavailable-handler-symbol handler-symbol
+        :seon.error/member :seon.effect/capability
+        :seon.error/expected "a loaded capability handler"}
 
            (not (accepts-request? database owner-sym request))
-           (error/diagnostic
-       {:seon.error/at (Date.)
+           {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/request*
         :seon.error/message "Supply a request satisfying the owner input contract."
         :seon.error/offending request
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/request*
-        :seon.error/diagnostic-member :seon.fn/spec
-        :seon.error/diagnostic-expected "the owner input contract"
-        :seon.error/diagnostic-offending request
-        :seon.error/diagnostic-cause :seon.fn/spec
-        :seon.error/diagnostic-evidence request
-        :seon.effect/request-owner owner-sym})
+        :seon.effect/request-owner owner-sym
+        :seon.error/member :seon.fn/spec
+        :seon.error/expected "the owner input contract"}
 
            (or (:seon.effect/time-limit-attribute background-limit) (:seon.effect/missing-bound background-limit))
            background-limit
@@ -920,22 +831,16 @@
              ;; The bound is the declared storage bound this admission was
              ;; handed, and the refusal names it and the bytes reached.
              (if-some [marker (admit/missing-marker projected-request)]
-               (error/diagnostic
-       {:seon.error/at (Date.)
+               {:seon.error/at (Date.)
         :seon.error/layer :seon.effect/execution
         :seon.error/operation 'seon.effect/request*
         :seon.error/message "Reduce the capability request to fit the declared admission bounds."
         :seon.error/offending request
-        :seon.error/diagnostic-layer :seon.effect/execution
-        :seon.error/diagnostic-operation 'seon.effect/request*
-        :seon.error/diagnostic-member :seon.sci.admit/caps
-        :seon.error/diagnostic-expected "an admitted capability request"
-        :seon.error/diagnostic-offending request
-        :seon.error/diagnostic-cause :seon.sci.admit/caps
-        :seon.error/diagnostic-evidence request
         :seon.effect/unadmitted-owner owner-sym
         :seon.error/data (assoc marker :seon.config.eval.result/max-bytes
-                               (:seon.config.eval.result/max-bytes (:seon.sci.admit/caps dials)))})
+                               (:seon.config.eval.result/max-bytes (:seon.sci.admit/caps dials)))
+        :seon.error/member :seon.sci.admit/caps
+        :seon.error/expected "an admitted capability request"}
                (let [effect-id
                      (id/digest 12 [::id (:seon.turn/id *request-context*)
                                     (:seon.cluster.eval/ordinal *request-context*)

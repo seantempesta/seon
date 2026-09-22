@@ -301,27 +301,6 @@
 ;;; Flat diagnostics — one evidence-complete construction
 ;;; ---------------------------------------------------------------------------
 
-(defn diagnostic
-  "Construct the declared base observation and its diagnostic evidence.
-  Delegate to the leaf constructor, preserving supplied domain members."
-  {:malli/schema
-   [:=> [:cat [:map
-                [:seon.error/at :seon.error/at]
-                [:seon.error/layer :seon.error/layer]
-                [:seon.error/operation :seon.error/operation]
-                [:seon.error/message :seon.error/message]
-                [:seon.error/diagnostic-layer :seon.schema/value]
-                [:seon.error/diagnostic-operation :seon.schema/value]
-                [:seon.error/diagnostic-member :seon.schema/value]
-                [:seon.error/diagnostic-expected :seon.schema/value]
-                [:seon.error/diagnostic-offending :seon.schema/value]
-                [:seon.error/diagnostic-cause :seon.schema/value]
-                [:seon.error/diagnostic-evidence :seon.schema/value]
-                [:seon.error/data {:optional true} :map]]]
-    :seon.error/base]}
-  [observation]
-  (error.refusal/diagnostic observation))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The normalizer
 ;;; ---------------------------------------------------------------------------
@@ -535,7 +514,10 @@
                   [:or :nil :map]]}
   [source]
   (let [observation (if (map? (::flow/ex source)) (:data (::flow/ex source)) source)
-        data (:seon.error/data observation)]
+        data (merge (:seon.error/data observation)
+                    (when (map? observation)
+                      (select-keys observation [:seon.error/operation :seon.error/member
+                                                :seon.error/expected :seon.error/offending])))]
     (when (and (map? data)
                (qualified-symbol? (:seon.instrument/fn data))
                (#{:input :output :guard} (:seon.instrument/arm data)))
@@ -545,7 +527,7 @@
   "The map entry holding the value that actually broke the contract, if any.
 
   WHAT BROKE THE CONTRACT IS A QUERY, NOT A RECONSTRUCTION.
-  `:seon.error/diagnostic-offending` is what the ARM checked — the caller's
+  `:seon.error/offending` is what the ARM checked — the caller's
   whole argument vector, or the whole returned value — so for a function whose
   argument carries an SCI context it is megabytes, becomes the over-bound
   marker, and the fault then names the violation's PATH with no copy of the
@@ -603,9 +585,9 @@
                   [:or :seon.error/fact :seon.error/base]]}
   [base-fact source message-value instrument-data actual caps inline-limit]
   (let [expected (or (:seon.instrument/schema instrument-data)
-                     (:seon.error/diagnostic-expected instrument-data))
+                     (:seon.error/expected instrument-data))
         arguments (or (:seon.instrument/args instrument-data)
-                      (:seon.error/diagnostic-offending instrument-data))
+                      (:seon.error/offending instrument-data))
         payload-count (+ 2 (if expected 1 0) (if arguments 1 0) (if actual 1 0))
         available (max 1 (- inline-limit (utf8-size (pr-str base-fact))))]
     (loop [field-limit (max 1 (quot available payload-count))]
@@ -649,7 +631,7 @@
   [{source :seon.error/source :as request}]
   (let [entry (or (offending-entry source)
                   (when (map? source) (find source :seon.error/offending))
-                  (find (:seon.error/data source) :seon.error/diagnostic-offending))
+                  (find (:seon.error/data source) :seon.error/offending))
         value (if entry (val entry) source)
         result-id (id/id)
         handle (admit/result-handle result-id)
@@ -695,7 +677,7 @@
         flow? (map? source)
         error-value (if failure (refusal failure) source)
         operation (or (:seon.error/operation error-value)
-                      (get-in error-value [:seon.error/data :seon.error/diagnostic-operation]))
+                      (get-in error-value [:seon.error/data :seon.error/operation]))
         function (or (when (qualified-symbol? operation) operation)
                      (:seon.instrument/fn instrument-data)
                      (stack-failing-function failure))
@@ -944,7 +926,9 @@
   [fact]
   (let [source (fact-source fact)]
     (if (map? (:seon.error/data source))
-      (:seon.error/data source)
+      (merge (:seon.error/data source)
+             (select-keys source [:seon.error/operation :seon.error/member
+                                  :seon.error/expected :seon.error/offending]))
       source)))
 
 (defn- evidence-prose
@@ -1125,7 +1109,7 @@
              (assoc :seon.render/value value
                     :seon.render.value/options {:seon.render.value/structural? true})
              (update :seon.render.call/id
-                     #(or % [:seon.error/diagnostic-offending])))
+                     #(or % [:seon.error/offending])))
          (get unit :seon.render/output :seon.render/ai))]
     (if (string? (:seon.render.value/text projection))
       (:seon.render.value/text projection)
@@ -1190,9 +1174,7 @@
       (let [correction (reader-correction unit evidence)]
        (if (map? correction)
          correction
-         {:seon.error/diagnostic-operation (or (:seon.sci.reader/call evidence) 'seon.sci.reader/read)
-       :seon.error/problems
-       [{:seon.error/argument "source"
+         {:seon.error/problems [{:seon.error/argument "source"
          :seon.error/path (into [] (keep evidence) [:seon.sci.reader/line :seon.sci.reader/column])
          :seon.error/expected :seon.cluster.eval/source
          :seon.error/expected-description "readable Clojure source"
@@ -1204,34 +1186,33 @@
            (:seon.sci.reader/prose-span? evidence) "Prose must start with ; on every line."
            (= :stray-closer (:seon.sci.reader/error-kind evidence))
            "Balance the delimiters in this reply; every reply is read from scratch."
-           :else (str "Correct the reader error: " (:seon.error/message fact)))}]}))
+           :else (str "Correct the reader error: " (:seon.error/message fact)))}]
+          :seon.error/operation (or (:seon.sci.reader/call evidence) 'seon.sci.reader/read)}))
 
       (and (:seon.schema/definition evidence) (:seon.schema/error evidence))
-      {:seon.error/diagnostic-operation 'seon.schema/register!
-       :seon.error/problems
-       [{:seon.error/argument (str (:seon.schema/identity evidence))
+      {:seon.error/problems [{:seon.error/argument (str (:seon.schema/identity evidence))
          :seon.error/path (get evidence :seon.schema/path [])
          :seon.error/expected :seon.schema/definition
          :seon.error/expected-description "a complete authored schema"
          :seon.error/offending (:seon.schema/definition evidence)
          :seon.error/actual-description "an incomplete schema"
-         :seon.error/fix (:seon.error/message fact)}]}
+         :seon.error/fix (:seon.error/message fact)}]
+       :seon.error/operation 'seon.schema/register!}
 
       (:seon.sci.eval/symbol evidence)
-      {:seon.error/diagnostic-operation 'seon.sci.eval/evaluate
-       :seon.error/problems
-       [{:seon.error/argument "source"
+      {:seon.error/problems [{:seon.error/argument "source"
          :seon.error/path []
          :seon.error/expected :symbol
          :seon.error/expected-description "a resolvable symbol"
          :seon.error/offending (:seon.sci.eval/symbol evidence)
          :seon.error/actual-description "an unresolved symbol"
-         :seon.error/fix "Define or require this symbol."}]}
+         :seon.error/fix "Define or require this symbol."}]
+       :seon.error/operation 'seon.sci.eval/evaluate}
 
-      (:seon.error/diagnostic-operation evidence)
-      (let [expected (:seon.error/diagnostic-expected evidence)
-            offending (:seon.error/diagnostic-offending evidence)
-            member (:seon.error/diagnostic-member evidence)
+      (:seon.error/operation evidence)
+      (let [expected (:seon.error/expected evidence)
+            offending (:seon.error/offending evidence)
+            member (:seon.error/member evidence)
             compiled (try
                        (m/schema expected
                                  (when-let [database (:seon.db/db unit)]
@@ -1244,9 +1225,7 @@
                       (explain-problem
                        {:seon.error/problem {:schema compiled :value offending}
                         :seon.error/path [] :seon.error/argument (str member)}))]
-        {:seon.error/diagnostic-operation (:seon.error/diagnostic-operation evidence)
-         :seon.error/problems
-         [(or problem
+        {:seon.error/problems [(or problem
               {:seon.error/argument (str member)
                :seon.error/path (get evidence :seon.db/path [])
                :seon.error/expected expected
@@ -1254,7 +1233,8 @@
                :seon.error/offending offending
                :seon.error/actual-description (value-description offending)
                :seon.error/fix (str (:seon.error/message fact)
-                                    " Inspect the named requirement before retrying.")})]})
+                                    " Inspect the named requirement before retrying.")})]
+         :seon.error/operation (:seon.error/operation evidence)})
 
       :else data)))
 
@@ -1264,7 +1244,7 @@
   [unit fact data]
   (let [stored-problems? (seq (:seon.error/problems data))
         data (refusal-data unit fact (when (map? data) data))
-        operation (:seon.error/diagnostic-operation data)
+        operation (:seon.error/operation data)
         problems (:seon.error/problems data)
         example (or (not-empty (get-in fact [:seon.error/doc :example]))
                     (when (and (:seon.db/db unit) (qualified-symbol? operation))
@@ -1333,13 +1313,13 @@
         data (if (:seon.error/data-edn fact)
                (flat-data fact)
                (:seon.error/data fact))
-        operation (or (:seon.error/diagnostic-operation data)
+        operation (or (:seon.error/operation data)
                       (:seon.instrument/fn fact))
-        member (or (:seon.error/diagnostic-member data)
+        member (or (:seon.error/member data)
                    (:seon.instrument/arm fact))
-        expected (or (:seon.error/diagnostic-expected data)
+        expected (or (:seon.error/expected data)
                      (:seon.instrument/expected fact))
-        received (or (:seon.error/diagnostic-offending data)
+        received (or (:seon.error/offending data)
                      (:seon.instrument/args fact))]
     (if-let [prose (refusal-text error-value fact data)]
       prose

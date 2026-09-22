@@ -223,17 +223,13 @@
          (let [query db/q
                thread (Thread/currentThread)
                injected (atom 0)
-               refusal (assoc (error/diagnostic
-                                 {:seon.error/at (java.util.Date.) :seon.error/layer :seon.db/read
+               refusal (assoc {:seon.error/at (java.util.Date.)
+                                  :seon.error/layer :seon.db/read
                                   :seon.error/operation 'seon.db/q
                                   :seon.error/message "Declared-reference read refused."
-                                  :seon.error/diagnostic-layer :database-read
-                                  :seon.error/diagnostic-operation 'seon.db/q
-                                  :seon.error/diagnostic-member :declared-reference
-                                  :seon.error/diagnostic-expected :available-read
-                                  :seon.error/diagnostic-offending :refused
-                                  :seon.error/diagnostic-cause :seon.db/invalid-read
-                                  :seon.error/diagnostic-evidence {}}) :seon.db/invalid-read true)]
+                                  :seon.error/expected :available-read
+                                  :seon.error/offending :refused
+                                  :seon.error/data {:seon.error/layer :database-read :seon.error/member :declared-reference}} :seon.db/invalid-read true)]
            (with-redefs [db/q (fn [& arguments]
                                (if (and (identical? thread (Thread/currentThread))
                                         (some #{'(declared-edge ?caller ?target)}
@@ -505,7 +501,6 @@
               :seon.test.run/basis-t (db/basis-t database)
               :seon.test.run/branch :current-src}})
            differences (get-in refusal [:seon.error/data
-                                         :seon.error/diagnostic-evidence
                                          :seon.test.selection/input-differences])]
        (is (= :seon.test/input-evidence-unavailable
               (:seon.test/selection-refusal refusal)) (pr-str refusal))

@@ -307,10 +307,10 @@
                       #(runner/commit-results! connection (completion changed)))]
          (is (string? (:seon.test.run/immutable refused)) (pr-str refused))
          (is (= (:seon.test.run/basis-t first-run)
-                (get-in refused [:seon.error/data :seon.error/diagnostic-expected
+                (get-in refused [:seon.error/expected
                                  :seon.test.run/basis-t])))
          (is (= (:seon.test.run/basis-t changed)
-                (get-in refused [:seon.error/data :seon.error/diagnostic-offending
+                (get-in refused [:seon.error/offending
                                  :seon.test.run/basis-t])))
          (is (= basis (db/basis-t (db/db connection)))))))))
 

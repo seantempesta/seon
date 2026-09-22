@@ -26,21 +26,15 @@
                  (:seon.program/blocked-subject (ex-data failure))
                  (:seon.program/read-operation (ex-data failure)))
            (ex-data failure)
-           (error/diagnostic
-            {:seon.error/at (java.util.Date.)
+           {:seon.error/at (java.util.Date.)
              :seon.error/layer :seon.program/read
              :seon.error/operation 'my.program/read-result
              :seon.error/message (str "Cannot read program facts: " (ex-message failure))
              :seon.program/read-operation operation
              :seon.error/exception-class (symbol (.getName (class failure)))
-             :seon.error/diagnostic-layer :seon.program/read
-             :seon.error/diagnostic-operation 'my.program/read-result
-             :seon.error/diagnostic-member (:seon.program/subject request)
-             :seon.error/diagnostic-expected :seon.program/breakage
              :seon.error/offending request
-             :seon.error/diagnostic-offending request
-             :seon.error/diagnostic-cause (ex-message failure)
-             :seon.error/diagnostic-evidence (ex-data failure)})))))
+             :seon.error/expected :seon.program/breakage
+             :seon.error/data (merge (ex-data failure) {:seon.error/member (:seon.program/subject request) :seon.error/source (ex-message failure)})}))))
 
 (defn- subject-identities [subject]
   (cond
@@ -65,19 +59,13 @@
                    :seon.program/identity [attribute value]
                    :seon.program/entities entities})))
             (subject-identities subject))
-      (let [refusal (error/diagnostic
-        {:seon.error/at (java.util.Date.)
+      (let [refusal {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.program/read
          :seon.error/operation 'my.program/locate
          :seon.error/message (str "No program declaration names " subject ".")
          :seon.program/not-found subject
-         :seon.error/diagnostic-layer :seon.program/read
-         :seon.error/diagnostic-operation 'my.program/locate
-         :seon.error/diagnostic-member subject
-         :seon.error/diagnostic-expected (subject-identities subject)
-         :seon.error/diagnostic-offending subject
-         :seon.error/diagnostic-cause :seon.program/not-found
-         :seon.error/diagnostic-evidence {:seon.db/basis-t (db/basis-t database)}})] (throw (ex-info (:seon.error/message refusal) refusal)))))
+         :seon.error/expected (subject-identities subject)
+         :seon.error/data {:seon.db/basis-t (db/basis-t database)}}] (throw (ex-info (:seon.error/message refusal) refusal)))))
 
 (defn- names-through
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.schema/value :qualified-keyword] [:vector :seon.schema/value]]}
@@ -435,24 +423,19 @@
         connection (:seon.db/connection environment)]
     (if (and ctx base connection)
       {:seon.sci.eval/ctx ctx :my.program/base-ctx base :seon.db/connection connection}
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.program/write
         :seon.error/operation 'my.program/supplied-context
-        :seon.program/missing-context-members
-        (into #{} (keep (fn [[member value]] (when-not value member)))
+        :seon.program/missing-context-members (into #{} (keep (fn [[member value]] (when-not value member)))
               [[:my.program/executing-ctx ctx] [:my.program/base-ctx base]
                [:seon.db/connection connection]])
         :seon.error/message "Program mutation requires the executing SCI context, its cluster base and connection."
-        :seon.error/diagnostic-layer :seon.program/write
-        :seon.error/diagnostic-operation 'my.program/supplied-context
-        :seon.error/diagnostic-member :my.program/context
-        :seon.error/diagnostic-expected :my.program/context
-        :seon.error/diagnostic-offending (select-keys environment [:seon.agent/id])
-        :seon.error/diagnostic-cause :context-unavailable
-        :seon.error/diagnostic-evidence {:my.program/executing? (boolean ctx)
+        :seon.error/member :my.program/context
+        :seon.error/expected :my.program/context
+        :seon.error/offending (select-keys environment [:seon.agent/id])
+        :seon.error/data {:my.program/executing? (boolean ctx)
                                          :my.program/base? (boolean base)
-                                         :my.program/connection? (boolean connection)}}))))
+                                         :my.program/connection? (boolean connection)}})))
 
 (defn overrides
   "Read current agent-admitted identities under an indexed src root.
@@ -474,21 +457,14 @@
                   :seon.program/mutation-refused-error]}
   [operation report affected]
   (merge
-   (error/diagnostic
-    {:seon.error/at (java.util.Date.)
+   {:seon.error/at (java.util.Date.)
      :seon.error/layer :seon.program/write
      :seon.error/operation 'my.program/refusal
      :seon.program/blocked-subject (:seon.program/subject report)
      :seon.error/message (str "Cannot perform " operation " on " (:seon.program/subject report)
                               "; repair the named referrers first.")
-     :seon.error/diagnostic-layer :seon.program/write
-     :seon.error/diagnostic-operation 'my.program/refusal
-     :seon.error/diagnostic-member (:seon.program/subject report)
-     :seon.error/diagnostic-expected :seon.program/change
-     :seon.error/diagnostic-offending report
-     :seon.error/diagnostic-cause :live-referrers
-     :seon.error/diagnostic-evidence report
-     :seon.error/data report})
+     :seon.error/data report
+     :seon.error/expected :seon.program/change}
    {:seon.program/affected affected
     :seon.program/plan (:seon.program/plan report)
     :seon.program/unknown (:seon.program/unknown report)}))
@@ -551,7 +527,7 @@
                  "Namespace removal requires the schema owner's declaration-and-attribute retraction; its turn.clj seam is held."
                  :seon.error/data
                  (merge (:seon.error/data (refusal operation report affected))
-                        {:seon.error/diagnostic-cause :schema-retraction-unavailable})))
+                        {})))
         (let [transaction
               (let [result (db/transact!
                 connection
@@ -684,19 +660,11 @@
             (when (or (#{'clojure.core/remove-ns 'clojure.core/ns-unalias} native)
                       (:seon.program/kind report))
               (reduced
-               (error/diagnostic
-                {:seon.error/at (java.util.Date.)
+               {:seon.error/at (java.util.Date.)
                  :seon.error/layer :seon.program/write
                  :seon.error/operation 'my.program/native-call-refusal
                  :seon.program/native-operation native
                  :seon.program/advised-operation operation
                  :seon.error/message (str "Use " operation " so program facts decide before SCI changes.")
-                 :seon.error/diagnostic-layer :seon.program/write
-                 :seon.error/diagnostic-operation 'my.program/native-call-refusal
-                 :seon.error/diagnostic-member native
-                 :seon.error/diagnostic-expected operation
                  :seon.error/offending arguments
-                 :seon.error/diagnostic-offending arguments
-                 :seon.error/diagnostic-cause :native-program-mutation
-                 :seon.error/diagnostic-evidence (or report {})
-                 :seon.error/data (or report {})})))))))))
+                 :seon.error/data (or report {})}))))))))

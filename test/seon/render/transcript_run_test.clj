@@ -97,4 +97,4 @@
                 (:seon.render.transcript/refused-member missing)))
          (is (= :seon.turn/turn
                 (get-in missing [:seon.error/data
-                                 :seon.error/diagnostic-member]))))))))
+                                 :seon.error/member]))))))))

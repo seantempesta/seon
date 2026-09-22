@@ -43,36 +43,25 @@
       ;; PRD 1.3 debt: seon.fs.jvm/stat still declares :seon.error/value.
       (and (:seon.error/at stat) (:seon.error/layer stat)
            (:seon.error/operation stat))
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :my.shell/execution
         :seon.error/operation 'seon.shell.jvm/cwd-path
         :seon.error/message "The child working directory is outside filesystem policy."
         :seon.error/offending cwd
-        :seon.error/diagnostic-layer :my.shell/execution
-        :seon.error/diagnostic-operation 'seon.shell.jvm/cwd-path
-        :seon.error/diagnostic-member :my.shell/cwd
-        :seon.error/diagnostic-expected :my.fs/directory?
-        :seon.error/diagnostic-offending cwd
-        :seon.error/diagnostic-cause stat
-        :seon.error/diagnostic-evidence stat
-        :my.shell/refused-cwd cwd})
+        :my.shell/refused-cwd cwd
+        :seon.error/expected :my.fs/directory?
+        :seon.error/source stat}
 
       (not (:my.fs/directory? stat))
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :my.shell/execution
         :seon.error/operation 'seon.shell.jvm/cwd-path
         :seon.error/message "The child working directory must be a no-follow directory."
         :seon.error/offending cwd
-        :seon.error/diagnostic-layer :my.shell/execution
-        :seon.error/diagnostic-operation 'seon.shell.jvm/cwd-path
-        :seon.error/diagnostic-member :my.shell/cwd
-        :seon.error/diagnostic-expected :my.fs/directory?
-        :seon.error/diagnostic-offending cwd
-        :seon.error/diagnostic-cause :my.shell/not-directory
-        :seon.error/diagnostic-evidence stat
-        :my.shell/refused-cwd cwd})
+        :my.shell/refused-cwd cwd
+        :seon.error/member :my.shell/cwd
+        :seon.error/expected :my.fs/directory?
+        :seon.error/data {:seon.error/source stat}}
 
       :else
       (let [working-root
@@ -127,14 +116,12 @@
            :seon.await/config-value
            (:seon.config.eval/time-limit-ms effective)}
           :seon.await/diagnostic
-          {:seon.error/diagnostic-layer :shell
-           :seon.error/diagnostic-operation ::capture-completion
-           :seon.error/diagnostic-member member
-           :seon.error/diagnostic-expected ::task-result
-           :seon.error/diagnostic-offending ::pending
-           :seon.error/diagnostic-evidence
-           {:seon.shell.jvm/thread-name (.getName ^Thread thread)
-            :seon.shell.jvm/thread-id (.threadId ^Thread thread)}}
+          {:seon.error/layer :shell
+           :seon.error/operation ::capture-completion
+           :seon.error/expected ::task-result
+           :seon.error/offending ::pending
+           :seon.error/data (merge {:seon.shell.jvm/thread-name (.getName ^Thread thread)
+            :seon.shell.jvm/thread-id (.threadId ^Thread thread)} {:seon.error/member member})}
           :seon.await/blocking-deref result})]
     (if (:seon.await/elapsed-ms terminal)
       (do
@@ -158,21 +145,15 @@
     (throw
      (ex-info
       "Child stdin exceeds the configured byte ceiling."
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :my.shell/execution
         :seon.error/operation 'seon.shell.jvm/write-array!
         :seon.error/message "Child stdin exceeds the configured byte ceiling; reduce the input or raise that bound."
         :seon.error/offending (alength octets)
-        :seon.error/diagnostic-layer :my.shell/execution
-        :seon.error/diagnostic-operation 'seon.shell.jvm/write-array!
-        :seon.error/diagnostic-member :my.shell/stdin
-        :seon.error/diagnostic-expected :seon.config.shell/stdin-max-bytes
-        :seon.error/diagnostic-offending (alength octets)
-        :seon.error/diagnostic-cause :my.shell/stdin-limit
-        :seon.error/diagnostic-evidence (alength octets)
         :my.shell/stdin-byte-limit limit
-        :my.shell/observed-stdin-bytes (alength octets)}))))
+        :my.shell/observed-stdin-bytes (alength octets)
+        :seon.error/member :my.shell/stdin
+        :seon.error/expected :seon.config.shell/stdin-max-bytes})))
   (.write output octets))
 
 (defn- copy-blob-stdin!
@@ -183,21 +164,15 @@
         (throw
          (ex-info
           "Child stdin exceeds the configured byte ceiling."
-          (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+          {:seon.error/at (java.util.Date.)
         :seon.error/layer :my.shell/execution
         :seon.error/operation 'seon.shell.jvm/copy-blob-stdin!
         :seon.error/message "Child stdin exceeds the configured byte ceiling; reduce the input or raise that bound."
         :seon.error/offending offset
-        :seon.error/diagnostic-layer :my.shell/execution
-        :seon.error/diagnostic-operation 'seon.shell.jvm/copy-blob-stdin!
-        :seon.error/diagnostic-member :my.shell/stdin
-        :seon.error/diagnostic-expected :seon.config.shell/stdin-max-bytes
-        :seon.error/diagnostic-offending offset
-        :seon.error/diagnostic-cause :my.shell/stdin-limit
-        :seon.error/diagnostic-evidence offset
         :my.shell/stdin-byte-limit limit
-        :my.shell/observed-stdin-bytes offset}))))
+        :my.shell/observed-stdin-bytes offset
+        :seon.error/member :my.shell/stdin
+        :seon.error/expected :seon.config.shell/stdin-max-bytes})))
       (let [remaining (- limit offset)
             requested (int (min io-buffer-bytes (inc remaining)))
             octets (blob/read-chunk connection content-digest offset requested)]
@@ -208,60 +183,42 @@
               (throw
                (ex-info
                 "The stdin blob is unavailable."
-                (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+                {:seon.error/at (java.util.Date.)
         :seon.error/layer :my.shell/execution
         :seon.error/operation 'seon.shell.jvm/copy-blob-stdin!
         :seon.error/message "The stdin blob is unavailable."
         :seon.error/offending content-digest
-        :seon.error/diagnostic-layer :my.shell/execution
-        :seon.error/diagnostic-operation 'seon.shell.jvm/copy-blob-stdin!
-        :seon.error/diagnostic-member :seon.blob/digest
-        :seon.error/diagnostic-expected :seon.blob/content
-        :seon.error/diagnostic-offending content-digest
-        :seon.error/diagnostic-cause :my.shell/missing-blob
-        :seon.error/diagnostic-evidence content-digest
         :my.shell/stdin-blob-digest content-digest
-        :my.shell/stdin-blob-offset offset}))))
+        :my.shell/stdin-blob-offset offset
+        :seon.error/member :seon.blob/digest
+        :seon.error/expected :seon.blob/content})))
             (when-not (= content-digest actual)
               (throw
                (ex-info
                 "The stdin blob is unavailable or failed verification."
-                (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+                {:seon.error/at (java.util.Date.)
         :seon.error/layer :my.shell/execution
         :seon.error/operation 'seon.shell.jvm/copy-blob-stdin!
         :seon.error/message "The stdin blob failed digest verification."
         :seon.error/offending content-digest
-        :seon.error/diagnostic-layer :my.shell/execution
-        :seon.error/diagnostic-operation 'seon.shell.jvm/copy-blob-stdin!
-        :seon.error/diagnostic-member :seon.blob/digest
-        :seon.error/diagnostic-expected :seon.blob/content
-        :seon.error/diagnostic-offending content-digest
-        :seon.error/diagnostic-cause :my.shell/digest-mismatch
-        :seon.error/diagnostic-evidence content-digest
         :my.shell/stdin-blob-digest content-digest
-        :my.shell/stdin-blob-offset offset})))))
+        :my.shell/stdin-blob-offset offset
+        :seon.error/member :seon.blob/digest
+        :seon.error/expected :seon.blob/content}))))
           (let [read-count (alength ^bytes octets)]
             (when (zero? read-count)
               (throw
                (ex-info
                 "The stdin blob reader made no progress."
-                (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+                {:seon.error/at (java.util.Date.)
         :seon.error/layer :my.shell/execution
         :seon.error/operation 'seon.shell.jvm/copy-blob-stdin!
         :seon.error/message "The stdin blob reader made no progress."
         :seon.error/offending content-digest
-        :seon.error/diagnostic-layer :my.shell/execution
-        :seon.error/diagnostic-operation 'seon.shell.jvm/copy-blob-stdin!
-        :seon.error/diagnostic-member :seon.blob/digest
-        :seon.error/diagnostic-expected :seon.blob/content
-        :seon.error/diagnostic-offending content-digest
-        :seon.error/diagnostic-cause :my.shell/stalled-input
-        :seon.error/diagnostic-evidence content-digest
         :my.shell/stdin-blob-digest content-digest
-        :my.shell/stdin-blob-offset offset}))))
+        :my.shell/stdin-blob-offset offset
+        :seon.error/member :seon.blob/digest
+        :seon.error/expected :seon.blob/content})))
             (.update digester ^bytes octets)
             (.write output ^bytes octets)
             (recur (+ offset read-count))))))))
@@ -450,26 +407,19 @@
                 (:seon.await/elapsed-ms input) input
                 :else
                 (assoc
-                 (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+                 {:seon.error/at (java.util.Date.)
         :seon.error/layer :my.shell/execution
         :seon.error/operation 'seon.shell.jvm/execute
         :seon.error/message (if (= :evaluation-limit disposition)
           "The process was terminated at the evaluation deadline."
           "The process was terminated at the configured shell deadline.")
         :seon.error/offending argv
-        :seon.error/diagnostic-layer :my.shell/execution
-        :seon.error/diagnostic-operation 'seon.shell.jvm/execute
-        :seon.error/diagnostic-member :my.shell/argv
-        :seon.error/diagnostic-expected "process exit before its deadline"
-        :seon.error/diagnostic-offending argv
-        :seon.error/diagnostic-cause :my.shell/time-limit
-        :seon.error/diagnostic-evidence evidence
         :my.shell/terminated-pid (.pid child)
-        :my.shell/limiting-config-key
-        (if (= :evaluation-limit disposition)
+        :my.shell/limiting-config-key (if (= :evaluation-limit disposition)
           :seon.config.eval/time-limit-ms :seon.config.shell/time-limit-ms)
-        :seon.error/data (merge {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)} evidence)})
+        :seon.error/member :my.shell/argv
+        :seon.error/expected "process exit before its deadline"
+        :seon.error/data (merge (merge {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)} evidence) {:seon.error/source evidence})}
                  :seon.effect/disposition :interrupted))))))
       (catch InterruptedException interrupted
         (terminate-tree! process-record
@@ -504,11 +454,8 @@
         :seon.error/operation 'seon.shell.jvm/run
         :seon.error/message "The foreground process could not be completed; inspect the captured cause."
         :seon.error/offending request
-        :seon.error/diagnostic-layer :my.shell/execution
-        :seon.error/diagnostic-operation 'seon.shell.jvm/run
-        :seon.error/diagnostic-member :my.shell/argv
-        :seon.error/diagnostic-expected :my.shell/run-result
-        :seon.error/diagnostic-offending request
-        :seon.error/diagnostic-cause error
-        :seon.error/diagnostic-evidence (ex-data error)
-        :my.shell/failed-argv (:my.shell/argv request)}))))))))
+        :my.shell/failed-argv (:my.shell/argv request)
+        :seon.error/throwable error
+        :seon.error/member :my.shell/argv
+        :seon.error/expected :my.shell/run-result
+        :seon.error/data {:seon.error/source (ex-data error)}}))))))))

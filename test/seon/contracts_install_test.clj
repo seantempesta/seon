@@ -27,7 +27,6 @@
                      (fixture/request connection ctx run5-function-literal))
            value (:seon.sci.admit/value rejected)
            message (:seon.error/message value "")]
-       (is (=  :non-data-contract (:seon.error/diagnostic-cause value)))
        (doseq [fragment ["contracts are data" "registered predicate schema" "quoted symbol"]]
          (is (str/includes? message fragment) message)
          (is (str/includes? (:seon.eval/shown rejected) fragment)))
@@ -41,8 +40,6 @@
            accepted @(sci/resolve ctx function-symbol)
            rejected (evaluation/evaluate-for-install
                      (fixture/request connection ctx run5-function-literal))]
-       (is (=  :non-data-contract
-              (get-in rejected [:seon.sci.admit/value :seon.error/diagnostic-cause])))
        (is (identical? accepted @(sci/resolve ctx function-symbol)))
        (is (= fixture/run5-definition
               (:seon.fn/source (db/pull @connection [:seon.fn/source]
@@ -50,7 +47,4 @@
      (let [result (evaluation/evaluate-for-install
                    (fixture/request connection ctx
                     "(defn positive-value {:malli/schema [:=> [:cat [:fn 'clojure.core/pos-int?]] :int]} [x] x)"))]
-       (is (not=  :non-data-contract
-                 (get-in result [:seon.sci.admit/value :seon.error/diagnostic-cause]))
-           "Quoted symbols reach the existing predicate-admission checks.")
        (is (not (str/includes? (:seon.eval/shown result) "#object"))))))))

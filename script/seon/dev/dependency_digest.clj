@@ -116,19 +116,15 @@
           " pin set would key the dependency-class cache to every fork commit"
           " at once, so no cache is reused or created here.")
      :seon.error/data
-     {:seon.error/diagnostic-layer :seon.dev-cache/dependency-configuration
-      :seon.error/diagnostic-operation 'dev-cache/dependency-pins
-      :seon.error/diagnostic-member :seon.dev-cache/dependency-pins
-      :seon.error/diagnostic-expected
-      {:seon.dev-cache/git-command
+     {:seon.error/layer :seon.dev-cache/dependency-configuration
+      :seon.error/operation 'dev-cache/dependency-pins
+      :seon.error/member :seon.dev-cache/dependency-pins
+      :seon.error/expected {:seon.dev-cache/git-command
        ["git" "-C" (.getCanonicalPath directory) "ls-files" "--stage" "--"
         "reference-code"]
        :seon.dev-cache/recorded-pins-file dependency-pins-file}
-      :seon.error/diagnostic-offending (.getCanonicalPath directory)
-      :seon.error/diagnostic-cause :seon.dev-cache/no-pin-source
-      :seon.error/diagnostic-evidence-availability :seon.error/known
-      :seon.error/diagnostic-evidence
-      {:seon.dev-cache/git-pins-stated false
+      :seon.error/offending (.getCanonicalPath directory)
+      :seon.error/data {:seon.dev-cache/git-pins-stated false
        :seon.dev-cache/recorded-pins-present
        (.isFile (io/file directory dependency-pins-file))}}}))
 

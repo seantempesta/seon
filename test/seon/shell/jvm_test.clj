@@ -174,7 +174,7 @@
     (is (number? (:seon.await/elapsed-ms result)))
     (is (= ::stdout-capture
            (get-in result [:seon.error/data
-                           :seon.error/diagnostic-member])))
+                           :seon.error/member])))
     (is (= true (deref interrupted 1000 ::not-interrupted)))))
 
 (deftest ^{:seon.test/long "Publish the canonical program into a physical store before observing shell output or process teardown."

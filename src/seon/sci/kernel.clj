@@ -592,32 +592,20 @@
         (not (string? (:seon.error/message existing)))
         (assoc :seon.error/message
                (or (ex-message throwable) "The operation was refused.")))
-      (error/diagnostic
+      (seon.error.refusal/diagnostic
        {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.sci.kernel/evaluation
         :seon.error/operation 'seon.sci.kernel/failure-value
-        :seon.sci.kernel/guard-observation
-        {:seon.error.evidence/attribute :seon.eval/duration-ms
+        :seon.sci.kernel/guard-observation {:seon.error.evidence/attribute :seon.eval/duration-ms
          :seon.error.evidence/value (:seon.eval/duration-ms diagnostic-record)}
-      :seon.error/message
-      (or (:seon.error/message existing)
+        :seon.error/message (or (:seon.error/message existing)
           (cond->> (if timed-out?
                      (str "Ran out of time after "
                           (:seon.eval/duration-ms diagnostic-record) "ms.")
                      (or (ex-message throwable)
                          (.getName (class throwable))))
             subject (str "Invocation of " subject " failed: ")))
-      :seon.error/diagnostic-layer :sci
-      :seon.error/diagnostic-operation 'seon.sci.kernel/failure-value
-      :seon.error/diagnostic-member :throwable
-      :seon.error/diagnostic-expected :successful-evaluation
-      :seon.error/diagnostic-offending
-      (or (:sci.impl/symbol throwable-data) subject)
-      :seon.error/diagnostic-cause
-      (or (ex-message throwable) (.getName (class throwable)))
-      :seon.error/diagnostic-evidence diagnostic-record
-      :seon.error/data
-      (cond-> evidence
+        :seon.error/data (merge (cond-> evidence
         throwable-data
         (assoc :seon.sci.eval/data throwable-data)
 
@@ -625,7 +613,10 @@
         (assoc :seon.sci.eval/symbol (:sci.impl/symbol throwable-data))
 
         (ex-message throwable)
-        (assoc :seon.error/throw-site-message (ex-message throwable)))}))))
+        (assoc :seon.error/throw-site-message (ex-message throwable))) {:seon.sci.admit/record diagnostic-record})
+        :seon.error/throwable throwable
+        :seon.error/expected :successful-evaluation
+        :seon.error/offending (or (:sci.impl/symbol throwable-data) subject)}))))
 
 (defn unarmed-record
   "The diagnostic record for a failure that never reached an arm."
@@ -669,22 +660,14 @@
             (when-not (sci.utils/var? sci-var)
               (throw
                (ex-info (str function-symbol " is not an installed SCI Var.")
-                        (error/diagnostic
-                         {:seon.error/at (java.util.Date.)
+                        {:seon.error/at (java.util.Date.)
                           :seon.error/layer :seon.sci.kernel/evaluation
                           :seon.error/operation 'seon.sci.kernel/invoke
                           :seon.error/message "Requested function has no installed SCI Var; acquire the function before invocation."
-                          :seon.sci.kernel/guard-observation
-                          {:seon.error.evidence/attribute :seon.fn/sym
+                          :seon.sci.kernel/guard-observation {:seon.error.evidence/attribute :seon.fn/sym
                            :seon.error.evidence/value function-symbol}
-                          :seon.error/diagnostic-layer :seon.sci.kernel/evaluation
-                          :seon.error/diagnostic-operation 'seon.sci.kernel/invoke
-                          :seon.error/diagnostic-member :seon.fn/sym
-                          :seon.error/diagnostic-expected :seon.sci.eval/invocation-result
-                          :seon.error/diagnostic-offending function-symbol
-                          :seon.error/diagnostic-cause :seon.error/unknown
-                          :seon.error/diagnostic-evidence function-symbol
-                          :seon.fn/sym function-symbol}))))
+                          :seon.fn/sym function-symbol
+                          :seon.error/expected :seon.sci.eval/invocation-result})))
             (let [;; The SECOND of the two ruled call-preparation
                   ;; entrances. SCI's analyzed call path hooks itself; a
                   ;; named invocation applies the Var directly, so it
@@ -731,20 +714,14 @@
               :seon.sci.admit/record record-value})
             (catch Throwable admission-failure
               {:seon.sci.admit/value
-               (error/diagnostic
+               (seon.error.refusal/diagnostic
                 {:seon.error/at (java.util.Date.)
                  :seon.error/layer :seon.sci.kernel/evaluation
                  :seon.error/operation 'seon.sci.kernel/invoke
                  :seon.error/message "The invocation failure could not be admitted; inspect its admission evidence."
-                 :seon.sci.kernel/guard-observation
-                 {:seon.error.evidence/attribute :seon.error/message
+                 :seon.sci.kernel/guard-observation {:seon.error.evidence/attribute :seon.error/message
                   :seon.error.evidence/value (or (ex-message admission-failure) "Failure admission failed.")}
-                 :seon.error/diagnostic-layer :seon.sci.kernel/evaluation
-                 :seon.error/diagnostic-operation 'seon.sci.kernel/invoke
-                 :seon.error/diagnostic-member :seon.error/message
-                 :seon.error/diagnostic-expected :seon.sci.eval/invocation-result
-                 :seon.error/diagnostic-offending (or (ex-message admission-failure) "Failure admission failed.")
-                 :seon.error/diagnostic-cause :seon.error/unknown
-                 :seon.error/diagnostic-evidence (or (ex-message admission-failure) "Failure admission failed.")
-                 :seon.error/offending failure :seon.error/data {:seon.error/exception-class (symbol (.getName (class admission-failure)))}})
+                 :seon.error/throwable admission-failure
+                 :seon.error/offending failure
+                 :seon.error/expected :seon.sci.eval/invocation-result})
                :seon.sci.admit/record record-value})))))))

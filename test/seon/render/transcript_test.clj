@@ -73,7 +73,7 @@
         (is (= :seon.turn/turn
                (:seon.render.transcript/refused-member refusal)))
         (is (= 'seon.render.transcript/missing-selected-run (:seon.error/operation refusal)))
-        (is (= "selected-run" (get-in refusal [:seon.error/diagnostic-offending :seon.turn/id])))))))
+        (is (= "selected-run" (get-in refusal [:seon.error/offending :seon.turn/id])))))))
 
 (deftest durable-history-entries-never-invent-executions
   (let [history (ns-resolve 'seon.render.transcript 'history)

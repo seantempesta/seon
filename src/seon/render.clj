@@ -11,7 +11,8 @@
   context and executes through `seon.sci.kernel`; there is no compiled renderer
   lane. A redefinition therefore changes the next call and a cold context
   re-derives the same symbol from its database program row."
-  (:require [clojure.string]
+  (:require [seon.error.refusal]
+            [clojure.string]
             [datahike.db :as datahike.db]
             [malli.core :as m]
             [sci.core :as sci]
@@ -144,16 +145,11 @@
                :seon.error/layer :seon.render/render
                :seon.error/operation 'seon.render/request-profile
                :seon.error/message "Rendering requires a carried profile or handed projection."
-               :seon.error/diagnostic-layer :seon.render/render
-               :seon.error/diagnostic-operation 'seon.render/request-profile
-               :seon.error/diagnostic-member :seon.schema/projection
-               :seon.error/diagnostic-expected [:or :seon.render/profile :seon.schema/handed-projection]
-               :seon.error/diagnostic-offending request
-               :seon.error/diagnostic-cause ::missing-projection
-               :seon.error/diagnostic-evidence {}
                :seon.error/fix "Supply the expected member and repeat the requested operation."
-               :seon.render/refused-member :seon.schema/projection}]
-          (merge observation (error/diagnostic observation))))))
+               :seon.render/refused-member :seon.schema/projection
+               :seon.error/expected [:or :seon.render/profile :seon.schema/handed-projection]
+               :seon.error/offending request}]
+          observation))))
 
 (defn- target-profile
 
@@ -323,19 +319,15 @@
          :seon.error/operation 'seon.render/ambiguity
          :seon.error/message (str "More than one function in " namespace-name
                              " accepts this value and returns " output ".")
-         :seon.error/diagnostic-layer :seon.render/render
-         :seon.error/diagnostic-operation 'seon.render/ambiguity
-         :seon.error/diagnostic-member :seon.render/output
-         :seon.error/diagnostic-expected "one applicable renderer"
-         :seon.error/diagnostic-offending candidate-symbols
-         :seon.error/diagnostic-cause :seon.render/output
-         :seon.error/diagnostic-evidence {:seon.render/namespace namespace-name :seon.render/output output}
          :seon.error/fix "Supply the expected member and repeat the requested operation."
          :seon.render/candidates (vec candidate-symbols)
-         :seon.error/data {:seon.render/namespace namespace-name
+         :seon.error/member :seon.render/output
+         :seon.error/expected "one applicable renderer"
+         :seon.error/offending candidate-symbols
+         :seon.error/data (merge {:seon.render/namespace namespace-name
                          :seon.render/output output
-                         :seon.render/candidates (vec candidate-symbols)}}]
-    (merge observation (error/diagnostic observation))))
+                         :seon.render/candidates (vec candidate-symbols)} {:seon.error/source {:seon.render/namespace namespace-name :seon.render/output output}})}]
+    observation))
 
 (defn transacted
   "Restore a pulled entity to the transaction shape used for selection."
@@ -947,15 +939,12 @@
                 :seon.error/layer :seon.render/invocation
                 :seon.error/operation 'seon.render/unknown
                 :seon.error/message "The selected renderer did not return an observation."
-                :seon.error/diagnostic-layer :seon.render/invocation
-                :seon.error/diagnostic-operation 'seon.render/unknown
-                :seon.error/diagnostic-member :seon.render/output
-                :seon.error/diagnostic-expected :seon.render/rendered
-                :seon.error/diagnostic-offending (:seon.error/value request)
-                :seon.error/diagnostic-cause reason
-                :seon.error/diagnostic-evidence stable
-                :seon.error/fix "Inspect the renderer's refusal and repair its declared output."})]
-    (merge observation (error/diagnostic observation))))
+                :seon.error/fix "Inspect the renderer's refusal and repair its declared output."
+                :seon.error/member :seon.render/output
+                :seon.error/expected :seon.render/rendered
+                :seon.error/offending (:seon.error/value request)
+                :seon.error/data stable})]
+    observation))
 
 (defn- unknown-evidence-of
   [unit]
@@ -1265,62 +1254,47 @@
               (valid-projection? projection :seon.render/source-blocks rendered))
         rendered
         (let [observation
-              {:seon.error/diagnostic-layer :seon.render/output
-               :seon.error/diagnostic-operation 'seon.render/raw-output
-               :seon.error/diagnostic-member :seon.render/output
-               :seon.error/diagnostic-expected "a value satisfying the requested render output"
-               :seon.error/diagnostic-offending rendered
-               :seon.error/diagnostic-cause :seon.render/output
-               :seon.error/diagnostic-evidence {:seon.render/output rendered}
-               :seon.error/fix "Return a value satisfying the renderer's declared output contract."
+              {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
                :seon.error/at (Date.)
                :seon.error/layer :seon.render/output
                :seon.error/operation 'seon.render/raw-output
                :seon.render/invalid-output :ai
                :seon.error/message "The selected AI renderer did not return text."
-               :seon.error/data {:seon.render/output rendered}}]
-          (merge observation (error/diagnostic observation))))
+               :seon.error/data {:seon.render/output rendered}
+               :seon.error/expected "a value satisfying the requested render output"
+               :seon.error/offending rendered}]
+          observation))
 
       :seon.render/html
       (if (or declared-absence? (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/refused-member rendered))
               (hiccup/hiccup? rendered))
         rendered
         (let [observation
-              {:seon.error/diagnostic-layer :seon.render/output
-               :seon.error/diagnostic-operation 'seon.render/raw-output
-               :seon.error/diagnostic-member :seon.render/output
-               :seon.error/diagnostic-expected "a value satisfying the requested render output"
-               :seon.error/diagnostic-offending rendered
-               :seon.error/diagnostic-cause :seon.render/output
-               :seon.error/diagnostic-evidence {:seon.render/output rendered}
-               :seon.error/fix "Return a value satisfying the renderer's declared output contract."
+              {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
                :seon.error/at (Date.)
                :seon.error/layer :seon.render/output
                :seon.error/operation 'seon.render/raw-output
                :seon.render/invalid-output :html
                :seon.error/message "The selected HTML renderer did not return Hiccup."
-               :seon.error/data {:seon.render/output rendered}}]
-          (merge observation (error/diagnostic observation))))
+               :seon.error/data {:seon.render/output rendered}
+               :seon.error/expected "a value satisfying the requested render output"
+               :seon.error/offending rendered}]
+          observation))
 
       :seon.render/form
       (if (valid-projection? projection :seon.render/form rendered)
         rendered
         (let [observation
-              {:seon.error/diagnostic-layer :seon.render/output
-               :seon.error/diagnostic-operation 'seon.render/raw-output
-               :seon.error/diagnostic-member :seon.render/output
-               :seon.error/diagnostic-expected "a value satisfying the requested render output"
-               :seon.error/diagnostic-offending rendered
-               :seon.error/diagnostic-cause :seon.render/output
-               :seon.error/diagnostic-evidence {:seon.render/output rendered}
-               :seon.error/fix "Return a value satisfying the renderer's declared output contract."
+              {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
                :seon.error/at (Date.)
                :seon.error/layer :seon.render/output
                :seon.error/operation 'seon.render/raw-output
                :seon.render/invalid-output :form
                :seon.error/message "The selected form renderer did not return a form."
-               :seon.error/data {:seon.render/output rendered}}]
-          (merge observation (error/diagnostic observation)))))))
+               :seon.error/data {:seon.render/output rendered}
+               :seon.error/expected "a value satisfying the requested render output"
+               :seon.error/offending rendered}]
+          observation)))))
 
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."
@@ -1376,16 +1350,11 @@
          :seon.error/layer :seon.render/render
          :seon.error/operation 'seon.render/source-provenance-error
          :seon.error/message "Default AI source requires an entity identity or stored evaluation result reference."
-         :seon.error/diagnostic-layer :seon.render/render
-         :seon.error/diagnostic-operation 'seon.render/source-provenance-error
-         :seon.error/diagnostic-member :seon.render.value/root
-         :seon.error/diagnostic-expected :seon.render.walk/lookup
-         :seon.error/diagnostic-offending unit
-         :seon.error/diagnostic-cause ::missing-source-provenance
-         :seon.error/diagnostic-evidence {}
          :seon.error/fix "Supply the expected member and repeat the requested operation."
-         :seon.render/refused-member :seon.render.value/root}]
-    (merge observation (error/diagnostic observation))))
+         :seon.render/refused-member :seon.render.value/root
+         :seon.error/expected :seon.render.walk/lookup
+         :seon.error/offending unit}]
+    observation))
 
 (defn render-form
   "Spell the structural read that reproduces one reached database value."
@@ -1429,21 +1398,16 @@
         (if (valid-projection? projection :seon.render/form rendered)
           rendered
           (let [observation
-                {:seon.error/diagnostic-layer :seon.render/output
-                 :seon.error/diagnostic-operation 'seon.render/render-form-value
-                 :seon.error/diagnostic-member :seon.render/output
-                 :seon.error/diagnostic-expected "a value satisfying the requested render output"
-                 :seon.error/diagnostic-offending rendered
-                 :seon.error/diagnostic-cause :seon.render/output
-                 :seon.error/diagnostic-evidence {:seon.render/output rendered}
-                 :seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
+                {:seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
                  :seon.error/at (Date.)
                  :seon.error/layer :seon.render/output
                  :seon.error/operation 'seon.render/render-form-value
                  :seon.render/invalid-output :form
                  :seon.error/message "The selected form renderer did not return a form."
-                 :seon.error/data {:seon.render/output rendered}}]
-            (merge observation (error/diagnostic observation))))))))
+                 :seon.error/data {:seon.render/output rendered}
+                 :seon.error/expected "a value satisfying the requested render output"
+                 :seon.error/offending rendered}]
+            observation))))))
 
 (defn render-call
   "Reuse one retained projection while its input, code, and reads are current."
@@ -1504,16 +1468,12 @@
                            :seon.error/layer :seon.render/render
                            :seon.error/operation 'seon.render/render-call
                            :seon.error/message "The requested renderer is not an applicable candidate."
-                           :seon.error/diagnostic-layer :seon.render/render
-                           :seon.error/diagnostic-operation 'seon.render/render-call
-                           :seon.error/diagnostic-member :seon.render.call/selected-producer
-                           :seon.error/diagnostic-expected :compatible
-                           :seon.error/diagnostic-offending requested-candidate
-                           :seon.error/diagnostic-cause ::candidate-not-applicable
-                           :seon.error/diagnostic-evidence decision
                            :seon.error/fix "Supply the expected member and repeat the requested operation."
-                           :seon.render/refused-member :seon.render.call/selected-producer}]
-                      (merge observation (error/diagnostic observation))))
+                           :seon.render/refused-member :seon.render.call/selected-producer
+                           :seon.error/expected :compatible
+                           :seon.error/offending requested-candidate
+                           :seon.error/data {:seon.error/source decision}}]
+                      observation))
                   (:seon.render.selection/selected decision))]
             (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
               (assoc selected :seon.render/refused-member :seon.render.call/selected-producer)
@@ -1749,16 +1709,11 @@
           :seon.error/layer :seon.render/render
           :seon.error/operation 'seon.render/walk-error
           :seon.error/message message
-          :seon.error/diagnostic-layer :seon.render/render
-          :seon.error/diagnostic-operation 'seon.render/walk-error
-          :seon.error/diagnostic-member :seon.render.walk/context
-          :seon.error/diagnostic-expected "available walk custody"
-          :seon.error/diagnostic-offending message
-          :seon.error/diagnostic-cause :seon.render.walk/context
-          :seon.error/diagnostic-evidence {}
           :seon.error/fix "Supply the expected member and repeat the requested operation."
-          :seon.render/walk-operation 'seon.render/walk-error}]
-     (merge observation (error/diagnostic observation)))))
+          :seon.render/walk-operation 'seon.render/walk-error
+          :seon.error/member :seon.render.walk/context
+          :seon.error/expected "available walk custody"}]
+     observation)))
 
 (defn- ambient-database-value
 

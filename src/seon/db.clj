@@ -176,16 +176,15 @@
 (defn- diagnostic
   {:malli/schema [:=> [:cat :map] :seon.error/base]}
   [request]
-  (let [operation (:seon.error/diagnostic-operation request)
+  (let [operation (:seon.error/operation request)
         operation (if (symbol? operation) operation
                       (symbol (namespace operation) (name operation)))]
-    (error.refusal/diagnostic
-     (cond-> (assoc request
+    (cond-> (assoc request
                     :seon.error/at (java.util.Date.)
-                    :seon.error/layer (keyword "seon.db" (name (:seon.error/diagnostic-layer request)))
+                    :seon.error/layer (keyword "seon.db" (name (:seon.error/layer request)))
                     :seon.error/operation operation)
        (:seon.db/invalid-read request)
-       (assoc :seon.db/refused-read-operation operation)))))
+       (assoc :seon.db/refused-read-operation operation))))
 
 (defn- schema-refusal
   "Return the actual unavailable value and the declared shape it cannot satisfy."
@@ -193,8 +192,7 @@
    [:=> [:cat :qualified-symbol :seon.schema/key :seon.schema/value :string :map]
     :seon.schema/validation-refusal]}
   [operation expected value message evidence]
-  (error.refusal/diagnostic
-   {:seon.error/at (java.util.Date.)
+  {:seon.error/at (java.util.Date.)
     :seon.error/layer :seon.db/acquisition
     :seon.error/operation operation
     :seon.error/message message
@@ -202,14 +200,7 @@
     :seon.db/refused-read-operation operation
     :seon.schema/expected-value expected
     :seon.schema/refused-value value
-    :seon.error/diagnostic-layer :database-read
-    :seon.error/diagnostic-operation operation
-    :seon.error/diagnostic-member expected
-    :seon.error/diagnostic-expected expected
-    :seon.error/diagnostic-offending value
-    :seon.error/diagnostic-cause ::unavailable-value
-    :seon.error/diagnostic-evidence evidence
-    :seon.error/data evidence}))
+    :seon.error/data (merge evidence {:seon.error/layer :database-read})})
 
 (defn- dependency-error
   {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable] :seon.db/error-result]}
@@ -1035,19 +1026,15 @@
                                          (:seon.db/index-page-options request)))
 
         (diagnostic
-         {:seon.error/message
-          (str "seon.db/replay-read cannot replay the read operation "
+         {:seon.error/message (str "seon.db/replay-read cannot replay the read operation "
                (pr-str (:seon.db/read-operation request)) ".")
-          :seon.error/diagnostic-layer :database-read
-          :seon.error/diagnostic-operation 'seon.db/replay-read
-          :seon.error/diagnostic-member :seon.db/read-operation
-          :seon.error/diagnostic-expected :seon.db/read-operation
-          :seon.error/diagnostic-offending (:seon.db/read-operation request)
           :seon.db.read/unknown-read-operation (:seon.db/read-operation request)
-          :seon.error/diagnostic-cause ::unknown-read-operation
-          :seon.error/diagnostic-evidence
-          {:seon.db/read-request request}
-          :seon.db/invalid-read true})))))
+          :seon.db/invalid-read true
+          :seon.error/layer :database-read
+          :seon.error/operation 'seon.db/replay-read
+          :seon.error/member :seon.db/read-operation
+          :seon.error/expected :seon.db/read-operation
+          :seon.error/data {:seon.db/read-request request}})))))
 
 (defn- index-pattern-change
   [changes pattern]
@@ -1215,22 +1202,14 @@
   (binding [*out* *err*]
     (println "WARN seon.db/projection-fallback caller=" operation
              "missing-projection count=1; supply the operation's projection."))
-  (error.refusal/diagnostic
-   {:seon.error/at (java.util.Date.)
+  {:seon.error/at (java.util.Date.)
     :seon.error/layer :seon.schema/projection
     :seon.error/operation 'seon.db/projection-fallback
     :seon.error/message "This operation requires a carried schema projection."
     :seon.db/invalid-read true
     :seon.db/refused-read-operation operation
     :seon.schema/expected-value :seon.schema/projection
-    :seon.schema/refused-value {:seon.db/operation operation}
-    :seon.error/diagnostic-layer :seon.schema/projection
-    :seon.error/diagnostic-operation 'seon.db/projection-fallback
-    :seon.error/diagnostic-member :seon.schema/projection
-    :seon.error/diagnostic-expected :seon.schema/projection
-    :seon.error/diagnostic-offending {:seon.db/operation operation}
-    :seon.error/diagnostic-cause :seon.schema/missing-projection
-    :seon.error/diagnostic-evidence {:seon.db/operation operation}}))
+    :seon.schema/refused-value {:seon.db/operation operation}})
 
 (defn carried-projection
   "The schema origin's immutable carried projection, or nil when absent."
@@ -1259,17 +1238,14 @@
                   (let [failure (projection-fallback operation)]
                     (throw (ex-info (:seon.error/message failure) failure)))))}
       (diagnostic
-       {:seon.error/message
-        (str operation " cannot decode a read: the supplied value carries no installed database schema.")
-        :seon.error/diagnostic-layer :database-read
-        :seon.error/diagnostic-operation operation
-        :seon.error/diagnostic-member ::installed-schema
-        :seon.error/diagnostic-expected :seon.db/database-value
-        :seon.error/diagnostic-offending database
+       {:seon.error/message (str operation " cannot decode a read: the supplied value carries no installed database schema.")
         :seon.db.read/unreadable-declarations operation
-        :seon.error/diagnostic-cause ::unreadable-declarations
-        :seon.error/diagnostic-evidence {:seon.db/db database}
-        :seon.db/invalid-read true}))))
+        :seon.db/invalid-read true
+        :seon.error/layer :database-read
+        :seon.error/member ::installed-schema
+        :seon.error/expected :seon.db/database-value
+        :seon.error/offending database
+        :seon.error/data {:seon.db/db database}}))))
 
 (def ^:private relation-only-declarations
   "The declaration table for a read with no database source.
@@ -1421,18 +1397,15 @@
   [operation database attribute offending]
   (let [evidence (attribute-observation database attribute)]
     (diagnostic
-     {:seon.error/message
-      (str operation " cannot read uninstalled attribute "
+     {:seon.error/message (str operation " cannot read uninstalled attribute "
            (pr-str attribute) ".")
-      :seon.error/diagnostic-layer :database-read
-      :seon.error/diagnostic-operation operation
-      :seon.error/diagnostic-member attribute
-      :seon.error/diagnostic-expected
-      {::installed-declaration :seon.error/unknown
+      :seon.db/invalid-read true
+      :seon.error/layer :database-read
+      :seon.error/operation operation
+      :seon.error/expected {::installed-declaration :seon.error/unknown
        ::registered-candidates (::registered-candidates evidence)}
-      :seon.error/diagnostic-offending offending
-      :seon.error/diagnostic-cause ::attribute-not-installed
-      :seon.error/diagnostic-evidence evidence :seon.db/invalid-read true})))
+      :seon.error/offending offending
+      :seon.error/data (merge evidence {:seon.error/member attribute})})))
 
 (defn- lookup-ref-error
   {:malli/schema [:=> [:cat :qualified-symbol :seon.db/database-value :seon.schema/value] [:or :nil :seon.error/base]]}
@@ -1452,33 +1425,27 @@
 
         (nil? (:db/unique declaration))
         (diagnostic
-         {:seon.error/message
-          (str operation " requires a unique lookup-ref attribute; "
+         {:seon.error/message (str operation " requires a unique lookup-ref attribute; "
                (pr-str attribute) " is not unique.")
-          :seon.error/diagnostic-layer :database-read
-          :seon.error/diagnostic-operation operation
-          :seon.error/diagnostic-member attribute
-          :seon.error/diagnostic-expected declaration
-          :seon.error/diagnostic-offending entity-id
-          :seon.error/diagnostic-cause ::lookup-attribute-not-unique
-          :seon.error/diagnostic-evidence evidence :seon.db/invalid-read true})
+          :seon.db/invalid-read true
+          :seon.error/layer :database-read
+          :seon.error/operation operation
+          :seon.error/expected declaration
+          :seon.error/offending entity-id
+          :seon.error/data (merge evidence {:seon.error/member attribute})})
 
         (not valid-value?)
         (diagnostic
-         {:seon.error/message
-          (str operation " received " (pr-str value) " for "
+         {:seon.error/message (str operation " received " (pr-str value) " for "
                (pr-str attribute) ", whose installed value type is "
                (pr-str (:db/valueType declaration)) ".")
-          :seon.error/diagnostic-layer :database-read
-          :seon.error/diagnostic-operation operation
-          :seon.error/diagnostic-member attribute
-          :seon.error/diagnostic-expected declaration
-          :seon.error/diagnostic-offending
-          {::attribute attribute ::value value}
-          :seon.error/diagnostic-cause
-          {::validation ::value-does-not-match-installed-type
-           ::value-type (:db/valueType declaration)}
-          :seon.error/diagnostic-evidence evidence :seon.db/invalid-read true})))))
+          :seon.db/invalid-read true
+          :seon.error/layer :database-read
+          :seon.error/operation operation
+          :seon.error/expected declaration
+          :seon.error/offending {::attribute attribute ::value value}
+          :seon.error/data (merge evidence {:seon.error/member attribute :seon.error/source {::validation ::value-does-not-match-installed-type
+           ::value-type (:db/valueType declaration)}})})))))
 
 (defn- query-binding-values
   "Collect every scalar value admitted by a Datalog input binding."
@@ -1530,16 +1497,13 @@
                            (query-patterns parsed-query))]
     (let [offending (parsed-pattern-value pattern)]
       (diagnostic
-       {:seon.error/message
-        "seon.db/q received a data pattern with more than five positions."
-        :seon.error/diagnostic-layer :database-read
-        :seon.error/diagnostic-operation 'seon.db/q
-        :seon.error/diagnostic-member offending
-        :seon.error/diagnostic-expected
-        [:entity :attribute :value :transaction :added]
-        :seon.error/diagnostic-offending offending
-        :seon.error/diagnostic-cause ::malformed-data-pattern
-        :seon.error/diagnostic-evidence request :seon.db/invalid-read true}))))
+       {:seon.error/message "seon.db/q received a data pattern with more than five positions."
+        :seon.db/invalid-read true
+        :seon.error/layer :database-read
+        :seon.error/operation 'seon.db/q
+        :seon.error/expected [:entity :attribute :value :transaction :added]
+        :seon.error/offending offending
+        :seon.error/data {:seon.error/member offending :seon.error/source request}}))))
 
 (defn- query-source-databases
   [query-form arguments]
@@ -1904,14 +1868,12 @@
   [query-form arguments]
   (diagnostic
    {:seon.error/message (query-argument-message query-form arguments)
-    :seon.error/diagnostic-layer :database-read
-    :seon.error/diagnostic-operation 'seon.db/q
-    :seon.error/diagnostic-member :in
-    :seon.error/diagnostic-expected (get query-form :in '[$])
-    :seon.error/diagnostic-offending arguments
-    :seon.error/diagnostic-cause ::query-input-shape
-    :seon.error/diagnostic-evidence {::query query-form}
-    :seon.db/invalid-read true}))
+    :seon.db/invalid-read true
+    :seon.error/layer :database-read
+    :seon.error/operation 'seon.db/q
+    :seon.error/expected (get query-form :in '[$])
+    :seon.error/offending arguments
+    :seon.error/data (merge {::query query-form} {:seon.error/member :in})}))
 
 (defn- query-input-position
   "Return the omitted $ position, :explicit, or :invalid from parsed bindings."
@@ -1963,17 +1925,15 @@
              (contains? query-input :args)
              (not (contains? query-input :query)))
     (diagnostic
-     {:seon.error/message
-      "seon.db/q argument maps require :query."
+     {:seon.error/message "seon.db/q argument maps require :query."
       :seon.db/invalid-request true
       :seon.db/missing-request-member :query
-      :seon.error/diagnostic-layer :database-read
-      :seon.error/diagnostic-operation 'seon.db/q
-      :seon.error/diagnostic-member :query
-      :seon.error/diagnostic-expected [:map [:query :seon.db/query]]
-      :seon.error/diagnostic-offending query-input
-      :seon.error/diagnostic-cause ::missing-required-key
-      :seon.error/diagnostic-evidence query-input :seon.db/invalid-read true})))
+      :seon.db/invalid-read true
+      :seon.error/layer :database-read
+      :seon.error/operation 'seon.db/q
+      :seon.error/expected [:map [:query :seon.db/query]]
+      :seon.error/offending query-input
+      :seon.error/data {:seon.error/source query-input}})))
 
 (defn- query-call-valid?
   [[call-arguments _result]]
@@ -2078,16 +2038,13 @@
              (not (contains? (first arguments) :selector)))
     (let [request (first arguments)]
       (diagnostic
-       {:seon.error/message
-        (str public-operation " argument maps require :selector.")
-        :seon.error/diagnostic-layer :database-read
-        :seon.error/diagnostic-operation public-operation
-        :seon.error/diagnostic-member :selector
-        :seon.error/diagnostic-expected
-        [:map [:selector :seon.db/pull-selector]]
-        :seon.error/diagnostic-offending request
-        :seon.error/diagnostic-cause ::missing-required-key
-        :seon.error/diagnostic-evidence request :seon.db/invalid-read true}))))
+       {:seon.error/message (str public-operation " argument maps require :selector.")
+        :seon.db/invalid-read true
+        :seon.error/layer :database-read
+        :seon.error/operation public-operation
+        :seon.error/expected [:map [:selector :seon.db/pull-selector]]
+        :seon.error/offending request
+        :seon.error/data {:seon.error/member :selector :seon.error/source request}}))))
 
 (defn- pull-entity-id
   [arguments]
@@ -2205,21 +2162,18 @@
 
       (< 1 (count declared))
       (diagnostic
-       {:seon.error/message
-        (str "The attributes present on this entity declare more than one "
+       {:seon.error/message (str "The attributes present on this entity declare more than one "
              "row schema " (pr-str (vec (sort declared)))
              ". Supply :schema-key with the selector.")
-        :seon.error/diagnostic-layer :database-read
-        :seon.error/diagnostic-operation 'seon.db/pull
-        :seon.error/diagnostic-member :seon.program/row-schema
-        :seon.error/diagnostic-expected :seon.schema/registry-key
-        :seon.error/diagnostic-offending (vec (sort declared))
         :seon.db.read/disagreeing-pull-schema declared
-        :seon.error/diagnostic-cause ::disagreeing-pull-schema
-        :seon.error/diagnostic-evidence
-        {:seon.db/entity-id entity-id
-         :seon.db/attributes (vec (sort attributes))}
-        :seon.db/invalid-read true})
+        :seon.db/invalid-read true
+        :seon.error/layer :database-read
+        :seon.error/operation 'seon.db/pull
+        :seon.error/member :seon.program/row-schema
+        :seon.error/expected :seon.schema/registry-key
+        :seon.error/offending (vec (sort declared))
+        :seon.error/data {:seon.db/entity-id entity-id
+         :seon.db/attributes (vec (sort attributes))}})
 
       :else
       (let [candidates
@@ -2271,21 +2225,16 @@
         (if (validator value)
           value
           (diagnostic
-           {:seon.error/message
-            (str public-operation
+           {:seon.error/message (str public-operation
                  " returned a value that does not satisfy the derived pulled form "
                  derived-key " of " schema-key ".")
-            :seon.error/diagnostic-layer :database-read
-            :seon.error/diagnostic-operation public-operation
-            :seon.error/diagnostic-member derived-key
-            :seon.error/diagnostic-expected
-            (get (:seon.schema.projection/forms projected) derived-key)
-            :seon.error/diagnostic-offending value
             :seon.db.read/invalid-pulled-result derived-key
-            :seon.error/diagnostic-cause ::invalid-pulled-result
-            :seon.error/diagnostic-evidence
-            {:seon.schema/key schema-key :seon.db/pull-selector selector}
-            :seon.db/invalid-read true}))))))
+            :seon.db/invalid-read true
+            :seon.error/layer :database-read
+            :seon.error/operation public-operation
+            :seon.error/expected (get (:seon.schema.projection/forms projected) derived-key)
+            :seon.error/offending value
+            :seon.error/data {:seon.schema/key schema-key :seon.db/pull-selector selector}}))))))
 
 (defn- validate-pulled-result
   "Validate every pulled map a read returns against its derived form.
@@ -2365,20 +2314,17 @@
                             (vector? options) (not (map? (second arguments)))))]
           (when-not valid?
             (diagnostic
-             {:seon.error/message
-              (str public-operation " received invalid arguments " (pr-str arguments)
+             {:seon.error/message (str public-operation " received invalid arguments " (pr-str arguments)
                    ". Use (" public-operation " selector " (if many? "eids" "eid")
                    ") with the database elided, or (" public-operation
                    " database selector " (if many? "eids" "eid")
                    "). Argument maps require :selector and " (if many? ":eids" ":eid") ".")
-              :seon.error/diagnostic-layer :database-read
-              :seon.error/diagnostic-operation public-operation
-              :seon.error/diagnostic-member :args
-              :seon.error/diagnostic-expected expected
-              :seon.error/diagnostic-offending arguments
-              :seon.error/diagnostic-cause ::pull-input-shape
-              :seon.error/diagnostic-evidence {::operation operation-key}
-              :seon.db/invalid-read true})))
+              :seon.db/invalid-read true
+              :seon.error/layer :database-read
+              :seon.error/operation public-operation
+              :seon.error/expected expected
+              :seon.error/offending arguments
+              :seon.error/data (merge {::operation operation-key} {:seon.error/member :args})})))
         (when (#{'seon.db/pull 'seon.db/entity} public-operation)
           (lookup-ref-error public-operation database
                             (pull-entity-id arguments)))
@@ -2707,8 +2653,7 @@
     (not (dbi/-temporal-index? database))
     (do
       (append-database-evidence! database :all)
-      (error.refusal/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.db/database-read
         :seon.error/operation 'seon.db/database-view
         :seon.error/message "The database does not retain temporal indices."
@@ -2716,15 +2661,10 @@
         :seon.db/refused-read-operation 'seon.db/database-view
         :seon.config/error-key :seon.config.db/keep-history?
         :seon.error/expected-shape (id/digest 64 [:= true])
-        :seon.error/diagnostic-layer :database-read
-        :seon.error/diagnostic-operation 'seon.db/database-view
-        :seon.error/diagnostic-member :seon.config.db/keep-history?
-        :seon.error/diagnostic-expected [:= true]
-        :seon.error/diagnostic-offending false
-        :seon.error/diagnostic-cause ::non-temporal-database
-        :seon.error/diagnostic-evidence {:seon.config.db/keep-history? false}
-        :seon.error/data {::operation ::temporal-read
-                          :seon.config.db/keep-history? false}}))
+        :seon.error/expected [:= true]
+        :seon.error/offending false
+        :seon.error/data (merge {::operation ::temporal-read
+                          :seon.config.db/keep-history? false} {:seon.error/layer :database-read :seon.error/source {:seon.config.db/keep-history? false}})})
 
     :else
     (try
@@ -2839,15 +2779,12 @@
   [message member expected offending cause evidence]
   (diagnostic
    {::diff-refused true
-
     :seon.error/message message
-    :seon.error/diagnostic-layer :agent-boundary
-    :seon.error/diagnostic-operation 'seon.db/diff
-    :seon.error/diagnostic-member member
-    :seon.error/diagnostic-expected expected
-    :seon.error/diagnostic-offending offending
-    :seon.error/diagnostic-cause cause
-    :seon.error/diagnostic-evidence evidence}))
+    :seon.error/layer :agent-boundary
+    :seon.error/operation 'seon.db/diff
+    :seon.error/expected expected
+    :seon.error/offending offending
+    :seon.error/data (merge evidence {:seon.error/member member})}))
 
 (defn- callee-symbol
   [callee]
@@ -3356,7 +3293,7 @@
      :seon.error/data
      (cond-> (merge data conflict)
        conflict
-       (assoc :seon.error/diagnostic-operation 'seon.db/transact!
+       (assoc :seon.error/operation 'seon.db/transact!
               :seon.error/problems
               [{:seon.error/argument "transaction data"
                 :seon.error/path [(::conflict-attribute conflict)]
@@ -3427,8 +3364,7 @@
               (= :malli.core/missing-key cause) (assoc :type cause))}))]
   (diagnostic
    (cond->
-    {:seon.error/message
-     (@error-problem-sentence
+    {:seon.error/message (@error-problem-sentence
       'seon.db/transact! problem nil
       (@error-scalar-text (:seon.error/offending problem)))
      ::transaction-refused true
@@ -3436,14 +3372,9 @@
      :seon.schema/form form
      ::offending value
      ::path path
-     :seon.error/diagnostic-layer :database-write
-     :seon.error/diagnostic-operation 'seon.db/transact!
-     :seon.error/diagnostic-member attribute
-     :seon.error/diagnostic-expected form
-     :seon.error/diagnostic-offending value
-     :seon.error/diagnostic-cause cause
      :seon.error/data {:seon.error/problems [problem]}
-     :seon.error/diagnostic-evidence {::path path}}
+     :seon.error/layer :seon.db/database-write
+     :seon.error/operation 'seon.db/transact!}
      entity-form (assoc ::entity-form entity-form)
      candidates (assoc ::registered-candidates candidates)))))
 
@@ -3566,8 +3497,7 @@
                   (write-attribute-error database projection attribute value
                                          (conj path attribute) entity-form false)))
               row)]
-    (if (and failure (= ::attribute-not-installed
-                        (get-in failure [:seon.error/data :seon.error/diagnostic-cause])))
+    (if (and failure (not (get forms (::attribute failure))))
       (let [candidates (write-key-candidates projection row)]
         (if (= 1 (count candidates))
           (-> failure
@@ -3668,8 +3598,8 @@
                                         (or (:type failure) ::invalid-entity) nil)]
              (-> refusal
                  (write-error-identity identities)
-                 (assoc-in [:seon.error/data :seon.error/diagnostic-evidence]
-                           {::entity identities ::entity-value row ::path (into [entity-id] in)})))))
+                 (update :seon.error/data merge
+                         {::entity identities ::entity-value row ::path (into [entity-id] in)})))))
        schema-keys))))
 
 (defn- write-owned-values-error
@@ -3694,21 +3624,14 @@
                                 {::owned-refusal
                                  (assoc
                                   (diagnostic
-                                   {:seon.error/message
-                                    (str "Complete component validation refused: " (name cause) "; bound "
+                                   {:seon.error/message (str "Complete component validation refused: " (name cause) "; bound "
                                          :seon.config.db/validation-node-limit "=" limit "; " (pr-str data) ".")
-                                    :seon.error/diagnostic-layer :database-write
-                                    :seon.error/diagnostic-operation 'seon.db/transact!
-                                    :seon.error/diagnostic-member (::entity data)
-                                    :seon.error/diagnostic-expected :seon.db/component-schema
-                                    :seon.error/diagnostic-offending data
-                                    :seon.error/diagnostic-cause cause
-                                    :seon.error/diagnostic-evidence data
-                                    :seon.error/data
-                                    (merge {::diagnostic-cause cause
-                                            ::validation-bound :seon.config.db/validation-node-limit
+                                    :seon.error/data (merge {::validation-bound :seon.config.db/validation-node-limit
                                             ::validation-limit limit}
-                                           data)})
+                                           data)
+                                    :seon.error/layer :seon.db/database-write
+                                    :seon.error/operation 'seon.db/transact!
+                                    :seon.error/expected :seon.db/component-schema})
                                   ::transaction-refused true)})))
         charge! (fn [phase entity-id]
                   (let [cache-key [phase entity-id]]
@@ -3954,14 +3877,12 @@
       (diagnostic
        {::transaction-refused true
         :seon.error/message "Render declarations name functions absent from the final program. Admit the definitions or repair the declarations in the same transaction."
-        :seon.error/diagnostic-layer :database-write
-        :seon.error/diagnostic-operation 'seon.db/transact!
-        :seon.error/diagnostic-member :seon.schema/form
-        :seon.error/diagnostic-expected :seon.fn/sym
-        :seon.error/diagnostic-offending missing
-        :seon.error/diagnostic-cause :seon.render/function
-        :seon.error/diagnostic-evidence {:seon.render/declarations missing}
-        :seon.error/data {:seon.render/declarations missing}}))))
+        :seon.error/data {:seon.render/declarations missing}
+        :seon.error/layer :database-write
+        :seon.error/operation 'seon.db/transact!
+        :seon.error/member :seon.schema/form
+        :seon.error/expected :seon.fn/sym
+        :seon.error/offending missing}))))
 
 (defn- removed-definition-error
   "Check surviving names against the identities removed by an admitted change."
@@ -4007,14 +3928,12 @@
         (diagnostic
          {::transaction-refused true
           :seon.error/message "Program deletion leaves surviving referrers. Repair or retract every named referrer in the same transaction."
-          :seon.error/diagnostic-layer :database-write
-          :seon.error/diagnostic-operation 'seon.db/transact!
-          :seon.error/diagnostic-member :seon.program/referrer
-          :seon.error/diagnostic-expected :seon.program/deletion-row
-          :seon.error/diagnostic-offending breaks
-          :seon.error/diagnostic-cause :seon.program/referrer
-          :seon.error/diagnostic-evidence {:seon.program/referrers breaks}
-          :seon.error/data {:seon.program/referrers breaks}})))))
+          :seon.error/data {:seon.program/referrers breaks}
+          :seon.error/layer :database-write
+          :seon.error/operation 'seon.db/transact!
+          :seon.error/member :seon.program/referrer
+          :seon.error/expected :seon.program/deletion-row
+          :seon.error/offending breaks})))))
 
 (defn deletion-error
   "Refuse a publication removing definitions still named in its final database.
@@ -4048,14 +3967,12 @@
       (diagnostic
        {::transaction-refused true
         :seon.error/message "Agents retain their identities. Archive the agent instead of retracting or renaming it."
-        :seon.error/diagnostic-layer :database-write
-        :seon.error/diagnostic-operation 'seon.db/transact!
-        :seon.error/diagnostic-member :seon.agent/id
-        :seon.error/diagnostic-expected :seon.agent/archived-tx
-        :seon.error/diagnostic-offending removed
-        :seon.error/diagnostic-cause :seon.agent/id
-        :seon.error/diagnostic-evidence {:seon.program/referrers removed}
-        :seon.error/data {:seon.program/referrers removed}}))))
+        :seon.error/data {:seon.program/referrers removed}
+        :seon.error/layer :database-write
+        :seon.error/operation 'seon.db/transact!
+        :seon.error/member :seon.agent/id
+        :seon.error/expected :seon.agent/archived-tx
+        :seon.error/offending removed}))))
 
 (defn- write-deletion-error
   [before database affected identity-attrs]
@@ -4140,14 +4057,12 @@
            (diagnostic
             {::transaction-refused true
              :seon.error/message "Recorded source argument counts disagree with the final prepared arities. Repair the callers or declaration in the same transaction."
-             :seon.error/diagnostic-layer :database-write
-             :seon.error/diagnostic-operation 'seon.db/transact!
-             :seon.error/diagnostic-member :seon.fn/call-arities
-             :seon.error/diagnostic-expected :seon.fn/prepared-arities
-             :seon.error/diagnostic-offending mismatches
-             :seon.error/diagnostic-cause :seon.fn/arity-mismatches
-             :seon.error/diagnostic-evidence {:seon.fn/arity-mismatches mismatches}
-             :seon.error/data {:seon.fn/arity-mismatches mismatches}}))))))))
+             :seon.error/data {:seon.fn/arity-mismatches mismatches}
+             :seon.error/layer :database-write
+             :seon.error/operation 'seon.db/transact!
+             :seon.error/member :seon.fn/call-arities
+             :seon.error/expected :seon.fn/prepared-arities
+             :seon.error/offending mismatches}))))))))
 
 (defn- write-report-validator
   "Acquire the callback on its immutable projection, primed when the connection acquires it."
@@ -4391,24 +4306,18 @@
                        :seon.store/transaction transaction
                        :seon.db/transaction-outcome-unknown true}]
                   (diagnostic
-                   {:seon.error/message
-                    (str "seon.db/transact! stopped waiting after " elapsed-ms
+                   {:seon.error/message (str "seon.db/transact! stopped waiting after " elapsed-ms
                          " ms (bound " write-time-limit-ms
                          " ms). Datahike may still commit the queued transaction; "
                          "its outcome is unknown.")
-                    :seon.error/diagnostic-layer :database-write
-                    :seon.error/diagnostic-operation 'seon.db/transact!
-                    :seon.error/diagnostic-member bound-attribute
-                    :seon.error/diagnostic-expected
-                    {:seon.config.db/write-time-limit-ms write-time-limit-ms}
-                    :seon.error/diagnostic-offending
-                    (select-keys evidence
+                    :seon.db/transaction-outcome-unknown true
+                    :seon.error/layer :database-write
+                    :seon.error/operation 'seon.db/transact!
+                    :seon.error/expected {:seon.config.db/write-time-limit-ms write-time-limit-ms}
+                    :seon.error/offending (select-keys evidence
                                  [:seon.db/connection-identity
                                   :seon.store/branch])
-                    :seon.error/diagnostic-cause ::write-bound-exceeded
-                    :seon.error/diagnostic-evidence evidence
-                    :seon.error/data evidence
-                    :seon.db/transaction-outcome-unknown true}))
+                    :seon.error/data (merge evidence {:seon.error/member bound-attribute})}))
                 (let [state
                       (or (when (identical? projection
                                              (:seon.schema/projection
@@ -4467,17 +4376,14 @@
   (when (and (map? transaction)
              (not (contains? transaction :tx-data)))
     (diagnostic
-     {:seon.error/message
-      "seon.db/transact! argument maps require :tx-data."
+     {:seon.error/message "seon.db/transact! argument maps require :tx-data."
       :seon.db/missing-request-member :tx-data
-      :seon.error/diagnostic-layer :database-write
-      :seon.error/diagnostic-operation 'seon.db/transact!
-      :seon.error/diagnostic-member :tx-data
-      :seon.error/diagnostic-expected
-      [:map [:tx-data :seon.store/transaction-data]]
-      :seon.error/diagnostic-offending transaction
-      :seon.error/diagnostic-cause ::missing-required-key
-      :seon.error/diagnostic-evidence transaction :seon.db/invalid-request true})))
+      :seon.db/invalid-request true
+      :seon.error/layer :database-write
+      :seon.error/operation 'seon.db/transact!
+      :seon.error/expected [:map [:tx-data :seon.store/transaction-data]]
+      :seon.error/offending transaction
+      :seon.error/data {:seon.error/source transaction}})))
 
 (defn- rendered-value
   [unit]

@@ -48,21 +48,16 @@
                (= 2 (count result-ref))
                (= :seon.effect/id (first result-ref))
                (string? (second result-ref)))
-    (refusal/diagnostic
-     {:seon.error/at (java.util.Date.)
+    {:seon.error/at (java.util.Date.)
       :seon.error/layer :my.background/poll
       :seon.error/operation 'seon.background/poll
       :seon.error/message "poll needs a :seon.effect/id lookup ref."
-      :seon.error/diagnostic-layer :my.background/poll
-      :seon.error/diagnostic-operation 'seon.background/poll
-      :seon.error/diagnostic-member :my.background/result
-      :seon.error/diagnostic-expected "a :seon.effect/id lookup ref"
-      :seon.error/diagnostic-offending result-ref
-      :seon.error/diagnostic-cause :my.background/invalid-result
-      :seon.error/diagnostic-evidence {}
       :seon.error/fix "Supply [:seon.effect/id <id>]."
       :seon.error/data {:my.background/result result-ref}
-      :my.background/result-observation (pr-str result-ref)})
+      :my.background/result-observation (pr-str result-ref)
+      :seon.error/member :my.background/result
+      :seon.error/expected "a :seon.effect/id lookup ref"
+      :seon.error/offending result-ref}
     (if-let [receipt
              (db/pull (db/db db/*conn*)
                       [:seon.effect/id
@@ -85,21 +80,15 @@
         (:seon.effect/interrupted-at receipt)
         (assoc :seon.effect/interrupted-at
                (:seon.effect/interrupted-at receipt)))
-      (refusal/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :my.background/poll
         :seon.error/operation 'seon.background/poll
         :seon.error/message "The background effect receipt does not exist."
-        :seon.error/diagnostic-layer :my.background/poll
-        :seon.error/diagnostic-operation 'seon.background/poll
-        :seon.error/diagnostic-member :my.background/result
-        :seon.error/diagnostic-expected "an existing background effect receipt"
-        :seon.error/diagnostic-offending result-ref
-        :seon.error/diagnostic-cause :my.background/missing-result
-        :seon.error/diagnostic-evidence {}
         :seon.error/fix "Use the lookup ref returned by background."
         :seon.error/data {:my.background/result result-ref}
-        :my.background/missing-result-ref result-ref}))))
+        :my.background/missing-result-ref result-ref
+        :seon.error/member :my.background/result
+        :seon.error/expected "an existing background effect receipt"})))
 
 (defn await
   "Wait for a background request or return its finished result.

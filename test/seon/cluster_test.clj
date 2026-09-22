@@ -160,7 +160,7 @@
                        :seon.instrument/contract-error)
             "the contract refuses before the recorder is reached")
         (is (= :input (:seon.instrument/check refusal)))
-        (is (= 'seon.error/commit-tx (:seon.error/diagnostic-operation data))
+        (is (= 'seon.error/commit-tx (:seon.error/operation data))
             "and names the function that was called")
         (is (some #{[:seon.config.error/max-evidence-bytes]}
                   (:seon.instrument/problem-paths data))
@@ -170,7 +170,7 @@
                            ":seon.config.error/max-evidence-bytes")
             "and the message itself names it")
         (is (string? (:seon.instrument/caller
-                      (:seon.error/diagnostic-evidence data)))
+                      data))
             "with a caller frame that is not malli's own wrapper")
         (is (empty? (committed-fault-ids @connection))
             "and the refused call committed nothing")))))
@@ -351,9 +351,7 @@
         adoption-failure (ex-info "Source changed during development adoption."
                                   {
                                    :seon.boot/offense
-                                   {:seon.source/commit-id "c0"
-                                    :seon.error/diagnostic-cause
-                                    :seon.cluster/source-changed-during-adoption}})
+                                   {:seon.source/digest-before "c0"}})
         reported (atom [])
         attempts (atom 0)
         converging (fn [failure]
@@ -363,10 +361,8 @@
                          {:seon.source/commit-id "converged"})))]
     (is (some? analysis-failure)
         "the captured span read genuinely refuses instead of returning source")
-    (is (= [true :seon.fn/source-changed-during-analysis]
-           [(:seon.fn/index-refused (ex-data analysis-failure))
-            (:seon.error/diagnostic-cause (ex-data analysis-failure))])
-        "carrying the declared analysis-time source-change cause")
+    (is (true? (:seon.fn/index-refused (ex-data analysis-failure))))
+    (is (vector? (:seon.fn/analysis-span (ex-data analysis-failure))))
     (is (= [:analysis :adoption nil]
            [(phase-of analysis-failure)
             (phase-of adoption-failure)
@@ -390,9 +386,9 @@
             "a second change refuses rather than rebuilding")
         (is (= :analysis (get-in surviving [:seon.boot/offense :seon.source/change-phase]))
             "naming the phase that changed under the retry")
-        (is (= :seon.fn/source-changed-during-analysis
-               (get-in surviving [:seon.boot/offense :seon.error/diagnostic-cause]))
-            "and retaining the typed cause as evidence")))))
+        (is (= (:seon.fn/analysis-span (ex-data analysis-failure))
+               (get-in surviving [:seon.boot/offense :seon.fn/analysis-span]))
+            "retaining the captured span")))))
 
 (deftest initialization-readiness-surfaces-a-refused-read-instead-of-absence
   ;; The readiness probe answers three states, not two. Before this, a

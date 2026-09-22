@@ -1,7 +1,8 @@
 (ns seon.test.runner
   "Run the JVM gate and optionally commit per-test result facts."
   (:refer-clojure :exclude [run!])
-  (:require [clojure.edn :as edn]
+  (:require [seon.error.refusal]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -660,19 +661,15 @@
      :seon.test/not-runnable-error]]}
   [test-vars custody]
   (if-let [unrunnable (first (remove #(ifn? (:test (meta %))) test-vars))]
-    (error/diagnostic
-     {:seon.error/at (java.util.Date.)
+    {:seon.error/at (java.util.Date.)
       :seon.error/layer :seon.test/execution
       :seon.error/operation `run-vars!
       :seon.error/message "The supplied Var has no clojure.test function."
-      :seon.error/diagnostic-layer :seon.test/execution
-      :seon.error/diagnostic-operation `run-vars!
-      :seon.error/diagnostic-member :seon.test/var
-      :seon.error/diagnostic-expected "a Var carrying a clojure.test function"
-      :seon.error/diagnostic-offending unrunnable
-      :seon.error/diagnostic-cause :seon.test/not-runnable
-      :seon.error/diagnostic-evidence {:seon.test/var (str unrunnable)}
-      :seon.test/not-runnable (str unrunnable)})
+      :seon.test/not-runnable (str unrunnable)
+      :seon.error/member :seon.test/var
+      :seon.error/expected "a Var carrying a clojure.test function"
+      :seon.error/offending unrunnable
+      :seon.error/data {:seon.test/var (str unrunnable)}}
     (let [selected-namespaces (set (map (comp symbol namespace symbol var-symbol) test-vars))
           options (report-options custody)
           capture (atom {::order [] ::results {}})
@@ -762,18 +759,13 @@
         (let [message (str marker-attribute " must contain a non-blank reason.")]
           (throw
            (ex-info message
-                    (assoc (error/diagnostic
-                            {:seon.error/at (java.util.Date.)
+                    (assoc {:seon.error/at (java.util.Date.)
                              :seon.error/layer :seon.test.runner/metadata
                              :seon.error/operation `marker-reason
                              :seon.error/message message
-                             :seon.error/diagnostic-layer :seon.test.runner/metadata
-                             :seon.error/diagnostic-operation `marker-reason
-                             :seon.error/diagnostic-member marker-attribute
-                             :seon.error/diagnostic-expected "a non-blank reason string"
-                             :seon.error/diagnostic-offending marker
-                             :seon.error/diagnostic-cause :invalid-marker-reason
-                             :seon.error/diagnostic-evidence {:seon.test/sym (var-symbol test-var)}})
+                             :seon.error/expected "a non-blank reason string"
+                             :seon.error/offending marker
+                             :seon.error/data (merge {:seon.test/sym (var-symbol test-var)} {:seon.error/member marker-attribute})}
                            :seon.test.runner/test-sym (var-symbol test-var)
                            :seon.test.runner/marker-key marker-attribute
                            :seon.error/offending marker)))))
@@ -1262,20 +1254,15 @@
             (throw
              (ex-info
               "A namespace test hook requires its complete admitted selection."
-              (error/diagnostic
-               {:seon.error/at (java.util.Date.)
+              {:seon.error/at (java.util.Date.)
                 :seon.error/layer :seon.test/execution
                 :seon.error/operation `run-selected-tests
                 :seon.error/message "A namespace test hook requires its complete admitted selection."
-                :seon.error/diagnostic-layer :seon.test/execution
-                :seon.error/diagnostic-operation `run-selected-tests
-                :seon.error/diagnostic-member :seon.test.runner/long-test-ns-hook
-                :seon.error/diagnostic-expected "the namespace's complete admitted test selection"
-                :seon.error/diagnostic-offending namespace-vars
-                :seon.error/diagnostic-cause :seon.test/namespace-hook-requires-complete-selection
-                :seon.error/diagnostic-evidence {:seon.ns/name namespace-name}
                 :seon.ns/name namespace-name
-                :seon.test.runner/long-test-ns-hook namespace-name}))))
+                :seon.test.runner/long-test-ns-hook namespace-name
+                :seon.error/expected "the namespace's complete admitted test selection"
+                :seon.error/offending namespace-vars
+                :seon.error/data {:seon.ns/name namespace-name}})))
           (test/test-vars namespace-vars))
         (when host? (test/do-report {:type :end-test-ns :ns namespace-object})))
       @test/*report-counters*))))
@@ -2053,18 +2040,14 @@
 
           (throw
            (ex-info "A test worker received an unknown command."
-                    (assoc (error/diagnostic
-                            {:seon.error/at (java.util.Date.)
+                    (assoc {:seon.error/at (java.util.Date.)
                              :seon.error/layer :seon.test.runner/worker-protocol
                              :seon.error/operation `serve-worker-commands!
                              :seon.error/message "A test worker received an unknown command."
-                             :seon.error/diagnostic-layer :seon.test.runner/worker-protocol
-                             :seon.error/diagnostic-operation `serve-worker-commands!
-                             :seon.error/diagnostic-member ::worker-command
-                             :seon.error/diagnostic-expected #{:initialize :run :stop}
-                             :seon.error/diagnostic-offending command
-                             :seon.error/diagnostic-cause :unknown-worker-command
-                             :seon.error/diagnostic-evidence {::worker-id worker-id}})
+                             :seon.error/member ::worker-command
+                             :seon.error/expected #{:initialize :run :stop}
+                             :seon.error/offending command
+                             :seon.error/data {::worker-id worker-id}}
                            :seon.test.runner/worker-id worker-id
                            :seon.test.runner/worker-command-key
                            (or (::worker-command command) :missing)
@@ -2350,19 +2333,15 @@
    (let [index (derive-index nil)]
     (select-keys (::reach-digests index) test-symbols))))
  (catch Exception failure
-  (error/diagnostic
-   {:seon.error/at (java.util.Date.)
+  {:seon.error/at (java.util.Date.)
     :seon.error/layer :seon.test/recording
     :seon.error/operation `reach-entries
     :seon.error/message (str "Reach digest unavailable: " (ex-message failure))
-    :seon.error/diagnostic-layer :seon.test/recording
-    :seon.error/diagnostic-operation `reach-entries
-    :seon.error/diagnostic-member :seon.test/reach-digests
-    :seon.error/diagnostic-expected "derived reach digests for the requested tests"
-    :seon.error/diagnostic-offending test-symbols
-    :seon.error/diagnostic-cause :seon.test/reach-digest-unavailable
-    :seon.error/diagnostic-evidence {:seon.test/syms test-symbols}
-    :seon.test/unknown "reach digest"})))))
+    :seon.test/unknown "reach digest"
+    :seon.error/member :seon.test/reach-digests
+    :seon.error/expected "derived reach digests for the requested tests"
+    :seon.error/offending test-symbols
+    :seon.error/data {:seon.test/syms test-symbols}}))))
 
 (defn reach-digests
   "Derive equality keys from the tested database's incremental reach index."
@@ -2470,17 +2449,13 @@
   ((requiring-resolve 'seon.test/selection-admission) request))
 
 (defn- execution-refusal! [operation run-id kind expected observed]
-  (let [failure (assoc (error/diagnostic
-                 {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
+  (let [failure (assoc {:seon.error/at (java.util.Date.)
+                  :seon.error/layer :seon.test/execution
                   :seon.error/operation operation
                   :seon.error/message "The test execution evidence does not authorize this transition."
-                  :seon.error/diagnostic-layer :test-execution
-                  :seon.error/diagnostic-operation operation
-                  :seon.error/diagnostic-member run-id
-                  :seon.error/diagnostic-expected expected
-                  :seon.error/diagnostic-offending observed
-                  :seon.error/diagnostic-cause kind
-                  :seon.error/diagnostic-evidence {:seon.test.run/id run-id}}) :seon.test/execution-refusal kind)]
+                  :seon.error/expected expected
+                  :seon.error/offending observed
+                  :seon.error/data (merge {:seon.test.run/id run-id} {:seon.error/layer :test-execution :seon.error/member run-id})} :seon.test/execution-refusal kind)]
     (throw (ex-info (:seon.error/message failure) failure))))
 
 (defn- execution-read [value]
@@ -2934,21 +2909,16 @@
     (when (and (map? previous) (contains? previous :seon.error/at) (contains? previous :seon.error/layer) (contains? previous :seon.error/operation))
       (throw (ex-info (:seon.error/message previous) previous)))
     (when (and previous (not= run (dissoc previous :db/id)))
-      (let [failure (assoc (error/diagnostic
-                     {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/recording
+      (let [failure (assoc {:seon.error/at (java.util.Date.)
+                      :seon.error/layer :seon.test/recording
                       :seon.error/operation 'seon.test.runner/record-tx
                       :seon.error/message "A test run's provenance is immutable."
-                      :seon.error/diagnostic-layer :test
-                      :seon.error/diagnostic-operation 'seon.test.runner/record-tx
-                      :seon.error/diagnostic-member run-id
-                      :seon.error/diagnostic-expected (dissoc previous :db/id)
-                      :seon.error/diagnostic-offending run
-                      :seon.error/diagnostic-cause :seon.test.run/immutable
-                      :seon.error/diagnostic-evidence
-                      {:seon.test.run/id run-id
-                       :seon.db/basis-t (db/basis-t database)}
                       :seon.test.run/id run-id
-                      :seon.test.run/immutable run-id}) :seon.test.run/immutable run-id)]
+                      :seon.test.run/immutable run-id
+                      :seon.error/expected (dissoc previous :db/id)
+                      :seon.error/offending run
+                      :seon.error/data (merge {:seon.test.run/id run-id
+                       :seon.db/basis-t (db/basis-t database)} {:seon.error/layer :test})} :seon.test.run/immutable run-id)]
         (throw (ex-info (:seon.error/message failure) failure))))
     (let [missing (into [] (comp (map :seon.test/sym) (remove current-by-symbol)) results)]
       (when (seq missing)
@@ -3119,17 +3089,13 @@
     (catch Exception failure
       (if (and (map? (ex-data failure)) (contains? (ex-data failure) :seon.error/at) (contains? (ex-data failure) :seon.error/layer) (contains? (ex-data failure) :seon.error/operation))
         (ex-data failure)
-        (assoc (error/diagnostic
-         {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/reuse
+        (assoc {:seon.error/at (java.util.Date.)
+          :seon.error/layer :seon.test/reuse
           :seon.error/operation 'seon.test.runner/reusable-result
           :seon.error/message "Recorded test evidence could not be read."
-          :seon.error/diagnostic-layer :test-reuse
-          :seon.error/diagnostic-operation 'seon.test.runner/reusable-result
-          :seon.error/diagnostic-member test-symbol
-          :seon.error/diagnostic-expected :recorded-program-selection-and-basis
-          :seon.error/diagnostic-offending (or (ex-message failure) (.getName (class failure)))
-          :seon.error/diagnostic-cause :unavailable-recorded-evidence
-          :seon.error/diagnostic-evidence {:seon.test/run-basis-t (db/basis-t database)}})
+          :seon.error/expected :recorded-program-selection-and-basis
+          :seon.error/offending (or (ex-message failure) (.getName (class failure)))
+          :seon.error/data (merge {:seon.test/run-basis-t (db/basis-t database)} {:seon.error/layer :test-reuse :seon.error/member test-symbol})}
          :seon.test/execution-refusal :seon.test/population-unknown)))))
 
 (defn- recorded-member-result [database run test-symbol]
@@ -3242,20 +3208,14 @@
     (throw
      (ex-info
       "Test results may not be written into the default cluster."
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.test/recording
         :seon.error/operation `record!
         :seon.error/message "Test results may not be written into the default cluster."
-        :seon.error/diagnostic-layer :seon.test/recording
-        :seon.error/diagnostic-operation `record!
-        :seon.error/diagnostic-member :seon.boot/cluster-name
-        :seon.error/diagnostic-expected "an explicitly named non-default cluster"
-        :seon.error/diagnostic-offending cluster-name
-        :seon.error/diagnostic-cause :seon.test.runner/default-cluster-refused
-        :seon.error/diagnostic-evidence {:seon.boot/cluster-name cluster-name}
         ::default-cluster-refused cluster-name
-        :seon.boot/cluster-name cluster-name}))))
+        :seon.boot/cluster-name cluster-name
+        :seon.error/expected "an explicitly named non-default cluster"
+        :seon.error/data {:seon.boot/cluster-name cluster-name}})))
   (let [run-result (completion-reach-digests run-result)
         instance (start-cluster! cluster-name root)]
     (try
@@ -3304,19 +3264,14 @@
   [path]
   (let [file (io/file (str path))
         refuse (fn [message offending expected]
-                 (error/diagnostic
-                  {:seon.error/at (java.util.Date.)
+                 {:seon.error/at (java.util.Date.)
                    :seon.error/layer :seon.test/recording
                    :seon.error/operation `staged-completion
                    :seon.error/message message
-                   :seon.error/diagnostic-layer :seon.test/recording
-                   :seon.error/diagnostic-operation `staged-completion
-                   :seon.error/diagnostic-member ::completion-path
-                   :seon.error/diagnostic-expected expected
-                   :seon.error/diagnostic-offending offending
-                   :seon.error/diagnostic-cause :seon.test.runner/staged-completion-unreadable
-                   :seon.error/diagnostic-evidence {::completion-path (str path)}
-                   ::completion-path (str path)}))]
+                   ::completion-path (str path)
+                   :seon.error/expected expected
+                   :seon.error/offending offending
+                   :seon.error/data {::completion-path (str path)}})]
     (if-not (.isFile file)
       (refuse (str "No staged gate completion file at " path ".")
               path "a readable staged completion EDN map")
@@ -3377,20 +3332,16 @@
           ((deref (ns-resolve 'seon.test.runner
                               (symbol "commit-staged-completion!")))
            store# ~(str completion-path))
-          (seon.error/diagnostic
-           {:seon.error/at (java.util.Date.)
+          {:seon.error/at (java.util.Date.)
             :seon.error/layer :seon.test/recording
             :seon.error/operation 'seon.test.runner/record-persistent-results!
             :seon.error/message "The live process has no held operator store."
-            :seon.error/diagnostic-layer :seon.test/recording
-            :seon.error/diagnostic-operation 'seon.test.runner/record-persistent-results!
-            :seon.error/diagnostic-member :seon.store/store
-            :seon.error/diagnostic-expected "a held operator store"
-            :seon.error/diagnostic-offending :seon.error/absent
-            :seon.error/diagnostic-cause :seon.test.runner/live-store-unavailable
-            :seon.error/diagnostic-evidence {:seon.store/store :seon.error/absent}
             :seon.test.run/unavailable true
-            :seon.test.run/provenance-failure "The live process has no held operator store."})))
+            :seon.test.run/provenance-failure "The live process has no held operator store."
+            :seon.error/member :seon.store/store
+            :seon.error/expected "a held operator store"
+            :seon.error/offending :seon.error/absent
+            :seon.error/data {:seon.store/store :seon.error/absent}}))
       (catch Throwable failure#
         ;; Preserve the producer's complete refusal, including its schema and
         ;; member. Older throwers lack base observations; this boundary adds
@@ -3439,18 +3390,13 @@
           (throw (ex-info "The recording authority returned no admission or result facts."
                           {:seon.test/recording-result result}))))
     (catch Exception failure
-      (assoc (error/diagnostic
-              {:seon.error/at (java.util.Date.)
+      (assoc {:seon.error/at (java.util.Date.)
                :seon.error/layer :seon.test/recording
                :seon.error/operation 'seon.test.runner/record-snapshot!
                :seon.error/message (or (ex-message failure) (.getName (class failure)))
-               :seon.error/diagnostic-layer :test
-               :seon.error/diagnostic-operation 'seon.test.runner/record-snapshot!
-               :seon.error/diagnostic-member operator-root
-               :seon.error/diagnostic-expected :published-source-test-authority
-               :seon.error/diagnostic-offending (Throwable->map failure)
-               :seon.error/diagnostic-cause :recording-unavailable
-               :seon.error/diagnostic-evidence {:seon.test.run/provenance (:seon.test.run/provenance request)}})
+               :seon.error/expected :published-source-test-authority
+               :seon.error/offending (Throwable->map failure)
+               :seon.error/data (merge {:seon.test.run/provenance (:seon.test.run/provenance request)} {:seon.error/layer :test :seon.error/member operator-root})}
              :seon.source/refused-test-run
              (get-in request [:seon.test.run/provenance :seon.test.run/id])))))
 
@@ -3507,17 +3453,13 @@
   [run-id failure]
   (if (:seon.test/execution-refusal (ex-data failure))
     (ex-data failure)
-    (assoc (error/diagnostic
-            {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/recording
+    (assoc {:seon.error/at (java.util.Date.)
+             :seon.error/layer :seon.test/recording
              :seon.error/operation 'seon.test.runner/run-results
              :seon.error/message "Recorded run coverage is unavailable."
-             :seon.error/diagnostic-layer :test
-             :seon.error/diagnostic-operation 'seon.test.runner/run-results
-             :seon.error/diagnostic-member run-id
-             :seon.error/diagnostic-expected :complete-recorded-membership
-             :seon.error/diagnostic-offending (Throwable->map failure)
-             :seon.error/diagnostic-cause :unavailable-recorded-evidence
-             :seon.error/diagnostic-evidence {:seon.test.run/id run-id}})
+             :seon.error/expected :complete-recorded-membership
+             :seon.error/offending (Throwable->map failure)
+             :seon.error/data (merge {:seon.test.run/id run-id} {:seon.error/layer :test :seon.error/member run-id})}
            :seon.test/execution-refusal :seon.test/population-unknown)))
 
 (defn run-results
@@ -3691,7 +3633,6 @@
   {:malli/schema [:=> [:cat :seon.error/base] :nil]}
   [refusal]
   (when-let [differences (seq (get-in refusal [:seon.error/data
-                                                :seon.error/diagnostic-evidence
                                                 :seon.test.selection/input-differences]))]
     (println "bin/test: differing gate inputs:")
     (doseq [difference differences]
@@ -3939,19 +3880,15 @@
                   error-log-path (.getCanonicalPath error-log)]
               (throw
                (ex-info message
-                        (assoc (error/diagnostic
+                        (assoc (seon.error.refusal/diagnostic
                                 {:seon.error/at (java.util.Date.)
                                  :seon.error/layer :seon.test.runner/worker-process
                                  :seon.error/operation `start-worker!
                                  :seon.error/message message
-                                 :seon.error/diagnostic-layer :seon.test.runner/worker-process
-                                 :seon.error/diagnostic-operation `start-worker!
-                                 :seon.error/diagnostic-member ::worker-process
-                                 :seon.error/diagnostic-expected "a launched worker process"
-                                 :seon.error/diagnostic-offending command
-                                 :seon.error/diagnostic-cause :worker-launch-failure
-                                 :seon.error/diagnostic-evidence
-                                 {:seon.error/throwable-class (.getName (class failure))
+                                 :seon.error/member ::worker-process
+                                 :seon.error/expected "a launched worker process"
+                                 :seon.error/offending command
+                                 :seon.error/data {:seon.error/throwable-class (.getName (class failure))
                                   ::worker-error-log error-log-path}})
                                :seon.test.runner/worker-id worker-id
                                :seon.test.runner/worker-error-log error-log-path
@@ -3982,18 +3919,13 @@
             error-log-path (::worker-error-log worker)]
         (throw
          (ex-info message
-                  (assoc (error/diagnostic
-                          {:seon.error/at (java.util.Date.)
+                  (assoc {:seon.error/at (java.util.Date.)
                            :seon.error/layer :seon.test.runner/worker-process
                            :seon.error/operation `start-worker!
                            :seon.error/message message
-                           :seon.error/diagnostic-layer :seon.test.runner/worker-process
-                           :seon.error/diagnostic-operation `start-worker!
-                           :seon.error/diagnostic-member :ready
-                           :seon.error/diagnostic-expected "a worker readiness event"
-                           :seon.error/diagnostic-offending ready
-                           :seon.error/diagnostic-cause :worker-launch-failure
-                           :seon.error/diagnostic-evidence ready})
+                           :seon.error/expected "a worker readiness event"
+                           :seon.error/offending ready
+                           :seon.error/data {:seon.error/member :ready :seon.error/source ready}}
                          :seon.test.runner/worker-id worker-id
                          :seon.test.runner/worker-error-log error-log-path
                          :seon.error/offending ready)))))
@@ -4074,18 +4006,14 @@
       (let [forced-completion? (await-process-tree-exit ownership)]
         (throw
          (ex-info "A worker process tree exceeded its exit backstop."
-                  (assoc (error/diagnostic
-                          {:seon.error/at (java.util.Date.)
+                  (assoc {:seon.error/at (java.util.Date.)
                            :seon.error/layer :seon.test.runner/worker-process
                            :seon.error/operation `stop-owned-process-tree!
                            :seon.error/message "A worker process tree exceeded its exit backstop."
-                           :seon.error/diagnostic-layer :seon.test.runner/worker-process
-                           :seon.error/diagnostic-operation `stop-owned-process-tree!
-                           :seon.error/diagnostic-member ::process-tree-exit
-                           :seon.error/diagnostic-expected "the complete process tree to exit before the bound"
-                           :seon.error/diagnostic-offending stuck-processes
-                           :seon.error/diagnostic-cause :process-tree-exit-backstop
-                           :seon.error/diagnostic-evidence {::forced-completion? forced-completion?}})
+                           :seon.error/member ::process-tree-exit
+                           :seon.error/expected "the complete process tree to exit before the bound"
+                           :seon.error/offending stuck-processes
+                           :seon.error/data {::forced-completion? forced-completion?}}
                          :seon.test.runner/worker-id worker-id
                          :seon.test.runner/process-tree-exit-bound-ms
                          (* 1000 process-tree-exit-backstop-seconds)
@@ -4785,21 +4713,15 @@
     (throw
      (ex-info
       "The test selection mode is not one this runner knows."
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+      {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.test/selection
         :seon.error/operation `run-coordinator!
         :seon.error/message "The test selection mode is not one this runner knows."
-        :seon.error/diagnostic-layer :seon.test/selection
-        :seon.error/diagnostic-operation `run-coordinator!
-        :seon.error/diagnostic-member :seon.test.runner/selection-mode
-        :seon.error/diagnostic-expected selection-modes
-        :seon.error/diagnostic-offending selection-mode
-        :seon.error/diagnostic-cause :seon.test.runner/invalid-selection-mode
-        :seon.error/diagnostic-evidence {::known selection-modes}
         ::selection-mode selection-mode
         ::known selection-modes
-        :seon.test.runner/invalid-selection-mode selection-mode}))))
+        :seon.test.runner/invalid-selection-mode selection-mode
+        :seon.error/member :seon.test.runner/selection-mode
+        :seon.error/data {::known selection-modes}})))
   (let [manifest (program-manifest)
         ;; Named namespaces are the selection; with none named, the gate's
         ;; membership is a FACT read from the manifest the base already

@@ -235,28 +235,6 @@
         (is (= 'java.lang.IllegalArgumentException
                (:seon.error/exception-class face)))
         (is (= small-message (:seon.error/message face)))
-        (is (= {:seon.error/diagnostic-layer :development-mcp
-                :seon.error/diagnostic-operation :evaluate-jvm
-                :seon.error/diagnostic-member :exception
-                :seon.error/diagnostic-expected
-                :successful-prepl-evaluation
-                :seon.error/diagnostic-offending
-                "java.lang.IllegalArgumentException"
-                :seon.error/diagnostic-cause small-message
-                :seon.error/diagnostic-evidence-availability
-                :seon.error/known
-                :seon.error/diagnostic-evidence
-                {:seon.error/frame serving-frame}}
-               (select-keys
-                (:seon.error/data face)
-                [:seon.error/diagnostic-layer
-                 :seon.error/diagnostic-operation
-                 :seon.error/diagnostic-member
-                 :seon.error/diagnostic-expected
-                 :seon.error/diagnostic-offending
-                 :seon.error/diagnostic-cause
-                 :seon.error/diagnostic-evidence-availability
-                 :seon.error/diagnostic-evidence])))
         (is (not (contains? face :seon.dev.mcp/text))
             "the same sentence is not rendered again inside the face")
         (is (false? (:seon.dev.mcp/windowed? result)))

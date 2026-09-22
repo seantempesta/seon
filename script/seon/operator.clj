@@ -49,15 +49,14 @@
       (operator-silence-backstop-ms manifest))))
 
 (defn diagnostic [message evidence cause]
-  (refusal/diagnostic
-   {:seon.error/at (java.util.Date.) :seon.error/layer :seon.operator/operation
-    :seon.error/operation 'seon.operator/request! :seon.error/message message
-    :seon.error/diagnostic-layer :seon.operator/client
-    :seon.error/diagnostic-operation 'seon.operator/request!
-    :seon.error/diagnostic-member :seon.operator/request
-    :seon.error/diagnostic-expected :completed-operation
-    :seon.error/diagnostic-offending evidence :seon.error/diagnostic-cause cause
-    :seon.error/diagnostic-evidence evidence}))
+  {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.operator/operation
+    :seon.error/operation 'seon.operator/request!
+    :seon.error/message message
+    :seon.error/member :seon.operator/request
+    :seon.error/expected :completed-operation
+    :seon.error/offending evidence
+    :seon.error/data (merge evidence {:seon.error/layer :seon.operator/client})})
 
 (defn- fail! [message evidence]
   (throw (ex-info message (diagnostic message evidence :refused))))

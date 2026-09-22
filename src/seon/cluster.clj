@@ -316,23 +316,14 @@
         (schema/call-with-projection-state
          projection-state
          #(config/effective (db/db connection) cluster-name))
-        (error/diagnostic
-         {:seon.error/at (Date.)
+        {:seon.error/at (Date.)
           :seon.error/layer :seon.dev.mcp/configuration
           :seon.error/operation 'seon.cluster/mcp-effective
           :seon.schema/expected-value :seon.schema/projection
           :seon.schema/refused-value :seon.error/unknown
-          :seon.error/message
-          "The MCP config read has no cluster projection state."
-          :seon.error/diagnostic-layer :development-mcp
-          :seon.error/diagnostic-operation 'seon.config/effective
-          :seon.error/diagnostic-member :seon.schema/projection
-          :seon.error/diagnostic-expected
-          :seon.sci.eval/projection-state
-          :seon.error/diagnostic-offending :seon.error/unknown
-          :seon.error/diagnostic-cause ::mcp-missing-projection
-          :seon.error/diagnostic-evidence
-          {:seon.boot/cluster-name cluster-name}}))
+          :seon.error/message "The MCP config read has no cluster projection state."
+          :seon.error/expected :seon.sci.eval/projection-state
+          :seon.error/data (merge {:seon.boot/cluster-name cluster-name} {:seon.error/layer :development-mcp :seon.error/operation 'seon.config/effective})})
       bootstrap-effective)))
 
 (defn- nil-deref?
@@ -360,24 +351,16 @@
         message (if nil-deref?
                   "The evaluated form dereferenced nil."
                   (str (or (:cause value) (:message cause-entry))))]
-    (refusal/diagnostic
-      {:seon.error/at (java.util.Date.)
+    {:seon.error/at (java.util.Date.)
        :seon.error/layer :seon.dev.mcp/evaluation
        :seon.error/operation `exception-summary
        :seon.error/message message
-       :seon.error/diagnostic-layer :development-mcp
-       :seon.error/diagnostic-operation :evaluate-jvm
-       :seon.error/diagnostic-member :exception
-       :seon.error/diagnostic-expected :successful-prepl-evaluation
-       :seon.error/diagnostic-offending (str (:type cause-entry))
-       :seon.error/diagnostic-cause message
-       :seon.error/diagnostic-evidence
-       {:seon.error/frame frame}
-       :seon.error/data
-       {:seon.error/exception-class (:type cause-entry)
-        :seon.error/frame frame}
        :seon.error/exception-class (:type cause-entry)
-       :seon.error/frame frame})))
+       :seon.error/frame frame
+       :seon.error/expected :successful-prepl-evaluation
+       :seon.error/offending (str (:type cause-entry))
+       :seon.error/data (merge {:seon.error/exception-class (:type cause-entry)
+        :seon.error/frame frame} {:seon.error/layer :development-mcp :seon.error/operation :evaluate-jvm :seon.error/member :exception :seon.error/source {:seon.error/frame frame}})}))
 
 (defn- mcp-projection-error
   {:malli/schema
@@ -395,21 +378,14 @@
    (mcp-projection-error value nil))
   ([value failure]
    {:seon.dev.mcp/value
-    (refusal/diagnostic
-     {:seon.error/at (java.util.Date.)
+    {:seon.error/at (java.util.Date.)
       :seon.error/layer :seon.dev.mcp/projection
       :seon.error/operation `mcp-projection-error
-      :seon.error/message
-      "MCP projection refused the value: expected an admissible projected value; projection raised an exception. Fix: inspect the offending value class and its projection contract."
-      :seon.error/diagnostic-layer :development-mcp
-      :seon.error/diagnostic-operation :project-value
-      :seon.error/diagnostic-member :seon.dev.mcp/value
-      :seon.error/diagnostic-expected :admissible-projected-value
-      :seon.error/diagnostic-offending (if (nil? value) "nil" (.getName (class value)))
-      :seon.error/diagnostic-cause (some-> failure ex-message)
-      :seon.error/diagnostic-evidence nil
-      :seon.dev.mcp/projection-offending-class
-      (if (nil? value) "nil" (.getName (class value)))})
+      :seon.error/message "MCP projection refused the value: expected an admissible projected value; projection raised an exception. Fix: inspect the offending value class and its projection contract."
+      :seon.dev.mcp/projection-offending-class (if (nil? value) "nil" (.getName (class value)))
+      :seon.error/member :seon.dev.mcp/value
+      :seon.error/expected :admissible-projected-value
+      :seon.error/data {:seon.error/layer :development-mcp :seon.error/operation :project-value :seon.error/source (some-> failure ex-message)}}
     :seon.dev.mcp/windowed? false}))
 
 (defn- mcp-project
@@ -698,26 +674,16 @@
                      (dissoc offense :seon.schema/projection)
                      offense)})))
 
-;; ONE declaration of what "the source changed under this publication" means.
-;; Both phases are the same event seen at different seams: the analyzer's span
-;; read against text captured earlier (`seon.fn/span-refused!`), and the
-;; post-publication digest compare below. They take the same single retry, so
-;; the retry keys on this map rather than on either seam's own spelling.
-(def ^:private source-change-phases
-  {::source-changed-during-adoption :adoption
-   :seon.fn/source-changed-during-analysis :analysis})
-
 (defn- source-change-phase
-  "The publication phase a failure's declared source-change cause names, or nil.
-
-  The adoption compare raises through `refused!`, so its cause rides
-  `:seon.boot/offense`; the analysis refusal is the analyzer's own ex-info and
-  carries the cause at the top of its data."
+  "Read the producer's captured-span or publication-digest observation."
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:maybe [:enum :analysis :adoption]]]}
   [failure]
-  (let [data (ex-data failure)]
-    (get source-change-phases
-         (or (get-in data [:seon.boot/offense :seon.error/diagnostic-cause])
-             (:seon.error/diagnostic-cause data)))))
+  (let [data (ex-data failure)
+        offense (:seon.boot/offense data)]
+    (cond
+      (and (:seon.fn/index-refused data) (:seon.fn/analysis-span data)
+           (:seon.fn/source-path data)) :analysis
+      (:seon.source/digest-before offense) :adoption)))
 
 (defn- retrying-source-change
   "Run one publication attempt, retrying ONCE when the source changed under it.

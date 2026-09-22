@@ -66,8 +66,7 @@
         (is (true? (:seon.fn/namespace-unresolvable result)))
         (is (= namespace-ref
                (get-in result
-                       [:seon.error/data
-                        :seon.error/diagnostic-offending])))))))
+                       [:seon.error/offending])))))))
 
 (deftest defining-forms-share-one-form-local-kondo-batch
   (test-support/with-database
@@ -1951,19 +1950,14 @@
    (fn [connection]
      (let [database (db/db connection)
            refusal
-           (error/diagnostic
-            {:seon.error/at (java.util.Date.)
+           {:seon.error/at (java.util.Date.)
              :seon.error/layer :seon.db/reading
              :seon.error/operation 'seon.db/q
              :seon.error/message "The program index read was refused."
-             :seon.error/diagnostic-layer :database-read
-             :seon.error/diagnostic-operation 'seon.db/q
-             :seon.error/diagnostic-member :seon.fn/sym
-             :seon.error/diagnostic-expected :seon.db/readable-database
-             :seon.error/diagnostic-offending :seon.fn/sym
-             :seon.error/diagnostic-cause :seon.db/invalid-read
-             :seon.error/diagnostic-evidence
-             {:seon.fn/index-phase :seon.fn/published-rows}})
+             :seon.error/member :seon.fn/sym
+             :seon.error/expected :seon.db/readable-database
+             :seon.error/offending :seon.fn/sym
+             :seon.error/data (merge {:seon.fn/index-phase :seon.fn/published-rows} {:seon.error/layer :database-read})}
            row (test-support/program-fn-row
                 database 'sample.refused-index/read
                 "(defn read [] true)")
@@ -2566,11 +2560,9 @@
       (testing reader
         (is (true? (:seon.fn/index-refused data))
             (pr-str data))
-        (is (= :seon.fn/source-changed-during-analysis
-               (:seon.error/diagnostic-cause data)))
         (is (= path (:seon.fn/source-path data)))
         (is (= (count captured-source) (:seon.fn.file/captured-length data)))
-        (is (= [4 1] (take 2 (:seon.error/diagnostic-offending data))))
+        (is (= [4 1] (take 2 (:seon.error/offending data))))
         (is (string? (:seon.fn.file/captured-digest data)))
         (is (string? (:seon.fn.file/current-digest data)))
         (is (not= (:seon.fn.file/captured-digest data)
@@ -2892,7 +2884,7 @@
                 (pr-str refusal))
             (is (= :seon.fn/calls
                    (get-in refusal
-                           [:seon.error/data :seon.error/diagnostic-member]))
+                           [:seon.error/data :seon.error/member]))
                 (pr-str refusal))))))))
 
 (deftest cross-file-implementations-keep-edges-or-widen

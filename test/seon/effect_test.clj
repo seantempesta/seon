@@ -39,21 +39,15 @@
   [request effective]
   (swap! handler-calls conj request)
   (let [refusal
-        (error.refusal/diagnostic
-         {:seon.error/at (Date.)
+        {:seon.error/at (Date.)
           :seon.error/layer :seon.effect-test/handler
           :seon.error/operation 'seon.effect-test/test-handler
           :seon.error/message "Use the permitted fixture working directory."
           :seon.error/offending request
-          :seon.error/diagnostic-layer :seon.effect-test/handler
-          :seon.error/diagnostic-operation 'seon.effect-test/test-handler
-          :seon.error/diagnostic-member :my.shell/cwd
-          :seon.error/diagnostic-expected "the permitted fixture directory"
-          :seon.error/diagnostic-offending request
-          :seon.error/diagnostic-cause :my.shell/cwd
-          :seon.error/diagnostic-evidence request
           :my.shell/refused-cwd "refused-fixture-directory"
-          :my.fs/after-digest (apply str (repeat 64 "a"))})]
+          :my.fs/after-digest (apply str (repeat 64 "a"))
+          :seon.error/member :my.shell/cwd
+          :seon.error/expected "the permitted fixture directory"}]
     (if (neg? (:seon.effect-test/value request))
       refusal
       (cond->

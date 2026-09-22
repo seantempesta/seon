@@ -64,21 +64,14 @@
                   :seon.context/selection-refused-error]}
   [rule request evidence]
   (assoc
-   (error/diagnostic
-    {:seon.error/at (java.util.Date.)
+   {:seon.error/at (java.util.Date.)
      :seon.error/layer ::selection
      :seon.error/operation 'seon.context/selection-refusal
      :seon.context/selection-agent-id (:seon.agent/id request)
      :seon.error/offending request
      :seon.error/message "Select terminal evaluations from an existing agent's closed turn with an available contribution identity."
-     :seon.error/diagnostic-layer ::selection
-     :seon.error/diagnostic-operation 'seon.context/selection-refusal
-     :seon.error/diagnostic-member rule
-     :seon.error/diagnostic-expected
-     "An existing agent's closed run with terminal evaluations and an available contribution identity."
-     :seon.error/diagnostic-offending request
-     :seon.error/diagnostic-cause rule
-     :seon.error/diagnostic-evidence evidence})
+     :seon.error/expected "An existing agent's closed run with terminal evaluations and an available contribution identity."
+     :seon.error/data (merge evidence {:seon.error/member rule})}
    ::selection-refused rule))
 
 (defn selection

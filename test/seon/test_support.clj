@@ -1,6 +1,7 @@
 (ns seon.test-support
   "Shared test constructions which invoke production owners."
-  (:require [clojure.core.async :as async]
+  (:require [seon.error.refusal]
+            [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.java.io :as io]
             [clojure.test :as test]
@@ -487,25 +488,17 @@
                                  (construct))))
                            (catch Throwable failure
                              (.printStackTrace failure)
-                             (error/diagnostic
+                             (seon.error.refusal/diagnostic
                               {:seon.test.run/unavailable true
                                :seon.test.run/provenance-failure (str "Canonical fixture base construction failed: " (ex-message failure))
                                :seon.error/at (java.util.Date.)
                                :seon.error/layer :seon.test/fixture
                                :seon.error/operation 'seon.test-support/create-base
-                               :seon.error/message
-                               (str "Canonical fixture base construction failed: "
+                               :seon.error/message (str "Canonical fixture base construction failed: "
                                     (ex-message failure))
-                               :seon.error/diagnostic-layer :test-fixture
-                               :seon.error/diagnostic-operation ::create-base
-                               :seon.error/diagnostic-member ::database-base
-                               :seon.error/diagnostic-expected :constructed-base
-                               :seon.error/diagnostic-offending
-                               (symbol (.getName (class failure)))
-                               :seon.error/diagnostic-cause
-                               (or (ex-message failure) :seon.error/unknown)
-                               :seon.error/diagnostic-evidence
-                               (or (ex-data failure) :seon.error/unknown)})))]
+                               :seon.error/throwable failure
+                               :seon.error/expected :constructed-base
+                               :seon.error/data (or (ex-data failure) {})})))]
                      (if (:seon.test.run/unavailable result)
                        (do (swap! state
                                   (fn [current]
