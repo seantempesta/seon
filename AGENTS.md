@@ -291,6 +291,9 @@ the policy is clear").** Two kinds, nothing in between:
 - A swallowed error, a print-only panic, or a fault that is recorded but delivered to
   nobody is a defect.
 
+Database failure is handled at the reachable REPL, never through another durable replay
+store.
+
 Rendering is total for ordinary values. AI render functions and the value renderer
 alone apply presentation limits, once; save the exact shown text. HTML never clips.
 Whole-unit prompt selection stays and never rewrites historical units. Query-work
