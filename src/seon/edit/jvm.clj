@@ -6,7 +6,7 @@
 
 (defn- flat-error
   {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value :string :map]
-                  :seon.error/base]}
+                  [:or :my.edit/stale-source-error :my.edit/not-utf8-error :my.edit/parse-refused-error]]}
   [marker subject message data]
   {marker subject
    :seon.error/at (java.util.Date.)
@@ -28,7 +28,7 @@
 (defn- edit-error
   {:malli/schema [:=> [:cat :seon.error/base
                        :seon.edit/request [:or :nil :my.fs/digest]]
-                  :seon.error/base]}
+                  [:or [:and :seon.error/base [:or :my.fs/path-refused-error :my.fs/not-found-error :my.fs/not-directory-error :my.fs/read-limit-error :my.fs/read-failed-error :my.fs/not-regular-file-error :my.fs/changed-during-read-error :my.fs/invalid-utf8-window-error :my.fs/write-limit-error :my.fs/write-failed-error :my.fs/blob-unavailable-error :my.fs/already-exists-error :my.fs/stale-digest-error :my.fs/atomic-write-unsupported-error]] :my.edit/stale-source-error :my.edit/not-utf8-error]]}
   [result request actual-digest]
   (cond
     (:my.fs/stale-digest result) (stale-source request
@@ -99,7 +99,7 @@
   symbol. Anything that is NOT a classified refusal is a genuine fault and
   is rethrown to the effect boundary unchanged."
   {:malli/schema [:=> [:cat :seon.error/throwable]
-                  :seon.error/base]}
+                  [:and :seon.error/base [:or :my.fs/path-refused-error :my.fs/not-found-error :my.fs/not-directory-error :my.fs/read-limit-error :my.fs/read-failed-error :my.fs/not-regular-file-error :my.fs/changed-during-read-error :my.fs/invalid-utf8-window-error :my.fs/write-limit-error :my.fs/write-failed-error :my.fs/blob-unavailable-error :my.fs/already-exists-error :my.fs/stale-digest-error :my.fs/atomic-write-unsupported-error]]]}
   [throwable]
   (let [classified (ex-data throwable)]
     (if (or (:my.fs/path-refused classified) (:my.fs/not-found classified)
@@ -114,7 +114,7 @@
 
 (defn- edit*
   {:malli/schema [:=> [:cat :seon.edit/request :seon.config/effective]
-                  [:or :my.edit/result :seon.error/base]]}
+                  [:or :my.edit/result [:or [:and :seon.error/base [:or :my.fs/path-refused-error :my.fs/not-found-error :my.fs/not-directory-error :my.fs/read-limit-error :my.fs/read-failed-error :my.fs/not-regular-file-error :my.fs/changed-during-read-error :my.fs/invalid-utf8-window-error :my.fs/write-limit-error :my.fs/write-failed-error :my.fs/blob-unavailable-error :my.fs/already-exists-error :my.fs/stale-digest-error :my.fs/atomic-write-unsupported-error]] :my.edit/stale-source-error :my.edit/not-utf8-error :my.edit/parse-refused-error :my.edit/lossless-check-failed-error :my.edit/no-match-error :my.edit/ambiguous-match-error]]]}
   [request effective]
   (let [path (:my.edit/path request)
         before (#'fs.jvm/read-complete

@@ -154,14 +154,22 @@
                     :seon.config.eval.result/max-string]}]
   (cond
     (not (agent-exists? database id))
-    {:seon.error/kind :seon.message/unknown-recipient :seon.message/unknown-recipient id
+    {:seon.message/unknown-recipient id
+     :seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.message/delivery
+     :seon.error/operation 'seon.cluster.message/inbound-tx
      :seon.error/message (str "There is no agent named " (pr-str id) ".")}
     (str/blank? inbound-content)
-    {:seon.error/kind :seon.message/blank-content :seon.message/blank-content true
+    {:seon.message/blank-content true
+     :seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.message/delivery
+     :seon.error/operation 'seon.cluster.message/inbound-tx
      :seon.error/message "A message must contain some text."}
     (> (count inbound-content) max-string)
-    {:seon.error/kind :seon.message/content-too-large
-     :seon.message/content-too-large (count inbound-content)
+    {:seon.message/content-too-large (count inbound-content)
+     :seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.message/delivery
+     :seon.error/operation 'seon.cluster.message/inbound-tx
      :seon.error/message (str "The message exceeds the configured " max-string " character bound.")}
     :else
     [{:seon.message/id (id/id (random-uuid) 8)
@@ -185,11 +193,17 @@
     (cond
       (not (pos-int? max-chain))
       {:seon.message/rows []
-       :seon.error/values [{:seon.error/kind :seon.message/no-limit :seon.message/no-limit true
+       :seon.error/values [{:seon.message/no-limit true
+                            :seon.error/at (java.util.Date.)
+                            :seon.error/layer :seon.message/delivery
+                            :seon.error/operation 'seon.cluster.message/delivery
                             :seon.error/message "Messaging requires a configured chain bound."}]}
       (> depth max-chain)
       {:seon.message/rows []
-       :seon.error/values [{:seon.error/kind :seon.message/chain-limit :seon.message/chain-limit max-chain
+       :seon.error/values [{:seon.message/chain-limit max-chain
+                            :seon.error/at (java.util.Date.)
+                            :seon.error/layer :seon.message/delivery
+                            :seon.error/operation 'seon.cluster.message/delivery
                             :seon.error/message "The conversation reached its configured chain bound."}]}
       :else
       (reduce
@@ -198,8 +212,10 @@
                about-id (:my.message/about candidate)
                failure (cond
                          (not (agent-exists? database recipient))
-                         {:seon.error/kind :seon.message/unknown-recipient
-                          :seon.message/unknown-recipient recipient
+                         {:seon.message/unknown-recipient recipient
+                          :seon.error/at (java.util.Date.)
+                          :seon.error/layer :seon.message/delivery
+                          :seon.error/operation 'seon.cluster.message/delivery
                           :seon.error/message (str "There is no agent named " (pr-str recipient) ".")}
                          :else nil)]
            (if failure
@@ -222,6 +238,8 @@
        candidates))))
 
 (defn- agent-reference-id
+  {:malli/schema [:=> [:cat [:or :nil :seon.db/database-value] :seon.schema/value]
+                  [:or :nil :seon.agent/id]]}
   [database reference]
   (or (:seon.agent/id reference)
       (let [entity-id
@@ -238,7 +256,7 @@
                         :in $ ?agent
                         :where [?agent :seon.agent/id ?id]]
                       database entity-id)]
-            (when-not (:seon.error/kind result)
+            (when-not (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
               result))))))
 
 (defn- identity-reference
@@ -301,7 +319,7 @@
   {:malli/schema [:=> [:cat [:or :seon.render/unit :seon.error/value]]
                   [:or :nil :string :seon.error/value]]}
   [unit]
-  (if (:seon.error/kind unit)
+  (if (or (:seon.db/invalid-read unit) (:seon.schema/expected-value unit))
     unit
     (let [database (get unit :seon.db/db)
         content (get unit :seon.message/content)
@@ -483,10 +501,6 @@
     :seon.message/assignment
     :my.message/reason])
 
-(defn- error-value?
-  [value]
-  (and (map? value) (keyword? (:seon.error/kind value))))
-
 (defn- endpoint-id
   [message endpoint]
   (get-in message [endpoint :seon.agent/id]))
@@ -536,15 +550,18 @@
         database current recipient))
 
 (defn- inbox*
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id
+                       [:or :nil :seon.db/basis-t]]
+                  [:or :my.message/inbox :seon.db/error-result]]}
   [database agent-id since]
   (let [recipient (recipient-eid database agent-id)]
-    (if (error-value? recipient)
+    (if (or (:seon.db/invalid-read recipient) (:seon.schema/expected-value recipient))
       recipient
       (let [source (if (some? since) (db/since database since) database)]
-        (if (error-value? source)
+        (if (or (:seon.db/invalid-read source) (:seon.schema/expected-value source))
           source
           (let [ids (inbox-message-eids source database recipient)]
-            (if (error-value? ids)
+            (if (or (:seon.db/invalid-read ids) (:seon.schema/expected-value ids))
               ids
               (->> ids
                    (map #(db/pull database message-selector %))
@@ -581,11 +598,13 @@
   (let [message (db/pull database message-selector
                          [:seon.message/id message-id])]
     (cond
-      (error-value? message) message
+      (or (:seon.db/invalid-read message) (:seon.schema/expected-value message)) message
       message (admitted-message message)
       :else
-      {:seon.error/kind :my.message/not-found
-       :my.message/not-found message-id
+      {:my.message/not-found message-id
+       :seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.message/delivery
+       :seon.error/operation 'seon.cluster.message/read
        :seon.error/message (str "There is no message named " (pr-str message-id) ".")
        :seon.error/data {:seon.message/id message-id}})))
 
@@ -594,27 +613,37 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- send-value
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value :boolean
+                       :seon.schema/value]
+                  [:or :my.message/message :my.message/no-recipient-error
+                   :my.message/no-content-error :my.message/no-about-error]]}
   [to content about? about]
   (cond
     ;; agent-facing: a wrong TYPE is an agent mistake too, and
     ;; `str/blank?` on a non-string would throw out of the one place
     ;; that must not throw
     (or (not (string? to)) (str/blank? to))
-    {:seon.error/kind :my.message/no-recipient
-     :my.message/no-recipient true
+    {:my.message/no-recipient true
+     :seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.message/delivery
+     :seon.error/operation 'seon.cluster.message/send-value
      :seon.error/message
      "send needs the id of the agent to message, as a string."}
 
     (or (not (string? content)) (str/blank? content))
-    {:seon.error/kind :my.message/no-content
-     :my.message/no-content true
+    {:my.message/no-content true
+     :seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.message/delivery
+     :seon.error/operation 'seon.cluster.message/send-value
      :seon.error/message
      "send needs the message to deliver, as a string."}
 
     (and about?
          (or (not (string? about)) (str/blank? about)))
-    {:seon.error/kind :my.message/no-about
-     :my.message/no-about true
+    {:my.message/no-about true
+     :seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.message/delivery
+     :seon.error/operation 'seon.cluster.message/send-value
      :seon.error/message
      "send's about argument must be a non-blank identity string."}
 
@@ -642,6 +671,8 @@
    (send-value to content true about)))
 
 (defn- send-call
+  {:malli/schema [:=> [:cat :seon.db/database-value :my.message/message
+                       :seon.agent/id] :seon.db/tx-data]}
   [database candidate agent-id]
   (let [limits (db/q '[:find [?limit ...]
                        :where [?cluster :seon.cluster/config ?config]
@@ -649,8 +680,10 @@
         limit (when (= 1 (count limits)) (first limits))
         _ (when-not (pos-int? limit)
             (throw (ex-info "Messaging requires one configured chain bound."
-                            {:seon.error/kind :seon.message/no-limit
-                             :seon.message/no-limit true
+                            {:seon.message/no-limit true
+                             :seon.error/at (java.util.Date.)
+                             :seon.error/layer :seon.message/delivery
+                             :seon.error/operation 'seon.cluster.message/send-call
                              :seon.error/message "Messaging requires one configured chain bound."
                              :seon.error/data {:seon.config.message/max-chain limits}})))
         run-id (db/q '[:find ?id . :in $ ?agent-id
@@ -679,14 +712,16 @@
   [request connection agent-id]
   (let [candidate (send-value (:my.message/to request) (:my.message/content request)
                               (some? (:my.message/about request)) (:my.message/about request))]
-    (if (error-value? candidate)
+    (if (or (:my.message/no-recipient candidate) (:my.message/no-content candidate)
+            (:my.message/no-about candidate))
       candidate
       (let [candidate (merge candidate (select-keys request [:my.message/assignment :my.message/reason]))
             result (db/transact!
                     connection
                     {:tx-data [[:db.fn/call #'send-call candidate agent-id]]
                      :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
-        (if (error-value? result) result
+        (if (or (:seon.db.write.attempt/request-id result)
+                (:seon.db/invalid-read result) (:seon.schema/expected-value result)) result
             (read (:seon.message/id candidate) (:db-after result)))))))
 
 (defn decline
@@ -700,20 +735,26 @@
   [to assignment reason]
   (cond
     (or (not (string? to)) (str/blank? to))
-    {:seon.error/kind :my.message/no-recipient
-     :my.message/no-recipient true
+    {:my.message/no-recipient true
+     :seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.message/delivery
+     :seon.error/operation 'seon.cluster.message/decline
      :seon.error/message
      "decline needs the id of the assigning agent, as a string."}
 
     (or (not (string? assignment)) (str/blank? assignment))
-    {:seon.error/kind :my.message/no-assignment
-     :my.message/no-assignment true
+    {:my.message/no-assignment true
+     :seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.message/delivery
+     :seon.error/operation 'seon.cluster.message/decline
      :seon.error/message
      "decline's assignment argument must be a non-blank identity string."}
 
     (or (not (string? reason)) (str/blank? reason))
-    {:seon.error/kind :my.message/no-reason
-     :my.message/no-reason true
+    {:my.message/no-reason true
+     :seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.message/delivery
+     :seon.error/operation 'seon.cluster.message/decline
      :seon.error/message
      "decline needs a reader-facing reason, as a string."}
 

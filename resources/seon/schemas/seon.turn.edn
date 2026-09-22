@@ -212,6 +212,18 @@
                  [:seon.cluster.eval/ns :seon.cluster.eval/ns]]]]]]
  ; Additive error declaration manifest, 2026-09-18.
 
+ :seon.turn/invalid-disposition-source :string
+ :seon.turn/invalid-disposition-error
+ [:and :seon.error/base
+  [:map [:seon.turn/invalid-disposition-source :seon.turn/invalid-disposition-source]]]
+ :seon.turn/compaction-agent-id :seon.agent/id
+ :seon.turn/compaction-refused-error
+ [:and :seon.error/base
+  [:map [:seon.turn/compaction-agent-id :seon.turn/compaction-agent-id]]]
+ :seon.turn/generated-read-attributes [:set :qualified-keyword]
+ :seon.turn/generated-read-depends-on-turns-error
+ [:and :seon.error/base
+  [:map [:seon.turn/generated-read-attributes :seon.turn/generated-read-attributes]]]
  :seon.turn/error
  [:and
  {:seon.db/attributes true}

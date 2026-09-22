@@ -594,7 +594,8 @@ adopted `6ab210b9-59bb-5a4c-bb24-6e373ee96cee`.
 
 Correction run `aae70663847f`: 25 tests, 184 assertions, 21 failures, 20 errors
 (`tmp/b3-values-correction.log`). It exposed the new generic factory contracts'
-missing base-error admission; their output is now `error/base`, and the
+missing base-error admission; their output now enumerates the actual filesystem/edit
+alternatives together with `error/base`, and the
 stale-source constructor names `my.edit/stale-source-error`. This is the existing
 polymorphic diagnostic-constructor boundary, not a general error discriminator.
 Final focused rerun of `seon.fs.jvm-test seon.edit.jvm-test my.turn-test`, with
@@ -603,3 +604,57 @@ the three respective source paths: run `6dfa3bbb4eb4`, **20 tests, 162 assertion
 remaining assertions still expect retired kind values; Slice C converts them.
 Publication `5991b53b-b0ab-4268-85de-25194af175b6` converged at
 `6ab2113a-2ef7-50f2-b1a0-4bdb0650f0c1`.
+
+### Runtime source cut
+
+The remaining runtime source kind references are removed. Retained decisions:
+
+| Owner / producer | Declared members read | Success computation |
+|---|---|---|
+| agent identity/archive/settings, eval/of-agent | db/invalid-read, schema/expected-value, db.write.attempt/request-id, config/error-key | identity, settings and write-result projections |
+| cluster identity, namespace requirements, configuration and artifact writes | the same DB members; config/error-key; instrument/registration-observation | render identity, assemble configuration, resolve admitted entities |
+| cluster.agent status/planned sources/plan | cluster.status/unavailable-observation, cluster.reply/no-forms, my.plan/missing-agent-id | status text, source submission and plan use |
+| cluster.message references, inbox, read and send | DB read/write members; the producer's my.message recipient/subject/text refusal members | resolve references, order inbox and transact delivery |
+| cluster.prompt settings/calibration/context | cluster.prompt/missing-cluster and missing-config; config/error-key; DB read members; render/refused-member, candidates, invalid-output; render.web/refused-member and function-unavailable; render.unknown/reason; render.transcript/refused-member; turn/error-turn-id and missing-opening-datom | calibrate tokens and construct the prompt |
+| turn declared/planned sources | cluster.reply/no-forms; render.walk/missing-entity; declared render/config/DB refusal members | compile and evaluate generated sources |
+| turn generated reads | turn/generated-read-attributes | refuse context regeneration that depends on turn activity |
+| turn dispositions | turn/invalid-disposition-source | execute a valid disposition |
+| turn compaction | turn/compaction-agent-id | preserve the affected agent identity |
+| turn writes and eval.drive inbound receipts | DB write members | inspect transaction reports and receipts |
+| repl HTML preparation | render.value/root-description | render a prepared value |
+| test.runner recording | source/refused-test-run, test/execution-refusal, test.run/unavailable, db.write.attempt/request-id | retain a recording refusal or accept committed refs |
+
+Contract accretions: `system-turn` includes the no-forms and generated-read errors;
+status snapshot/agents include unavailable-observation; new private runtime contracts
+enumerate their producing alternatives. `capture-mismatch` declares validation-refusal
+and carries expected/refused text. Recording failure declares its actual alternatives,
+including the existing test/unknown member for an unrecognized recording result.
+Filesystem/edit diagnostic factories enumerate their existing declared alternatives;
+they do not use a generic base-only output union.
+
+Focused runtime run (13 namespaces, 236 selected tests) used the 13 runtime source
+and resource paths listed by `tmp/b3-runtime.log`. It exited **124** after the
+no-forms regression's executor cleanup waited for an outstanding backstop task.
+The regression now interrupts its owned executor in `finally` before closing it.
+There is no final namespace tally or recorded green for this interrupted run.
+Observed failures include existing agent-retraction fixtures, missing terminal events,
+old kind assertions, outdated settle/open-turn fixtures, and invalid-schema errors.
+
+The invalid-schema boundary was probed independently on the canonical fixture:
+`support/with-database`, `db/carried-projection`, and `malli.core/schema` on authored
+contracts with that projection's composite registry. Exact executable form is retained
+in `tmp/b3-fixture-contract-probe.clj`, output in its `.log`. Fixture basis was
+536870944; `(contains? (:schema database) (keyword "seon.error" "kind"))` was false.
+Compilation refused `seon.turn/system-turn` and `generated-read-fault` because
+`:seon.turn/generated-read-depends-on-turns-error` was absent, and
+`disposition-rule-error` because `:seon.turn/invalid-disposition-error` was absent.
+The launcher reported its immutable overlay graph six commits behind HEAD.
+Read-only default probes compile the new prompt/declared-sources contracts successfully
+against default's current carried projection (4 ms). This does not prove the old
+canonical fixture can execute the new schema consumers. The orchestrator owns fixture
+publication; no cold gate, reset or default restart was performed here.
+
+Publication observations: `96ea94a1` 24.928730 s; `e0ced6cb` converged at
+`6ab21363`; explicit factory alternatives `a53c4827` converged at `6ab21341`;
+regression cleanup `e4424da9` converged at `6ab21656`. The timed publication exceeded
+10 seconds in SOURCE_BATCH. **RESTART NEEDED remains in force** for the live settle proof.

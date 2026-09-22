@@ -1,4 +1,9 @@
-{:seon.cluster.status/root
+{:seon.cluster.status/unavailable-observation :string
+ :seon.cluster.status/unavailable-error
+ [:and :seon.error/base
+  [:map [:seon.cluster.status/unavailable-observation
+         :seon.cluster.status/unavailable-observation]]]
+ :seon.cluster.status/root
  [:map {:seon.render/units [:seon.cluster.status/concern]}
   [:seon.agent/id [:= "root"]]]
  :seon.cluster.status/concern

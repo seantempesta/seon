@@ -11,12 +11,13 @@
            [com.sun.management HotSpotDiagnosticMXBean HotSpotDiagnosticMXBean$ThreadDumpFormat]))
 
 (defn- unknown
-  {:malli/schema [:=> [:cat :string] :seon.error/base]}
+  {:malli/schema [:=> [:cat :string] :seon.cluster.status/unavailable-error]}
   [message]
   {:seon.error/at (java.util.Date.)
    :seon.error/layer :seon.cluster.status/observation
    :seon.error/operation 'seon.cluster.status/unknown
-   :seon.error/message message})
+   :seon.error/message message
+   :seon.cluster.status/unavailable-observation message})
 
 (defn- boot-time []
   (java.util.Date. (.getStartTime (ManagementFactory/getRuntimeMXBean))))
@@ -54,7 +55,8 @@
 
   Example: (seon.cluster.status/snapshot {})"
   {:malli/schema [:=> [:cat :seon.cluster.status/request]
-                  [:or :seon.cluster.status/value :seon.error/base]]}
+                  [:or :seon.cluster.status/value :seon.error/base
+                   :seon.cluster.status/unavailable-error]]}
   [{database :seon.db/db connection :seon.db/connection}]
   (try
     (let [cluster (db/q '[:find (pull ?c [:seon.cluster/name :seon.source/commit-id]) .
@@ -108,7 +110,8 @@
 
   Example: (seon.cluster.status/agents {})"
   {:malli/schema [:=> [:cat :seon.cluster.status/request]
-                  [:or [:vector :seon.cluster.status/agent] :seon.error/value]]}
+                  [:or [:vector :seon.cluster.status/agent] :seon.error/value
+                   :seon.cluster.status/unavailable-error]]}
   [{database :seon.db/db connection :seon.db/connection}]
   (try
     (let [boot (inst-ms (boot-time))

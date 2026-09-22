@@ -18,10 +18,11 @@
                                       [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
                      [:seon.agent/id agent-id])]
     (cond
-      (:seon.error/kind row) row
+      (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
       (not (:seon.agent/id row))
       {:seon.agent/no-such-agent agent-id
-       :seon.error/kind :seon.agent/no-such-agent
+       :seon.error/at (java.util.Date.) :seon.error/layer :seon.agent/identity
+       :seon.error/operation 'seon.agent/identity
        :seon.error/message (str "No agent has id " (pr-str agent-id) ".")}
       :else
       (cond-> {:my.agent/id (:seon.agent/id row)}
@@ -38,10 +39,11 @@
   (let [row (db/pull database [:seon.agent/id :seon.agent/archived-tx]
                      [:seon.agent/id agent-id])]
     (cond
-      (:seon.error/kind row) row
+      (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
       (:seon.agent/id row) (boolean (:seon.agent/archived-tx row))
       :else {:seon.agent/no-such-agent agent-id
-             :seon.error/kind :seon.agent/no-such-agent
+             :seon.error/at (java.util.Date.) :seon.error/layer :seon.agent/identity
+             :seon.error/operation 'seon.agent/archived?
              :seon.error/message (str "No agent has id " (pr-str agent-id) ".")})))
 
 (defn open?
@@ -53,15 +55,17 @@
     (if (map? archived) archived (not archived))))
 
 (defn- archive-call
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  :seon.db/tx-data]}
   [database agent-id]
   (let [row (db/pull database [:db/id :seon.agent/archived-tx]
                      [:seon.agent/id agent-id])]
     (cond
-      (:seon.error/kind row) (throw (ex-info (:seon.error/message row) row))
+      (or (:seon.db/invalid-read row) (:seon.schema/expected-value row))
+      (throw (ex-info (:seon.error/message row) row))
       (nil? (:db/id row))
       (throw (ex-info "The agent to archive does not exist."
-                      {:seon.error/kind :seon.agent/no-such-agent
-                       :seon.agent/no-such-agent agent-id}))
+                      {:seon.agent/no-such-agent agent-id}))
       (:seon.agent/archived-tx row) []
       :else [[:db/add (:db/id row) :seon.agent/archived-tx :db/current-tx]])))
 
@@ -80,16 +84,18 @@
   (ai/agent-overlay database agent-id))
 
 (defn- update-settings-call
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id
+                       :seon.config/agent-overlay] :seon.db/tx-data]}
   [database agent-id overrides]
   (let [agent (db/pull database '[:db/id {:seon.agent/settings [:db/id]}]
                        [:seon.agent/id agent-id])]
     (when-not (:db/id agent)
       (throw (ex-info "The agent whose settings were requested does not exist."
-                      {:seon.error/kind :seon.agent/no-such-agent
-                       :seon.agent/no-such-agent agent-id})))
+                      {:seon.agent/no-such-agent agent-id})))
     (let [component (or (get-in agent [:seon.agent/settings :db/id]) "agent-settings")
           attributes (ai/agent-setting-attributes database)
-          _ (when (:seon.error/kind attributes)
+          _ (when (or (:seon.db/invalid-read attributes)
+                      (:seon.schema/expected-value attributes))
               (throw (ex-info (:seon.error/message attributes) attributes)))
           admitted (select-keys overrides attributes)]
       (if (seq admitted)
@@ -110,7 +116,8 @@
                                          agent-id overrides]]
                               :tx-meta {:seon.db/user
                                         [:seon.agent/id agent-id]}})]
-    (if (:seon.error/kind result)
+    (if (or (:seon.db.write.attempt/request-id result)
+            (:seon.db/invalid-read result) (:seon.schema/expected-value result))
       result
       (ai/agent-overlay (:db-after result) agent-id))))
 
@@ -125,11 +132,15 @@
         defaults (when (string? cluster-name) (config/effective database cluster-name))
         overrides (ai/agent-overlay database agent-id)
         attributes (ai/agent-setting-attributes database)
-        refusal (some #(when (:seon.error/kind %) %)
+        refusal (some #(when (or (:seon.db/invalid-read %)
+                                 (:seon.schema/expected-value %)
+                                 (:seon.config/missing-effective %)) %)
                       [cluster-name defaults overrides attributes])]
     (cond
       refusal refusal
-      (nil? defaults) {:seon.error/kind :seon.config/required-absent
+      (nil? defaults) {:seon.error/at (java.util.Date.)
+                      :seon.error/layer :seon.agent/identity
+                      :seon.error/operation 'seon.agent/effective-settings
                       :seon.error/message "The cluster configuration is absent."}
       :else
       (let [resolved (ai/settings defaults overrides)

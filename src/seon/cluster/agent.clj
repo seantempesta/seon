@@ -143,7 +143,7 @@
                         [?namespace :seon.ns/name ?namespace-name]
                         [?namespace :seon.ns/steward ?steward]]
                       database namespace-name)]
-    (when (:seon.error/kind steward)
+    (when (or (:seon.db/invalid-read steward) (:seon.schema/expected-value steward))
       (throw (ex-info (:seon.error/message steward) steward)))
     (if steward
       []
@@ -261,13 +261,11 @@
                   [:or [:maybe :seon.render/hiccup] :seon.error/value]]}
   [unit]
   (let [agent-data (if-let [database (:seon.db/db unit)]
-                     (if (:seon.error/kind database)
-                       database
-                       (when-let [agent-id (:seon.agent/id unit)]
-                         (db/pull database identity-selector
-                                  [:seon.agent/id agent-id])))
+                     (when-let [agent-id (:seon.agent/id unit)]
+                       (db/pull database identity-selector
+                                [:seon.agent/id agent-id]))
                      (or (:seon.render/value unit) unit))]
-    (if (:seon.error/kind agent-data)
+    (if (or (:seon.db/invalid-read agent-data) (:seon.schema/expected-value agent-data))
       agent-data
       (let [agent-id (:seon.agent/id agent-data)
             namespace-name
@@ -295,7 +293,7 @@
                                 steward]]])))
            (when (and (= "root" agent-id) (:seon.db/db unit))
              (let [agents (cluster.status/agents unit)]
-               (if (:seon.error/kind agents)
+               (if (:seon.cluster.status/unavailable-observation agents)
                  [:p (:seon.error/message agents)]
                  [:section {:class "seon-root-agents"}
                   [:h3 "Agents"]
@@ -329,7 +327,7 @@
   (let [rendered (render-identity-html {:seon.db/db database
                                         :seon.agent/id agent-id})]
     (cond
-      (:seon.error/kind rendered)
+      (or (:seon.db/invalid-read rendered) (:seon.schema/expected-value rendered))
       [:article {:class "seon-family-entry seon-agent-identity-entry"}
        [:p {:class "seon-agent-identity-unavailable"}
         (:seon.error/message rendered)]]
@@ -358,7 +356,7 @@
           (when (and (:seon.db/db unit) (:seon.agent/id unit))
             (bootstrap/situation (:seon.db/db unit)
                                  (:seon.agent/id unit))))]
-    (when (and situation (not (:seon.error/kind situation)))
+    (when (and situation (not (:my.plan/missing-agent-id situation)))
       (str "You are agent " (:seon.agent/id situation)
            " in namespace "
            (second (:seon.agent/namespace-ref situation)) ". "
@@ -416,7 +414,8 @@
                     [?agent :seon.agent/namespace ?namespace]
                     [?agent :seon.agent/id ?agent-id]]
                   db namespace-name)]
-    (if (:seon.error/kind ids) [] (vec (sort ids)))))
+    (if (or (:seon.db/invalid-read ids) (:seon.schema/expected-value ids))
+      [] (vec (sort ids)))))
 
 (defn steward-of
   "The agent id stewarding `namespace-name`, or nil.
@@ -558,6 +557,9 @@
     (submit-source-in-projection request)))
 
 (defn- submit-source-in-projection
+  {:malli/schema [:=> [:cat :seon.agent/source-submission-request]
+                  [:or :seon.agent/source-submission-result :seon.error/value
+                   :seon.db/error-result :seon.cluster.reply/no-forms-error]]}
   [{handle :seon.turn.loop/cluster
     routing :seon.agent/routing
     agent-id :seon.agent/id
@@ -576,11 +578,14 @@
                 [?namespace :seon.ns/name ?namespace-name]]
                 database agent-id))]
     (cond
-      (:seon.error/kind namespace-name) namespace-name
+      (or (:seon.db/invalid-read namespace-name)
+          (:seon.schema/expected-value namespace-name)) namespace-name
 
       (nil? namespace-name)
       (error/diagnostic
-       {:seon.error/kind :seon.agent/no-such-agent
+       {:seon.error/at (Date.)
+        :seon.error/layer :seon.agent/source-submission
+        :seon.error/operation `submit-source!
         :seon.error/message
         "Source submission requires an agent with an assigned namespace."
         :seon.error/diagnostic-layer :seon.agent/source-submission
@@ -596,7 +601,7 @@
             (get-in handle [:seon.sci.admit/caps
                             :seon.config.eval.result/max-source])
             sources (turn/planned-sources text namespace-name max-source)]
-        (if (:seon.error/kind sources)
+        (if (:seon.cluster.reply/no-forms sources)
           sources
           (let [run-id (turn/next-id database (:seon.cluster/name handle) agent-id)
                 now (Date.)
@@ -611,7 +616,8 @@
                      database
                      (merge (dissoc staged-reply :seon.blob/staged-writes)
                             {:seon.agent/id agent-id :seon.turn/id run-id :seon.db.process/id (:seon.db.process/id handle) :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply-size (count (pr-str sources)) :seon.turn/sources sources}))}))]
-            (if (:seon.error/kind outcome)
+            (if (or (:seon.db.write.attempt/request-id outcome)
+                    (:seon.db/invalid-read outcome) (:seon.schema/expected-value outcome))
               outcome
               (let [channel
                     (or (:seon.cluster.wake/channel (armed routing agent-id))
@@ -619,7 +625,9 @@
                 (if (async/offer! channel :seon.agent/wake)
                   {:seon.turn/id run-id}
                   (error/diagnostic
-                   {:seon.error/kind :seon.agent/source-submission-undeliverable
+                   {:seon.error/at (Date.)
+                    :seon.error/layer :seon.agent/source-submission
+                    :seon.error/operation `submit-source!
                     :seon.error/message
                     "The source run committed, but its wake was not delivered."
                     :seon.error/diagnostic-layer :seon.agent/source-submission
@@ -690,8 +698,7 @@
   (let [contexts (:seon.agent/context-state handle)]
     (when-not contexts
       (throw (ex-info "Agent context acquisition requires the cluster's context state."
-                      {:seon.error/kind :seon.agent/missing-context-state
-                       :seon.agent/id agent-id})))
+                      {:seon.agent/id agent-id})))
     (locking contexts
       (let [acquired (sci.eval/fork-for-turn
                       (cond-> {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
@@ -736,8 +743,7 @@
                      @connection agent-id)
             _ (when (nil? eid)
                 (throw (ex-info "arm! refused: no such agent in facts."
-                                {:seon.error/kind :seon.agent/no-such-agent
-                                 :seon.agent/id agent-id
+                                {:seon.agent/id agent-id
                                  :seon.agent/no-such-agent agent-id})))
             wake-ch (wake-channel)
             schedule-channel (async/chan (async/sliding-buffer 1))
@@ -931,7 +937,7 @@
   `offer!`. A quiescence request acknowledges that every earlier arm wake
   has settled before cluster teardown disarms agent graphs. The stop
   transition publishes the cluster graph's completion."
-  {:malli/schema [:function [:=> [:cat] [:map]] [:=> [:cat :map] :map] [:=> [:cat :map :keyword] :map] [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract.", :gen/elements [nil false 0 "" :k [] {}]}]] [:tuple :map [:maybe [:map-of :keyword [:vector [:some {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract.", :gen/elements [false 0 "" :k [] {}]}]]]]]]]}
+  {:malli/schema [:function [:=> [:cat] [:map]] [:=> [:cat :map] :map] [:=> [:cat :map :keyword] :map] [:=> [:cat :map :keyword :seon.schema/value] [:tuple :map [:maybe [:map-of :keyword [:vector [:some {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract.", :gen/elements [false 0 "" :k [] {}]}]]]]]]]}
   ([]
    {:ins {}
     :outs {}
@@ -1033,12 +1039,12 @@
                     first-agent)]
                (when (seq supervision-tx)
                  (let [result (db/transact! connection supervision-tx)]
-                   (when (:seon.error/kind result)
+                   (when (or (:seon.db.write.attempt/request-id result)
+                             (:seon.db/invalid-read result) (:seon.schema/expected-value result))
                      (throw
                       (ex-info
                        "Root's first-agent supervision run did not commit."
-                       {:seon.error/kind :seon.agent/supervision-not-committed
-                        :seon.agent/supervision-not-committed true
+                       {:seon.agent/supervision-not-committed true
                         :seon.error/message
                         "Root's first-agent supervision run did not commit."
                         :seon.error/data result}))))

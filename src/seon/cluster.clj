@@ -95,6 +95,7 @@
 (declare source-refresh-holder)
 
 (defn- report-source-progress!
+  {:malli/schema [:=> [:cat :string] :nil]}
   [phase]
   (when *source-refresh-holder-token*
     (swap! source-refresh-holder
@@ -111,8 +112,7 @@
   (when (and (instance? java.io.PrintWriter *out*)
              (.checkError ^java.io.PrintWriter *out*))
     (throw (ex-info (str "Source publication observer closed in phase " phase ".")
-                    {:seon.error/kind ::source-observer-closed
-                     :seon.source/progress phase})))
+                    {:seon.source/progress phase})))
   nil)
 
 (defn- report-analysis-warnings!
@@ -189,7 +189,7 @@
   {:malli/schema [:=> [:cat [:or :seon.render/unit :seon.error/value]]
                   [:or :nil :string :seon.error/value]]}
   [unit]
-  (if (:seon.error/kind unit)
+  (if (or (:seon.db/invalid-read unit) (:seon.schema/expected-value unit))
     unit
     (when-let [name (:seon.cluster/name unit)]
       (let [database (:seon.db/db unit)
@@ -296,6 +296,9 @@
   (get @running-instances cluster-name))
 
 (defn- mcp-effective
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name [:or :nil :seon.config/effective]]
+                  [:or :nil :seon.config/effective :seon.config/error
+                   :seon.db/error-result :seon.schema/validation-refusal]]}
   [cluster-name bootstrap-effective]
   (let [instance (mcp-instance cluster-name)
         connection (:seon.boot/cluster-connection instance)
@@ -308,7 +311,11 @@
          projection-state
          #(config/effective (db/db connection) cluster-name))
         (error/diagnostic
-         {:seon.error/kind ::mcp-missing-projection
+         {:seon.error/at (Date.)
+          :seon.error/layer :seon.dev.mcp/configuration
+          :seon.error/operation 'seon.cluster/mcp-effective
+          :seon.schema/expected-value :seon.schema/projection
+          :seon.schema/refused-value :seon.error/unknown
           :seon.error/message
           "The MCP config read has no cluster projection state."
           :seon.error/diagnostic-layer :development-mcp
@@ -400,6 +407,13 @@
     :seon.dev.mcp/windowed? false}))
 
 (defn- mcp-project
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.boot/cluster-name [:or :nil :seon.config/effective] :seon.schema/value]
+     [:map [:seon.dev.mcp/value :seon.schema/value] [:seon.dev.mcp/windowed? :boolean]]]
+    [:=> [:cat :seon.boot/cluster-name [:or :nil :seon.config/effective]
+          :seon.schema/value :boolean :boolean]
+     [:map [:seon.dev.mcp/value :seon.schema/value] [:seon.dev.mcp/windowed? :boolean]]]]}
   ([cluster-name bootstrap-effective value]
    (mcp-project cluster-name bootstrap-effective value false false))
   ([cluster-name bootstrap-effective value evaluation? exception?]
@@ -407,13 +421,15 @@
      (let [instance (mcp-instance cluster-name)
            connection (:seon.boot/cluster-connection instance)
            effective (mcp-effective cluster-name bootstrap-effective)
-           caps (when-not (:seon.error/kind effective)
+           caps (when-not (or (:seon.config/error-key effective)
+                 (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
                   (config/result-caps effective))]
        (cond
-         (:seon.error/kind effective)
+         (or (:seon.config/error-key effective)
+                 (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
          {:seon.dev.mcp/value effective :seon.dev.mcp/windowed? false}
 
-         (:seon.error/kind caps)
+         (:seon.config/error-key caps)
          {:seon.dev.mcp/value caps :seon.dev.mcp/windowed? false}
 
          (and evaluation? (not exception?) (string? (:seon.eval/shown value)))
@@ -488,12 +504,12 @@
                            connection
                            [{:seon.dev.mcp.artifact/id content-digest
                              :seon.dev.mcp.artifact/digest content-digest}])]
-                      (when (:seon.error/kind result)
+                      (when (or (:seon.db.write.attempt/request-id result)
+                                (:seon.db/invalid-read result) (:seon.schema/expected-value result))
                         (throw
                          (ex-info
                           "The durable MCP artifact root did not commit."
-                          {:seon.error/kind :core-bug
-                           :seon.dev.mcp.artifact/root-not-committed content-digest
+                          {:seon.dev.mcp.artifact/root-not-committed content-digest
                            :seon.error/message
                            "The durable MCP artifact root did not commit."
                            :seon.dev.mcp.artifact/digest content-digest
@@ -569,7 +585,7 @@
 
 (defn mcp-get-value
   "Read and drill one stored MCP value artifact without mutating REPL state."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.blob/digest :seon.render.data/path :int] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The MCP retrieval boundary returns the arbitrary original evaluation value at the requested path.", :gen/elements [nil false 0 "" :k [] {}]}]]}
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.blob/digest :seon.render.data/path :int] :seon.schema/value]}
   [cluster-name content-digest path offset]
   (if-let [connection (:seon.boot/cluster-connection
                        (mcp-instance cluster-name))]
@@ -589,7 +605,8 @@
                    {:seon.render.data/path path
                     :seon.render.data/offset offset})
             effective (mcp-effective cluster-name nil)]
-        (if (:seon.error/kind effective)
+        (if (or (:seon.config/error-key effective)
+                 (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
           effective
           (if (contains? found :seon.render.data/value)
             (let [value (:seon.render.data/value found)
@@ -616,12 +633,16 @@
                    :seon.render.value/more? (< end total)})
                 (render.value/window value offset collection-size)))
             found)))
-      {:seon.error/kind :seon.dev.mcp/value-not-found
-       :seon.dev.mcp/value-not-found content-digest
+      {:seon.dev.mcp/value-not-found content-digest
+       :seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.cluster/operation
+       :seon.error/operation 'seon.cluster/mcp-get-value
        :seon.error/message "No stored MCP value has this digest."
        :seon.blob/digest content-digest})
-    {:seon.error/kind :seon.dev.mcp/remainder-not-retrievable
-     :seon.dev.mcp/remainder-not-retrievable content-digest
+    {:seon.dev.mcp/remainder-not-retrievable content-digest
+     :seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.cluster/operation
+     :seon.error/operation 'seon.cluster/mcp-get-value
      :seon.error/message
      "The cluster has no database connection; the remainder is not retrievable."
      :seon.blob/digest content-digest}))
@@ -660,10 +681,10 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- refused!
+  {:malli/schema [:=> [:cat :string :seon.schema/value] :nil]}
   [message offense]
   (throw (ex-info message
-                  {:seon.error/kind :seon.boot/refused
-                   :seon.boot/refused true
+                  {:seon.boot/refused true
                    :seon.error/message message
                    ;; A projection is execution input, not refusal evidence.
                    :seon.boot/offense
@@ -740,7 +761,7 @@
   carries the real port), log-dir derived as <root>/<name>/logs,
   store-dir derived as <operator-root>/data/store — the process-root
   store every cluster branches from.
-  Refuses (throws ex-info {:seon.error/kind :seon.boot/refused ...}) when a
+  Refuses (throws ex-info {:seon.boot/refused true ...}) when a
   declared key has an invalid value. Extra keys remain available for
   accretion."
   {:malli/schema [:=> [:cat :seon.boot/overrides] :seon.boot/config]}
@@ -891,6 +912,13 @@
         :seon.boot/working-directory working}))))
 
 (defn warn-low-space!
+  "Observe volume capacity and apply the supplied low-space policy."
+  {:malli/schema [:=> [:cat :string :seon.config/effective]
+                  [:map [:seon.operator.footprint/root :string]
+                   [:seon.operator.footprint/usable-bytes [:int {:min 0}]]
+                   [:seon.operator.footprint/total-bytes [:int {:min 0}]]
+                   [:seon.operator.footprint/usable-ratio :double]
+                   [:seon.operator.footprint/observed-at :inst]]]}
   [managed-root effective]
   ;; statfs only — the boot path must never pay a recursive directory
   ;; walk (a checkout carrying frozen tmp/ evidence took ~94 s, which is
@@ -915,8 +943,7 @@
         (when (= :panic (:seon.config/on-core-error effective))
           (throw
            (ex-info message
-                    {:seon.error/kind :seon.operator/low-disk-space
-                     :seon.operator/low-disk-space managed-root
+                    {:seon.operator/low-disk-space managed-root
                      :seon.error/message message
                      :seon.operator/footprint footprint
                      :seon.config.maintenance/min-usable-bytes
@@ -1276,10 +1303,13 @@
    boot reported \"Initialization lookup refs do not resolve\" about rows whose
    targets were in the database all along. The read's own refusal is the
    evidence; this seam never re-decides it."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.schema/value]]
+                  [:or :nil [:map [::lookup [:sequential :seon.schema/value]]
+                             [::refusal {:optional true} :seon.db/error-result]]]]}
   [database lookup]
   (let [result (db/pull database [:db/id] (vec lookup))]
     (cond
-      (:seon.error/kind result)
+      (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
       {::lookup lookup ::refusal result}
 
       (:db/id result) nil
@@ -1570,6 +1600,7 @@
   (some-> holder (dissoc ::holder-token)))
 
 (defn- with-source-refresh-monitor!
+  {:malli/schema [:=> [:cat [:=> [:cat] :seon.schema/value]] :seon.schema/value]}
   [transition]
   (if (.isHeldByCurrentThread ^ReentrantLock source-refresh-monitor)
     (transition)
@@ -1588,8 +1619,7 @@
             (str "Timed out after " waited-ms
                  " ms waiting for source publication held in phase "
                  (pr-str (:seon.operator.lock/phase holder)) ".")
-            {:seon.error/kind ::source-refresh-acquisition-timeout
-             :seon.error/message
+            {:seon.error/message
              (str "Source publication waited " waited-ms " ms, exceeding the "
                   bound-ms " ms acquisition bound while the holder was in phase "
                   (pr-str (:seon.operator.lock/phase holder)) ".")
@@ -1947,6 +1977,8 @@
 
 (defn- namespace-requires
   "The declared `:seon.ns/requires` edges among `namespaces`, by name."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:seqable :symbol]]
+                  [:map-of :symbol [:set :symbol]]]}
   [database namespaces]
   (let [edges (db/q '[:find ?name ?required-name
                       :in $ [?name ...]
@@ -1954,7 +1986,7 @@
                       [?namespace :seon.ns/name ?name]
                       [?namespace :seon.ns/requires ?required-name]]
                     database (vec namespaces))]
-    (when (:seon.error/kind edges)
+    (when (or (:seon.db/invalid-read edges) (:seon.schema/expected-value edges))
       (refused! "Development reload could not read namespace requires." edges))
     (reduce (fn [result [namespace-name required-name]]
               (update result namespace-name (fnil conj #{}) required-name))
@@ -2106,7 +2138,8 @@
      projection
      (fn []
        (let [effective (config/effective database cluster-name)
-             _ (when (:seon.error/kind effective)
+             _ (when (or (:seon.config/error-key effective)
+                 (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
                  (refused! "Development instrumentation configuration is unavailable."
                            effective))
              result (instrument/apply!
@@ -2118,7 +2151,7 @@
                       :seon.config.error/max-evidence-bytes
                       (:seon.config.error/max-evidence-bytes effective)
                       :seon.schema/projection projection})]
-         (when (or (:seon.error/kind result)
+         (when (or (:seon.instrument/registration-observation result)
                    (and (= :panic (:seon.config/on-core-error effective))
                         (not (pos? (or (:seon.instrument/instrumented result) 0)))))
            (refused! "Development JVM instrumentation did not restore contracts."
@@ -2466,7 +2499,9 @@
          {:tx-data [[:db.fn/call #'ensure-entity-call
                      process (java.util.Date.) request]]
           :tx-meta {:seon.db/process [:seon.db.process/id process]}})]
-    (if (:seon.error/kind transaction-result)
+    (if (or (:seon.db.write.attempt/request-id transaction-result)
+            (:seon.db/invalid-read transaction-result)
+            (:seon.schema/expected-value transaction-result))
       transaction-result
       ;; Read back from the connection because this operation needs only the
       ;; current committed value, not the rest of the transaction report.
@@ -2495,8 +2530,10 @@
            :seon.ns/name namespace-name
            :seon.cluster/name cluster-name
            :seon.turn/id bootstrap-run-id}
-          {:seon.error/kind :seon.agent/creation-incomplete
-           :seon.agent/creation-incomplete agent-id
+          {:seon.agent/creation-incomplete agent-id
+           :seon.error/at (java.util.Date.)
+           :seon.error/layer :seon.cluster/operation
+           :seon.error/operation 'seon.cluster/ensure-entity!
            :seon.error/message
            (str "Agent " (pr-str agent-id)
                 " committed without its namespace, cluster, or bootstrap run.")
@@ -3034,6 +3071,7 @@
   This is orderly-stop behavior only. A process kill cannot await a
   completion and may lose an in-flight transaction by design; the crash
   model owns that row and the next boot settles its durable wreckage."
+  {:malli/schema [:=> [:cat :map] :nil]}
   [instance]
   ;; the VIEW goes first: it is the newest layer and the only one
   ;; holding sockets belonging to somebody outside this process
@@ -3051,17 +3089,13 @@
                              {:seon.agent/quiesce quiesced})
           (throw
            (ex-info "The cluster armer input closed before quiescence."
-                    {:seon.error/kind
-                     :seon.agent/armer-quiescence-undeliverable
-                     :seon.agent/armer-quiescence-undeliverable true
+                    {:seon.agent/armer-quiescence-undeliverable true
                      :seon.error/message
                      "The cluster armer input closed before quiescence."})))
         (when-not (= :seon.agent/quiesced (async/<!! quiesced))
           (throw
            (ex-info "The cluster armer did not publish quiescence."
-                    {:seon.error/kind
-                     :seon.agent/armer-quiescence-undeliverable
-                     :seon.agent/armer-quiescence-undeliverable true
+                    {:seon.agent/armer-quiescence-undeliverable true
                      :seon.error/message
                      "The cluster armer did not publish quiescence."})))
         ;; Closure is the observable completion fact a later stop derives

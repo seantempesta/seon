@@ -33,7 +33,7 @@
   (Object.))
 
 (defn- flat-error
-  {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value :string :map] :seon.error/base]}
+  {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value :string :map] [:and :seon.error/base [:or :my.fs/path-refused-error :my.fs/not-found-error :my.fs/not-directory-error :my.fs/read-limit-error :my.fs/read-failed-error :my.fs/not-regular-file-error :my.fs/changed-during-read-error :my.fs/invalid-utf8-window-error :my.fs/write-limit-error :my.fs/write-failed-error :my.fs/blob-unavailable-error :my.fs/already-exists-error :my.fs/stale-digest-error :my.fs/atomic-write-unsupported-error :my.fs/glob-failed-error :my.fs/invalid-glob-error]]]}
   [marker subject message data]
   {marker subject
    :seon.error/at (java.util.Date.)
@@ -49,7 +49,7 @@
             (flat-error marker subject message data))))
 
 (defn- error-value
-  {:malli/schema [:=> [:cat :seon.error/throwable :qualified-keyword :seon.schema/value :string :map] :seon.error/base]}
+  {:malli/schema [:=> [:cat :seon.error/throwable :qualified-keyword :seon.schema/value :string :map] [:and :seon.error/base [:or :my.fs/path-refused-error :my.fs/not-found-error :my.fs/not-directory-error :my.fs/read-limit-error :my.fs/read-failed-error :my.fs/not-regular-file-error :my.fs/changed-during-read-error :my.fs/invalid-utf8-window-error :my.fs/write-limit-error :my.fs/write-failed-error :my.fs/blob-unavailable-error :my.fs/already-exists-error :my.fs/stale-digest-error :my.fs/atomic-write-unsupported-error :my.fs/glob-failed-error :my.fs/invalid-glob-error]]]}
   [error fallback-marker fallback-subject fallback-message data]
   (let [classified (ex-data error)]
     (if (or

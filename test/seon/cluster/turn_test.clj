@@ -1862,7 +1862,8 @@
               (finally
                 (d/unlisten connection ::prose-only)
                 (async/close! completion)
-                (async/close! faults)))))))))
+                (async/close! faults)
+                (.shutdownNow executor)))))))))
 
 (deftest a-completing-disposition-closes-in-the-terminal-transaction
   (with-cluster fake-evaluate

@@ -3591,20 +3591,32 @@
    (catch Exception failure (result-read-error run-id failure))))
 
 (defn- recording-failure
+  {:malli/schema [:=> [:cat [:=> [:cat] :seon.schema/value]]
+                  [:or :nil :seon.source/test-evidence-error
+                   :seon.test/execution-error :seon.test.run/unavailable-error
+                   :seon.db/error-result :seon.test/unknown-error]]}
   [record-fn]
   (try
     (let [result (record-fn)]
       (cond
-        (:seon.error/kind result) result
+        (or (:seon.source/refused-test-run result)
+            (:seon.test/execution-refusal result)
+            (:seon.test.run/unavailable result)
+            (:seon.db.write.attempt/request-id result)) result
         (and (vector? result) (every? :seon.test/run result)) nil
-        :else {:seon.error/kind ::persistent-results-recording-failed
+        :else {:seon.error/at (java.util.Date.)
+               :seon.error/layer :seon.test/recording
+               :seon.error/operation 'seon.test.runner/recording-failure
+               :seon.test/unknown "The recorder returned no committed result references."
                :seon.error/message
                "The recorder returned no committed result references."}))
     (catch Throwable failure
       (let [data (ex-data failure)]
-        (cond-> {:seon.error/kind
-                 (or (:seon.error/kind data)
-                     ::persistent-results-recording-failed)
+        (cond-> {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :seon.test/recording
+                 :seon.error/operation 'seon.test.runner/recording-failure
+                 :seon.test/unknown
+                 (or (ex-message failure) (.getName (class failure)))
                  :seon.error/message
                  (or (ex-message failure) (.getName (class failure)))}
           (seq data) (assoc :seon.error/data data))))))
@@ -3612,8 +3624,8 @@
 (defn- recording-failure-notice
   "The gate line for a refused recording, carrying the cluster's own cause.
 
-  The refusal names what was missing: its kind, its message, and the data the
-  raiser attached — never a kind and a sentence with the evidence dropped."
+  The refusal retains its message and the evidence attached by the producer."
+  {:malli/schema [:=> [:cat :string :seon.error/base] :string]}
   [recording-label failure]
   (let [cause
         (when-let [data (not-empty
@@ -3627,7 +3639,6 @@
      " "
      (remove nil?
              [(str "bin/test: " recording-label " NOT recorded:")
-              (str (:seon.error/kind failure))
               (:seon.error/message failure)
               cause]))))
 

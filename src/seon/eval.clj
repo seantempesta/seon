@@ -30,10 +30,14 @@
   (let [agent-row (db/pull database [:seon.agent/id]
                        [:seon.agent/id agent-id])]
     (cond
-      (:seon.error/kind agent-row) agent-row
+      (or (:seon.db/invalid-read agent-row)
+          (:seon.schema/expected-value agent-row)) agent-row
       (nil? (:seon.agent/id agent-row))
       (error/diagnostic
-       {:seon.error/kind ::agent-not-found
+       {:seon.error/at (java.util.Date.)
+        :seon.error/layer :seon.eval/of-agent
+        :seon.error/operation 'seon.eval/of-agent
+        :seon.agent/no-such-agent agent-id
         :seon.error/message "Cannot read evaluations of an absent agent."
         :seon.error/diagnostic-layer :seon.eval
         :seon.error/diagnostic-operation 'seon.eval/of-agent
@@ -58,7 +62,7 @@
                   database agent-id (vec (distinct (into selector [:db/id :seon.cluster.eval/id
                                                                  :seon.cluster.eval/run
                                                                  :seon.cluster.eval/ordinal]))))]
-        (if (:seon.error/kind rows)
+        (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
           rows
           (mapv #(assoc (nth % 4) :t (nth % 3))
                 (sort-by #(subvec % 0 3) rows))))))))

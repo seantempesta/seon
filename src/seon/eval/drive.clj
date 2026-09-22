@@ -79,6 +79,9 @@
         (d/unlisten connection listener-key)))))
 
 (defn- inbound!
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.boot/cluster-name
+                       :seon.db.process/id :seon.agent/id :string]
+                  :seon.message/id]}
   [connection cluster-name process agent-id content]
   (let [caps (config/result-caps
               (config/effective @connection cluster-name))
@@ -93,7 +96,8 @@
            {:tx-data [[:db.fn/call #'message/inbound-tx request]]
             :tx-meta {:seon.db/process
                       [:seon.db.process/id process]}})]
-      (when (:seon.error/kind result)
+      (when (or (:seon.db.write.attempt/request-id result)
+                (:seon.db/invalid-read result) (:seon.schema/expected-value result))
         (throw
          (ex-info "The objective message transaction was refused."
                   {:seon.eval.drive/refusal result}))))
@@ -140,7 +144,7 @@
                   [:vector :seon.eval.drive/evaluation]]}
   [db run-ids]
   (if (seq run-ids)
-    (->> (db/q '[:find ?run-id ?ordinal ?source ?result ?error ?error-kind ?at
+    (->> (db/q '[:find ?run-id ?ordinal ?source ?result ?error ?at
                 :in $ [?run-id ...]
                 :where
                 [?run :seon.turn/id ?run-id]
@@ -151,19 +155,16 @@
                 [?receipt :seon.cluster.eval/ordinal ?ordinal]
                 [?receipt :seon.cluster.eval/at ?at]
                 [(get-else $ ?receipt :seon.eval/shown "") ?result]
-                [(get-else $ ?receipt :seon.cluster.eval/error "") ?error]
-                [(get-else $ ?receipt :seon.error/kind :seon.eval.drive/absent)
-                 ?error-kind]]
+                [(get-else $ ?receipt :seon.cluster.eval/error "") ?error]]
               db run-ids)
-         (sort-by (juxt #(inst-ms (nth % 6)) second))
-         (mapv (fn [[run-id ordinal source result error error-kind at]]
+         (sort-by (juxt #(inst-ms (nth % 5)) second))
+         (mapv (fn [[run-id ordinal source result error at]]
                  {:seon.turn/id run-id
                   :seon.cluster.eval/ordinal ordinal
                   :seon.cluster.eval/source source
                   :seon.eval/shown result
                   :seon.eval.drive/value (read-result result)
                   :seon.cluster.eval/error error
-                  :seon.error/kind error-kind
                   :seon.cluster.eval/at at})))
     []))
 
@@ -180,7 +181,10 @@
   [receipts]
   (:my.turn/result (last (completion-values receipts))))
 
-(defn- model-attempts [db run-ids]
+(defn- model-attempts
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.turn/id]]
+                  [:vector :seon.db/pulled-entity]]}
+  [db run-ids]
   (if (seq run-ids)
     (->> (db/q '[:find [?attempt ...]
                 :in $ [?run-id ...]
@@ -206,8 +210,7 @@
                   :seon.ai/response-started?
                   :seon.ai/output-observed?
                   {:seon.ai.attempt/error
-                   [:seon.error/kind
-                    :seon.error/message
+                   [:seon.error/message
                     :seon.error/data-edn]}]
                 %))
          (sort-by (juxt :seon.ai.attempt/at :seon.ai.attempt/ordinal))

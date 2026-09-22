@@ -42,15 +42,21 @@
         database))
 
 (defn- effective-ai-settings
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  [:or :seon.config/effective :seon.config/error :seon.db/error-result
+                   :seon.schema/validation-refusal
+                   :seon.cluster.prompt/missing-cluster-error
+                   :seon.cluster.prompt/missing-config-error]]}
   [database agent-id]
   (let [cluster-name (config-cluster-name database)]
     (cond
-      (:seon.error/kind cluster-name)
+      (or (:seon.db/invalid-read cluster-name) (:seon.schema/expected-value cluster-name))
       cluster-name
 
       (nil? cluster-name)
-      {:seon.error/kind ::missing-cluster
-       :seon.cluster.prompt/missing-cluster agent-id
+      {:seon.cluster.prompt/missing-cluster agent-id
+       :seon.error/at (java.util.Date.) :seon.error/layer :seon.cluster.prompt/prompt
+       :seon.error/operation 'seon.cluster.prompt/effective-ai-settings
        :seon.error/message
        "The prompt's database has no effective cluster configuration."
        :seon.error/data {:seon.agent/id agent-id}}
@@ -59,11 +65,13 @@
       (let [effective (config/effective database cluster-name)]
         (if (:seon.config/missing-effective effective)
           (assoc effective
-                 :seon.error/kind ::missing-config
                  ::missing-config agent-id)
           (ai/settings effective (ai/agent-overlay database agent-id)))))))
 
 (defn- calibration-for
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ai/model
+                       :seon.ai.tokens/calibration [:or :nil :seon.agent/id]]
+                  :seon.ai.tokens/calibration]}
   [database model fallback-calibration agent-id]
   (let [query (cond->
                '{:find [?attempt ?at ?characters ?provider-tokens]
@@ -85,7 +93,8 @@
              (when (and (int? provider-tokens) (pos? provider-tokens))
                  {:seon.ai.tokens/characters characters
                   :seon.ai.usage/prompt-tokens provider-tokens}))
-           (sort-by (juxt second first) (if (:seon.error/kind rows) [] rows)))
+           (sort-by (juxt second first)
+                    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) [] rows)))
      10 fallback-calibration)))
 
 (defn model-calibration
@@ -127,17 +136,20 @@
                   [:or :seon.ai.tokens/calibration :seon.error/value]]}
   [database agent-id model]
   (let [settings (effective-ai-settings database agent-id)]
-    (if (:seon.error/kind settings)
+    (if (or (:seon.cluster.prompt/missing-cluster settings)
+            (:seon.cluster.prompt/missing-config settings)
+            (:seon.config/error-key settings) (:seon.db/invalid-read settings)
+            (:seon.schema/expected-value settings))
       settings
       (model-calibration database model
                          (tokens/prior-calibration (:seon.config.ai/chars-per-token-prior settings))
                          agent-id))))
 
 (defn- refuse!
+  {:malli/schema [:=> [:cat :keyword :string] :nil]}
   [rule message]
   (throw (ex-info message
-                  {:seon.error/kind ::refused
-                   :seon.error/message message
+                  {:seon.error/message message
                    ::rule rule
                    :seon.cluster.prompt/refused rule})))
 
@@ -321,6 +333,8 @@
   whole unselected join: identical at a budget large enough to keep every
   unit, and a false `capture-mismatch` at every smaller one. A live turn
   has no capture yet, so this answers only for a replay."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/id :string]
+                  [:or :nil :seon.schema/validation-refusal]]}
   [database turn-id text]
   (let [capture (db/q '[:find ?text . :in $ ?id
                         :where [?t :seon.turn/id ?id]
@@ -328,7 +342,11 @@
                                [?c :seon.context.capture/prompt ?text]]
                       database turn-id)]
     (when (and (string? capture) (not= capture text))
-      {:seon.error/kind ::capture-mismatch
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.cluster.prompt/capture
+       :seon.error/operation 'seon.cluster.prompt/capture-mismatch
+       :seon.schema/expected-value capture
+       :seon.schema/refused-value text
        :seon.error/message
        "Saved evaluations do not reconstruct the captured provider prompt."
        :seon.turn/id turn-id})))
@@ -337,17 +355,32 @@
   "`settings` is the ONE resolution `prompt` already made (2.1): the turn
   frame reads the same resolved dial through it rather than deriving the
   agent's overlay a second time for the same number."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.prompt/request
+                       :seon.config.ai/prompt-token-budget :seon.ai.tokens/calibration
+                       :seon.config/effective]
+                  [:or :seon.cluster.prompt/result :seon.render.web/context-error
+                   :seon.render/request-error :seon.config/error :seon.db/error-result]]}
   [database request budget calibration settings]
   (let [profile (render/request-profile (assoc request :seon.db/db database))
         distance (long (get request :seon.render/distance default-depth))
-        acquired (if (:seon.error/kind profile) profile
+        acquired (if (or (:seon.render/refused-member profile)
+                         (:seon.config/error-key profile) (:seon.db/invalid-read profile)
+                         (:seon.schema/expected-value profile)) profile
                    (render/acquire-context!
                   (assoc request
                          :seon.render/profile profile
                          :seon.db/db database
                          :seon.render/distance distance)))]
     (cond
-      (:seon.error/kind acquired)
+      (or (:seon.render/refused-member acquired)
+          (:seon.render.web/refused-member acquired)
+          (:seon.render.web/function-unavailable acquired)
+          (:seon.render/candidates acquired) (:seon.render/invalid-output acquired)
+          (:seon.render.unknown/reason acquired)
+          (:seon.render.transcript/refused-member acquired)
+          (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired)
+          (:seon.config/error-key acquired) (:seon.db/invalid-read acquired)
+          (:seon.schema/expected-value acquired))
       acquired
 
       ;; ABSENCE IS NOT AN EMPTY HISTORY. Acquisition publishes one unit per
@@ -397,7 +430,10 @@
   (validate-request! (db/carried-projection database) request)
   (let [agent-id (:seon.agent/id request)
         settings (effective-ai-settings database agent-id)]
-    (if (:seon.error/kind settings)
+    (if (or (:seon.cluster.prompt/missing-cluster settings)
+            (:seon.cluster.prompt/missing-config settings)
+            (:seon.config/error-key settings) (:seon.db/invalid-read settings)
+            (:seon.schema/expected-value settings))
       settings
       (acquire-context-report
        database request
