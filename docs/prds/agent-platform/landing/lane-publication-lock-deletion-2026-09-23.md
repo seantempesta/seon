@@ -242,3 +242,46 @@ default JVM restart after this commit is adopted (orchestrator).
 | fork versioning test JVM | 8.9 s | |
 | `publication-base!` over empty root (snapshot) | 93.3 s | full index — defect, from-zero-boot issue row |
 | armed focused run, 3 namespaces | 66.9 s | tests 38.9 s (three `with-store` publication tests each copy the canonical store) — defect, extends `a-focused-test-jvm-spends-twenty-seconds-before-its-first-test.md` |
+
+## P1-2 option 1 — commit `40c9ebf5e`; resume costs — commit `7a9d33da4`
+
+Ruling: option 1 (coordinator, 2026-09-23). Declared member
+**`:seon.source/expected-head`** (`seon.source.edn`: `:seon.source/branch` +
+`:seon.source/expected-commit-id`), optional on `:seon.fn/index-request`.
+`seon.cluster.registry/head-guard-tx` refuses inside the transaction unless the
+branch still names the expected commit in the transacting database's own
+store, with Datahike's `:stale-branch-head` data. `seon.fn/index!` leads its
+development reconciliation transaction with it; `development-source-refresh!`
+passes it to `index!` and leads its schema declaration transaction
+(`declaration-changes`) with it. Remaining site: `seon.issue/adopt!`
+(`issue.clj`, held by the census R-PRED batch): the exact change is to lead
+both `db/transact!` calls in `adopt!` (`src/seon/issue.clj:947,954` at
+`40c9ebf5e`) with `[:db.fn/call registry/head-guard-tx expected-head]`, the
+member passed from `development-source-refresh!` as a third argument.
+
+Proof boundary: at this HEAD the canonical fixture requires a `seon.test/run`
+execution handle on a live cluster; default does not load this code (JVM
+probe: `(resolve 'seon.cluster.registry/head-guard-tx)` → false), and lanes
+never adopt default. The committed regressions
+(`stale-adoption-row-writes-refuse-at-the-writer`,
+`schema-adoption-refuses-at-the-writer-after-a-publication-moves-the-head`)
+are therefore **not executed**. The same behavior was probed under armed
+contracts on a scratch store built by `publication-base!` from HEAD plus this
+slice (`tmp/publication-lock-lane/guard-probe.clj`, log `guard-probe.log`):
+current-src moved h1 → h2 by a guarded `force-branch!` (44 ms); schema
+adoption expecting h1 refused `:stale-branch-head`, basis unchanged, attribute
+absent (13 ms); expecting h2 accepted, attribute installed (90 ms);
+`index!` of `seon.schema/registration-delta-form` expecting h1 refused,
+basis unchanged (947 ms); expecting h2 converged (6,999 ms).
+
+Resume costs (`lane-resume-in-seconds-2026-09-23` (e) and the seed finding),
+probe `resume-probe.clj`: `accrete-schema-population!` with the branch's own
+carried projection 469 ms, no transaction (that lane measured 3,240 → 333 ms);
+`seed-root-agent!` first 9,668 ms (creation, cold), resume 6 ms, basis unchanged.
+
+| operation | wall | note |
+|---|---|---|
+| `publication-base!` over empty root (snap3) | 127.5 s | defect, from-zero-boot class |
+| guard probe JVM | 45.7 s | JVM + arming; `index!` of one identity 7.0 s — defect |
+| resume probe JVM | 41.6 s | first root seed 9.7 s — defect |
+| attempted armed test run (snap3) | 29.6 s | all 13 refused: fixture needs a `seon.test/run` handle |
