@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
+            [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.eval]
@@ -24,6 +25,103 @@
             [seon.schema.edn :as schema.edn]
             [seon.sci.reader :as reader]
             [seon.test-support :as test-support]))
+
+(def ^:private digest-a (apply str (repeat 64 "a")))
+(def ^:private digest-b (apply str (repeat 64 "b")))
+(def ^:private digest-c (apply str (repeat 64 "c")))
+
+(deftest three-way-classifies-complete-generated-digest-maps
+  (let [result
+        (tc/quick-check
+         100
+         (prop/for-all [offset gen/nat]
+           (let [identity (fn [label]
+                            [:seon.fn/sym
+                             (symbol "generated" (str label "-" offset))])
+                 unchanged (identity "unchanged")
+                 equal-edit (identity "equal-edit")
+                 equal-add (identity "equal-add")
+                 branch-change (identity "branch-change")
+                 head-change (identity "head-change")
+                 conflict (identity "conflict")
+                 add-conflict (identity "add-conflict")
+                 retract-conflict (identity "retract-conflict")
+                 equal-retraction (identity "equal-retraction")
+                 added (identity "added")
+                 retracted (identity "retracted")
+                 base {unchanged digest-a equal-edit digest-a
+                       branch-change digest-a head-change digest-a
+                       conflict digest-a retract-conflict digest-a
+                       equal-retraction digest-a retracted digest-a}
+                 branch {unchanged digest-a equal-edit digest-b equal-add digest-a
+                         branch-change digest-b head-change digest-a
+                         conflict digest-b add-conflict digest-b added digest-a}
+                 head {unchanged digest-a equal-edit digest-b equal-add digest-a
+                       branch-change digest-a head-change digest-b
+                       conflict digest-c add-conflict digest-c
+                       retract-conflict digest-b retracted digest-a}
+                 comparison (program/three-way base branch head)]
+             (= comparison
+                {:seon.program/unchanged #{unchanged equal-edit equal-add
+                                           equal-retraction}
+                 :seon.program/changed-on-branch #{branch-change}
+                 :seon.program/changed-on-head #{head-change}
+                 :seon.program/conflict #{conflict add-conflict retract-conflict}
+                 :seon.program/added #{added}
+                 :seon.program/retracted #{retracted}
+                 :seon.program/conflict-digests
+                 {conflict {:seon.program/base-digest digest-a
+                            :seon.program/branch-digest digest-b
+                            :seon.program/head-digest digest-c}
+                  add-conflict {:seon.program/base-digest :seon.program/absent
+                                :seon.program/branch-digest digest-b
+                                :seon.program/head-digest digest-c}
+                  retract-conflict {:seon.program/base-digest digest-a
+                                    :seon.program/branch-digest :seon.program/absent
+                                    :seon.program/head-digest digest-b}}})))
+         :seed 22092026)]
+    (test-support/assert-check! result)))
+
+(deftest digest-map-compares-two-fixture-branches-from-one-commit
+  (test-support/with-database
+    (fn [connection]
+      (let [base-database (db/db connection)
+            base-map (program/digest-map base-database)
+            [branch-identity head-identity]
+            (take 2 (sort-by pr-str (keys base-map)))
+            configuration (:config base-database)
+            source-branch (:branch configuration)
+            branch-a (keyword "seon.program-test" (str (name source-branch) "-a"))
+            branch-b (keyword "seon.program-test" (str (name source-branch) "-b"))]
+        (is (every? some? [branch-identity head-identity]))
+        (d/branch! connection source-branch branch-a)
+        (try
+          (d/branch! connection source-branch branch-b)
+          (try
+            (let [connection-a (d/connect (assoc configuration :branch branch-a))
+                  connection-b (d/connect (assoc configuration :branch branch-b))]
+              (try
+                (test-support/transacted!
+                 connection-a [{(first branch-identity) (second branch-identity)
+                                :seon.program/definition-digest digest-a}])
+                (test-support/transacted!
+                 connection-b [{(first head-identity) (second head-identity)
+                                :seon.program/definition-digest digest-b}])
+                (let [branch-map (program/digest-map (db/db connection-a))
+                      head-map (program/digest-map (db/db connection-b))
+                      comparison (program/three-way base-map branch-map head-map)]
+                  (is (= #{branch-identity}
+                         (:seon.program/changed-on-branch comparison)))
+                  (is (= #{head-identity}
+                         (:seon.program/changed-on-head comparison)))
+                  (is (empty? (:seon.program/conflict comparison))))
+                (finally
+                  (d/release connection-a)
+                  (d/release connection-b))))
+            (finally
+              (d/delete-branch! connection branch-b)))
+          (finally
+            (d/delete-branch! connection branch-a)))))))
 
 (defn- one-event
   [source]
