@@ -39,7 +39,11 @@ During the refactor, [plan §6](docs/prds/agent-platform/plan/README.md#6-implem
 owns verification cadence: focused installed REPL/test requests within a cut;
 platform and affected integration once at its completion. No suite per edit or
 commit. A deleted mechanism's tests leave with it; replacement behavior tests land
-by the cut's end. HEAD loads and the named REPL probe answers. Report the exact
+by the cut's end. The work is deep cuts in the plan's ruled order, each confirmed at
+the REPL and landed as one loadable slice; a red test is then asked three questions —
+does it test deleted machinery (delete it), a retired assumption (fix the
+expectation), or wanted behavior of a surviving seam (fix the owner) — and never
+triaged wholesale into lanes (README §6, "forest, not trees"). HEAD loads and the named REPL probe answers. Report the exact
 verification boundary; unavailable evidence is not a pass.
 The [testing skill](.agents/skills/clojure-testing/SKILL.md) distinguishes installed
 commands and enforcement from B4 targets. Never pretend a planned API is installed.

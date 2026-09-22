@@ -248,6 +248,25 @@ seconds still needs owner authorization; a named slow path is not an explanation
 
 ## 6. Implementation proof and recovery
 
+**The method (owner, 2026-09-22): forest, not trees.** This plan was researched and
+ruled; the steps in §4 carry their implementation references. Work is DEEP CUTS in the
+ruled order: delete the mechanism the step names, write the replacement from the step's
+data-flow table, confirm it at the REPL against the running system, land it as one
+loadable slice with its callers, then ask of each red test whether it is still
+relevant — a test of deleted machinery leaves with the machinery; a test asserting a
+retired assumption (an error kind, a hand-rostered fixture, an old fallback) is fixed
+at the expectation; only a test asserting wanted behavior of a surviving seam is a
+defect to fix at the owner. The orchestrator never runs the bulk tier between steps,
+never triages a full-suite red list into lanes, and never launches a lane to fix a
+red in a mechanism a later step deletes. The platform tier runs at step landings; the
+bulk tier once at the end of a cut, and its reds are read through the same three
+questions. A step is done when its own proof in its lane spec holds, not when the
+suite is green. When a landing exposes breakage (a parked proc, a filling store), the
+orchestrator repairs it at the owner as its own bounded slice and returns to the
+step; the 2026-09-21/22 night showed the cost of doing otherwise: five full gates,
+514 reds, and three lanes on tests of code the next steps delete.
+
+
 Before a Clojure change, read the listed dependency source and probe the owning seam.
 Use the canonical database population, explicit projection/environment, real SCI and
 armed contracts. A publication regression uses a small complete fixture program.
