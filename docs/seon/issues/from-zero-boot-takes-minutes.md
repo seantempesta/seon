@@ -40,3 +40,6 @@ the launching shell's; load is `uptime`'s one-minute average at start.
 | 2026-09-22 | `bfe3445f8` archive + projection-writer-producer patch | from-zero | 131,170 | 148.98 | — | [lane-projection-writer-producer](../../prds/agent-platform/landing/lane-projection-writer-producer-2026-09-23.md) |
 | 2026-09-22 | working tree (pre-fix memo; refused at scratch schema transaction) | from-zero, exit 1 | — | 38.69 | — | same |
 | 2026-09-22 | working tree (foreign `:pos-int` contract in `src/seon/test.clj`; refused) | from-zero, exit 1 | — | 41.29 | — | same |
+| 2026-09-22 | `a102a8403` frozen archive (`git archive`), before the 2026-09-23 no-from-zero ruling reached the lane | from-zero | 176,798 | 201.64 | — | [lane-publication-lock-deletion](../../prds/agent-platform/landing/lane-publication-lock-deletion-2026-09-23.md) |
+| 2026-09-22 | `87c4228f7` frozen archive: `cluster/publication-base!` over an empty root (full index + export, no boot) | publication from empty | — | 166.04 | — | same |
+| 2026-09-22 | `a102a8403` archive: `cluster/publication-base!` over the booted root (unchanged source, export only) | publication export | — | 39.10 (JVM start + require included) | — | same |

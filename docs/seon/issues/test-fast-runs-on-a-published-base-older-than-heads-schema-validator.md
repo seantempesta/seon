@@ -33,3 +33,10 @@ behind HEAD. Runs `8e0595c0b640`, `e6688bfdc5b3` and `e84538519dbc` of
 The block also stops the incremental schema proof the owner asked for on
 2026-09-23: no canonical fixture branch can be opened to transact a declaration
 change on.
+
+Sighting 2026-09-22 20:42Z (lane publication-lock-deletion): run `e838074339ff`
+at HEAD `a102a8403`, overlay `d73e0a6c` 44 commits behind; all five fixture
+tests of `seon.cluster.source-test` / `seon.cluster.publication-lock-test`
+refused on `:my.note/note`. The lane built its own base with
+`cluster/publication-base!` inside a `git archive` snapshot and ran the named
+namespaces under armed contracts without recording; see its landing note.
