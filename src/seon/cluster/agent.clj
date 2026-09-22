@@ -713,21 +713,33 @@
   "Release an execution handle after its caller has observed actual exit.
 
   No graph is started by acquisition. The caller owns execution and must join
-  its work before release. Live handles own nothing; borrowed branches persist."
+  its work before release. Live handles own nothing; borrowed branches persist.
+  The connection release, the branch unlink and the context-state removal are
+  each attempted even when an earlier one throws; the first cause is then
+  rethrown whole, carrying every later cause as suppressed."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle] :nil]}
   [handle]
-  (when (:seon.agent/owns-connection? handle)
-    (store/release-branch! (:seon.db/connection handle)))
-  (when (:seon.agent/owns-branch? handle)
-    (registry/retire-branch!
-     {:seon.store/store (:seon.store/store handle)
-      :seon.store/branch (:seon.agent/branch handle)}))
-  (when (or (:seon.agent/owns-connection? handle)
-            (:seon.agent/owns-branch? handle))
-    (swap! (:seon.agent/context-state handle)
-           (fn [contexts]
-             (into {} (remove (fn [[[branch _] _]]
-                                (= branch (:seon.agent/branch handle)))) contexts))))
+  (let [owns-connection? (:seon.agent/owns-connection? handle)
+        owns-branch? (:seon.agent/owns-branch? handle)
+        attempt (fn [step] (try (step) nil (catch Throwable cause cause)))
+        causes
+        (into []
+              (keep attempt)
+              [#(when owns-connection?
+                  (store/release-branch! (:seon.db/connection handle)))
+               #(when owns-branch?
+                  (registry/retire-branch!
+                   {:seon.store/store (:seon.store/store handle)
+                    :seon.store/branch (:seon.agent/branch handle)}))
+               #(when (or owns-connection? owns-branch?)
+                  (swap! (:seon.agent/context-state handle)
+                         (fn [contexts]
+                           (into {} (remove (fn [[[branch _] _]]
+                                              (= branch (:seon.agent/branch handle))))
+                                 contexts))))])]
+    (when-let [[first-cause & later] (seq causes)]
+      (doseq [cause later] (.addSuppressed ^Throwable first-cause cause))
+      (throw first-cause)))
   nil)
 
 (defn acquire-context!
