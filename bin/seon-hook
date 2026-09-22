@@ -41,6 +41,7 @@
       (root-file "src") java.io.File/pathSeparator
       (root-file "resources")))
 (require '[seon.dev.clj-kondo :as dev.kondo]
+         '[seon.error.refusal :as error.refusal]
          '[seon.operator :as operator]
          '[seon.cluster.process :as operator.process])
 
@@ -456,16 +457,16 @@
     (str "clj-kondo analysis failed: "
      (:seon.hook.analysis/reason analysis))))
 
-(defn- throwable-message
-  "The first non-blank message in a throwable's cause chain."
+(defn- failure-cause
+  "The failure's whole cause chain and the root sentence a reader is told.
+  The chain is `seon.error.refusal/chain` (class, message, ex-data and
+  first-party frames per link, outermost to root); the sentence is the root
+  cause's message, else the root's class."
   [error]
-  (loop [throwable error]
-    (if throwable
-      (let [message (.getMessage throwable)]
-        (if (str/blank? message)
-          (recur (.getCause throwable))
-          message))
-      (str (class error)))))
+  (let [chain (error.refusal/chain error)
+        root (peek chain)]
+    {:message (or (:seon.error/message root) (:seon.error/throwable-class root))
+     :chain chain}))
 
 (defn- schema-resource-path?
   "True for one flat split-registry EDN resource."
@@ -554,10 +555,11 @@
              :seon.hook.reconstruction/reason
              (:seon.error/message transformed)}))
         (catch Exception error
-          (let [message (throwable-message error)]
-            (log! "EXACT_RECONSTRUCTION_ERROR" message)
+          (let [{:keys [message chain]} (failure-cause error)]
+            (log! "EXACT_RECONSTRUCTION_ERROR" message (pr-str chain))
             {:seon.hook.reconstruction/status :unavailable
-             :seon.hook.reconstruction/reason message}))))))
+             :seon.hook.reconstruction/reason message
+             :seon.hook.reconstruction/chain chain}))))))
 
 (defn- content-lines
   "File content as lines, keeping the trailing empty line a final newline makes."
@@ -734,8 +736,10 @@
         (try
           (apply-patch-hunks (slurp source) operation)
           (catch Exception error
-            {:seon.hook.reconstruction/status :unavailable
-             :seon.hook.reconstruction/reason (throwable-message error)}))))))
+            (let [{:keys [message chain]} (failure-cause error)]
+              {:seon.hook.reconstruction/status :unavailable
+               :seon.hook.reconstruction/reason message
+               :seon.hook.reconstruction/chain chain})))))))
 
 (defn- reconstruct-file-content [event]
   (let [tool-name (:tool_name event)
@@ -758,8 +762,10 @@
           (reconstruct-exact-edit
            (slurp (absolute-file-path file-path)) tool-input)
           (catch Exception error
-            {:seon.hook.reconstruction/status :unavailable
-             :seon.hook.reconstruction/reason (throwable-message error)})))
+            (let [{:keys [message chain]} (failure-cause error)]
+              {:seon.hook.reconstruction/status :unavailable
+               :seon.hook.reconstruction/reason message
+               :seon.hook.reconstruction/chain chain}))))
 
       ;; an edit tool the hook has no reconstruction for is a file it cannot
       ;; lint; naming that is the whole point of the check
@@ -1790,8 +1796,8 @@
         ;; only honest answer, because silence here is what let a shell write
         ;; break the tree in the first place
         (catch Exception e
-          (let [message (throwable-message e)]
-            (log! "DERIVED_SCAN_FAILED" (str "tool=" tool-name) message)
+          (let [{:keys [message chain]} (failure-cause e)]
+            (log! "DERIVED_SCAN_FAILED" (str "tool=" tool-name) message (pr-str chain))
             (output!
              {:decision "block"
               :reason (str "BLOCKED: the hook could not tell whether this "
@@ -1846,13 +1852,13 @@
                 (output! (feedback-response feedback refusal))
                 (refuse! (feedback-response feedback refusal) refusal)))))
         (catch Exception e
-          (let [message (throwable-message e)
+          (let [{:keys [message chain]} (failure-cause e)
                 stack (with-out-str
                         (binding [*err* *out*]
                           (.printStackTrace e (java.io.PrintWriter. *out* true))))]
             ;; the class name alone hid an all-afternoon feedback outage;
             ;; the stack is the diagnosis, log it every time
-            (log! "ERROR" message (str/replace stack "\n" " | "))
+            (log! "ERROR" message (pr-str chain) (str/replace stack "\n" " | "))
             (binding [*out* *err*]
               (println "HOOK ERROR:" message))
             (output! {:continue true})))))))
