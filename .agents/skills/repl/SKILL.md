@@ -5,8 +5,10 @@ description: "Distinguish the agent reply reader, persistent agent SCI context, 
 
 # REPL surfaces and durable observations
 
-Use [the turn PRD](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
-§10 for lane rules and §13–§15 for the target. Later sections supersede
+Use [root instructions](../../../AGENTS.md) and
+[the active plan §6](../../../docs/prds/agent-platform/plan/README.md#6-implementation-proof-and-recovery)
+for lane verification cadence. Use [the turn PRD](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
+§13–§15 for the target. Later sections supersede
 fresh forks per turn, restored defs, and serialized results. The
 [agent runtime](../../../docs/seon/architecture/agent-runtime.md) diagrams
 show the additive context and since-query diff.

@@ -16,8 +16,8 @@ This directory contains the integrated plan and implementation specifications.
 Each spec states its design directly: the data flow, dependency source, ordered
 changes, probes and acceptance conditions. Research and review history are outside
 this directory. These are implementation instructions, not claims that the code
-has already changed. The [proposed shared instructions](AGENTS-rewrite-2026-09-21.md)
-remain a replacement proposal until the implementation transition.
+has already changed. The [shared instructions](../../../../AGENTS.md) are active; their activation
+diff receives Fable review before the next implementation lane launches.
 
 ## 1. What becomes simpler
 
@@ -354,15 +354,15 @@ The implementation plans are the current design, not an audit log. Incorporate a
 correction into its owning section; keep reproducible historical evidence in research
 or landing material outside `plan/`. The writer brief is background research, not a
 second set of implementation instructions. Architecture explains mechanisms and links
-directly to the specs; the proposed instructions hold durable working laws.
+directly to the specs; root `AGENTS.md` holds durable working laws.
 
-**Shared-instruction activation is part of the B1b integration checkpoint, before
-the next implementation lane launches.** The orchestrator owns replacing root
-`AGENTS.md` from the proposed rewrite after correcting its links and distinguishing
-installed commands from future targets. `CLAUDE.md` remains its symlink, not a second
-instruction authority. Reconcile the testing and REPL skills in the same checkpoint:
-remove obsolete command/owner claims, carry §6's cut-level verification policy, and
-keep helper details in the skill rather than duplicating them in the root file.
+**Shared instructions are activated independently of the remaining B1b integration
+work.** The orchestrator owns root `AGENTS.md` and the rewritten testing skill;
+installed commands are distinguished from future targets. `CLAUDE.md` remains its
+symlink, not a second instruction authority. Testing and REPL guidance use §6's
+cut-level verification policy; helper details live in the skill rather than being
+duplicated in the root file. Fable's dropped-rule review remains due before the
+next implementation lane launches.
 Each later cut updates the affected instructions with its implementation; B4's
 runner instructions activate only when that runner and its callers actually land.
 Running lanes receive the changed guidance explicitly; new lanes read it at launch.

@@ -1,167 +1,157 @@
 ---
 name: clojure-testing
-description: "Test Seon with the canonical Datahike fixture, real SCI evaluation, armed contracts, bounded event waits, and reproducible properties. Use for regressions, fixture diagnosis, and gate selection."
+description: "Write and run Seon behavior regressions with canonical fixtures, real SCI and armed contracts. Use for test design, fixture diagnosis, bounds, selection and interpreting recorded evidence."
 ---
 
-# Test the running contract
+# Test the behavior through the installed authority
 
-The binding gate is [turn PRD §10](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
-A lane iterates with `bin/test-fast --paths <owned files> -- <subject namespaces>`.
-The orchestrator owns `bin/test --paths <owned files> -- <subject namespaces>`
-and `--platform`; report that cold proof separately from the fast tally.
-`bin/test` refuses cold gates carrying the launcher's `SEON_CODEX_LANE`
-identity; its `--fast` snapshot path stays admitted (`bin/test:237`).
-Foreign working-tree edits are not inputs to a
-selected snapshot. Never run cold gates, `--all`, or `--full` in a lane.
+[Root instructions](../../../AGENTS.md) and the
+[agent-platform plan §6](../../../docs/prds/agent-platform/plan/README.md#6-implementation-proof-and-recovery)
+own the cut cadence. This skill owns test construction and current harness limits.
+B4 describes a replacement runner; it is not permission to assume that runner exists.
 
-## Select and read the real gate
+## Choose the smallest honest proof
 
-`bin/test` creates an isolated operator root and reports the suite
-verdict as its exit code (`bin/test:1`). Bare selection follows
-program-graph calls from changed definitions; explicit namespaces run
-complete. The reachability owner is
-`src/seon/test/selection.clj:134`, following call and test-subject edges.
+Name the behavior and the real boundary before writing the test. Keep one regression
+per failure class, with cases that exercise its meaningful variations. Assert public
+outcomes independently of the implementation; do not preserve obsolete machinery by
+repairing its tests. Remove those tests with the mechanism and supply replacement
+behavior coverage by the end of the cut. Ordinary tests must not publish all of `src/`
+to set up a small change; publication tests use a small complete fixture program.
 
-Run the selected namespaces together. Read counts and the complete
-failure category: worker exchange, launch, confirmation, and test
-assertion failures make different claims. A green exit with zero tests
-is not a proof of the subject. Do not attribute a failure to another
-lane until its exact boundary is established.
+Prove the subject exists before testing its disappearance or refusal. Assert the
+specific diagnostic and unchanged relevant state, not merely a throw/nonzero exit.
+A missing entity, wrong branch name or failed fixture write must make the test fail.
+An empty set is not proof that the right set was queried. Use the writer's returned
+identity, then positively establish the before-state and independently read the after-state.
 
-If concurrent edits block the gate, preserve them. Follow the assignment's
-specific worktree or stop rule. Never resume or alter another lane's
-session. Commit only the owned files; end owned background shells before
-reporting. These are §10 operational rules, not runner implementation claims.
+## What the machinery enforces today
 
-## Canonical fixture
+These are source-verified boundaries, not a claim that the entire platform is green.
+Recheck the named owners when changing them; update this table in the same slice.
 
-`seon.test-support/with-database` ordinarily opens an isolated branch
-of the published database in a worker-private file store. It never indexes
-the source population. Each branch has its own connection, datoms, schema
-evolution, and history (`test/seon/test_support.clj`, `with-branched-database`).
+| Rule | Installed enforcement | Author responsibility / limit |
+|---|---|---|
+| Exceeding the declared test duration fails | **Enforced on reported completion:** `duration-failures`, `src/seon/test/runner.clj:360`, emits an assertion failure at `:end-test-var`. A nonblank `:seon.test/long` reason AND positive `:seon.test/long-ms` are required to raise the ordinary bound. | Measure the operation, put the reason beside the number, and distinguish cold/warm work. The runner cannot validate the measurement's honesty. This elapsed-body check is not a hard kill or a complete accounting of namespace fixtures/child cleanup. |
+| An in-process request cannot wait forever | **Bounded observation:** `bounded-result`, `src/seon/test.clj:143`, uses `:seon.test/remaining-ms` and records unsuccessful completion. | Observation expiry does not prove the body thread exited. The current implementation deliberately lets resource scopes finish. Do not overlap another mutation or clean resources until actual exit is observed; retain isolation for uninterruptible work. |
+| A refused fixture write stops setup | **Enforced when using `transacted!`:** `test/seon/test_support.clj:309` checks the real writer report and throws if no successful `:db-after` exists. `apply-config!` and `seed-cluster!` also check their production writer results (`:1039`, `:1058`). | Use these helpers. Calling `db/transact!` and discarding its returned refusal bypasses this setup check. Assert the subject-specific populated state too. |
+| Tests enter with production contracts | **Enforced by initialization:** `seon.test.arm/arm-contracts!`, `src/seon/test/arm.clj:163`, loads the derived program and verifies actual wrapper coverage against armable Vars. | A later reload removes wrappers. `seon.test/run` is not an automatic arming operation; after reload, use the installed arming owner with the correct carried projection and positively verify relevant entering wrappers. Never hand-pick a smaller fake program. |
+| Tests leave instrumentation intact | **Partially enforced:** `run-vars!` compares entering/exiting global state and adds errors (`src/seon/test/runner.clj:657`); `ambient-drift` checks wrapper membership, registrations, live clusters and SCI sizes (`:1617`). Worker `reassert-contracts!` repairs a reduced wrapper count (`:1866`). | A before/after set cannot prove entry was already correct, same-cardinality changes are not the re-arm count's proof, and unchanged SCI size is not unchanged contents. Restore deliberate mutations with the canonical scope. Automatic repair does not excuse leakage. |
+| No hand-written production fixture maps | **Author rule, partially supported by validation:** the real writer checks schema validity. `program-fn-row` reads actual indexed artifacts or analyzes supplied source (`test/seon/test_support.clj:1026`). | There is no general detector for a map's hand-written origin or semantic fidelity. Use canonical declaration/config/cluster helpers. A schema-valid invented row may still model the wrong world. Synthetic data is legitimate only when the subject needs it. |
+| No assertionless green | **Enforced:** `assertionless-failure`, `src/seon/test/runner.clj:343`, rejects executed tests with zero assertion evidence. `assert-check!`, `test/seon/test_support.clj:880`, requires a true property result and positive trial count. | One vacuous assertion can still pass. Prove meaningful inputs, subject presence and coverage. A reused recorded green is different from executing an assertionless test. |
 
-Shared base construction runs on its own daemon thread using the system
-classloader and the caller's explicitly carried projection. Failed attempts
-return a typed diagnostic and retry on the next request; caller interruption
-does not interrupt construction. `retrying-base` and `database-base` own
-this lifecycle (`test/seon/test_support.clj:349`, `:400`). The canonical
-regression is `failed-base-construction-retries-without-caller-interruption`
-in `test/seon/test_support_test.clj:22`. Reload preserves the successful base;
-never replace it merely to rerun a test.
+## Canonical fixtures and custody
 
-When the runner supplies a published base, `create-base` clones and
-reidentifies its file store before connecting it directly
-(`test/seon/test_support.clj`, `create-base`). The former tiered backend
-copied every store key into memory on first connection (Datahike
-`store.cljc:91–104`). Konserve's connect-time enumeration may migrate
-and delete old-format files, so the private copy remains necessary. The simultaneous-acquisition regression in
-`test/seon/test_support_test.clj:146` verifies distinct stores, isolated
-writes, cleanup, and unchanged published bytes.
+`seon.test-support/with-database` (`test/seon/test_support.clj:982`) calls the body
+with a real connection on an isolated branch of the published fixture base. It does
+not index source for each ordinary test. `with-branched-database` (`:946`) carries
+the projection, owns the connection and retires the branch before releasing its lease.
+Base acquisition and the branch's timed work are separate measurements; do not
+replace a reusable base merely to repeat a test.
 
-Use `:seon.test-support/extra-schema` only for synthetic declarations
-whose installation is part of the subject. Store-global tests may request
-`:seon.test-support/fresh-store?`; the separate physical-store path
-lives at `test/seon/test_support.clj:731`.
+Use `program-fn-row` for program declarations (actual source symbol, or database +
+symbol + synthetic source), `apply-config!` for a complete config overlay, and
+`seed-cluster!` for the cluster/config path. `apply-config!` replaces the whole overlay;
+it is not an incremental map merge (`test/seon/test_support.clj:1039`). Fixture
+transactions go through `transacted!`. Use `:seon.test-support/extra-schema` only
+for genuinely synthetic declarations. Never hand-roster the production schema.
 
-Hand the projection and environment explicitly as production does.
-`run-database-body` supplies the fixture's projection state
-(`test/seon/test_support.clj:707`). Never create a small schema roster
-or mocked SCI context that misrepresents the production boundary.
+Pass projection, environment, declared proc inputs and fixed render profiles as
+production does. Use real SCI evaluation for SCI semantics; calling the same JVM
+function does not prove context isolation or interpreted caller behavior. Stop an
+agent graph before retracting facts it may still settle.
 
-Tests own no process-global mutation. Use an isolated database per
-mutating property trial; pure trials may share an immutable database
-value. A fixture's successful population does not prove live boot,
-adoption, or browser behavior.
+A branch isolates its datoms, connection and history. It does not isolate store-wide
+blob keys, GC, filesystem locks, loaded JVM Vars/classes or shared SCI objects.
+Store-global subjects use the existing `:seon.test-support/fresh-store?` route
+(`test/seon/test_support.clj:921`); file/process subjects use the canonical published
+file/root helpers with their required `:seon.test/fixture-observation` explaining why
+a branch is insufficient (`:108`, `:145`). Do not fabricate a manifest or bypass
+fixture admission to get a green. B4 owns replacing these costly fixture paths.
 
-Pure derivation properties may use immutable Datahike `with` values from the
-canonical fixture. Retain Seon's final-report validator in transaction metadata:
-Datahike's writer calls the same `core/with` evaluator
-(`reference-code/datahike/src/datahike/writing.cljc:872–889`), which invokes
-that validator (`reference-code/datahike/src/datahike/db/transaction.cljc:1206–1225`).
-`seon.turn-work-cost-test` compares generated state with the real writer's
-derivation and checks that the prepared database is unchanged
-(`test/seon/turn_work_cost_test.clj`). This does not prove durable publication.
+For pure derivation properties, immutable Datahike `with` values are admissible
+only with the same final-report validator in transaction metadata as the writer.
+See `test/seon/turn_work_cost_test.clj` and the shared transaction evaluator at
+`reference-code/datahike/src/datahike/db/transaction.cljc:1206`. This does not prove
+durable publication, live boot, adoption or browser paint.
 
-## Events and refusals
+## Bounds, events and process tests
 
-Use `seon.test-support/await-event!` for a channel, latch, future, or watched reference.
-It uses the declared event backstop and throws evidence naming a missing
-event (`test/seon/test_support.clj:540`). Wait for the actual required
-terminal fact or completion, never quiescence or a tuned sleep.
-For a reference, it installs the watch before deriving the current value and
-removes it on every exit. Future failures preserve the publisher's original
-exception instead of hiding it behind `ExecutionException`.
-The future branch cancels timed-out work before reporting the missing event.
+The ordinary duration bound is five seconds (`resources/seon/schemas/seon.test.edn:27`).
+A longer bound declares both numeric `:seon.test/long-ms` and explanatory
+`:seon.test/long` beside the test. Derive it from the measured operation, including
+which work was timed and why any margin is needed. Store exact timings in the owning
+landing evidence. No blanket multiplier or fifteen-minute escape substitutes for
+measurement. Raising a bound cannot turn a prior timeout into a pass; diagnose and
+rerun the actual proof. Work over ten seconds needs owner authorization already
+covering that operation. Cold boot/index authorization is not permission for unrelated
+slow tests or repeated full-suite runs.
 
-`seon.test-support/refusal-data` returns flat errors or deepest
-exception data, distinguishing committed and unknown results
-(`test/seon/test_support.clj:660`). Assert the specific refusal and
-independently verify the database did not change. Checking only a throw
-does not establish atomic refusal.
+`await-event!` (`test/seon/test_support.clj:738`) waits on the required event under a
+declared bound and reports what failed to arrive. It installs watches before reading
+current state. A future timeout requests cancellation, which is not proof of exit.
+Avoid sleeps, quiescence guesses and infinite waits. A fixture hold that waits for a
+cold competitor must cover that declared operation; positively assert the winner
+remains paused until the competitor has returned the expected refusal.
 
-Acquire fixture resources in `with-open` scopes using
-`seon.test-support/closeable` for values with a separate release function
-(`test/seon/test_support.clj`, the adapter following the instrumentation fixture).
-Clojure's nested `finally` expansion owns reverse cleanup even when setup or
-another cleanup fails (`reference-code/clojure/src/clj/clojure/core.clj:3854`).
-The recurring test injects failures after each acquisition count and at each
-cleanup (`test/seon/test_support_test.clj`,
-`fixture-resources-close-through-setup-and-cleanup-failures`).
+Concurrency regressions use the same contested identity/path as production. OS lock
+exclusion needs an actual second process; `.isValid` in one JVM alone proves too little.
+Assert the specific losing operation, unchanged winner state, and actual child exit
+with its exit code where relevant. Wait for stdout/stderr completion separately;
+a diagnostic stream is not automatically an EDN result. A connection closing is not
+proof of process exit. Use the retained `(pid, start-instant)` and `ProcessHandle.onExit`.
+See the eight real examples in `test/seon/cluster/boot_test.clj`.
 
-## Properties and instrumentation
+Acquire resources in nested `with-open` scopes, using `test-support/closeable`
+(`test/seon/test_support.clj:1116`) for separate release functions. Setup and cleanup
+failures must still attempt every earlier release. Preserve the primary failure and
+cleanup diagnostics. Do not delete a root while a child or database release is unknown.
+Plant an external symlink sentinel in recursive-cleanup tests; verify it survives.
 
-Derive inputs from fixed seeds. Do not read wall time or mint random
-values inside a property body whose replay depends on that seed.
-A mutating trial gets its own fixture; the invariant checker observes
-written facts independently of the operation's return.
+## Properties and global state
 
-Use `seon.test-support/assert-check!` to retain full shrink evidence
-and require both an actual true result and a positive trial count
-(`test/seon/test_support.clj:676`). Its regression retains a failing
-counterexample and rejects a successful zero-trial check.
-Generator construction, generated-value validity, and meaningful domain
-coverage are separate proofs. Malli overrides do not validate their own
-output (`reference-code/malli/src/malli/generator.cljc:468`).
+Generate reproducible inputs from a fixed seed. Do not mint uncontrolled IDs or read
+wall time inside a property whose replay depends on that seed. Mutating trials get
+isolated fixtures; pure trials may share an immutable database value. Validate generated
+values and meaningful domain coverage separately from the property; generator overrides
+do not prove validity (`reference-code/malli/src/malli/generator.cljc:468`).
+Use `assert-check!` to preserve shrink evidence and require positive trials.
 
-Run under the same contracts the cluster arms. Re-evaluating a Var
-strips its wrapper; the instrumentation owner documents re-arming with
-the supplied projection at `src/seon/instrument.clj:685`.
-Do not weaken contracts to make a stale fixture pass.
+Own no incidental JVM-global state. Deliberate instrumentation changes use
+`preserving-instrumentation-state` (`test/seon/test_support.clj:1073`); it restores
+through `seon.instrument/restore!` even after exceptions and leaves definitions replaced
+by reload alone. Restoring an old callable over new protocols/classes is not safe.
+Use the separate `preserving-schema-registry` (`:1089`) when that is the subject.
+Do not weaken contracts, fake SCI, or restore an obsolete schema to make a test pass.
 
-Tests that deliberately change instrumentation use
-`seon.test-support/preserving-instrumentation-state`
-(`test/seon/test_support.clj`, the fixture following `seed-cluster!`). It
-restores the entering callable roots and Malli function-schema registry on
-both normal and exceptional exit. Malli's registry is the private atom at
-`reference-code/malli/src/malli/core.cljc:3061`; the existing context fixture
-uses this same shared owner. The platform regression removes real entering
-wrappers, throws, and proves those exact wrappers and schemas return. A
-runner re-arm is evidence of leaked test state, not a substitute for this
-cleanup.
+## Execute and report the right proof
 
-## Turn and context regressions — target
+During a cut use the installed focused authority, not a suite per commit:
 
-PRD §12–§15 requires virtual replies through the ordinary per-agent
-proc, without paid model calls. Prove the behavior rather than the
-deleted implementation:
+- `seon.test/run` / `run-owned` (`src/seon/test.clj:541`, `:576`) admit and record
+  requests with explicit program/result custody. `run-owned` supplies the agent's
+  body custody; JVM callers must supply it. Read the complete returned evidence.
+  Result-recording connection alone does not supply body custody (`:409`).
+- `bin/test-fast --paths <owned files> -- <namespaces>` remains the shared-tree
+  iteration launcher. Without `--paths`, it uses the working tree. Snapshot claims
+  must match the command actually run. Missing published base is an orchestrator
+  preparation problem, not permission to invent a fixture or worktree.
+- The orchestrator owns affected integration and `bin/test --platform` at the cut
+  checkpoint. Lanes never run cold gates, `--all` or `--full`. No full suite after
+  each edit. Existing destructive admission stays in force; do not relabel a test
+  or lie about its root to bypass it (`src/seon/test.clj:409`).
 
-- Three transactions per turn; source stored before execution;
-  interrupted work closes at boot and never replays.
-- One persistent SCI context per agent; an atom retains identity across
-  turns, private values stay out of other agents and the base, and a new
-  third agent sees neither agent's private layer.
-- Installed program changes reach existing contexts as base diffs.
-- System opening and changed reads append evaluations. The previous
-  prompt is a byte-identical prefix, including after restart from shown
-  text.
-- Generated and agent-written reads refresh from latest evidence and
-  since changes, including empty reads and retractions. Unchanged reads
-  do not append; writes and effects never rerun.
-- Restart loses actual objects while inspection retains shown text.
-  Compaction wipes evaluations and regenerates the opening.
-- History uses the evaluation schema's pair through the walk; no second
-  formatter or clipping pass rewrites shown text.
+Record actual program identity, arming precondition, execution/reuse counts,
+assertions, failures, errors and refusal/timeout categories. Zero executions with
+valid recorded green evidence is reuse, not a fresh proof. Fixture-excluded or
+unconfirmed work is not green. A standalone `clojure.test` call bypassing canonical
+admission/recording is diagnostic only. Distinguish hot reload, in-place adoption,
+new fork and cold boot; observe the real user-facing result separately.
 
-Keep one regression per failure class. Test identity derivation through
-the existing `seon.id/evaluation` owner (`src/seon/id.clj:49`);
-do not hand-build a second id scheme in the fixture.
+Turn/context regressions follow the current
+[turn PRD](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
+and [B2](../../../docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md): use virtual
+provider replies through real procs, without paid model calls; test ordered durable
+source/results, interruption without replay, private-context isolation, changed-read
+refresh without replaying effects, unchanged historical shown text and loss of live
+objects on restart. A target is an acceptance condition, not proof it is installed.
