@@ -36,6 +36,7 @@
                 :seon.cluster.eval/id],
                :inbound-content :string,
                :no-limit [:= true],
+               :refused-chain-limit :string,
                :inbound-request
                [:map
                 [:seon.agent/id :seon.agent/id]
@@ -50,14 +51,16 @@
                  "Every message addressed to one agent, as the reverse of `to` pulls them."}
                 :seon.message/pulled],
                :no-limit-error
-               [:map
+               [:and {:seon.db/attributes true} :seon.error/base
+                [:map
                 {
                  :seon.render/ai seon.error/render-ai,
                  :seon.render/html seon.error/render-html,
                  :error/message
                  "must mark a message chain with no configured limit"}
                 [:seon.message/no-limit :seon.message/no-limit]
-                [:seon.error/message :seon.error/message]],
+                [:seon.message/refused-chain-limit :seon.message/refused-chain-limit]
+                [:seon.error/message :seon.error/message]]],
                :message
                [:map
                 {:seon.db/attributes true,
@@ -140,14 +143,15 @@
                  :seon.message/content-too-large]
                 [:seon.error/message :seon.error/message]],
                :chain-limit-error
-               [:map
+               [:and {:seon.db/attributes true} :seon.error/base
+                [:map
                 {
                  :seon.render/ai seon.error/render-ai,
                  :seon.render/html seon.error/render-html,
                  :error/message
                  "must identify the message-chain limit that was reached"}
                 [:seon.message/chain-limit :seon.message/chain-limit]
-                [:seon.error/message :seon.error/message]],
+                [:seon.error/message :seon.error/message]]],
                :blank-content [:= true],
                :unknown-recipient :seon.agent/id,
                :delivery
@@ -155,7 +159,8 @@
                 [:seon.message/rows :seon.db/tx-data]
                 [:seon.error/values [:vector :seon.error/value]]],
                :unknown-recipient-error
-               [:map
+               [:and {:seon.db/attributes true} :seon.error/base
+                [:map
                 {
                  :seon.render/ai seon.error/render-ai,
                  :seon.render/html seon.error/render-html,
@@ -163,7 +168,7 @@
                  "must identify the unknown message recipient"}
                 [:seon.message/unknown-recipient
                  :seon.message/unknown-recipient]
-                [:seon.error/message :seon.error/message]],
+                [:seon.error/message :seon.error/message]]],
                :limit [:int {:min 0}]
  ; Additive error declaration manifest, 2026-09-18.
 

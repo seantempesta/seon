@@ -1497,11 +1497,13 @@
 
   The leading identity row preserves existing transaction composition; it
   contains no occurrence state. Counts and notification decisions belong
-  exclusively to commit-call's mid-transaction database."
+  exclusively to commit-call's mid-transaction database. Both entry points
+  require the producer's declared schema; the positional form carries it as
+  its third argument, before the source observation."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.error/commit-tx-request] [:or :seon.error/recording :seon.db/error-result :seon.error/base]]
-    [:=> [:cat :map :seon.db/database-value :seon.error/source :inst :map] [:or :seon.error/recording :seon.db/error-result :seon.error/base]]]}
+    [:=> [:cat :map :seon.db/database-value :seon.error/declared-schema :seon.error/source :inst :map] [:or :seon.error/recording :seon.db/error-result :seon.error/base]]]}
   ([database request]
    (let [request (assoc request :seon.schema/projection
                         (or (db/carried-projection database)
@@ -1554,11 +1556,11 @@
       :seon.error.occurrence/ref [:seon.error.occurrence/id occurrence-id]
       :seon.error/value (value fact)
       :seon.db/tx-data tx}))))
-  ([cluster database source at attribution]
+  ([cluster database declared-schema source at attribution]
    (recording database
               (merge (select-keys cluster [:seon.sci.admit/caps :seon.config.error/recurrence-limit
                                           :seon.config.error/max-evidence-bytes :seon.config.error/escalate-to])
-                     {:seon.error/source source :seon.error/id (id/id)
+                     {:seon.error/source source :seon.error/declared-schema declared-schema :seon.error/id (id/id)
                       :seon.error/at at :seon.error/process (:seon.db.process/id cluster)
                       :seon.error/basis-t (db/basis-t database)}
                      attribution))))

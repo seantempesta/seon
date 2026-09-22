@@ -3401,10 +3401,11 @@
   Attribution is passed in, never derived here: an `:open` that REFUSED
   has no run to point at, and a lookup ref to a run that does not exist
   would fail the very transaction that records the failure."
-  [cluster db failure now attribution]
+  [cluster db declared-schema failure now attribution]
   (error/commit-tx
    db
-   (merge {:seon.error/source failure
+   (merge {:seon.error/declared-schema declared-schema
+           :seon.error/source failure
            :seon.error/id (str (random-uuid))
            :seon.error/at now
            :seon.error/process (:seon.db.process/id cluster)
@@ -3455,7 +3456,11 @@
      (into []
            (mapcat
             (fn [failure]
-              (error-tx cluster db failure now
+              (error-tx cluster db
+                        (cond (:seon.message/no-limit failure) :seon.message/no-limit-error
+                              (:seon.message/chain-limit failure) :seon.message/chain-limit-error
+                              (:seon.message/unknown-recipient failure) :seon.message/unknown-recipient-error)
+                        failure now
                         {:seon.agent/id agent-id
                          :seon.turn/id run-id})))
            (:seon.error/values delivery))}))
@@ -3475,12 +3480,16 @@
   (try
     (operation)
     (catch Throwable failure
-      (merge {:seon.error/at (java.util.Date.)
+      (with-meta
+       (merge {:seon.error/at (java.util.Date.)
               :seon.error/layer :seon.turn/phase
               :seon.error/operation 'seon.turn/phase
               :seon.error/message
               (or (ex-message failure) (.getName (class failure))) :seon.turn.loop/phase-failed true}
-             (error/refusal failure)))))
+             (error/refusal failure)
+             {:seon.turn.loop/failed-step
+              (or (:seon.error/operation (error/refusal failure)) 'seon.turn/phase)})
+       {:seon.error/declared-schema :seon.turn.loop/phase-failed-error}))))
 
 (defn- closing-settlement?
   "True when this settlement closes the ordinary turn.
@@ -3702,7 +3711,35 @@
      [:seon.db/tx-data :seon.store/transaction-data]]]}
   [cluster database now agent-id run-id process ordinal _receipt source]
   (let [recording
-        (error/recording cluster database source now
+        (error/recording cluster database
+                  (or (:seon.error/declared-schema source)
+                      (:seon.error/declared-schema (meta source))
+                      (cond
+                        (:seon.turn/rule source) :seon.turn/refused-error
+                        (:seon.db.write.attempt/request-id source) :seon.db.write/validation-refusal
+                        (:seon.db/invalid-read source) :seon.db/invalid-read-error
+                        (:seon.schema/expected-value source) :seon.schema/validation-refusal
+                        (:seon.cluster.reply/no-forms source) :seon.cluster.reply/no-forms-error
+                        (:seon.render.walk/missing-lookup source) :seon.render.walk/no-such-entity-error
+                        (:seon.render/refused-member source) :seon.render/request-error
+                        (:seon.render/candidates source) :seon.render/ambiguous-error
+                        (:seon.render/invalid-output source) :seon.render/invalid-output-error
+                        (:seon.render.unknown/reason source) :seon.render/unknown
+                        (:seon.render.transcript/refused-member source) :seon.render.transcript/request-error
+                        (:seon.config/error-key source) :seon.config/error
+                        (:seon.fn/namespace-unresolvable source) :seon.fn/namespace-unresolvable-error
+                        (:seon.ai/unreadable-response-member source) :seon.ai/unparseable-body-error
+                        (:seon.ai/unanswered-reasoning-count source) :seon.ai/reasoning-without-answer-error
+                        (:seon.ai/exhausted-finish-reason source) :seon.ai/token-starvation-error
+                        (:seon.ai/interrupted-text-count source) :seon.ai/stream-truncated-error
+                        (:seon.ai/provider-error source) :seon.ai/provider-error-error
+                        (:seon.ai/timeout source) :seon.ai/timeout-error
+                        (:seon.ai/transport-failure source) :seon.ai/transport-failure-error
+                        (:seon.ai/extra-body-edn source) :seon.ai/invalid-extra-body-error
+                        (:seon.ai/protected-keys source) :seon.ai/extra-body-conflict-error
+                        (:seon.ai/missing-credential-variable source) :seon.ai/no-credential-error
+                        (:seon.cluster.prompt/error-agent-id source) :seon.cluster.prompt/error))
+                  source now
                   (cond-> {:seon.agent/id agent-id}
                     run-id (assoc :seon.turn/id run-id)))
         value (:seon.error/value recording)
@@ -3749,7 +3786,14 @@
          run-id :seon.turn/id}
         (first requests)
         process (:seon.db.process/id cluster)
-        recording (error/recording cluster (db/db connection) refusal now
+        recording (error/recording cluster (db/db connection)
+                            (or (:seon.error/declared-schema (meta refusal))
+                                (cond
+                                  (:seon.turn/rule refusal) :seon.turn/refused-error
+                                  (:seon.db.write.attempt/request-id refusal) :seon.db.write/validation-refusal
+                                  (:seon.db/invalid-read refusal) :seon.db/invalid-read-error
+                                  (:seon.schema/expected-value refusal) :seon.schema/validation-refusal))
+                            refusal now
                             {:seon.agent/id agent-id
                              :seon.turn/id run-id})
         value (:seon.error/value recording)
@@ -4058,12 +4102,26 @@
         attribution {:seon.agent/id agent-id
                      :seon.turn/id run-id}
         failure-recording (when failure
-                            (error/recording cluster db failure now attribution))
+                            (error/recording cluster db
+                              (or (:seon.error/declared-schema (meta failure))
+                                  (cond
+                                    (:seon.ai/unreadable-response-member failure) :seon.ai/unparseable-body-error
+                                    (:seon.ai/unanswered-reasoning-count failure) :seon.ai/reasoning-without-answer-error
+                                    (:seon.ai/exhausted-finish-reason failure) :seon.ai/token-starvation-error
+                                    (:seon.ai/interrupted-text-count failure) :seon.ai/stream-truncated-error
+                                    (:seon.ai/provider-error failure) :seon.ai/provider-error-error
+                                    (:seon.ai/timeout failure) :seon.ai/timeout-error
+                                    (:seon.ai/transport-failure failure) :seon.ai/transport-failure-error
+                                    (:seon.ai/extra-body-edn failure) :seon.ai/invalid-extra-body-error
+                                    (:seon.ai/protected-keys failure) :seon.ai/extra-body-conflict-error
+                                    (:seon.ai/missing-credential-variable failure) :seon.ai/no-credential-error
+                                    (:seon.cluster.prompt/error-agent-id failure) :seon.cluster.prompt/error))
+                              failure now attribution))
         truncation-recording
         (cond
           (nil? truncation) nil
           (= truncation failure) failure-recording
-          :else (error/recording cluster db truncation now attribution))
+          :else (error/recording cluster db :seon.ai/stream-truncated-error truncation now attribution))
         recording (into (vec (:seon.db/tx-data failure-recording))
                         (when (not= truncation failure)
                           (:seon.db/tx-data truncation-recording)))

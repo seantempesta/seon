@@ -138,3 +138,100 @@ No worktree was created. Ordinary Git archives under `tmp/` were used for commit
 - `test/seon/schema_test.clj`
 - `test/seon/sci/eval_test.clj`
 - `test/seon/turn_loop_test.clj`
+
+
+## Recorder custody conversion, 2026-09-22 follow-up
+
+The earlier protected turn-caller handoff is superseded by this authorized
+conversion. The five-argument `error/recording` arity is retired. Its replacement
+requires the producer's declared schema as the third of six arguments; the
+request arity remains unchanged. Every production caller now supplies that name.
+The cluster committer, schedule owner and SCI acquisition recorder already carried
+it and required no changes. The validator and `extends-schema?` remain strict.
+
+The turn's phase producer supplies `:seon.turn.loop/phase-failed-error` in custody
+metadata. The terminal and attempt callers branch on their explicit domain
+members before calling the recorder; no registry search, matching-schema set or
+structural base classifier supplies a name. Already-recorded observations retain
+the name they received. Delivery records its three declared alternatives, and
+stream truncation supplies its single declaration directly.
+
+The phase declaration now extends `:seon.error/base`. Cold admission also exposed
+three delivery declarations that lacked that extension; they land with their
+consumer. Phase retains the failed operation, and missing-chain-limit delivery
+retains the rejected bound's shown value. These are domain observations, not
+Boolean-only schema identities. README §6 classification: these are surviving
+owner seams, so fix the declarations and producers; the five-argument interface
+is retired machinery, so convert its callers rather than preserve inference.
+
+### Proof and limits
+
+- `bin/test-fast --paths test/seon/error_recording_test.clj --
+  seon.error-recording-test` loaded/armed 1,692 Vars (1,686 program-armable),
+  then refused admission: **Test recording requires a published current-src**.
+  Refused run `73fe882dd816`, snapshot `tmp/test-runs/run.8OSB9Y`, base HEAD
+  `c94e88a403f983ad299c9c45bc05935239c00940`; log
+  `tmp/error-recorder-before.log`. No tests executed in that request. This is
+  the acknowledged B4 recording limit, not a recorded pass.
+- The canonical in-process regression uses the real root seed, a first opening
+  turn, an injected opening-source exception, the production phase/settlement
+  recorder and the real writer. It checks root-turn existence, error outcome,
+  the durable declared schema and closed turn. **1 test, 4 assertions, zero
+  failures/errors; 2,285.545792 ms.** Contracts armed normally through
+  `seon.test.arm/initialize-contracts!`. Exact form and full results:
+  `tmp/error-recorder-proof.clj`, `tmp/error-recorder-proof.log`. The existing
+  canonical fixture used the scratch publication, without rebuilding a base.
+- Read-only scratch JVM phase probe: named declaration plus validator returned
+  true in **50 ms**. The exact form was
+  `(let [p (seon.schema/declaration-projection (seon.schema.edn/packaged-forms))
+         v (#'seon.turn/phase #(throw (ex-info "Recorder probe" {})))]
+     {:declaration (:seon.error/declared-schema (meta v)) :value v
+      :valid? ((seon.schema/projection-validator p
+                :seon.turn.loop/phase-failed-error) v)})`.
+- The first cold attempt correctly refused the Boolean-only delivery declaration
+  before the observation conversion. The second refused concurrent source change
+  during publication. A third shared-source launch was stopped before publication
+  to use stable inputs. Logs `tmp/error-recorder-boot.log`, `-boot-2.log`,
+  `-boot-3.log`; exact-root stop results `tmp/error-recorder-stop-1.log` through
+  `-stop-3.log`. No default operation was performed.
+- Stable input proof used an ordinary archive of
+  `b2dc1de06c8be2bedfa5949457a725a3e47ae1bf` plus only the seven owned source,
+  resource and test paths listed below, with vendored dependencies linked.
+  From that source directory, ran `bin/seon --root
+  /Users/sean/src/seon/tmp/error-recorder-root reset --force`.
+  **Readiness: 101,576 ms**, missing layers `[]`, one root agent, PID 47334,
+  start `2026-09-22T18:13:31.853Z`. This is above the ten-second target and is
+  not a speed pass. Logs `tmp/error-recorder-boot-4.log` and
+  `tmp/error-recorder-status.log`.
+- The first root turn `12a2b18544e6` completed with an error and a durable
+  `:seon.turn/closed-tx` (536870927). Its recorded error has
+  `:seon.error/declared-schema :seon.render/request-error`, operation
+  `seon.render/unknown`, signature `504062b823b1b35fa067f8b3eb82004e95ab5576ab5445feb05db58770a3aef8`.
+  The original missing-name recorder panic is absent.
+
+**No HEALTHY boot is claimed.** After initial readiness/observed proc replies,
+root met three further refused writes and the JVM exited. The retained refusal
+names the foreign boundary `seon.sci.eval/host-namespace!`: **Loaded source defined
+no namespace**, subject `seon.cluster.source-evidence-test`, while acquiring
+`seon.cluster.agent/render-identity-ai`. This becomes the renderer's explicit
+request error, then the existing turn write-refusal bound. The recorder persisted
+both errors with declared names. Full evidence is in the proof log and
+`tmp/error-recorder-fault-3dc53134948784dc2d771854b99d6fc0e5c83558e78574553e2e805a55bae55c.edn`.
+The publication/host-loading owners were not edited. This is a surviving foreign
+seam requiring its owner, not permission to weaken error validation or silence
+panic. Shared `src/seon/fn.clj` was also temporarily unreadable during test-file
+lint; the stable snapshot avoided that concurrent edit.
+
+### Paths in this follow-up
+
+- `src/seon/error.clj`
+- `src/seon/turn.clj`
+- `src/seon/cluster/message.clj`
+- `resources/seon/schemas/seon.turn.loop.edn`
+- `resources/seon/schemas/seon.message.edn`
+- `test/seon/turn_work_test.clj`
+- `test/seon/error_recording_test.clj`
+- this landing note
+
+The requested summary is updated separately under `tmp/orchestrator/`. Historical
+observations remain **RESET NEEDED**; no migration was introduced.

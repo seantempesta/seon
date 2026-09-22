@@ -85,7 +85,8 @@
                   [:my.turn/value {:optional true} :my.turn/value]],
                  :completion :seon.flow/channel,
                  :phase-failed-error
-                 [:map
+                 [:and {:seon.db/attributes true} :seon.error/base
+                  [:map
                   {
                    :seon.render/ai seon.error/render-ai,
                    :seon.render/html seon.error/render-html,
@@ -93,7 +94,8 @@
                    "must carry the :seon.turn.loop/phase-failed distinguishing member"}
                   [:seon.turn.loop/phase-failed
                    :seon.turn.loop/phase-failed]
-                  [:seon.error/message :seon.error/message]],
+                  [:seon.turn.loop/failed-step :seon.turn.loop/failed-step]
+                  [:seon.error/message :seon.error/message]]],
                  :phase-failed [:= true],
                  :evaluation
                  [:map

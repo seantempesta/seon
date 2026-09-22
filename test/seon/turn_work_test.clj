@@ -653,6 +653,7 @@
               (error/recording
                (support/cluster-handle {:seon.db.process/id process})
                (db/db connection)
+               :seon.error/normalization-error
                {:seon.error/at now :seon.error/layer ::provider
                 :seon.error/operation 'seon.turn-work-test/model-attempt
                 :seon.error/message "no credential"}

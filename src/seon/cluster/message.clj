@@ -194,6 +194,7 @@
       (not (pos-int? max-chain))
       {:seon.message/rows []
        :seon.error/values [{:seon.message/no-limit true
+                            :seon.message/refused-chain-limit (pr-str max-chain)
                             :seon.error/at (java.util.Date.)
                             :seon.error/layer :seon.message/delivery
                             :seon.error/operation 'seon.cluster.message/delivery
