@@ -139,3 +139,15 @@ first local check found an extra test delimiter; it was corrected before the
 passing check above. `git diff --check` also passed. No JVM, canonical gate,
 operator action, or commit ran in this bounded repair; the owner still owns
 integrated canonical verification and the broader export issue's status.
+
+## Bare graph-root follow-up — 2026-09-21
+
+The fixture widening change accepted bare `src` and `test` through the
+classifier's equality arm. `input-roots` already excludes those roots;
+the predicate now requires a slash-delimited graph descendant. The class
+regression distinguishes roots, nonindexed fixture files and all three
+indexed extensions, retaining fixture-change/deletion invalidation.
+The old predicate fails exactly the two new root assertions. See the
+[gate repair landing](../../prds/agent-platform/landing/lane-gate-widening-2026-09-21.md)
+for armed snapshot evidence and the independently measured named-selection
+lifecycle bound. This does not close the broader publication-export issue.

@@ -76,6 +76,14 @@
                       (dissoc "test/seon/example_test.clj"))))))))
 
 (deftest nonindexed-graph-fixtures-invalidate-the-external-input-signature
+  (let [roots (cache/input-roots ".")]
+    (doseq [root cache/graph-roots]
+      (testing root
+        (is (false? (cache/input-path? roots root)))
+        (is (false? (cache/widening-path? roots root)))
+        (is (true? (cache/widening-path? roots (str root "/fixtures/input.txt"))))
+        (doseq [extension [".clj" ".cljc" ".edn"]]
+          (is (false? (cache/widening-path? roots (str root "/example" extension))))))))
   (let [fixtures {"test/fixtures/input.txt" "text-v1"
                   "test/resources/program.clj.txt" "template-v1"
                   "test/seon/dev/probe.py" "python-v1"

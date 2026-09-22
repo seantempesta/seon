@@ -202,6 +202,7 @@
 (defn widening-path?
   "True for a gate input without indexed declarations for reach selection.
   Includes declared non-graph roots and nonindexed fixtures under graph roots.
+  A bare graph root is not a changed file and never widens.
   Documentation outside those input roots, scratch files and logs never widen.
   The two-argument arity reuses this checkout's already derived input roots."
   {:malli/schema
@@ -211,7 +212,7 @@
   ([path] (widening-path? (input-roots ".") path))
   ([roots path]
    (or (input-path? roots path)
-       (and (input-path? (set graph-roots) path)
+       (and (boolean (some #(str/starts-with? path (str % "/")) graph-roots))
             (not (source-file? path))))))
 
 (defn gitlink-digests

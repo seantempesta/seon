@@ -77,7 +77,13 @@
     (support/transacted! connection [[:db.fn/call complete-selection-tx admission]])
     admission))
 
-(deftest named-selection-reuses-green-members-by-reachable-content
+(deftest ^{:seon.test/long-ms 8000
+           :seon.test/long
+           "Measured armed fixture lifecycle: cluster/config seed, four declarations,
+            four selections, six provenance calculations and validated writes.
+            Three quiet probes: 6336, 5067, 4903 ms; 8 s covers the observed
+            1433 ms first-run spread above the maximum (landing 2026-09-21)."}
+  named-selection-reuses-green-members-by-reachable-content
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "named-selection")
@@ -459,8 +465,11 @@
   (is (cache/widening-path? "reference-code/datahike"))
   (is (cache/widening-path? "reference-code/datahike/src/datahike/api.cljc"))
   (doseq [root cache/graph-roots]
+    (is (not (cache/input-path? (cache/input-roots ".") root)))
     (is (not (cache/widening-path? root)))
-    (is (not (cache/widening-path? (str root "/example.clj"))))))
+    (is (cache/widening-path? (str root "/fixtures/input.txt")))
+    (doseq [extension [".clj" ".cljc" ".edn"]]
+      (is (not (cache/widening-path? (str root "/example" extension)))))))
 
 (deftest omitted-dirty-callers-use-head-and-carry-recordable-provenance
   (let [root (.toFile (Files/createTempDirectory
