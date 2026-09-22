@@ -1916,23 +1916,6 @@
                 (into (conj (subvec arguments 0 position) database)
                       (subvec arguments position)))))))))
 
-(defn- missing-query-error
-  {:malli/schema [:=> [:cat :seon.schema/value] [:or :nil :seon.db/invalid-request-error]]}
-  [query-input]
-  (when (and (map? query-input)
-             (contains? query-input :args)
-             (not (contains? query-input :query)))
-    (diagnostic
-     {:seon.error/message "seon.db/q argument maps require :query."
-      :seon.db/invalid-request true
-      :seon.db/missing-request-member :query
-      :seon.db/invalid-read true
-      :seon.error/layer :database-read
-      :seon.error/operation 'seon.db/q
-      :seon.error/expected [:map [:query :seon.db/query]]
-      :seon.error/offending query-input
-      :seon.error/data {:seon.error/source query-input}})))
-
 (defn- query-call-valid?
   [[call-arguments _result]]
   (let [[query-or-database & arguments] call-arguments]
@@ -1985,8 +1968,7 @@
         (if explicit-database?
           (rest arguments)
           arguments)]
-    (or (missing-query-error query-input)
-        (try
+    (try
       ;; This disambiguates a Datalog map query from Datahike's argument map
       ;; before Seon decides where the ambient database belongs.
       (let [normalized (query/normalize-q-input query-input argument-inputs)
@@ -2026,7 +2008,7 @@
         (catch Throwable cause
           (when explicit-database?
             (append-database-evidence! query-or-database :all))
-          (dependency-error 'seon.db/q cause)))))))
+          (dependency-error 'seon.db/q cause))))))
 
 (defn- missing-pull-selector-error
   {:malli/schema [:=> [:cat :qualified-symbol [:sequential :seon.schema/value]] [:or :nil :seon.error/base]]}

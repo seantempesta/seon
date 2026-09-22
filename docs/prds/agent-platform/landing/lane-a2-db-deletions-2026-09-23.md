@@ -1,6 +1,6 @@
 ---
 type: evidence
-status: c5-and-f2-landed; c13-probed; scope-decisions-pending
+status: c3-c5-f2-landed; c13-typed-row-deleted; c4-attribute-resource-scope-pending
 created: 2026-09-23
 tags: [agent-platform, a2, datahike]
 ---
@@ -225,7 +225,7 @@ MCP form and envelope are retained in `tmp/a2-c13-probe.txt` and
 
 | Class / dependency call | Result | ms | Decision |
 |---|---|---:|---|
-| Missing query: `(d/q {:args [database]})` | `ExceptionInfo`, `:error :parser/find`, `:fragment nil` | 0.607459 | Only candidate proven typed; translation contract needs checking before deletion |
+| Missing query: `(d/q {:args [database]})` | `ExceptionInfo`, `:error :parser/find`, `:fragment nil` | 0.607459 | Delete missing-query pre-check; retain typed diagnostic through the existing translation |
 | Missing input: `(d/q '[:find ?e :in $ ?id :where [?e :seon.agent/id ?id]] database)` | **Accepted**, `#{[38800]}` | 0.798167 | Keep input-count/alignment checks |
 | Invalid source: `(d/q '[:find ?e :in $ :where [?e :seon.agent/id _]] 42)` | `IllegalArgumentException`, no ex-data | 0.844500 | Keep source-shape check; not typed |
 | Six-position pattern: `(d/q '[:find ?e :where [?e :seon.agent/id "root" ?tx true :extra]] database)` | `ExceptionInfo`, `Pattern mismatch`, `:input`/`:pattern`, **no :type/:error** | 0.393833 | Keep malformed-pattern check |
@@ -318,6 +318,66 @@ using real SCI on a fixture branch, not browser paint or default adoption.
 Exact form: `tmp/a2-system-turn-body.clj`; first envelope:
 `tmp/a2-c3-probe-result.json`; boot/load/stop: `tmp/a2-c3-{boot,load,stop}.log`.
 
-§8 comparison: source −380 net versus planned −330; declarations −31 net;
-test deltas recorded by the commit. No writer or codec region changed.
+§8 comparison (commit `f1e55a824`): source +5/−383 = **−378** net
+versus planned −330; declarations +2/−31 = **−29** net; tests
++48/−100 = **−52** net. Exact committed HEAD load exited 0
+(`tmp/a2-c3-head-load.log`). No writer or codec region changed.
 Scratch `down --force` observed process exit; its held shell exited.
+
+
+### c4 schema placement evidence
+
+The first focused snapshot refused top-level `:datahike.budget/*` keys in
+`seon.db.edn` at `seon.schema.edn/validate-resource-placement!`; the second
+refused inline-only required error members at
+`seon.schema.internal/owned-storage!` ("A stored error member must have a
+storable registered attribute."). These are wanted guarantees: fix the
+new declaration, not either schema owner. Both runs exited before tests.
+Logs: `tmp/a2-c4-tests.log`, `tmp/a2-c4-tests-retry.log`.
+The concrete three-attribute resource draft is
+`tmp/a2-c4-budget-attributes.edn`; ownership clarification requested because
+`resources/seon/schemas/datahike.budget.edn` is outside the assigned list.
+
+
+## Resumed owner ruling — c13
+
+Applied the eight-row table exactly: removed `missing-query-error` and its
+call; retained the seven other pre-check classes and explicit `q`/`pull`/
+`datoms` error unions. The query-variable/find attribute helpers also serve
+the codec, so they remain. `:seon.db/invalid-request*` and
+`:seon.db/missing-request-member` remain because the transaction writer
+still reads/writes those declarations. The malformed-request regression now
+expects Datahike's `:parser/find` rather than the removed Seon diagnostic.
+
+Unresolved representation: `:seon.error/cause` is an entity ref (`seon.error.edn`), so Datahike's typed diagnostic stays in `:seon.error/data :seon.db/dependency-data`; no incompatible cause value is invented.
+
+The new source loaded `seon.db`, `seon.render`, and `seon.turn` and
+`(seon.db/q {:args []})` returned `:seon.db/invalid-read true`, operation
+`seon.db/q`, layer `:seon.db/database-read`, the parser's message, and
+`{:error :parser/find :fragment nil}` in dependency-data. CLI envelope:
+`tmp/a2-c13-load-probe.log`. This is changed-source JVM boundary evidence;
+the eight counterpart decisions remain the read-only live probe above.
+§8 comparison: source +2/−20 = **−18**, tests +6/−8 = **−2** net;
+the spec's conditional −450/+10 is not claimed. No schema resources change
+in c13, and there is no schema-retirement boot requirement for this row.
+
+The focused lint found no new error in these edits. Its existing
+`parser.type/->Variable` unresolved-var diagnostic remained after rebuilding
+the dependency cache with the publication classpath; runtime namespace loads
+resolve that constructor. No codec reference was rewritten to appease lint.
+
+
+Focused `bin/test-fast --paths ... -- seon.db-test` reached **65 tests,
+410 assertions, 52 failures, 18 errors** (`tmp/a2-c13-tests.log`). Its
+reported fixture graph is still `d73e0a6c...`, **30 commits behind** the
+snapshot HEAD, not the owner's mentioned `394b58f09` base. Three-question
+triage: c3 machinery tests already left; the malformed-request test's two
+remaining reds assert retired nested instrumentation paths, corrected to the
+producer's current top-level `:seon.instrument/problem-paths`; c5/pull and
+system setup failures still report the base's seven-argument validator
+against current five-argument calls (fresh armed c3/c5 proofs passed).
+Other surviving c1 digest and writer/codec fixtures are outside these cuts,
+with their previously recorded boundaries retained. The new missing-query
+assertion and eight value-diff round-trip assertions passed in this run.
+Automatic result recording again refused `:seon.test/report-conflict`;
+this run is red and unrecorded, never claimed green.

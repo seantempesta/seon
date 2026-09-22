@@ -1603,16 +1603,16 @@
        (doseq [[result operation member] cases]
          (is (true? (:seon.db/invalid-read result)))
          (if (= :query member)
-           (do (is (true? (:seon.db/invalid-request result)))
-               (is (= :query (:seon.db/missing-request-member result))))
+           (is (= :parser/find
+                  (get-in result [:seon.error/data :seon.db/dependency-data :error])))
            (is (nil? (:seon.db/missing-request-member result))))
          (is ((schema/projection-validator (schema/handed-projection) :seon.db/invalid-read-error) result))
          (is (= operation
                 (get-in result
                         [:seon.error/operation])))
-         (is (= member
-                (get-in result
-                        [:seon.error/data :seon.error/member]))))
+         (when-not (= :query member)
+           (is (= member
+                  (get-in result [:seon.error/data :seon.error/member])))))
        ;; `seon.db/pull` declares `:selector` required and `seon.db/transact!`
        ;; declares the shape of `:tx-data`, so under the contracts every
        ;; cluster arms the refusal lands one frame before the body — and it
@@ -1631,9 +1631,7 @@
            (is (= operation
                   (get-in refusal [:seon.error/operation])))
            (is (= path
-                  (first (get-in refusal
-                                 [:seon.error/data
-                                  :seon.instrument/problem-paths]))))))
+                  (first (:seon.instrument/problem-paths refusal))))))
        (let [malformed (first (last cases))]
          (is (= [:entity :attribute :value :transaction :added]
                 (get-in malformed
