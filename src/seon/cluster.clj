@@ -1570,8 +1570,14 @@
               (require-committed!
                (db/transact! connection {:tx-data process-rows})
                {:seon.boot/population :seon.db/processes})))
-          (let [schema-rows (when publish-schema-rows?
-                              (schema-row-changes (db/db connection) projection))]
+          (let [database (db/db connection)
+                ;; A projection that IS this branch's own carried projection
+                ;; describes these rows already; diffing them against
+                ;; themselves cost 2.8-4.2 s of per-row pulls on every resume
+                ;; (docs/prds/agent-platform/landing/lane-resume-in-seconds-2026-09-23.md (e)).
+                schema-rows (when (and publish-schema-rows?
+                                       (not (identical? projection (db/carried-projection database))))
+                              (schema-row-changes database projection))]
             (when (seq schema-rows)
               (require-committed!
                (db/transact! connection
@@ -2817,24 +2823,32 @@
            :seon.error/data {:seon.agent/id agent-id}})))))
 
 (defn seed-root-agent!
-  "Ensure root and its agent-owned maintenance initialization exist."
+  "Ensure root and its agent-owned maintenance initialization exist.
+
+  Boot runs this before any agent is armed and root is never retracted, so a
+  pre-read of the current value cannot change before the writer acts: an
+  existing root and complete maintenance seed commit no empty transaction
+  (two per resume, 1,308 -> 386 ms, lane-resume-in-seconds-2026-09-23)."
   [connection cluster-name process]
-  (require-committed!
-   (ensure-entity!
-    connection
-    process
-    {:seon.agent/id root-agent-id
-     :seon.cluster/name cluster-name
-     :seon.ns/name 'my.agents.root})
-   {:seon.agent/id root-agent-id
-    :seon.boot/population :seon.agent/agent})
-  (require-committed!
-   (db/transact!
-    connection
-    {:tx-data [[:db.fn/call #'schedule/root-maintenance-seed-call]]
-     :tx-meta {:seon.db/process [:seon.db.process/id process]}})
-   {:seon.agent/id root-agent-id
-    :seon.boot/population :seon.schedule/root-maintenance}))
+  (when-not (db/q '[:find ?agent . :in $ ?agent-id :where [?agent :seon.agent/id ?agent-id]]
+                  (db/db connection) root-agent-id)
+    (require-committed!
+     (ensure-entity!
+      connection
+      process
+      {:seon.agent/id root-agent-id
+       :seon.cluster/name cluster-name
+       :seon.ns/name 'my.agents.root})
+     {:seon.agent/id root-agent-id
+      :seon.boot/population :seon.agent/agent}))
+  (when (seq (schedule/root-maintenance-seed-call (db/db connection)))
+    (require-committed!
+     (db/transact!
+      connection
+      {:tx-data [[:db.fn/call #'schedule/root-maintenance-seed-call]]
+       :tx-meta {:seon.db/process [:seon.db.process/id process]}})
+     {:seon.agent/id root-agent-id
+      :seon.boot/population :seon.schedule/root-maintenance})))
 
 (defn serve!
   "Bind the cluster's web view and publish its actual URL and port.
