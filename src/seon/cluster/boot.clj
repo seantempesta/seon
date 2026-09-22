@@ -433,12 +433,8 @@
           (let [dev (:seon.operator/development-cluster request)
                 published (cluster/refresh-source! cluster-root
                                                     (get request :seon.source/changed-paths []) dev)]
-            ;; A stale-head refusal carries the winner's commit id; it is
-            ;; returned whole, never narrowed into the success shape.
-            (if (:seon.error/at published)
-              published
-              (cond-> (select-keys published [:seon.source/commit-id])
-                dev (assoc :seon.boot/cluster-name dev)))))
+            (cond-> (select-keys published [:seon.source/commit-id])
+              dev (assoc :seon.boot/cluster-name dev))))
         (refuse! "Unknown operator command." request)))
     (catch Throwable cause
       (diagnostic (ex-message cause)
