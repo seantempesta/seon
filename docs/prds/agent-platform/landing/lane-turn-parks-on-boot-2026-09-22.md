@@ -166,3 +166,21 @@ Owned paths are `src/seon/fn.clj` (analysis hunk only),
 and the two linked issue notes:
 [diagnostic field declarations](../../../seon/issues/diagnostic-fields-make-generated-error-reads-look-like-turn-activity.md)
 and [wake delivery contract](../../../seon/issues/wake-delivery-contract-confuses-registration-key-with-agent-id.md).
+
+Implementation commit: `0e0e8b6ba` (11 files, 335 insertions, 32 deletions).
+In a clean checkout of that commit, the required load command
+`clojure -M -e "(require 'seon.turn 'seon.cluster.wake 'seon.db)"`
+exited 0; log `tmp/turn-parks-head-load.log`. This proves source loading only.
+The isolated diagnostic and load JVMs exited. After checking actual JVM command
+lines for holders, both owned worktrees and their disposable fixture roots were
+removed; evidence logs and probe scripts remain under repository `tmp/`.
+One earlier owned diagnostic JVM (PID 19688, start 02:31:48 local) required TERM
+after its executor cleanup waited on the backstop; exit 143 was observed before
+the cleanup was corrected. No default process was signalled.
+
+Remaining proof belongs after the orchestrator refreshes the published fixture:
+run the opening class before and after the declaration fix, obtain admitted
+recorded results for both classes, then observe adoption and an unparked loop.
+The seven markdown lint errors name pre-existing stale dependency citations
+outside these changed paths. No passing lint or platform gate is claimed.
+RESTART NEEDED.
