@@ -8,7 +8,7 @@ tags: [testing, instrumentation, error, schema]
 
 # Test refusal observations overflow in projection acquisition
 
-A1's fast snapshot at `487d7e4eb` plus owned selector/error-facet changes
+A1's fast snapshot at `487d7e4eb` plus owned selector and error-schema changes
 completed 41 tests / 294 assertions / 1 failure / 16 errors
 (`tmp/a1-fast-6.log`). The canonical admission regressions reach the expected
 writer refusal carrying `:seon.error/at`, `/layer`, `/operation`, and
@@ -25,8 +25,9 @@ The armed constructor refuses it during `recording-distinguishes-run-replay-from
 The database owner was being edited concurrently, and A1 excluded that edit
 from its snapshot rather than changing it.
 
-Contract propagation must also account for test selection/admission/execution
-facets at the database transaction boundary. Its explicit
+Contract propagation must also account for the declared test
+selection/admission/execution error schemas at the database transaction
+boundary. Its explicit
 `:seon.db/error-result` union is outside A1's owned schema paths. Verify the
 converged producer and return contracts with the three A1 namespaces; a
 passing result must observe the original typed refusal, not a wrapper failure.
@@ -44,9 +45,10 @@ schema-shape owner was changed by A1.
 
 The ninth run finishes with 41 tests / 306 assertions / 7 failures / 15 errors.
 Its invalid-read probe now returns a base observation without the expected
-read facet; propagation through `seon.blob/with-publication!` reports an
-undeclared error facet. The immutable-run refusal is produced with its test
-facet, but the enclosing write/publication boundary does not preserve the
+read error's declared schema; propagation through
+`seon.blob/with-publication!` reports an error outside the arity's declared
+error union. The immutable-run refusal is produced under its declared test
+error schema, but the enclosing write/publication boundary does not preserve the
 test's expected result. These are separate observed propagation boundaries,
 not evidence that restoring the retired kind key would be correct.
 The check regression also stops at `seon.sci.eval/acquisition-refusal`
@@ -60,7 +62,8 @@ noncanonical `seon.error/config-expectation-present?` compiled schema:
 8 tests, 56 assertions, 2 failures, 1 error. Its four-namespace candidate
 at `721b110b8` plus owned overlays records 45 tests, 354 assertions,
 8 failures, 16 errors, including that provenance boundary, refused
-propagation of admission/execution facets through `seon.error.refusal/refusal`,
+propagation of the declared admission/execution error schemas through
+`seon.error.refusal/refusal`,
 and the same missing base observation in SCI acquisition. One additional
 error was the new test's own missing database request key, subsequently
 corrected; the whole tally is not attributed to this issue.
@@ -78,7 +81,7 @@ suite still exposed these boundaries:
   `seon.program/declaration-row`; its nil input refusal hides the earlier
   evaluation result, so this log does not establish that earlier cause.
 - `:277`, `:284–288`: `seon.blob/with-publication!` replaces expected read and
-  immutable-run refusals with undeclared error facets
+  immutable-run refusals with errors outside the declared union
   `:seon.db.write/validation-refusal` and `:seon.test.run/immutable-error`.
 - `recording-preserves-admission-and-refuses-a-deleted-definition`:
   `seon.db/transact-call` rejects its refusal as a return missing `:db-before`.
@@ -117,7 +120,7 @@ hashes and the pending command are in the lane note.
 
 `seon.fn-test/a-refused-reference-read-refuses-gate-set-derivation` in the
 slice 2 snapshot at `05c77ac1d` reaches
-`seon.fn/declared-reference-edges returned undeclared error facets
+`seon.fn/declared-reference-edges returned undeclared error schemas
 #{:seon.schema/validation-refusal}`. The test's refused read is replaced by
 an instrumentation exception. This is an additional return-contract
 propagation sighting; the function and that test are unchanged by slice 2.

@@ -18,7 +18,7 @@ One member is cheap to keep honest, and the derivation was out of scope for
 the lane that landed the attribute (`docs/prds/steward-platform/research/
 analyzer-facets-2026-09-16.md` §2), but the shape is the defect class: a
 second write entry point added anywhere else makes `:seon.fn/writes`
-silently under-report, and an under-reporting facet is precisely the check
+silently under-report, and an under-reporting set is precisely the check
 that reads absence of signal as health.
 
 **The fix.** Declare the seam where it lives — a marker in
@@ -28,5 +28,5 @@ analysis instead of naming it in `seon.fn`. Then delete
 `write-seam-symbols`. One regression: a fixture function marked as a seam
 contributes its span's keywords, and removing the marker removes them.
 
-Discovered 2026-09-16 by the analyzer-facets lane while landing
-`:seon.fn/writes`.
+Discovered 2026-09-16 by the analyzer lane whose note is
+`analyzer-facets-2026-09-16.md`, while landing `:seon.fn/writes`.

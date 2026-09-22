@@ -24,8 +24,10 @@ in the two specimens read the 2026-09-21 evidence collection the "cause" was a v
 message beside it, and the "evidence" a copy of the frame beside it
 (`effect.clj:677-694` copies its `:seon.error/offending` into `diagnostic-cause`).
 The set of error schemas a boundary may return is copied by hand into 14 places
-(695 lines, six different member sets — pack B3 §4b) while `error/facet-keys`
-(`error.clj:1921`) derives the true set from the registry. 799 sites still write
+(695 lines, six different member sets — pack B3 §4b) while the registry-wide
+union derivation at `error.clj:1921` (to be renamed) computes a complete set
+from the registry — which the ruling retires: every arity declares its own
+explicit error union. 799 sites still write
 a `:seon.error/kind` the live schema does not store (pack §3a). When a fault is
 recorded the recorder prints the map to EDN and stores it beside datoms that say
 the same thing, then explodes a Malli path into component entities and keeps 33
@@ -116,7 +118,7 @@ Probe 2, MCP `ret` 4 ms:
 |---|---|---|---|---|
 | construct | `{:seon.error/at :seon.error/layer :seon.error/operation ?message + the declared domain members}` | at the refusing function, `at` supplied as data | the return value (or `ex-data` of the one throw at a `:panic` seam) | the one map |
 | validate | the returning arity's DECLARED error alternatives | after the call, in A1's armed wrapper (`instrument.clj:775-808` today) | compiled once at wrapper acquisition (A1: capture the child's declared output permission through Malli's `:gen` option, `core.cljc:2207`) | the declared alternatives; a broad success output must not admit an undeclared error; no classification against the ~116-key population on a successful return |
-| identity | D13 signature: `[layer operation (sorted satisfied schema keys) throwable-class frame expected-key/shape path]` → `id/id … 64` (`error.clj:200-225`) | once per RECORDED error, before the writer, from the complete error and its supplied projection | `:seon.error/signature` on the root | the error-schema population (`facets`, `error.clj:1939`) — paid once per recording, never per return; stated honestly, not hidden in the union check |
+| identity | D13 signature: `[layer operation (sorted satisfied schema keys) throwable-class frame expected-key/shape path]` → `id/id … 64` (`error.clj:200-225`) | once per RECORDED error, before the writer, from the complete error and its supplied projection | `:seon.error/signature` on the root | the error-schema population (the satisfied-schema derivation at `error.clj:1939`, to be renamed) — paid once per recording, never per return; stated honestly, not hidden in the union check |
 | result | `{:seon.error/shown :seon.error/result-id?}` | before recording, by the caller, through B2's result mechanism with an explicit profile and, when a ctx is supplied, the owning binding (`prepare-result`'s two renders and `blob/put!`, `error.clj:635-668`, are deleted) | the request handed to `recording` | one render under the profile; the handle names the OFFENDING value, not the explanation; after restart the handle is explicitly unavailable and the text remains |
 | store | root `{signature id layer operation frame? exception-class? expected-key? expected-shape? path?}` + occurrence component `{id count first-at last-at process agent? turn? message? shown? result-id?}` + the storable attributes of the schemas the observation satisfies (the existing `diagnostic-attributes` derivation, `error.clj:1601-1611`, kept: it is a projection query, not a hand list) | one `:db.fn/call commit-call` (`error.clj:1567`) | Datahike; transaction provenance in tx-meta (`transaction.cljc:903-922`); `:seon.error.occurrence/process` is the OBSERVED process, declared as such in its docstring | the declared datoms — `data-edn`, `data-size`, `capped?`, `data-blob`, `dropped-fault-*`, `proc`, `op`, `cid`, `throwable-class` (duplicate of `exception-class`), `regressions`, `issue` (the task points at the error, never the reverse) are deleted from `seon.error.edn:103-140` and from `commit-call`'s `evidence` list (`:1621-1630`); `:seon.instrument/fn`/`arm`/`expected` survive as members of their own declared schemas |
 | path | `:seon.error/path` one value | at the wrapper's refusal | `:db.type/any` (A2's fork admission; RESET) — otherwise retain the existing structured representation until A2 supplies equivalent queryable storage | one problem; the `location`/`segment`/`omission`/`key` components and the 33 predicates (`error.clj:2314-2658`) retire only after the replacement preserves the D13 identity and queryable path |
@@ -129,9 +131,9 @@ Probe 2, MCP `ret` 4 ms:
 keeps its name and stays the one leaf; the pass-through facade `seon.error/diagnostic`
 (`error.clj:304`) is deleted. Input: `[:map [:seon.error/at :seon.error/at]
 [:seon.error/layer :seon.error/layer] [:seon.error/operation :seon.error/operation]
-[:seon.error/message {:optional true} :seon.error/message] [:seon.error/cause
+[:seon.error/message {:optional true} :seon.error/message] [:seon.error/throwable
 {:optional true} :seon.error/throwable]]`, open — every domain member rides through
-untouched. It removes nothing; it adds `:seon.error/frame` and
+untouched. It consumes only `:seon.error/throwable`; it adds `:seon.error/frame` and
 `:seon.error/exception-class` from a supplied Throwable and nothing else. Output:
 `:seon.error/base`. This is the ONE Var whose output is the base — the arming
 already exempts an arity declared as base (`::base?`, `instrument.clj:800`). It
@@ -146,7 +148,7 @@ carries a Throwable in both `:seon.error/offending` and `diagnostic-cause`, and 
 MCP specimen carried the message twice (pack §4a). The rule is therefore
 "delete duplicate labels, never information by prefix": at each of the 275
 sites, a `diagnostic-*` value that copies a sibling member is dropped; one that
-does not is kept under its owning declared member (a Throwable → `:seon.error/cause`
+does not is kept under its owning declared member (a Throwable → `:seon.error/throwable`
 → frame/exception-class; a keyword "cause" that named a kind is deleted under
 D3, the schema being the meaning). The landing note counts each disposition.
 
@@ -309,7 +311,7 @@ B1 (`cluster.clj`), B2 (`sci/eval.clj`, `shell/jvm.clj`), B4 (`runner.clj`).
 | `reference-code/datahike/src/datahike/pull_api.cljc:16,315,323` | default 1,000 cut, `:limit nil` bypasses it — removing the limit does not make a scan cheap; the recorder stops scanning instead |
 | `reference-code/clojure/src/clj/clojure/core.clj:4924,4933`; `core_print.clj:473` | `ex-info`/`ex-data`; `Throwable->map` `:trace` is a VECTOR of frames; `:seon.error/frame` stores the top one |
 | `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:136-142` | `ping` returns the procs that replied within `timeout-ms` (default 1,000) — partial replies, not readiness |
-| `src/seon/error.clj:200-225` signature, `:1567-1681` `commit-call`, `:1683-1751` `recording`, `:1921-1953` `facet-keys`/`facets` | the landed D13 pieces: identity semantics are kept; bytes change where location components disappear |
+| `src/seon/error.clj:200-225` signature, `:1567-1681` `commit-call`, `:1683-1751` `recording`, `:1921-1953` the union and satisfied-schema derivations (to be renamed) | the landed D13 pieces: identity semantics are kept; bytes change where location components disappear |
 | `src/seon/instrument.clj:775-808` | today's after-call union check (A1's file): what the declared-only validation replaces |
 | `src/seon/issue.clj:554-564` `subject-id`; `:1028-1064` done | the identity derivation carried into `seon.task`; the tests-vs-detector `cond` the new `done?` makes a conjunction |
 | `src/seon/plan.clj:265-305` `derived-frontier` | handles children and missing foreign dependencies — the invariants the parent/needs readiness query must keep |
@@ -398,7 +400,7 @@ reaching its change, in process through B4's `seon.test/run`; never a suite.
 
 | File | Before | Floor (audit) | Target | Why the gap |
 |---|---:|---:|---:|---|
-| `error.clj` + `refusal.clj` | 2,790 | ≈ 900 | **550** (+300 in `seon.render.error`) | rendering leaves; EDN/blob/cap machinery dissolves into the value renderer; predicates gone; `facets` stays for D13 |
+| `error.clj` + `refusal.clj` | 2,790 | ≈ 900 | **550** (+300 in `seon.render.error`) | rendering leaves; EDN/blob/cap machinery dissolves into the value renderer; predicates gone; the satisfied-schema derivation stays for D13 |
 | `issue`+`issue/*`+`my.issue`+`plan`+`my.plan` | 4,169 | ≈ 3,660 | **530** (`seon.task` 450 + `my.task` 80), conditional on §2b's start/done/plan guarantees | one entity, two writers, done as a query, no note pipeline, no tree reconcile |
 | `config.clj` | 926 | — | **650** | 146 diagnostic lines → 40 |
 | `effect.clj` | 1,053 | ≈ 800 | **500** | sync rows, dynamic var, retired spellings |

@@ -20,7 +20,7 @@ The classpath resources under `resources/seon/schemas/` form one
 population. Duplicate keys refuse; `packaged-forms` returns the
 declarations (`src/seon/schema/edn.clj:316`, `:393`).
 The schema bridge consumes a supplied projection and derives Datahike
-facets (`src/seon/schema/datahike.clj:232`).
+attribute declarations (`src/seon/schema/datahike.clj:232`).
 
 | Intent | Declaration | Derived behavior |
 |---|---|---|

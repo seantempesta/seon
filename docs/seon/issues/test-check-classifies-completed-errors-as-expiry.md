@@ -17,7 +17,7 @@ completed normally with a test unknown or another declared refusal.
 The caller therefore cannot infer a fired bound from the presence of an error.
 
 The await boundary's output is `[:or :seon.schema/value :seon.error/value]`
-(`src/seon/await.clj:106-107`). It has no timeout facet. Its diagnostic producer
+(`src/seon/await.clj:106-107`). It declares no timeout error schema. Its diagnostic producer
 at `:28-51` still supplies a retired kind and omits the mandatory base members.
 Timeout's bound evidence exists only in diagnostic data. The owning schema
 resource `resources/seon/schemas/seon.await.edn` declares requests and bounds,
@@ -49,7 +49,7 @@ sci-program assignment; no foreign breakage is blamed.
 The await owner must expose the distinction at the seam that observes the
 timed-get outcome. Reuse its declared `:seon.await/config-attribute` and
 `:seon.await/config-value` as substantive evidence. Then `seon.test/check`
-can return completed failures unchanged and construct the ruled expiry facet
+can return completed failures unchanged and construct the ruled expiry error schema
 only for that actual timeout, carrying measured `:seon.test/elapsed-ms`.
 Do not infer timeout from message text, inspect a retired kind, poll isDone
 after the outcome, or copy a timed-get implementation into the caller.

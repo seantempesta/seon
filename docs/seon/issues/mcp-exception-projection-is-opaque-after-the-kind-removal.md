@@ -20,7 +20,8 @@ exception projection, not the evaluation.
 with `error/diagnostic` and a `:seon.error/kind` member (`{kind true
 :seon.error/kind kind …}`) and the fallback `mcp-projection-error` also
 stamps `:seon.error/kind`. After the error family cut (D3/D12: kinds deleted,
-contracts name exact facets, the wrapper refuses undeclared facets) the
+an arity's contract names its declared error schemas and the wrapper refuses
+anything outside that union) the
 constructor call itself fails, so the fallback runs and reports the map it
 could not project. The orchestrator's tooling loses every exception's cause.
 
@@ -36,14 +37,15 @@ cause of the status projection failure. No runtime mutation was performed.
 
 Owned by the `kind-sweep-turn-cluster` sweep (PRD
 `docs/prds/steward-platform/plan/error-conversion-prd-2026-09-20.md`): convert
-the MCP projection producers in `src/seon/cluster.clj` to declared facets via
+the MCP projection producers in `src/seon/cluster.clj` to declared error
+schemas via
 `seon.error.refusal`, and one regression: a thrown `ex-info` in jvm mode
 projects to a value carrying message, exception class and the first
 first-party frame. The kind-free fallback must still name the offending class.
 
 ## Resolved — 2026-09-21 ~00:45 UTC
 
-Fixed by the turn/cluster sweep in `510a9236d` (facets + two armed
+Fixed by the turn/cluster sweep in `510a9236d` (declared error schemas + two armed
 regressions). In-place adoption of the change into default was refused
 twice (a lifecycle lock held by a lane's short "source build", then the
 30 s prepl silence bound in the eventless "source build" phase — the

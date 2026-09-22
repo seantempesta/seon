@@ -14,7 +14,7 @@ The bridge's armed 55-namespace snapshot at
 vector where the declared contract requires a map. Evidence:
 `tmp/bridge-step2-retirement-fast.log:259` and `:295`.
 
-The run stopped at the separately ruled turn-identity/error-facet decision,
+The run stopped at the separately ruled turn-identity and error-schema decision,
 so no completed tally exists. This observation has not been attributed to
 the bridge conversion or reproduced against a baseline. The current fast
 snapshot cannot enter tests until the published base no longer contains the

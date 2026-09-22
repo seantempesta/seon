@@ -421,7 +421,7 @@ selection sets after this proof; no reduction is promised from the existing coun
 |---|---|
 | `fn_test.clj` sections for the caller-less vars | die with the vars (≈ 800 lines) |
 | 13 single-`deftest` `publication_*`/`source_*`/`fn/publication_*` namespaces | collapse to `cluster/publication_test.clj` (edit → two reports → head → adoption, one class each) and `fn/publication_test.clj` (capture/lint/rows/diff), sharing the canonical base plus ONE small fixture program (three files under a fixture root, never `src/`) published once per namespace |
-| the 600,000 / 900,000 / 1,200,000 ms escapes (`publication_{adoption,reuse,export,facet,cache}`, `source_nochange`, `test/publication_test`) | fixture defect (a complete publication per fixture); the shared base removes the bound; `publication_host_test` (real boot) declares 60,000 with the measured 12.8–16.2 s boot as its reason |
+| the 600,000 / 900,000 / 1,200,000 ms escapes (five `publication_*` namespaces, `source_nochange`, `test/publication_test`) | fixture defect (a complete publication per fixture); the shared base removes the bound; `publication_host_test` (real boot) declares 60,000 with the measured 12.8–16.2 s boot as its reason |
 | `boot_test.clj` (4 × 600,000, 2 × 90,000), `cohost_boot_test.clj` (180,000) | genuinely long: 60,000 each with the measured boot |
 | `dev/fresh_operator_test.clj` (41), `dev/fresh_operator_reset_test.clj` (14), `operator_test.clj` (34) | process-record/advertisement/claim/reap/phase-log drills die with the mechanism; cold start, stop, exact down, reset and flock drills stay, moved in the same slice |
 | `fn/publication_toolchain_test.clj` | dies with the aggregate; the config-change → complete-analysis case takes its place |

@@ -19,14 +19,14 @@ The local `admitted-value` helper (`src/seon/effect.clj:206`) delegates to
 `:seon.sci.admit/admitted-value`; the nested `/value` member is explicitly
 `:any`, with a polymorphic-boundary exemption
 (`resources/seon/schemas/seon.sci.admit.edn:68`, `:71`). It does not declare
-a union of handler refusal facets. A timeout-only or effect-only check
+a union of the handlers' declared refusal schemas. A timeout-only or effect-only check
 would let other capability refusals become effect datoms. A base-three
 replacement is not authorized by conversion PRD §1.3's literal exception:
 this callee does not declare `:seon.error/value`.
 
-This invokes §6's consumer requiring a distinction the declared facet
+This invokes §6's consumer requiring a distinction the declared error schema's
 members do not express. It is independent of foreign edits and of the
-already deferred gate-selection facets. No production edits were made.
+already deferred gate-selection error schemas. No production edits were made.
 
 Three options, with engineering estimates rather than measured runtimes:
 
@@ -35,9 +35,9 @@ Three options, with engineering estimates rather than measured runtimes:
    pass-through error contract, and preserve the original observation.
    Cost: about 1–2 hours including canonical regression coverage. Guarantee:
    complete base errors do not become ordinary effect arguments. Give up:
-   the literal requirement that this consumer use one domain facet member.
+   the literal requirement that this consumer use one domain schema member.
 2. Carry the selected handler's declared output contract into settlement and
-   validate the returned facets against that contract using the existing
+   validate the returned error schemas against that contract using the existing
    projection. Cost: about 3–6 hours across effect contracts and fixtures.
    Guarantee: refusal recognition follows the actual handler declaration.
    Give up: a mechanical sweep; this changes settlement's carried inputs and

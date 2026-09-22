@@ -10,7 +10,7 @@ tags: [issue, render, testing, program-graph, symbols]
 Observed 2026-09-17 on `steward-platform` HEAD `767ff6d75`, running
 `bin/test-fast --paths src/seon/render/value.clj -- seon.render.value-test`
 (37 tests / 243 assertions / 36 failures / 9 errors). The tally is identical
-with the HEAD test file and with the facet-declaration change applied, so this
+with the HEAD test file and with the error-schema declaration change applied, so this
 predates both and is independent of the wrapper-enforcement work.
 
 26 of the failing assertions are one class. The 2026-09-17 ruling stores every

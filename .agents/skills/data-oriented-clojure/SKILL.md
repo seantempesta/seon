@@ -36,7 +36,7 @@ identities derive through `seon.id/digest`; evaluations use
 
 First-party schema resources form one population. Duplicate keys refuse
 at `src/seon/schema/edn.clj:303`; `packaged-forms` exposes the
-population at `:348`. The bridge derives storage facets from the
+population at `:348`. The bridge derives storage attribute declarations from the
 supplied projection (`src/seon/schema/datahike.clj:231`).
 
 Model attributes and refs, not entity-kind stamps. Identity, cardinality,

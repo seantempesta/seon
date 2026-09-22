@@ -15,7 +15,7 @@ decision, separate from the deferred handler-contract recognition decision.
 capture-owned rows. Their input contracts accept `:seon.error/value`
 (`resources/seon/schemas/seon.context.edn:11`, `:26`): a raw base observation,
 with no guaranteed occurrence identity or prepared recording transaction.
-Copying arbitrary facet members into these rows cannot preserve the ruled
+Copying arbitrary declared-schema members into these rows cannot preserve the ruled
 ownership of raw offending evidence on an error occurrence; discarding the
 raw members would silently lose evidence at this projection.
 
@@ -24,7 +24,7 @@ Its request requires process identity, admission caps and evidence-byte
 bound in addition to the observation (`seon.error.edn:164`). Capture has
 only a database value and turn identity on its refusal arm. Inferring the
 missing process custody or inventing bounds would violate values-carry-their-
-world; adding a per-capture or per-facet EDN field would violate the explicit
+world; adding a per-capture or per-schema EDN field would violate the explicit
 occurrence ruling.
 
 The held `src/seon/turn.clj:4335` caller passes the raw error into capture,

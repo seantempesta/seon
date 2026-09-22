@@ -53,7 +53,7 @@ Commit `59e51e221` plus its canonical SCI fixture corrections durably recorded
 Both failures are this walk's unchanged assertions. The selected-render
 failure is resolved: a redundant identity wrapper excluded the typed unknown
 from its input. Removing that wrapper and asserting the declared unknown
-facet passed both the six-suite and focused SCI runs.
+error schema passed both the six-suite and focused SCI runs.
 
 The scoped plan observation now falsifies the inference that the walk
 owner's cache failed: all seven acquisitions returned plan identity

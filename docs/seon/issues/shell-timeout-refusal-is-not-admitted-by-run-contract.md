@@ -10,15 +10,16 @@ tags: [issue, effect, test, wave/contract-gate]
 
 ## Problem
 
-The shell timeout regression receives a handler-failure facet that its
-armed public return contract does not admit.
+The shell timeout regression receives a handler-failure error whose declared
+schema
+the armed public return contract does not admit.
 
 ## Evidence
 
 The slice 1 fast snapshot at `f08558cb5`, recorded run `0b0cd41bc68d`, ran
 `seon.shell.jvm-test/time-limit-reaps-the-process-tree-and-marks-the-effect-interrupted`
 under armed contracts. It stopped with `my.shell/run! returned undeclared
-error facets #{:seon.effect/handler-failed-error}`. That prevents the test
+error schemas #{:seon.effect/handler-failed-error}`. That prevents the test
 from checking its expected interrupted effect and process-tree cleanup.
 The test body, shell implementation, effect owner, and their schemas were
 unchanged by the operator slice.

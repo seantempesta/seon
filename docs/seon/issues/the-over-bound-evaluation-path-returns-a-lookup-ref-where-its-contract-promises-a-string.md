@@ -95,18 +95,19 @@ contract failure. `shown-result` at `src/seon/sci/eval.clj:2460` recognizes the
 regression's arbitrary returned map solely by its retired stamp. The regression
 at `test/seon/sci/eval_test.clj:2454` supplies a vector as the error message;
 `:seon.error/base` requires a string when the message is present. Even adding
-all three base members and a complete kernel observation leaves zero valid
-facets. Replacing the message with valid prose yields `:seon.sci.kernel/error`.
+all three base members and a complete kernel observation satisfies no declared
+error schema. Replacing the message with valid prose yields `:seon.sci.kernel/error`.
 
 The committed [probe](../../prds/steward-platform/research/sci-program-returned-error-recognition-2026-09-21.clj)
 prints these observations and asserts them against the complete packaged
 declarations. This is unarmed schema/source evidence, not a canonical test run.
 No default or foreign lane was operated.
 
-PRD §6 applies: a consumer needs to distinguish more than the facet members
-express. Rule 1.3 permits a transitional base check only for a callee that
+PRD §6 applies: a consumer needs to distinguish more than the declared error
+schema's members express. Rule 1.3 permits a transitional base check only for a callee that
 declares `:seon.error/value`; an arbitrary evaluation return is not such a
-callee. Choosing to recognize only valid facets changes this regression's
+callee. Choosing to recognize only values satisfying a declared error schema changes
+this regression's
 explicit behavior. Choosing to recognize malformed claims needs a stated
 boundary policy. No general predicate or replacement marker was added.
 
@@ -116,9 +117,9 @@ returned object, assert the selected evaluation-error behavior and concrete
 evidence, and keep the evaluation's string contract satisfied under the
 canonical real-SCI regression. The historical resolution above remains valid.
 
-The orchestrator settled recognition under D12: only complete declared facets
-mark returned values as errors. The sci-program implementation replaces this
-legacy regression with complete-facet and malformed-value cases, preserving
+The orchestrator settled recognition under D12: only values complete under a declared
+error schema mark returned values as errors. The sci-program implementation replaces this
+legacy regression with complete-schema and malformed-value cases, preserving
 the actual returned objects and the evaluation string contract. Canonical
 execution remains owed because the fast recording authority refuses snapshot
 admission; this note stays open until that regression executes.

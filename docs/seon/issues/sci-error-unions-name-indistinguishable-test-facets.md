@@ -8,8 +8,8 @@ tags: [issue, error-model, contracts, sci, test]
 
 # SCI error unions name indistinguishable test facets
 
-The kind-retirement PRD section 6 requires a lane to stop when two facets in
-one declared union share every required member. Both
+The kind-retirement PRD section 6 requires a lane to stop when two declared error
+schemas in one declared union share every required member. Both
 `seon.sci.kernel/failure-value` and `seon.sci.admit/semantic-value` declare
 `:seon.test/unknown-error` and `:seon.test/expired` in their output unions.
 The latter is a conjunction that adds only a description to the former:
@@ -28,7 +28,7 @@ No production edit or test run was made for this finding. The four assigned
 namespaces load; the probe exits zero and lints without errors or warnings.
 
 The test-schema owner and error-conversion PRD owner must resolve whether
-these unions should name only the existing general test-unknown facet,
+these unions should name only the existing general test-unknown schema,
 whether expiry needs distinct substantive evidence, or whether equivalent
 aliases are exempt from section 6 at polymorphic pass-through boundaries.
 Acceptance is the selected rule applied consistently to the two SCI output
@@ -42,5 +42,5 @@ elapsed milliseconds; unknown retains its current members. That choice is
 settled, but implementation is not yet landed. The producer conversion exposed
 a separate, measured [await distinction defect](test-check-classifies-completed-errors-as-expiry.md):
 the current caller classifies completed failures as expiry, and its await
-callee declares no timeout facet. This issue stays open until the coherent
+callee declares no timeout error schema. This issue stays open until the coherent
 producer/schema/consumer slice lands; the former choice is not reopened.

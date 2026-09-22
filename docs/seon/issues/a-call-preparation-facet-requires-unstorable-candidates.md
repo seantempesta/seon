@@ -31,7 +31,8 @@ publication lane did not edit either owner.
 
 ## Acceptance
 
-Canonical schema acquisition accepts every required facet member, and
+Canonical schema acquisition accepts every required member of that declared
+error schema, and
 `bin/test-fast --paths test/seon/cluster/publication_export_test.clj -- seon.cluster.publication-export-test`
 reaches its test body and records its result. Preserve the ruled distinction
 between typed durable members and optional in-memory observations.

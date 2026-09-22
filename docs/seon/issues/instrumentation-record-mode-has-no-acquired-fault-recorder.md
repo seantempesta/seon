@@ -9,7 +9,7 @@ tags: [issue, errors, instrumentation, contracts, wave/instrumentation-error-dat
 
 **2026-09-18 SCI resume:** the recording operation is now acquired by host
 and SCI wrappers. `base-ctx`, `acquire!`, installation and cold cluster forks
-carry the cluster's existing committer. Both dials share per-arity body facet
+carry the cluster's existing committer. Both dials share per-arity body error-union
 enforcement; record arming without custody refuses. The direct real-SCI
 regression passes both dials with committed provenance and exact refusal
 identity. The issue stays open for complete integration proof, not for the
@@ -18,10 +18,10 @@ original missing-operation design question.
 The next generic declaration boundaries observed by the full fast run are
 `seon.render.value/transacted` (`src/seon/render/value.clj:29`, output `:map`)
 and `seon.sci.kernel/failure-value` (`src/seon/sci/kernel.clj:519`, output
-`:seon.error/value`). They preserve wrapper contract/arity facets but do not
+`:seon.error/value`). They preserve the wrapper's contract and arity error schemas but do not
 declare them. Rendering and normal SCI failure normalization consequently
-refuse at those helpers. Their owners need the explicit base/facet alternatives
-required by program-facts §1q. `seon.error/latest-fact` had the same gap and is
+refuse at those helpers. Their owners need the explicit base and declared-schema
+alternatives required by program-facts §1q. `seon.error/latest-fact` had the same gap and is
 fixed in this lane. `1278dfa16` already fixed `seon.error.refusal/refusal` and
 `seon.error/refusal`; the accepted `db/pull` and `db/transact-call` dependencies
 remain with the database owner. Full tallies, timings, acquisition corrections
@@ -43,11 +43,11 @@ contracts. The real canonical recorder regression reaches
 `seon.error/commit-call` and its `db/pull` of an earlier occurrence.
 `src/seon/db.clj:2032–2054` declares each `pull` result as
 `[:or :nil :map :seon.error/value]`; it declares neither base nor the new
-facets. Returning a stored contract refusal therefore triggers the new
+error schemas. Returning a stored contract refusal therefore triggers the new
 independent check. The writer reports `seon.db/pull returned undeclared error
-facets #{:seon.instrument/contract-error}`. Handling that failure encounters
+schemas #{:seon.instrument/contract-error}`. Handling that failure encounters
 the same gap in `src/seon/error/refusal.clj:4–8`, whose output is
-`[:or :nil :map]`. Both generic helpers need explicit facet alternatives under
+`[:or :nil :map]`. Both generic helpers need explicit declared-schema alternatives under
 owner §1q, including explicit base permission. This is a declaration dependency
 exposed by enforcement, not foreign in-flight breakage. The database owner
 was not edited; its path was clean at this observation, but remains outside
@@ -79,7 +79,7 @@ per-call mode and truthful recording outcome to the wrapper. Reuse the existing
 committer, without global custody lookup or a parallel recorder. Then verify
 host and SCI invalid calls never execute, return the recorded refusal under
 `:record`, and throw that flat value under `:panic`. Preserve `with-arm` release
-on every exit. New base/facet occurrence preservation remains recorder-owned.
+on every exit. New base and declared-schema occurrence preservation remains recorder-owned.
 
 ## Owner resolution and next boundary — 2026-09-18
 

@@ -16,10 +16,10 @@ refusal, including its acquired schema projection. One captured output
 chunk exceeded 79 MB. The failure message itself named the missing
 `:seon.error/at` at `[:seon.call-preparation/refusals 0]`.
 
-Call-preparation's facet conversion fixes this trigger, but failure reporting
+Call-preparation's conversion to declared error schemas fixes this trigger, but failure reporting
 must remain readable when the next snapshot contract fails. This is the
 error/test-reporting owners' boundary: retain raw in-memory offending evidence,
 but render diagnostic output through the existing bounded value renderer.
-Do not add another truncation boundary or serialize per-facet offending data.
+Do not add another truncation boundary or serialize per-schema offending data.
 Acceptance: a real armed snapshot-return refusal retains its evidence and
 prints bounded, readable output through the existing renderer.

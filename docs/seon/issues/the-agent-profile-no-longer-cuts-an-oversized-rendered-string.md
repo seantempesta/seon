@@ -10,7 +10,8 @@ tags: [issue, render, elision, profile]
 Observed 2026-09-17 on `steward-platform` HEAD `767ff6d75`, running
 `bin/test-fast --paths src/seon/render/value.clj -- seon.render.value-test`.
 Present identically with the HEAD test file, so it predates the
-facet-declaration change made in `seon.render.value/transacted` that day.
+error-schema declaration change made in `seon.render.value/transacted` that
+day.
 
 `an-oversized-string-shows-its-prefix-not-only-a-count`
 (`test/seon/render/value_test.clj:806`) evaluates

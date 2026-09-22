@@ -17,12 +17,13 @@ Both distinguishing members are declared `[:= true]`.
 The owned consumer `seon.issue.detect/public-without-reaching-test` propagates
 these failures instead of treating them as a map of selected tests. The
 kind-retirement PRD §1.3 requires a substantive member required by the
-callee's declared facet. Neither `:seon.db/read-operation` nor
+callee's declared error schema. Neither `:seon.db/read-operation` nor
 `:seon.schema/expected-value` is required by this declared output. A base-three
 check is not authorized by §1.3 here: gate-sets does not declare
 `:seon.error/value`. Recognizing the message is expressly forbidden by §1.4.
 
-Retiring the boolean members therefore leaves the two facets with the same
+Retiring the boolean members therefore leaves the two declared error schemas
+with the same
 required set, `#{:seon.error/message}`. The lane invokes §6 before introducing
 that collision and leaves this one consumer kind branch explicitly pending.
 This is a declaration boundary, independent of dirty foreign files or the
@@ -36,7 +37,7 @@ members and boolean markers, asserts two observations and equal substantive
 sets. It exited zero; this is declaration evidence, not a test execution.
 
 Recommended resolution: the owning lane corrects gate-sets and its helper
-contracts to the actual substantive database/schema refusal facets. Then this
+contracts to the actual substantive database/schema refusal schemas. Then this
 consumer branches on those required observations and the canonical detector
 regressions prove propagation. Temporary generic-output permission or an
 explicit scope deferral require the orchestrator's ruling.

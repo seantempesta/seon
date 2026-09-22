@@ -10,7 +10,7 @@ tags: [issue, turn, schema]
 The read-only default SCI preview reproduced the root boot refusal for
 `:seon.cluster.eval/source` and `:seon.turn/rule`. Five error observation pulls
 name these attributes on occurrence entities. The namespace-analysis error
-facet reused the evaluation source attribute; the diagnostic rule also carried
+schema reused the evaluation source attribute; the diagnostic rule also carried
 the context-inert property. Neither requires a read-evidence or retry change.
 
 The owner fix uses `:seon.fn/source` in the analysis diagnostic and removes the

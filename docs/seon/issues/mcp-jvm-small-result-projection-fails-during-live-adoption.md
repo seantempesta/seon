@@ -84,7 +84,7 @@ unavailable probe evidence without attributing its cause.
 At HEAD `c96db3e94`, cluster `s` in `tmp/one-jvm-redesign-root`, PID
 56462, a JVM `seon.db/pull` without the cluster's supplied projection
 returned a validation refusal whose MCP rendering then failed:
-`seon.render.value/artifact-value returned undeclared error facets
+`seon.render.value/artifact-value returned undeclared error schemas
 #{:seon.schema/validation-refusal}`. The outer diagnostic retained that
 message and the offending class `clojure.lang.PersistentHashMap`.
 Repeating the read under the instance's `:seon.sci.eval/projection-state`
