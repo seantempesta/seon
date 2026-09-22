@@ -11,6 +11,7 @@ tags: [agent-platform, a2, datahike, registry, blob]
 
 Base with a published test graph: `394b58f09`. Datahike was inspected at pinned
 gitlink `cc2b2bc7`; Konserve was inspected at pinned gitlink `8cd9144f`.
+The implementation and initial evidence landed as `24ea81bf5`.
 
 - `registry/retire-branch!` now lets Datahike decide main-branch and active-
   connection refusal at `versioning.cljc:286-288,310-315`, translates those two
