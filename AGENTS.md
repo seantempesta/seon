@@ -288,8 +288,10 @@ the policy is clear").** Two kinds, nothing in between:
   graph stops and shows as failed in status, the page and the REPL, and nothing continues
   past it. The JVM and REPL stay up. `:record` (production) keeps the rest of the system
   running once the fact is stored and delivered.
-- If the database is down, so the error cannot be stored, it panics in both modes (owner,
-  2026-09-23: "If the db is down I think it's fair to just panic"). No fallback store.
+- If the database is down, so the error cannot be stored, it panics in BOTH modes,
+  production included (owner, 2026-09-23: "If the db is down I think it's fair to just
+  panic"; "even in production. Things are fucked if the db is down and shit is trying
+  to write to it"). No fallback store, no retry loop.
 - A swallowed error, a print-only panic, or a fault that is recorded but delivered to
   nobody is a defect.
 
