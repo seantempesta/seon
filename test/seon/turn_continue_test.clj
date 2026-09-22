@@ -34,7 +34,8 @@
          (fn [connection]
            (config/apply! {:seon.db/connection connection
                           :seon.boot/cluster-name "loop-continue"
-                          :seon.config/manifest {:seon.config.ai/no-provider true}})
+                          :seon.config/manifest {:seon.config.ai/no-provider true
+                                                 :seon.config.agent/turn-completion-backstop-ms 5000}})
            (support/transacted! connection [{:seon.agent/id "root"
                                             :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
            (cluster/ensure-cluster-entity! connection "loop-continue" cluster/boot-process-identity)
@@ -78,7 +79,14 @@
                  (cluster/ensure-entity! connection cluster/boot-process-identity
                                          {:seon.agent/id "juniper" :seon.cluster/name "loop-continue"
                                           :seon.ns/name 'my.agents.juniper})
-                 (fixture/install! handle routing)
+                 (try
+                   (fixture/install! handle routing)
+                   (catch Throwable failure
+                     (throw (ex-info "Continuation fixture did not publish its required turn closure."
+                                     {:seon.test/event :seon.turn/closed-tx
+                                      :seon.test/proc :seon.agent/turn
+                                      :seon.test/fault (async/poll! @faults)}
+                                     failure))))
                  (let [settings (get-in (db/pull @connection '[{:seon.agent/settings [:db/id]}]
                                                 [:seon.agent/id "juniper"])
                                         [:seon.agent/settings :db/id])]

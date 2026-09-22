@@ -161,7 +161,8 @@
       (body cluster-handle)
       (finally
         (flow.core/stop graph)
-        (async/<!! completion)))))
+        (test-support/await-event! completion ::render-proc-stopped
+                                  (constantly true) 5000)))))
 
 (defn- with-cluster
   "Drive `body` against one live cluster, optionally under a stand-in evaluator.

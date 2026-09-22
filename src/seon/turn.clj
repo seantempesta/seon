@@ -2047,7 +2047,9 @@
                          ;; Agent reads remain callable on demand. Only reads
                          ;; independent of turn-taking can become generated reads.
                          (filter #(and (read-only-evaluation? database %)
-                                       (nil? (generated-read-fault database % %)))
+                                       (nil? (generated-read-fault
+                                               database %
+                                               (select-keys % [:seon.cluster.eval/read-evidence]))))
                                  (sort-by (juxt :seon.turn/basis-t
                                                 :seon.cluster.eval/ordinal)
                                           (vals latest))))))))
@@ -2058,12 +2060,15 @@
             (db/pull database [:seon.issue/agent] [:seon.issue/id origin])))))
 
 (defn- generated-read-fault
+  "Check read dependencies, independent of the evaluator or stored entity shape.
+  Callers hand the captured evidence; reference expansion is not an input to this check."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.reply/form
-                       :seon.sci.eval/evaluation]
+                       [:map [:seon.cluster.eval/read-evidence {:optional true}
+                              [:vector :seon.db/read-evidence]]]]
                   [:or :nil :seon.turn/generated-read-depends-on-turns-error]]}
-  [database source evaluation]
+  [database source dependencies]
   (let [inert (wake/inert-attributes database)
-        evidence (:seon.cluster.eval/read-evidence evaluation)
+        evidence (:seon.cluster.eval/read-evidence dependencies)
         offending (into (sorted-set)
                         (mapcat (fn [read]
                                   (let [position (:seon.db/source-argument-position read)
@@ -2198,7 +2203,8 @@
             (some identity
                   (map (fn [source preview]
                          (some #(when-let [failure (generated-read-fault database source
-                                                      (:seon.sci.eval/evaluation %))]
+                                                      (select-keys (:seon.sci.eval/evaluation %)
+                                                                   [:seon.cluster.eval/read-evidence]))]
                                   (assoc failure :seon.turn/refused-system-agent agent-id))
                                (:seon.turn.loop/evaluated-sources preview)))
                        selected previews))
@@ -3473,7 +3479,8 @@
   "Return one phase's value, translating a host failure to flat data.
 
   Callback results are polymorphic and unchecked here; the callback's own
-  contract owns them. Only a caught host failure gains phase-failed evidence."
+  contract owns them. This boundary does not promise a phase-failed member
+  on callback results. Only a caught host failure gains that evidence."
   {:malli/schema
    [:=> [:cat [:=> [:cat] :seon.schema/value]]
     [:schema {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
@@ -3995,7 +4002,16 @@
   A refused transaction returns its diagnostic so the caller cannot freeze
   a successful reply or make another paid call without durable evidence."
   {:malli/schema
-   [:=> [:cat :seon.turn.loop/cluster
+   [:=> [:cat [:map
+                [:seon.db/connection :seon.db/connection]
+                [:seon.db.process/id {:optional true} :seon.db.process/id]
+                [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
+                [:seon.config.error/recurrence-limit {:optional true}
+                 :seon.config.error/recurrence-limit]
+                [:seon.config.error/max-evidence-bytes {:optional true}
+                 :seon.config.error/max-evidence-bytes]
+                [:seon.config.error/escalate-to {:optional true}
+                 :seon.config.error/escalate-to]]
          [:map
           [:seon.ai/target :seon.ai/target]
           [:seon.ai/settings :seon.ai/settings]
@@ -4759,7 +4775,9 @@
                      (= :generate (:seon.turn.work/situation
                                    (db/pull database [:seon.turn.work/situation]
                                             [:seon.turn/id run-id]))))
-            (when-let [fault (generated-read-fault database form evaluation)]
+            (when-let [fault (generated-read-fault
+                              database form
+                              (select-keys evaluation [:seon.cluster.eval/read-evidence]))]
               (throw (ex-info (:seon.error/message fault) fault))))
           (when entity-id
             (sci.eval/bind-result! ctx handle (:seon.sci.admit/value evaluation)))

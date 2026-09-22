@@ -174,3 +174,21 @@
             (is (= 2 (count (entries connection documentation))))
             (is (= (mapv :seon.cluster.eval/id failed)
                    (mapv #(-> (entries connection %) last :seon.cluster.eval/id) failures)))))))))
+
+(deftest generated-read-check-needs-read-evidence-not-an-evaluator-result
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           captured (atom [])
+           source {:seon.cluster.eval/source
+                   "(seon.db/q '[:find [?source ...] :where [_ :seon.cluster.eval/source ?source]])"}
+           _ (binding [db/*read-evidence-sink* captured]
+               (db/q '[:find [?source ...]
+                       :where [_ :seon.cluster.eval/source ?source]] database))
+           evidence (db/read-evidence @captured)]
+       (is (seq evidence) "The real query must publish dependency evidence.")
+       (let [fault (#'turn/generated-read-fault
+                    database source {:seon.cluster.eval/read-evidence evidence})]
+         (is (contains? (:seon.turn/generated-read-attributes fault)
+                        :seon.cluster.eval/source)
+             "Turn activity is refused using the captured dependencies alone."))))))
