@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [seon.ai :as ai]
             [seon.cluster.message :as message]
+            [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.id :as id]
             [seon.repl :as repl]
@@ -937,13 +938,33 @@
            (map #(vector :db/retractEntity [:seon.issue/id (:seon.issue/id %)])
                    (remove #(contains? ids (:seon.issue/id %)) current)))))))
 
+(defn- adopt-selected!
+  "Transact the selected identities' rows, led by any writer-side guard."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :seon.db/database-value [:set :seon.issue/id]
+         [:vector [:tuple [:= :db.fn/call] [:fn ifn?] :seon.source/expected-head]]]
+    [:or :nil :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]}
+  [connection source identities guards]
+  (when (seq identities)
+    (let [rows (db/pull-many source (citation-pattern (citation-attributes source))
+                             (mapv #(vector :seon.issue/id %) identities))]
+      (if (:seon.error/at rows)
+        rows
+        (db/transact! connection
+                      (conj guards [:db.fn/call #'adopt-tx (filterv :seon.issue/id rows) identities]))))))
+
 (defn adopt!
-  "Adopt selected issue entities from the exact published database."
+  "Adopt selected issue entities from the exact published database.
+  With an expected head, the write refuses at the writer once another
+  publication moved it (`registry/head-guard-tx`)."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/connection :seon.db/database-value]
      [:or :nil :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]
     [:=> [:cat :seon.db/connection :seon.db/database-value [:set :seon.issue/id]]
+     [:or :nil :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]
+    [:=> [:cat :seon.db/connection :seon.db/database-value [:set :seon.issue/id]
+          :seon.source/expected-head]
      [:or :nil :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]]}
   ([connection source]
    (let [rows (identity-rows source)]
@@ -951,13 +972,10 @@
        rows
        (db/transact! connection [[:db.fn/call #'adopt-tx rows]]))))
   ([connection source identities]
-   (when (seq identities)
-     (let [rows (db/pull-many source (citation-pattern (citation-attributes source))
-                              (mapv #(vector :seon.issue/id %) identities))]
-       (if (:seon.error/at rows)
-         rows
-         (db/transact! connection
-                       [[:db.fn/call #'adopt-tx (filterv :seon.issue/id rows) identities]]))))))
+   (adopt-selected! connection source identities []))
+  ([connection source identities expected-head]
+   (adopt-selected! connection source identities
+                    [[:db.fn/call registry/head-guard-tx expected-head]])))
 
 (def ^:private tests-done-query
   "Nonempty tests all have positive green results on their current reach digest."
