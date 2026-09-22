@@ -141,16 +141,71 @@
           (test.cache/input-paths directory))))
 
 (defn classify-paths
-  "Analyzer configuration invalidates every source; loaded dependencies require reset."
+  "Analyzer configuration invalidates every source; a loaded dependency change
+  needs a replacement JVM on the same store, never a reset."
   {:malli/schema [:=> [:cat [:set :string] [:set :string]] [:enum :selected :all]]}
   [changed gitlinks]
   (let [dependencies (into #{} (filter #(or (= "deps.edn" %) (gitlinks %))) changed)]
     (when (seq dependencies)
-      (refuse! ::reset-needed "RESET NEEDED: loaded dependencies changed."
+      ;; The JVM's classpath is fixed at launch, so a changed manifest or
+      ;; vendored pin cannot load into this process. The store, its branches
+      ;; and every database fact are unaffected: `bin/seon down` then
+      ;; `bin/seon start` replaces the JVM on the same store.
+      (refuse! ::restart-needed
+               (str "JVM RESTART NEEDED: loaded dependencies changed ("
+                    (str/join ", " (sort dependencies))
+                    "). Run `bin/seon down` then `bin/seon start` on the same"
+                    " store; the store and its database survive, no reset.")
                {:seon.source/changed-paths (vec (sort dependencies))}))
     (if (some #(or (= ".clj-kondo" %) (str/starts-with? % ".clj-kondo/")) changed)
       :all
       :selected)))
+
+(defn snapshot-test-input-digest
+  "The publication snapshot's test-input digest, computed from content already held.
+
+  The digest is `seon.test.cache/test-input-digest` of the checkout's gate
+  inputs that carry no indexed declarations. It is a function of those
+  inputs' paths and bytes, so:
+
+  - when `:seon.source/changed-paths` names every changed path (a partial
+    publication) and none of them is such an input, `::published`, the
+    digest the prior publication stored, is still valid and is returned
+    without reading anything (`::reused`);
+  - otherwise Git's inventory names the inputs, every one whose digest
+    `:seon.source/relative-file-digests` already holds (captured by this
+    publication, or stored and unchanged) is reused, and only the rest are
+    read (`::read`).
+
+  `::roots` is the checkout's `seon.test.cache/input-roots`, held by the
+  caller for the whole publication."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.fn/root :string]
+               [::roots [:set :string]]
+               [:seon.source/relative-file-digests :seon.source/relative-file-digests]
+               [::published {:optional true} :seon.source/test-input-digest]
+               [:seon.source/changed-paths {:optional true} :seon.source/changed-paths]]]
+    [:map
+     [:seon.source/test-input-digest :seon.source/test-input-digest]
+     [::reused :boolean]
+     [::hits :int]
+     [::read [:vector :string]]]]}
+  [{directory :seon.fn/root roots ::roots inputs :seon.source/relative-file-digests
+    published ::published changed :seon.source/changed-paths}]
+  (if (and published changed
+           (not-any? #(test.cache/widening-path? roots %) changed))
+    {:seon.source/test-input-digest published ::reused true ::hits 1 ::read []}
+    (let [listed (filterv #(test.cache/widening-path? roots %)
+                          (test.cache/input-paths directory))
+          held (select-keys inputs listed)
+          unread (filterv #(not (contains? held %)) listed)
+          [captured _] (capture-paths directory unread)]
+      {:seon.source/test-input-digest
+       (test.cache/input-evidence-digest (merge captured held))
+       ::reused false
+       ::hits (count held)
+       ::read unread})))
 
 (defn stored-path-digests
   "Seek each named input by its unique file identity in one database value."
@@ -263,21 +318,33 @@
                   (inst-ms start-instant) "-" (random-uuid)))))
 
 (defn- resolve-population
+  {:malli/schema [:=> [:cat :qualified-symbol :seon.source/digest] [:fn clojure.core/ifn?]]}
   [populate source-digest]
-  (or (try
-        (requiring-resolve populate)
-        (catch Throwable _ nil))
-      (refuse! ::populate-unresolvable
-               (str "the population " populate " does not resolve")
-               {:seon.source/populate populate
-                :seon.source/digest source-digest})))
+  (let [data {::refused ::populate-unresolvable
+              ::rule ::populate-unresolvable
+              :seon.source/populate populate
+              :seon.source/digest source-digest}
+        message (str "the population " populate " does not resolve")
+        resolved (try
+                   (requiring-resolve populate)
+                   ;; A load failure of the population's namespace is the cause.
+                   (catch Exception failure
+                     (throw (ex-info message data failure))))]
+    (or resolved (throw (ex-info message data)))))
 
 (defn- retire-scratch!
-  [store scratch]
+  "Unlink one scratch branch. When cleanup follows `primary`, a cleanup failure
+  is attached to it as suppressed; otherwise it propagates."
+  {:malli/schema [:=> [:cat :seon.store/store :keyword [:or :seon.error/throwable :nil]] :nil]}
+  [store scratch primary]
   (try
     (registry/retire-branch! {:seon.store/store store
                               :seon.store/branch scratch})
-    (catch Throwable _ nil)))
+    nil
+    (catch Exception failure
+      (if primary
+        (do (.addSuppressed ^Throwable primary failure) nil)
+        (throw failure)))))
 
 (defn publication-error
   "The typed stale-head refusal, from Datahike's `:stale-branch-head` data."
@@ -319,7 +386,8 @@
     (registry/branch! {:seon.store/store held-store
                        :seon.cluster.registry/from expected
                        :seon.store/branch scratch})
-    (try
+    (let [recorded
+          (try
       (let [connection (store/open-branch! held-store scratch)]
         (try
           (let [projection (schema/projection-from-database @connection)
@@ -374,7 +442,11 @@
                                    {:expected-current-commit expected})
                   result)))
           (finally (store/release-branch! connection))))
-      (finally (retire-scratch! held-store scratch)))))
+      (catch Throwable failure
+        (retire-scratch! held-store scratch failure)
+        (throw failure)))]
+      (retire-scratch! held-store scratch nil)
+      recorded)))
 
 (defn record-results!
   "Admit and publish test completions against the acquired source head.
@@ -572,5 +644,5 @@
                            :seon.source/digest source-digest})
             expected-commit (assoc :seon.source/expected-commit-id expected-commit))))
         (catch Throwable failure
-          (retire-scratch! store scratch)
+          (retire-scratch! store scratch failure)
           (stale-publication-error 'seon.cluster.source/publish! failure)))))))

@@ -175,34 +175,59 @@
 (defn- finding [entry]
   (source-located (present-values entry finding-keys)))
 
-(defn- manifest-source-roots
-  "The canonical source-root directories this checkout's own manifest declares.
-  clj-kondo keys its dependency cache by NAMESPACE NAME, so only source the
-  checkout owns may write the checkout's cache. `deps.edn` is the ecosystem's
-  own declaration of that ownership — `:paths` plus every alias's
-  `:extra-paths` — never a list maintained here. The `.` entry of the test
-  alias is discarded with every other candidate that is not strictly inside
-  the checkout: a root containing the cache itself would admit every scratch
-  file under `tmp/` (`deps.edn:137`)."
-  [^java.io.File checkout]
-  (let [checkout (.getCanonicalFile checkout)
-        manifest (io/file checkout "deps.edn")
-        declarations (when (.isFile manifest)
-                       (try
-                         (edn/read-string (slurp manifest))
-                         (catch Throwable _ nil)))
-        prefix (str (.getPath checkout) java.io.File/separator)]
-    (into #{}
-          (comp (filter string?)
-                (map #(.getCanonicalFile (io/file checkout ^String %)))
-                (filter #(.isDirectory ^java.io.File %))
-                (filter #(str/starts-with? (.getPath ^java.io.File %) prefix))
-                (map #(.getPath ^java.io.File %)))
-          (concat (:paths declarations)
-                  (mapcat :extra-paths (vals (:aliases declarations)))))))
+(defn- manifest-roots
+  "The canonical directories this checkout's own manifest declares.
 
-(def ^:private source-roots-of
-  (memoize (fn [checkout-path] (manifest-source-roots (io/file checkout-path)))))
+  `::source-roots`: clj-kondo keys its dependency cache by NAMESPACE NAME, so
+  only source the checkout owns may write the checkout's cache. `deps.edn` is
+  the ecosystem's own declaration of that ownership — `:paths` plus every
+  alias's `:extra-paths` — never a list maintained here. The `.` entry of the
+  test alias is discarded with every other candidate that is not strictly
+  inside the checkout: a root containing the cache itself would admit every
+  scratch file under `tmp/` (`deps.edn:137`).
+
+  `::dependency-roots`: every `:local/root` the manifest names. A cache entry
+  whose source lies inside the checkout answers only when it is under one of
+  these two sets; a snapshot, fixture or scratch copy inside the checkout
+  never does."
+  {:malli/schema [:=> [:cat :string]
+                  [:map [::source-roots [:set :string]] [::dependency-roots [:set :string]]]]}
+  [checkout-path]
+  (let [checkout (.getCanonicalFile (io/file checkout-path))
+        manifest (io/file checkout "deps.edn")
+        ;; The JVM was launched from this manifest; an unreadable one throws.
+        declarations (if (.isFile manifest) (edn/read-string (slurp manifest)) {})
+        prefix (str (.getPath checkout) java.io.File/separator)
+        canonical (fn [paths]
+                    (into #{}
+                          (comp (filter string?)
+                                (map #(.getCanonicalFile (io/file checkout ^String %)))
+                                (filter #(.isDirectory ^java.io.File %))
+                                (map #(.getPath ^java.io.File %)))
+                          paths))
+        local-roots (fn [dependencies]
+                      (keep (fn [[_ coordinate]] (:local/root coordinate)) dependencies))
+        aliases (vals (:aliases declarations))]
+    {::source-roots
+     (into #{} (filter #(str/starts-with? % prefix))
+           (canonical (concat (:paths declarations) (mapcat :extra-paths aliases))))
+     ::dependency-roots
+     (canonical (concat (local-roots (:deps declarations))
+                        (mapcat #(local-roots (:extra-deps %)) aliases)))}))
+
+(def ^:private roots-of
+  ;; A manifest change needs a replacement JVM (`seon.cluster.source/classify-paths`),
+  ;; so one reading per checkout path serves the process.
+  (memoize manifest-roots))
+
+(defn- under?
+  {:malli/schema [:=> [:cat [:set :string] :string] :boolean]}
+  [roots ^String path]
+  (boolean
+   (some (fn [^String root]
+           (or (= root path)
+               (str/starts-with? path (str root java.io.File/separator))))
+         roots)))
 
 (defn- checkout-source?
   "True when this analyzed path is the checkout's own declared source.
@@ -212,79 +237,136 @@
   answers for the checkout file whose captured bytes it carries, so mirroring
   a file does not change whether its analysis owns the cache."
   [path]
-  (let [checkout (.getCanonicalFile (io/file "."))
-        roots (source-roots-of (.getPath checkout))
-        candidate (.getCanonicalPath (io/file (analyzed-source-path path)))]
-    (boolean
-     (some (fn [root]
-             (or (= root candidate)
-                 (str/starts-with? candidate (str root java.io.File/separator))))
-           roots))))
+  (let [checkout (.getCanonicalFile (io/file "."))]
+    (under? (::source-roots (roots-of (.getPath checkout)))
+            (.getCanonicalPath (io/file (analyzed-source-path path))))))
 
-(defn- discard-obsolete-cache-entries!
-  "Drop cache entries the checkout's source no longer answers for.
-  Still required with the ownership rule above: it repairs a cache an older
-  build or another tool left behind — including a fixture stub written before
-  that rule, whose recorded file is gone once the fixture root is swept."
-  [canonical-sources]
-  (let [root (kondo.core/resolve-cache-dir config-directory true cache-directory)]
-    (when (.isDirectory root)
-      (kondo.cache/with-thread-lock
-        (kondo.cache/with-cache root 6
-          (doall (for [directory (.listFiles root)
-                  :when (and (.isDirectory directory)
-                             (not (java.nio.file.Files/isSymbolicLink
-                                   (.toPath directory))))
-                  file (.listFiles directory)
-                  :when (and (.isFile file)
-                             (not (java.nio.file.Files/isSymbolicLink
-                                   (.toPath file)))
-                             (str/ends-with? (.getName file) ".transit.json"))
-                  :let [entry (with-open [input (io/input-stream file)]
-                                (transit/read (transit/reader input :json)))
-                        filename (:filename entry)
-                        source (when (string? filename)
-                                 (analyzed-source-path filename))
-                        namespace-name (symbol (subs (.getName file) 0
-                                                     (- (count (.getName file))
-                                                        (count ".transit.json"))))
-                        canonical-source (get canonical-sources namespace-name)]
-                  :when (and (string? filename)
-                             (or (= "<stdin>" filename)
-                                 (and canonical-source
-                                      (not= (.getCanonicalPath (io/file source))
-                                            (.getCanonicalPath (io/file canonical-source))))
-                                 (and (not (str/includes? filename ".jar:"))
-                                      (not (.exists (io/file source))))))]
-            (java.nio.file.Files/deleteIfExists (.toPath file)))))))))
+(defn- stale-cache-entries
+  "The cache entries this analysis could have read that do not answer for the
+  current bytes of their source.
+
+  clj-kondo loads a cached namespace by NAME with no content check
+  (`reference-code/clj-kondo/src/clj_kondo/impl/cache.clj:127-144`,
+  `load-when-missing`), and only for namespaces the linted files use, so
+  only those entries are examined — the work is proportional to the analysis,
+  not to the cache. An entry is stale when it was built from other bytes than
+  its source now holds (the source was modified after the entry was written:
+  the file's own modification time is the stat check), when its source is gone
+  or is the stdin buffer, when a namespace this analysis defines now lives in
+  another file, or when its source sits inside the checkout outside every
+  declared source and dependency root. Jar entries are immutable by
+  coordinate. Each stale entry names its checkout source when it has one, so
+  the caller can rebuild it.
+
+  `shared?` is true for the checkout's own cache under `.clj-kondo/`. An
+  explicitly supplied cache root belongs to its caller, whose every source
+  may rebuild it and none of whose sources is foreign."
+  {:malli/schema
+   [:=> [:cat :string :boolean [:map [:analysis {:optional true} :map]]]
+    [:map
+     [::examined :int]
+     [::stale [:vector [:map [::cache-file :string] [::namespace :symbol]
+                        [::language [:enum :clj :cljc :cljs]]
+                        [::reason [:enum ::stdin ::source-absent ::moved ::foreign ::modified]]
+                        [::source {:optional true} :string]]]]]]}
+  [root shared? result]
+  (let [checkout (.getCanonicalFile (io/file "."))
+        {::keys [source-roots dependency-roots]} (roots-of (.getPath checkout))
+        prefix (str (.getPath checkout) java.io.File/separator)
+        analysis (:analysis result)
+        defined (into {}
+                      (keep (fn [{namespace-name :name filename :filename}]
+                              (when (string? filename)
+                                [namespace-name
+                                 (.getCanonicalPath (io/file (analyzed-source-path filename)))])))
+                      (:namespace-definitions analysis))
+        used (into (set (keep :to (:namespace-usages analysis)))
+                   (keep :to (:var-usages analysis)))
+        examined
+        (for [namespace-name (sort-by str used)
+              :when (symbol? namespace-name)
+              language [:clj :cljc :cljs]
+              :let [file (kondo.cache/cache-file root language namespace-name)]
+              :when (and (.isFile file)
+                         (not (java.nio.file.Files/isSymbolicLink (.toPath file))))]
+          [namespace-name language file])]
+    {::examined (count examined)
+     ::stale
+     (into []
+        (for [[namespace-name language ^java.io.File file] examined
+              :let [filename (:filename (with-open [input (io/input-stream file)]
+                                          (transit/read (transit/reader input :json))))]
+              :when (and (string? filename) (not (str/includes? filename ".jar:")))
+              :let [source (io/file (analyzed-source-path filename))
+                    path (.getCanonicalPath source)
+                    current (get defined namespace-name)
+                    reason (cond
+                             (= "<stdin>" filename) ::stdin
+                             (not (.isFile source)) ::source-absent
+                             (and current (not= current path)) ::moved
+                             (and shared?
+                                  (str/starts-with? path prefix)
+                                  (not (under? source-roots path))
+                                  (not (under? dependency-roots path))) ::foreign
+                             (> (.lastModified source) (.lastModified file)) ::modified)]
+              :when reason]
+          (cond-> {::cache-file (.getPath file)
+                   ::namespace namespace-name
+                   ::language language
+                   ::reason reason}
+            (and (#{::modified ::moved} reason)
+                 (or (not shared?) (under? source-roots path)))
+            (assoc ::source path))))}))
 
 (defn- invoke-kondo
+  "Run clj-kondo once, then rebuild any cache entry the run read that does not
+  answer for current bytes and run once more.
+
+  The rerun is the whole cost of a stale entry; with none, the check reads
+  only the entries of the namespaces the analysis used. `::cache` reports
+  what was examined, rebuilt and deleted."
+  {:malli/schema [:=> [:cat [:map [:lint [:vector :string]]]]
+                  [:map [::cache [:map [::examined :int] [::stale [:vector :map]]
+                                  [::rebuilt [:vector :string]]]]]]}
   [options]
-  ;; Complete source is authoritative. Old synthesized entries and entries
-  ;; whose source was removed cannot answer for an unanalysed language arm.
-  (when-not (or (contains? options :cache-dir) (false? (:cache options)))
-    (discard-obsolete-cache-entries! {}))
   (let [options (merge {:lang :clj
-           :config-dir config-directory
-           :cache-dir cache-directory
-           :cache true
-           :repro true
-           :config analysis-config}
-          options)
+                        :config-dir config-directory
+                        :cache-dir cache-directory
+                        :cache true
+                        :repro true
+                        :config analysis-config}
+                       options)
+        cached? (not (false? (:cache options)))
+        shared? (= cache-directory (:cache-dir options))
+        root (when cached?
+               (.getPath ^java.io.File
+                (kondo.core/resolve-cache-dir (:config-dir options) true (:cache-dir options))))
+        check (fn [result]
+                (if root
+                  (kondo.cache/with-thread-lock
+                    (kondo.cache/with-cache root 6
+                      (stale-cache-entries root shared? result)))
+                  {::examined 0 ::stale []}))
         result (clj-kondo/run! options)
-        sources (into {}
-                      (map (juxt :name #(let [filename (:filename %)]
-                                          (cond-> filename
-                                            (string? filename)
-                                            analyzed-source-path))))
-                      (get-in result [:analysis :namespace-definitions]))]
-    ;; A current namespace declaration outranks a retained copy in any other
-    ;; language's cache, even when that old build artifact still exists.
-    (if (and (= cache-directory (:cache-dir options))
-             (not (false? (:cache options)))
-             (seq (discard-obsolete-cache-entries! sources)))
-      (clj-kondo/run! options)
-      result)))
+        {::keys [examined stale]} (check result)]
+    (if (empty? stale)
+      (assoc result ::cache {::examined examined ::stale [] ::rebuilt []})
+      (let [sources (into [] (comp (keep ::source) (distinct)) stale)]
+        (kondo.cache/with-thread-lock
+          (kondo.cache/with-cache root 6
+            (doseq [{::keys [cache-file]} stale]
+              (java.nio.file.Files/deleteIfExists (.toPath (io/file cache-file))))))
+        ;; Rebuild each checkout-owned entry from its current bytes; this
+        ;; run's own findings belong to its files' analyses, not to this one.
+        (when (seq sources)
+          (clj-kondo/run! (assoc options :lint sources)))
+        (let [rerun (clj-kondo/run! options)
+              remaining (::stale (check rerun))]
+          (when (seq remaining)
+            (throw (ex-info "clj-kondo cache entries changed again during analysis."
+                            {::stale remaining
+                             ::lint (:lint options)})))
+          (assoc rerun ::cache {::examined examined ::stale stale ::rebuilt sources}))))))
 
 (defn forget-namespaces!
   "Remove superseded declarations from one explicitly owned resolver cache."
@@ -455,7 +537,9 @@
      [::java-class-usages [:vector :map]]
      [::protocol-impls [:vector :map]]
      [::keywords [:vector :map]]
-     [::findings [:vector :map]]]]}
+     [::findings [:vector :map]]
+     [::cache [:map [::examined :int] [::stale [:vector :map]]
+               [::rebuilt [:vector :string]]]]]]}
   [{::keys [paths sources cache-root config-root]}]
   (when-not (or (seq paths) (seq sources))
     (throw (ex-info "Analysis requires either captured sources or paths."
@@ -547,7 +631,10 @@
           (map finding)
           (filter jvm-entry?)
           (sort-by entry-order)
-          vec)}))
+          vec)
+     ;; Which cache entries the analysis found stale and rebuilt: the
+     ;; publication's cache-miss count.
+     ::cache (::cache result)}))
 
 (defn- require-specs
   [{:seon.ns/keys [requires aliases refers]}]

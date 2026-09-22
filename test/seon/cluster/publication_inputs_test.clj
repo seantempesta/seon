@@ -1,5 +1,6 @@
 (ns seon.cluster.publication-inputs-test
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.cluster.source :as source]
@@ -9,6 +10,7 @@
             [seon.fn.analyzer :as analyzer]
             [seon.fs :as fs]
             [seon.schema :as schema]
+            [seon.test.cache :as test.cache]
             [seon.test-support :as support]))
 
 (deftest changed-paths-hash-only-the-named-files-and-use-recorded-pins
@@ -23,7 +25,7 @@
       (.mkdirs (io/file root pin))
       (spit (io/file root "deps.edn") "This unrequested input must not be hashed.")
       (spit (io/file root "dependency-pins.txt")
-            (str "160000 " (apply str (repeat 40 "a")) " 0\t" pin "\n"))
+            (str "160000 " (apply str (repeat 64 "a")) " 0\t" pin "\n"))
       (let [digests (with-redefs [schema/sha-256
                                  (fn [parts]
                                    (swap! captured into
@@ -135,8 +137,66 @@
   (doseq [path ["deps.edn" "reference-code/sci"]]
     (let [refusal (try (source/classify-paths #{path} #{"reference-code/sci"})
                        (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
-      (is (= :seon.cluster.source/reset-needed (:seon.cluster.source/rule refusal)))
+      (is (= :seon.cluster.source/restart-needed (:seon.cluster.source/rule refusal)))
       (is (= [path] (:seon.source/changed-paths refusal))))))
+
+(defn- test-input-checkout!
+  "A checkout whose inventory and pins are recorded, so no Git process runs."
+  [root]
+  (doseq [[path text] {"deps.edn" "{:paths [\"src\" \"script\"]}"
+                       "src/leaf.clj" "(ns leaf)"
+                       "script/tool.clj" "(ns tool)"
+                       "test/fixtures/sample.txt" "fixture bytes"}]
+    (io/make-parents (io/file root path))
+    (spit (io/file root path) text))
+  (.mkdirs (io/file root "reference-code/example"))
+  (spit (io/file root "dependency-pins.txt")
+        (str "160000 " (apply str (repeat 64 "a")) " 0\treference-code/example\n"))
+  (spit (io/file root "test-input-paths.txt")
+        (str/join (char 0) ["deps.edn" "src/leaf.clj" "script/tool.clj"
+                            "test/fixtures/sample.txt" "reference-code/example"])))
+
+(deftest the-test-input-digest-reads-only-inputs-it-does-not-already-hold
+  (let [root (.getCanonicalPath (io/file "tmp/publication-inputs" (str (random-uuid))))]
+    (try
+      (test-input-checkout! root)
+      (let [roots (test.cache/input-roots root)
+            whole (test.cache/test-input-digest root (test.cache/input-digests root))
+            held (source/path-digests root ["deps.edn" "src/leaf.clj" "script/tool.clj"
+                                            "reference-code/example"])
+            derived (source/snapshot-test-input-digest
+                     {:seon.fn/root root ::source/roots roots
+                      :seon.source/relative-file-digests held})]
+        (is (= whole (:seon.source/test-input-digest derived))
+            "the derived digest equals the whole-checkout digest")
+        (is (= ["test/fixtures/sample.txt"] (::source/read derived))
+            "only the input the capture did not hold is read")
+        (is (= 3 (::source/hits derived)))
+        (is (false? (::source/reused derived))))
+      (finally (support/delete-recursively! root)))))
+
+(deftest a-partial-publication-reuses-the-published-test-input-digest-until-an-input-changes
+  (let [root (.getCanonicalPath (io/file "tmp/publication-inputs" (str (random-uuid))))
+        published (apply str (repeat 64 "d"))]
+    (try
+      (test-input-checkout! root)
+      (let [request {:seon.fn/root root ::source/roots (test.cache/input-roots root)
+                     ::source/published published
+                     :seon.source/relative-file-digests
+                     (source/path-digests root ["src/leaf.clj"])}
+            leaf (source/snapshot-test-input-digest
+                  (assoc request :seon.source/changed-paths ["src/leaf.clj"]))
+            tool (source/snapshot-test-input-digest
+                  (assoc request :seon.source/changed-paths ["script/tool.clj"]))]
+        (is (= {:seon.source/test-input-digest published ::source/reused true
+                ::source/hits 1 ::source/read []}
+               leaf)
+            "a leaf change keeps the published test-input digest, reading nothing")
+        (is (false? (::source/reused tool)))
+        (is (= (test.cache/test-input-digest root (test.cache/input-digests root))
+               (:seon.source/test-input-digest tool))
+            "a changed test input recomputes from content"))
+      (finally (support/delete-recursively! root)))))
 
 (deftest captured-source-is-the-analysis-and-digest-authority
   (let [root (io/file "tmp" (str "publication-capture-" (random-uuid)))
@@ -157,3 +217,42 @@
           (is (= (get digests path) (:seon.fn.file/digest file-row)))
           (is (not= digests (source/path-digests directory [path])))))
       (finally (support/delete-recursively! root)))))
+
+(deftest a-caller-is-never-checked-against-a-cache-entry-older-than-its-callee
+  ;; docs/seon/issues/publication-analysis-reads-a-stale-kondo-cache-entry-for-an-unindexed-caller-target.md
+  (let [root (.getCanonicalFile (io/file "tmp/publication-inputs" (str (random-uuid))))
+        callee (io/file root "src/kondo_stale/callee.clj")
+        caller (io/file root "src/kondo_stale/caller.clj")
+        cache-root (.getPath (io/file root "cache"))
+        arity-findings (fn [analysis]
+                         (filterv #(= :invalid-arity (::analyzer/type %))
+                                  (::analyzer/findings analysis)))
+        analyze (fn [files]
+                  (analyzer/analyze {::analyzer/paths (mapv #(.getPath ^java.io.File %) files)
+                                     ::analyzer/cache-root cache-root}))]
+    (try
+      (io/make-parents callee)
+      (spit callee "(ns kondo-stale.callee)\n(defn f [x] x)\n")
+      (spit caller (str "(ns kondo-stale.caller (:require [kondo-stale.callee :as callee]))\n"
+                        "(defn g [] (callee/f 1 2))\n"))
+      (is (= 1 (count (arity-findings (analyze [callee caller]))))
+          "the old one-argument callee refuses the two-argument call")
+      ;; The edit is later than the entry clj-kondo wrote for the old bytes;
+      ;; age the entry so the file clock's resolution cannot tie them.
+      (let [entry (io/file cache-root "v1" "clj" "kondo-stale.callee.transit.json")]
+        (is (.isFile entry))
+        (.setLastModified entry (- (System/currentTimeMillis) 2000)))
+      (spit callee "(ns kondo-stale.callee)\n(defn f [x y] [x y])\n")
+      (let [caller-only (analyze [caller])
+            cache (::analyzer/cache caller-only)]
+        (is (empty? (arity-findings caller-only))
+            "the caller is checked against the callee's current arity")
+        (is (= [['kondo-stale.callee ::analyzer/modified]]
+               (mapv (juxt ::analyzer/namespace ::analyzer/reason) (::analyzer/stale cache))))
+        (is (= [(.getCanonicalPath callee)] (::analyzer/rebuilt cache))))
+      (let [again (analyze [caller])]
+        (is (empty? (arity-findings again)))
+        (is (empty? (::analyzer/stale (::analyzer/cache again)))
+            "the rebuilt entry is reused")
+        (is (pos? (::analyzer/examined (::analyzer/cache again)))))
+      (finally (support/delete-recursively! (.getPath root))))))
