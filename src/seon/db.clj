@@ -3111,6 +3111,14 @@
                          {::entity identities ::entity-value row ::path (into [entity-id] in)})))))
        schema-keys))))
 
+(defn identity-attribute-accumulator?
+  "True for the arity gate's accumulator: a volatile holding a set of qualified keywords."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (boolean (and (volatile? value)
+                (set? @value)
+                (every? qualified-keyword? @value))))
+
 (defn- write-owned-values-error
   "Validate complete owning values, reached through both sides of this report.
    EAVT supplies every child; AVET discovers owners without pull's 1,000 cap.
@@ -3120,7 +3128,7 @@
                        ;; Datahike's `:schema` also maps each attribute's entity
                        ;; id to its ident, so the plans carry integer keys too.
                        [:map-of [:or :keyword :int] :map] [:set :qualified-keyword]
-                       [:fn clojure.core/volatile?]]
+                       [:fn seon.db/identity-attribute-accumulator?]]
                   [:or :nil :seon.db/error-result]]}
   [projection report attribute-plans identity-attrs changed-identity-attributes]
   (let [before (:db-before report)
@@ -3248,7 +3256,10 @@
               ;; root's own identity datom, so there every root is changed.
               changed-roots
               (delay
-               (let [tx-data (filter #(< (long (:e %)) const/tx0) (:tx-data report))]
+               ;; A root's own arity-bearing datom counts whatever its id,
+               ;; a transaction entity included; only the ancestor walk is
+               ;; bounded to ordinary entities.
+               (let [tx-data (:tx-data report)]
                  (into (into #{}
                              (comp (filter #(#{:seon.fn/sym :seon.test/sym
                                                :seon.fn/call-arities :seon.fn/arities}
@@ -3259,7 +3270,8 @@
                                  (disj (into (owning-ancestors :before before [entity])
                                              (owning-ancestors :after after [entity]))
                                        entity)))
-                       (into #{} (map :e) tx-data))))]
+                       (into #{} (comp (map :e) (filter #(< (long %) const/tx0)))
+                             tx-data))))]
         (or
          (some (fn [root]
                  (let [value (get @expanded root)

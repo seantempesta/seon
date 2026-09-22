@@ -345,3 +345,21 @@ loudly, never store silently.
 * `bin/test --paths` (47 s): published-base preparation refused on the datahike
   checkout drift.
 * No scratch boot. Default was never stopped, reset, reloaded or adopted by this lane.
+
+# Validator single-pass review follow-up (review-validator-deletion-oversight §A)
+
+* **P2 (1) confirmed and fixed** in `write-owned-values-error`: the direct
+  arity-bearing root set now reads unfiltered `:tx-data`; only the ancestor walk keeps
+  the `< tx0` bound, restoring `6bf3bde78^`'s predicate. Pure probe (HEAD archive JVM):
+  a transaction entity `536870917` carrying `:seon.fn/sym` → before `#{}`, after
+  `#{536870917}`.
+* **P2 (2) confirmed and fixed**: the accumulator contract is
+  `[:fn seon.db/identity-attribute-accumulator?]` (volatile holding a set of qualified
+  keywords). Probe: `[(volatile! #{}) (volatile! #{:a/b}) (volatile! 42) (volatile! #{:a}) #{}]`
+  → `[true true false false false]`.
+* **Regression not added** — `test/seon/owned_value_test.clj` is outside this lane's
+  exclusive paths. Exact test to add there: a transaction writing
+  `{:db/id :db/current-tx :seon.fn/sym <sym>}` plus a changed arity component owned
+  by it must add `:seon.fn/sym` to the arity gate's accumulator (before the fix the
+  root was skipped).
+* Load: HEAD archive with the new `db.clj`, exit 0, 14.3 s. No armed run (base blocked).
