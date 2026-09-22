@@ -202,3 +202,25 @@ sole instance ends the process and a following `start` launches cold. Recovery u
   `:status`, `src/seon/cluster/boot.clj:369-374`): with lane edits to `db.clj`,
   `config.clj`, `fn.clj` half-adopted, no conclusion about the code at HEAD; re-check
   at the coordinated restart.
+
+## 2026-09-22 03:45 local — store growth diagnosed (248 GB); export bound landed; RESET queued
+
+- `store-growth` (`d368f217d`, landing `landing/lane-store-growth-2026-09-22.md`):
+  248.40 GiB in 899,520 konserve files; 245.11 GiB is Datahike commit/index ancestry
+  retained under the epoch GC cutoff; 296 MiB unreachable; blobs 0.74 GiB, all owned.
+  The writer: a feedback loop — every transaction made `wake/deliver!` refuse its
+  keyword key, recording the fault was itself a transaction (22,537 refusals in 24,538
+  transactions). Root fix is `0e0e8b6ba` (turn-parks-on-boot); regression
+  `test/seon/store_growth_test.clj` proves one listened write = one commit, no fault
+  write. The ~10 MB of rewritten 6.3 MB persistent-set index leaves per commit is
+  A2's retention/currency seam (README §4 cut 2), not a lane's fix. **RESET NEEDED**
+  to reclaim the disk; the orchestrator resets after `kind-cut` lands (dirty src
+  edits would otherwise load at boot).
+- `base-export-timeout` (`64c31cf75`): one export request ran 484 s under the 300 s
+  boot bound; now each operation carries its declared bound (`export-bound-ms 600000`
+  as a config fact with its reason) and the export emits progress; child preparation
+  measured 179.9 s. That number is B4's motivation (fixture on the open store), not a
+  constant to keep.
+- Fixture preparation still fails against pid 21908, whose config apply was refused by
+  the half-landed key and whose projection state is missing; it will pass after the
+  reset. Astra hit "model at capacity" once; the lane was resumed on Sol.
