@@ -96,6 +96,7 @@
   indistinguishable, which is honest: the form's effect MAY have
   happened. Nothing re-executes."
   (:require
+            [clojure.core.cache.wrapped :as cache]
             [clojure.edn :as edn]
             [datahike.api :as d]
             [clojure.java.io :as io]
@@ -888,15 +889,16 @@
         (not= (row-definition-digest row) (row-definition-digest previous)))))
 
 (defn- host-bound-row?
-  "Form-head half of host binding. Body-reference facts belong to the indexer.
-   Type declarations also retain host identity even where SCI can
-   construct a distinct SciType. Their generated constructors cannot be replaced."
+  "Whether the indexer's per-declaration host-binding fact holds for this row.
+
+  `seon.fn` derives `:seon.fn/host-bound?` from the defining form and the
+  declaration's own analyzed class and form usages; callers inherit nothing.
+  A function row without the fact was not analyzed by that producer, so its
+  binding is unknown and it is treated as host-bound: an interpretation is never
+  granted on silence."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [row]
-  (boolean
-   (#{'clojure.core/reify 'clojure.core/proxy 'clojure.core/definterface
-          'clojure.core/deftype 'clojure.core/defrecord}
-        (:seon.fn/defined-by row))))
+  (not (false? (get row :seon.fn/host-bound?))))
 
 (defn install-row!
   "Install one declaration from the terminal transaction's db-after.
@@ -974,7 +976,10 @@
                                (when (and previous (host-bound-row? previous)) previous)))))
               refusal (when host-row
                         (interpretation-error function-symbol
-                          (str "Host-bound declaration " (:seon.fn/defined-by host-row)
+                          (str (if (contains? host-row :seon.fn/host-bound?)
+                                 "Host-bound declaration "
+                                 "Declaration with no :seon.fn/host-bound? fact ")
+                               (:seon.fn/sym host-row)
                                " must change through the loaded source files.")))
               result
               (or refusal
@@ -1355,20 +1360,28 @@
                 :seon.error/expected :seon.sci.eval/loaded-namespace}))))))
 
 (defn- load-core-namespaces!
-  "The effectful cluster caller loads JVM namespaces before pure construction."
+  "The effectful cluster caller loads the running program's JVM namespaces
+  before pure construction. A namespace indexed from the test source root is
+  not run by the cluster: `seon.test/resolve-test` requires it on the test
+  request that needs it. Measured 2026-09-23 on a 417-namespace program:
+  107 armed, 310 deferred, 7,772 ms -> 1,193 ms on a warm resume."
   [database]
-  (doseq [namespace-name
-          (sort-by str
-                   (db/q '[:find [?name ...]
-                           :where [?namespace :seon.ns/name ?name]
-                           (or-join [?namespace]
-                             (and [?namespace :seon.schema.admission/source :core]
-                                  [?namespace :seon.ns/source _])
-                             (and [?function :seon.fn/ns ?namespace]
-                                  [?function :seon.fn/source _]
-                                  [?function :seon.schema.admission/source :core]))]
-                         database))]
-    (host-namespace! namespace-name)))
+  (let [names (db/q '[:find [?name ...]
+                      :where [?file :seon.fn.file/relative-root ?root]
+                      [(not= ?root "test")]
+                      [?namespace :seon.fn/file ?file]
+                      [?namespace :seon.ns/name ?name]
+                      (or-join [?namespace]
+                        (and [?namespace :seon.schema.admission/source :core]
+                             [?namespace :seon.ns/source _])
+                        (and [?function :seon.fn/ns ?namespace]
+                             [?function :seon.fn/source _]
+                             [?function :seon.schema.admission/source :core]))]
+                    database)]
+    (when (:seon.error/at names)
+      (throw (ex-info (:seon.error/message names) names)))
+    (doseq [namespace-name (sort-by str names)]
+      (host-namespace! namespace-name))))
 
 (defn- install-first-party-namespaces!
   "Bind every first-party program namespace as its actual compiled JVM Vars.
@@ -1733,21 +1746,18 @@
               (get-in refusal [:seon.error/data ::acquisition-cause-message])]))
 
 (defn- record-acquisition-refusals!
-  "Record contained row refusals through the one durable error owner."
+  "Record contained row refusals through the one durable error owner, once.
+
+  All of one acquisition's refusals commit as one transaction on the context's
+  custody connection: acquisition runs under the arming monitor, and one fault
+  delivery per refusal paid one writer projection derivation each (measured 164 ms
+  per call; warm-restart hang, schedule #17a). A context with no connection
+  delivers through the supplied fault recorder."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map [:or :nil :seon.flow/commit-fault!]] :map]}
   [ctx db state commit-fault!]
   (let [refusals (::acquisition-refusals state)]
     (if-not (seq refusals)
       state
-      (if commit-fault!
-        (let [outcomes (mapv #(commit-fault! {:seon.error/source %
-                                             :seon.error/declared-schema
-                                             (if (:seon.sci.eval/refused-function %)
-                                               :seon.sci.eval/interpretation-error
-                                               :seon.sci.eval/row-acquisition-error)}) refusals)
-              failed (first (remove #(= :seon.flow/committed (second %)) outcomes))]
-          (cond-> (assoc state ::acquisition-refusals-recorded? (nil? failed))
-            failed (assoc ::acquisition-recording-error (second failed))))
       (if-let [connection (:seon.db/connection (::custody ctx))]
         (let [read-effective (database-effective-config db)
               ;; THE FALLBACK KEYS ON THE REFUSAL, not on nil: this read
@@ -1789,6 +1799,15 @@
             (or (:seon.db.write.attempt/request-id outcome) (:seon.db/invalid-read outcome) (:seon.schema/expected-value outcome))
             (assoc ::acquisition-refusals-recorded? false
                    ::acquisition-recording-error outcome)))
+      (if commit-fault!
+        (let [outcomes (mapv #(commit-fault! {:seon.error/source %
+                                             :seon.error/declared-schema
+                                             (if (:seon.sci.eval/refused-function %)
+                                               :seon.sci.eval/interpretation-error
+                                               :seon.sci.eval/row-acquisition-error)}) refusals)
+              failed (first (remove #(= :seon.flow/committed (second %)) outcomes))]
+          (cond-> (assoc state ::acquisition-refusals-recorded? (nil? failed))
+            failed (assoc ::acquisition-recording-error (second failed))))
         (assoc state ::acquisition-refusals-recorded? false))))))
 
 (defn- acquire-program!
@@ -2246,20 +2265,112 @@
      :seon.sci.eval/private-state
      (if agent-ctx :preserved-in-memory :absent)}))
 
-(defn base-ctx
-  "Derive the program-only SCI context from one database value.
+(def program-cache-policy
+  "Bound the memoized program identities and base contexts independently of commits."
+  {::program-identity-cache-size 256
+   ::program-identity-cache-reason
+   "One entry per recently acquired commit: agent turns, MCP evaluations and test requests on a few live branches; an evicted commit derives its identity again from its own cache-context."
+   ::base-context-cache-size 4
+   ::base-context-cache-reason
+   "A base context holds a whole interpreted program; four recent program identities cover the live branch and concurrent test requests without retaining an unbounded population."})
 
-  Matching definitions copy the loaded JVM Var root. Overrides and affected
-  callers interpret their admitted source. Acquisition refusals remain values on the context;
-  construction has no connection, writes no facts, and restores no private state."
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
-    [:=> [:cat :seon.db/database-value
-          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]]]
-     :seon.sci.eval/ctx]]}
-  ([database] (base-ctx database {}))
-  ([database arm-request]
+;; The same core.cache wrapped LRU seon.db's projection memo and
+;; datahike.schema-cache use.
+(defonce ^:private acquisition-attribute-cache
+  (cache/lru-cache-factory {} :threshold 8))
+
+(defonce ^:private program-identity-cache
+  (cache/lru-cache-factory
+   {} :threshold (::program-identity-cache-size program-cache-policy)))
+
+(defonce ^:private base-context-cache
+  (cache/lru-cache-factory
+   {} :threshold (::base-context-cache-size program-cache-policy)))
+
+(defn- acquisition-attributes
+  "Every attribute an acquisition reads, derived from the projection's declarations.
+
+  The program partition (`seon.program/program-attributes`), the projection's own
+  read set (`seon.schema/projection-attributes`), the contract dials an interpreted
+  wrapper arms with (`seon.config/dial-attributes`) and the loaded source commit.
+  Memoized by the projection's fingerprint, which names its declaration population."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
+  [projection]
+  @(cache/lookup-or-miss
+    acquisition-attribute-cache
+    (:seon.schema.projection/fingerprint projection)
+    (fn [_]
+      (delay
+       (-> (program/program-attributes projection)
+           (into schema/projection-attributes)
+           (into (config/dial-attributes projection))
+           (conj :seon.config/cluster :seon.source/commit-id))))))
+
+(defn- revision-basis
+  "The part of a value's Datahike cache-context that names its attribute revisions.
+
+  Datahike advances one attribute revision per attribute a commit touched and the
+  conservative revision on a schema or unknown change
+  (`reference-code/datahike/src/datahike/query.cljc:2568-2589`); its query cache
+  carries results across commits by comparing exactly these members
+  (`source-context-unchanged?`, `:2963-2975`). Revisions are comparable within
+  one connection generation, which the basis names."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
+  [database]
+  (select-keys (:cache-context database)
+               [:datahike.cache/connection-id
+                :datahike.cache/generation
+                :datahike.cache/conservative-revision
+                :datahike.cache/attribute-revisions]))
+
+(defn- program-basis
+  "A revision basis restricted to the attributes an acquisition reads."
+  {:malli/schema [:=> [:cat :map [:set :qualified-keyword]] :map]}
+  [basis attributes]
+  (update basis :datahike.cache/attribute-revisions select-keys attributes))
+
+(defn- commit-id-of
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :uuid]]}
+  [database]
+  (let [value-id (db/committed-value-identity database)]
+    (when (map? value-id) (:datahike.value/commit-id value-id))))
+
+(defn- remember-program-identity!
+  "Record a commit's revision basis unless its commit already has one."
+  {:malli/schema [:=> [:cat :uuid :map] :map]}
+  [commit-id basis]
+  @(cache/lookup-or-miss program-identity-cache commit-id (fn [_] (delay basis))))
+
+(defn program-identity
+  "The revision basis naming the program a committed value holds, or nil.
+
+  Memoized by commit id, which names one immutable root
+  (`reference-code/datahike/src/datahike/db.cljc:385`): a branch opened at a commit
+  reads the basis its parent recorded when the commit landed
+  (`watch-program-identity!`), so its program compares with the parent's. A commit
+  proven program-equal to an acquired value takes that value's basis
+  (`acquired-database?`). Compare two identities through `program-basis` over the
+  acquisition attributes. A value without committed identity has none."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :map]]}
+  [database]
+  (when-let [commit-id (commit-id-of database)]
+    (remember-program-identity! commit-id (revision-basis database))))
+
+(defn- watch-program-identity!
+  "Record each committed value's revision basis as its commit lands.
+
+  A system-side `d/listen` observer (the seam AGENTS names for notification): the
+  callback is one select over the committed value's cache-context, no read."
+  {:malli/schema [:=> [:cat :seon.db/connection] :keyword]}
+  [connection]
+  (d/listen connection ::program-identity
+            (fn [report] (program-identity (:db-after report))))
+  ::program-identity)
+
+(defn- derive-base-ctx
+  "Derive one base context: build the interpreter and acquire the program."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] :seon.sci.eval/ctx]}
+  [database arm-request]
   (let [projection (if-let [carried (db/carried-projection database)]
                      (schema/projection-from-database database carried)
                      (schema/projection-from-database database))]
@@ -2278,55 +2389,168 @@
          (swap! (::kernel/program-snapshot ctx) assoc
                 :seon.db/db database ::acquisition acquired
                 :seon.test/class-loader (clojure.lang.RT/baseLoader))
-         (assoc ctx ::acquisition acquired)))))))
+         (assoc ctx ::acquisition acquired))))))
 
-(defn- acquired-database?
-  "Whether this context already acquired the exact supplied database value.
+(defn- base-ctx-key
+  "The inputs a base context is a function of, or nil when one has no identity.
 
-  Datahike's commit id names one immutable committed root
-  (`reference-code/datahike/src/datahike/db.cljc:385`). A branch opened at that
-  commit reads the same value through another connection, so a forked context
-  acquires no program again; speculative values carry no committed identity."
+  The program identity of the database, the loaded program it compares against
+  and the fault recorder its contract wrappers close over."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map]
+                  [:or :nil [:tuple :map [:or :nil :uuid] [:or :nil :seon.flow/commit-fault!]]]]}
+  [database arm-request]
+  (let [program (some-> (program-identity database)
+                        (program-basis (acquisition-attributes
+                                        (db/carried-projection database))))
+        loaded (::loaded-database arm-request)
+        loaded-id (when loaded (db/committed-value-identity loaded))]
+    (when (and program (or (nil? loaded) (map? loaded-id)))
+      [program
+       (when loaded (:datahike.value/commit-id loaded-id))
+       (:seon.flow/commit-fault! arm-request)])))
+
+(defn- copy-base-ctx
+  "A fresh context over a memoized base: SCI's generation-aware fork plus owned
+  copies of the kernel atoms, acquired at the supplied value."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :seon.sci.eval/ctx]}
+  [cached database]
+  (assoc (sci/fork cached)
+         ::kernel/installed-functions (atom @(::kernel/installed-functions cached))
+         ::kernel/program-snapshot
+         (atom (assoc @(::kernel/program-snapshot cached) :seon.db/db database))))
+
+(defn base-ctx
+  "Derive the program-only SCI context from one database value.
+
+  Matching definitions copy the loaded JVM Var root. Overrides and affected
+  callers interpret their admitted source. Acquisition refusals remain values on the context;
+  construction has no connection, writes no facts, and restores no private state.
+  A base context is a function of its program identity, loaded program and fault
+  recorder, memoized by that key; each call returns its own fork of the value."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
+    [:=> [:cat :seon.db/database-value
+          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]]]
+     :seon.sci.eval/ctx]]}
+  ([database] (base-ctx database {}))
+  ([database arm-request]
+   (if-let [cache-key (base-ctx-key database arm-request)]
+     (let [cell (cache/lookup-or-miss
+                 base-context-cache cache-key
+                 (fn [_] (delay (derive-base-ctx database arm-request))))]
+       (copy-base-ctx
+        (try @cell
+             (catch Throwable failure
+               ;; A failed derivation is not a value of the key: drop the
+               ;; cell so the next call derives again, and surface the cause.
+               (cache/evict base-context-cache cache-key)
+               (throw failure)))
+        database))
+     (derive-base-ctx database arm-request))))
+
+(defn acquired-database?
+  "Whether this context already acquired the program the supplied value holds.
+
+  True for the acquired value itself, and for any committed value whose program
+  identity (restricted to the acquisition attributes) equals the acquired one: a
+  commit that wrote only receipts, turns, messages, test results or artifacts
+  leaves those revisions alone, and a branch opened at such a commit reads its
+  parent's recorded basis. A later value of the acquired value's own lineage with
+  equal revisions also matches and records its commit under the acquired identity.
+  A value without committed identity never matches."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :boolean]}
   [ctx database]
   (let [snapshot @(::kernel/program-snapshot ctx)
         previous (:seon.db/db snapshot)
-        value-id (db/committed-value-identity database)
-        previous-id (when previous (db/committed-value-identity previous))]
+        commit-id (commit-id-of database)]
     (boolean
      (and (::acquisition snapshot)
+          previous
           (or (identical? previous database)
-              (and (map? value-id) (map? previous-id)
-                   (= (:datahike.value/commit-id value-id)
-                      (:datahike.value/commit-id previous-id))))))))
+              (when (and commit-id (commit-id-of previous))
+                (let [attributes (acquisition-attributes (db/carried-projection previous))
+                      acquired (program-identity previous)]
+                  (or (= (program-basis acquired attributes)
+                         (program-basis (program-identity database) attributes))
+                      ;; The basis carries connection and generation, so this
+                      ;; equality also proves one lineage.
+                      (when (= (program-basis (revision-basis database) attributes)
+                               (program-basis (revision-basis previous) attributes))
+                        ;; A branch opened at this commit reads the acquired
+                        ;; program by commit id from here on.
+                        (cache/evict program-identity-cache commit-id)
+                        (remember-program-identity! commit-id acquired)
+                        true)))))))))
+
+(defonce ^:private refusal-recording-cache
+  (cache/lru-cache-factory
+   {} :threshold (::program-identity-cache-size program-cache-policy)))
+
+(defn- record-refusals-once!
+  "Record one program's acquisition refusals once per recording target.
+
+  A refusal is a fact about the program rows, so re-acquiring the same program
+  identity (another context, another commit of the same program) records nothing
+  again. Concurrent acquirers share the one delay; no monitor is held."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map
+                       [:or :nil :seon.flow/commit-fault!]] :map]}
+  [ctx database acquired commit-fault!]
+  (let [program (some-> (program-identity database)
+                        (program-basis (acquisition-attributes
+                                        (db/carried-projection database))))
+        target (or (:seon.db/connection (::custody ctx)) commit-fault!)]
+    (if (and (seq (::acquisition-refusals acquired)) program target)
+      (let [cache-key [program target]
+            cell (cache/lookup-or-miss
+                  refusal-recording-cache cache-key
+                  (fn [_] (delay (record-acquisition-refusals!
+                                  ctx database acquired commit-fault!))))]
+        (merge acquired
+               (select-keys (try @cell
+                                 (catch Throwable failure
+                                   (cache/evict refusal-recording-cache cache-key)
+                                   (throw failure)))
+                            [::acquisition-refusals-recorded?
+                             ::acquisition-recording-error])))
+      (record-acquisition-refusals! ctx database acquired commit-fault!))))
 
 (defn acquire!
-  "Acquire the supplied database once in this cluster context.
+  "Acquire the program the supplied database holds in this cluster context.
 
   The existing context identity belongs to cluster handles; replacing its
-  program environment lets their retained forks regenerate from that base."
+  program environment lets their retained forks regenerate from that base.
+  A value holding the acquired program returns at once. Otherwise the program's
+  base context is a memoized function of its identity (`base-ctx`), so
+  concurrent acquirers of one program share one derivation and hold no monitor;
+  each installs an equal fork of it."
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx database :seon.db/db
     commit-fault! :seon.flow/commit-fault!}]
-  (locking (::kernel/program-snapshot ctx)
-    (let [snapshot @(::kernel/program-snapshot ctx)]
-      (if (acquired-database? ctx database)
-        (::acquisition snapshot)
-        (let [commit-fault! (or commit-fault! (:seon.flow/commit-fault! snapshot))
-              _ (load-core-namespaces! database)
-              generated (base-ctx database
-                                  (cond-> {::loaded-database (::loaded-database snapshot)} commit-fault!
-                                    (assoc :seon.flow/commit-fault! commit-fault!)))
-              acquired (::acquisition generated)]
-          ;; SCI stamps later definitions with this generation. Installing the
-          ;; unforked base loses the provenance that definition-row observes.
-          (reset! (:env ctx) @(:env (sci/fork generated)))
-          (reset! (::kernel/installed-functions ctx) @(::kernel/installed-functions generated))
-          (advance-context-projection! ctx database (:seon.schema/projection generated))
-          (let [recorded (record-acquisition-refusals! ctx database acquired commit-fault!)]
-            (reset! (::kernel/program-snapshot ctx)
-                    (assoc @(::kernel/program-snapshot generated) ::acquisition recorded))
-            recorded))))))
+  (let [snapshot @(::kernel/program-snapshot ctx)]
+    (if (acquired-database? ctx database)
+      (do
+        ;; Same program: the acquired value advances to the supplied one, so
+        ;; a branch opened at it holds the acquired program by commit id.
+        (when-not (identical? database (:seon.db/db snapshot))
+          (swap! (::kernel/program-snapshot ctx) assoc :seon.db/db database)
+          (advance-context-projection! ctx database (context-projection ctx)))
+        (::acquisition snapshot))
+      (let [commit-fault! (or commit-fault! (:seon.flow/commit-fault! snapshot))
+            _ (load-core-namespaces! database)
+            generated (base-ctx database
+                                (cond-> {::loaded-database (::loaded-database snapshot)} commit-fault!
+                                  (assoc :seon.flow/commit-fault! commit-fault!)))
+            acquired (::acquisition generated)]
+        ;; SCI stamps later definitions with this generation. Installing the
+        ;; unforked base loses the provenance that definition-row observes.
+        (reset! (:env ctx) @(:env (sci/fork generated)))
+        (reset! (::kernel/installed-functions ctx) @(::kernel/installed-functions generated))
+        (advance-context-projection! ctx database (:seon.schema/projection generated))
+        (let [recorded (record-refusals-once! ctx database acquired commit-fault!)]
+          (reset! (::kernel/program-snapshot ctx)
+                  (assoc @(::kernel/program-snapshot generated) ::acquisition recorded))
+          recorded)))))
 
 (defn- acquire-function-from-database!
   "Acquire the lazy program before its first named invocation."
@@ -2394,7 +2618,8 @@
      ;; connection, so a connectionless context simply has none.
      (when connection
        (call-preparation/watch!
-        (get ctx call-preparation/carrier) connection projection))
+        (get ctx call-preparation/carrier) connection projection)
+       (watch-program-identity! connection))
      ctx))
 
 (defn fork-cluster-ctx
@@ -2461,7 +2686,8 @@
         ctx (db/pull db '[*] [:seon.fn/sym function-symbol]) projection db))
      (when connection
        (call-preparation/watch!
-        (get ctx call-preparation/carrier) connection projection))
+        (get ctx call-preparation/carrier) connection projection)
+       (watch-program-identity! connection))
      ctx)))
 
 (defn- declared-row

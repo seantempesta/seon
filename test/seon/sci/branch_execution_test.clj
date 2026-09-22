@@ -5,6 +5,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn :as functions]
+            [seon.id :as id]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.sci.eval-test]
@@ -130,3 +131,128 @@
                  (is (nil? (sci/resolve a-ctx 'seon.env/->Environment)))
                  (is (some? (sci/resolve b-ctx 'seon.env/->Environment)))
                  (println "REALITIES-HOST-REFUSAL" (pr-str refused))))))))))))))
+
+(defn- declared!
+  "Transact one analyzed declaration through the turn's declaration writer."
+  {:malli/schema [:=> [:cat :seon.db/connection :qualified-symbol :string] :seon.program/row]}
+  [connection function-symbol source]
+  (let [row (support/program-fn-row (db/db connection) function-symbol source)]
+    (support/transacted! connection (#'turn/row-tx (db/db connection) {} row))
+    row))
+
+(deftest ^{:seon.test/long "Two complete SCI acquisitions of the canonical fixture program (measured 985 ms for one derivation in this run's memo test) plus one analyzed declaration."
+           :seon.test/long-ms 8000}
+  a-data-only-commit-reuses-the-acquired-program-and-a-program-row-reacquires
+  (support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+       (let [live (support/fork-cluster-ctx connection)
+             before (db/db connection)
+             acquisition (eval/acquire! {:seon.sci.eval/ctx live :seon.db/db before})
+             environment @(:env live)
+             digest (id/sha-256 [(.getBytes "program-revision-probe" "UTF-8")])
+             _ (support/transacted! connection
+                 [{:seon.dev.mcp.artifact/id digest
+                   :seon.dev.mcp.artifact/digest digest}])
+             data (db/db connection)
+             reused (measured #(eval/acquire! {:seon.sci.eval/ctx live :seon.db/db data}))]
+         (is (not= (db/commit-id before) (db/commit-id data))
+             "the artifact row is a real commit")
+         (is (identical? acquisition (:value reused))
+             "a commit writing no program row returns the acquired program")
+         (is (identical? environment @(:env live))
+             "and installs nothing into the context")
+         (is (identical? data (:seon.db/db (eval/acquired-program live)))
+             "the acquired value advances to the program-equal commit")
+         (let [_ (declared! connection 'seon.sci.eval-test/program-revision-probe
+                   "(defn ^{:malli/schema [:=> [:cat] :int]} program-revision-probe [] 1)")
+               changed (db/db connection)]
+           (is (not (eval/acquired-database? live changed))
+               "a program row changes the acquired program's identity")
+           (let [reacquired (measured #(eval/acquire! {:seon.sci.eval/ctx live :seon.db/db changed}))]
+             (is (not (identical? acquisition (:value reacquired))))
+             (is (not (identical? environment @(:env live))))
+             (is (identical? changed (:seon.db/db (eval/acquired-program live))))
+             (is (= 1 (sci/eval-string* live "(seon.sci.eval-test/program-revision-probe)")))
+             (println "PROGRAM-REVISION-PROOF"
+                      (pr-str {:reused-acquire-ms (:ms reused)
+                               :program-reacquire-ms (:ms reacquired)}))))))))))
+
+(deftest ^{:seon.test/long "One complete base-context derivation of the canonical fixture program (measured 452-1,192 ms on default) and one memoized copy."
+           :seon.test/long-ms 8000}
+  a-base-context-is-memoized-by-its-program-and-each-caller-gets-its-own-fork
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           first-call (measured #(eval/base-ctx database))
+           second-call (measured #(eval/base-ctx database))
+           a (:value first-call)
+           b (:value second-call)]
+       (is (identical? (:seon.sci.eval/acquisition a) (:seon.sci.eval/acquisition b))
+           "the second call reads the derivation the first made")
+       (is (not (identical? (:env a) (:env b))))
+       (is (not (identical? (:seon.sci.kernel/program-snapshot a)
+                            (:seon.sci.kernel/program-snapshot b))))
+       (sci/eval-string* a "(def base-memo-probe 1)")
+       (is (some? (sci/resolve a 'user/base-memo-probe)))
+       (is (nil? (sci/resolve b 'user/base-memo-probe))
+           "a definition in one caller's context is invisible to another")
+       (println "BASE-CTX-MEMO-PROOF"
+                (pr-str {:derive-ms (:ms first-call) :memoized-ms (:ms second-call)}))))))
+
+(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program plus one analyzed declaration."
+           :seon.test/long-ms 8000}
+  an-override-of-a-declaration-the-indexer-marks-host-bound-refuses-by-name
+  (support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+       (let [live (support/fork-cluster-ctx connection)
+             _ (eval/acquire! {:seon.sci.eval/ctx live :seon.db/db (db/db connection)})
+             subject 'seon.render.hiccup/escape
+             indexed (db/pull (db/db connection) '[*] [:seon.fn/sym subject])]
+         (is (true? (:seon.fn/host-bound? indexed))
+             "the indexer marks the declaration's own class usage")
+         (is (not (#{'clojure.core/reify 'clojure.core/proxy 'clojure.core/definterface
+                     'clojure.core/deftype 'clojure.core/defrecord}
+                   (:seon.fn/defined-by indexed)))
+             "the form head alone would not have refused it")
+         (let [row (declared! connection subject
+                     "(defn ^{:malli/schema [:=> [:cat :string] :string]} escape [text] text)")
+               refused (eval/install-row! {:seon.sci.eval/ctx live
+                                           :seon.db/db (db/db connection)
+                                           :seon.program/row row})]
+           (is (= subject (:seon.sci.eval/refused-function refused)))
+           (is ((schema/projection-validator
+                 (db/carried-projection (db/db connection))
+                 :seon.sci.eval/interpretation-error) refused)))))))))
+
+(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program shared by two concurrent acquirers (measured 985 ms per derivation) plus one analyzed declaration."
+           :seon.test/long-ms 8000}
+  two-concurrent-acquisitions-of-one-program-derive-it-once
+  (support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+       (let [a (support/fork-cluster-ctx connection)
+             b (support/fork-cluster-ctx connection)
+             _ (declared! connection 'seon.sci.eval-test/concurrent-acquisition-probe
+                 "(defn ^{:malli/schema [:=> [:cat] :int]} concurrent-acquisition-probe [] 2)")
+             changed (db/db connection)
+             start (promise)
+             acquiring (fn [ctx]
+                         (future @start
+                                 (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db changed})))
+             in-a (acquiring a)
+             in-b (acquiring b)
+             _ (deliver start true)
+             from-a (deref in-a 6000 ::unfinished)
+             from-b (deref in-b 6000 ::unfinished)]
+         (is (not= ::unfinished from-a) "the first acquirer finished within its bound")
+         (is (not= ::unfinished from-b) "the second acquirer finished within its bound")
+         (is (identical? from-a from-b)
+             "both acquirers read the one derivation of the program")
+         (is (not (identical? (:env a) (:env b))) "each context keeps its own environment")
+         (is (= 2 (sci/eval-string* a "(seon.sci.eval-test/concurrent-acquisition-probe)")))
+         (is (= 2 (sci/eval-string* b "(seon.sci.eval-test/concurrent-acquisition-probe)")))))))))
