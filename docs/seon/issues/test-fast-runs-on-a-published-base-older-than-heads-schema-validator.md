@@ -26,3 +26,10 @@ refuses by name ("base predates <commit>; run `bin/test --prepare-head-base`")
 before it runs any test. Today the refusal comes from inside fixture setup,
 where the failing test looks like a red. The orchestrator owns
 `bin/test --prepare-head-base`.
+
+Sighting 2026-09-22 20:51Z (lane three-way-comparison): the overlay was 52 commits
+behind HEAD. Runs `8e0595c0b640`, `e6688bfdc5b3` and `e84538519dbc` of
+`seon.program-test` all hit the same 11 fixture-setup errors on `:my.note/note`.
+The block also stops the incremental schema proof the owner asked for on
+2026-09-23: no canonical fixture branch can be opened to transact a declaration
+change on.

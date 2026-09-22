@@ -26,3 +26,13 @@ the work. The unlabelled interval before the projection has no phase line of
 its own. Nobody has yet split it into JVM start, dependency class loading and
 Seon namespace compilation. Next step: add PHASE lines for those three, then
 name whichever load is proportional to the whole program.
+
+Sighting 2026-09-22 (lane three-way-comparison, run `e84538519dbc`, `seon.program-test`, 31 tests):
+
+| phase | seconds |
+| --- | --- |
+| whole command (`time`) | 46.11 |
+| `PHASE snapshot` | 4 |
+| JVM start + load, until `PACKAGED TEST PROJECTION ACQUIRED` (20:51:26.15Z) | about 29 (by subtraction) |
+| projection acquired -> `CONTRACTS ARMED` (1702 instrumented) | 2.4 |
+| test bodies (`BEGIN`..`END namespace`, 20:51:29.69Z..20:51:39.91Z) | 10.2 |

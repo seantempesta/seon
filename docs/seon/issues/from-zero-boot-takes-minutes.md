@@ -36,3 +36,4 @@ the launching shell's; load is `uptime`'s one-minute average at start.
 | 2026-09-22 | `a614fb898` frozen archive | from-zero | 145,701 | 160.44 | — | [lane-entrance-supplier](../../prds/agent-platform/landing/lane-entrance-supplier-2026-09-23.md) |
 | 2026-09-22 | earlier lane boots (recorded by the orchestrator) | from-zero | 112,209 · 152,951 · 180,675 · 96,964 · 89,423 | — | — | orchestrator report |
 | 2026-09-22 | typical | warm restart | ~5,500 | — | — | orchestrator report |
+| 2026-09-22 | `b51a24055` frozen archive (`git archive HEAD`) | from-zero | 179,252 | 199.19 | — | [lane-three-way-comparison](../../prds/agent-platform/landing/lane-three-way-comparison-2026-09-22.md) |
