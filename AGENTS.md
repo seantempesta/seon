@@ -100,6 +100,11 @@ Every derived result is keyed by its inputs' content (file digest, deps digest, 
 root, snapshot, scratch store and test run links that shared cache instead of starting
 empty. A valid key means reuse, never recomputation; an invalid key recomputes only what
 the changed inputs reach. Misses are counted where they happen, never hidden.
+A derived value is keyed by WHAT IT READS — the attributes and their Datahike revisions,
+or the input content — never by "the commit changed": an unrelated write must cost the
+happy path nothing (owner, 2026-09-23: "We need the happy path to be fast and to
+accumulate data that is reused"). A read, render, probe or eval path never writes a
+transaction that invalidates derived state.
 
 **Derive state; do not remember it.** A stored observation is not current derived
 state. Carry derived values with their immutable authority. A check must report its
