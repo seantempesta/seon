@@ -121,7 +121,8 @@ mechanism. Recognise them in your own next edit:
    function, and a test that fails without it.
 4. **Retiring without converting.** `:seon.error/kind` left the schema with 730 live
    writers and surfaced only when a reset built a store without it. A retirement and
-   every caller are one loadable slice, proven by a from-zero boot, not by a warm JVM.
+   every caller are one loadable slice, proven at the write: the schema writer refuses
+   a retirement while any program row still writes or references it (1.3e).
 
 Underneath all four: the dependency's source was not the first read. SCI keeps a live
 env, Datahike has per-attribute revisions and branch heads, konserve has GC. Before
@@ -412,9 +413,12 @@ that stops it. They are evergreen because they are habits of attention, not of c
    §7 and the model, with the citation; a genuinely new decision goes to the owner at
    once with priced options; a lane never waits across a check-in.
 4. **Accepting "HEAD loads" for a schema change.** Five writers off the canonical path
-   were invisible on a warm JVM and refused a from-zero boot one after another. Rule: a
-   commit touching a schema resource is accepted only with a scratch-root from-zero
-   boot in its landing note, and the graph refuses a retirement while writers survive.
+   were invisible on a warm JVM and refused a from-zero boot one after another. Rule
+   (owner, 2026-09-23: "a schema change should not require a from scratch boot.
+   Period."): a schema change is proven INCREMENTALLY — its declaration transaction
+   applied on a branch of a live store, with the writer refusing a retirement while
+   writers survive (1.3e). A schema change that cannot be adopted incrementally is a
+   publication defect to fix, never a reason to boot from zero.
 
 Underneath all four: the coordinator's job is the big picture — dependencies, files,
 proofs — and every minute spent on a tree is a minute the forest is unattended. When a
