@@ -56,9 +56,6 @@
 (def pending-review-lock-path (io/file review-state-root ".pending-review.lock"))
 (def review-worker-path (io/file review-state-root ".review-worker.edn"))
 (def reviews-path (io/file review-state-root "reviews"))
-(def pending-source-path (io/file review-state-root ".pending-source.edn"))
-(def source-worker-path (io/file review-state-root ".source-worker.edn"))
-(def source-results-path (io/file review-state-root "source-publications"))
 (def max-pending-files 50)
 
 ;;; ---------------------------------------------------------------------------
@@ -1483,190 +1480,57 @@
            (absolute-file-path file-path))
         (schema-resource-path? file-path))))
 
-(defn- publication-result
-  {:malli/schema [:=> [:cat :seon.schema/value] :map]}
-  [path]
-  (let [result (edn/read-string (slurp path))]
-    (when-not (and (map? result)
-                   (or (:seon.error/at result)
-                       (:seon.source/commit-id result)))
-      (throw (ex-info "Operator returned no typed publication evidence."
-                      {:seon.hook/result-path (str path)})))
-    result))
-
-(defn- publication-failure-message
-  {:malli/schema [:=> [:cat :map :map] :string]}
-  [result failure]
-  (let [output (str (:out result) "\n" (:err result))
-        evidence (root-file "logs/current-source-failure.log")
-        omitted (max 0 (- (count output) hook-log-cap))
-        failure-data (:seon.operator/exception-data failure)
-        failure-data (if (:seon.fn/findings failure-data)
-                       (update failure-data :seon.fn/findings
-                               #(filterv (fn [finding]
-                                           (= :error (:seon.fn.analyzer/level finding))) %))
-                       failure-data)]
-    (io/make-parents evidence)
-    (spit evidence
-          (str (when (pos? omitted)
-                 (str "Earlier output omitted: " omitted " characters.\n"))
-               (subs output omitted)))
-    (str "ADVISORY — current-src publication failed. Diagnostic: "
-         (.getPath evidence) ". "
-         (if-let [message (:seon.error/message failure)]
-           (str message
-                (when (seq failure-data) (str " " (pr-str failure-data))) ".")
-           (str "Operator exit " (:exit result)
-                " with no typed failure in its result."))
-         " Inspect the published head before relying on it.")))
-
 (defn- publish-source-paths
-  "Publish one admitted union of paths and return its terminal feedback."
-  {:malli/schema [:=> [:cat [:sequential :string] :map :string] :string]}
-  [paths config publication-id]
+  "Send one publication request and return its terminal feedback."
+  {:malli/schema [:=> [:cat [:vector :string] :map] :string]}
+  [paths config]
   (try
-        (let [timeout-ms (* 1000 (required-positive-config config [:current-source :timeout-seconds]))
-              result-path (io/file source-results-path (str publication-id "-operator.edn"))
-              _ (io/make-parents result-path)
-              _ (when (.exists result-path) (.delete result-path))
-              child
-              (process/process
-               {:cmd (into
-                      (cond-> [(str (root-file "bin/seon"))]
-                        (get-in config [:current-source :root])
-                        (into ["--root" (str (root-file
-                                             (get-in config [:current-source :root])))])
-                        true (into ["init" "--result-file" (str result-path)])
-                        (get-in config [:current-source :cluster])
-                        (into ["--dev" (get-in config [:current-source :cluster])])
-                        true (conj "--changed"))
-                      paths)
-                :dir repo-root
-                :out :string
-                :err :string
-                :continue true})
-              result (deref child
-                            timeout-ms
-                            ::timeout)
-              result (if (= ::timeout result)
-                       (do (process/destroy-tree child)
-                           @child
-                           {:exit 124 :err "Publication did not finish within its declared bound."})
-                       result)
-              terminal (if (.isFile result-path)
-                         (publication-result result-path)
-                         {:seon.error/at (java.util.Date.)
-                          :seon.error/layer :seon.hook/publication
-                          :seon.error/operation 'user/publish-source-paths
-                          :seon.error/message (str "Operator returned no result; exit " (:exit result))})]
-          (doseq [progress (:seon.operator/progress terminal)]
-            (log! "SOURCE_PROGRESS" (str "publication=" publication-id)
-                  (str "paths=" (pr-str paths))
-                  (pr-str (:seon.source/progress progress))))
-          (if (and (zero? (:exit result)) (:seon.source/commit-id terminal))
-              (str (if (get-in config [:current-source :cluster]) "converged: " "published: ")
-                   (pr-str (dissoc terminal :seon.operator/progress))
-                   (when (and (get-in config [:current-source :check-tests] true)
-                              (get-in config [:current-source :cluster]))
-                     (let [check (process/process
-                                  {:cmd [(str (root-file "bin/test-check"))
-                                         "--root" (str (root-file (get-in config [:current-source :root] ".")))
-                                         (get-in config [:current-source :cluster])]
-                                   :dir repo-root :out :string :err :string :continue true})
-                           checked (deref check
-                                          timeout-ms
-                                          ::timeout)]
-                       (if (= ::timeout checked)
-                         (do (process/destroy-tree check)
-                             @check
-                             "\ncheck unavailable: post-adoption feedback bound fired; adoption remains converged.")
-                         (str "\n" (:out checked) (:err checked))))))
-            (clip-feedback
-             config
-             (str "refused: " (publication-failure-message result terminal)))))
-        (catch Exception error
-          (clip-feedback
-           config
-           (str "ADVISORY — current-src publication could not run; inspect the "
-                "published head before relying on it. " (.getMessage error))))))
-
-(defn- read-source-state [path]
-  (when (.exists (io/file path))
-    (edn/read-string (slurp path))))
-
-(defn- source-result-path [id]
-  (io/file source-results-path (str id ".edn")))
-
-(defn- launch-source-worker-unlocked!
-  "Use the review worker admission pattern under the same pending lock."
-  []
-  (let [worker (read-source-state source-worker-path)]
-    (when-not (process-alive? (:seon.hook/pid worker))
-      (let [child (launch-hook-worker! ["--source-worker"])]
-        (spit source-worker-path (pr-str {:seon.hook/pid (.pid child)}))))))
-
-(defn- enqueue-source-unlocked! [paths]
-  (let [pending (read-source-state pending-source-path)
-        batch (-> (or pending {:seon.hook/publication (str (random-uuid))
-                              :seon.hook/queued-at (System/currentTimeMillis)})
-                  (update :seon.hook/paths #(vec (sort (into (set %) paths))))
-                  (assoc :seon.hook/edited-at (System/currentTimeMillis)))]
-    (spit pending-source-path (pr-str batch))
-    (log! "SOURCE_EDIT" (str "publication=" (:seon.hook/publication batch))
-          (str "paths=" (pr-str paths)))
-    (let [result (source-result-path (:seon.hook/publication batch))]
-      (io/make-parents result)
-      (.createNewFile result))
-    (launch-source-worker-unlocked!)
-    (:seon.hook/publication batch)))
-
-(defn- run-source-worker!
-  "Drain pending paths immediately; in-flight edits join one successor batch."
-  []
-  (let [config (load-config)]
-    (try
-      (loop []
-        (let [batch
-              (with-pending-lock
-                (fn []
-                  (if-let [pending (read-source-state pending-source-path)]
-                    (do (.delete pending-source-path) pending)
-                    (do (.delete source-worker-path) nil))))]
-          (when batch
-            (let [id (:seon.hook/publication batch)
-                  paths (:seon.hook/paths batch)
-                  _ (log! "SOURCE_ADMITTED" (str "publication=" id)
-                          (str "paths=" (pr-str paths)))
-                  feedback (publish-source-paths paths config id)
-                  result (source-result-path id)]
-              (io/make-parents result)
-              ;; Persist the terminal result for independent convergence inspection.
-              (with-pending-lock
-                #(spit result (str (pr-str (assoc batch
-                                                 :seon.hook/worker-pid
-                                                 (.pid (java.lang.ProcessHandle/current))
-                                                 :seon.hook/feedback feedback)) "\n")))
-              (log! "SOURCE_BATCH" (str "publication=" id)
-                    (str "paths=" (count paths)) feedback))
-            (recur))))
-      (catch Exception error
-        (log! "SOURCE_WORKER_ERROR" (.getMessage error))
-        (with-pending-lock #(.delete source-worker-path))))))
+    (let [timeout-ms (* 1000 (required-positive-config config [:current-source :timeout-seconds]))
+          root (operator/canonical-root (absolute-file-path (get-in config [:current-source :root] ".")))
+          cluster (get-in config [:current-source :cluster])
+          endpoint (operator/advertisement root cluster)
+          _ (when-not endpoint
+              (throw (ex-info "No live publication endpoint; start the selected root."
+                              {:seon.operator/root root :seon.boot/cluster-name cluster})))
+          form (pr-str
+                `(do
+                   (~'seon.cluster/project-next-prepl-value!
+                    {:seon.dev.mcp/read-only? false :seon.dev.mcp/project? false})
+                   (try
+                     (~'seon.cluster/refresh-source! ~root ~paths ~cluster)
+                     (catch Throwable failure#
+                       (merge {:seon.error/at (java.util.Date.)
+                               :seon.error/layer :seon.cluster/publication
+                               :seon.error/operation '~'seon.cluster/refresh-source!
+                               :seon.error/message (ex-message failure#)}
+                              (ex-data failure#))))))
+          result (operator/prepl-value! endpoint form timeout-ms
+                                       (fn [output] (binding [*out* *err*] (print output) (flush)))
+                                       timeout-ms)]
+      (cond
+        (:seon.error/message result) (str "refused: " (pr-str result))
+        (and (:seon.source/commit-id result)
+             (vector? (:seon.source/reloaded-namespaces result))
+             (set? (:seon.source/arming-identities result)))
+        (str "accepted: " (pr-str result))
+        :else (str "degraded: " (pr-str (operator/diagnostic
+                                        "Publication returned no complete terminal evidence."
+                                        {:seon.operator/reply result} :client-failed)))))
+    (catch Exception failure
+      (str "degraded: " (pr-str (operator/diagnostic
+                                (ex-message failure) (or (ex-data failure) {}) :client-failed))))))
 
 (defn- current-source-feedback
-  "Queue this edit in the root's detached publication worker and return immediately."
-  [event config]
-  (let [paths (->> (event-file-paths event)
+  "Publish the admitted named and derived paths synchronously in one request."
+  {:malli/schema [:=> [:cat :map :map [:vector :string]] [:maybe :string]]}
+  [event config derived-paths]
+  (let [paths (->> (concat (event-file-paths event) derived-paths)
                    (filter source-index-path?)
                    (map absolute-file-path) distinct vec)]
     (when (and (= (:hook_event_name event) "PostToolUse")
                (get-in config [:current-source :enabled] true)
                (seq paths))
-      (let [id (with-pending-lock #(enqueue-source-unlocked! paths))]
-        (str "queued for publication " id ": " (str/join ", " paths)
-             ". Check convergence by comparing the cluster's :seon.source/commit-id"
-             " with seon.cluster.source/current. Result: " (source-result-path id))))))
-
+      (publish-source-paths paths config))))
 
 
 ;;; ---------------------------------------------------------------------------
@@ -1777,7 +1641,7 @@
                          (event-agent event) (merge (event-agent event)))))
     (prune-session-digests!)))
 
-(defn- derived-write-refusal
+(defn- derived-write-feedback
   "Refuse when a write the payload never named left unreadable Clojure.
 
   The bytes are already written — a shell write has no payload to check
@@ -1787,6 +1651,10 @@
   `apply_patch`, so its next patch is the first moment an earlier shell
   write of its own can be reported to it at all. Paths the payload named
   are left to the payload's own check, which already ran."
+  {:malli/schema [:=> [:cat :map :map]
+                  [:maybe [:map
+                           [:seon.hook/paths [:vector :string]]
+                           [:seon.hook/refusal [:maybe :string]]]]]}
   [event config]
   (when (and (= "PostToolUse" (:hook_event_name event))
              (get-in config [:shell-writes :enabled] true))
@@ -1811,7 +1679,9 @@
                 (str "session=" session)
                 (str "agent=" (pr-str (event-agent event)))
                 (str "changed=" (pr-str changed)))
-          (cond
+          {:seon.hook/paths changed
+           :seon.hook/refusal
+           (cond
             (analysis-error analysis)
             (str "BLOCKED: " (:tool_name event) " changed "
                  (count changed) " Clojure file(s) and the hook could not "
@@ -1821,7 +1691,7 @@
             (str "BLOCKED: " (:tool_name event)
                  " left unreadable Clojure on disk. The bytes are already "
                  "written — repair them before anything else loads them:\n"
-                 (format-clj-kondo-findings syntax-errors)))))))))
+                 (format-clj-kondo-findings syntax-errors)))}))))))
 
 (defn- refuse-with
   "Refuse with a response built by `refusal-response`."
@@ -1908,12 +1778,14 @@
       (not local-edit?)
       (try
         (let [config (load-config)
-              refusal (when (#{"PreToolUse" "PostToolUse"} event-name)
-                        (derived-write-refusal event config))]
+              derived (when (#{"PreToolUse" "PostToolUse"} event-name)
+                        (derived-write-feedback event config))
+              refusal (:seon.hook/refusal derived)]
           (if refusal
             (do (log! "DERIVED_BLOCK" (str "tool=" tool-name) refusal)
                 (refuse! {:decision "block" :reason refusal} refusal))
-            (output! {:continue true})))
+            (output! (feedback-response
+                      [(current-source-feedback event config (vec (:seon.hook/paths derived)))] nil))))
         ;; a derived scan that throws has checked nothing; saying so is the
         ;; only honest answer, because silence here is what let a shell write
         ;; break the tree in the first place
@@ -1961,14 +1833,14 @@
                           schema-admission)]
                         feedback)
                   _ (schedule-gemini-review! event config)
+                  derived (derived-write-feedback event config)
+                  refusal (or (:seon.hook.lint/refusal lint) (:seon.hook/refusal derived))
                   feedback
                   (cond-> (vec feedback)
-                    (not (:seon.hook.schema-admission/errors?
-                          schema-admission))
-                    (conj (current-source-feedback event config)))
-                  feedback (vec feedback)
-                  refusal (or (:seon.hook.lint/refusal lint)
-                              (derived-write-refusal event config))]
+                    (and (str/blank? refusal)
+                         (not (:seon.hook.schema-admission/errors? schema-admission)))
+                    (conj (current-source-feedback event config (vec (:seon.hook/paths derived)))))
+                  feedback (vec feedback)]
               (when-not (str/blank? refusal) (log! "CLOJURE_REFUSAL" refusal))
               (if (str/blank? refusal)
                 (output! (feedback-response feedback refusal))
@@ -1986,7 +1858,6 @@
             (output! {:continue true})))))))
 
 (cond
-  (= "--source-worker" (first *command-line-args*)) (run-source-worker!)
   (= "--review-worker" (first *command-line-args*))
   (run-review-worker!
    (or (some-> (second *command-line-args*) parse-long) 120))

@@ -1900,13 +1900,15 @@
 
 (defn- load-development-definitions!
   "The one ordered JVM definition replacement used by development adoption."
-  {:malli/schema [:=> [:cat [:set :symbol] [:map-of :symbol [:set :symbol]]] :nil]}
+  {:malli/schema [:=> [:cat [:set :symbol] [:map-of :symbol [:set :symbol]]] :seon.source/reloaded-namespaces]}
   [namespaces requires]
-  (doseq [namespace-name (reload-order namespaces requires)
-          :when (reloadable-namespace? namespace-name)]
-    (report-source-progress! (str "development reload " namespace-name))
-    (require namespace-name :reload))
-  nil)
+  (into []
+        (comp (filter reloadable-namespace?)
+              (map (fn [namespace-name]
+                     (report-source-progress! (str "development reload " namespace-name))
+                     (require namespace-name :reload)
+                     namespace-name)))
+        (reload-order namespaces requires)))
 
 (declare commit-fault! process-identity)
 
@@ -2024,7 +2026,7 @@
    [:=> [:cat :seon.store/store :seon.boot/instance :seon.source/published
           [:vector :string]
           [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]]]
-    :nil]}
+    :seon.source/adoption-result]}
   [held-store instance published changed-paths _roots]
   (let [connection (:seon.boot/cluster-connection instance)
         cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
@@ -2033,7 +2035,9 @@
         prior-commit (:seon.source/commit-id
                       (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref))]
     (if (and prior-commit (= prior-commit (:seon.source/commit-id published)))
-      (do (report-source-progress! "development cluster converged") nil)
+      (do (report-source-progress! "development cluster converged")
+          {:seon.source/reloaded-namespaces []
+           :seon.source/arming-identities #{}})
       (let [previous-database (db/db connection)
         published-database (source/database held-store (:seon.source/commit-id published))]
        (try
@@ -2091,56 +2095,57 @@
           (ns-unmap namespace-name local-name))))
     ;; A changed caller reloaded before its changed callee fails on the
     ;; callee's new Var, so the order follows the declared requires facts.
-    (load-development-definitions! namespaces (namespace-requires database namespaces))
-    (verify-development-sources! published-database (fs/source-directory)
-                                 (into #{} (filter reloadable-namespace?) namespaces))
-    (env/advance-projection! (get ctx env/state-carrier)
-                             (db/basis-t database) projection)
-    (report-source-progress! "development JVM instrumentation")
-    (schema/call-with-projection
-     projection
-     (fn []
-       (let [effective (config/effective database cluster-name)
-             _ (when (or (:seon.config/error-key effective)
-                 (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
-                 (refused! "Development instrumentation configuration is unavailable."
-                           effective))
-             result (instrument/apply!
-                     {:seon.config/on-core-error
-                      (:seon.config/on-core-error effective)
-                      :seon.flow/commit-fault!
-                      (:seon.flow/commit-fault! @(:seon.sci.kernel/program-snapshot ctx))
-                      :seon.sci.admit/caps (config/result-caps effective)
-                      :seon.config.error/max-evidence-bytes
-                      (:seon.config.error/max-evidence-bytes effective)
-                      :seon.schema/projection projection
-                      :seon.instrument/changed-identities
-                      (development-arming-identities database namespaces changed-identities)})]
-         (when (or (:seon.instrument/registration-observation result)
-                   (and (= :panic (:seon.config/on-core-error effective))
-                        (not (pos? (or (:seon.instrument/instrumented result) 0)))))
-           (refused! "Development JVM instrumentation did not restore contracts."
-                     result)))))
-    ;; This fact means indexing, reload and instrumentation succeeded. SCI
-    ;; acquires this database on first use; it does no work during adoption.
-    (report-source-progress! "development adoption record")
-    (require-committed!
-     (db/transact! connection
-                   {:tx-data [{:db/id cluster-ref
-                               :seon.source/commit-id
-                               (:seon.source/commit-id published)}
-                              {:db/id :db/current-tx
-                               :seon.test/adoption-cluster cluster-ref
-                               :seon.test/adoption-identities (set/difference (set changed-identities)
-                                                                             (set deleted-identities))
-                               :seon.test/adoption-inputs (set changed-paths)}]})
-     {:seon.boot/population :seon.source/commit-id})
-    (when-let [channel (get-in instance
-                              [:seon.render.web/view
-                               :seon.render.web/runtime-eval-channel])]
-      (async/offer! channel :seon.render.web/runtime-eval))
-    (report-source-progress! "development cluster converged")
-    nil)
+    (let [reloaded (load-development-definitions! namespaces (namespace-requires database namespaces))
+          arming-identities (development-arming-identities database namespaces changed-identities)]
+      (verify-development-sources! published-database (fs/source-directory) (set reloaded))
+      (env/advance-projection! (get ctx env/state-carrier)
+                               (db/basis-t database) projection)
+      (report-source-progress! "development JVM instrumentation")
+      (schema/call-with-projection
+       projection
+       (fn []
+         (let [effective (config/effective database cluster-name)
+               _ (when (or (:seon.config/error-key effective)
+                   (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
+                   (refused! "Development instrumentation configuration is unavailable."
+                             effective))
+               result (instrument/apply!
+                       {:seon.config/on-core-error
+                        (:seon.config/on-core-error effective)
+                        :seon.flow/commit-fault!
+                        (:seon.flow/commit-fault! @(:seon.sci.kernel/program-snapshot ctx))
+                        :seon.sci.admit/caps (config/result-caps effective)
+                        :seon.config.error/max-evidence-bytes
+                        (:seon.config.error/max-evidence-bytes effective)
+                        :seon.schema/projection projection
+                        :seon.instrument/changed-identities
+                        arming-identities})]
+           (when (or (:seon.instrument/registration-observation result)
+                     (and (= :panic (:seon.config/on-core-error effective))
+                          (not (pos? (or (:seon.instrument/instrumented result) 0)))))
+             (refused! "Development JVM instrumentation did not restore contracts."
+                       result)))))
+      ;; This fact means indexing, reload and instrumentation succeeded. SCI
+      ;; acquires this database on first use; it does no work during adoption.
+      (report-source-progress! "development adoption record")
+      (require-committed!
+       (db/transact! connection
+                     {:tx-data [{:db/id cluster-ref
+                                 :seon.source/commit-id
+                                 (:seon.source/commit-id published)}
+                                {:db/id :db/current-tx
+                                 :seon.test/adoption-cluster cluster-ref
+                                 :seon.test/adoption-identities (set/difference (set changed-identities)
+                                                                               (set deleted-identities))
+                                 :seon.test/adoption-inputs (set changed-paths)}]})
+       {:seon.boot/population :seon.source/commit-id})
+      (when-let [channel (get-in instance
+                                [:seon.render.web/view
+                                 :seon.render.web/runtime-eval-channel])]
+        (async/offer! channel :seon.render.web/runtime-eval))
+      (report-source-progress! "development cluster converged")
+      {:seon.source/reloaded-namespaces reloaded
+       :seon.source/arming-identities arming-identities}))
     (finally (d/release-materialized-db published-database)))))))
 
 (defn refresh-source!
@@ -2153,12 +2158,12 @@
   the next request reconciles from the last adopted source database."
   {:malli/schema
    [:function
-    [:=> [:cat :seon.boot/root] :seon.source/published]
-    [:=> [:cat :seon.boot/root [:vector :string]] :seon.source/published]
+    [:=> [:cat :seon.boot/root] :seon.source/refresh-result]
+    [:=> [:cat :seon.boot/root [:vector :string]] :seon.source/refresh-result]
     [:=> [:cat :seon.boot/root [:vector :string] [:maybe :seon.boot/cluster-name]]
-     :seon.source/published]
+     :seon.source/refresh-result]
     [:=> [:cat :seon.boot/root [:vector :string] [:maybe :seon.boot/cluster-name] :string]
-     :seon.source/published]]}
+     :seon.source/refresh-result]]}
   ([root]
    (refresh-source! root []))
   ([root changed-paths]
@@ -2190,9 +2195,11 @@
           (schema/declaration-projection (schema.edn/packaged-forms))
           (fn []
             (let [published (full-source-refresh! root held-store roots)]
-              (when instance
-                (development-source-refresh! held-store instance published changed-paths roots))
-              published)))
+              (merge published
+                     (if instance
+                       (development-source-refresh! held-store instance published changed-paths roots)
+                       {:seon.source/reloaded-namespaces []
+                        :seon.source/arming-identities #{}})))))
          (finally
            (release-root-store! store-dir))))))))
 

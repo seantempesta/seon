@@ -15,7 +15,7 @@
   (let [result
         (operator.process/run-process!
          {:seon.operator.subprocess/argv command
-          :seon.operator.subprocess/directory directory
+          :seon.operator.subprocess/directory (str directory)
           :seon.operator.subprocess/extra-env (or environment {})
           :seon.operator.subprocess/input (or input "")
           :seon.operator.subprocess/deadline-ms (or deadline-ms 30000)})]
@@ -43,110 +43,6 @@
 (defn- delete-files! [files]
   (doseq [^java.io.File file files]
     (when (.exists file) (.delete file))))
-
-(deftest publication-diagnostics-come-from-the-operator-result
-  (let [directory (fixture-directory)
-        path (io/file directory "operator.edn")
-        failure {
-                 :seon.error/message "missing schema"
-                 :seon.operator/exception-data {:schema :example/input}}
-        program
-        (str "(require '[seon.operator :as operator]) "
-             "(binding [*in* (java.io.StringReader. \"{}\") "
-             "*out* (java.io.StringWriter.)] (load-file \"bin/seon-hook\")) "
-             "(with-redefs [operator/init! (fn [& _] "
-             "(println \"unreadable console {[\") "
-             "(throw (ex-info \"missing schema\" " (pr-str failure) ")))] "
-             "(binding [*out* (java.io.StringWriter.)] "
-             "(try (#'operator/init-result! \".\" [\"--result-file\" "
-             (pr-str (str path)) "]) (catch Exception _ nil)))) "
-             "(prn (publication-result " (pr-str (str path)) "))")]
-    (try
-      (let [result (run-process {::command ["bb" "-e" program]
-                                 ::directory repo-root})]
-        (is (hook-exit-honest? result) (::stderr result))
-        (is (= failure (edn/read-string (::stdout result)))))
-      (finally (test-support/delete-recursively! directory)))))
-
-(def ^:private queued-editor-probe
-  '(do
-     (binding [*in* (java.io.StringReader. "{}")
-               *out* (java.io.StringWriter.)]
-       (load-file "bin/seon-hook"))
-     (let [paths (mapv #(str (root-file %))
-                      ["src/seon/test/arm.clj" "src/seon/test/runner.clj"
-                       "test/seon/test/runner_test.clj"
-                       "test/seon/dev/hook_test.clj"
-                       "test/seon/dev/edit_feedback_test.clj"])
-           config {:current-source {:enabled true :timeout-seconds 1}}
-           publications (atom [])
-           responses (atom [])
-           edit (fn [path]
-                  (current-source-feedback
-                   {:hook_event_name "PostToolUse" :tool_name "Edit"
-                    :tool_input {:file_path path}}
-                   config))]
-       (io/make-parents source-worker-path)
-       (spit source-worker-path
-             (pr-str {:seon.hook/pid (.pid (java.lang.ProcessHandle/current))}))
-       (with-redefs [load-config (constantly config)
-                     publish-source-paths
-                     (fn [batch-paths _ id]
-                       (swap! publications conj
-                              {:seon.hook/publication id :seon.hook/paths batch-paths})
-                       ;; Inject edit events while the first publication is
-                       ;; on the stack. Feedback must return before it settles;
-                       ;; no scheduling interval determines batch membership.
-                       (when (= 1 (count @publications))
-                         (doseq [path (conj paths (first paths))]
-                           (swap! responses conj
-                                  {:seon.probe/path path :seon.probe/feedback (edit path)})))
-                       "refused: probe publication")]
-         (let [initial (edit (first paths))]
-           (run-source-worker!)
-           (prn {:seon.probe/paths paths
-                 :seon.probe/initial initial
-                 :seon.probe/publications @publications
-                 :seon.probe/responses @responses
-                 :seon.probe/results (mapv #(edn/read-string (slurp %))
-                                           (.listFiles source-results-path))
-                 :seon.probe/pending? (.exists pending-source-path)
-                 :seon.probe/worker? (.exists source-worker-path)}))))))
-
-(deftest concurrent-editors-queue-without-waiting-for-publication
-  (let [directory (fixture-directory)]
-    (try
-      (let [result (run-process
-                    {::command ["bb" "-e" (pr-str queued-editor-probe)]
-                     ::directory repo-root
-                     ::environment {"SEON_HOOK_STATE_DIR" (str directory)}
-                     ::deadline-ms (* 1000 test-support/event-backstop-seconds)})
-            _ (is (hook-exit-honest? result) (::stderr result))
-            observed (edn/read-string (::stdout result))
-            paths (:seon.probe/paths observed)
-            publications (:seon.probe/publications observed)
-            [initial successor] publications
-            responses (:seon.probe/responses observed)
-            results (:seon.probe/results observed)]
-        (is (= 2 (count publications)) "One initial batch and exactly one successor.")
-        (is (= [(first paths)] (:seon.hook/paths initial)))
-        (is (= (vec (sort paths)) (:seon.hook/paths successor)))
-        (is (not= (:seon.hook/publication initial) (:seon.hook/publication successor)))
-        (is (str/includes? (:seon.probe/initial observed) (:seon.hook/publication initial)))
-        (is (= (inc (count paths)) (count responses)))
-        (doseq [{:seon.probe/keys [path feedback]} responses]
-          (is (str/includes? feedback "queued for publication"))
-          (is (str/includes? feedback (:seon.hook/publication successor)))
-          (is (str/includes? feedback path))
-          (is (str/includes? feedback "seon.cluster.source/current")))
-        (is (= 2 (count results)))
-        (is (= (set (map :seon.hook/publication publications))
-               (set (map :seon.hook/publication results))))
-        (is (every? #(= "refused: probe publication" (:seon.hook/feedback %)) results)
-            "Terminal refusals remain refusals, never convergence.")
-        (is (false? (:seon.probe/pending? observed)))
-        (is (false? (:seon.probe/worker? observed))))
-      (finally (test-support/delete-recursively! directory)))))
 
 (deftest pre-edit-blocks-reconstructed-error-level-findings
   (let [directory (fixture-directory)
@@ -219,7 +115,8 @@
         (delete-files! [source config directory])))))
 
 (deftest ^{:seon.test/long
-           "59.518 s pool: real hook subprocesses cover schema admission before edit-hook publication."}
+           "Real schema-admission subprocesses measured 43,249.731 ms on 2026-09-22 (historical 59.518 s); allow 60 s for the two cold admission requests."
+           :seon.test/long-ms 60000}
   split-schema-edits-run-admission-before-publication
   (let [directory (fixture-directory)
         config (io/file directory "hook.edn")

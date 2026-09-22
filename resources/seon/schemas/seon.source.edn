@@ -77,6 +77,13 @@
                [:seon.source/populate-request
                 {:optional true}
                 :seon.source/populate-request]],
+              :reloaded-namespaces [:vector {:description "Namespaces whose require :reload completed in this request, in reload order."} :symbol],
+              :arming-identities [:and {:description "Reloaded Var and schema-referrer identities supplied to instrumentation by this adoption; empty for an unchanged adoption."} :seon.reconcile/adopt-identities],
+              :adoption-result
+              [:map
+               [:seon.source/reloaded-namespaces :seon.source/reloaded-namespaces]
+               [:seon.source/arming-identities :seon.source/arming-identities]],
+              :refresh-result [:and :seon.source/published :seon.source/adoption-result],
               :published
               [:map
                [:seon.source/branch :seon.source/branch]

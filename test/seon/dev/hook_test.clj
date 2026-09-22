@@ -3,147 +3,99 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [seon.cluster :as cluster]
+            [seon.cluster.process :as process]
             [seon.operator :as operator]
-            [seon.cluster.process :as operator.process]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as support]))
 
-(deftest source-progress-wording-is-not-the-hook-contract
-  (let [directory (doto (io/file "tmp" (str "hook-progress-" (random-uuid))) .mkdirs)
-        result-file (io/file directory "operator.edn")
-        phases ["incremental scalar publication" "completely renamed phase\nwith a newline"]]
-    (try
-      (let [result {:seon.source/commit-id "publication-probe"
-                    :seon.operator/progress (mapv #(hash-map :seon.source/progress %) phases)}
-            _ (spit result-file (pr-str result))
-            program
-            (str "(binding [*in* (java.io.StringReader. \"{}\") "
-                 "*out* (java.io.StringWriter.)] (load-file \"bin/seon-hook\")) "
-                 "(let [events (atom [])] "
-                 "(with-redefs [process/process (fn [request] "
-                 "(let [path (second (drop-while #(not= \"--result-file\" %) (:cmd request)))] "
-                 "(spit path (slurp " (pr-str (str result-file)) ")) "
-                 "(future {:exit 0 :out \"not EDN {[ console noise\" :err \"warning\"}))) "
-                 "log! (fn [& event] (swap! events conj event))] "
-                 "(prn {:seon.probe/feedback (publish-source-paths [\"probe.clj\"] "
-                 "{:current-source {:cluster \"default\" :timeout-seconds 1 :check-tests false}} \"rename\") "
-                 ":seon.probe/progress (mapv #(edn/read-string (last %)) @events)})))")
-            observed (operator.process/run-process!
-                      {:seon.operator.subprocess/argv ["bb" "-e" program]
-                       :seon.operator.subprocess/directory (io/file ".")
-                       :seon.operator.subprocess/extra-env
-                       {"SEON_HOOK_STATE_DIR" (.getCanonicalPath directory)}
-                       :seon.operator.subprocess/deadline-ms
-                       (* 1000 test-support/event-backstop-seconds)})]
-        (is (zero? (:seon.operator.subprocess/exit observed))
-            (:seon.operator.subprocess/error-output observed))
-        (is (= phases
-               (:seon.probe/progress (edn/read-string (:seon.operator.subprocess/output observed)))))
-        (is (str/starts-with?
-             (:seon.probe/feedback (edn/read-string (:seon.operator.subprocess/output observed)))
-             "converged:"))
-        (is (= "publication-probe" (:seon.source/commit-id result))))
-      (finally (test-support/delete-recursively! directory)))))
-
-(def ^:private source-worker-probe
+(def ^:private terminal-probe
   '(do
-     (require '[seon.operator :as operator]
-              '[seon.dev.clj-kondo :as kondo])
-     (binding [*in* (java.io.StringReader. "{}")
-               *out* (java.io.StringWriter.)]
+     (binding [*in* (java.io.StringReader. "{}") *out* (java.io.StringWriter.)]
        (load-file "bin/seon-hook"))
-     (let [published (atom [])
-           successor-ids (atom [])
-           transports (atom [])
-           operator-root (io/file (System/getenv "SEON_HOOK_STATE_DIR") "operator")
-           advertised {:seon.boot/cluster-name "default"
-                       :seon.boot/pid (.pid (java.lang.ProcessHandle/current))
-                       :seon.boot/start-instant
-                       (java.util.Date/from (.get (.startInstant (.info (java.lang.ProcessHandle/current)))))
-                       :seon.boot/prepl-host "127.0.0.1"
-                       :seon.boot/prepl-port 1}
-           advertisement-file (io/file operator-root "data" "clusters" "default" "prepl.edn")
-           config {:current-source {:quiet-seconds 86400 :timeout-seconds 1}}]
-       (io/make-parents advertisement-file)
-       (spit advertisement-file (pr-str advertised))
-       (io/make-parents source-worker-path)
-       ;; This process owns the worker. Exercise its real file lock, pending
-       ;; batch, admission and completion without launching a second worker.
-       (spit source-worker-path
-             (pr-str {:seon.hook/pid (.pid (java.lang.ProcessHandle/current))}))
-       (with-redefs [kondo/ensure-dependency-cache! (fn [& _] {:seon.dev.clj-kondo/status :ready})
-                     operator/prepl-value!
-                     (fn [advertisement & _]
-                       (swap! transports conj advertisement)
-                       {:seon.source/commit-id "probe"})
-                     load-config (constantly config)
-                     publish-source-paths
-                     (fn [paths _ id]
-                       (binding [*out* (java.io.StringWriter.)]
-                         (operator/connected! {:seon.operator/managed-root (str operator-root)
-                                              :seon.operator/command :init
-                                              :seon.operator/development-cluster "default"
-                                              :seon.source/changed-paths paths}))
-                       (swap! published conj {:seon.hook/paths paths
-                                              :seon.hook/publication id})
-                       (when (= 1 (count @published))
-                         (doseq [edit [["b.clj"] ["c.clj" "b.clj"] ["a.clj"]]]
-                           (swap! successor-ids conj
-                                  (with-pending-lock
-                                    #(enqueue-source-unlocked! edit)))))
-                       "converged: probe")]
-         (let [first-id (with-pending-lock
-                          #(enqueue-source-unlocked! ["a.clj"]))]
-           (run-source-worker!)
-           (.delete advertisement-file)
-           (prn {:seon.probe/first-id first-id
-                 :seon.probe/published @published
-                 :seon.probe/transports @transports
-                 :seon.probe/advertised advertised
-                 :seon.probe/absent
-                 (try
-                   (operator/connected! {:seon.operator/managed-root (str operator-root)
-                                         :seon.operator/command :init})
-                   :unexpected-success
-                   (catch Exception e (:seon.error/layer (ex-data e))))
-                 :seon.probe/successor-ids @successor-ids
-                 :seon.probe/results
-                 (mapv #(edn/read-string (slurp %))
-                       (.listFiles source-results-path))
-                 :seon.probe/pending? (.exists pending-source-path)
-                 :seon.probe/worker? (.exists source-worker-path)}))))))
+     (let [accepted {:seon.source/commit-id #uuid "b2b94a47-7638-4187-9a8f-b71b95532880"
+                     :seon.source/reloaded-namespaces '[my.note]
+                     :seon.source/arming-identities #{[:seon.fn/sym 'my.note/create]}}
+           refused {:seon.error/message "probe refusal"
+                    :seon.error/operation 'seon.cluster/refresh-source!
+                    :seon.error/layer :seon.cluster/publication}
+           requests (atom [])
+           config {:current-source {:enabled true :root "." :cluster "default"
+                                    :timeout-seconds 2}}
+           event {:hook_event_name "PostToolUse" :tool_name "Edit"
+                  :tool_input {:file_path "src/my/note.clj"}}]
+       (with-open [server (java.net.ServerSocket. 0)]
+         (.setSoTimeout server 2000)
+         (let [worker
+               (future
+                 (doseq [result [accepted refused {}]]
+                   (with-open [socket (.accept server)
+                               reader (java.io.PushbackReader. (io/reader socket))
+                               writer (io/writer socket)]
+                     (.setSoTimeout socket 2000)
+                     (swap! requests conj (edn/read reader))
+                     (.write writer (str (pr-str {:tag :out :val "arbitrary progress {[\n"}) "\n"
+                                         (pr-str {:tag :ret :val (pr-str result)}) "\n"))
+                     (.flush writer)
+                     (when-not (= ::eof (edn/read {:eof ::eof} reader))
+                       (throw (ex-info "More than one request on the connection" {}))))))
+               endpoint {:seon.boot/prepl-host "127.0.0.1"
+                         :seon.boot/prepl-port (.getLocalPort server)}
+               replies
+               (with-redefs [operator/advertisement (fn [& _] endpoint)]
+                 [(current-source-feedback event config [])
+                  (current-source-feedback event config ["src/seon/id.clj"])
+                  (current-source-feedback event (assoc-in config [:current-source :enabled] false) [])
+                  (current-source-feedback event config [])])]
+           @worker
+           (prn {:seon.probe/replies replies :seon.probe/requests @requests
+                 :seon.probe/accepted accepted :seon.probe/refused refused}))))))
 
-(deftest idle-edit-starts-without-quiet-delay
-  (let [directory (doto (io/file "tmp" (str "hook-drain-" (random-uuid))) .mkdirs)]
-    (try
-      (let [result (operator.process/run-process!
-                    {:seon.operator.subprocess/argv
-                     ["bb" "-e" (pr-str source-worker-probe)]
-                     :seon.operator.subprocess/directory (io/file ".")
-                     :seon.operator.subprocess/extra-env
-                     {"SEON_HOOK_STATE_DIR" (.getCanonicalPath directory)}
-                     :seon.operator.subprocess/deadline-ms
-                     (* 1000 test-support/event-backstop-seconds)})
-            _ (is (zero? (:seon.operator.subprocess/exit result))
-                  (:seon.operator.subprocess/error-output result))
-            observed (edn/read-string (:seon.operator.subprocess/output result))
-            published (:seon.probe/published observed)
-            successor-ids (:seon.probe/successor-ids observed)]
-        (is (= [["a.clj"] ["a.clj" "b.clj" "c.clj"]]
-               (mapv :seon.hook/paths published))
-            "Idle admission and completion drain immediately, even with a legacy quiet setting.")
-        (is (= (repeat 2 (:seon.probe/advertised observed)) (:seon.probe/transports observed))
-            "Both batches use the live advertisement without a registry census prerequisite.")
-        (is (= :seon.operator/operation (:seon.probe/absent observed))
-            "An absent advertisement is named, never inferred to mean a dead JVM.")
-        (is (= 3 (count successor-ids)))
-        (is (= 1 (count (set successor-ids)))
-            "Every edit during publication joins the same successor.")
-        (is (not= (:seon.probe/first-id observed) (first successor-ids)))
-        (is (= (set (map :seon.hook/publication published))
-               (set (map :seon.hook/publication (:seon.probe/results observed)))))
-        (is (every? #(= "converged: probe" (:seon.hook/feedback %))
-                    (:seon.probe/results observed)))
-        (is (false? (:seon.probe/pending? observed)))
-        (is (false? (:seon.probe/worker? observed))))
-      (finally (test-support/delete-recursively! directory)))))
+(deftest one-request-returns-terminal-evidence-and-pause-sends-nothing
+  (let [result (process/run-process!
+                {:seon.operator.subprocess/argv ["bb" "-e" (pr-str terminal-probe)]
+                 :seon.operator.subprocess/directory "."
+                 :seon.operator.subprocess/deadline-ms
+                 (* 1000 support/event-backstop-seconds)})]
+    (is (zero? (:seon.operator.subprocess/exit result))
+        (:seon.operator.subprocess/error-output result))
+    (when (zero? (:seon.operator.subprocess/exit result))
+      (let [observed (edn/read-string (:seon.operator.subprocess/output result))
+            [accepted refused paused degraded] (:seon.probe/replies observed)
+            requests (:seon.probe/requests observed)]
+        (is (= 3 (count requests)))
+        (is (= (str "accepted: " (pr-str (:seon.probe/accepted observed))) accepted))
+        (is (= (str "refused: " (pr-str (:seon.probe/refused observed))) refused))
+        (is (nil? paused))
+        (is (str/starts-with? degraded "degraded:"))
+        (is (every? #(= 1 (count (filter (fn [form] (and (seq? form) (= 'seon.cluster/refresh-source! (first form))))
+                                        (tree-seq coll? seq %)))) requests))
+        (is (str/includes? (pr-str (second requests)) "src/seon/id.clj"))
+        (is (not (str/includes? accepted "arbitrary progress")))))))
+
+(deftest output-does-not-extend-the-hook-terminal-bound
+  (with-open [server (java.net.ServerSocket. 0)]
+    (.setSoTimeout server 1000)
+    (let [worker (future
+                   (try
+                   (with-open [socket (.accept server)
+                               reader (java.io.PushbackReader. (io/reader socket))
+                               writer (io/writer socket)]
+                     (edn/read reader)
+                     (try
+                       (dotimes [_ 30]
+                         (.write writer (str (pr-str {:tag :out :val "still working"}) "\n"))
+                         (.flush writer)
+                         (Thread/sleep 10))
+                       (catch java.io.IOException _ nil)))
+                   (catch java.io.IOException _ nil)))
+          began (System/nanoTime)
+          failure (try
+                    (operator/prepl-value!
+                     {:seon.boot/prepl-host "127.0.0.1"
+                      :seon.boot/prepl-port (.getLocalPort server)} "(+ 1 1)" 1000 nil 50)
+                    nil
+                    (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
+          elapsed (/ (- (System/nanoTime) began) 1e6)]
+      @worker
+      (is (map? failure))
+      (is (str/includes? (:seon.error/message failure) "outcome unknown"))
+      (is (< elapsed 500) "Output cannot renew the hook's total wait bound."))))

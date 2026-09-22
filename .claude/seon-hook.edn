@@ -3,8 +3,8 @@
 ;; bin/seon-hook runs entirely in Babashka. It does not require a running
 ;; Seon process: syntax validation happens before an edit; the canonical
 ;; Markdown and docstring linters run after it; current source publication
-;; uses the live operator JVM when one exists. After convergence the same JVM
-;; checks tests reaching the recorded adoption; widened edits only name a gate.
+;; makes one synchronous prepl request to the live operator JVM and returns
+;; its terminal adoption data. Save-time test gating remains a separate cut.
 ;; Gemini review is one asynchronous, coalesced batch per two-minute window;
 ;; it never delays edit feedback or creates parallel review workers.
 ;; Every numeric bound this hook enforces is declared here and nowhere else:

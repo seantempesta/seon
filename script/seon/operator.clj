@@ -116,31 +116,51 @@
             (iterator-seq (.iterator stream))))))
 
 (defn prepl-value!
+  "Read one form's arbitrary EDN terminal value. The optional total bound limits
+  the hook's wait even while output arrives; expiry leaves execution unknown."
+  {:malli/schema
+   [:function
+    [:=> [:cat :map :string] :seon.schema/value]
+    [:=> [:cat :map :string [:int {:min 1}]] :seon.schema/value]
+    [:=> [:cat :map :string [:int {:min 1}] [:maybe [:=> [:cat :string] :nil]]]
+     :seon.schema/value]
+    [:=> [:cat :map :string [:int {:min 1}] [:maybe [:=> [:cat :string] :nil]]
+          [:maybe [:int {:min 1}]]]
+     :seon.schema/value]]}
   ([advertisement form] (prepl-value! advertisement form (operator-silence-backstop-ms {})))
   ([advertisement form timeout-ms] (prepl-value! advertisement form timeout-ms nil))
   ([advertisement form timeout-ms observe!]
-   (with-open [socket (Socket.)]
-     (.connect socket (InetSocketAddress. (:seon.boot/prepl-host advertisement)
-                                         (int (:seon.boot/prepl-port advertisement))) (int timeout-ms))
-     (.setSoTimeout socket (int timeout-ms))
-     (with-open [writer (io/writer socket) reader (PushbackReader. (io/reader socket))]
-       (.write writer (str form "\n")) (.flush writer)
-       (loop []
-         (let [event (try
-                       (edn/read {:eof ::eof} reader)
-                       (catch SocketTimeoutException _
-                         (fail! "PREPL emitted no next output or terminal result within its declared bound; outcome unknown."
-                                (assoc advertisement
-                                       :seon.operator/event :prepl-output-or-result
-                                       :seon.operator/timeout-ms timeout-ms))))]
-           (when (and observe! (= :out (:tag event))) (observe! (:val event)))
-           (when (= ::eof event) (fail! "PREPL closed without a terminal result; outcome unknown." advertisement))
-           (if (= :ret (:tag event))
-             (if (:exception event)
-               (fail! "PREPL evaluation failed." event)
-               (try (edn/read-string (:val event))
-                    (catch Exception cause (fail! "Malformed PREPL result." event))))
-             (recur))))))))
+   (prepl-value! advertisement form timeout-ms observe! nil))
+  ([advertisement form timeout-ms observe! total-bound-ms]
+   (let [deadline (when total-bound-ms (+ (System/nanoTime) (* 1000000 total-bound-ms)))]
+     (with-open [socket (Socket.)]
+       (.connect socket (InetSocketAddress. (:seon.boot/prepl-host advertisement)
+                                           (int (:seon.boot/prepl-port advertisement))) (int timeout-ms))
+       (.setSoTimeout socket (int timeout-ms))
+       (with-open [writer (io/writer socket) reader (PushbackReader. (io/reader socket))]
+         (.write writer (str form "\n")) (.flush writer)
+         (loop []
+           (when deadline
+             (let [remaining (long (Math/ceil (/ (- deadline (System/nanoTime)) 1000000.0)))]
+               (when-not (pos? remaining)
+                 (fail! "PREPL terminal result did not arrive within its declared bound; outcome unknown."
+                        (assoc advertisement :seon.operator/timeout-ms total-bound-ms)))
+               (.setSoTimeout socket (int (min timeout-ms remaining)))))
+           (let [event (try
+                         (edn/read {:eof ::eof} reader)
+                         (catch SocketTimeoutException _
+                           (fail! "PREPL emitted no next output or terminal result within its declared bound; outcome unknown."
+                                  (assoc advertisement
+                                         :seon.operator/event (if deadline :prepl-terminal-result :prepl-output-or-result)
+                                         :seon.operator/timeout-ms (or total-bound-ms timeout-ms)))))]
+             (when (and observe! (= :out (:tag event))) (observe! (:val event)))
+             (when (= ::eof event) (fail! "PREPL closed without a terminal result; outcome unknown." advertisement))
+             (if (= :ret (:tag event))
+               (if (:exception event)
+                 (fail! "PREPL evaluation failed." event)
+                 (try (edn/read-string (:val event))
+                      (catch Exception cause (fail! "Malformed PREPL result." event))))
+               (recur)))))))))
 
 (defn- operator-reply!
   [value]
@@ -361,7 +381,6 @@
           "--force" (recur (next args) (assoc request :seon.operator/force? true) positionals)
           "--verbose" (recur (next args) (assoc request :seon.operator/verbose? true) positionals)
           "--dev" (recur (nnext args) (assoc request :seon.operator/development-cluster (valid-name (second args))) positionals)
-          "--result-file" (recur (nnext args) (assoc request :seon.operator/result-file (second args)) positionals)
           "--config" (let [_ (when-not (= :start command)
                                         (fail! "--config is supported only by start." request))
                            manifest (edn/read-string (slurp (second args)))]
@@ -403,7 +422,6 @@
           result (if (= :help (:seon.operator/command request))
                    {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset --force | logs [NAME] | config apply [NAME] PATH | export PATH"}
                    (request! request))]
-      (when-let [path (:seon.operator/result-file request)] (spit path (pr-str result)))
       (cond
         (:seon.operator/help result) (println (:seon.operator/help result))
         (:seon.error/message result) (binding [*out* *err*] (prn result))
