@@ -364,3 +364,14 @@ the Throwable is consumed into `:seon.error/frame` and `:seon.error/exception-cl
 and never carried in the returned base (B3 §2a's store row lists frame/exception-class,
 never the object); `:seon.error/cause` stays the stored ref. lane-b3 §2a is corrected
 by the lane in the constructor commit.
+
+## 2026-09-22 09:40 local — ruling: errors are explicit named schemas; the facet layer retires
+
+Owner: errors are data with explicit named schemas and validations; a function declares
+the explicit union it can return; callers branch on that union or a member; the program
+graph answers which functions can error, with what, how it propagates and who fixes it.
+Recorded in README §7. Consequence for the queued `error-facets` resume: do NOT replace
+the four hand-written unions with a registry-derived complete schema; each producer
+declares its explicit union (or is typed on the base if it is an error-handling owner);
+the wrapper check at `instrument.clj:774` validates against the arity's declared union,
+never against base shape; rename `facet` → declared error schema.
