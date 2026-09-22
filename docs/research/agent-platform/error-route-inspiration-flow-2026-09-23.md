@@ -93,3 +93,20 @@ There are 238 `(catch ` sites under `src/seon`.
    - Never read a source `:error-chan` from anywhere else; flow-monitor shows how a second reader steals errors.
 7. **Rule out:** stringified errors (flow-monitor), string-only context (http-kit), unchecked failure-as-data (bb-process), and `println` side paths (hyperlith `extras/batch.clj:38`).
 8. **Enforcement:** a clj-kondo hook flagging any `catch` whose body neither calls `record!` nor rethrows, plus a test counting non-compliant catch sites.
+
+## Addendum: dedupe (A) and visibility to agents (B), from the same lane
+- **Dedupe (A).** No reference project fingerprints and counts. The nearest are hyperlith `impl/trace.clj`, which records the first occurrence of each hash (no counter), core.async's bounding buffers (not dedupe), and http-kit, which logs every occurrence. Seon already goes further:
+  - `signature` (`src/seon/error.clj:151-176`) excludes time, process, message and bytes;
+  - `fault-committer-step` (`src/seon/flow.clj:1002-1080`) keeps `::seen-signatures` and does nothing on a repeat;
+  - `problems.clj:110-127` sums `:seon.error.occurrence/count`;
+  - `counted-dropping-buffer` (`flow.clj:999`) turns overflow into one synthetic fault.
+
+  Fits:
+  - (a) coalesce `signature -> {count first-at last-at last-occurrence}` on the committer and flush one transaction per tick;
+  - (b) bound `::seen-signatures` (LRU/TTL). Today it only grows and resets on each graph start, and a repeat hit should still bump the durable counter instead of being dropped at `flow.clj:1057-1058`;
+  - (c) expose counts through `ping-map-fn` (which already selects `::committed ::panicked ::lost` at `flow.clj:1005`), adding `::coalesced ::dropped`.
+- **Visibility (B).**
+  - The operator looks at `flow/ping` (MCP `runtime_status` can call it) and the monitor tap, so each proc's `ping-map-fn` should expose last-fault-signature, fault-count and status. `problems.clj` is the durable view agents read.
+  - Flow gives pid, cid, msg, state and count for free (`flow/impl.clj:313-315`), which is enough to replay `(step state cid msg)`. But Seon's `meaningful-source` (`src/seon/error.clj:218-222`) dissocs `::flow/state`, which removes the reproduction context. Keep a bounded digest or a capped copy per signature (first and latest) instead.
+  - `:panic` = commit first, `tap>` the fault, and fail the waiting turn or REPL eval with the fault id (template: `db.clj:2725-2731, 3947-3951`).
+  - Wake: `join-error-fanout!` (`src/seon/flow.clj:1270-1293`) merges a provenance tag into each fault. Use `::flow/pid` plus that tag to resolve the owning agent and signal it, on the FIRST occurrence of a signature only.
