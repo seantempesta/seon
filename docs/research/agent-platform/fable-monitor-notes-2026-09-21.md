@@ -256,3 +256,19 @@ again if it passes a few GB.
 Cold gate at `09e8ba533` refused selection: "requested external inputs differ from the
 published database" with no differing key named; lane `gate-input-mismatch` (sol
 medium) owns the diagnosis, the fix at the owner, and the evidence-naming refusal.
+
+## 2026-09-22 05:05 local — gate input authority fixed; publication paused for store growth
+
+- `gate-input-mismatch` (`42ecbacf3`, `59012e386`): publication hashed only its 283
+  indexed program files while selection hashed all 302 declared inputs; the 19
+  nonindexed test fixtures/probes were the difference. Both now derive from one
+  inventory and a refusal prints every differing path with both digests. Two
+  pre-existing reds remain in its 18-test run: one test at 8.8 s over its 5 s bound
+  and an incomplete declared-reference error facet — queued for the next lane.
+- Store: 87 MB → 796 MB (5 min) → 7.4 GB (15 min) with hook publication on and one
+  lane editing: ~150 MB of rewritten index leaves per adoption (A2 retention/currency,
+  README §4 cut 2). Hook publication PAUSED again; the orchestrator adopts at
+  checkpoints with `bin/seon init --dev default`. The disk-filling class is no longer
+  a loop, but it is not closed until A2 lands.
+- Next: re-prepare the fixture base (publication now records the complete input map),
+  then the cold gate at HEAD.

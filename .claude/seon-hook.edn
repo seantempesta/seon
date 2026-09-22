@@ -44,8 +44,12 @@
  ;; the config apply; `bin/seon status` then threw inside the JVM. Re-enable at the
  ;; coordinated restart after these lanes land, and record the resume here.
  ;; 2026-09-22 04:05 (orchestrator): RESUMED after the coordinated reset; no lane edits src.
+ ;; 2026-09-22 05:05 (orchestrator): PAUSED again — every adoption rewrites ~150 MB of
+ ;; Datahike index leaves (store 87 MB → 7.4 GB in 15 min with one lane editing; A2's
+ ;; retention seam, cut 2). The orchestrator adopts at checkpoints with
+ ;; `bin/seon init --dev default` until A2 lands; resume is recorded here.
  :current-source
- {:enabled true
+ {:enabled false
   :root "."
   :cluster "default"
   ;; 2026-09-20 (owner): the post-adoption test check is OFF until the new
