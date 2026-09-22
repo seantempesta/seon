@@ -140,6 +140,13 @@
                     (catch Exception cause (fail! "Malformed PREPL result." event))))
              (recur))))))))
 
+(defn- operator-reply!
+  [value]
+  (when-not (map? value)
+    (fail! "Operator reply must be a readable EDN map."
+           {:seon.operator/reply value}))
+  value)
+
 (defn live-root-value!
   ([root form] (live-root-value! root form {}))
   ([root form options]
@@ -170,10 +177,16 @@
                  "An exact-root JVM is alive but its endpoint is unavailable."
                  "No live exact-root JVM; start the selected root first.")
                (assoc request :seon.operator/processes (vec identities)))))
-    (prepl-value! endpoint
-                  (request-form (merge request (select-keys endpoint [:seon.boot/pid :seon.boot/start-instant])))
-                  (operation-bound-ms request)
-                  (fn [text] (print text) (flush)))))
+    (let [identity (select-keys endpoint [:seon.boot/pid :seon.boot/start-instant])
+          handle (matching-handle identity)
+          result (operator-reply!
+                  (prepl-value! endpoint
+                                (request-form (merge request identity))
+                                (operation-bound-ms request)
+                                (fn [text] (print text) (flush))))]
+      (when (:seon.operator/process-exit? result)
+        (.get (.onExit handle) (operation-bound-ms request) TimeUnit/MILLISECONDS))
+      result)))
 
 (defn terminate! [identity bound]
   (when-let [handle (matching-handle identity)]
@@ -196,7 +209,8 @@
                         (request-form (merge request identity {:seon.operator/command :down})))
            (catch Exception _ nil))))
   (doseq [identity identities] (terminate! identity (operator-silence-backstop-ms {})))
-  {:seon.operator/stopped-processes (vec identities)})
+  {:seon.operator/stopped-processes (vec identities)
+   :seon.operator/process-exit? (boolean (seq identities))})
 
 (defn force-stop! [request]
   (let [endpoint (advertisement (:seon.operator/managed-root request)
@@ -238,13 +252,8 @@
       (require '~'clojure.core.server '~'clojure.java.io)
       (let [listener# (~'clojure.core.server/start-server
                        {:name ~(str "seon.cluster/" (:seon.boot/cluster-name request))
-                        :accept '~'clojure.core.server/io-prepl :address "127.0.0.1" :port 0
-                        :args [:valf (fn [value#]
-                                       (if-let [project# (some-> (find-ns '~'seon.cluster)
-                                                                 (ns-resolve '~'mcp-valf))]
-                                         (project# ~(:seon.boot/cluster-name request)
-                                                   (deref (ns-resolve '~'seon.config '~'defaults)) value#)
-                                         (pr-str value#))) ]})
+                        :accept '~'seon.operator.prepl/io-prepl :address "127.0.0.1" :port 0
+                        :args [:cluster-name ~(:seon.boot/cluster-name request)]})
             start# (.startInstant (.info (java.lang.ProcessHandle/current)))
             identity# {:seon.boot/pid (.pid (java.lang.ProcessHandle/current))
                        :seon.boot/start-instant (java.util.Date/from (.get start#))}

@@ -4,6 +4,7 @@
                   :seon.operator/advertisements]
                  [:seon.operator/branches :seon.operator/branches]],
                 :working-directory :string,
+                :process-exit? :boolean,
                 :missing-bound :qualified-keyword,
                 :custody-selection-error
                 [:and
@@ -226,10 +227,12 @@
                   [:seon.render.web/url :seon.render.web/url]]
                  [:map
                   [:seon.boot/cluster-name :seon.boot/cluster-name]
-                  [:seon.operator/stopped? [:= true]]]
+                  [:seon.operator/stopped? [:= true]]
+                  [:seon.operator/process-exit? :seon.operator/process-exit?]]
                  [:map
                   [:seon.operator/stopped-processes
-                   [:vector :seon.cluster.process/identity]]]
+                   [:vector :seon.cluster.process/identity]]
+                  [:seon.operator/process-exit? :seon.operator/process-exit?]]
                  [:map
                   [:seon.boot/cluster-name :seon.boot/cluster-name]
                   [:seon.reconcile/result :seon.reconcile/result]]

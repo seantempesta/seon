@@ -244,10 +244,10 @@
     (try
       (let [listener (or (:seon.boot/prepl-server request)
                          (server/start-server
-                          {:name (server-name name) :accept 'clojure.core.server/io-prepl
+                          {:name (server-name name) :accept 'seon.operator.prepl/io-prepl
                            :address (:seon.boot/prepl-host config)
                            :port (:seon.boot/prepl-port config)
-                           :args [:valf #(cluster/mcp-valf name config/defaults %)]}))
+                           :args [:cluster-name name]}))
             advertisement (merge (process/current-identity)
                                  {:seon.boot/cluster-name name
                                   :seon.boot/prepl-host (:seon.boot/prepl-host config)
@@ -354,12 +354,25 @@
       (registry/reset-cluster! (assoc request :seon.store/store held))
       (finally (cluster/release-root-store! dir)))))
 
+(defn- readable-response
+  "Return one plain-EDN response; malformed diagnostic evidence becomes readable data."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.operator/response]}
+  [response]
+  (try
+    (with-meta (edn/read-string (pr-str response)) (meta response))
+    (catch Throwable cause
+      (diagnostic "Operator response contained non-EDN evidence."
+                  {:seon.operator/response (pr-str response)
+                   :seon.operator/reader-error (ex-message cause)}
+                  :non-edn-response))))
+
 (defn request!
   "One data request. Verify root and process identity before connected effects."
   {:malli/schema [:=> [:cat :seon.operator/request] :seon.operator/response]}
   [{command :seon.operator/command root :seon.operator/managed-root
     name :seon.boot/cluster-name :as request}]
-  (try
+  (readable-response
+   (try
     (let [identity (process/current-identity)
           actual (store/declared-operator-root)
           cluster-root (str (io/file root "data/clusters"))]
@@ -397,9 +410,12 @@
                       ;; stop! would wait for this same reservation monitor.
                       (.halt (Runtime/getRuntime) 0)))
                   (stop! instance))
-                {:seon.boot/cluster-name n :seon.operator/stopped? true})
+                {:seon.boot/cluster-name n
+                 :seon.operator/stopped? true
+                 :seon.operator/process-exit? (empty? @running-instances)})
         :down (do (doseq [instance (filter map? (vals @running-instances))] (stop! instance))
-                  {:seon.operator/stopped-processes [identity]})
+                  {:seon.operator/stopped-processes [identity]
+                   :seon.operator/process-exit? (empty? @running-instances)})
         :config-apply
         (let [result (config/apply! {:seon.db/connection (connection (or name "default"))
                                     :seon.boot/cluster-name (or name "default")
@@ -435,7 +451,7 @@
     (catch Throwable cause
       (diagnostic (ex-message cause)
                   (dissoc (or (ex-data cause) request) :seon.boot/instance :seon.boot/prepl-server)
-                  :operation-failed))))
+                  :operation-failed)))))
 
 (defn banner
   "Render observed readiness without treating missing layers as ready."

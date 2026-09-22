@@ -236,6 +236,43 @@
             (is (.isValid (:seon.store/lock (:seon.store/store replacement))))
             (is (= 2 (client/prepl-value! (:seon.boot/advertisement replacement) "(+ 1 1)" event-ms)))))))))
 
+(deftest ^{:seon.test/long "A sole-instance stop flushes its reply, exits, and permits one cold replacement."
+           :seon.test/long-ms 120000}
+  sole-stop-exits-and-restarts
+  (with-published-root!
+    (fn [root children _]
+      (let [first-start (started! root children)
+            first-identity (select-keys first-start [:seon.boot/pid :seon.boot/start-instant])
+            first-handle (client/matching-handle first-identity)
+            stopped (completed! (cli! root children ["stop"]))]
+        (is (zero? (:seon.probe/exit stopped)) (pr-str stopped))
+        (is (= {:seon.boot/cluster-name "default" :seon.operator/stopped? true
+                :seon.operator/process-exit? true}
+               (:seon.probe/value stopped)))
+        (.get (.onExit first-handle) event-ms TimeUnit/MILLISECONDS)
+        (is (nil? (client/matching-handle first-identity)))
+        (let [second-start (started! root children)
+              second-identity (select-keys second-start [:seon.boot/pid :seon.boot/start-instant])]
+          (is (not= (:seon.boot/pid first-identity) (:seon.boot/pid second-identity)))
+          (is (= 2 (evaluate! root "(+ 1 1)"))))))))
+
+(deftest ^{:seon.test/long "Graceful down returns one plain-EDN identity map before process exit."
+           :seon.test/long-ms 120000}
+  down-reply-is-readable-edn
+  (with-published-root!
+    (fn [root children _]
+      (let [started (started! root children)
+            identity (select-keys started [:seon.boot/pid :seon.boot/start-instant])
+            handle (client/matching-handle identity)
+            down (completed! (cli! root children ["down"]))
+            reply (:seon.probe/value down)]
+        (is (zero? (:seon.probe/exit down)) (pr-str down))
+        (is (= {:seon.operator/stopped-processes [identity]
+                :seon.operator/process-exit? true} reply))
+        (is (= reply (edn/read-string (pr-str reply))))
+        (.get (.onExit handle) event-ms TimeUnit/MILLISECONDS)
+        (is (nil? (client/matching-handle identity)))))))
+
 (deftest ^{:seon.test/long "Real owned JVM receives SIGSTOP; down must prove exit without a REPL reply."
            :seon.test/long-ms 120000}
   down-unresponsive
