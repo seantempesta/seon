@@ -3933,7 +3933,6 @@
           :seon.error/message (str "Program deletion leaves surviving referrers: "
                                    (pr-str breaks)
                                    ". Repair or retract them in the same transaction.")
-          :seon.error/data {:seon.program/referrers breaks}
           :seon.error/layer :database-write
           :seon.error/operation 'seon.db/transact!
           :seon.error/member :seon.program/referrer

@@ -43,6 +43,8 @@
                          (= writer (get-in % [:seon.program/referrer :seon.fn/sym])))
                    blockers)
              (pr-str refusal))
+         (is (nil? (get-in refusal [:seon.error/data :seon.program/referrers]))
+             "referrers have one declared home on the refusal")
          (is (str/includes? (:seon.error/message refusal) (str writer)))
          (is (= basis (db/basis-t (db/db connection))))
          (is (some? (:db/id (db/pull (db/db connection) [:db/id] [:seon.schema/key attribute])))))
