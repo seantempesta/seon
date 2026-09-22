@@ -289,3 +289,36 @@ Raw evidence: `tmp/orchestrator/root-seed-fault-decoded.edn`, original full blob
 and final probe log. Existing issue-authority search found related historical
 error-recording/retirement issues but no exact legacy-arity/nil-declaration class;
 this named defect is recorded here as the owner expressly requested.
+
+## Completion
+
+Implementation commit: `6cd8d86f50b69d1a518b8da964c0fc213a95ec42`
+(`Construct root namespace from source and digest canonical rows`), five owned
+paths, +389/-29 including this evidence note. No foreign hunks were staged.
+`git diff -- src/seon/cluster.clj` was empty before committing; that file was
+not part of the commit.
+
+A pristine detached checkout of that exact commit, with the pinned dependency
+sources linked, ran:
+
+```sh
+clojure -M -e "(require 'seon.cluster 'seon.cluster.boot 'seon.program 'seon.bootstrap 'seon.cluster.agent) (println :head-load-ok)"
+```
+
+Exit **0**, `:head-load-ok`, **12.28 seconds** real, maximum RSS **1,967,718,400
+bytes**, peak memory footprint **1,944,865,192 bytes**. Log:
+`tmp/orchestrator/root-seed-digest-head-load.log`. The subsequent shared HEAD
+`d7c6584a4` differed only in a monitor Markdown note; no new source was claimed
+verified by that load.
+
+Final cleanup: all owned boot/probe/load JVMs and shells exited. Process-command
+and `lsof +D` checks found no live holder before deleting `tmp/root-seed-root`,
+`tmp/root-seed-digest-wt`, `tmp/root-seed-digest-head`, and the owned focused-test
+snapshot `tmp/test-runs/run.26lbr9` if present. Recursive cleanup did not follow
+symlinks. Evidence and summary remain in `tmp/orchestrator/`. Default and all
+foreign source/session/process state were preserved.
+
+Owned implementation, armed class regressions and exact committed-source load
+are complete. Healthy root-turn completion is **not** claimed: the owner's
+explicit stop at the named out-of-scope error/turn panic applies. No full,
+platform, or cold test gate was run, and no live-default adoption is claimed.
