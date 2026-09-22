@@ -184,9 +184,9 @@
                     :seon.render.data/offset 0})
                 (read-string scalar-source))))
        (testing "query and path failures remain flat diagnostics"
-         (is (:seon.error/kind
+         (is (:seon.render.data/root-description
               (data/pull-at '[*] [:my.plan.item/id "absent"] cursor)))
-         (is (:seon.error/kind
+         (is (:seon.render.data/root-description
               (data/pull-at '[*] lookup
                             {:seon.render.data/path [:no.such/path]
                              :seon.render.data/offset 0}))))))))
@@ -195,8 +195,7 @@
   (let [failure
         (render/render-default-ai-source
          {:seon.render/value (Object.)})]
-    (is (= :seon.render/missing-source-provenance
-           (:seon.error/kind failure)))
+    (is (some? (:seon.render/refused-member failure)))
     (is (= :seon.render.value/root
            (:seon.error/diagnostic-member failure)))
     (is (not (re-find #"#object" (pr-str failure))))))
@@ -296,7 +295,7 @@
                           :seon.render/captured-calls (atom {})
                           :seon.render/captured-invocations (atom {})))
                refusal (source-call unowned-request)]
-           (is (= :seon.render.web/owner-not-ensured (:seon.error/kind refusal)))
+           (is (some? (:seon.render.web/refused-member refusal)))
            (is (= refusal (source-call unowned-request))
                "a repeated unowned interest remains a retained preview refusal")
            (is (= 1 @evaluations)

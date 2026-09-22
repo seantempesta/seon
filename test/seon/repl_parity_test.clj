@@ -539,8 +539,8 @@
   (let [result (peek (repl-session
                      ["(defmacro parity_doc \"foodoc\" ([x]) ([x y]))"
                       "(doc parity_doc)"]))]
-    (compared :seon.sci.eval/documentation-unavailable
-              (:seon.error/kind (:value result)))))
+    (compared true
+              (symbol? (:seon.sci.eval/documentation-unavailable (:value result))))))
 
 (defparity "D2" :passing
   (let [result (first (repl-session ["(doc seon.db)"]))
@@ -554,14 +554,13 @@
 
 (defparity "D3" :passing
   (let [results (repl-session ["(doc catch)" "(doc try)"])]
-    (compared [:seon.sci.eval/documentation-unavailable
-               :seon.sci.eval/documentation-unavailable]
-              (mapv #(get-in % [:value :seon.error/kind]) results))))
+    (compared ['catch 'try]
+              (mapv #(get-in % [:value :seon.sci.eval/documentation-unavailable]) results))))
 
 (defparity "D4" :passing
   (let [result (first (repl-session ["(let [x 1] (doc x))"]))]
-    (compared :seon.sci.eval/documentation-unavailable
-              (:seon.error/kind (:value result)))))
+    (compared true
+              (symbol? (:seon.sci.eval/documentation-unavailable (:value result))))))
 
 (defparity "D5" :known-divergence
   ;; Pending Lane 1: find-doc has not been admitted over program-graph facts.
@@ -595,9 +594,8 @@
 
 (defparity "D8" :passing
   (let [value (:value (first (repl-session ["(dir parity.no-such-ns)"])))]
-    (compared [:seon.sci.eval/documentation-unavailable 'parity.no-such-ns]
-              [(:seon.error/kind value)
-               (:seon.sci.eval/documentation-unavailable value)])))
+    (compared 'parity.no-such-ns
+              (:seon.sci.eval/documentation-unavailable value))))
 
 (defparity "D9" :known-divergence
   ;; Pending Lane 1: source does not yet read exact program-graph source.
@@ -863,7 +861,7 @@
 (defparity "G10" :passing
   ;; `sci.reader/read` answers with the ordered EVENTS it read, and a refusal
   ;; rides the event that could not be read — it is not the return value.
-  ;; Asking the vector for `:seon.error/kind` got nil and compared it to the
+  ;; Reading a discriminator from the vector returned nil and compared it to the
   ;; kind it wanted, which is a check that passes only by accident.
   (let [refusals (mapv (fn [text]
                          (mapv :seon.sci.reader/error (read-events text)))
@@ -872,8 +870,7 @@
              refusals
              (every? (fn [errors]
                        (and (= 1 (count errors))
-                            (= :seon.sci.reader/unreadable
-                               (:seon.error/kind (first errors)))))
+                            (qualified-keyword? (:seon.sci.reader/unreadable-member (first errors)))))
                      refusals))))
 
 ;;; Family H — namespaces and vars

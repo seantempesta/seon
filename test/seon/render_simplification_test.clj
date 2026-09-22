@@ -95,8 +95,7 @@
                            :seon.sci.admit/caps caps}]
            (is (= (value/render-ai floor-unit) (render-ai request)))
            (is (= (value/render-html floor-unit) (render-html request)))
-           (is (not= :seon.render/missing-declaration
-                     (:seon.error/kind (render-ai request))))))))))
+           (is (string? (render-ai request)))))))))
 
 (deftest
   attribute-declared-producers-select-for-every-projection
@@ -317,7 +316,7 @@
                           :seon.render/html
                           'seon.render-simplification.fixture-b/holes-html
                           :seon.render/profile missing-profile))]
-       (is (= ::config/missing-effective (:seon.error/kind result)))
+       (is (some? (:seon.config/missing-effective result)))
        (is (= "missing-profile" (:seon.config/missing-effective result)))))))
 
 (deftest floor-selection-is-recorded-on-the-retained-call
@@ -584,8 +583,7 @@
        (let [without-owner-function
              (render-ai (assoc request :seon.db/db (db/db connection)))]
          (is (not (str/starts-with? (str without-owner-function) "A:")))
-         (is (not= :seon.render/missing-declaration
-                   (:seon.error/kind without-owner-function))))))))
+         (is (string? without-owner-function)))))))
 
 (deftest overlapping-contracts-refuse-loudly-and-deterministically
   (support/with-database
@@ -609,10 +607,8 @@
                     :seon.render/distance 0})
            expected #{"seon.render-simplification.fixture-ambiguous/first-ai"
                       "seon.render-simplification.fixture-ambiguous/second-ai"}]
-       (is (= :seon.render/ambiguous (:seon.error/kind result)))
-       (is (= :seon.render/ambiguous
-              (:seon.error/kind
-               (:seon.render.selection/selected decision))))
+       (is (seq (:seon.render/candidates result)))
+       (is (seq (:seon.render/candidates (:seon.render.selection/selected decision))))
        (is (= [:no-match :no-match :ambiguous
                :not-consulted :not-consulted]
               (stage-statuses decision)))
@@ -620,9 +616,8 @@
               (set (:seon.render/candidates (:seon.error/data result)))))
        (is (= (sort expected)
               (:seon.render/candidates (:seon.error/data result))))
-       (is (= :seon.render/ambiguous
-              (get-in (first walked)
-                      [:seon.error/value :seon.error/kind])))
+       (is (seq (get-in (first walked)
+                      [:seon.error/value :seon.render/candidates])))
        (is (= expected
               (set (get-in (first walked)
                            [:seon.error/value
@@ -738,9 +733,7 @@
         (is (contains? (set (map :seon.render.walk/lookup at-one)) [:seon.ns/name fixture-b]))
         (is (= #{[:seon.ns/name fixture-a]} (set (map :seon.render.walk/lookup capped))))
         (is
-          (=
-            :seon.db/invalid-read
-            (get-in (first capped) [:seon.error/value :seon.error/kind])))
+          (true? (get-in (first capped) [:seon.error/value :seon.db/invalid-read])))
         (is
           (=
             {:datahike/budget-exceeded true,
@@ -958,7 +951,7 @@
        {:seon.agent/id "owner-b"
         :seon.cluster/name "render-failure"
         :seon.ns/name fixture-b}))
-     (let [failure {:seon.error/kind :render.test/broken
+     (let [failure {
                     :seon.error/message "secret stack and renderer symbol"
                     :seon.error/data
                     {:seon.fn/sym

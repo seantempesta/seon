@@ -6,11 +6,11 @@
             [seon.test-support :as test-support]))
 
 (defn- inbox-evidence-after-message
+  {:malli/schema [:=> [:cat :string] :boolean]}
   [recipient]
   (test-support/with-database
    (fn [connection]
-     (is (not (:seon.error/kind
-               (db/transact!
+     (is (some? (:db-after (db/transact!
                 connection
                 [{:seon.agent/id "juniper"}
                  {:seon.agent/id "root"}
@@ -37,7 +37,7 @@
                                     evidence))
            juniper (db/q '[:find ?e . :where [?e :seon.agent/id "juniper"]]
                          @connection)]
-       (is (nil? (:seon.error/kind evaluation)) (pr-str evaluation))
+       (is (vector? (:seon.sci.admit/value evaluation)) (pr-str evaluation))
        (is (= "Opening message"
               (get-in evaluation [:seon.sci.admit/value 0 :seon.message/content]))
            (pr-str evaluation))
@@ -46,8 +46,7 @@
                  patterns)
            (pr-str evidence))
        (is (true? (db/read-evidence-current? @connection evidence)))
-       (is (not (:seon.error/kind
-                 (db/transact!
+       (is (some? (:db-after (db/transact!
                   connection
                   [{:seon.message/id "next" :seon.message/to [:seon.agent/id recipient] :seon.message/content "Next message"}]))))
        ;; Remove replay inputs as data: these assertions must be decided by
@@ -73,8 +72,7 @@
 (deftest nested-patterns-and-find-pulls-retain-scoped-index-evidence
   (test-support/with-database
    (fn [connection]
-     (is (not (:seon.error/kind
-               (db/transact! connection
+     (is (some? (:db-after (db/transact! connection
                              [{:seon.agent/id "juniper"}
                               {:seon.agent/id "root"}
                               {:seon.message/id "mine" :seon.message/content "mine"
@@ -111,15 +109,13 @@
          (is (some #{ {:seon.db/pattern-entity mine
                        :seon.db/pattern-attribute :seon.message/content}} patterns))
          (is (true? (db/read-evidence-current? @connection evidence)))
-         (is (not (:seon.error/kind
-                   (db/transact! connection
+         (is (some? (:db-after (db/transact! connection
                                  [[:db/add [:seon.message/id "theirs"]
                                    :seon.message/content (pr-str where)]
                                   [:db/add [:seon.message/id "theirs"]
                                    :seon.message/from [:seon.agent/id "root"]]]))))
          (is (true? (db/read-evidence-current? @connection evidence)))
-         (is (not (:seon.error/kind
-                   (db/transact! connection
+         (is (some? (:db-after (db/transact! connection
                                  [[:db/add [:seon.message/id "mine"]
                                    :seon.message/content "changed"]]))))
          (is (false? (db/read-evidence-current? @connection evidence)))

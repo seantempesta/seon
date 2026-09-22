@@ -79,12 +79,12 @@
           (testing "preview emits nothing and changes no facts"
             (let [basis (db/basis-t @connection)
                   preview (turn/system-turn (assoc request :seon.turn/write? false))]
-              (is (nil? (:seon.error/kind preview)) (pr-str preview))
+              (is (vector? (:seon.turn/forms preview)) (pr-str preview))
               (is (not-any? :seon.turn/text (:seon.turn/forms preview)))
               (is (= basis (db/basis-t @connection)))))
           (let [result (turn/system-turn request)
                 refreshed (last (entries connection source))]
-            (is (nil? (:seon.error/kind result)) (pr-str result))
+            (is (vector? (:seon.turn/forms result)) (pr-str result))
             (is (nil? (:seon.turn/id result)))
             (is (not-any? :seon.turn/text (:seon.turn/forms result)))
             (is (= (mapv :seon.cluster.eval/id all-before)
@@ -170,7 +170,7 @@
                              (some #(when (= documentation (:seon.cluster.eval/source %)) %) plan))))
             (is (not-any? #(some #{(:seon.cluster.eval/source %)} failures) plan)))
           (let [result (turn/system-turn request)]
-            (is (nil? (:seon.error/kind result)) (pr-str result))
+            (is (vector? (:seon.turn/forms result)) (pr-str result))
             (is (= 2 (count (entries connection documentation))))
             (is (= (mapv :seon.cluster.eval/id failed)
                    (mapv #(-> (entries connection %) last :seon.cluster.eval/id) failures)))))))))

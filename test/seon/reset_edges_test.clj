@@ -31,7 +31,7 @@
            basis (db/basis-t database)
            refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym target]]])]
        (is (seq callers) "The real indexed identity must have live referrers.")
-       (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+       (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
        (is (= (count callers)
               (count (get-in refusal [:seon.error/data :seon.program/referrers]))))
        (is (= basis (db/basis-t (db/db connection))))
@@ -53,7 +53,7 @@
                            [[:db/add entity :seon.fn/sym 'seon.turn/renamed-open?]]]]
          (let [refusal (db/transact! connection operations)
                referrers (get-in refusal [:seon.error/data :seon.program/referrers])]
-           (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+           (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
            (is (seq referrers) "The refusal names the surviving callers, not just the missing identity.")
            (is (every? #(= target (:seon.program/subject %)) referrers))
            (is (= basis (db/basis-t (db/db connection))))))))))
@@ -81,7 +81,7 @@
        (is (= 64 (count (:seon.program/analyzed-source-digest row))))
        (doseq [attribute [:seon.program/analyzed-source-digest :seon.fn/file]]
          (let [refusal (db/transact! connection [[:db.fn/retractAttribute target attribute]])]
-           (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+           (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
            (is (= basis (db/basis-t (db/db connection))))))))))
 
 (deftest an-agent-definition-with-only-historical-reach-deletes
@@ -149,7 +149,7 @@
              refusal (db/transact! connection [[:db/retractEntity [identity-attribute target]]])
              referrers (get-in refusal [:seon.error/data :seon.program/referrers])]
          (is (seq expected))
-         (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+         (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
          (is (= (set expected)
                 (set (map (juxt :db/id :seon.program/relation) referrers)))
              (pr-str refusal))
@@ -173,7 +173,7 @@
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)
                     :seon.config/on-core-error :panic})
            refusal (:seon.sci.admit/value result)]
-       (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str result))
+       (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str result))
        (is (seq (get-in refusal [:seon.error/data :seon.program/referrers])))
        (is (= (db/basis-t database) (db/basis-t (db/db connection))))))))
 
@@ -238,11 +238,11 @@
            before (db/pull (db/db connection) selector lookup)
            basis (db/basis-t (db/db connection))
            refusal (db/transact! connection [[:db/retractEntity lookup]])]
-       (is (= :seon.db/invalid-write (:seon.error/kind refusal)))
+       (is (string? (:seon.db.write.attempt/request-id refusal)))
        (is (= basis (db/basis-t (db/db connection))))
        (is (true? (agent/open? (db/db connection) agent-id)))
        (let [result (agent/archive! connection agent-id)]
-         (is (nil? (:seon.error/kind result)) (pr-str result)))
+         (is (some? (:db-after result)) (pr-str result)))
        (is (true? (agent/archived? (db/db connection) agent-id)))
        (is (false? (agent/open? (db/db connection) agent-id)))
        (is (= before (db/pull (db/db connection) selector lookup)))))))
@@ -362,7 +362,7 @@
      (let [target 'seon.fs.jvm/write
            refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym target]]])
            referrers (get-in refusal [:seon.error/data :seon.program/referrers])]
-       (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+       (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
        (is (some #(and (= target (:seon.program/subject %))
                        (= :seon.effect/capability (:seon.program/relation %))
                        (= 'my.fs/write! (get-in % [:seon.program/referrer :seon.fn/sym])))

@@ -32,6 +32,7 @@
   (::value request))
 
 (defn- cluster-projection
+  {:malli/schema [:=> [:cat :seon.db/connection :string :qualified-keyword :seon.schema/definition] :seon.schema/projection]}
   [connection cluster-name schema-key definition]
   (support/seed-cluster! connection cluster-name)
   (config/apply! {:seon.db/connection connection
@@ -45,7 +46,7 @@
                   :seon.schema.admission/source :core}
                  {:seon.fn/sym "seon.registry-isolation-test/value"
                   :seon.fn/spec (pr-str contract)}])]
-    (is (not (:seon.error/kind result)) (pr-str (:seon.error/kind result)))
+    (is (some? (:db-after result)) (pr-str (:seon.error/message result)))
     (schema/projection-from-database @connection)))
 
 (deftest two-clusters-own-their-contracts-and-share-stable-host-wrappers

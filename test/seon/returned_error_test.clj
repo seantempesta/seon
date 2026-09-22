@@ -34,7 +34,7 @@
        (println "RETURNED-ERROR"
                 (pr-str {:shown shown :bytes (alength (.getBytes shown "UTF-8"))
                          :response response}))
-       (is (= :seon.db/invalid-write (:seon.error/kind diagnostic)) (pr-str result))
+       (is (string? (:seon.db.write.attempt/request-id diagnostic)) (pr-str result))
        (is (:seon.schema/form diagnostic))
        (is (= 42 (:seon.db/offending diagnostic)))
        ;; §2.4's refusal grammar: the shown text names the layer and member

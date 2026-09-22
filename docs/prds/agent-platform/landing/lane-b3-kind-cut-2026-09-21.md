@@ -19,6 +19,10 @@ No final green or live default settlement claim is made.
 
 ### Final settlement verification, 2026-09-22 07:00 UTC
 
+The rendering/read-evidence batch completed **183 tests / 683 assertions /
+89 failures / 25 errors**. Result recording was refused. Its observed failures
+remain evidence in the namespace matrix; no recorded green is claimed.
+
 The contract/publication/value batch `1f6499b44492` completed and recorded
 **62 tests / 622 assertions / 43 failures / 13 errors**. Observed failures
 include missing fixture program rows, renderer selection/text differences,
@@ -173,6 +177,46 @@ This is the dependency's immutable transaction path, not a live committed turn.
 The following JVM MCP forms used the same explicit root, `default` cluster,
 `read_only true`, and a 10,000 ms request bound.
 
+The model fixture no longer dispatches on a test-local kind enum. Its generator
+supplies the producer's declared member map directly. This probe exercised all
+twelve partitions after adoption (10 ms):
+
+```clojure
+(let [partitions (ns-resolve 'seon.cluster.turn-test 'turn-evidence-partitions)
+      construct (ns-resolve 'seon.cluster.turn-test 'turn-failure-value)]
+  (pr-str
+    (if (and partitions construct)
+      (mapv (fn [partition]
+              (let [value (construct partition)]
+                {:members (select-keys value
+                            [:seon.ai/missing-credential-variable
+                             :seon.ai/transport-failure :seon.ai/timeout
+                             :seon.ai/provider-error
+                             :seon.ai/unreadable-response-member])
+                 :at? (inst? (:seon.error/at value))
+                 :operation (:seon.error/operation value)}))
+            (var-get partitions))
+      {:loaded? false})))
+```
+
+The returned string describes a twelve-element vector. Every element has
+`:at? true` and `:operation seon.ai/complete`. In order, its `:members` values are:
+
+```clojure
+[{:seon.ai/missing-credential-variable "SEON_TEST_PROVIDER_KEY"}
+ {:seon.ai/transport-failure "https://provider.invalid"}
+ {:seon.ai/transport-failure "https://provider.invalid"}
+ {:seon.ai/timeout 1000}
+ {:seon.ai/provider-error 503}
+ {:seon.ai/provider-error 503}
+ {:seon.ai/provider-error 503}
+ {:seon.ai/provider-error 503}
+ {:seon.ai/provider-error 503}
+ {:seon.ai/provider-error 503}
+ {:seon.ai/unreadable-response-member "body"}
+ {:seon.ai/unreadable-response-member "body"}]
+```
+
 ```clojure
 (let [database (seon.db/db (seon.cluster.boot/connection "default"))
       reply (seon.cluster.reply/sources "; prose only" 'user 100)]
@@ -247,6 +291,54 @@ This probes rejection of nilable storage, not permission to add a nilable
 production boundary. An earlier three-argument call to `projection-with-schema`
 was incorrect and failed in 8 ms; its caught arity data also encountered the
 MCP artifact projection's undeclared-facet refusal. It proves no schema behavior.
+
+### Canonical fixture contract compilation probe
+
+One exclusive probe JVM ran the following file with `clojure -M:test` and exited
+0 after fixture cleanup. This is schema inspection, not an alternate test gate.
+
+```clojure
+(require '[seon.test-support :as support] '[seon.db :as db]
+         '[seon.schema :as schema] '[malli.core :as m]
+         '[malli.registry :as mr] 'seon.turn 'seon.cluster.prompt)
+(try
+  (support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            projection (db/carried-projection database)
+            options {:registry
+                     (mr/composite-registry
+                       (:seon.schema.projection/registry projection)
+                       (mr/var-registry))}]
+        (prn {:basis (db/basis-t database)
+              :retired-attribute-installed?
+              (contains? (:schema database) (keyword "seon.error" "kind"))})
+        (doseq [namespace-name '[seon.turn seon.cluster.prompt]
+                [name v] (ns-interns namespace-name)
+                :let [authored (:malli/schema (meta v))]
+                :when authored]
+          (try (m/schema authored options)
+               (catch Exception e
+                 (prn {:function (symbol (str namespace-name) (str name))
+                       :failure (ex-data e)})))))))
+  (finally (shutdown-agents)))
+```
+
+It reported basis `536870944`, `:retired-attribute-installed? false`, and three
+compile failures. Each failure had both `:type` and `:message` equal to
+`:malli.core/invalid-schema`; its `:data` had `:schema` and `:form` equal to the
+same missing key:
+
+| Function | Missing schema/form |
+|---|---|
+| `seon.turn/system-turn` | `:seon.turn/generated-read-depends-on-turns-error` |
+| `seon.turn/generated-read-fault` | `:seon.turn/generated-read-depends-on-turns-error` |
+| `seon.turn/disposition-rule-error` | `:seon.turn/invalid-disposition-error` |
+
+The probe printed publication digest
+`b771bf4fa00eea263a2b679e89aa58fce34471659c38a5c1e11c7c43786797e0`, then six
+commits behind HEAD. No other authored contract in the two inspected namespaces
+printed a compile failure. That is the exact scope of this observation.
 
 ## Fails-before regression
 

@@ -53,7 +53,7 @@
                    :seon.render.profile/max-string-length 256
                    :seon.render.profile/composition :multiline}}
             diagnostic (error/diagnostic
-                        {:seon.error/kind :seon.db/invalid-read
+                        {
                          :seon.error/message "Invalid selector."
                          :seon.error/diagnostic-layer :database-read
                          :seon.error/diagnostic-operation 'seon.db/pull
@@ -70,7 +70,7 @@
         (let [refusal (db/transact! connection
                                     [{:seon.fn/sym "seon.refusal-grammar-test/incomplete"
                                       :seon.fn/doc "incomplete"}])]
-          (is (= :seon.db/invalid-write (:seon.error/kind refusal))
+          (is (string? (:seon.db.write.attempt/request-id refusal))
               (pr-str refusal))
           (is (str/includes? (:seon.error/message refusal)
                              ":core")

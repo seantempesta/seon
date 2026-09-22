@@ -58,6 +58,7 @@
   (<= 1 (count (str/split-lines text)) 3))
 
 (defn- seed-entities!
+  {:malli/schema [:=> [:cat :seon.db/connection] :nil]}
   [connection]
   (config/apply-compiled!
    connection
@@ -81,7 +82,7 @@
   (let [written!
         (fn [tx]
           (let [report (db/transact! connection tx)]
-            (is (nil? (:seon.error/kind report)) (pr-str report))
+            (is (some? (:db-after report)) (pr-str report))
             report))]
     (written!
      (into
@@ -140,7 +141,7 @@
     (let [{:keys [database ctx value]} @world
           result (with-redefs [schema/handed-projection (constantly nil)]
                    (render/render-ai (render-request database ctx value)))]
-      (is (= ::render/missing-projection (:seon.error/kind result)))
+      (is (some? (:seon.render/refused-member result)))
       (is (= 'seon.render/request-profile
              (get-in result
                      [:seon.error/data
@@ -203,7 +204,7 @@
        (is (= after-web after-agent)
            "rendering prepares costs without moving the caller's database basis")
        (is (= 1 (count prepared)))
-       (is (nil? (:seon.error/kind settled)) (pr-str settled))
+       (is (some? (:db-after settled)) (pr-str settled))
        (is (= 1 (count facts)))
        (let [[shape profile estimated at] (first facts)]
          (is (= :seon.config/entity shape))
@@ -376,7 +377,7 @@
                face (:seon.render/output (first units))]
            (is (some? face))
            (is (str/includes? (str face) owner-symbol))
-           (is (not (:seon.error/kind face))
+           (is (vector? face)
                "the walk's own request shape reaches a total render")))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -499,7 +500,7 @@
        (testing "a producer that runs past the limit names itself and the bound"
          (let [refused (probe-render database ctx value
                                      'my.render-probe/slow 50)]
-           (is (= :seon.render/unknown (:seon.error/kind refused)))
+           (is (some? (:seon.render.unknown/reason refused)))
            (is (= :time-limit (:seon.render.unknown/reason refused)))
            (is (= 'my.render-probe/slow
                   (:seon.render.unknown/producer refused)))

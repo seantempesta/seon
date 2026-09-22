@@ -231,10 +231,10 @@
   ;; violation from inside a page derivation — and one throw took the whole
   ;; page with it — while `render-ai`'s own guard could never run.
   (testing "an error value arriving where a unit was expected renders nil"
-    (is (nil? (repl/render-ai {:seon.error/kind :seon.render/refused
+    (is (nil? (repl/render-ai {
                                :seon.error/message "no producer"}))))
   (testing "so does the HTML projection of the same non-evaluation"
-    (is (nil? (repl/render-html {:seon.error/kind :seon.render/refused
+    (is (nil? (repl/render-html {
                                  :seon.error/message "no producer"}))))
   (testing "an evaluation entity with a source still renders"
     (is (str/includes?

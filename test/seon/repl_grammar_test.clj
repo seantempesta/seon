@@ -82,7 +82,7 @@
                expected-response (bootstrap/render-help-ai (bootstrap/help-value @connection "juniper"))
                expected (str "my.agents.juniper=> ;; I should understand how this REPL works before I act.\n(help)\n"
                              expected-response)]
-           (is (not (:seon.error/kind opened)) (pr-str opened))
+           (is (vector? (:seon.turn/forms opened)) (pr-str opened))
            (is (= "(help)" (:seon.cluster.eval/source saved)))
            (is (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer saved)))
            (is (= expected-response (repl/response (repl/entity-emission saved))))

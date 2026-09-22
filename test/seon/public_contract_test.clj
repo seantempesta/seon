@@ -35,6 +35,7 @@
                 (::analyzer/findings analysis))))
 
 (defn- public-function-census!
+  {:malli/schema [:=> [:cat [:sequential :string]] [:vector :map]]}
   [paths]
   (let [analysis (analyzer/analyze {::analyzer/paths paths})
         subjects (filterv public-defn? (::analyzer/var-definitions analysis))
@@ -45,14 +46,11 @@
     (when-not (seq subjects)
       (throw
        (ex-info "Public-contract analysis produced no public function subjects."
-                (assoc evidence
-                       :seon.error/kind
-                       ::no-public-function-subjects))))
+                evidence)))
     (when-let [subject (first (remove identity-bearing? subjects))]
       (throw
        (ex-info "Public-contract analysis produced an unidentified subject."
                 (assoc evidence
-                       :seon.error/kind ::unidentified-public-function
                        :seon.public-contract/subject subject))))
     subjects))
 
@@ -81,8 +79,7 @@
           (public-function-census! [(.getPath absent-root)])
           nil
           (catch clojure.lang.ExceptionInfo error error))]
-    (is (= ::no-public-function-subjects
-           (:seon.error/kind (ex-data failure))))
+    (is (= "Public-contract analysis produced no public function subjects." (ex-message failure)))
     (is (= [] (:seon.public-contract/analyzed-files (ex-data failure))))
     (is (= [(.getPath absent-root)]
            (:seon.public-contract/paths (ex-data failure))))))

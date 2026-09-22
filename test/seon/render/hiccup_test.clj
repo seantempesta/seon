@@ -107,7 +107,7 @@
   ;; first. Emitting nothing is the one answer that cannot leak raw EDN
   ;; into a human's page, which is exactly what the quarry's `str`
   ;; fallback did.
-  (doseq [refused [{:seon.error/kind :a/b} [1 2 3] #{:a}]]
+  (doseq [refused [{} [1 2 3] #{:a}]]
     (is (= "" (hiccup/->string refused))
         (str "a refused value must serialize to nothing: " (pr-str refused)))))
 

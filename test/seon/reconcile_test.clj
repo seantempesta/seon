@@ -119,7 +119,7 @@
 (deftest a-flat-write-refusal-is-the-reconcile-result
   (with-model-database
     (fn [connection]
-      (let [refusal {:seon.error/kind :seon.db/rejected
+      (let [refusal {:seon.db.write.attempt/request-id "reconcile-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
                      :seon.error/message "injected reconcile refusal"}
             result
             (with-redefs [db/transact! (fn [& _] refusal)]
@@ -131,8 +131,7 @@
 (deftest reconciliation-uses-current-provenance-without-history
   (with-non-temporal-database
     (fn [connection]
-      (is (= :seon.db/non-temporal-database
-             (:seon.error/kind (db/history @connection)))
+      (is (some? (:seon.schema/expected-value (db/history @connection)))
           "the fixture genuinely has no temporal indices")
       (let [desired [(config-row "non-temporal" 10)]
             adopted #{[:seon.config/cluster "non-temporal"]}
