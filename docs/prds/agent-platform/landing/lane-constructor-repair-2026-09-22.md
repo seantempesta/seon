@@ -234,3 +234,40 @@ The final cleanup group removes F12's remaining four unused require edges
 (`render`, `test`, `config`, `sci/eval`) and F14's empty merge. The schema require
 was already carried by `434c01f4c`; issue and turn were in `59e9642b1`.
 All remaining source diffs were checked: these are only the prepared owned hunks.
+
+F10 follow-up from the final contract inspection: the two `q` assertions must
+name **`:seon.db/invalid-read-error`**, which is the actual explicit alternative
+in `seon.db/q`'s arity at `src/seon/db.clj:1975`. The review's example
+`:seon.db.read/error` describes a recorded read observation with stored target
+and basis components, not this API refusal. The initial prepared assertions
+used that example too literally. They are corrected to the actual arity schema;
+the operation/member/invalid-request assertions remain. No output union changes.
+
+`320c73adc` archive load exited 0. `252e6e5bd` lands F12/F14's remaining
+cleanup, 6 files / 15 insertions / 6 deletions including the note, and its
+archive load also exited 0 (`head-252e6e5bd-load.log`).
+
+The final selected in-process proof now loads all three complete test namespaces
+through the ordinary arming owner, with no selective namespace workaround:
+**5 tests / 58 passes / 0 failures / 0 errors**. Arming reported 1,684 registered
+and instrumented Vars, 1,678 program-armable Vars, 107 program namespaces,
+mode `:panic`. Driver `tmp/constructor-repair/resume-in-process.clj`; log
+`resume-in-process.log`. This is in-process assertion evidence, not recorded green.
+
+The F10 read-only JVM query below returned declared-arity-error true and
+recorded-read-error false, operation `seon.db/q`, in 140 ms; full envelope/form
+is `tmp/constructor-repair/f10-resume-probe.json`:
+
+```clojure
+(let [refusal (seon.db/q database
+                       '[:find ?entity :where [?entity :seon.agent/idd _]])]
+  {:operation (:seon.error/operation refusal)
+   :declared-arity-error?
+   ((seon.schema/projection-validator projection :seon.db/invalid-read-error) refusal)
+   :recorded-read-error?
+   ((seon.schema/projection-validator projection :seon.db.read/error) refusal)})
+```
+
+The seven dead requires are absent. The protected test infrastructure files have
+zero diff from the resume baseline `19a11478e`. No canonical base was rebuilt,
+no cold/platform gate was run, and the running default program was not changed.

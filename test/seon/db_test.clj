@@ -1562,7 +1562,7 @@
                       [:seon.agent/id 'identity-admission-present])]
        (testing "an uninstalled query attribute names registered candidates"
          (is (true? (:seon.db/invalid-read unknown-attribute)))
-         (is ((schema/projection-validator (schema/handed-projection) :seon.db.read/error) unknown-attribute))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.db/invalid-read-error) unknown-attribute))
          (is (= 'seon.db/q
                 (get-in unknown-attribute
                         [:seon.error/operation])))
@@ -1692,7 +1692,7 @@
            (do (is (true? (:seon.db/invalid-request result)))
                (is (= :query (:seon.db/missing-request-member result))))
            (is (nil? (:seon.db/missing-request-member result))))
-         (is ((schema/projection-validator (schema/handed-projection) :seon.db.read/error) result))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.db/invalid-read-error) result))
          (is (= operation
                 (get-in result
                         [:seon.error/operation])))
