@@ -208,14 +208,18 @@
     (assoc (ex-data error) :seon.db/invalid-read true
            :seon.db/refused-read-operation
            operation)
-    (error-value
-     operation
-     ::invalid-read
-     (or (ex-message error) "Datahike refused the database read.")
-     (cond-> {::operation operation
-              ::exception-class (.getName (class error))}
-       (map? (ex-data error))
-       (assoc ::dependency-data (ex-data error))))))
+    ;; Every other dependency failure keeps its whole cause: the diagnostic
+    ;; derives the class, root frame and cause chain from the Throwable.
+    (error.refusal/diagnostic
+     (assoc (error-value
+             operation
+             ::invalid-read
+             (or (ex-message error) "Datahike refused the database read.")
+             (cond-> {::operation operation
+                      ::exception-class (.getName (class error))}
+               (map? (ex-data error))
+               (assoc ::dependency-data (ex-data error))))
+            :seon.error/throwable error))))
 
 (defn- connection-projection-state
   [connection]
@@ -1994,38 +1998,55 @@
                       (subvec arguments position)))))))))
 
 (defn- query-call-valid?
-  [[call-arguments _result]]
+  "Whether `q`'s supplied inputs match the parsed query's `:in`.
+
+  A result that is `q`'s own dependency refusal already answers the call:
+  the body caught Datahike's throwable (a malformed query among them) and
+  carries its whole cause, so the guard has no input count to check. Any
+  other failure while parsing here is not health: it escapes the guard."
+  {:malli/schema [:=> [:cat [:tuple [:sequential :seon.schema/value] :seon.schema/value]]
+                  :boolean]}
+  [[call-arguments result]]
   (let [[query-or-database & arguments] call-arguments]
-    (if (and (map? query-or-database) (inst? (:seon.error/at query-or-database))
-             (qualified-keyword? (:seon.error/layer query-or-database))
-             (qualified-symbol? (:seon.error/operation query-or-database)))
+    (cond
+      (and (map? query-or-database) (inst? (:seon.error/at query-or-database))
+           (qualified-keyword? (:seon.error/layer query-or-database))
+           (qualified-symbol? (:seon.error/operation query-or-database)))
       true
-      (try
-        (let [explicit? (db.utils/db? query-or-database)
-              query-input (if explicit? (first arguments) query-or-database)
-              supplied (if explicit? (rest arguments) arguments)
-              normalized (query/normalize-q-input query-input supplied)]
-          (and (not (and (map? query-input) (contains? query-input :args) (seq supplied)))
-               (not= :invalid (query-input-position explicit? (:query normalized) (:args normalized)))))
-        ; Malformed query syntax has no input count; the parser supplies its
-        ; existing diagnostic at the read seam. This guard checks parsed inputs.
-        (catch Exception _ true)))))
+
+      (and (map? result) (::invalid-read result)
+           (= 'seon.db/q (:seon.db/refused-read-operation result))
+           (:seon.error/exception-class result))
+      true
+
+      :else
+      (let [explicit? (db.utils/db? query-or-database)
+            query-input (if explicit? (first arguments) query-or-database)
+            supplied (if explicit? (rest arguments) arguments)
+            normalized (query/normalize-q-input query-input supplied)]
+        (and (not (and (map? query-input) (contains? query-input :args) (seq supplied)))
+             (not= :invalid (query-input-position explicit? (:query normalized) (:args normalized))))))))
 
 (defn- query-guard-message
+  "The refusal sentence for a `q` call whose inputs do not match `:in`.
+  Reached only after `query-call-valid?` parsed these inputs and answered
+  false, so parsing here cannot fail differently."
+  {:malli/schema [:=> [:cat [:map [:value [:tuple [:sequential :seon.schema/value]
+                                             :seon.schema/value]]]
+                        :seon.schema/value]
+                  :string]}
   [{value :value} _options]
   (let [[[head & tail] result] value]
     (or (when (and (map? result) (inst? (:seon.error/at result))
              (qualified-keyword? (:seon.error/layer result))
              (qualified-symbol? (:seon.error/operation result))) (:seon.error/message result))
-        (try
-          (let [explicit? (db.utils/db? head)
-                query-input (if explicit? (first tail) head)
-                supplied (if explicit? (rest tail) tail)
-                normalized (query/normalize-q-input query-input supplied)]
-            (query-argument-message (:query normalized)
-                                    (into (vec (:args normalized))
-                                          (when (and (map? query-input) (:args query-input)) supplied))))
-          (catch Exception _ "The query and supplied arguments do not form a valid Datalog call.")))))
+        (let [explicit? (db.utils/db? head)
+              query-input (if explicit? (first tail) head)
+              supplied (if explicit? (rest tail) tail)
+              normalized (query/normalize-q-input query-input supplied)]
+          (query-argument-message (:query normalized)
+                                  (into (vec (:args normalized))
+                                        (when (and (map? query-input) (:args query-input)) supplied)))))))
 
 (defn q
   "Run a Datalog query over explicit inputs or the current database value."
@@ -2177,10 +2198,12 @@
   {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable]
                   :seon.db/pull-budget-error]}
   [operation cause]
-  (merge {:seon.error/at (java.util.Date.)
-          :seon.error/layer :seon.db/database-read
-          :seon.error/operation operation
-          :seon.error/message (ex-message cause)}
+  (merge (error.refusal/diagnostic
+          (cond-> {:seon.error/at (java.util.Date.)
+                   :seon.error/layer :seon.db/database-read
+                   :seon.error/operation operation
+                   :seon.error/throwable cause}
+            (ex-message cause) (assoc :seon.error/message (ex-message cause))))
          (select-keys (ex-data cause)
                       [:datahike.budget/name :datahike.budget/observed
                        :datahike.budget/allowed])))
@@ -2788,30 +2811,41 @@
    [:=> [:cat :seon.db/database-value :seon.store/transaction :seon.error/throwable :map]
     :seon.db.write/validation-refusal]}
   [database transaction throwable data]
-  (let [conflict
+  (let [;; Naming the conflicting owner is a further read. When it fails the
+        ;; rejection still stands; the lookup's own whole cause rides with it.
+        [conflict lookup-failure]
         (try
-          (unique-conflict database data)
-          (catch Throwable _
-            nil))]
+          [(unique-conflict database data) nil]
+          (catch Throwable lookup
+            [nil (error.refusal/diagnostic
+                  {:seon.error/at (java.util.Date.)
+                   :seon.error/layer :seon.db/database-read
+                   :seon.error/operation 'seon.db/unique-conflict
+                   :seon.error/message (or (ex-message lookup) (.getName (class lookup)))
+                   :seon.error/throwable lookup})]))]
     (write-observation
      database transaction
-     {:seon.error/at (java.util.Date.)
-      :seon.error/layer :seon.db/database-write
-      :seon.error/operation 'seon.db/transact!
-     :seon.error/message (rejection-message conflict throwable)
-     :seon.error/data
-     (cond-> (merge data conflict)
-       conflict
-       (assoc :seon.error/operation 'seon.db/transact!
-              :seon.error/problems
-              [{:seon.error/argument "transaction data"
-                :seon.error/path [(::conflict-attribute conflict)]
-                :seon.error/expected
-                (get (dbi/-schema database) (::conflict-attribute conflict))
-                :seon.error/expected-description "a value satisfying the attribute's uniqueness constraint"
-                :seon.error/offending conflict
-                :seon.error/actual-description "a value already assigned to an entity"
-                :seon.error/fix "Update the existing owner, or choose an unused value."}]))})))
+     (error.refusal/diagnostic
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.db/database-write
+       :seon.error/operation 'seon.db/transact!
+       :seon.error/throwable throwable
+       :seon.error/message (rejection-message conflict throwable)
+       :seon.error/data
+       (cond-> (merge data conflict)
+         lookup-failure
+         (assoc ::conflict-lookup-failure lookup-failure)
+         conflict
+         (assoc :seon.error/operation 'seon.db/transact!
+                :seon.error/problems
+                [{:seon.error/argument "transaction data"
+                  :seon.error/path [(::conflict-attribute conflict)]
+                  :seon.error/expected
+                  (get (dbi/-schema database) (::conflict-attribute conflict))
+                  :seon.error/expected-description "a value satisfying the attribute's uniqueness constraint"
+                  :seon.error/offending conflict
+                  :seon.error/actual-description "a value already assigned to an entity"
+                  :seon.error/fix "Update the existing owner, or choose an unused value."}]))}))))
 
 (defn- stamp-receipt
   [transaction]
@@ -3112,7 +3146,8 @@
        schema-keys))))
 
 (defn identity-attribute-accumulator?
-  "True for the arity gate's accumulator: a volatile holding a set of qualified keywords."
+  "True for the arity gate's accumulator.
+  It is a volatile holding a set of qualified keywords."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (boolean (and (volatile? value)
@@ -3542,6 +3577,30 @@
 
 (declare retention-report-check)
 
+(defn- report-identity-attributes
+  "Every identity attribute installed on either side of a report."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report] [:set :keyword]]}
+  [report]
+  (set/union (set (identity-attributes (:db-before report)))
+             (set (identity-attributes (:db-after report)))))
+
+(defn- write-attribute-plans
+  "The write plan for every attribute installed in `database`, a function
+  of the projection and that installed schema."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value]
+                  [:map-of [:or :keyword :int] :map]]}
+  [projection database]
+  (schema/projection-cache-value
+   projection [::write-attribute-plans (dbi/-schema database)]
+   #(into {}
+          (map (fn [[attribute installed]]
+                 [attribute (write-attribute-plan
+                             projection attribute
+                             (= :db.cardinality/many
+                                (:db/cardinality installed)))]))
+          (merge datahike.schema/implicit-schema-spec
+                 (dbi/-schema database)))))
+
 (defn- write-report-error
   "One final check for native operations and all expanded transaction-function output."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report] [:or :nil :seon.db/error-result]]}
@@ -3551,18 +3610,8 @@
         attempted (:datahike/attempted-tx-data report)
         affected (distinct (map :e (concat attempted (:tx-data report))))
         changed-identity-attributes (volatile! #{})
-        identity-attrs (set/union (set (identity-attributes before))
-                                  (set (identity-attributes database)))
-        attribute-plans (schema/projection-cache-value
-                         projection [::write-attribute-plans (dbi/-schema database)]
-                         #(into {}
-                                (map (fn [[attribute installed]]
-                                       [attribute (write-attribute-plan
-                                                   projection attribute
-                                                   (= :db.cardinality/many
-                                                      (:db/cardinality installed)))]))
-                                (merge datahike.schema/implicit-schema-spec
-                                       (dbi/-schema database))))]
+        identity-attrs (report-identity-attributes report)
+        attribute-plans (write-attribute-plans projection database)]
     (or
      (retention-report-check projection report affected)
      (some (fn [datom]
@@ -3885,14 +3934,16 @@
             (let [failure
                   (write-observation
                    database transaction
-                   {:seon.error/at (java.util.Date.)
-                    :seon.error/layer :seon.db/database-write
-                    :seon.error/operation 'seon.db/transact!
-                    :seon.error/message
-                    (or (ex-message throwable)
-                        (.getName (class throwable)))
-                    :seon.error/data (or data {})
-                    :seon.db/transaction-outcome-unknown true})]
+                   (error.refusal/diagnostic
+                    {:seon.error/at (java.util.Date.)
+                     :seon.error/layer :seon.db/database-write
+                     :seon.error/operation 'seon.db/transact!
+                     :seon.error/throwable throwable
+                     :seon.error/message
+                     (or (ex-message throwable)
+                         (.getName (class throwable)))
+                     :seon.error/data (or data {})
+                     :seon.db/transaction-outcome-unknown true}))]
               (when (panic-on-core-error? connection)
                 (throw
                  (ex-info (:seon.error/message failure)

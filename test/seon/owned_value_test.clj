@@ -1,5 +1,6 @@
 (ns seon.owned-value-test
   (:require [malli.core] [clojure.test :refer [deftest is]]
+            [datahike.api :as d]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -115,3 +116,32 @@
           (is (= {::key "bad"} (get-in result [:seon.error/data :seon.db/entity])) (pr-str result)))
         (support/transacted! connection valid)
         (is (= 200 (count (db/datoms (db/db connection) :avet ::key))))))))
+
+(deftest a-transaction-entity-root-reaches-the-arity-gate
+  ;; A transaction entity can own a function identity: its `:seon.fn/sym`
+  ;; and arity ref are datoms whose entity id is at or above tx0. The arity
+  ;; gate runs only when the owning walk records a changed function root.
+  ;; Filtering the root's own arity-bearing datoms below tx0 (before
+  ;; bb3a0c6c4) skipped exactly this root: its arity child carries no datom
+  ;; of its own here, so no ancestor walk can find it either.
+  (support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            projection (:seon.schema/projection (meta database))
+            staged (d/with database [{:db/id "arity" :seon.fn.arity/min 1 :seon.fn.arity/max 1}])
+            arity (get (:tempids staged) "arity")
+            report (d/with (:db-after staged)
+                           [[:db/add :db/current-tx :seon.fn/sym `a-transaction-entity-root-reaches-the-arity-gate]
+                            [:db/add :db/current-tx :seon.fn/arities arity]])
+            transaction (get (:tempids report) :db/current-tx)
+            changed (volatile! #{})]
+        (is (some? projection))
+        (is (every? #(= transaction (:e %))
+                    (remove #(= :db/txInstant (:a %)) (:tx-data report)))
+            (pr-str (:tx-data report)))
+        (@#'seon.db/write-owned-values-error
+         projection report
+         (@#'seon.db/write-attribute-plans projection (:db-after report))
+         (@#'seon.db/report-identity-attributes report)
+         changed)
+        (is (contains? @changed :seon.fn/sym) (pr-str @changed))))))
