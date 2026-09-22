@@ -69,3 +69,39 @@ restarted (Fable did its own). (c) `data/clusters/default/logs/seon.log:629` sho
 
 **Next for root.** Finding 1 first (it corrupts every error commit on `default`), then 2
 (no checkpoint gate without it). Then README §4 steps 1.1–1.3 in order.
+
+## 18:45 local — default's root agent is PARKED (platform failure, highest priority)
+
+Read through the re-dialed bridge (`seon.problems/problems` on `default`, read-only,
+24 ms; the 2.4 MB envelope is blob `fe4e96f1583aaf11e95c3fc75bda1178fdfa354de8a16d6b307449c2c01d8b9e`).
+The chain on pid 56288, all within sixteen seconds of boot:
+
+| t (Z) | Event | Seam |
+|---|---|---|
+| 00:33:34 | root agent's first ordinary turn `c7d30b1fa12a` replies with prose only (the Juniper "largest" message; a PAID provider call) | `seon.cluster.reply` no-forms |
+| 00:33:38 | settling that evaluation is REFUSED: `Bad entity attribute :seon.error/kind at [:db/add 37294 :seon.error/kind :seon.cluster.reply/no-forms]` | `seon.turn/receipt-settle-batch-call` → `seon.db/transact!` (finding 1 above) |
+| 00:33:39–46 | three system-turn refusals "A generated context read depends on the agent's own turn-taking" | `src/seon/turn.clj:2093` (`::generated-read-depends-on-turns`) |
+| 00:33:50 | "Agent root with no open turn had 3 consecutive turn writes refused (bound 3); the turn proc is parked and will not re-fire" | `src/seon/turn.clj:5159`, `offer-write-refusal-fault!` `:5189` |
+
+No open turn remains (`(not [?t :seon.turn/closed-tx _])` → empty), so this is a parked
+proc, not a dangling turn. The agent loop on `default` is dead until the proc is
+re-armed, and it will die again on the next no-forms reply while finding 1 stands.
+Also observed: `seon.db/pull` itself returns `{:seon.error/kind :seon.db/invalid-read …}`
+for an unknown attribute, so the retired key is constructed by `seon.db` too; and the
+refused-write error fact captured 2,383,701 bytes of `:seon.instrument/actual`
+(`seon.error/data-size`), which is the B3 "error payload durability" defect in the wild.
+
+**Smallest correct sequence for root:** (1) convert the writers that reach
+`transact!` off `:seon.error/kind` (reply/no-forms first) — B3 commit 4, pulled forward;
+(2) one regression: a no-forms reply settles as a fact on a fresh store; (3) after it
+lands, `bin/seon stop default; bin/seon start` (orchestrator) and seed one message; the
+proof is a settled evaluation with `:seon.cluster.eval/error` and NO refusal in
+`seon.log`. Whether the three generated-read refusals were caused by the failed settle
+is NOT established; record what the system turn's read evidence named before blaming
+`turn.clj:2093`.
+
+**Hook publication was re-enabled** in `1a434cc48` (`.claude/seon-hook.edn`
+`:enabled true`) after one explicit `init --dev default`. B1 §2d's condition also asked
+for the measured `adopt-noncore ≤ 700 ms` row and one observed live hook adoption;
+neither is recorded. Record the next real hook event's adoption time in the landing
+note, or disable again if an edit costs the old 60–150 s.
