@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed-pending-default-reload
 severity: blocking
 created: 2026-09-22
 tags: [issue, publication, program-graph, test-runner]
@@ -39,3 +39,43 @@ identity, including callers in unchanged files. Regression: publish a program,
 delete a callee whose caller file is unchanged, publish incrementally; the
 population commits and the caller's edge names no deleted identity.
 Raw log: `tmp/projection-writer-producer/test-gate-1.log`.
+
+## Cause (verified 2026-09-22, lane deletion-caller-edge)
+
+The surviving edge is not a literal call. `seon.render/invoke-selected` declares
+`{:seon.fn/invokes #{:seon.render/ai :seon.render/html :seon.render/form}}`, and
+`analysis-rows-by-file` derives its `:seon.fn/calls` from EVERY schema form naming a
+producer under those attributes (`schema-targets`). `render-diff-ai` was named by
+`{:seon.render/ai seon.db/render-diff-ai}` in `seon.db.diff.edn`; f1e55a824 removed
+the declaration and the function, `render.clj` did not change, so the incremental
+selection (`db.clj` + the two schema resources) never recomputed the caller.
+Default (pid 51528) stores 112 edges on `invoke-selected`, including this one.
+
+A second defect sat underneath: a partial analysis of `render.clj` alone kept only
+16 of those 112 edges, because the first-party filter knew only symbols mentioned
+in the analyzed batch. Any incremental edit of `render.clj` silently dropped 96
+declared edges.
+
+## Fix
+
+`f31074521` (`src/seon/fn.clj`): `analyzed-files` reads the removed definitions'
+stored `:seon.fn/calls`/`:seon.fn/references` referrers from AVET
+(`removed-definition-caller-paths`) and re-analyzes their files in the same
+population; `index!` reconciles every file whose rows are supplied
+(`reconciled-paths`). `analyzed-artifacts` asks the database for invokers'
+declared targets, so partial analysis keeps all 112 edges. The deletion guard is
+unchanged. Regression: `test/seon/fn/incremental_deletion_test.clj`.
+
+Evidence and the proof boundary: `docs/prds/agent-platform/landing/lane-deletion-caller-edge-2026-09-23.md`.
+The shared base is prepared by the DEFAULT JVM's loaded `seon.fn`, so
+`bin/test --prepare-head-base` keeps refusing until default reloads `seon.fn`.
+
+## Remaining (same class, not fixed here)
+
+- A schema change that ADDS a producer under an invoked attribute does not
+  re-analyze the invokers (`invoke-selected`), so the new declared edge is missing
+  until `render.clj` changes: under-reach for test selection, not a refusal. The
+  recomputation event is "a form under an invoked attribute changed"; its callers
+  are the definitions holding `:seon.fn/invokes` of that attribute.
+- `seon.fn/source-rows` (agent-submitted forms) filters declared targets by the
+  submitted batch's functions only, the same shape the analyzed-artifacts fix removed.
