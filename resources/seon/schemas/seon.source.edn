@@ -1,8 +1,11 @@
 #:seon.source{:branch :keyword,
+              :operator-root :string,
               :refused-test-run [:and {:seon.db/identity false :description "Identity of the test request whose admission or completion the source authority refused."} :seon.test.run/id],
               :test-evidence-error
               [:and :seon.error/base
-               [:map [:seon.source/refused-test-run :seon.source/refused-test-run]]],
+               [:map [:seon.source/refused-test-run :seon.source/refused-test-run]
+                [:seon.source/operator-root {:optional true} :seon.source/operator-root]
+                [:seon.test.run/branch {:optional true} :seon.test.run/branch]]],
               :test-selection-request
               [:map
                [:seon.test.run/provenance [:and :seon.test.run/provenance :seon.test.run/snapshot]]

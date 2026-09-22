@@ -111,7 +111,7 @@
  ;; The error owner requires call preparation. Resolve its inspection Vars
 ;; once after loading, as seon.error does for its SCI dependency. The supplied
 ;; projection remains the authority; no error population is copied here.
-(def ^:private error-declared-schemas (delay (requiring-resolve 'seon.error/declared-schemas)))
+(def ^:private error-output-validators (delay (requiring-resolve 'seon.error/declared-output-validators)))
 (def ^:private error-declared-schema-keys (delay (requiring-resolve 'seon.error/declared-schema-keys)))
 
 ;;; ---------------------------------------------------------------------------
@@ -1083,6 +1083,8 @@
      (assoc :seon.call-preparation/cause cause))
   :seon.error/expected "an available supplied default"})
 
+
+
 (defn supply
   "Call one supplied default's supplier with this call's environment.
 
@@ -1126,7 +1128,10 @@
             valid? (get (:seon.call-preparation/validators current)
                         default-key)]
         (cond
-          (seq (@error-declared-schemas (:seon.schema/projection current) produced)) (unavailable sym slot produced)
+          (or (:seon.call-preparation/thrown-supplier produced)
+              (some (fn [[_ valid?]] (valid? produced))
+                    (@error-output-validators (:seon.schema/projection current)
+                                              (:malli/schema (meta resolved)) 1))) (unavailable sym slot produced)
 
           (or (nil? valid?) (valid? produced)) produced
 
@@ -1277,10 +1282,8 @@
   :seon.error/offending {:seon.call-preparation/candidates (:seon.call-preparation/candidates answer)
                         :seon.schema/arguments arguments}
   :seon.error/expected "one uniquely determined argument placement"
-  :seon.error/data (merge {:seon.fn/sym sym
-          :seon.call-preparation/supplied-count supplied
-          :seon.call-preparation/candidates
-          (:seon.call-preparation/candidates answer)} {:seon.error/offending arguments})}
+  :seon.call-preparation/candidates (:seon.call-preparation/candidates answer)
+  :seon.call-preparation/offending-arguments arguments}
 
         :else
         (let [refusal (volatile! nil)

@@ -1003,8 +1003,8 @@
                       " does not resolve to :seon.ns/name.")
                  :seon.error/expected :seon.ns/name
                  :seon.error/offending namespace-ref
-                 :seon.error/data (merge {:seon.fn/namespace-ref namespace-ref
-                  :seon.fn/namespace-row namespace-row} {:seon.error/layer :program-analysis :seon.error/member :namespace-ref})})))
+                 :seon.error/data {:seon.fn/namespace-ref namespace-ref
+                  :seon.fn/namespace-row namespace-row}})))
          requests)
         refusal (some #(when (::namespace-unresolvable %) %) resolved)]
     (if refusal

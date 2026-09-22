@@ -22,6 +22,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
+            [seon.error.refusal :as refusal]
             [seon.id :as id]
             [seon.maintenance :as maintenance]
             [seon.operator.runtime :as operator.runtime]
@@ -569,8 +570,9 @@
             :seon.boot/log-dir log-dir})))
 
 (defn- error-request
-  [cluster claimed-receipt-id agent-id source completed-at]
+  [cluster claimed-receipt-id agent-id declared-schema source completed-at]
   (cond-> {:seon.error/source source
+           :seon.error/declared-schema declared-schema
            :seon.error/id (error-identity claimed-receipt-id)
            :seon.error/at completed-at
            :seon.error/process (:seon.db.process/id cluster)
@@ -588,27 +590,23 @@
   [connection cluster claimed-receipt-id agent-id result-or-failure]
   (let [completed-at (Date.)
         handler-result (:seon.maintenance.settlement/result result-or-failure)
-        failure (:seon.maintenance.settlement/failure result-or-failure)
-        result (if failure
-                 handler-result
-                 (maintenance/result-entity
-                  (db/carried-projection (db/db connection)) handler-result))
-        returned-error? (and (map? result) (:seon.error/at result)
-                             (:seon.error/layer result)
-                             (:seon.error/operation result)) ; debt: maintenance/result-entity-response still includes :seon.error/value.
-
-        source (cond
-                 failure failure
-                 returned-error?
-                 (ex-info (:seon.error/message result) result)
-                 :else nil)
+        projection (db/carried-projection (db/db connection))
+        declared-schema (:seon.error/declared-schema result-or-failure)
+        result (if declared-schema handler-result
+                   (maintenance/result-entity projection handler-result))
+        declared-schema
+        (or declared-schema
+            (some (fn [[name valid?]] (when (valid? result) name))
+                  (error/declared-output-validators
+                   projection (:malli/schema (meta #'maintenance/result-entity)) 2)))
+        source (when declared-schema result)
         request
         (cond-> {:seon.maintenance.receipt/id claimed-receipt-id
                  :seon.maintenance.receipt/completed-at completed-at}
           source
           (assoc :seon.maintenance.settlement/arm :error
                  :seon.maintenance.settlement/error-request
-                 (error-request cluster claimed-receipt-id agent-id source
+                 (error-request cluster claimed-receipt-id agent-id declared-schema source
                                 completed-at))
           (nil? source)
           (assoc :seon.maintenance.settlement/arm :result
@@ -618,13 +616,22 @@
      [[:db.fn/call #'settle-call request]])))
 
 (defn- invoke-handler
-  {:seon.fn/invokes #{:seon.schedule.task/function}}
-  [function request]
+  "Capture a handler's declared error alternative before recording custody."
+  {:seon.fn/invokes #{:seon.schedule.task/function}
+   :malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :map]
+                  [:map [:seon.maintenance.settlement/result :seon.schema/value]
+                   [:seon.error/declared-schema {:optional true} :seon.error/declared-schema]]]}
+  [projection function request]
   (try
-    (let [handler (requiring-resolve (symbol function))]
-      (when-not handler
-        (throw (ex-info "The scheduled handler Var does not resolve."
-                        {:seon.error/at (Date.)
+    (if-let [handler (requiring-resolve function)]
+      (let [result (handler request)
+            declaration (some (fn [[name valid?]] (when (valid? result) name))
+                              (error/declared-output-validators
+                               projection (:malli/schema (meta handler)) 1))]
+        (cond-> {:seon.maintenance.settlement/result result}
+          declaration (assoc :seon.error/declared-schema declaration)))
+      {:seon.error/declared-schema :seon.schedule/unresolved-handler-error
+       :seon.maintenance.settlement/result {:seon.error/at (Date.)
                         :seon.error/layer :seon.schedule/execution
                         :seon.error/operation 'seon.schedule/invoke-handler
                         :seon.error/message "Scheduled execution requires a resolving handler Var."
@@ -633,10 +640,18 @@
                         :seon.error/data {
                          :seon.fn/sym function }
                         :seon.schedule/unresolved-handler-symbol function
-                        :seon.error/expected "a resolving handler Var"})))
-      {:seon.maintenance.settlement/result (handler request)})
+                        :seon.error/expected "a resolving handler Var"}})
     (catch Throwable failure
-      {:seon.maintenance.settlement/failure failure})))
+      {:seon.error/declared-schema :seon.schedule/handler-failed-error
+       :seon.maintenance.settlement/result
+       (cond-> (refusal/diagnostic
+        {:seon.error/at (Date.)
+         :seon.error/layer :seon.schedule/execution
+         :seon.error/operation 'seon.schedule/invoke-handler
+         :seon.error/message (or (ex-message failure) "The scheduled handler failed.")
+         :seon.schedule/failed-handler-symbol function
+         :seon.error/throwable failure})
+         (ex-data failure) (assoc :seon.schedule/handler-exception-data (ex-data failure)))})))
 
 (defn fire-due!
   "Commit at most the latest due nominal instant for each task of `agent-id`.
@@ -686,7 +701,7 @@
                  (do
                    (settle! connection cluster (receipt-identity claimed-fire-id)
                             agent-id
-                            (invoke-handler (:seon.fn/sym task)
+                            (invoke-handler (db/carried-projection database) (:seon.fn/sym task)
                                             (assoc request :seon.db/connection connection)))
                    (inc fire-count))
                  fire-count))

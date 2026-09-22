@@ -72,15 +72,15 @@
     connection
     (error/commit-tx
      @connection
-     {:seon.error/source
+     {:seon.error/declared-schema :seon.error/normalization-error
+      :seon.error/source
       {:seon.error/at now
        :seon.error/layer :seon.problems-test/fixture
        :seon.error/operation (symbol "seon.problems-test" (name cause))
        :seon.error/message "boom"
        :seon.error/member :seon.error/source
        :seon.error/expected "a fixture diagnostic"
-       :seon.error/offending cause
-       :seon.error/data {:seon.error/operation 'seon.problems-test/commit-error!}}
+       :seon.error/offending cause}
       ;; DETERMINISTIC, because this fixture runs inside a property: a
       ;; random id would make a shrunk counterexample unreplayable even
       ;; though nothing here reads the id (review-caught)
@@ -107,7 +107,8 @@
   (test-support/transacted! connection
                             (error/commit-tx
                              (db/db connection)
-                             {:seon.error/source {:seon.error/at now
+                             {:seon.error/declared-schema :seon.error/normalization-error
+      :seon.error/source {:seon.error/at now
                                                   :seon.error/layer :seon.ai/provider
                                                   :seon.error/operation 'seon.ai/complete
                                                   :seon.error/message "the model did not answer"}
@@ -163,6 +164,7 @@
            {:seon.error/id (apply str (repeat 64 (nth "abcd" ordinal)))
             :seon.error/at now
             :seon.error/process live
+            :seon.error/declared-schema :seon.error/normalization-error
             :seon.error/message (str "generated error " ordinal)
             :seon.error/signature
             (apply str (repeat 64 (nth "abcd" ordinal)))
@@ -337,7 +339,8 @@
         (let [fact (generated-error-fact ordinal (keys optional-error-evidence) attribution)
               result (db/transact! connection
                                   (error/commit-tx (db/db connection)
-                                                  {:seon.error/fact fact :seon.error/source {}
+                                                  {:seon.error/declared-schema :seon.error/normalization-error
+                                                   :seon.error/fact fact :seon.error/source {}
                                                    :seon.error/id (:seon.error/id fact)
                                                    :seon.error/at now :seon.error/process live
                                                    :seon.sci.admit/caps caps

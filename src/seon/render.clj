@@ -324,9 +324,9 @@
          :seon.error/member :seon.render/output
          :seon.error/expected "one applicable renderer"
          :seon.error/offending candidate-symbols
-         :seon.error/data (merge {:seon.render/namespace namespace-name
-                         :seon.render/output output
-                         :seon.render/candidates (vec candidate-symbols)} {:seon.error/source {:seon.render/namespace namespace-name :seon.render/output output}})}]
+         :seon.error/data {:seon.render/namespace namespace-name
+                           :seon.render/candidates (vec candidate-symbols)
+                           :seon.render/output output}}]
     observation))
 
 (defn transacted
@@ -1472,7 +1472,7 @@
                            :seon.render/refused-member :seon.render.call/selected-producer
                            :seon.error/expected :compatible
                            :seon.error/offending requested-candidate
-                           :seon.error/data {:seon.error/source decision}}]
+                           :seon.render/selection-observation decision}]
                       observation))
                   (:seon.render.selection/selected decision))]
             (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))

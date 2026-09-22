@@ -119,6 +119,7 @@
  :empty? :boolean,
  :supplied-count :int,
  :candidates [:vector [:vector :seon.fn.argument/index]],
+ :offending-arguments :seon.schema/arguments,
  :argument-validators [:vector :seon.schema/compiled-validator],
 
  :arity-plan
@@ -243,5 +244,5 @@
   :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/invalid-key :seon.call-preparation/invalid-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.call-preparation/schema-key :seon.call-preparation/schema-key]]]
  :ambiguous-call-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/supplied-count :seon.call-preparation/supplied-count] [:seon.call-preparation/candidate-count :seon.call-preparation/candidate-count]]]
+  :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/supplied-count :seon.call-preparation/supplied-count] [:seon.call-preparation/candidate-count :seon.call-preparation/candidate-count] [:seon.call-preparation/candidates {:optional true} :seon.call-preparation/candidates] [:seon.call-preparation/offending-arguments {:optional true} :seon.call-preparation/offending-arguments]]]
 }

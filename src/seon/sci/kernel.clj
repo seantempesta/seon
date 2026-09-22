@@ -532,46 +532,11 @@
 (defn failure-value
   "Preserve an existing structural refusal and accrete guard evidence.
   Otherwise return the kernel declared-schema with the observed evaluation duration;
-  the complete diagnostic record retains whether the deadline fired."
+  the complete diagnostic record retains whether the deadline fired.
+  This error-handling normalizer preserves any producer error under the bare base contract."
   {:malli/schema
    [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record]
-    [:or :seon.error/base
-         :seon.await/timeout-error :seon.await/closed-error
-         :my.background/error :my.edit/error :my.fs/error :my.message/error :my.plan/error
-         :my.shell/error :my.turn/error :seon.agent/error :seon.agent.graph/error
-         :seon.ai/request-error :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-         :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-         :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-         :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-         :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-         :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-         :seon.flow/error :seon.fn/error :seon.fn.binding/error :seon.instrument/arity-error
-         :seon.instrument/contract-error :seon.instrument/registration-error
-         :seon.instrument/undeclared-error :seon.message/error :seon.operator/error
-         :seon.operator.collect/error :seon.problems/error :seon.program/error :seon.program/declaration-refused-error :seon.program/no-declaration-at-error :seon.program/binding-error :seon.program/signature-error
-     :seon.render/request-error :seon.render.transcript/request-error
-     :seon.render.walk/elided-error :seon.render.value/window-failed-error
-     :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error
-     :seon.render/ambiguous-error :seon.render.data/no-such-path-error
-     :seon.cluster.process/start-instant-unavailable-error
-     :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
-     :seon.render.walk/no-such-entity-error :seon.dev.mcp/projection-failed-error
-     :seon.render/walk-failed-error :seon.dev.mcp/jvm-exception-error
-     :seon.render.web/value-not-found-error :seon.render.value/missing-root-identity-error
-     :seon.render/unknown :seon.render.web/function-unavailable-error
-     :seon.render.data/observation-error :seon.render.value/window-realization-failed-error
-     :seon.render.web/request-error :seon.render.lint/absent-element-error
-         :seon.reconcile/error :seon.render/error :seon.render.data/error
-         :seon.render.value/error :seon.render.walk/error :seon.render.web/error
-         :seon.schedule/error :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error
-         :seon.schema.shape/error :seon.sci.admit/error :seon.sci.admit/projection-failed-error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error :seon.sci.eval/missing-function-row-error :seon.sci.eval/schema-refused-error :seon.sci.eval/documentation-unavailable-error :seon.sci.eval/namespace-binding-cycle-error :seon.sci.eval/declaration-absent-error :seon.sci.eval/install-mismatch-error
-         :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error :seon.sci.reader/unreadable-error :seon.sci.reader/refused-tag-error :seon.sci.reader/oversize-error :seon.sci.reader/fabricated-response-error
-         :seon.test/admission-error :seon.test/execution-error :seon.test/expired
-         :seon.test/not-runnable-error :seon.test/resolution-error
-         :seon.test/selection-error :seon.test/unknown-error
-         :seon.test.run/immutable-error :seon.test.run/unavailable-error
-         :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error :seon.test.run/error
-         :seon.test.runner/error :seon.turn/error :seon.turn/refused-error :seon.turn.loop/error]]}
+    :seon.error/base]}
   [{subject :seon.fn/sym}
    throwable
    diagnostic-record]
@@ -610,10 +575,7 @@
         (assoc :seon.sci.eval/data throwable-data)
 
         (:sci.impl/symbol throwable-data)
-        (assoc :seon.sci.eval/symbol (:sci.impl/symbol throwable-data))
-
-        (ex-message throwable)
-        (assoc :seon.error/throw-site-message (ex-message throwable))) {:seon.sci.admit/record diagnostic-record})
+        (assoc :seon.sci.eval/symbol (:sci.impl/symbol throwable-data))) {:seon.sci.admit/record diagnostic-record})
         :seon.error/throwable throwable
         :seon.error/expected :successful-evaluation
         :seon.error/offending (or (:sci.impl/symbol throwable-data) subject)}))))

@@ -535,9 +535,9 @@
                      "(seon.call-preparation-test/probe-current-database))"))]
            (is (= 1 (:seon.call-preparation/supplied-count refusal)))
            (is (= 2 (:seon.call-preparation/candidate-count refusal)))
+           (is (= 1 (count (:seon.call-preparation/offending-arguments refusal))))
            (is (= #{[0] [1]}
-                  (set (:seon.call-preparation/candidates
-                        (:seon.error/data refusal)))))
+                  (set (:seon.call-preparation/candidates refusal))))
            (is (zero? @entered) "an ambiguous call never enters the body")))))))
 
 (deftest the-leave-off-the-database-shortcut-survives-the-general-planner
@@ -808,16 +808,14 @@
                               (assoc slot :seon.call-preparation/supplier-symbol
                                      'sample/absent-supplier) 'sample/target)
            cause (get-in missing [:seon.error/data :seon.call-preparation/cause])]
-       (is (contains? (error/declared-schemas (projection) value)
-                      :seon.call-preparation/invalid-supplied-value-error))
+       (is ((seon.schema/projection-validator (projection) :seon.call-preparation/invalid-supplied-value-error) value))
        (is (= :seon.db/db (:seon.call-preparation/invalid-key value)))
        (is (= :seon.db/database-value (:seon.call-preparation/schema-key value)))
-       (is (empty? (error/declared-schemas (projection) (:seon.error/offending value))))
+       (is (not ((schema/projection-validator (projection) :seon.call-preparation/unavailable-error)
+                 (:seon.error/offending value))))
        (is (= 'seon.call-preparation-test/malformed-base-supplier
               (:seon.error/operation (:seon.error/offending value))))
-       (is (contains? (error/declared-schemas (projection) missing)
-                      :seon.call-preparation/unavailable-error))
+       (is ((seon.schema/projection-validator (projection) :seon.call-preparation/unavailable-error) missing))
        (is (= 'sample/target (:seon.call-preparation/target-symbol missing)))
-       (is (contains? (error/declared-schemas (projection) cause)
-                      :seon.call-preparation/unresolved-supplier-error))
+       (is ((seon.schema/projection-validator (projection) :seon.call-preparation/unresolved-supplier-error) cause))
        (is (= 'sample/absent-supplier (:seon.call-preparation/unresolved-symbol cause)))))))

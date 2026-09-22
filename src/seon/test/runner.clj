@@ -765,7 +765,7 @@
                              :seon.error/message message
                              :seon.error/expected "a non-blank reason string"
                              :seon.error/offending marker
-                             :seon.error/data (merge {:seon.test/sym (var-symbol test-var)} {:seon.error/member marker-attribute})}
+                             :seon.error/data {:seon.test/sym (var-symbol test-var)}}
                            :seon.test.runner/test-sym (var-symbol test-var)
                            :seon.test.runner/marker-key marker-attribute
                            :seon.error/offending marker)))))
@@ -2455,7 +2455,7 @@
                   :seon.error/message "The test execution evidence does not authorize this transition."
                   :seon.error/expected expected
                   :seon.error/offending observed
-                  :seon.error/data (merge {:seon.test.run/id run-id} {:seon.error/layer :test-execution :seon.error/member run-id})} :seon.test/execution-refusal kind)]
+                  :seon.error/data {:seon.test.run/id run-id}} :seon.test/execution-refusal kind)]
     (throw (ex-info (:seon.error/message failure) failure))))
 
 (defn- execution-read [value]
@@ -2917,8 +2917,8 @@
                       :seon.test.run/immutable run-id
                       :seon.error/expected (dissoc previous :db/id)
                       :seon.error/offending run
-                      :seon.error/data (merge {:seon.test.run/id run-id
-                       :seon.db/basis-t (db/basis-t database)} {:seon.error/layer :test})} :seon.test.run/immutable run-id)]
+                      :seon.error/data {:seon.test.run/id run-id
+                       :seon.db/basis-t (db/basis-t database)}} :seon.test.run/immutable run-id)]
         (throw (ex-info (:seon.error/message failure) failure))))
     (let [missing (into [] (comp (map :seon.test/sym) (remove current-by-symbol)) results)]
       (when (seq missing)
@@ -3095,7 +3095,8 @@
           :seon.error/message "Recorded test evidence could not be read."
           :seon.error/expected :recorded-program-selection-and-basis
           :seon.error/offending (or (ex-message failure) (.getName (class failure)))
-          :seon.error/data (merge {:seon.test/run-basis-t (db/basis-t database)} {:seon.error/layer :test-reuse :seon.error/member test-symbol})}
+          :seon.error/data {:seon.test/run-basis-t (db/basis-t database)}
+          :seon.test/error-test-symbol test-symbol}
          :seon.test/execution-refusal :seon.test/population-unknown)))))
 
 (defn- recorded-member-result [database run test-symbol]
@@ -3396,7 +3397,8 @@
                :seon.error/message (or (ex-message failure) (.getName (class failure)))
                :seon.error/expected :published-source-test-authority
                :seon.error/offending (Throwable->map failure)
-               :seon.error/data (merge {:seon.test.run/provenance (:seon.test.run/provenance request)} {:seon.error/layer :test :seon.error/member operator-root})}
+               :seon.error/data {:seon.test.run/provenance (:seon.test.run/provenance request)}
+          :seon.source/operator-root operator-root}
              :seon.source/refused-test-run
              (get-in request [:seon.test.run/provenance :seon.test.run/id])))))
 
@@ -3459,7 +3461,7 @@
              :seon.error/message "Recorded run coverage is unavailable."
              :seon.error/expected :complete-recorded-membership
              :seon.error/offending (Throwable->map failure)
-             :seon.error/data (merge {:seon.test.run/id run-id} {:seon.error/layer :test :seon.error/member run-id})}
+             :seon.error/data {:seon.test.run/id run-id}}
            :seon.test/execution-refusal :seon.test/population-unknown)))
 
 (defn run-results
@@ -3888,8 +3890,7 @@
                                  :seon.error/member ::worker-process
                                  :seon.error/expected "a launched worker process"
                                  :seon.error/offending command
-                                 :seon.error/data {:seon.error/throwable-class (.getName (class failure))
-                                  ::worker-error-log error-log-path}})
+                                 :seon.error/throwable failure})
                                :seon.test.runner/worker-id worker-id
                                :seon.test.runner/worker-error-log error-log-path
                                :seon.error/offending command)
@@ -3925,7 +3926,7 @@
                            :seon.error/message message
                            :seon.error/expected "a worker readiness event"
                            :seon.error/offending ready
-                           :seon.error/data {:seon.error/member :ready :seon.error/source ready}}
+                           :seon.error/member :ready}
                          :seon.test.runner/worker-id worker-id
                          :seon.test.runner/worker-error-log error-log-path
                          :seon.error/offending ready)))))

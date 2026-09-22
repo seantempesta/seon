@@ -232,7 +232,7 @@
  :seon.turn/error
  [:and
  {:seon.db/attributes true}
- :seon.agent/error
+ :seon.error/base
  [:map
   {:seon.db/attributes true}
   [:seon.turn/error-turn-id :seon.turn/error-turn-id]]]

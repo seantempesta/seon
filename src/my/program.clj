@@ -34,7 +34,8 @@
              :seon.error/exception-class (symbol (.getName (class failure)))
              :seon.error/offending request
              :seon.error/expected :seon.program/breakage
-             :seon.error/data (merge (ex-data failure) {:seon.error/member (:seon.program/subject request) :seon.error/source (ex-message failure)})}))))
+             :seon.program/read-failure-message (or (ex-message failure) "Program fact read failed.")
+             :seon.program/read-exception-data (or (ex-data failure) {})}))))
 
 (defn- subject-identities [subject]
   (cond

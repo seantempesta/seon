@@ -279,8 +279,7 @@
     ::submission-id submission-id
     :seon.error/message "The bounded work submission queue is full."
     :seon.error/expected "available submission capacity"
-    :seon.error/data (merge {::submission-id submission-id
-                     ::workload workload} {:seon.error/source {::workload workload}})})
+    :seon.error/data {::submission-id submission-id ::workload workload}})
 
 (defn- refuse-compute-submission!
   [{::keys [submission-id result status]}]
@@ -750,8 +749,9 @@
              :seon.error/operation ::stop-work-launcher
              :seon.error/expected ::completion
              :seon.error/offending ::pending
-             :seon.error/data (merge {:seon.flow/active-work-count (count @active-work)
-              :seon.flow/io-submission-count (count @io-submissions)} {:seon.error/member member})})
+             :seon.await/subject {:seon.flow/active-work-count (count @active-work)
+              :seon.flow/io-submission-count (count @io-submissions)}
+             :seon.error/member member})
           drained-result
           (await/await!
            {:seon.await/bound bound
@@ -1032,7 +1032,12 @@
        (let [mode (read-core-error-mode)
              [fact outcome previously-reported?]
              ((if (::dropped-fault-count fault) commit-drop! commit-fault!)
-              fault)
+              {:seon.error/source fault
+               :seon.error/declared-schema
+               (if (::dropped-fault-count fault)
+                 :seon.flow/fault-channel-overflow-error
+                 (or (:seon.error/declared-schema (meta (ex-data (::flow/ex fault))))
+                     :seon.flow/exception-error))})
              signature (:seon.error/signature fact)
              repeated? (and signature (contains? seen-signatures signature))
              already-reported?
@@ -1111,7 +1116,7 @@
         :seon.error/offending [pid command more-kvs]
         :seon.error/message "core.async.flow does not implement command-proc."
         :seon.error/expected :implemented-protocol-method
-        :seon.error/data {:seon.error/layer :flow :seon.error/member :command-proc :seon.error/source 'clojure.core.async.flow.impl/create-flow}})
+        :seon.flow/unsupported-implementation 'clojure.core.async.flow.impl/create-flow})
     (inject [_ coordinate messages]
       (flow.graph/inject graph coordinate messages))))
 

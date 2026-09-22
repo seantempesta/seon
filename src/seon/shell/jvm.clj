@@ -50,7 +50,7 @@
         :seon.error/offending cwd
         :my.shell/refused-cwd cwd
         :seon.error/expected :my.fs/directory?
-        :seon.error/source stat}
+        :my.shell/cwd-observation stat}
 
       (not (:my.fs/directory? stat))
       {:seon.error/at (java.util.Date.)
@@ -61,7 +61,7 @@
         :my.shell/refused-cwd cwd
         :seon.error/member :my.shell/cwd
         :seon.error/expected :my.fs/directory?
-        :seon.error/data {:seon.error/source stat}}
+        :my.shell/cwd-observation stat}
 
       :else
       (let [working-root
@@ -120,8 +120,9 @@
            :seon.error/operation ::capture-completion
            :seon.error/expected ::task-result
            :seon.error/offending ::pending
-           :seon.error/data (merge {:seon.shell.jvm/thread-name (.getName ^Thread thread)
-            :seon.shell.jvm/thread-id (.threadId ^Thread thread)} {:seon.error/member member})}
+           :seon.await/subject {:seon.shell.jvm/thread-name (.getName ^Thread thread)
+            :seon.shell.jvm/thread-id (.threadId ^Thread thread)}
+             :seon.error/member member}
           :seon.await/blocking-deref result})]
     (if (:seon.await/elapsed-ms terminal)
       (do
@@ -419,7 +420,7 @@
           :seon.config.eval/time-limit-ms :seon.config.shell/time-limit-ms)
         :seon.error/member :my.shell/argv
         :seon.error/expected "process exit before its deadline"
-        :seon.error/data (merge (merge {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)} evidence) {:seon.error/source evidence})}
+        :seon.error/data (merge {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)} evidence)}
                  :seon.effect/disposition :interrupted))))))
       (catch InterruptedException interrupted
         (terminate-tree! process-record
@@ -449,7 +450,7 @@
                     (:my.shell/stdin-blob-digest observed))
               observed
               (error/diagnostic
-       {:seon.error/at (java.util.Date.)
+       (cond-> {:seon.error/at (java.util.Date.)
         :seon.error/layer :my.shell/execution
         :seon.error/operation 'seon.shell.jvm/run
         :seon.error/message "The foreground process could not be completed; inspect the captured cause."
@@ -457,5 +458,5 @@
         :my.shell/failed-argv (:my.shell/argv request)
         :seon.error/throwable error
         :seon.error/member :my.shell/argv
-        :seon.error/expected :my.shell/run-result
-        :seon.error/data {:seon.error/source (ex-data error)}}))))))))
+        :seon.error/expected :my.shell/run-result}
+         (ex-data error) (assoc :my.shell/process-exception-data (ex-data error)))))))))))

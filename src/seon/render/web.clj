@@ -707,11 +707,11 @@
 
 (defn- debug-diagnostic
   {:malli/schema [:=> [:cat :string :qualified-symbol :qualified-keyword
-                       :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value]
+                       :seon.schema/value :seon.schema/value :seon.render.web/refusal-reason [:maybe :map]]
                   :seon.render.web/request-error]}
   [message operation member expected offending cause evidence]
   (let [observation
-        {:seon.error/at (java.util.Date.)
+        (merge evidence {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.render.web/debug
          :seon.error/operation operation
          :seon.render.web/refused-member member
@@ -719,7 +719,7 @@
          :seon.error/fix "Repair the unavailable page input and repeat the observation."
          :seon.error/expected expected
          :seon.error/offending offending
-         :seon.error/data (merge evidence {:seon.error/source cause})}]
+         :seon.render.web/refusal-reason cause})]
     observation))
 
 (defn- turn-function-result
@@ -2261,7 +2261,7 @@
           'seon.render.web/render-pass
           :seon.render.web/page :seon.render.web/page
           registration-key ::page-derivation-failed
-          {:seon.error/throwable-class (.getName (class failure))})]
+          {:seon.render.web/page-exception-class (symbol (.getName (class failure)))})]
      (when (and fault-channel (not= signature last-signature))
        (when-not (async/offer!
                   fault-channel
@@ -2733,7 +2733,8 @@
                  :seon.error/operation 'seon.render.web/write-package!
                  :seon.error/expected ::drained-or-closed
                  :seon.error/offending ::pending
-                 :seon.error/data (merge {:http-kit.write/pending-bytes pending-bytes} {:seon.error/member member})}
+                 :seon.await/subject {:http-kit.write/pending-bytes pending-bytes}
+             :seon.error/member member}
                 :seon.await/future drained})]
           (if (or (:seon.await/elapsed-ms result) (:seon.await/closed-operation result))
             (do
@@ -2765,7 +2766,7 @@
            :seon.error/operation 'seon.render.web/await-feed-package!
            :seon.error/expected ::registered-package
            :seon.error/offending ::pending
-           :seon.error/data {:seon.error/member registration-key}}
+           :seon.error/member registration-key}
           :seon.await/port-operations [tap]
           :seon.await/accept? #(get % registration-key)})]
 
@@ -3414,7 +3415,7 @@
                      :seon.render.web/value-unreadable value-digest
                      :seon.error/member :seon.blob/digest
                      :seon.error/expected "a readable stored value"
-                     :seon.error/data {:seon.error/throwable-class (.getName (class failure))}}]
+                     :seon.error/data {:seon.render.web/page-exception-class (symbol (.getName (class failure)))}}]
                 observation)))
 
           entity?

@@ -427,8 +427,8 @@
                       :seon.error/message "Value admission could not project this value; inspect the codec failure evidence."
                       :seon.error/offending value
                       ::failed-class (symbol (.getName (class value)))
-                      :seon.error/data {:seon.error/exception-class (symbol (.getName (class failure)))
-                                        :seon.error/throw-site-message (or (ex-message failure) "Projection failed.")}
+                      :seon.error/exception-class (symbol (.getName (class failure)))
+                      :seon.sci.admit/projection-failure-message (or (ex-message failure) "Projection failed.")
                       :seon.error/member :seon.sci.admit/value
                       :seon.error/expected :seon.print/node}
                     failure))))
@@ -555,50 +555,7 @@
   `Error` thrown out of a total operation."
   {:malli/schema
    [:=> [:cat :seon.print/node]
-    [:or
-     [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
-            :seon.schema.admission/reason "A print node represents an arbitrary original Clojure value; semantic decoding preserves its scalar or collection shape.",
-            :gen/elements [nil false 0 "" :k [] {}]}]
-     :seon.error/base
-     :seon.await/timeout-error :seon.await/closed-error
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.program/declaration-refused-error :seon.program/no-declaration-at-error :seon.program/binding-error :seon.program/signature-error :seon.reconcile/error
-     :seon.render/request-error :seon.render.transcript/request-error
-     :seon.render.walk/elided-error :seon.render.value/window-failed-error
-     :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error
-     :seon.render/ambiguous-error :seon.render.data/no-such-path-error
-     :seon.cluster.process/start-instant-unavailable-error
-     :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
-     :seon.render.walk/no-such-entity-error :seon.dev.mcp/projection-failed-error
-     :seon.render/walk-failed-error :seon.dev.mcp/jvm-exception-error
-     :seon.render.web/value-not-found-error :seon.render.value/missing-root-identity-error
-     :seon.render/unknown :seon.render.web/function-unavailable-error
-     :seon.render.data/observation-error :seon.render.value/window-realization-failed-error
-     :seon.render.web/request-error :seon.render.lint/absent-element-error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.admit/projection-failed-error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error :seon.sci.eval/missing-function-row-error :seon.sci.eval/schema-refused-error :seon.sci.eval/documentation-unavailable-error :seon.sci.eval/namespace-binding-cycle-error :seon.sci.eval/declaration-absent-error :seon.sci.eval/install-mismatch-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error :seon.sci.reader/unreadable-error :seon.sci.reader/refused-tag-error :seon.sci.reader/oversize-error :seon.sci.reader/fabricated-response-error
-     :seon.test/admission-error :seon.test/execution-error :seon.test/expired
-     :seon.test/not-runnable-error :seon.test/resolution-error
-     :seon.test/selection-error :seon.test/unknown-error
-     :seon.test.run/immutable-error :seon.test.run/unavailable-error
-     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
-     :seon.turn.loop/error]]}
+    :seon.schema/value]}
   [print-node]
   (loop [stack []
          step [::open print-node]]

@@ -1,10 +1,10 @@
 (ns seon.error
   "Error observations, complete declared component reads, and writer-owned recurrence.
 
-  D12: errors are structural base values with composable declared declared-schemas.
+  D12: errors have one named schema over the base observation.
   Callers branch on their boundary's required members; no general error
   predicate or stored classification is used here. D13 identity derives from
-  layer, operation, satisfied declared-schemas, Throwable class/frame, violated schema
+  layer, operation, the producer-declared schema, Throwable class/frame, violated schema
   and location. Message, time, process and offending bytes do not identify a bug.
 
   Normalization receives its projection and evidence policy. Recording acquires
@@ -17,6 +17,7 @@
             [clojure.test.check.generators :as gen]
             [malli.core :as m]
             [malli.error :as me]
+            [malli.util :as mu]
             [seon.call-preparation :as call-preparation]
             [seon.blob :as blob]
             [seon.db :as db]
@@ -79,51 +80,11 @@
 
   The pure cause-chain owner is `seon.error.refusal`, below both this
   rendering-aware normalizer and `seon.db`; this public entry delegates
-  so existing callers retain one behavior without a dependency cycle."
+  so existing callers retain one behavior without a dependency cycle.
+  This error-handling reader accepts errors from any producer under the bare base contract."
   {:malli/schema
    [:=> [:cat [:maybe :seon.error/throwable]]
-    [:or
-     :nil
-     :map
-     :seon.error/base
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
-     :seon.render/request-error :seon.render.transcript/request-error
-     :seon.render.walk/elided-error :seon.render.value/window-failed-error
-     :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error
-     :seon.render/ambiguous-error :seon.render.data/no-such-path-error
-     :seon.cluster.process/start-instant-unavailable-error
-     :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
-     :seon.render.walk/no-such-entity-error :seon.dev.mcp/projection-failed-error
-     :seon.render/walk-failed-error :seon.dev.mcp/jvm-exception-error
-     :seon.render.web/value-not-found-error :seon.render.value/missing-root-identity-error
-     :seon.render/unknown :seon.render.web/function-unavailable-error
-     :seon.render.data/observation-error :seon.render.value/window-realization-failed-error
-     :seon.render.web/request-error :seon.render.lint/absent-element-error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.test/admission-error :seon.test/execution-error :seon.test/expired
-     :seon.test/not-runnable-error :seon.test/resolution-error
-     :seon.test/selection-error :seon.test/unknown-error
-     :seon.test.run/immutable-error :seon.test.run/unavailable-error
-     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
-     :seon.turn.loop/error]]}
+    [:or :nil :map :seon.error/base]]}
   [throwable]
   (error.refusal/refusal throwable))
 
@@ -195,15 +156,15 @@
       [(symbol (.getClassName frame)) (symbol (.getMethodName frame))
        file (long (.getLineNumber frame))])))
 
-(declare declared-schemas declared-schema-keys stored-observation observation-selector latest-fact)
+(declare declared-schema-keys stored-observation observation-selector latest-fact)
 
 (defn- signature
-  "D13: identity of the observed site, satisfied declared-schemas, violated schema and path.
+  "D13: identity of the observed site, producer-declared schema, violated schema and path.
   Incidental time, process, message and offending bytes never enter this tuple."
-  {:malli/schema [:=> [:cat :seon.schema/projection :map
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.error/declared-schema
                        [:or :nil :symbol] [:or :nil :seon.error/frame]]
                   :seon.error/signature]}
-  [projection observation throwable-class frame]
+  [projection observation declared-schema throwable-class frame]
   (let [observation (stored-observation projection observation)
         location (:seon.error/location observation)
         path (mapv (fn [segment]
@@ -218,7 +179,7 @@
                path)]
     (id/id [(:seon.error/layer observation)
             (:seon.error/operation observation)
-            (into (sorted-set) (declared-schemas projection observation))
+            declared-schema
             throwable-class frame
             (into (sorted-map)
                   (select-keys observation [:seon.error/expected-key :seon.error/expected-shape]))
@@ -229,48 +190,7 @@
   "Restore the declared stored collection/ref grammar of a complete acquired
   observation. Only declared attributes are transformed; owned children keep
   their complete values, peer refs keep their entity identity."
-  {:malli/schema [:=> [:cat :seon.schema/projection :map] [:or
-     :nil
-     :map
-     :seon.error/base
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
-     :seon.render/request-error :seon.render.transcript/request-error
-     :seon.render.walk/elided-error :seon.render.value/window-failed-error
-     :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error
-     :seon.render/ambiguous-error :seon.render.data/no-such-path-error
-     :seon.cluster.process/start-instant-unavailable-error
-     :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
-     :seon.render.walk/no-such-entity-error :seon.dev.mcp/projection-failed-error
-     :seon.render/walk-failed-error :seon.dev.mcp/jvm-exception-error
-     :seon.render.web/value-not-found-error :seon.render.value/missing-root-identity-error
-     :seon.render/unknown :seon.render.web/function-unavailable-error
-     :seon.render.data/observation-error :seon.render.value/window-realization-failed-error
-     :seon.render.web/request-error :seon.render.lint/absent-element-error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.test/admission-error :seon.test/execution-error :seon.test/expired
-     :seon.test/not-runnable-error :seon.test/resolution-error
-     :seon.test/selection-error :seon.test/unknown-error
-     :seon.test.run/immutable-error :seon.test.run/unavailable-error
-     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
-     :seon.turn.loop/error]]}
+  {:malli/schema [:=> [:cat :seon.schema/projection :map] [:maybe :map]]}
   [projection observation]
   (letfn [(restore [value]
               (if-not (map? value)
@@ -307,42 +227,7 @@
 
 (defn- meaningful-source
   {:malli/schema [:=> [:cat :seon.error/source]
-                  [:or :seon.error/source
-     :seon.error/base
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
-     :seon.render/request-error :seon.render.transcript/request-error
-     :seon.render.walk/elided-error :seon.render.value/window-failed-error
-     :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error
-     :seon.render/ambiguous-error :seon.render.data/no-such-path-error
-     :seon.cluster.process/start-instant-unavailable-error
-     :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
-     :seon.render.walk/no-such-entity-error :seon.dev.mcp/projection-failed-error
-     :seon.render/walk-failed-error :seon.dev.mcp/jvm-exception-error
-     :seon.render.web/value-not-found-error :seon.render.value/missing-root-identity-error
-     :seon.render/unknown :seon.render.web/function-unavailable-error
-     :seon.render.data/observation-error :seon.render.value/window-realization-failed-error
-     :seon.render.web/request-error :seon.render.lint/absent-element-error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
-     :seon.turn.loop/error]]}
+                  :seon.error/source]}
   [source]
   (if (and (map? source) (instance? Throwable (::flow/ex source)))
     (dissoc source ::flow/state)
@@ -514,10 +399,7 @@
                   [:or :nil :map]]}
   [source]
   (let [observation (if (map? (::flow/ex source)) (:data (::flow/ex source)) source)
-        data (merge (:seon.error/data observation)
-                    (when (map? observation)
-                      (select-keys observation [:seon.error/operation :seon.error/member
-                                                :seon.error/expected :seon.error/offending])))]
+        data observation]
     (when (and (map? data)
                (qualified-symbol? (:seon.instrument/fn data))
                (#{:input :output :guard} (:seon.instrument/arm data)))
@@ -648,11 +530,33 @@
      :seon.error/shown shown
      :seon.error/data-blob digest}))
 
+(defn- validate-declaration!
+  "Validate one producer-supplied name and its observation without inference."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.error/declared-schema :map :inst] :nil]}
+  [projection declared-schema observation at]
+  (when-not (and (not= declared-schema :seon.error/base)
+                         (internal/extends-schema?
+                          (mr/schema (:seon.schema.projection/registry projection) declared-schema)
+                          :seon.error/base)
+                         ((schema/projection-validator projection declared-schema) observation))
+            (throw (ex-info "The supplied error declaration does not validate its observation."
+                            {:seon.error/at at
+                             :seon.error/layer :seon.error/recording
+                             :seon.error/operation 'seon.error/prepare
+                             :seon.error/member :seon.error/declared-schema
+                             :seon.error/refused-schema declared-schema
+                             :seon.error/expected declared-schema
+                             :seon.error/offending observation}))))
+
 (defn prepare
-  "Prepare one bounded fact and its full meaningful admitted evidence."
+  "Prepare one bounded fact under the producer-supplied named schema.
+  Normalization of arbitrary escaped data is explicitly requested with
+  normalization-error; missing declaration evidence never selects it.
+  The two declared transient validation refusals are normalized to this owner's
+  explicit stored write/schema error members before identity is derived."
   {:malli/schema [:=> [:cat :seon.error/prepare-request]
                   :seon.error/prepared]}
-  [{:seon.error/keys [source at process basis-t]
+  [{:seon.error/keys [source at process basis-t declared-schema]
     evidence-bytes :seon.config.error/max-evidence-bytes
     projection :seon.schema/projection
     :seon.sci.admit/keys [caps]
@@ -676,18 +580,23 @@
         instrument-data (contract-violation-data projected-source)
         flow? (map? source)
         error-value (if failure (refusal failure) source)
-        operation (or (:seon.error/operation error-value)
-                      (get-in error-value [:seon.error/data :seon.error/operation]))
+        operation (:seon.error/operation error-value)
         function (or (when (qualified-symbol? operation) operation)
                      (:seon.instrument/fn instrument-data)
                      (stack-failing-function failure))
         frame (top-frame failure)
-        observation (merge {:seon.error/at at
-                            :seon.error/layer :seon.error/normalization
-                            :seon.error/operation (or function 'seon.error/normalize)}
+        observation (merge (cond-> {:seon.error/at at
+                                    :seon.error/layer :seon.error/normalization
+                                    :seon.error/operation (or function 'seon.error/normalize)}
+                             class-name (assoc :seon.error/exception-class (symbol class-name))
+                             frame (assoc :seon.error/frame frame))
                            (when (map? error-value) error-value))
+        observation (cond-> observation
+                      (= :seon.error/normalization-error declared-schema)
+                      (assoc :seon.error/data-edn full-edn))
+        _ (validate-declaration! projection declared-schema observation at)
         observation
-        (if ((schema/projection-validator projection :seon.db.write/validation-refusal) observation)
+        (if (= declared-schema :seon.db.write/validation-refusal)
           (-> observation
               (assoc :seon.db.write/attempt
                      {:seon.db.write.attempt/request-id (:seon.db.write.attempt/request-id observation)
@@ -698,7 +607,7 @@
               (update :seon.error/data dissoc :seon.db.write.attempt/transaction))
           observation)
         observation
-        (if ((schema/projection-validator projection :seon.schema/validation-refusal) observation)
+        (if (= declared-schema :seon.schema/validation-refusal)
           (-> observation
               (assoc :seon.schema/error-declaration
                      (project-observation caps (:seon.schema/refused-value observation))
@@ -706,7 +615,12 @@
                      (project-observation caps (:seon.schema/expected-value observation)))
               (dissoc :seon.schema/refused-value :seon.schema/expected-value))
           observation)
-        signature (signature projection observation
+        declared-schema (case declared-schema
+                          :seon.db.write/validation-refusal :seon.db.write/error
+                          :seon.schema/validation-refusal :seon.schema/error
+                          declared-schema)
+        _ (validate-declaration! projection declared-schema observation at)
+        signature (signature projection observation declared-schema
                              (or (some-> class-name symbol)
                                  (:seon.error/exception-class observation))
                              (or frame (:seon.error/frame observation)))
@@ -734,10 +648,12 @@
                  :seon.error/layer (:seon.error/layer observation)
                  :seon.error/operation (:seon.error/operation observation)
                  :seon.error/signature signature
+                 :seon.error/declared-schema declared-schema
                  :seon.error/capped? true}
           (int? data-size) (assoc :seon.error/data-size (long data-size))
-          class-name (assoc :seon.error/throwable-class class-name
-                            :seon.error/exception-class (symbol class-name))
+          class-name (assoc :seon.error/throwable-class class-name)
+          (:seon.error/exception-class observation)
+          (assoc :seon.error/exception-class (:seon.error/exception-class observation))
           frame (assoc :seon.error/frame frame)
           function (assoc :seon.instrument/fn function)
           (and flow? (::flow/pid source))
@@ -790,7 +706,7 @@
 
 (defn normalize
   "Normalize one observation with a supplied projection and bounded evidence.
-  The signature is D13's stable tuple; complete source declared-schemas remain on the
+  The signature is D13's stable tuple; complete declared source members remain on the
   owned occurrence, while this fact carries the root's site and evidence link."
   {:malli/schema [:=> [:cat :seon.error/normalize-request]
                   [:or :seon.error/fact :seon.error/base]]}
@@ -804,7 +720,7 @@
   (assoc (select-keys fact [:seon.error/at :seon.error/layer :seon.error/operation
                           :seon.error/result-id :seon.error/shown :seon.error/data-blob
                           :seon.error/message :seon.error/signature])
-         :seon.error/data {:seon.error/id (:seon.error/id fact)}))
+         :seon.error/id (:seon.error/id fact)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The routing unit and its projections
@@ -839,42 +755,7 @@
 
 (defn- fact-source
   {:malli/schema [:=> [:cat :map]
-                  [:or :seon.error/source
-     :seon.error/base
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
-     :seon.render/request-error :seon.render.transcript/request-error
-     :seon.render.walk/elided-error :seon.render.value/window-failed-error
-     :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error
-     :seon.render/ambiguous-error :seon.render.data/no-such-path-error
-     :seon.cluster.process/start-instant-unavailable-error
-     :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
-     :seon.render.walk/no-such-entity-error :seon.dev.mcp/projection-failed-error
-     :seon.render/walk-failed-error :seon.dev.mcp/jvm-exception-error
-     :seon.render.web/value-not-found-error :seon.render.value/missing-root-identity-error
-     :seon.render/unknown :seon.render.web/function-unavailable-error
-     :seon.render.data/observation-error :seon.render.value/window-realization-failed-error
-     :seon.render.web/request-error :seon.render.lint/absent-element-error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
-     :seon.turn.loop/error]]}
+                  :seon.error/source]}
   [fact]
   (try
     (admit/semantic-value (edn/read-string (:seon.error/data-edn fact)))
@@ -887,49 +768,9 @@
 
 (defn- flat-data
   {:malli/schema [:=> [:cat :map]
-                  [:or :seon.error/source
-     :seon.error/base
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
-     :seon.render/request-error :seon.render.transcript/request-error
-     :seon.render.walk/elided-error :seon.render.value/window-failed-error
-     :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error
-     :seon.render/ambiguous-error :seon.render.data/no-such-path-error
-     :seon.cluster.process/start-instant-unavailable-error
-     :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
-     :seon.render.walk/no-such-entity-error :seon.dev.mcp/projection-failed-error
-     :seon.render/walk-failed-error :seon.dev.mcp/jvm-exception-error
-     :seon.render.web/value-not-found-error :seon.render.value/missing-root-identity-error
-     :seon.render/unknown :seon.render.web/function-unavailable-error
-     :seon.render.data/observation-error :seon.render.value/window-realization-failed-error
-     :seon.render.web/request-error :seon.render.lint/absent-element-error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
-     :seon.turn.loop/error]]}
+                  :seon.error/source]}
   [fact]
-  (let [source (fact-source fact)]
-    (if (map? (:seon.error/data source))
-      (merge (:seon.error/data source)
-             (select-keys source [:seon.error/operation :seon.error/member
-                                  :seon.error/expected :seon.error/offending]))
-      source)))
+  (fact-source fact))
 
 (defn- evidence-prose
   {:malli/schema [:=> [:cat :map]
@@ -1134,11 +975,7 @@
         (cond
           (map? spec) spec
           (not (vector? supplied))
-          {:seon.error/at (java.util.Date.)
-           :seon.error/layer :seon.error/reading
-           :seon.error/operation 'seon.error/reader-correction
-           :seon.error/message "The supplied-entry owner has not declared its error output."
-           :seon.error/data {:seon.error/cause supplied}}
+          supplied
           (and (string? spec) (nat-int? position)
                (= "{" (:edamame/opened-delimiter container)))
           (let [projection (or (db/carried-projection database)
@@ -1168,7 +1005,7 @@
   [unit fact data]
   (let [evidence (merge (when (map? fact) fact) data)]
     (cond
-      (seq (:seon.error/problems data)) data
+      (seq (:seon.error/problems evidence)) evidence
 
       (find evidence :seon.sci.reader/text)
       (let [correction (reader-correction unit evidence)]
@@ -1209,7 +1046,8 @@
          :seon.error/fix "Define or require this symbol."}]
        :seon.error/operation 'seon.sci.eval/evaluate}
 
-      (:seon.error/operation evidence)
+      (and (:seon.error/operation evidence)
+           (or (find evidence :seon.error/expected) (find evidence :seon.error/offending)))
       (let [expected (:seon.error/expected evidence)
             offending (:seon.error/offending evidence)
             member (:seon.error/member evidence)
@@ -1242,7 +1080,7 @@
   {:malli/schema [:=> [:cat :seon.error/source :seon.error/source :seon.error/source]
                   [:or :nil :string]]}
   [unit fact data]
-  (let [stored-problems? (seq (:seon.error/problems data))
+  (let [stored-problems? (seq (:seon.error/problems fact))
         data (refusal-data unit fact (when (map? data) data))
         operation (:seon.error/operation data)
         problems (:seon.error/problems data)
@@ -1256,18 +1094,14 @@
                           (str "Documentation lookup unavailable: " (:seon.error/message doc))
                           (when (string? doc)
                             (not-empty (:example (@sci-eval-docstring-parts doc))))))))]
-    (if (and (inst? (:seon.error/at data))
-             (qualified-keyword? (:seon.error/layer data))
-             (qualified-symbol? (:seon.error/operation data)))
-      (:seon.error/message data)
-      (when (and operation (seq problems))
+    (if (and operation (seq problems))
       (str/join
        "\n"
        (map-indexed
         (fn [index {:seon.error/keys [expected offending input result-contract]
                     :as problem}]
           (let [location (when stored-problems?
-                           [:seon.error/data :seon.error/problems index])]
+                           [:seon.error/problems index])]
           (str (problem-sentence
                 operation problem
                 (refusal-value-text unit expected (when location (conj location :seon.error/expected)))
@@ -1279,7 +1113,8 @@
                (when (and (zero? index) (:seon.instrument/caller data))
                  (str " Called from " (:seon.instrument/caller data) "."))
                " Example: " (or example "No docstring example is available."))))
-        problems))))))
+        problems))
+      nil)))
 
 (defn refusal-prose
   "`:seon.render/ai` — a refused transition and its atomic outcome."
@@ -1312,7 +1147,7 @@
   (let [fact (or (:seon.error/fact error-value) error-value)
         data (if (:seon.error/data-edn fact)
                (flat-data fact)
-               (:seon.error/data fact))
+               fact)
         operation (or (:seon.error/operation data)
                       (:seon.instrument/fn fact))
         member (or (:seon.error/member data)
@@ -1614,15 +1449,12 @@
                                    :seon.instrument/actual-size])
         digest (:seon.error/data-blob fact)
         occurrence (cond-> (merge evidence
-                                 (let [source (:seon.error/source request)
-                                       base? (schema/projection-cache-value
-                                              projection ::base-validator
-                                              #(schema/projection-validator projection :seon.error/base))]
-                                   (when (and (map? source) (base? source))
-                                     (let [attributes (into #{}
-                                                            (mapcat #(map first (internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) %))))
-                                                            (conj (declared-schemas projection source) :seon.error/base))]
-                                       (select-keys source (filter diagnostic-attributes attributes)))))
+                                 (let [attributes (into #{}
+                                                    (mapcat #(map first (internal/entity-entries
+                                                                         (mr/schema (:seon.schema.projection/registry projection) %))))
+                                                    [(:seon.error/declared-schema fact) :seon.error/base])]
+                                   (select-keys (:seon.error/source request)
+                                                (filter diagnostic-attributes attributes)))
                                  {:seon.error.occurrence/id occurrence-id
                                   :seon.error.occurrence/count count
                                   :seon.error.occurrence/first-at (or (:seon.error.occurrence/first-at old) at)
@@ -1637,7 +1469,7 @@
                      turn-id (assoc :seon.error.occurrence/turn [:seon.turn/id turn-id])
                      digest (assoc :seon.error.occurrence/data-blob
                                    [:seon.error.occurrence/blob-digest digest]))
-        error-row (assoc (select-keys fact [:seon.error/signature :seon.error/id
+        error-row (assoc (select-keys fact [:seon.error/signature :seon.error/id :seon.error/declared-schema
                                           :seon.error/layer :seon.error/operation :seon.instrument/fn :seon.error/frame
                                           :seon.error/exception-class])
                          :seon.error/occurrences #{occurrence})
@@ -1712,6 +1544,7 @@
                                      (nil? turn-id) (assoc :seon.db.process/id (:seon.error/process fact)))))
          rows [{:db/id (fact-tempid (:seon.error/id request))
                 :seon.error/id signature :seon.error/signature signature
+                :seon.error/declared-schema (:seon.error/declared-schema fact)
                 :seon.error/layer (:seon.error/layer fact)
                 :seon.error/operation (:seon.error/operation fact)}]
          tx (conj rows [:db.fn/call #'commit-call
@@ -1774,49 +1607,11 @@
          (selector #{:seon.error/error} #{:seon.error/error}))))))
 
 (defn latest-fact
-  "Project an error's latest occurrence for the existing diagnostic renderers."
+  "Project an error's latest occurrence for the existing diagnostic renderers.
+  This error-handling reader reconstructs any recorded error under the bare base contract; stored entity maps remain data."
   {:malli/schema
    [:=> [:cat :map]
-    [:or :map
-     :seon.error/base
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
-     :seon.render/request-error :seon.render.transcript/request-error
-     :seon.render.walk/elided-error :seon.render.value/window-failed-error
-     :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error
-     :seon.render/ambiguous-error :seon.render.data/no-such-path-error
-     :seon.cluster.process/start-instant-unavailable-error
-     :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
-     :seon.render.walk/no-such-entity-error :seon.dev.mcp/projection-failed-error
-     :seon.render/walk-failed-error :seon.dev.mcp/jvm-exception-error
-     :seon.render.web/value-not-found-error :seon.render.value/missing-root-identity-error
-     :seon.render/unknown :seon.render.web/function-unavailable-error
-     :seon.render.data/observation-error :seon.render.value/window-realization-failed-error
-     :seon.render.web/request-error :seon.render.lint/absent-element-error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.test/admission-error :seon.test/execution-error :seon.test/expired
-     :seon.test/not-runnable-error :seon.test/resolution-error
-     :seon.test/selection-error :seon.test/unknown-error
-     :seon.test.run/immutable-error :seon.test.run/unavailable-error
-     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
-     :seon.turn.loop/error]]}
+    [:or :map :seon.error/base]]}
   [error]
   (if (some #(not (map? %)) (:seon.error/occurrences error))
     {:seon.error/at (java.util.Date.)
@@ -1842,44 +1637,7 @@
 
 (defn- rendered-error-value
   {:malli/schema [:=> [:cat :seon.error/source]
-    [:or :seon.error/source
-     :nil
-     :map
-     :seon.error/base
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
-     :seon.render/request-error :seon.render.transcript/request-error
-     :seon.render.walk/elided-error :seon.render.value/window-failed-error
-     :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error
-     :seon.render/ambiguous-error :seon.render.data/no-such-path-error
-     :seon.cluster.process/start-instant-unavailable-error
-     :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
-     :seon.render.walk/no-such-entity-error :seon.dev.mcp/projection-failed-error
-     :seon.render/walk-failed-error :seon.dev.mcp/jvm-exception-error
-     :seon.render.web/value-not-found-error :seon.render.value/missing-root-identity-error
-     :seon.render/unknown :seon.render.web/function-unavailable-error
-     :seon.render.data/observation-error :seon.render.value/window-realization-failed-error
-     :seon.render.web/request-error :seon.render.lint/absent-element-error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
-     :seon.turn.loop/error]]}
+    :seon.error/source]}
   [unit]
   (let [value (if (map? (:seon.render/value unit))
                 (:seon.render/value unit)
@@ -1897,6 +1655,31 @@
 
 
 
+
+(defn declared-output-validators
+  "Compile the named error alternatives of one declared arity.
+  This inspects the supplied contract, never an error value or the registry population."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value [:int {:min 0}]]
+                  [:vector [:tuple :qualified-keyword :seon.schema/compiled-validator]]]}
+  [projection authored argument-count]
+  (schema/projection-cache-value
+   projection [::declared-output-validators authored argument-count]
+   (fn []
+     (let [contract (m/schema
+                     (schema/compilable-form authored (schema/predicate-functions-in projection))
+                     {:registry (:seon.schema.projection/registry projection)})]
+       (into []
+             (comp (map m/-function-info)
+                   (filter #(and (<= (:min %) argument-count)
+                                 (or (nil? (:max %)) (<= argument-count (:max %)))))
+                   (mapcat #(mu/subschemas (:output %)))
+                   (filter (fn [{:keys [schema in]}]
+                             (and (empty? in)
+                                  (qualified-keyword? (m/form schema))
+                                  (not= :seon.error/base (m/form schema))
+                                  (internal/extends-schema? schema :seon.error/base))))
+                   (map (fn [{:keys [schema]}] [(m/form schema) (m/validator schema)])))
+             (m/-function-schema-arities contract))))))
 
 (defn declared-schema-keys
   "Canonical base-extension declarations in this projection, excluding aliases.
@@ -1916,22 +1699,7 @@
                        k)))
              forms)))))
 
-(defn declared-schemas
-  "All canonical error declared-schemas satisfied by a complete value in projection.
-  Validators derive once from the supplied declarations, including at boot
-  before a program-graph shape catalog exists. Every declared-schema predicate runs."
-  {:malli/schema [:=> [:cat :map :seon.schema/value] [:set :qualified-keyword]]}
-  [projection value]
-  (let [validators
-        (schema/projection-cache-value
-         projection ::declared-schema-validators
-         (fn []
-           (mapv (fn [declared-schema]
-                   [declared-schema (schema/projection-validator projection declared-schema)])
-                 (sort (declared-schema-keys projection)))))]
-    (into #{}
-          (keep (fn [[declared-schema valid?]] (when (valid? value) declared-schema)))
-          validators)))
+
 
 
 
@@ -2034,42 +1802,7 @@
 
 (defn- faults-input
   {:malli/schema [:=> [:cat :seon.error/source]
-                  [:or :seon.error/source
-     :seon.error/base
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
-     :seon.render/request-error :seon.render.transcript/request-error
-     :seon.render.walk/elided-error :seon.render.value/window-failed-error
-     :seon.render/invalid-output-error :seon.render.hiccup/unparseable-tag-error
-     :seon.render/ambiguous-error :seon.render.data/no-such-path-error
-     :seon.cluster.process/start-instant-unavailable-error
-     :seon.render.web/value-unreadable-error :seon.render.web/missing-port-error
-     :seon.render.walk/no-such-entity-error :seon.dev.mcp/projection-failed-error
-     :seon.render/walk-failed-error :seon.dev.mcp/jvm-exception-error
-     :seon.render.web/value-not-found-error :seon.render.value/missing-root-identity-error
-     :seon.render/unknown :seon.render.web/function-unavailable-error
-     :seon.render.data/observation-error :seon.render.value/window-realization-failed-error
-     :seon.render.web/request-error :seon.render.lint/absent-element-error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
-     :seon.turn.loop/error]]}
+                  :seon.error/source]}
   [unit]
   (let [value (:seon.render/value unit)]
     (get value (:seon.render.walk/attribute unit) value)))
@@ -2417,19 +2150,7 @@
                               (> n maximum))))))
                (:seon.instrument/declared-arities value))))
 
-(defn declared-schema-counts-agree?
-  "Declared and actual declared-schema counts each describe their own optional sets."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [value]
-  (and (map? value)
-       (every? (fn [[count-key set-key]]
-                 (let [n (get value count-key)]
-                   (and (nat-int? n)
-                        (if (zero? n) (not (contains? value set-key))
-                            (and (set? (get value set-key))
-                                 (= n (count (get value set-key))))))))
-               [[:seon.instrument/declared-declared-schema-count :seon.instrument/declared-declared-schemas]
-                [:seon.instrument/actual-declared-schema-count :seon.instrument/actual-declared-schemas]])))
+
 
 (defn config-expectation-present?
   "A config refusal identifies at least one actual expected constraint."
@@ -2604,17 +2325,7 @@
                                 :seon.error.basis/commit #uuid "00000000-0000-0000-0000-000000000002"
                                 :seon.error.basis/t 1}))))
 
-(def declared-schema-counts-agree-generator
-  (gen/let [base error-base-generator projection projection-complete-generator
-            declared (gen/set (gen/elements [:seon.agent/error :seon.turn/error :seon.turn/refused-error]))
-            actual (gen/set (gen/elements [:seon.db.read/error :seon.config/error]))]
-    (cond-> (assoc base :seon.instrument/fn 'seon.id/valid? :seon.instrument/arity 2
-                   :seon.instrument/returned-error projection
-                   :seon.instrument/declared-declared-schema-digest (apply str (repeat 64 "0"))
-                   :seon.instrument/declared-declared-schema-count (count declared)
-                   :seon.instrument/actual-declared-schema-count (count actual))
-      (seq declared) (assoc :seon.instrument/declared-declared-schemas declared)
-      (seq actual) (assoc :seon.instrument/actual-declared-schemas actual))))
+
 
 (def ordered-failures-generator
   (gen/fmap (fn [items]

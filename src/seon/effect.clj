@@ -512,10 +512,11 @@
                :seon.error/operation ::handler-completion
                :seon.error/expected ::handler-result
                :seon.error/offending ::pending
-               :seon.error/data (merge {:seon.effect/id effect-id
+               :seon.await/subject {:seon.effect/id effect-id
                 :seon.turn/id
-                (:seon.turn/id *request-context*)} {:seon.error/member {:seon.effect/id effect-id
-                :seon.fn/sym owner-sym}})}
+                (:seon.turn/id *request-context*)}
+             :seon.error/member {:seon.effect/id effect-id
+                :seon.fn/sym owner-sym}}
               :seon.await/future task})]
         (when (:seon.await/elapsed-ms result)
           (.cancel task true))
@@ -550,27 +551,15 @@
        (assoc :seon.effect/result-blob (:seon.blob/digest staged)))
      :seon.blob/staged-writes (cond-> [] staged (conj staged))}))
 
+(def ^:private error-output-validators
+  (delay (requiring-resolve 'seon.error/declared-output-validators)))
+
 (defn- handler-refusal-validators
-  "Validators for this loaded handler's result-position declared-schemas, excluding payloads."
+  "Validators for the loaded two-argument handler's declared errors."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value]
                   [:vector :seon.effect/result-validator]]}
   [projection handler-var]
-  (let [contract (m/schema
-                  (schema/compilable-form (:malli/schema (meta handler-var))
-                                          (schema/predicate-functions-in projection))
-                  {:registry (:seon.schema.projection/registry projection)})]
-    (into []
-          (comp
-           (map m/-function-info)
-           (filter #(and (<= (:min %) 2) (or (nil? (:max %)) (<= 2 (:max %)))))
-           (mapcat #(mu/subschemas (:output %)))
-           (filter (fn [{:keys [schema in]}]
-                     (and (empty? in)
-                          (qualified-keyword? (m/form schema))
-                          (not= :seon.error/base (m/form schema))
-                          (internal/extends-schema? schema :seon.error/base))))
-           (map #(m/validator (:schema %))))
-          (m/-function-schema-arities contract))))
+  (mapv second (@error-output-validators projection (:malli/schema (meta handler-var)) 2)))
 
 (defn- settle-value!
   ([connection dials effect-id opened-at threshold raw-value refusal-validators]
@@ -950,7 +939,9 @@
                          (settled outcome)))))))))))))
 
 (defn request!
-  "Validate, record, dispatch, bound, and settle one capability request."
+  "Validate, record, dispatch, bound, and settle one capability request.
+  This polymorphic dispatcher preserves each capability's declared result as data;
+  its handler contract owns validation and error alternatives."
   {:malli/schema
    [:function [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The effect boundary reports malformed owners and requests as values; the resolved capability's own declared contract validates the heterogeneous request.", :gen/elements [nil false 0 "" :k [] {}]}] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The effect boundary reports malformed owners and requests as values; the resolved capability's own declared contract validates the heterogeneous request.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.effect/request-result] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The effect boundary reports malformed owners and requests as values; the resolved capability's own declared contract validates the heterogeneous request.", :gen/elements [nil false 0 "" :k [] {}]}] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The effect boundary reports malformed owners and requests as values; the resolved capability's own declared contract validates the heterogeneous request.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.effect/execution-options] :seon.effect/request-result]]}
   ([owner request]

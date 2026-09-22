@@ -48,11 +48,16 @@
    [:my.shell/stdin-byte-limit :my.shell/stdin-byte-limit]
    [:my.shell/observed-stdin-bytes :my.shell/observed-stdin-bytes]
 ]]
+ :my.shell/cwd-observation
+ [:or :my.fs/stat-result :my.fs/path-refused-error :my.fs/not-found-error
+      :my.fs/not-directory-error :my.fs/read-failed-error]
+ :my.shell/process-exception-data :map
  :my.shell/refused-cwd :my.fs/path
  :my.shell/cwd-refused-error
  [:and :seon.error/base
   [:map
    [:my.shell/refused-cwd :my.shell/refused-cwd]
+   [:my.shell/cwd-observation {:optional true} :my.shell/cwd-observation]
 ]]
  :my.shell/terminated-pid :int
  :my.shell/limiting-config-key :qualified-keyword
@@ -67,6 +72,7 @@
  [:and :seon.error/base
   [:map
    [:my.shell/failed-argv :my.shell/failed-argv]
+   [:my.shell/process-exception-data {:optional true} :my.shell/process-exception-data]
 ]]
  ; Additive error declaration manifest, 2026-09-18.
 

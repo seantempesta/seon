@@ -238,7 +238,7 @@
                          {:seon.schema/member (first (remove required base-required))}))
       (when (and (not= :seon.error/base identity) (not alias?) (empty? additions))
         (contract-error! identity definition [] :seon.schema/invalid-schema
-                         "An error declared-schema requires a non-base domain member." {}))
+                         "A named error schema requires a non-base domain member." {}))
       (letfn [(boolean-schema? [node seen]
                 (cond
                   (not (m/schema? node)) false
@@ -272,7 +272,7 @@
                       (owned-storage! (mr/schema registry target) (conj seen target))))))]
         (when (and (seq additions) (every? #(boolean-schema? (mr/schema registry %) #{}) additions))
           (contract-error! identity definition [] :seon.schema/invalid-schema
-                           "A boolean marker alone cannot define an error declared-schema."
+                           "A boolean marker alone cannot define a named error schema."
                            {:seon.schema/member (first additions)}))
         (when (:seon.db/attributes properties)
           (owned-storage! compiled #{identity})))

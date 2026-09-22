@@ -1126,7 +1126,7 @@
             :seon.schema/missing-projection true
             :seon.schema/refused-value nil
             :seon.schema/expected-value :seon.schema/projection
-            :seon.error/data (merge {:seon.schema/caller caller} {:seon.error/layer :schema-derivation})}]
+            :seon.error/data {:seon.schema/caller caller}}]
       (throw (ex-info (:seon.error/message diagnostic) diagnostic)))))
 
 (defn call-with-forms
@@ -1826,11 +1826,11 @@
           :seon.error/message (str "Schema publication refused " schema-key ": " property
                " names " renderer " whose declared input "
                (pr-str render-input) " does not accept the declaring shape.")
-          :seon.error/data (merge {:seon.schema/key schema-key
+          :seon.error/data {:seon.schema/key schema-key
            :seon.render/property property
            :seon.render/function renderer
            :seon.fn/spec render-contract
-           :seon.fn/input render-input} {:seon.error/layer :schema-admission})}]
+           :seon.fn/input render-input}}]
     (throw (ex-info (:seon.error/message diagnostic) diagnostic))))
 
 (defn- assert-render-contracts!
@@ -2756,7 +2756,7 @@
     :seon.schema/expected-value :seon.db/database-value
     :seon.error/message "The program projection requires a Datahike database value; a projection with no forms is never derived from one that is not."
     :seon.error/member :seon.schema/database-value
-    :seon.error/data (merge {:seon.schema/database-value db} {:seon.error/layer :schema-derivation})})
+    :seon.error/data {:seon.schema/database-value db}})
 
 (defn- derive-projection-from-database
   [db reusable-projection]
@@ -2922,8 +2922,8 @@
     :seon.schema/refused-value selector-element
     :seon.schema/expected-value :seon.schema/pull-selector-element
     :seon.error/message message
-    :seon.error/data (merge {:seon.schema/key schema-key
-     :seon.schema/pull-selector-element selector-element} {:seon.error/layer :schema-derivation :seon.error/member schema-key})})
+    :seon.error/data {:seon.schema/key schema-key
+     :seon.schema/pull-selector-element selector-element}})
 
 (defn- entity-entry-map
   "Map one entity schema's attributes to their Malli map entries."

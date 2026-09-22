@@ -119,9 +119,11 @@
             commit-fault! (var-get (ns-resolve 'seon.cluster 'commit-fault!))
             [fact outcome] (commit-fault!
                             connection fault-cluster "cluster-test-process" caps
-                            {::seon.flow/pid :seon.cluster-test/probe
-                             ::seon.flow/op :step
-                             ::seon.flow/ex (ex-info "probe core fault" {})})
+                            {:seon.error/declared-schema :seon.flow/exception-error
+                             :seon.error/source
+                             {::seon.flow/pid :seon.cluster-test/probe
+                              ::seon.flow/op :step
+                              ::seon.flow/ex (ex-info "probe core fault" {})}})
             stored (committed-fault-ids @connection)]
         (is (int? (:seon.config.error/max-evidence-bytes dials))
             "the cluster's effective config genuinely carries the dial, so
@@ -136,7 +138,8 @@
   (test-support/with-database
     (fn [connection]
       (let [dials (test-support/effective-config)
-            request {:seon.error/source
+            request {:seon.error/declared-schema :seon.agent/error
+                     :seon.error/source
                      {:seon.error/at #inst "2026-09-20T00:00:00Z"
                       :seon.error/layer :seon.agent/lifecycle
                       :seon.error/operation 'seon.agent/by-id
@@ -155,9 +158,8 @@
              #(error/commit-tx
                @connection
                (dissoc request :seon.config.error/max-evidence-bytes)))
-            data (:seon.error/data refusal)]
-        (is (contains? (error/properties (schema/handed-projection) refusal)
-                       :seon.instrument/contract-error)
+            data refusal]
+        (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal)
             "the contract refuses before the recorder is reached")
         (is (= :input (:seon.instrument/check refusal)))
         (is (= 'seon.error/commit-tx (:seon.error/operation data))

@@ -330,7 +330,7 @@
                   :seon.error/fix "Remove the empty shorthand segment or give it a name."
                   :seon.error/expected "a nonempty shorthand segment"
                   :seon.error/offending token
-                  :seon.error/data (merge {::head (pr-str head)} {:seon.error/source {:seon.render.hiccup/tag head}})}
+                  :seon.error/data {::head (pr-str head)}}
                 (if (= \# marker)
                   ;; last id wins, matching the attribute map's precedence
                   ;; rule one level up: the more specific statement wins

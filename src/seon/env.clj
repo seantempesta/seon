@@ -318,7 +318,7 @@
     ::unscopable-members outside
     :seon.error/message "Only turn-layer members may be scoped onto an existing environment."
     :seon.error/expected @turn-members
-    :seon.error/data (merge {:seon.env/member outside} {:seon.error/member @turn-members})}
+    :seon.error/data {:seon.env/member outside}}
       (merge carried supplied))))
 
 ;;; ---------------------------------------------------------------------------

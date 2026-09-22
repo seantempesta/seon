@@ -89,4 +89,9 @@
  :seon.schedule/task-without-creation-instant-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
   :seon.error/base [:map [:seon.schedule/undated-task-entity :seon.schedule/undated-task-entity]]]
+ :seon.schedule/handler-exception-data :map
+ :seon.schedule/failed-handler-symbol :qualified-symbol
+ :seon.schedule/handler-failed-error
+ [:and :seon.error/base [:map [:seon.schedule/failed-handler-symbol :seon.schedule/failed-handler-symbol]
+  [:seon.schedule/handler-exception-data {:optional true} :seon.schedule/handler-exception-data]]]
 }

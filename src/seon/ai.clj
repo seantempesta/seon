@@ -666,9 +666,10 @@
        :seon.error/message "The configured extra body is not readable EDN; supply a map with string keys."
        :seon.ai/extra-body-edn encoded
        :seon.error/expected "an EDN map with string keys"
-       :seon.error/data (merge {::request-transmitted? false
-                           ::response-started? false
-                           ::output-observed? false} {:seon.error/source {:seon.error/throw-site-message (ex-message failure)}})}))
+       :seon.ai/body-read-message (or (ex-message failure) "The provider-specific body could not be read.")
+       ::request-transmitted? false
+       ::response-started? false
+       ::output-observed? false}))
     {}))
 
 (defn- request-headers

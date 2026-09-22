@@ -154,7 +154,7 @@
           (is (str/includes? (pr-str (error/render-html (read-error))) "Resolved"))
           (is ((schema/projection-validator (schema/handed-projection) :seon.error/fact) (:seon.error/fact (first (#'seon.problems/error-signatures (db/db connection)))))))
         (let [flat (error/recording (db/db connection)
-                                  (commit-request {:seon.error/message "flat error", :seon.error/data {:seon.error/operation (quote seon.id/valid?)}} {}))]
+                                  (commit-request {:seon.error/message "flat error", :seon.error/operation (quote seon.id/valid?)} {}))]
           (is (:seon.error/ref flat))
           (is (= 'seon.id/valid? (:seon.instrument/fn (:seon.error/fact flat))))
           (is (not (contains? (:seon.error/fact flat) :seon.error/exception-class)))
@@ -201,6 +201,7 @@
   ([source extra]
    (merge {:seon.schema/projection (schema/handed-projection)
            :seon.error/source source
+           :seon.error/declared-schema :seon.error/normalization-error
            :seon.error/id "err-1"
            :seon.error/at #inst "2026-07-27T21:00:00.000-00:00"
            :seon.error/process process
@@ -477,7 +478,7 @@
         disposable (str "DISPOSABLE-PROC-STATE-" large)
         failure
         (ex-info large
-                 {:seon.error/data {:seon.instrument/schema large, :seon.instrument/fn (quote seon.render.data/at), :seon.instrument/args large, :seon.instrument/arm :input}})
+                 {:seon.instrument/schema large, :seon.instrument/fn (quote seon.render.data/at), :seon.instrument/args large, :seon.instrument/arm :input})
         prepared
         (error/prepare
          (assoc (request (assoc (transform-error failure)
@@ -673,7 +674,7 @@
     (is (not (contains? fact :seon.render/ai)))))
 
 (deftest instrumentation-evidence-survives-normalization
-  (let [violation {:seon.error/message "bad call", :seon.error/data {:seon.instrument/schema ":seon.error/fact", :seon.instrument/fn (quote seon.error/value), :seon.instrument/args "[\"not a fact\"]", :seon.instrument/arm :input}}
+  (let [violation {:seon.error/message "bad call", :seon.instrument/schema ":seon.error/fact", :seon.instrument/fn (quote seon.error/value), :seon.instrument/args "[\"not a fact\"]", :seon.instrument/arm :input}
         fact (error/normalize
               (request (transform-error
                         (ex-info "bad call" violation))))]
@@ -693,7 +694,7 @@
     (is (= (select-keys fact [:seon.error/at :seon.error/layer :seon.error/operation])
            (select-keys value [:seon.error/at :seon.error/layer :seon.error/operation])))
     (is (= (:seon.error/message fact) (:seon.error/message value)))
-    (is (= (:seon.error/id fact) (:seon.error/id (:seon.error/data value)))
+    (is (= (:seon.error/id fact) (:seon.error/id value))
         "the value points at the durable evidence rather than copying it")))
 
 ;;; ---------------------------------------------------------------------------
@@ -725,6 +726,7 @@
   [source extra]
   (merge {:seon.schema/projection (schema/handed-projection)
            :seon.error/source source
+          :seon.error/declared-schema :seon.error/normalization-error
           :seon.error/id (str (random-uuid))
           :seon.error/at #inst "2026-07-27T21:00:00.000-00:00"
           :seon.error/process process
@@ -892,28 +894,17 @@
           (is (nil? (db/pull database [:db/id] [:seon.ns/name 'my.mint]))))))))
 
 
-(deftest new-error-declared-schemas-compose-and-report-missing-members
-  (test-support/with-database
-   (fn [connection]
-     (let [projection (db/carried-projection (db/db connection))
-           base {:seon.error/at #inst "2026-09-18T00:00:00Z"
-                 :seon.error/layer :seon.db/read :seon.error/operation 'seon.db/q}
-           matching (partial error/declared-schemas projection)
-           read-error (gen/generate error/read-operation-agrees-generator 4 20260918)
-           combined (assoc read-error :seon.agent/error-agent-id "manifest-agent"
-                           :seon.turn/error-turn-id "manifest-turn")
-           missing (dissoc combined :seon.agent/error-agent-id)]
-       (is ((schema/projection-validator projection :seon.error/base) base))
-       (is (= #{} (matching base)) "Valid base-only error: no domain declared-schema matched.")
-       (is (= #{} (matching (dissoc combined :seon.error/operation)))
-           "A malformed base cannot satisfy a declared-schema.")
-       (is (not ((matching combined) :seon.error/base)))
-       (is (identical? (error/declared-schema-keys projection) (error/declared-schema-keys projection))
-           "Only projection-derived population is memoised.")
-       (is (every? (matching combined) [:seon.db.read/error :seon.turn/error :seon.agent/error]))
-       (is (false? ((schema/projection-validator projection :seon.turn/error) missing)))
-       (is (some #(= [:seon.agent/error-agent-id] (:in %))
-                 (:errors ((schema/projection-explainer projection :seon.turn/error) missing))))))))
+(deftest declared-error-schema-reports-missing-members
+  (let [projection (schema/handed-projection)
+        value {:seon.error/at #inst "2026-09-22T00:00:00Z"
+               :seon.error/layer :seon.agent/read
+               :seon.error/operation 'seon.agent/by-id
+               :seon.agent/error-agent-id "missing-agent"}
+        missing (dissoc value :seon.agent/error-agent-id)]
+    (is ((schema/projection-validator projection :seon.agent/error) value))
+    (is (false? ((schema/projection-validator projection :seon.agent/error) missing)))
+    (is (some #(= [:seon.agent/error-agent-id] (:in %))
+              (:errors ((schema/projection-explainer projection :seon.agent/error) missing))))))
 
 (deftest arity-declared-schema-preserves-real-refusal-observations
   (test-support/with-database
@@ -921,7 +912,7 @@
      (let [projection (db/carried-projection (db/db connection))
            observed-at (java.util.Date.)
            refusal (test-support/refusal-data #(apply seon.id/valid? []))
-           data (:seon.error/data refusal)
+           data refusal
            contract (:malli/schema (meta #'seon.id/valid?))
            info (malli.core/-function-info
                  (malli.core/schema contract (:seon.schema.projection/compile-options projection)))
@@ -1029,7 +1020,7 @@
          (is (= before (get-in result [:seon.error/basis :seon.error.basis/t])))
          (is (= before (db/basis-t (db/db connection))))
          (is (= 2 (count (db/datoms database :eavt location :seon.error.location/segments))))
-         (let [recording (error/recording database (commit-request result {}))
+         (let [recording (error/recording database (commit-request result {:seon.error/declared-schema :seon.db.write/validation-refusal}))
                report (test-support/transacted! connection (:seon.db/tx-data recording))
                stored (db/pull (:db-after report) (error/observation-selector projection)
                                (:seon.error/ref recording))
@@ -1056,7 +1047,7 @@
            unavailable {:seon.error-test/unavailable true}
            raw (try (schema/projection-from-database unavailable)
                     (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
-           recording (error/recording (db/db connection) (commit-request raw {}))
+           recording (error/recording (db/db connection) (commit-request raw {:seon.error/declared-schema :seon.schema/validation-refusal}))
            report (test-support/transacted! connection (:seon.db/tx-data recording))
            root (db/pull (:db-after report) (error/observation-selector projection)
                          (:seon.error/ref recording))
@@ -1071,7 +1062,8 @@
                (edn/read-string (get-in occurrence [:seon.schema/declaration-expectation :seon.instrument/actual])))))
        (is (not (contains? occurrence :seon.schema/refused-value)))
        (is (= (second (:seon.error/ref recording))
-              (:seon.error/signature (error/normalize (request (error/latest-fact root))))))))))
+              (:seon.error/signature (error/normalize (request (error/latest-fact root)
+                                                         {:seon.error/declared-schema :seon.schema/error})))))))))
 
 (deftest cause-chain-reading-preserves-the-deepest-complete-observation
   (let [observation {:seon.error/at #inst "2026-09-20T00:00:00Z"
@@ -1102,9 +1094,9 @@
        (prn {::unowned-refusal unowned})
        (is ((schema/projection-validator projection :seon.instrument/arity-error) armed)
            (pr-str armed))
-       (doseq [[source required-declared-schemas]
-               [[observed #{:seon.agent/error :seon.turn/error}]
-                [armed #{:seon.instrument/arity-error}]
+       (doseq [[source declared-schema]
+               [[observed :seon.turn/error]
+                [armed :seon.instrument/arity-error]
                 [(assoc observed :seon.error/location
                         {:seon.error.location/length 1001
                          :seon.error.location/segments
@@ -1114,18 +1106,19 @@
                                  {:seon.error.key/projection (str ordinal)
                                   :seon.error.key/capped? false
                                   :seon.error.key/bound-bytes 256}}))})
-                 #{:seon.agent/error :seon.turn/error}]]]
+                 :seon.turn/error]]]
          (let [recording (error/recording (db/db connection)
-                                           (commit-request source {:seon.error/at (:seon.error/at source)}))
+                                           (commit-request source {:seon.error/at (:seon.error/at source)
+                                                                   :seon.error/declared-schema declared-schema}))
                report (test-support/transacted! connection (:seon.db/tx-data recording))
                database (db/db connection)
                root (db/pull database (error/observation-selector projection) (:seon.error/ref recording))
                occurrence (first (:seon.error/occurrences root))]
            (is (seq (:tx-data report)))
-           (is (= required-declared-schemas (error/declared-schemas projection source)))
+           (is ((schema/projection-validator projection declared-schema) source))
            ;; Stored entity contracts and pull-result contracts have distinct
            ;; collection grammars. Validate the read through its derived form.
-           (doseq [declared-schema required-declared-schemas]
+           (doseq [declared-schema [declared-schema]]
              (let [occurrence-selector
                    (some #(when (map? %)
                             (get % [:seon.error/occurrences :limit nil]))
@@ -1163,12 +1156,9 @@
            (is (some #(= (:db/id occurrence) (:db/id %)) (:seon.error/occurrences root)))
            ;; Record the acquisition question without asserting that a stored
            ;; entity validator is a pull-result validator.
-           (when-not (:seon.error/location source)
-             (prn {::stored-occurrence occurrence ::required-declared-schemas required-declared-schemas
-                   ::authored-declared-schemas (error/declared-schemas projection source)
-                   ::pulled-declared-schemas (error/declared-schemas projection occurrence)}))))))))
+           (is (= declared-schema (:seon.error/declared-schema root)))))))))
 
-(deftest recurrence-identity-is-the-complete-observations-stable-evidence
+(deftest recurrence-identity-uses-declared-schema-and-distinguishing-evidence
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "error-family-d13")
@@ -1178,42 +1168,42 @@
                      :seon.error/operation 'seon.agent/by-id
                      :seon.error/expected-key :seon.agent/id
                      :seon.agent/error-agent-id "observed-agent"}
-           record! (fn [source process]
+           record! (fn [source declared-schema process]
                      (let [recorded (error/recording
                                      (db/db connection)
-                                     (commit-request source {:seon.error/process process}))]
+                                     (commit-request source
+                                      {:seon.error/process process
+                                       :seon.error/declared-schema declared-schema}))]
                        (test-support/transacted! connection (:seon.db/tx-data recorded))
                        recorded))
            root (fn [recorded]
                   (db/pull (db/db connection) (error/observation-selector projection)
                            (:seon.error/ref recorded)))
-           first-record (record! observed "d13-process-a")
-           second-record (record! observed "d13-process-a")
+           first-record (record! observed :seon.agent/error "d13-process-a")
+           second-record (record! observed :seon.agent/error "d13-process-a")
            after-two (root first-record)]
        (is (= (:seon.error/ref first-record) (:seon.error/ref second-record)))
+       (is (= :seon.agent/error (:seon.error/declared-schema after-two)))
        (is (= 2 (:seon.error.occurrence/count (first (:seon.error/occurrences after-two)))))
        (is (= (second (:seon.error/ref first-record))
               (:seon.error/signature
-               (error/normalize (request (error/latest-fact after-two)))))
-           "A complete acquired observation has the same identity as its authored value.")
+               (error/normalize (request (error/latest-fact after-two)
+                                 {:seon.error/declared-schema :seon.agent/error})))))
        (let [changed-incidental
              (assoc observed :seon.error/at #inst "2026-09-20T00:00:00Z"
                              :seon.error/message "Different explanation"
-                             :seon.error/data {:seon.error/offending "different bytes"}
+                             :seon.error/offending "different bytes"
                              :seon.agent/error-agent-id "another-observed-agent")
-             third-record (record! changed-incidental "d13-process-b")]
+             third-record (record! changed-incidental :seon.agent/error "d13-process-b")]
          (is (= (:seon.error/ref first-record) (:seon.error/ref third-record)))
          (is (= 3 (:seon.error/occurrence-count (error/latest-fact (root first-record))))))
        (let [before (root first-record)
-             added-declared-schema (record! (assoc (error/latest-fact before)
-                                        :seon.turn/error-turn-id "observed-turn")
-                                 "d13-process-a")
-             other-declared-schema (record! (-> observed
-                                     (dissoc :seon.agent/error-agent-id)
-                                     (assoc :seon.turn/error-turn-id "observed-turn"))
-                                 "d13-process-a")
-             other-schema (record! (assoc observed :seon.error/expected-key :seon.turn/id)
-                                  "d13-process-a")
+             other-declaration (record! (-> observed
+                                            (dissoc :seon.agent/error-agent-id)
+                                            (assoc :seon.turn/error-turn-id "observed-turn"))
+                                        :seon.turn/error "d13-process-a")
+             other-expected (record! (assoc observed :seon.error/expected-key :seon.turn/id)
+                                     :seon.agent/error "d13-process-a")
              other-path (record! (assoc observed :seon.error/location
                                        {:seon.error.location/length 1
                                         :seon.error.location/segments
@@ -1223,11 +1213,11 @@
                                             :seon.error.key/projection ":seon.agent/id"
                                             :seon.error.key/capped? false
                                             :seon.error.key/bound-bytes 256}}}})
-                                "d13-process-a")]
-         (is (= 5 (count (set (map :seon.error/ref
-                                   [first-record added-declared-schema other-declared-schema other-schema other-path])))))
-         (is (= before (root first-record)) "Adding a declared-schema leaves prior occurrences untouched.")
-         (is (= 5 (count (db/q '[:find ?root :where [?root :seon.error/signature]]
+                                 :seon.agent/error "d13-process-a")]
+         (is (= 4 (count (set (map :seon.error/ref
+                                   [first-record other-declaration other-expected other-path])))))
+         (is (= before (root first-record)) "Other identities leave this error's occurrences untouched.")
+         (is (= 4 (count (db/q '[:find ?root :where [?root :seon.error/signature]]
                                (db/db connection))))))))))
 
 (deftest every-error-owner-function-declares-its-input-and-output
@@ -1249,3 +1239,160 @@
        (is (= :seon.error/error (:seon.error/expected-key result)))
        (is (= result (error/commit-tx database request)))
        (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]] database)))))))
+
+
+(deftest the-default-renderers-accept-an-attribute-shaped-error
+  (test-support/with-database
+   (fn [_]
+     (let [value {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'seon.error-test/rendering
+                  :my.fs/error-path "/tmp/missing.edn"
+                  :seon.error/message "No file exists at that path."}
+           ai (error/render-ai value)
+           html (error/render-html value)]
+       (is (str/includes? ai (:seon.error/message value))
+           "AI explains the failure without dumping internal evidence")
+       (is (= :article (first html)))
+       (is ((schema/projection-validator (schema/handed-projection) :seon.render/hiccup) html))
+       (is (str/includes? (pr-str html) (:seon.error/message value)))))))
+
+(deftest the-default-html-face-links-committed-evidence
+  (let [html (error/render-html
+              {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'seon.error-test/rendering
+                  :seon.error/id "err-42"
+               :seon.error/message "Nothing recognized this error."})
+        href (get-in (last html) [2 1 :href])]
+    (is (str/starts-with? href "/data?"))
+    (is (str/includes? href "%3Aseon.error%2Fid"))))
+
+(deftest specialist-renderers-use-their-declared-evidence
+  (test-support/with-database
+   (fn [_connection]
+    (testing "instrumentation names the failed arm and received value"
+    (let [prose (error/instrumentation-prose
+                 {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'my.fs/read
+                  :seon.instrument/fn 'my.fs/read
+                  :seon.instrument/arm :input
+                  :seon.instrument/expected ":my.fs/read-request"
+                  :seon.instrument/args "[{:my.fs/path 42}]"
+                  :seon.error/message "The call violated its contract."})]
+      (is (str/includes? prose "Contract violation in my.fs/read input"))
+      (is (str/includes? prose "path 42"))))
+  (testing "refusal names the transition, rule, and atomic result"
+    (let [prose (error/refusal-prose
+                 {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'seon.error-test/rendering
+                  :seon.turn/id "run-7"
+                  :seon.turn/rule :seon.turn/not-holder
+                  :seon.turn/transition :seon.turn/close
+                  :seon.error/message "The run is held elsewhere."})]
+      (is (str/includes? prose "close of run-7"))
+      (is (str/includes? prose "Nothing from this close committed"))))
+  (testing "AI attempt prose exposes the decision attributes"
+    (let [prose (error/ai-prose
+                 {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'seon.error-test/rendering
+                  :seon.ai/request-transmitted? false
+                  :seon.ai/response-started? false
+                  :seon.ai/output-observed? false
+                  :seon.error/message "The provider connection failed."})]
+      (is (str/includes? prose "request transmitted: false"))
+      (is (str/includes? prose "response started: false"))
+      (is (str/includes? prose "output observed: false"))
+      (is (str/includes? prose "configured failover may be safe"))))
+  (testing "time-limit prose explains the diagnostic without treating it as a limit"
+    (let [prose (error/time-limit-prose
+                 {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'seon.error-test/rendering
+                  :seon.eval/fn-entries 271000000
+                  :seon.error/message "Evaluation reached its time limit."})]
+      (is (str/includes? prose "Recorded function-body entries: 271000000"))
+      (is (str/includes? prose "indicate a spin"))))
+  (testing "edit prose asks for a narrower source selection"
+    (let [prose (error/edit-prose
+                 {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'seon.error-test/rendering
+                  :my.edit/error-path "src/seon/error.clj"
+                  :my.edit/edit-observation {:seon.error.evidence/attribute :my.edit/from-line
+                                             :seon.error.evidence/value 1}
+                  :seon.error/message "More than one form matched."})]
+      (is (str/includes? prose "src/seon/error.clj"))
+      (is (str/includes? prose "narrow the edit selection"))))
+  (testing "render-walk elision stays neutral in both projections"
+    (let [value {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'seon.error-test/rendering
+                  :seon.error/message "The bounded walk omitted content."}
+          prose (error/elision-prose value)
+          html (error/elision-html value)]
+      (is (str/includes? prose "content was elided"))
+      (is (not (str/includes? prose "error")))
+      (is (= :aside (first html)))
+      (is (= "seon-family-entry seon-render-elision"
+             (get-in html [1 :class])))))
+  (testing "unavailable domain evidence is explicit"
+    (let [prose (error/unclassified-prose
+                 {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'seon.error-test/rendering
+                  :seon.error/offending {:unexpected/value 7}
+                  :seon.error/message "Nothing recognized the source."})]
+      (is (str/includes? prose "did not supply complete domain evidence"))
+      (is (str/includes? prose "boundary contract"))))
+  (testing "MCP lookup prose keeps the requested value identity"
+    (let [digest (apply str (repeat 64 "a"))
+          prose (error/mcp-prose
+                 {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'seon.error-test/rendering
+                  :seon.dev.mcp/error-cluster "fixture"
+                  :seon.dev.mcp/request-observation
+                  {:seon.error.evidence/attribute :seon.blob/digest
+                   :seon.error.evidence/value digest}
+                  :seon.error/message "The value was absent."})]
+      (is (str/includes? prose digest))
+      (is (str/includes? prose "current cluster status"))))
+  (testing "index refusal prose names the stopped phase"
+    (let [prose (error/index-refusal-prose
+                 {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'seon.error-test/rendering
+                  :seon.fn/analysis-phase :seon.fn/schema
+                  :seon.fn/error-subject {:seon.instrument/actual "source.clj"
+                                          :seon.error.projection/bound-bytes 256
+                                          :seon.error/capped? false}
+                  :seon.error/message "Schema indexing was refused."})]
+      (is (str/includes? prose ":seon.fn/schema"))
+      (is (str/includes? prose "rerun initialization")))))))
+
+(deftest the-log-line-is-one-line-and-derived
+  (let [fact (fact)
+        line (rendered (error/notice {:seon.error/fact fact}) :log)]
+    (is (not (str/includes? line "\n")) "a log line that wraps is two log lines")
+    (is (not (str/blank? line)))))
+
+(deftest recorded-identity-uses-the-producer-declared-schema
+  (let [projection (schema/handed-projection)
+        observation {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                     :seon.error/layer ::identity
+                     :seon.error/operation 'seon.error-test/identity
+                     :seon.agent/error-agent-id "agent"}
+        signature (fn [schema value]
+                    (#'error/signature projection value schema nil nil))]
+    (is (= (signature :seon.agent/error observation)
+           (signature :seon.agent/error
+                      (assoc observation :seon.error/message "Changed prose"
+                                         :seon.error/at #inst "2026-09-23T00:00:00Z"))))
+    (is (not= (signature :seon.agent/error observation)
+              (signature :seon.turn/error observation)))
+    (is (= (signature :seon.agent/error observation)
+           (signature :seon.agent/error (assoc observation :seon.turn/error-turn-id "incidental"))))))

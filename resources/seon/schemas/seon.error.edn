@@ -79,10 +79,17 @@
                "The error boundary must normalize any value or Throwable that escaped a failing subsystem.",
                :gen/elements
                [nil true 0 "failure" :failure [] {} #{}]}],
+             :declared-schema
+             [:qualified-keyword {:description "The single named error schema supplied by the producer through recording custody; never inferred from an observation."}],
+             :recording-observation
+             [:map
+              [:seon.error/source :seon.error/source]
+              [:seon.error/declared-schema :seon.error/declared-schema]],
              :normalize-request
              [:map
               [:seon.schema/projection :seon.schema/projection]
               [:seon.error/source :seon.error/source]
+              [:seon.error/declared-schema :seon.error/declared-schema]
               [:seon.error/id :seon.error/id]
               [:seon.error/at :seon.error/at]
               [:seon.error/process :seon.error/process]
@@ -95,7 +102,7 @@
               [:seon.config.error/max-evidence-bytes
                :seon.config.error/max-evidence-bytes]],
              :id [:string {:min 1, :seon.db/identity true}],
-             :message [:string {:min 1, :seon.search/index :text}],
+             :message [:string {:min 1}],
              :refusal-shape :qualified-keyword,
              :proc :keyword,
              :dropped-fault-digest [:string {:min 64, :max 64}],
@@ -113,6 +120,7 @@
               [:seon.error/layer :seon.error/layer]
               [:seon.error/operation :seon.error/operation]
               [:seon.error/signature :seon.error/signature]
+              [:seon.error/declared-schema :seon.error/declared-schema]
               [:seon.error/occurrences {:optional true} :seon.error/occurrences]
               [:seon.error/frame {:optional true} :seon.error/frame]
               [:seon.error/exception-class {:optional true} :seon.error/exception-class]
@@ -168,6 +176,7 @@
              :commit-tx-request
              [:map
               [:seon.error/source :seon.error/source]
+              [:seon.error/declared-schema :seon.error/declared-schema]
               [:seon.error/id :seon.error/id]
               [:seon.error/at :seon.error/at]
               [:seon.error/process :seon.error/process]
@@ -190,6 +199,7 @@
               [:seon.error/layer :seon.error/layer]
               [:seon.error/operation :seon.error/operation]
               [:seon.error/signature :seon.error/signature]
+              [:seon.error/declared-schema :seon.error/declared-schema]
               [:seon.error/id {:optional true} :seon.error/id]
               [:seon.instrument/fn {:optional true} :seon.instrument/fn]
               [:seon.error/frame {:optional true} :seon.error/frame]
@@ -344,4 +354,9 @@
 
  :seon.error/operation
  [:qualified-symbol {:seon.db/index true}]
+ :seon.error/refused-schema :qualified-keyword
+ :seon.error/invalid-declaration-error
+ [:and :seon.error/base [:map [:seon.error/refused-schema :seon.error/refused-schema]]]
+ :seon.error/normalization-error
+ [:and :seon.error/base [:map [:seon.error/data-edn :seon.error/data-edn]]]
 }

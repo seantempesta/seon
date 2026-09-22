@@ -910,16 +910,8 @@
        (is (= 'seon.print/value-at (first (:seon.print/requery-form cut)))
            shown)))))
 
-(deftest transacted-declares-every-error-declared-schema-it-hands-back
-  ;; `seon.error/rendered-error-value` hands this floor the error entity
-  ;; `seon.error/latest-fact` projected, so an ARMED `transacted` returns a
-  ;; base-shaped value carrying that error's own declared-schemas. While both arities
-  ;; were declared `:map`, the wrapper's declared-schema check refused the render path
-  ;; with "seon.render.value/transacted returned undeclared error declared-schemas
-  ;; #{:seon.instrument/contract-error}" (error-wrapper-enforcement
-  ;; research, 2026-09-18). Nothing here CONSTRUCTS an error, so the
-  ;; declaration is the generic pass-through enumeration program-facts PRD
-  ;; 1q requires, identical to `seon.error/latest-fact`'s.
+(deftest transacted-preserves-error-entities-as-data
+  ;; Both arities normalize entity maps without interpreting them as failures.
   (support/with-database
    (fn [connection]
      (let [projection (schema/handed-projection)
@@ -929,18 +921,14 @@
                           projection :panic caps (constantly 1))
                          "not-a-vector")
                         (catch Exception failure (ex-data failure)))]
-       (is (contains? (error/declared-schemas projection refusal)
-                      :seon.instrument/contract-error)
+       (is ((seon.schema/projection-validator projection :seon.instrument/contract-error) refusal)
            (str "the reproduction is a genuinely declared base error: "
                 (pr-str refusal)))
-       ;; The fast runner arms this Var under :panic, so an undeclared declared-schema
-       ;; throws here instead of passing silently. Surviving the call IS the
-       ;; proof, and the declared-schemas must survive it too.
+       ;; The canonical runner arms both data-conversion arities.
        (doseq [[label returned]
                [["shape-only arity" (value/transacted refusal)]
                 ["database arity" (value/transacted refusal (db/db connection))]]]
-         (is (contains? (error/declared-schemas projection returned)
-                        :seon.instrument/contract-error)
+         (is ((seon.schema/projection-validator projection :seon.instrument/contract-error) returned)
              (str label " returns a value satisfying its declared alternative"))
          (is (= (:seon.error/operation refusal) (:seon.error/operation returned))
              label))
@@ -950,10 +938,4 @@
        (is (= {:seon.agent/id "root"}
               (value/transacted {:db/id 7 :seon.agent/id "root"}
                                 (db/db connection))))
-       ;; And the hand-written union cannot drift from the projection.
-       (doseq [arity (rest (:malli/schema (meta #'value/transacted)))]
-         (let [declared (#'instrument/declared-result projection (last arity))]
-           (is (= (error/declared-schema-keys projection)
-                  (:seon.instrument/declared declared))
-               (pr-str arity))
-           (is (true? (:seon.instrument/base? declared)))))))))
+       (is (= refusal (value/transacted refusal)))))))

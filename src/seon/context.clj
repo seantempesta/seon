@@ -71,7 +71,7 @@
      :seon.error/offending request
      :seon.error/message "Select terminal evaluations from an existing agent's closed turn with an available contribution identity."
      :seon.error/expected "An existing agent's closed run with terminal evaluations and an available contribution identity."
-     :seon.error/data (merge evidence {:seon.error/member rule})}
+     :seon.error/data evidence}
    ::selection-refused rule))
 
 (defn selection

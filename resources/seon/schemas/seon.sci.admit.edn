@@ -80,7 +80,8 @@
 
                  :projection-failed-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
- [:map [:seon.sci.admit/failed-class :seon.sci.admit/failed-class]]]
+ [:map [:seon.sci.admit/failed-class :seon.sci.admit/failed-class]
+  [:seon.sci.admit/projection-failure-message {:optional true} :seon.sci.admit/projection-failure-message]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.sci.admit/bound-bytes
@@ -102,5 +103,6 @@
   :seon.db/component-schema :seon.error.evidence/entity}
  :seon.db/ref]
 
+:projection-failure-message :string
 :failed-class :symbol
 }

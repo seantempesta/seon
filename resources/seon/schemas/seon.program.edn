@@ -218,9 +218,13 @@
  :seon.program/blocked-subject :seon.program/subject
  :seon.program/native-operation :qualified-symbol
  :seon.program/advised-operation :qualified-symbol
+ :seon.program/read-failure-message :string
+ :seon.program/read-exception-data :map
  :seon.program/read-refused-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.program/read-operation :seon.program/read-operation] [:seon.error/exception-class :seon.error/exception-class]]]
+  :seon.error/base [:map [:seon.program/read-operation :seon.program/read-operation] [:seon.error/exception-class :seon.error/exception-class]
+    [:seon.program/read-failure-message {:optional true} :seon.program/read-failure-message]
+    [:seon.program/read-exception-data {:optional true} :seon.program/read-exception-data]]]
  :seon.program/not-found-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
   :seon.error/base [:map [:seon.program/not-found :seon.program/not-found]]]

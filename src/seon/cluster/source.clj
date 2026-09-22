@@ -271,7 +271,8 @@
                            :seon.error/message "The published recording authority predates snapshot result admission. The orchestrator must publish the converged schema before fast recording can be enabled."
                            :seon.error/expected required
                            :seon.error/offending missing
-                           :seon.error/data (merge {:seon.source/commit-id expected} {:seon.error/layer :test :seon.error/operation ::record-results! :seon.error/member current-branch})}
+                           :seon.error/data {:seon.source/commit-id expected}
+          :seon.test.run/branch current-branch}
                          (schema/call-with-projection
                         projection
                         #(if (contains? completion :seon.test.runner/results)
@@ -302,7 +303,7 @@
                                      :seon.error/message "Matching snapshot work is already admitted and has no recorded terminal result."
                                      :seon.error/expected expected
                                      :seon.error/offending reserved
-                                     :seon.error/data (merge {:seon.test.run/provenance (:seon.test.run/provenance admission)} {:seon.error/layer :test :seon.error/operation ::record-results! :seon.error/member (get-in admission [:seon.test.run/provenance :seon.test.run/id])})})))))))]
+                                     :seon.error/data {:seon.test.run/provenance (:seon.test.run/provenance admission)}})))))))]
             (if (:seon.error/at result)
               (assoc result :seon.source/refused-test-run
                      (get-in completion [:seon.test.run/provenance :seon.test.run/id]))
@@ -348,7 +349,7 @@
                       :seon.error/message "The publication input inventory is unavailable."
                       :seon.error/expected :snapshot-input-inventory
                       :seon.error/offending directory
-                      :seon.error/data (merge {:seon.source/inventory-failure (str (ex-message failure))} {:seon.error/layer :source-publication :seon.error/member directory})}]
+                      :seon.error/data {:seon.source/inventory-failure (str (ex-message failure))}}]
         (throw (ex-info (:seon.error/message refusal) refusal failure))))))
 
 (defn publish!

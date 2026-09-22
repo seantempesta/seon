@@ -223,8 +223,9 @@
    @connection))
 
 (defn- commit-fault!
-  [connection fault]
-  (let [message (ex-message (::flow/ex fault))
+  [connection observation]
+  (let [fault (:seon.error/source observation)
+        message (ex-message (::flow/ex fault))
         signature (str (::flow/pid fault) "|" message)]
     (test-support/transacted!
                  connection
@@ -447,7 +448,7 @@
     (is (number? (:seon.await/elapsed-ms result)))
     (is (= ::sut/work-launcher-proc-stopped
            (get-in result
-                   [:seon.error/data :seon.error/member])))
+                   [:seon.await/requested-member])))
     (is (= :seon.config.agent/turn-completion-backstop-ms
            (get-in result
                    [:seon.await/config-attribute])))))
@@ -1052,7 +1053,8 @@
           (configure! connection)
           (let [[durable-fact durable-outcome _]
                   (commit-core-fault! connection "fault-test" "process-3"
-                                      caps repeated-fault)
+                                      caps {:seon.error/source repeated-fault
+                                            :seon.error/declared-schema :seon.flow/exception-error})
                   initial-state
                   (committer-step
                    {::sut/fault-channel (async/chan 1)

@@ -867,7 +867,7 @@
                         :seon.error/offending row
                         :seon.sci.eval/installation-member value
                         :seon.error/expected :seon.sci.eval/committed-source
-                        :seon.error/data {:seon.error/member identity-attribute}})))
+                        :seon.error/member identity-attribute})))
     (let [installed
           (case identity-attribute
       :seon.ns/name
@@ -1250,9 +1250,8 @@
                     :seon.error/message message
                     :seon.ns/name namespace-name
                     :seon.error/expected ::loaded-host-namespace
-                    :seon.error/data (merge {:seon.sci.eval/cause-class
-                     (symbol (.getName (class underlying)))
-                     :seon.sci.eval/cause-location location-data} {:seon.error/source cause-message})}]
+                    :seon.error/data {:seon.sci.eval/cause-class (symbol (.getName (class underlying)))
+                                      :seon.sci.eval/cause-location location-data}}]
               (throw (ex-info message diagnostic failure)))))
         (or (find-ns namespace-name)
             (throw
@@ -1661,7 +1660,8 @@
     (if-not (seq refusals)
       state
       (if commit-fault!
-        (let [outcomes (mapv commit-fault! refusals)
+        (let [outcomes (mapv #(commit-fault! {:seon.error/source %
+                                             :seon.error/declared-schema :seon.sci.eval/row-acquisition-error}) refusals)
               failed (first (remove #(= :seon.flow/committed (second %)) outcomes))]
           (cond-> (assoc state ::acquisition-refusals-recorded? (nil? failed))
             failed (assoc ::acquisition-recording-error (second failed))))
@@ -1687,6 +1687,7 @@
                    db
                    (cond->
                     {:seon.error/source refusal
+                     :seon.error/declared-schema :seon.sci.eval/row-acquisition-error
                      :seon.error/id (acquisition-refusal-id refusal)
                      :seon.error/at (java.util.Date.)
                      :seon.error/process acquisition-process
@@ -2554,9 +2555,6 @@
              :seon.eval/shown (if (string? shown) shown (pr-str shown))}
       (:seon.render.call/selected-producer projection)
       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
-      (when-let [declared (render/request-projection request)]
-        (seq (error/declared-schemas declared value)))
-      (assoc :seon.cluster.eval/error (failure-text value))
       record (assoc :seon.sci.admit/record record))))
 
 (defn- success-evaluation

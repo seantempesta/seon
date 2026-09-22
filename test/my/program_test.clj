@@ -163,16 +163,16 @@
                     (env/environment {:seon.boot/cluster-name "program-declared-schemas"}))
            absent (program/callers {:seon.db/db (db/db connection)
                                     :seon.program/subject 'sample/missing})]
-       (is (contains? (error/declared-schemas projection failed) :seon.program/read-refused-error))
+       (is ((seon.schema/projection-validator projection :seon.program/read-refused-error) failed))
        (is (= 'my.program/callers (:seon.program/read-operation failed)))
        (is (= {:sample/evidence 42}
-              (get-in failed [:seon.error/data ])))
-       (is (contains? (error/declared-schemas projection missing) :seon.program/context-unavailable-error))
+              (:seon.program/read-exception-data failed)))
+       (is ((seon.schema/projection-validator projection :seon.program/context-unavailable-error) missing))
        (is (= #{:my.program/executing-ctx :my.program/base-ctx :seon.db/connection}
               (:seon.program/missing-context-members missing)))
-       (is (contains? (error/declared-schemas projection absent) :seon.program/not-found-error))
+       (is ((seon.schema/projection-validator projection :seon.program/not-found-error) absent))
        (is (= 'sample/missing (:seon.program/not-found absent)))
-       (is (empty? (error/declared-schemas projection
+       (is (not ((schema/projection-validator projection :seon.program/read-refused-error)
                                 {:seon.error/at (java.util.Date.)
                                  :seon.error/layer :seon.program/read
                                  :seon.error/operation 'my.program/callers})))))))

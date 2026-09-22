@@ -416,6 +416,7 @@
           :finish-reason [:string {:min 1}],
           :authorization-failure :seon.ai/http-status,
 
+          :body-read-message :string,
           :invalid-extra-body-error
           [:and {:seon.db/attributes true,
             :seon.render/ai seon.error/render-ai,
@@ -424,6 +425,7 @@
             "must mark invalid provider-specific request data"}
            :seon.error/base
            [:map
+           [:seon.ai/body-read-message {:optional true} :seon.ai/body-read-message]
            [:seon.ai/extra-body-edn :seon.ai/extra-body-edn]
            [:seon.error/message :seon.error/message]]],
           :timeout-error

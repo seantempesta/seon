@@ -16,7 +16,7 @@
     :my.background/call-source (pr-str forms)
     :seon.error/expected '(my.background/background (capability request-map))
     :seon.error/offending forms
-    :seon.error/data (merge {:my.background/authored-form forms} {:seon.error/member :forms})})
+    :seon.error/data {:my.background/authored-form forms}})
 
 (defmacro background
   "Start one capability request without waiting for its result.

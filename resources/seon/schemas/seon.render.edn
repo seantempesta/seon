@@ -246,9 +246,10 @@
  :seon.render/requested-output
  [:enum :seon.render/ai :seon.render/html]
 
+ :selection-observation :map
  :refused-member :qualified-keyword
 
- :request-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render/refused-member :seon.render/refused-member]]]
+ :request-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render/refused-member :seon.render/refused-member] [:seon.render/selection-observation {:optional true} :seon.render/selection-observation]]]
 
  :walk-operation :qualified-symbol
 

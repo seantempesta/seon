@@ -32,11 +32,11 @@
              seon.flow/channel?],
             :commit-drop!
             [:=>
-             [:cat :seon.flow/core-fault]
+             [:cat :seon.error/recording-observation]
              :seon.flow/callback-result],
             :commit-fault!
             [:=>
-             [:cat :seon.flow/core-fault]
+             [:cat :seon.error/recording-observation]
              :seon.flow/callback-result],
             :completion :seon.flow/channel,
             :compute-timeout-ms [:int {:min 1}],
@@ -238,11 +238,13 @@
    [:seon.flow/dropped-fault-count :seon.flow/dropped-fault-count]
    [:seon.flow/dropped-fault-digest :seon.flow/dropped-fault-digest]
 ]]
+ :seon.flow/unsupported-implementation :qualified-symbol
  :seon.flow/unsupported-method :qualified-symbol
  :seon.flow/unsupported-command-error
  [:and :seon.error/base
   [:map
    [:seon.flow/unsupported-method :seon.flow/unsupported-method]
+   [:seon.flow/unsupported-implementation {:optional true} :seon.flow/unsupported-implementation]
 ]]
  ; Additive error declaration manifest, 2026-09-18.
 
@@ -266,4 +268,7 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.projection/entity}
  :seon.db/ref]
+ :seon.flow/exception-error
+ [:and :seon.error/base [:map [:seon.error/exception-class :seon.error/exception-class]]]
+
 }

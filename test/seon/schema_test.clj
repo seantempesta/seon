@@ -1481,10 +1481,10 @@
            turn (set (map first (seon.schema.internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) :seon.turn/error))))
            base (set (map first (seon.schema.internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) :seon.error/base))))]
        (is (every? turn base))
-       (is (turn :seon.agent/error-agent-id))
+       (is (not (turn :seon.agent/error-agent-id)))
        (is (turn :seon.turn/error-turn-id))
        (is (= #{:seon.error/at :seon.error/layer :seon.error/operation
-                :seon.agent/error-agent-id :seon.turn/error-turn-id}
+                :seon.turn/error-turn-id}
               (set (schema.internal/map-required-attrs
                     (mr/schema (:seon.schema.projection/registry projection) :seon.turn/error)))))
        (doseq [definition

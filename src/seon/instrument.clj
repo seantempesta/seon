@@ -236,15 +236,7 @@
                                                            function-symbol)]
         (if (vector? entries)
           (into #{} (map (fn [[_ position entry-key]] [position entry-key])) entries)
-          (throw (ex-info "Supplied-entry errors are not declared by their owner."
-                          {:seon.error/at (java.util.Date.)
-                           :seon.error/layer :seon.instrument/registration
-                           :seon.error/operation 'seon.instrument/supplied-entry-problems
-                           :seon.instrument/fn function-symbol
-                           :seon.instrument/registration-observation
-                           {:seon.error.evidence/attribute :seon.fn/sym
-                            :seon.error.evidence/value 'seon.call-preparation/supplied-map-entries}
-                           :seon.error/data {:seon.error/cause entries}})))))))
+          (throw (ex-info (:seon.error/message entries) entries)))))))
 
 (defn- actionable-problem
   {:malli/schema [:=> [:cat :seon.error/problem-description :map [:or :nil :boolean]] :seon.error/problem-description]}
@@ -374,7 +366,7 @@
            offending (if arity? (:arity data) value)
            paths (into [] (comp (map :seon.error/path) (remove empty?)) problems)
            caller (caller-frame)]
-       {:seon.error/at (java.util.Date.)
+       (merge {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.instrument/invocation
          :seon.error/operation function-symbol
          :seon.error/message (str (error/problem-sentence
@@ -385,17 +377,18 @@
               (when caller (str " Called from " caller ".")))
          :seon.error/expected expected
          :seon.error/offending offending
-         :seon.error/data (merge (cond-> {::malli kind ::arm arm ::fn function-symbol
+         :seon.error/member (case arm :output :seon.fn.arity/output :guard :seon.fn.arity/guard
+                                  (if arity? :seon.instrument/arity :seon.fn.arity/input))}
+        (cond-> {::malli kind ::arm arm ::fn function-symbol
                   ::problem-count (count problems)
                   :seon.error/problems problems}
            arity? (assoc ::arity (:arity data))
            arglists (assoc ::arglists arglists)
            (seq paths) (assoc ::problem-paths paths)
-           caller (assoc ::caller caller)) {:seon.error/layer :instrumentation :seon.error/member (case arm :output :return :guard :guard
-                                              (if arity? :arity :arguments))}
+           caller (assoc ::caller caller))
           (when arity?
             (select-keys lookup [:seon.instrument.lookup/status
-                                 :seon.instrument.lookup/cause])))}))
+                                 :seon.instrument.lookup/cause])))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Interpreted function contracts
@@ -519,32 +512,7 @@
     (symbol (str (ns-name namespace-object)) (str var-name))))
 
 (defn- registration-cause-data
-  {:malli/schema [:=> [:cat :seon.error/throwable] [:or :seon.schema/value
-     :nil
-     :map
-     :seon.error/base
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
-     :seon.turn.loop/error]]}
+  {:malli/schema [:=> [:cat :seon.error/throwable] :seon.schema/value]}
   [failure]
   (loop [deepest (ex-data failure)]
     (if-let [nested (and (map? deepest)
@@ -557,32 +525,7 @@
 (def ^:dynamic ^:private *compiling-contract* false)
 
 (defn- request-member
-  {:malli/schema [:=> [:cat :seon.schema/value :qualified-keyword] [:or :seon.schema/value
-     :nil
-     :map
-     :seon.error/base
-     :my.background/error :my.edit/error :my.fs/error :my.message/error
-     :my.plan/error :my.shell/error :my.turn/error
-     :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
-     :seon.artifact/error :seon.boot/error :seon.bootstrap/error
-     :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
-     :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
-     :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
-     :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal
-     :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
-     :seon.flow/error :seon.fn/error :seon.fn.binding/error
-     :seon.instrument/arity-error :seon.instrument/contract-error
-     :seon.instrument/registration-error :seon.instrument/undeclared-error
-     :seon.message/error :seon.operator/error :seon.operator.collect/error
-     :seon.problems/error :seon.program/error :seon.reconcile/error
-     :seon.render/error :seon.render.data/error :seon.render.value/error
-     :seon.render.walk/error :seon.render.web/error :seon.schedule/error
-     :seon.schema/error :seon.schema/validation-refusal :seon.schema.datahike/error :seon.schema.shape/error
-     :seon.sci.admit/error :seon.sci.eval/acquisition-error :seon.sci.eval/row-acquisition-error :seon.sci.eval/reader-event-count-error
-     :seon.sci.eval/evaluation-error :seon.sci.kernel/error :seon.sci.reader/error
-     :seon.search/error :seon.source/test-evidence-error :seon.test/error :seon.test.accretion/error
-     :seon.test.run/error :seon.test.runner/error :seon.turn/error :seon.turn/refused-error
-     :seon.turn.loop/error]]}
+  {:malli/schema [:=> [:cat :seon.schema/value :qualified-keyword] :seon.schema/value]}
   [value member]
   (when (map? value)
     (try (get value member)
@@ -605,49 +548,6 @@
       (let [projection ((mi/-f->original schema/handed-projection))]
         (when (request-member projection :seon.schema.projection/registry)
           projection))))
-
-(defn- declared-result
-  "Derive result-position permissions without inspecting nested payloads."
-  {:malli/schema [:=> [:cat :map :seon.schema/value] :map]}
-  [projection output]
-  (let [forms (:seon.schema.projection/forms projection)
-        declared-schemas ((mi/-f->original error/declared-schema-keys) projection)]
-    (letfn [(walk-result [node seen]
-              (cond
-                (= node :seon.error/base) #{:seon.error/base}
-                (and (keyword? node) (find forms node))
-                (if (seen node)
-                  (throw (ex-info "Cyclic error result declaration."
-                                  {:seon.error/at (java.util.Date.)
-                                   :seon.error/layer :seon.instrument/registration
-                                   :seon.error/operation 'seon.instrument/declared-result
-                                   :seon.error/expected-key node}))
-                  (let [inherited (walk-result (get forms node) (conj seen node))]
-                    ;; Extending the base promises this complete declared-schema. It does
-                    ;; not separately permit an incomplete base-only result.
-                    (if (declared-schemas node)
-                      (conj (disj inherited :seon.error/base) node)
-                      inherited)))
-                (vector? node)
-                (let [tag (first node)
-                      children (if (map? (second node)) (nnext node) (next node))]
-                  (cond
-                    (#{:or :and :maybe :schema :ref} tag)
-                    (into #{} (mapcat #(walk-result % seen)) children)
-                    (#{:orn :multi} tag)
-                    (into #{} (mapcat #(walk-result (last %) seen)) children)
-                    (= :merge tag)
-                    (throw (ex-info "Unsupported error result declaration."
-                                    {:seon.error/at (java.util.Date.)
-                                   :seon.error/layer :seon.instrument/registration
-                                   :seon.error/operation 'seon.instrument/declared-result
-                                     :seon.error/expected node}))
-                    :else #{}))
-                :else #{}))]
-      (let [declared (walk-result output #{})]
-        {::declared (disj declared :seon.error/base)
-         ::base? (contains? declared :seon.error/base)
-         ::digest ((mi/-f->original seon.id/digest) 64 (sort declared))}))))
 
 (defn- observation-location
   "Ordered schema or value path, preserving arbitrary observed keys."
@@ -739,68 +639,35 @@
                                (mr/var-registry))}
            compiled (m/schema bound options)
            arities (mapv m/-function-info (m/-function-schema-arities compiled))
-           permissions (mapv #(declared-result projection (m/form (:output %))) arities)
-           base? ((mi/-f->original schema/projection-cache-value)
-                  projection ::base-validator
-                  #((mi/-f->original schema/projection-validator) projection :seon.error/base))
            refusal? ((mi/-f->original schema/projection-cache-value)
                      projection ::refusal-validator
                      #((mi/-f->original schema/projection-validator) projection :seon.instrument/refusal-result))
            marker (Object.)
-           reject! (fn [value]
+           reject! (fn [declared-schema value]
                      (when-not (refusal? value)
                        (throw (ex-info "Instrumentation constructed an invalid refusal." value)))
                      (throw (ex-info (:seon.error/message value)
-                                     (with-meta value {::boundary marker}))))
+                                     (with-meta value {::boundary marker
+                                                       :seon.error/declared-schema declared-schema}))))
            wrapped
            (m/-instrument
             {:schema compiled :scope #{:input :output :guard}
              :report (fn [kind data]
                        (binding [*compiling-contract* true]
-                         (reject! (boundary-refusal projection caps kind
+                         (reject! (if (= :malli.core/invalid-arity kind)
+                                    :seon.instrument/arity-error :seon.instrument/contract-error)
+                                  (boundary-refusal projection caps kind
                                                     (assoc data :fn-name function-symbol) arities))))}
-            (fn [& arguments]
-              (let [value (apply original arguments)]
-                (when (and (map? value) (base? value))
-                  (let [arity (count arguments)
-                        index (or (first (keep-indexed
-                                          #(when (= arity (:arity %2)) %1) arities))
-                                  (first (keep-indexed
-                                      #(when (and (<= (:min %2) arity)
-                                                  (or (nil? (:max %2)) (<= arity (:max %2)))) %1)
-                                      arities)))
-                        permission (nth permissions index)
-                        declared (::declared permission)
-                        actual ((mi/-f->original error/declared-schemas) projection value)]
-                    (when (and (not (::base? permission))
-                               (empty? (set/intersection actual declared)))
-                      (reject!
-                       (cond->
-                        {:seon.error/message
-                         (if (empty? actual)
-                           (str function-symbol " returned a base error without a complete declared declared-schema."
-                                " Declared declared-schemas: " (pr-str declared) ".")
-                           (str function-symbol " returned undeclared error declared-schemas "
-                                (pr-str (set/difference actual declared)) "."))
-                         :seon.error/at (java.util.Date.)
-                         :seon.error/layer :seon.instrument/invocation
-                         :seon.error/operation function-symbol
-                         :seon.instrument/fn function-symbol
-                         :seon.instrument/arity arity
-                         :seon.instrument/returned-error (error/project-observation caps value)
-                         :seon.instrument/declared-declared-schema-digest (::digest permission)
-                         :seon.instrument/declared-declared-schema-count (count declared)
-                         :seon.instrument/actual-declared-schema-count (count actual)}
-                         (seq declared) (assoc :seon.instrument/declared-declared-schemas declared)
-                         (seq actual) (assoc :seon.instrument/actual-declared-schemas actual))))))
-                value)) options)]
+            original options)]
        (fn [& arguments]
          (try (apply wrapped arguments)
               (catch clojure.lang.ExceptionInfo failure
                 (if (and (= :record (:seon.config/on-core-error policy))
                          (identical? marker (::boundary (meta (ex-data failure)))))
                   (let [value (ex-data failure)
-                        outcome ((:seon.flow/commit-fault! policy) value)]
+                        outcome ((:seon.flow/commit-fault! policy)
+                                 {:seon.error/source value
+                                  :seon.error/declared-schema (:seon.error/declared-schema (meta value))})]
                     (if (= :seon.flow/committed (second outcome)) value
                         (throw (ex-info "Recording the instrumentation refusal failed." value failure))))
                   (throw failure)))))))))

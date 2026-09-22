@@ -2447,7 +2447,7 @@
                      (assoc reader-row :seon.schema/form "[:int {:seon.db/identity true}]")))
             "a genuinely different declaration is still not the committed one")))))
 
-(deftest returned-errors-require-a-complete-declared-declared-schema
+(deftest quoted-error-shaped-values-remain-data
   (test-support/with-database
     (fn [connection]
       (let [ctx (test-support/fork-cluster-ctx connection)
@@ -2462,9 +2462,9 @@
             malformed (assoc complete :seon.error/message [:seon.ns/name 'user])
             failed (run-in ctx (str "'" (pr-str complete)) 5000)
             ordinary (run-in ctx (str "'" (pr-str malformed)) 5000)]
-        (is (contains? (error/declared-schemas projection complete) :seon.sci.kernel/error))
-        (is (empty? (error/declared-schemas projection malformed)))
-        (is (string? (:seon.cluster.eval/error failed)))
+        (is ((seon.schema/projection-validator projection :seon.sci.kernel/error) complete))
+        (is (not ((schema/projection-validator projection :seon.sci.kernel/error) malformed)))
+        (is (nil? (:seon.cluster.eval/error failed)))
         (is (= complete (:seon.sci.admit/value failed)))
         (is (= 12 (get-in failed [:seon.sci.admit/value
                                   :seon.sci.kernel/guard-observation

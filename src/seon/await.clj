@@ -38,16 +38,17 @@
         (:seon.await/bound request)
         observation (:seon.await/diagnostic request)]
     (merge
-     observation
+     (dissoc observation :seon.error/member)
+     (when-let [member (:seon.error/member observation)]
+       {:seon.await/requested-member member})
      outcome
      {:seon.error/at (java.util.Date.)
       :seon.error/layer :seon.await/completion
       :seon.error/operation 'seon.await/diagnostic
       :seon.await/config-attribute attribute
       :seon.await/config-value backstop-ms
-      :seon.error/data
-      (merge (:seon.error/data observation)
-             (select-keys observation [:seon.error/layer :seon.error/operation]))
+      :seon.await/requested-layer (:seon.error/layer observation)
+      :seon.await/requested-operation (:seon.error/operation observation)
       :seon.error/message
       (if (:seon.await/closed-operation outcome)
         "The awaited channel closed before completion. Fix: publish the completion before closing the channel."

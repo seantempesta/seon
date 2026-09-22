@@ -713,7 +713,7 @@
          :seon.render.transcript/refused-member :seon.turn/turn
          :seon.error/expected [:seon.db/db :seon.turn/id :seon.agent/id]
          :seon.error/offending unit
-         :seon.error/data {:seon.error/source identities}}]
+         :seon.render.transcript/selection-identities identities}]
     observation))
 
 (defn render-run-ai
@@ -1031,8 +1031,7 @@
                :seon.render.transcript/refused-member :seon.agent/runtime
                :seon.error/member :seon.runtime/agent
                :seon.error/expected :seon.agent/id
-               :seon.error/offending unit
-               :seon.error/data {:seon.error/layer :seon.render :seon.error/source [:seon.runtime/agent]}}]
+               :seon.error/offending unit}]
           observation))))
 
 (defn render-runtime-ai
@@ -2415,8 +2414,7 @@
              :seon.error/fix "Supply the expected member and repeat the requested operation."
              :seon.render.transcript/refused-member :seon.agent/runtime
              :seon.error/expected :seon.runtime/entity
-             :seon.error/offending agent-id
-             :seon.error/data {:seon.error/layer :seon.render :seon.error/source [:seon.agent/runtime]}}]
+             :seon.error/offending agent-id}]
         observation)
       :else
         (let [runtime (:seon.agent/runtime row)

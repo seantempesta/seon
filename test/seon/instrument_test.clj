@@ -35,6 +35,7 @@
             [seon.fs :as fs]
             [seon.instrument :as instrument]
             [seon.print :as print]
+            [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.kernel :as kernel]
@@ -171,7 +172,7 @@
      (let [projection (schema/projection-from-database (db/db connection))
            caps (config/result-caps (test-support/effective-config))
            contract [:function
-                     [:=> [:cat :map] :map]
+                     [:=> [:cat :map] [:map [::success :boolean]]]
                      [:=> [:cat :map :int] [:or :int :seon.agent/error]]]
            base {:seon.error/at #inst "2026-09-18T00:00:00Z"
                  :seon.error/layer :seon.instrument-test/body
@@ -185,7 +186,7 @@
            recorder (fn [value]
                       (let [outcome (#'cluster/commit-fault!
                                      connection "host-error-wrapper" "host-wrapper-test" caps value)]
-                        (swap! committed conj [value outcome])
+                        (swap! committed conj [(:seon.error/source value) outcome])
                         outcome))]
        (try
          (doseq [mode [:panic :record]]
@@ -207,17 +208,17 @@
                    (pr-str refusal))))
            (let [refusal (if (= :panic mode)
                            (test-support/refusal-data #(candidate domain)) (candidate domain))]
-             (is (= #{:seon.agent/error} (:seon.instrument/actual-declared-schemas refusal)) (pr-str refusal))
+             (is (= :output (:seon.instrument/check refusal)) (pr-str refusal))
              (is (= 1 (:seon.instrument/arity refusal)))
-             (is ((schema/projection-validator projection :seon.instrument/undeclared-error) refusal))
+             (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))
              (when (= :record mode)
                (is (identical? refusal (first (peek @committed)))
                    "The call returns the exact flat value handed to the committer."))
              (is (= domain (candidate domain 1)) "Only the declaring arity permits this declared-schema."))
            (let [refusal (if (= :panic mode)
                            (test-support/refusal-data #(candidate base)) (candidate base))]
-             (is (= 0 (:seon.instrument/actual-declared-schema-count refusal)))
-             (is ((schema/projection-validator projection :seon.instrument/undeclared-error) refusal))))
+             (is (= :output (:seon.instrument/check refusal)))
+             (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))))
          (is (= 4 (count @committed)))
          (doseq [[value [_fact outcome]] @committed]
            (is (= :seon.flow/committed outcome) (pr-str outcome))
@@ -276,8 +277,8 @@
        (is (= 'seon.error/value
               (:seon.error/operation data))
            "naming the function whose contract was violated")
-       (is (= :arguments
-              (:seon.error/member (:seon.error/data data))))
+       (is (= :seon.fn.arity/input
+              (:seon.error/member data)))
        (is (= :seon.error/fact
               (:seon.error/expected data))
            "a cluster re-arm retains the JVM wrapper's bounded evidence policy")
@@ -334,7 +335,7 @@
              recorder (fn [value]
                         (let [outcome (#'cluster/commit-fault!
                                        connection "sci-wrapper" "sci-wrapper-test" caps value)]
-                          (swap! recorded conj [value outcome])
+                          (swap! recorded conj [(:seon.error/source value) outcome])
                           outcome))
              ctx (sci.eval/base-ctx database {:seon.flow/commit-fault! recorder})
              _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database
@@ -343,13 +344,13 @@
                      :seon.error/layer ::sci-body
                      :seon.error/operation 'user/sci-declared-schema
                      :seon.agent/error-agent-id "sci-agent"}
-             contract [:function [:=> [:cat :map] :map]
+             contract [:function [:=> [:cat :map] [:map [::success :boolean]]]
                        [:=> [:cat :map :int] [:or :int :seon.agent/error]]]]
          (sci/eval-string* ctx "(def calls (atom 0))")
          (doseq [[label args declared-schema ran?]
                  [[:input [42] :seon.instrument/contract-error false]
                   [:arity [] :seon.instrument/arity-error false]
-                  [:undeclared [domain] :seon.instrument/undeclared-error true]
+                  [:undeclared [domain] :seon.instrument/contract-error true]
                   [:declared [domain 1] nil true]]]
            (let [name (symbol (str "sci-declared-schema-" (clojure.core/name mode) "-" (clojure.core/name label)))
                  qualified (symbol "user" (str name))
@@ -373,7 +374,7 @@
                  (is (= qualified (:seon.instrument/fn result)))
                  (is (= (count args) (:seon.instrument/arity result)))
                  (when (= :undeclared label)
-                   (is (= #{:seon.agent/error} (:seon.instrument/actual-declared-schemas result))))
+                   (is (= :output (:seon.instrument/check result))))
                  (when (= :record mode)
                    (let [[value [_ outcome]] (peek @recorded)]
                      (is (= :seon.flow/committed outcome)
@@ -413,7 +414,7 @@
            recorder (fn [value]
                       (let [outcome (#'cluster/commit-fault!
                                      connection "sci-fork-recorder" "sci-fork-test" caps value)]
-                        (swap! recorded conj [value outcome])
+                        (swap! recorded conj [(:seon.error/source value) outcome])
                         outcome))
            missing (test-support/refusal-data
                     #(sci.eval/fork-cluster-ctx base database connection state))
@@ -461,7 +462,7 @@
       (let [failure (test-support/refusal-data call)]
         (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) failure))
         (is (= :malli.core/invalid-guard
-               (get-in failure [:seon.error/data :seon.instrument/malli])))
+               (get-in failure [:seon.instrument/malli])))
         (is (str/includes? (:seon.error/message failure) "The guard was evaluated."))))))
 
 (def ^:private reporter-frames (atom nil))
@@ -629,7 +630,7 @@
             data (ex-data failure)
             message (:seon.error/message data)
             problems (get-in data
-                             [:seon.error/data :seon.error/problems])]
+                             [:seon.error/problems])]
         (is (str/includes? message "seon.instrument-test"))
         (is (str/includes? message "expected an integer"))
         (is (not (str/includes? message ":seon.print/face"))
@@ -664,7 +665,7 @@
         (let [failure (try (invoke) (catch Exception thrown thrown))
               data (ex-data failure)
               message (:seon.error/message data)
-              instrument-data (:seon.error/data data)]
+              instrument-data data]
           (testing (name expected-arm)
             (is (= expected-kind (:seon.instrument/malli instrument-data)))
             (is (= expected-arm (:seon.instrument/arm instrument-data)))
@@ -697,7 +698,7 @@
                  (schema/handed-projection) :panic
                  (config/result-caps (test-support/effective-config)) (constantly 1))
         refusal (try (wrapped raw) (catch Exception failure (ex-data failure)))
-        offending (get-in refusal [:seon.error/data :seon.error/problems 0 :seon.error/offending])
+        offending (get-in refusal [:seon.error/problems 0 :seon.error/offending])
         checked (get-in refusal [:seon.error/offending])
         unit {:seon.render/value refusal
               :seon.repl/handle 'result/eaudit
@@ -722,7 +723,7 @@
     (is (str/includes? ai ":seon.print/omitted 37") ai)
     (is (str/includes? ai ":seon.render.data/total 40")
         "the elision counts what it omitted and what was there")
-    (is (str/includes? ai "(get-in result/eaudit [:seon.error/data :seon.error/problems 0 :seon.error/offending])")
+    (is (str/includes? ai "(get-in result/eaudit [:seon.error/problems 0 :seon.error/offending])")
         "and it hands back the form that requeries the leaf it elided")
     (is (= [] (remove #(str/includes? html (str %)) member))
         "the HTML face keeps every member of the whole offending value")))
@@ -753,7 +754,7 @@
             allocated (- (.getThreadAllocatedBytes thread-bean thread-id)
                          before)
             data (ex-data failure)
-            instrument-data (:seon.error/data data)
+            instrument-data data
             received (first (:seon.error/offending instrument-data))]
         (is (identical? registry received)
             "the seam retains the actual object; presentation alone elides it")
@@ -981,8 +982,7 @@
               (catch clojure.lang.ExceptionInfo thrown thrown))
             diagnostic (ex-data failure)]
         (is (= function-symbol
-               (:seon.error/member
-                (:seon.error/data diagnostic))))
+               (:seon.error/member diagnostic)))
         (is (= authored-schema
                (:seon.error/expected diagnostic)))
         (is (= :n5/missing
@@ -1125,26 +1125,57 @@
                [:output #(private-integer-boundary 0)]]]
         (let [refusal (test-support/refusal-data call)]
           (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
-          (is (= kind (get-in refusal [:seon.error/data :seon.instrument/arm])))
+          (is (= kind (get-in refusal [:seon.instrument/arm])))
           (is (= 'seon.instrument-test/private-integer-boundary
                  (get-in refusal [:seon.error/operation])))))
       (let [refusal (test-support/refusal-data #(private-integer-boundary original-error))]
         (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
         (is (= original-error
-               (get-in refusal [:seon.error/data :seon.error/problems 0 :seon.error/offending]))
+               (get-in refusal [:seon.error/problems 0 :seon.error/offending]))
             "The consumer refuses its input and retains the causal value.")))))
 
-(deftest semantic-admission-explicitly-declares-every-error-declared-schema
-  (let [projection (schema/handed-projection)]
-    (doseq [candidate [#'admit/semantic-value #'error/refusal #'error/latest-fact
-                       #'kernel/failure-value]]
-      (let [output (last (:malli/schema (meta candidate)))
-            declared (#'instrument/declared-result projection output)]
-        (is (= (error/declared-schema-keys projection) (:seon.instrument/declared declared))
-            (str candidate " missing declarations: "
-                 (pr-str (remove (:seon.instrument/declared declared)
-                                 (error/declared-schema-keys projection)))))
-        (is (true? (:seon.instrument/base? declared)))))))
+(deftest stored-error-pull-remains-data-through-an-armed-function
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "stored-error-data")
+     (let [caps (config/result-caps (test-support/effective-config))
+           source {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                   :seon.error/layer ::stored-error
+                   :seon.error/operation 'seon.instrument-test/stored-error
+                   :seon.error/message "Stored error data"
+                   :seon.agent/error-agent-id "stored-error-agent"}
+           [error outcome] (cluster/commit-fault!
+                            connection "stored-error-data" "stored-error-test" caps
+                            {:seon.error/source source :seon.error/declared-schema :seon.agent/error})
+           database (db/db connection)
+           occurrence (db/q '[:find ?occurrence . :in $ ?signature
+                              :where [?error :seon.error/signature ?signature]
+                                     [?error :seon.error/occurrences ?occurrence]]
+                            database (:seon.error/signature error))]
+       (is (= :seon.flow/committed outcome) (pr-str outcome))
+       (is (pos-int? occurrence))
+       (is (contains? (instrument/instrumented) #'db/pull))
+       (let [pulled (db/pull database '[*] occurrence)]
+         (is (= occurrence (:db/id pulled)))
+         (is (= (:seon.error/operation source) (:seon.error/operation pulled)))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.error/base)
+              pulled)))))))
+
+(deftest parsed-shown-error-entities-remain-data
+  (let [value {:seon.error/at #inst "2026-09-22T00:00:00Z"
+               :seon.error/layer ::shown
+               :seon.error/operation 'seon.instrument-test/shown
+               :seon.agent/error-agent-id "shown-agent"}]
+    (is (contains? (instrument/instrumented) #'repl/shown-value))
+    (is (= value (repl/shown-value (pr-str value))))))
+
+(deftest semantic-admission-explicitly-declares-its-error-contract
+  (doseq [[candidate expected]
+          [[#'admit/semantic-value :seon.schema/value]
+           [#'error/refusal [:or :nil :map :seon.error/base]]
+           [#'error/latest-fact [:or :map :seon.error/base]]
+           [#'kernel/failure-value :seon.error/base]]]
+    (is (= expected (last (:malli/schema (meta candidate)))) (str candidate))))
 
 (deftest hot-host-declared-schema-check-measurement
   (let [projection (schema/handed-projection)
@@ -1310,7 +1341,7 @@
 
 (deftest the-caller-frame-is-part-of-the-refusal-sentence
   (let [refusal (test-support/refusal-data #(prefix-contract "wrong"))
-        caller (get-in refusal [:seon.error/data :seon.instrument/caller])]
+        caller (:seon.instrument/caller refusal)]
     (is (string? caller))
     (is (str/starts-with? caller "seon.instrument-test "))
     (is (str/includes? (:seon.error/message refusal) caller))
@@ -1331,30 +1362,30 @@
                              {:seon.env/environment environment}]
                      (test-support/refusal-data #(apply prefix-contract [])))]
        (is (= '([value])
-              (get-in refusal [:seon.error/data :seon.instrument/arglists])))
+              (:seon.instrument/arglists refusal)))
        (is (not (str/includes? (error/render-ai refusal) "stale-name")))))))
 
-(deftest a-broad-success-arm-cannot-admit-an-incomplete-declared-error
+(deftest output-validation-follows-the-declared-union
   (let [projection (schema/handed-projection)
         caps (config/result-caps (test-support/effective-config))
-        wrapped (instrument/wrap-interpreted
-                 'seon.instrument-test/precise-error-output
-                 "[:=> [:cat :map] [:or :map :seon.agent/error]]"
-                 projection :panic caps identity)
+        wrap (fn [output]
+               (instrument/wrap-interpreted
+                'seon.instrument-test/precise-error-output
+                (pr-str [:=> [:cat :map] output])
+                projection :panic caps identity))
+        data (wrap :map)
+        declared (wrap [:or [:map [::success :boolean]] :seon.agent/error])
         base {:seon.error/at #inst "2026-09-19T00:00:00Z"
-              :seon.error/layer :seon.instrument-test/body
+              :seon.error/layer ::body
               :seon.error/operation 'seon.instrument-test/precise-error-output}
         complete (assoc base :seon.agent/error-agent-id "observed")
-        composed (assoc complete :seon.test/unknown "seon.instrument-test/absent")
-        refusal (test-support/refusal-data #(wrapped base))]
-    (is (= complete (wrapped complete)))
-    (is (every? (error/declared-schemas projection composed)
-                #{:seon.agent/error :seon.test/unknown-error}))
-    (is (= composed (wrapped composed))
-        "A complete declared declared-schema permits additional declared-schemas on the same open map.")
-    (is ((schema/projection-validator projection :seon.instrument/undeclared-error)
-         refusal)
-        "An ordinary map success arm cannot satisfy the promised error declared-schema.")))
+        refusal (test-support/refusal-data #(declared base))]
+    (is (= base (data base)))
+    (is (= complete (data complete)))
+    (is (= complete (declared complete)))
+    (is (= {::success true} (declared {::success true})))
+    (is (= :output (:seon.instrument/check refusal)))
+    (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))))
 
 (deftest instrumentation-observations-do-not-carry-legacy-class-stamps
   (let [projection (schema/handed-projection)

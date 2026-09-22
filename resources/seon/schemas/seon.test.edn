@@ -52,7 +52,7 @@
             [:and :seon.error/base [:map [:seon.test/not-runnable :seon.test/not-runnable]]],
             :sym
             [:qualified-symbol
-             { :seon.db/identity true, :seon.search/index :symbol,
+             { :seon.db/identity true,
               :seon.program/row-schema :seon.test/test,
               :seon.program/source-attribute :seon.test/source}],
             :result
@@ -338,10 +338,12 @@
  :seon.test/resolution-error
  [:and :seon.error/base
   [:map {:seon.db/attributes true}
-   [:seon.test/resolution-refusal :seon.test/resolution-refusal]]]
+   [:seon.test/resolution-refusal :seon.test/resolution-refusal]
+   [:seon.test/error-test-symbol {:optional true} :seon.test/error-test-symbol]]]
  :seon.test/execution-refusal :qualified-keyword
  :seon.test/execution-error
  [:and :seon.error/base
   [:map {:seon.db/attributes true}
-   [:seon.test/execution-refusal :seon.test/execution-refusal]]]
+   [:seon.test/execution-refusal :seon.test/execution-refusal]
+   [:seon.test/error-test-symbol {:optional true} :seon.test/error-test-symbol]]]
 }

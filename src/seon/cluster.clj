@@ -323,7 +323,7 @@
           :seon.schema/refused-value :seon.error/unknown
           :seon.error/message "The MCP config read has no cluster projection state."
           :seon.error/expected :seon.sci.eval/projection-state
-          :seon.error/data (merge {:seon.boot/cluster-name cluster-name} {:seon.error/layer :development-mcp :seon.error/operation 'seon.config/effective})})
+          :seon.error/data {:seon.boot/cluster-name cluster-name}})
       bootstrap-effective)))
 
 (defn- nil-deref?
@@ -358,9 +358,7 @@
        :seon.error/exception-class (:type cause-entry)
        :seon.error/frame frame
        :seon.error/expected :successful-prepl-evaluation
-       :seon.error/offending (str (:type cause-entry))
-       :seon.error/data (merge {:seon.error/exception-class (:type cause-entry)
-        :seon.error/frame frame} {:seon.error/layer :development-mcp :seon.error/operation :evaluate-jvm :seon.error/member :exception :seon.error/source {:seon.error/frame frame}})}))
+       :seon.error/offending (str (:type cause-entry))}))
 
 (defn- mcp-projection-error
   {:malli/schema
@@ -378,14 +376,15 @@
    (mcp-projection-error value nil))
   ([value failure]
    {:seon.dev.mcp/value
-    {:seon.error/at (java.util.Date.)
+    (cond-> {:seon.error/at (java.util.Date.)
       :seon.error/layer :seon.dev.mcp/projection
       :seon.error/operation `mcp-projection-error
       :seon.error/message "MCP projection refused the value: expected an admissible projected value; projection raised an exception. Fix: inspect the offending value class and its projection contract."
       :seon.dev.mcp/projection-offending-class (if (nil? value) "nil" (.getName (class value)))
       :seon.error/member :seon.dev.mcp/value
-      :seon.error/expected :admissible-projected-value
-      :seon.error/data {:seon.error/layer :development-mcp :seon.error/operation :project-value :seon.error/source (some-> failure ex-message)}}
+      :seon.error/expected :admissible-projected-value}
+      failure (assoc :seon.dev.mcp/projection-failure-message
+                     (or (ex-message failure) "Projection failed.")))
     :seon.dev.mcp/windowed? false}))
 
 (defn- mcp-project
@@ -2667,11 +2666,11 @@
   `db/transact!`, which never throws. The signature query and Flow's
   process-local signature set bound notification only; recurrence remains the
   query-derived count of committed facts."
-  [connection cluster-name process caps fault]
+  [connection cluster-name process caps observation]
   (try
     (let [db (db/db connection)
           dials (config/effective db cluster-name)
-          source-fault fault
+          source-fault (:seon.error/source observation)
           agent-id (:seon.agent/id source-fault)
           run-id (when agent-id (tagged-run db agent-id))
           dropped-count (::flow/dropped-fault-count source-fault)
@@ -2679,6 +2678,7 @@
           request
           (cond-> {:seon.schema/projection (db/carried-projection db)
                    :seon.error/source source-fault
+                   :seon.error/declared-schema (:seon.error/declared-schema observation)
                    :seon.error/id (str (random-uuid))
                    :seon.error/at (java.util.Date.)
                    :seon.error/process process
@@ -2741,7 +2741,8 @@
       ;; `error/commit-tx` is total. This last-resort shape is only for a
       ;; failure before its fact exists, so no content signature is available
       ;; for Flow to collapse honestly.
-      (let [cause (if (instance? Throwable fault) fault (::flow.core/ex fault))
+      (let [fault (:seon.error/source observation)
+            cause (if (instance? Throwable fault) fault (::flow.core/ex fault))
             message (or (:seon.error/message fault)
                         (when (instance? Throwable cause)
                           (str (.getName (class cause)) ": " (ex-message cause)))

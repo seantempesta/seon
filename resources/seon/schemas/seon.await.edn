@@ -1,4 +1,8 @@
-#:seon.await{:elapsed-ms
+#:seon.await{:requested-member :seon.schema/value
+             :requested-layer :seon.schema/value
+             :requested-operation :seon.schema/value
+             :subject :map
+             :elapsed-ms
              [:double {:min 0 :description "Elapsed monotonic milliseconds when the declared await bound fired. A value observation, retained after the awaited subject is gone."}]
              :closed-operation
              [:enum {:description "The actual channel operation that observed closure before completion; a bounded operation vocabulary, not an entity discriminator."} :put :take]
@@ -11,7 +15,11 @@
               [:map
                [:seon.await/config-attribute :seon.await/config-attribute]
                [:seon.await/config-value :seon.await/config-value]
-               [:seon.await/elapsed-ms :seon.await/elapsed-ms]]]
+               [:seon.await/elapsed-ms :seon.await/elapsed-ms]
+               [:seon.await/requested-layer {:optional true} :seon.await/requested-layer]
+               [:seon.await/requested-operation {:optional true} :seon.await/requested-operation]
+               [:seon.await/subject {:optional true} :seon.await/subject]
+               [:seon.await/requested-member {:optional true} :seon.await/requested-member]]]
              :closed-error
              [:and {:seon.db/attributes true
                     :seon.render/ai seon.error/render-ai
@@ -19,7 +27,11 @@
               :seon.error/base
               [:map
                [:seon.await/closed-operation :seon.await/closed-operation]
-               [:seon.await/operation-index :seon.await/operation-index]]]
+               [:seon.await/operation-index :seon.await/operation-index]
+               [:seon.await/requested-layer {:optional true} :seon.await/requested-layer]
+               [:seon.await/requested-operation {:optional true} :seon.await/requested-operation]
+               [:seon.await/subject {:optional true} :seon.await/subject]
+               [:seon.await/requested-member {:optional true} :seon.await/requested-member]]]
              :config-attribute :qualified-keyword
              :config-value
              [:or

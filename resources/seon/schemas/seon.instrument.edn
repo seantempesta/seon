@@ -50,11 +50,7 @@
 
  ; Additive error declaration manifest, 2026-09-18.
 
- :seon.instrument/actual-declared-schema-count
- [:int {:min 0}]
 
- :seon.instrument/actual-declared-schemas
- [:set :qualified-keyword]
 
  :seon.instrument/arity
  [:int {:min 0}]
@@ -105,14 +101,8 @@
  :seon.instrument/declared-arity-count
  [:int {:min 1}]
 
- :seon.instrument/declared-declared-schema-count
- [:int {:min 0}]
 
- :seon.instrument/declared-declared-schema-digest
- [:string {:min 64, :max 64}]
 
- :seon.instrument/declared-declared-schemas
- [:set :qualified-keyword]
 
  :seon.instrument/explanations
  [:and
@@ -123,8 +113,7 @@
  :seon.instrument/refusal-result
  [:or
  :seon.instrument/contract-error
- :seon.instrument/arity-error
- :seon.instrument/undeclared-error]
+ :seon.instrument/arity-error ]
 
  :seon.instrument/registration-error
  [:and
@@ -142,36 +131,5 @@
   :seon.db/component-schema :seon.error.evidence/entity}
  :seon.db/ref]
 
- :seon.instrument/returned-error
- [:and
- {:seon.db/component true,
-  :seon.db/component-schema :seon.error.projection/entity}
- :seon.db/ref]
 
- :seon.instrument/undeclared-error
- [:and
- [:and
-  {:seon.db/attributes true}
-  :seon.error/base
-  [:map
-   {:seon.db/attributes true}
-   [:seon.instrument/fn :seon.instrument/fn]
-   [:seon.instrument/arity :seon.instrument/arity]
-   [:seon.instrument/returned-error :seon.instrument/returned-error]
-   [:seon.instrument/declared-declared-schema-digest
-    :seon.instrument/declared-declared-schema-digest]
-   [:seon.instrument/declared-declared-schema-count
-    :seon.instrument/declared-declared-schema-count]
-   [:seon.instrument/actual-declared-schema-count
-    :seon.instrument/actual-declared-schema-count]
-   [:seon.instrument/declared-declared-schemas
-    {:optional true}
-    :seon.instrument/declared-declared-schemas]
-   [:seon.instrument/actual-declared-schemas
-    {:optional true}
-    :seon.instrument/actual-declared-schemas]]]
- [:fn
-  {:error/message "declared-schema-counts-agree?",
-   :gen/gen seon.error/declared-schema-counts-agree-generator}
-  seon.error/declared-schema-counts-agree?]]
 }

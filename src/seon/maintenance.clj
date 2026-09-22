@@ -256,8 +256,7 @@
         :seon.error/offending managed-root
         :seon.error/message "No completed maintenance receipt records a collection of this root."
         :seon.error/member :seon.operator/managed-root
-        :seon.error/expected :seon.operator.collect/managed-root
-        :seon.error/data {:seon.error/layer :seon.maintenance :seon.error/source [:seon.operator.collect/managed-root managed-root]}})))
+        :seon.error/expected :seon.operator.collect/managed-root})))
 
 (defn last-collection
   "When `managed-root` was last collected, and what that collection reclaimed.

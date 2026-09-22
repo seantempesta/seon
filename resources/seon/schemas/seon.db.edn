@@ -17,7 +17,7 @@
            :seon.dev.mcp/error :seon.effect/error :seon.env/error :seon.eval.drive/error
            :seon.flow/error :seon.fn/error :seon.fn.binding/error
            :seon.instrument/arity-error :seon.instrument/contract-error
-           :seon.instrument/registration-error :seon.instrument/undeclared-error
+           :seon.instrument/registration-error
            :seon.message/error :seon.operator/error :seon.operator.collect/error
            :seon.problems/error :seon.program/error :seon.reconcile/error
            :seon.render/error :seon.render.data/error :seon.render.value/error

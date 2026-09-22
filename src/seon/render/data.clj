@@ -115,7 +115,7 @@
      :seon.error/message message
      :seon.error/expected "an existing subject and a continuation from the same snapshot, entity, and direction"
      :seon.error/offending offending
-     :seon.error/data (merge {member offending} {:seon.error/member member})}
+     :seon.error/data {member offending}}
    :seon.render.data/refused-member member
    :seon.error/offending offending
    :seon.error/fix "Acquire the subject again and use the continuation returned by that observation."))

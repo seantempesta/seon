@@ -14,6 +14,7 @@
    [:seon.error/exception-class :seon.error/exception-class]
    [:seon.error/frame :seon.error/frame]]]
 
+ :seon.dev.mcp/projection-failure-message :string
  :seon.dev.mcp/projection-offending-class [:string {:min 1}]
  :seon.dev.mcp/projection-failed-error
  [:and
@@ -23,7 +24,8 @@
   :seon.error/base
   [:map
    [:seon.dev.mcp/projection-offending-class
-    :seon.dev.mcp/projection-offending-class]]]
+    :seon.dev.mcp/projection-offending-class]
+   [:seon.dev.mcp/projection-failure-message {:optional true} :seon.dev.mcp/projection-failure-message]]]
 
  :seon.dev.mcp/projection-failed-result
  [:map

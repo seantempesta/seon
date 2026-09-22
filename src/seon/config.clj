@@ -126,12 +126,12 @@
         :seon.error/expected-key missing
         :seon.error/message "Value-admission caps require every declared configuration bound."
         :seon.error/offending effective
-        :seon.error/data (merge (cond-> {::key missing}
+        :seon.error/data (cond-> {::key missing}
          (:seon.config/missing-effective effective)
          (assoc :seon.config/missing-effective
                 (:seon.config/missing-effective effective))
          cluster-less-refusal
-         (assoc ::configuration-refusal cluster-less-refusal)) {:seon.error/source {:seon.config/key missing}})}
+         (assoc ::configuration-refusal cluster-less-refusal))}
       (select-keys effective result-cap-attributes))))
 
 ;;; Every function below asks the declaration population one question per
@@ -534,8 +534,7 @@
          :seon.config/rule ::required-absent
          :seon.error/expected-key :seon.boot/cluster-name
          :seon.error/offending request
-         :seon.error/data {::key :seon.boot/cluster-name
-                           :seon.error/operation 'seon.config/compile-manifest}
+         :seon.error/data {::key :seon.boot/cluster-name}
          :seon.error/expected "a value for each required configuration key"}
        nil))
     (let [document (default-document)
@@ -781,4 +780,4 @@
               :seon.error/expected-key :seon.config/effective
               :seon.config/missing-effective cluster-name
               :seon.error/message "Effective configuration requires a matching cluster row with every required dial."
-              :seon.error/data (merge {::missing missing ::available (vec (sort available))} {:seon.error/source {:seon.config/missing missing}})})))))))
+              :seon.error/data {::missing missing ::available (vec (sort available))}})))))))

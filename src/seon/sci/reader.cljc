@@ -19,8 +19,9 @@
      :seon.error/operation 'seon.sci.reader/error-value
      :seon.error/message message
      :seon.error/offending (::text data data)
+     :seon.error/member member
      :seon.error/expected :seon.sci.reader/accepted-source
-     :seon.error/data (merge data {:seon.error/member member})}
+     :seon.error/data data}
     observation))
 
 (defn- refusal-handler

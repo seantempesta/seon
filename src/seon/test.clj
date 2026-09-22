@@ -9,7 +9,6 @@
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.error :as error]
             [seon.fn :as functions]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -113,7 +112,7 @@
         :seon.error/member :seon.dev-cache/digest
         :seon.error/expected digest
         :seon.error/offending (.getName (io/file loaded-cache))
-        :seon.error/data (merge {:seon.test/classpath-root root} {:seon.error/layer :test-resolution})}
+        :seon.error/data {:seon.test/classpath-root root}}
       (let [loader (DynamicClassLoader. (clojure.lang.RT/baseLoader))]
     (doseq [path roots]
       (let [file (io/file path)]
@@ -161,7 +160,7 @@
                        :seon.error/operation :seon.test/run
                        :seon.error/expected :test-completion
                        :seon.error/offending :pending
-                       :seon.error/data (merge {:seon.test/sym test-symbol} {:seon.error/member test-symbol})}})]
+                       :seon.error/data {:seon.test/sym test-symbol}}})]
         (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation))
           {:seon.test/sym test-symbol,
            :seon.test.member/began? false,
@@ -396,7 +395,7 @@
              :seon.test/next-tier :none
              :seon.error/expected :isolated-operator-root
              :seon.error/offending root
-             :seon.error/data (merge evidence {:seon.error/layer :test :seon.error/operation ::run :seon.error/member test-symbol :seon.error/source owner})}))))))
+             :seon.error/data evidence}))))))
 
 (defn- execute-admitted!
   "Run one declared test Var, commit its result facts, and return them.\n\n  The connection is ordinarily supplied by call preparation from the calling\n  agent's environment. The returned value is pulled from the transaction's\n  `:db-after`, so it cannot disagree with the facts that were committed.\n\n  A test whose program-graph reach includes a function declaring\n  `:seon.fn/destroys` is REFUSED, without executing, in a JVM whose declared operator root is the\n  development checkout it runs in; the refusal names the test, the owner, the\n  call path, and the cold invocation that may run it. `:seon.test/declared-root`\n  in the options is that declaration when the caller genuinely holds one;\n  absent, this JVM's own is read once here.\n\n  The test BODY runs under exactly the custody the options hand it:\n  `:seon.db/connection` present means the run is that cluster's own work and\n  the body's elided `seon.db` arities reach it; absent means none, which is\n  what a host REPL calling this is. `run-owned` is the agent's entry and\n  supplies its evaluation's connection. The `connection` argument is where\n  the RESULT FACTS are committed and never decides the body's custody."
@@ -613,8 +612,8 @@
     :seon.error/message message
     :seon.error/expected :complete-comparable-program-evidence
     :seon.error/offending observed
-    :seon.error/data (merge {:seon.test.run/basis-t (db/basis-t database)
-     :seon.test.run/branch (get-in (db/schema-database database) [:config :branch])} {:seon.error/layer :test-selection :seon.error/member kind})}
+    :seon.error/data {:seon.test.run/basis-t (db/basis-t database)
+     :seon.test.run/branch (get-in (db/schema-database database) [:config :branch])}}
          :seon.test/selection-refusal kind))
 
 (defn- selection-read!
@@ -1232,7 +1231,7 @@
           :seon.error/message "Test run admission refused inconsistent evidence."
           :seon.error/expected expected
           :seon.error/offending offending
-          :seon.error/data (merge {:seon.test.run/id run-id} {:seon.error/layer :test :seon.error/operation :seon.test/admit-run :seon.error/member run-id})} :seon.test/admission-refusal kind)]
+          :seon.error/data {:seon.test.run/id run-id}} :seon.test/admission-refusal kind)]
     (throw (ex-info (:seon.error/message failure) failure))))
 
 (defn- admission-members
@@ -1527,7 +1526,8 @@
                    :seon.error/message message
                    :seon.error/expected :admitted-executable-test
                    :seon.error/offending observed
-                   :seon.error/data (merge {:seon.test.run/basis-t (db/basis-t database)} {:seon.error/layer :test-resolution :seon.error/member test-symbol})} :seon.test/resolution-refusal kind))
+                   :seon.error/data {:seon.test.run/basis-t (db/basis-t database)}
+          :seon.test/error-test-symbol test-symbol} :seon.test/resolution-refusal kind))
         row (db/pull database
                      '[:db/id :seon.test/source :seon.schema.admission/source
                        :seon.program/analyzed-source-digest :seon.fn/file
@@ -1777,16 +1777,6 @@
                                      (str "the reaching set cannot bound this change: "
                                           (str/join ", " widened))))
             _ (swap! progress assoc :seon.test/recorded initial :seon.test/pending (vec runnable))
-            _ (when (and (seq runnable)
-                         (some (set (functions/tests-reaching database 'seon.test-support/with-database)) runnable))
-                (swap! progress assoc :seon.test/progress "canonical fixture preparation")
-                ;; Realize the fixture owner's one base before starting a Var's
-                ;; event backstop. The total check deadline still applies.
-                ;; `seon.test-support` is reachable only under the test
-                ;; loader — the same deliberate late dependency as
-                ;; `event-backstop-ms`.
-                (with-test-loader
-                  #(deref @(requiring-resolve 'seon.test-support/database-base))))
             prepared (when (seq runnable)
                        (swap! progress assoc :seon.test/progress "test namespace loading and contract arming")
                        (prepare-tests! database connection request))
@@ -1970,7 +1960,8 @@
                             :seon.error/operation ::check
                             :seon.error/expected :check-result
                             :seon.error/offending :pending
-                            :seon.error/data (merge {:seon.test/changed (:seon.test/changed request)} {:seon.error/member :check-completion})}})]
+                            :seon.error/data {:seon.test/changed (:seon.test/changed request)}
+          :seon.error/member :seon.test/check-completion}})]
               (when-let [n (:seon.test/skipped-count result)]
                 (println "Skipped" n "tests:" (:seon.test/skip-reason result)))
               (check-completion @progress started result))
@@ -2129,8 +2120,9 @@
                   :seon.error/operation ::check-request
                   :seon.error/expected :seon.test.check/result
                   :seon.error/offending :pending
-                  :seon.error/data {:seon.error/member :check-completion :seon.error/source (cond-> {:seon.boot/cluster-name cluster}
-                    test-symbol (assoc :seon.test/sym test-symbol))}}})
+                  :seon.error/member :check-completion
+                  :seon.await/subject (cond-> {:seon.boot/cluster-name cluster}
+                    test-symbol (assoc :seon.test/sym test-symbol))}})
                (catch Exception failure
                  (unknown (or test-symbol cluster) (ex-message failure)))
                (finally (when-not (.isDone task) (.cancel task false)))))))))))
