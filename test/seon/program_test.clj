@@ -94,6 +94,9 @@
             branch-a (keyword "seon.program-test" (str (name source-branch) "-a"))
             branch-b (keyword "seon.program-test" (str (name source-branch) "-b"))]
         (is (every? some? [branch-identity head-identity]))
+        ;; File and lint rows are derived and carry no definition digest.
+        (is (not-any? #{:seon.lint/id :seon.fn.file/relative-path}
+                      (map first (keys base-map))))
         (d/branch! connection source-branch branch-a)
         (try
           (d/branch! connection source-branch branch-b)

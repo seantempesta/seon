@@ -390,47 +390,51 @@
 
 #?(:clj
    (defn digest-map
-     "Read every program identity and its stored definition digest from `database`."
+     "Read every digested program declaration and its stored definition digest.
+
+  A declaration family is compared when its row schema declares
+  `:seon.program/definition-digest`; file and lint rows are derived from bytes
+  and analysis, carry no digest and are recomputed rather than compared."
      {:malli/schema [:=> [:cat :seon.db/database-value]
                      :seon.program/digest-map]}
      [database]
-     (let [projection (schema/projection-from-database database)
+     (let [projection ((requiring-resolve 'seon.db/carried-projection) database)
            declared-program-attributes (program-attributes projection)
-           selected-identities (filterv declared-program-attributes
-                                        identity-attributes)
-           query (requiring-resolve 'seon.db/q)
-           read! (fn [result]
-                   (when (and (map? result) (:seon.error/at result))
-                     (throw (ex-info "The program digest map could not be read."
-                                     {:seon.error/operation 'seon.program/digest-map
-                                      :seon.error/data result})))
-                   result)]
-       (when-not (= (set selected-identities) (set identity-attributes))
+           registry (:seon.schema.projection/registry projection)
+           digested-identities
+           (filterv (fn [attribute]
+                      (let [row-schema (some-> (mr/schema registry attribute)
+                                               m/properties :seon.program/row-schema)
+                            definition (some->> row-schema (mr/schema registry))]
+                        (some #{:seon.program/definition-digest}
+                              (keep entry-attribute
+                                    (some-> definition internal/entity-entries)))))
+                    identity-attributes)
+           datoms (requiring-resolve 'seon.db/datoms)
+           read! (fn [attribute]
+                   (let [result (datoms database :aevt attribute)]
+                     (when (and (map? result) (:seon.error/at result))
+                       (throw (ex-info "The program digest map could not be read."
+                                       {:seon.error/operation 'seon.program/digest-map
+                                        :seon.error/data result})))
+                     result))]
+       (when-not (and (seq digested-identities)
+                      (every? declared-program-attributes digested-identities))
          (throw (ex-info "The program partition omits a declaration identity."
                          {:seon.error/operation 'seon.program/digest-map
                           :seon.error/offending
-                          (remove declared-program-attributes identity-attributes)
+                          (remove declared-program-attributes digested-identities)
                           :seon.error/expected :seon.program/identity-attribute})))
-       (let [program-entities
-             (read! (query '[:find [?entity ...]
-                             :in $ [?attribute ...]
-                             :where [?entity ?attribute]]
-                           database declared-program-attributes))
-             identities
-             (read! (query '[:find ?attribute ?value
-                             :in $ [?entity ...] [?attribute ...]
-                             :where [?entity ?attribute ?value]]
-                           database program-entities selected-identities))
-             rows
-             (read! (query '[:find ?attribute ?value ?digest
-                             :in $ [?entity ...] [?attribute ...]
-                             :where [?entity ?attribute ?value]
-                                    [?entity :seon.program/definition-digest ?digest]]
-                           database program-entities selected-identities))
-             result (into {} (map (fn [[attribute value digest]]
-                                    [[attribute value] digest])) rows)
-             missing (into #{} (remove #(contains? result %))
-                           (map vec identities))]
+       (let [digests (into {} (map (juxt :e :v))
+                           (read! :seon.program/definition-digest))
+             identities (into [] (mapcat read!) digested-identities)
+             result (into {} (keep (fn [datom]
+                                     (when-let [digest (get digests (:e datom))]
+                                       [[(:a datom) (:v datom)] digest])))
+                          identities)
+             missing (into #{} (comp (remove #(contains? digests (:e %)))
+                                     (map (juxt :a :v)))
+                           identities)]
          (when (seq missing)
            (throw (ex-info "Program declarations are missing their stored definition digest."
                            {:seon.error/operation 'seon.program/digest-map
@@ -449,19 +453,18 @@
     :seon.program/three-way]}
   [base branch head]
   (let [absent :seon.program/absent
-        state (fn [digests identity]
-                (if (contains? digests identity) (get digests identity) absent))]
+        state (fn [digests declaration] (get digests declaration absent))]
     (reduce
-     (fn [result identity]
-       (let [base-digest (state base identity)
-             branch-digest (state branch identity)
-             head-digest (state head identity)]
+     (fn [result declaration]
+       (let [base-digest (state base declaration)
+             branch-digest (state branch declaration)
+             head-digest (state head declaration)]
          (cond
            (= branch-digest head-digest)
-           (update result :seon.program/unchanged conj identity)
+           (update result :seon.program/unchanged conj declaration)
 
            (= branch-digest base-digest)
-           (update result :seon.program/changed-on-head conj identity)
+           (update result :seon.program/changed-on-head conj declaration)
 
            (= head-digest base-digest)
            (update result
@@ -469,12 +472,12 @@
                      (= base-digest absent) :seon.program/added
                      (= branch-digest absent) :seon.program/retracted
                      :else :seon.program/changed-on-branch)
-                   conj identity)
+                   conj declaration)
 
            :else
            (-> result
-               (update :seon.program/conflict conj identity)
-               (assoc-in [:seon.program/conflict-digests identity]
+               (update :seon.program/conflict conj declaration)
+               (assoc-in [:seon.program/conflict-digests declaration]
                          {:seon.program/base-digest base-digest
                           :seon.program/branch-digest branch-digest
                           :seon.program/head-digest head-digest})))))
