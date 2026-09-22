@@ -91,7 +91,10 @@
   {:malli/schema [:=> [:cat :seon.error/throwable] :seon.plan/refusal]}
   [throwable]
   (let [data (ex-data throwable)]
-    (if (or (:seon.db/invalid-read data) (:seon.schema/expected-value data) (:seon.db.write.attempt/request-id data) (:my.plan/missing-agent-id data) (:my.plan/missing-item-id data) (:my.plan/unowned-item-id data) (:my.plan/existing-item-id data) (:my.plan/foreign-item-id data) (:my.plan/duplicate-item-id data) (:my.plan/duplicate-sibling-position data) (:my.plan/cycle-item-id data) (:my.plan/missing-dependency-id data) (:my.plan/unusable-current-id data) (:my.plan/missing-reference-member data) (:my.plan/unowned-reference-member data) (:my.plan/missing-subject-attribute data) (:my.plan/unbounded-query-agent data) (:my.plan/failed-query-item-id data) (:my.plan/unsatisfied-query-item-id data) (:seon.plan/non-test-entity data))
+    (if (or (:seon.db/invalid-read data)
+          (:seon.db/transaction-refused data)
+          (:seon.schema/expected-value data)
+          (:my.plan/refused-member data))
       data
       (throw throwable))))
 
@@ -178,6 +181,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/resolve-subject!
                  :seon.error/diagnostic-member :my.plan.item/about
+                 :my.plan/refused-member :my.plan.item/about
                  :seon.error/diagnostic-expected "an installed subject identity"
                  :seon.error/diagnostic-offending {:my.plan.item/about token}
                  :seon.error/offending {:my.plan.item/about token}
@@ -373,6 +377,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/plan
                  :seon.error/diagnostic-member :seon.agent/id
+                 :my.plan/refused-member :seon.agent/id
                  :seon.error/diagnostic-expected "an existing agent"
                  :seon.error/diagnostic-offending {:seon.agent/id agent-id}
                  :seon.error/offending {:seon.agent/id agent-id}
@@ -429,6 +434,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/item
                  :seon.error/diagnostic-member :my.plan.item/id
+                 :my.plan/refused-member :my.plan.item/id
                  :seon.error/diagnostic-expected "an existing plan step"
                  :seon.error/diagnostic-offending {:my.plan.item/id item-id}
                  :seon.error/offending {:my.plan.item/id item-id}
@@ -565,6 +571,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/owned-step-eid!
                  :seon.error/diagnostic-member member
+                 :my.plan/refused-member member
                  :seon.error/diagnostic-expected "an existing referenced plan step"
                  :seon.error/diagnostic-offending {member reference}
                  :seon.error/offending {member reference}
@@ -586,6 +593,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/owned-step-eid!
                  :seon.error/diagnostic-member member
+                 :my.plan/refused-member member
                  :seon.error/diagnostic-expected "a referenced step owned by this agent"
                  :seon.error/diagnostic-offending {member reference}
                  :seon.error/offending {member reference}
@@ -619,6 +627,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/add-step-call
                  :seon.error/diagnostic-member :seon.agent/id
+                 :my.plan/refused-member :seon.agent/id
                  :seon.error/diagnostic-expected "an existing agent"
                  :seon.error/diagnostic-offending {:seon.agent/id agent-id}
                  :seon.error/offending {:seon.agent/id agent-id}
@@ -635,6 +644,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/add-step-call
                  :seon.error/diagnostic-member :my.plan.item/id
+                 :my.plan/refused-member :my.plan.item/id
                  :seon.error/diagnostic-expected "a new plan step identity"
                  :seon.error/diagnostic-offending {:my.plan.item/id item-id}
                  :seon.error/offending {:my.plan.item/id item-id}
@@ -657,6 +667,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/add-step-call
                  :seon.error/diagnostic-member :my.plan.item/needs
+                 :my.plan/refused-member :my.plan.item/needs
                  :seon.error/diagnostic-expected "an existing or authored prerequisite step"
                  :seon.error/diagnostic-offending {:my.plan.item/needs reference}
                  :seon.error/offending {:my.plan.item/needs reference}
@@ -708,6 +719,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/query-deadline
                  :seon.error/diagnostic-member :seon.config.eval/time-limit-ms
+                 :my.plan/refused-member :seon.config.eval/time-limit-ms
                  :seon.error/diagnostic-expected "a positive configured query deadline"
                  :seon.error/diagnostic-offending {:seon.agent/id agent-id}
                  :seon.error/offending {:seon.agent/id agent-id}
@@ -741,8 +753,9 @@
                       (sort tests))
           stale (seon.test/stale
                  database (into [] (keep second) named))]
-      (when (or (:seon.db/invalid-read stale) (:seon.schema/expected-value stale) (:seon.db.write.attempt/request-id stale) (:seon.test/selection-refusal stale) (:seon.test/admission-refusal stale) (:seon.test/execution-refusal stale) (:seon.test/unknown stale) (:seon.test/resolution-refusal stale) (:seon.test/not-runnable stale) (:seon.test.run/unavailable stale) (:seon.test.run/immutable stale) (:seon.instrument/fn stale))
-        (throw (ex-info (:seon.error/message stale) stale)))
+      (when (:seon.test/execution-refusal stale)
+        (throw (ex-info (:seon.error/message stale)
+                        (assoc stale :my.plan/refused-member :seon.issue/tests))))
       (let [changed (set stale)]
         (filterv (fn [[_ test-symbol]]
                    (or (nil? test-symbol) (contains? changed test-symbol)))
@@ -812,6 +825,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/run-issue-tests!
                  :seon.error/diagnostic-member :seon.issue/tests
+                 :my.plan/refused-member :seon.issue/tests
                  :seon.error/diagnostic-expected "a test entity named by the issue"
                  :seon.error/diagnostic-offending {:seon.agent/id agent-id :seon.db/ref test-eid}
                  :seon.error/offending {:seon.agent/id agent-id :seon.db/ref test-eid}
@@ -819,8 +833,10 @@
                  :seon.error/diagnostic-evidence {}
                  :seon.error/data {:seon.agent/id agent-id :seon.db/ref test-eid}
                  :seon.plan/non-test-entity (get {:seon.agent/id agent-id :seon.db/ref test-eid} :seon.db/ref)})))]
-            (when (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result) (:seon.test/selection-refusal result) (:seon.test/admission-refusal result) (:seon.test/execution-refusal result) (:seon.test/unknown result) (:seon.test/resolution-refusal result) (:seon.test/not-runnable result) (:seon.test.run/unavailable result) (:seon.test.run/immutable result) (:seon.instrument/fn result))
-              (throw (ex-info (:seon.error/message result) result)))))))
+            (when (or (:seon.test/execution-refusal result)
+                      (:seon.test.run/unavailable result))
+              (throw (ex-info (:seon.error/message result)
+                              (assoc result :my.plan/refused-member :seon.issue/tests))))))))
     nil))
 
 (defn- done-query-result
@@ -844,6 +860,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/done-query-result
                  :seon.error/diagnostic-member :my.plan.item/done-query
+                 :my.plan/refused-member :my.plan.item/done-query
                  :seon.error/diagnostic-expected "a successful completion-query evaluation"
                  :seon.error/diagnostic-offending {:my.plan.item/id (:my.plan.item/id step)
                 :my.plan.item/done-query query :seon.db/result result}
@@ -911,6 +928,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/complete-step-call
                  :seon.error/diagnostic-member :my.plan.item/id
+                 :my.plan/refused-member :my.plan.item/id
                  :seon.error/diagnostic-expected "an existing plan step"
                  :seon.error/diagnostic-offending {:my.plan.item/id item-id}
                  :seon.error/offending {:my.plan.item/id item-id}
@@ -931,6 +949,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/complete-step-call
                  :seon.error/diagnostic-member :my.plan.item/id
+                 :my.plan/refused-member :my.plan.item/id
                  :seon.error/diagnostic-expected "a step owned by the requesting agent"
                  :seon.error/diagnostic-offending {:my.plan.item/id item-id
                 :seon.agent/id agent-id}
@@ -954,6 +973,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/complete-step-call
                  :seon.error/diagnostic-member :my.plan.item/done-query
+                 :my.plan/refused-member :my.plan.item/done-query
                  :seon.error/diagnostic-expected "a nonempty or true completion-query result"
                  :seon.error/diagnostic-offending {:my.plan.item/id item-id :my.plan.item/done-query query
                       :seon.db/result result}
@@ -1026,6 +1046,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/start-step-call
                  :seon.error/diagnostic-member :my.plan.item/id
+                 :my.plan/refused-member :my.plan.item/id
                  :seon.error/diagnostic-expected "a step owned by the requesting agent"
                  :seon.error/diagnostic-offending {:my.plan.item/id item-id :seon.agent/id agent-id}
                  :seon.error/offending {:my.plan.item/id item-id :seon.agent/id agent-id}
@@ -1044,6 +1065,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/start-step-call
                  :seon.error/diagnostic-member :my.plan/current-step
+                 :my.plan/refused-member :my.plan/current-step
                  :seon.error/diagnostic-expected "an open step in this plan"
                  :seon.error/diagnostic-offending {:my.plan.item/id item-id}
                  :seon.error/offending {:my.plan.item/id item-id}
@@ -1080,6 +1102,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/update-step-call
                  :seon.error/diagnostic-member :my.plan.item/id
+                 :my.plan/refused-member :my.plan.item/id
                  :seon.error/diagnostic-expected "a step owned by the requesting agent"
                  :seon.error/diagnostic-offending {:my.plan.item/id item-id :seon.agent/id agent-id}
                  :seon.error/offending {:my.plan.item/id item-id :seon.agent/id agent-id}
@@ -1139,6 +1162,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/refuse-duplicate-identities!
                  :seon.error/diagnostic-member :my.plan.item/id
+                 :my.plan/refused-member :my.plan.item/id
                  :seon.error/diagnostic-expected "one occurrence of each step identity"
                  :seon.error/diagnostic-offending {:my.plan.item/id id}
                  :seon.error/offending {:my.plan.item/id id}
@@ -1160,6 +1184,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/refuse-duplicate-positions!
                  :seon.error/diagnostic-member :my.plan.item/position
+                 :my.plan/refused-member :my.plan.item/position
                  :seon.error/diagnostic-expected "distinct positions among siblings"
                  :seon.error/diagnostic-offending {:my.plan.item/position position
                 :my.plan/parent-step parent-id}
@@ -1186,6 +1211,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/refuse-dependency-cycle!
                  :seon.error/diagnostic-member :my.plan.item/needs
+                 :my.plan/refused-member :my.plan.item/needs
                  :seon.error/diagnostic-expected "acyclic step dependencies"
                  :seon.error/diagnostic-offending {:my.plan.item/id id}
                  :seon.error/offending {:my.plan.item/id id}
@@ -1319,6 +1345,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/compile-tree
                  :seon.error/diagnostic-member :seon.agent/id
+                 :my.plan/refused-member :seon.agent/id
                  :seon.error/diagnostic-expected "an existing agent"
                  :seon.error/diagnostic-offending {:seon.agent/id agent-id}
                  :seon.error/offending {:seon.agent/id agent-id}
@@ -1348,6 +1375,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/compile-tree
                  :seon.error/diagnostic-member :my.plan.item/id
+                 :my.plan/refused-member :my.plan.item/id
                  :seon.error/diagnostic-expected "an identity available to this agent"
                  :seon.error/diagnostic-offending {:my.plan.item/id id}
                  :seon.error/offending {:my.plan.item/id id}
@@ -1368,6 +1396,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/compile-tree
                  :seon.error/diagnostic-member :my.plan.item/needs
+                 :my.plan/refused-member :my.plan.item/needs
                  :seon.error/diagnostic-expected "an existing or authored prerequisite step"
                  :seon.error/diagnostic-offending {:my.plan.item/needs reference}
                  :seon.error/offending {:my.plan.item/needs reference}
@@ -1395,6 +1424,7 @@
                  :seon.error/diagnostic-layer :my.plan/constraint
                  :seon.error/diagnostic-operation 'seon.plan/compile-tree
                  :seon.error/diagnostic-member :my.plan/current-step
+                 :my.plan/refused-member :my.plan/current-step
                  :seon.error/diagnostic-expected "an open step in this plan"
                  :seon.error/diagnostic-offending {:my.plan/current-step plan-current}
                  :seon.error/offending {:my.plan/current-step plan-current}
@@ -1577,7 +1607,7 @@
   {:malli/schema [:=> [:cat [:or :my.plan/render-step :seon.error/value]]
                   :string]}
   [step]
-  (if (or (:seon.db/invalid-read step) (:seon.schema/expected-value step) (:seon.db.write.attempt/request-id step) (:my.plan/missing-agent-id step) (:my.plan/missing-item-id step) (:my.plan/unowned-item-id step) (:my.plan/existing-item-id step) (:my.plan/foreign-item-id step) (:my.plan/duplicate-item-id step) (:my.plan/duplicate-sibling-position step) (:my.plan/cycle-item-id step) (:my.plan/missing-dependency-id step) (:my.plan/unusable-current-id step) (:my.plan/missing-reference-member step) (:my.plan/unowned-reference-member step) (:my.plan/missing-subject-attribute step) (:my.plan/unbounded-query-agent step) (:my.plan/failed-query-item-id step) (:my.plan/unsatisfied-query-item-id step) (:seon.plan/non-test-entity step))
+  (if-not (:my.plan.item/id step)
     (refusal-line "Plan step" step)
     (str "Plan step [" (:my.plan.item/id step) "] "
          (step-line (str (inc (get step :my.plan.item/position 0))) step))))
@@ -1629,7 +1659,7 @@
   {:malli/schema [:=> [:cat [:or :my.plan/ready-items :seon.error/value]]
                   :string]}
   [plan-steps]
-  (if (or (:seon.db/invalid-read plan-steps) (:seon.schema/expected-value plan-steps) (:seon.db.write.attempt/request-id plan-steps) (:my.plan/missing-agent-id plan-steps) (:my.plan/missing-item-id plan-steps) (:my.plan/unowned-item-id plan-steps) (:my.plan/existing-item-id plan-steps) (:my.plan/foreign-item-id plan-steps) (:my.plan/duplicate-item-id plan-steps) (:my.plan/duplicate-sibling-position plan-steps) (:my.plan/cycle-item-id plan-steps) (:my.plan/missing-dependency-id plan-steps) (:my.plan/unusable-current-id plan-steps) (:my.plan/missing-reference-member plan-steps) (:my.plan/unowned-reference-member plan-steps) (:my.plan/missing-subject-attribute plan-steps) (:my.plan/unbounded-query-agent plan-steps) (:my.plan/failed-query-item-id plan-steps) (:my.plan/unsatisfied-query-item-id plan-steps) (:seon.plan/non-test-entity plan-steps))
+  (if-not (vector? plan-steps)
     (refusal-line "Ready work" plan-steps)
     (if (seq plan-steps)
       (str "Ready work (" (count plan-steps) "):\n"
@@ -1686,7 +1716,7 @@
   {:malli/schema [:=> [:cat [:or :my.plan/component-view :seon.error/value]]
                   :string]}
   [view]
-  (if (or (:seon.db/invalid-read view) (:seon.schema/expected-value view) (:seon.db.write.attempt/request-id view) (:my.plan/missing-agent-id view) (:my.plan/missing-item-id view) (:my.plan/unowned-item-id view) (:my.plan/existing-item-id view) (:my.plan/foreign-item-id view) (:my.plan/duplicate-item-id view) (:my.plan/duplicate-sibling-position view) (:my.plan/cycle-item-id view) (:my.plan/missing-dependency-id view) (:my.plan/unusable-current-id view) (:my.plan/missing-reference-member view) (:my.plan/unowned-reference-member view) (:my.plan/missing-subject-attribute view) (:my.plan/unbounded-query-agent view) (:my.plan/failed-query-item-id view) (:my.plan/unsatisfied-query-item-id view) (:seon.plan/non-test-entity view))
+  (if-not (:my.plan/steps view)
     (refusal-line "Plan" view)
     (let [plan-steps (:my.plan/steps view)
           current-id (get-in view [:my.plan/current-step :my.plan.item/id])

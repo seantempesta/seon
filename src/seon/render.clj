@@ -66,13 +66,15 @@
                 :seon.error/value]]
     [:or :seon.render.profile/profile
      :seon.config/missing-effective-error
-     :seon.config/error]]}
+     :seon.config/error :seon.db/invalid-read-error :seon.schema/validation-refusal]]}
   [effective]
-  ;; Either refusal shape is returned unchanged. A profile built from a
+  ;; A declared config or read refusal is returned unchanged. A profile built from a
   ;; refusal would carry nil budgets and every downstream render would then
   ;; read that absence as a policy (AGENTS.md section 2.4).
-  (if (or (:seon.config/missing-effective effective)
-          (or (:seon.config/error-key effective) (:seon.config/missing-effective effective) (:seon.db/invalid-read effective) (:seon.schema/expected-value effective)))
+  (if (or (:seon.config/error-key effective)
+          (:seon.config/missing-effective effective)
+          (:seon.db/invalid-read effective)
+          (:seon.schema/expected-value effective))
     effective
     {:seon.render.profile/id :seon.render.profile/agent
      :seon.render.profile/token-budget
@@ -115,7 +117,7 @@
 (defn request-profile
   "Return the profile carried by one request, deriving it once when absent."
   {:malli/schema [:=> [:cat :map]
-                  [:or :seon.render.profile/profile :seon.render/request-error :seon.config/error :seon.db/error-result]]}
+                  [:or :seon.render.profile/profile :seon.render/request-error]]}
   [request]
   (or (:seon.render/profile request)
       (if-let [projection (or (:seon.schema/projection request)
@@ -128,11 +130,13 @@
                         :where
                         [?cluster :seon.cluster/name ?cluster-name]]
                       database))
-              effective (when cluster-name
-                          (schema/call-with-projection
-                           projection #(config/effective database cluster-name)))]
+              effective (if (:seon.db/invalid-read cluster-name)
+                          cluster-name
+                          (when cluster-name
+                            (schema/call-with-projection
+                             projection #(config/effective database cluster-name))))]
           (if (or (:seon.config/error-key effective) (:seon.config/missing-effective effective) (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
-            effective
+            (assoc effective :seon.render/refused-member :seon.render/profile)
             (or (when effective (agent-render-profile effective))
                 @default-agent-profile)))
         (let [observation
@@ -153,7 +157,7 @@
 
 (defn- target-profile
 
-  {:malli/schema [:=> [:cat :map] [:or :seon.render.profile/profile :seon.render/request-error :seon.config/error :seon.db/error-result]]}
+  {:malli/schema [:=> [:cat :map] [:or :seon.render.profile/profile :seon.render/request-error]]}
   [request]
   (let [value (render-value request)
         database (:seon.db/db request)
@@ -593,7 +597,7 @@
   [{output :seon.render/output
     :as request}]
   (let [profile (request-profile request)]
-    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
+    (if (:seon.render/refused-member profile)
       (finish-selection [] profile selection-stage-order)
       (let [request (assoc request :seon.render/profile profile)
             value (render-value request)
@@ -622,7 +626,7 @@
     :as request}]
   (let [decision (selection request)
         profile (request-profile request)]
-    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
+    (if (:seon.render/refused-member profile)
       decision
       (let [request (assoc request :seon.render/profile profile)
             value (render-value request)
@@ -1326,7 +1330,7 @@
   :seon.fn/projection-boundary :seon.render/ai}
   [request]
   (let [profile (request-profile request)]
-    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
+    (if (:seon.render/refused-member profile)
       profile
       (let [request (assoc request :seon.render/profile profile)
             selected (or (:seon.render.call/selected-producer request)
@@ -1343,7 +1347,7 @@
   :seon.fn/projection-boundary :seon.render/html}
   [request]
   (let [profile (request-profile request)]
-    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
+    (if (:seon.render/refused-member profile)
       profile
       (let [request (assoc request :seon.render/profile profile)
             selected (or (:seon.render.call/selected-producer request)
@@ -1416,7 +1420,7 @@
                   [:or :seon.render/form :seon.render/error-result]]}
   [request]
   (let [profile (request-profile request)]
-    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
+    (if (:seon.render/refused-member profile)
       profile
       (let [request (assoc request :seon.render/profile profile)
             projection (request-projection request)
@@ -1445,7 +1449,9 @@
   "Reuse one retained projection while its input, code, and reads are current."
   {:malli/schema [:=> [:cat :seon.render/call-request]
                   [:or :nil :string :seon.render/hiccup
-                   :seon.render/form :seon.render/error-result]]}
+                   :seon.render/form :seon.render/request-error
+                   :seon.render/ambiguous-error :seon.render/invalid-output-error
+                   :seon.render/unknown]]}
   [{database :seon.db/db
     output :seon.render/output
     call-id :seon.render.call/id
@@ -1454,7 +1460,7 @@
     candidate-call-ids :seon.render/candidate-call-ids
     :as request}]
   (let [profile (request-profile request)]
-    (if (or (:seon.render/refused-member profile) (:seon.config/error-key profile))
+    (if (:seon.render/refused-member profile)
       profile
       (let [request (assoc request :seon.render/profile profile)
             previous (when (and call-id retained-calls)
@@ -1658,10 +1664,9 @@
           basis (if turn-id
                   (@turn-opening-db database turn-id)
                   database)]
-      (if (or (:seon.db/invalid-read basis) (:seon.schema/expected-value basis) (:seon.turn/missing-opening-datom basis)) basis
-        (let [acquired (@render-web-derive-context!
-                        (assoc request :seon.db/db basis))]
-          acquired)))))
+      (if (or (:seon.db/invalid-read basis) (:seon.turn/missing-opening-datom basis))
+        (assoc basis :seon.render.web/refused-member :seon.turn/opened-tx)
+        (@render-web-derive-context! (assoc request :seon.db/db basis))))))
 
 
 (defn- namespace-owner

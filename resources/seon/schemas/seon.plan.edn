@@ -8,6 +8,7 @@
  [:int {:description "The entity id read from an issue test relation that no longer identified a test at the observed basis. This is a value, not a reference that protects the entity."}]
  :seon.plan/non-test-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.plan/non-test-entity :seon.plan/non-test-entity]]]
+  :my.plan/request-error [:map [:seon.plan/non-test-entity :seon.plan/non-test-entity]]]
  :seon.plan/refusal
- [:or :seon.db/error-result :my.plan/agent-not-found-error :my.plan/not-found-error :my.plan/not-owned-error :my.plan/identity-exists-error :my.plan/foreign-identity-error :my.plan/duplicate-identity-error :my.plan/duplicate-position-error :my.plan/dependency-cycle-error :my.plan/dependency-not-found-error :my.plan/unusable-current-step-error :my.plan/item-reference-not-found-error :my.plan/item-reference-not-owned-error :my.plan/subject-not-found-error :my.plan/missing-query-bound-error :my.plan/done-query-failed-error :my.plan/done-query-unsatisfied-error :seon.plan/non-test-error]}
+ [:or :seon.db/invalid-read-error :seon.db/transaction-refused-error
+  :seon.schema/validation-refusal :my.plan/request-error]}

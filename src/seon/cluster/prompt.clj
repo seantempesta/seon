@@ -43,7 +43,7 @@
 
 (defn- effective-ai-settings
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
-                  [:or :seon.config/effective :seon.config/error :seon.db/error-result
+                  [:or :seon.config/effective :seon.config/error :seon.db/invalid-read-error
                    :seon.schema/validation-refusal
                    :seon.cluster.prompt/missing-cluster-error
                    :seon.cluster.prompt/missing-config-error]]}
@@ -63,10 +63,16 @@
 
       :else
       (let [effective (config/effective database cluster-name)]
-        (if (:seon.config/missing-effective effective)
-          (assoc effective
-                 ::missing-config agent-id)
-          (ai/settings effective (ai/agent-overlay database agent-id)))))))
+        (cond
+          (:seon.config/missing-effective effective)
+          (assoc effective ::missing-config agent-id)
+          (or (:seon.config/error-key effective) (:seon.db/invalid-read effective))
+          effective
+          :else
+          (let [overlay (ai/agent-overlay database agent-id)]
+            (if (or (:seon.db/invalid-read overlay) (:seon.schema/expected-value overlay))
+              overlay
+              (ai/settings effective overlay))))))))
 
 (defn- calibration-for
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ai/model
@@ -358,14 +364,11 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.prompt/request
                        :seon.config.ai/prompt-token-budget :seon.ai.tokens/calibration
                        :seon.config/effective]
-                  [:or :seon.cluster.prompt/result :seon.render.web/context-error
-                   :seon.render/request-error :seon.config/error :seon.db/error-result]]}
+                  [:or :seon.cluster.prompt/rendered-context :seon.cluster.prompt/error]]}
   [database request budget calibration settings]
   (let [profile (render/request-profile (assoc request :seon.db/db database))
         distance (long (get request :seon.render/distance default-depth))
-        acquired (if (or (:seon.render/refused-member profile)
-                         (:seon.config/error-key profile) (:seon.db/invalid-read profile)
-                         (:seon.schema/expected-value profile)) profile
+        acquired (if (:seon.render/refused-member profile) profile
                    (render/acquire-context!
                   (assoc request
                          :seon.render/profile profile
@@ -373,15 +376,11 @@
                          :seon.render/distance distance)))]
     (cond
       (or (:seon.render/refused-member acquired)
-          (:seon.render.web/refused-member acquired)
-          (:seon.render.web/function-unavailable acquired)
-          (:seon.render/candidates acquired) (:seon.render/invalid-output acquired)
-          (:seon.render.unknown/reason acquired)
-          (:seon.render.transcript/refused-member acquired)
-          (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired)
-          (:seon.config/error-key acquired) (:seon.db/invalid-read acquired)
-          (:seon.schema/expected-value acquired))
-      acquired
+          (:seon.render.web/refused-member acquired))
+      (assoc acquired :seon.cluster.prompt/error-agent-id (:seon.agent/id request)
+                       :seon.cluster.prompt/derivation-observation
+                       {:seon.error.evidence/attribute :seon.error/message
+                        :seon.error.evidence/value (:seon.error/message acquired)})
 
       ;; ABSENCE IS NOT AN EMPTY HISTORY. Acquisition publishes one unit per
       ;; stored evaluation; a text with no units behind it would compose to
@@ -405,7 +404,11 @@
             contributions (history-contributions segments calibration)
             report (tokens/budget-report text budget calibration)]
         (or (when-let [turn-id (:seon.turn/id request)]
-              (capture-mismatch database turn-id text))
+              (when-let [failure (capture-mismatch database turn-id text)]
+                (assoc failure :seon.cluster.prompt/error-agent-id (:seon.agent/id request)
+                       :seon.cluster.prompt/derivation-observation
+                       {:seon.error.evidence/attribute :seon.error/message
+                        :seon.error.evidence/value (:seon.error/message failure)})))
             {:seon.cluster.prompt/text text
              :seon.context/contributions
              (update contributions (dec (count contributions))
@@ -425,7 +428,7 @@
   carried are all readable rather than implied."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.prompt/request]
-                  :seon.cluster.prompt/result]}
+                  [:or :seon.cluster.prompt/rendered-context :seon.cluster.prompt/error]]}
   [database request]
   (validate-request! (db/carried-projection database) request)
   (let [agent-id (:seon.agent/id request)
@@ -434,7 +437,10 @@
             (:seon.cluster.prompt/missing-config settings)
             (:seon.config/error-key settings) (:seon.db/invalid-read settings)
             (:seon.schema/expected-value settings))
-      settings
+      (assoc settings :seon.cluster.prompt/error-agent-id agent-id
+                       :seon.cluster.prompt/derivation-observation
+                       {:seon.error.evidence/attribute :seon.error/message
+                        :seon.error.evidence/value (:seon.error/message settings)})
       (acquire-context-report
        database request
        (:seon.config.ai/prompt-token-budget settings)

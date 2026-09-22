@@ -43,6 +43,11 @@
             :rule [:keyword {:description "The violated transition rule in a refusal. Diagnostic data, not turn progress."}],
             :handled [:set {:description "Messages handled by this turn at settlement. Optional peer refs sweep if a message is deleted; they do not decide wake answering."} :seon.db/ref],
             :trigger [:and #:seon.db{:index true :seon.wake/context-inert true} :seon.db/ref],
+            :refused-system-agent [:string {:min 1}]
+            :system-refused-error
+            [:and :seon.error/base
+             [:map {:seon.db/attributes true}
+              [:seon.turn/refused-system-agent :seon.turn/refused-system-agent]]]
             :system-result
             [:map
              [:seon.turn/forms :seon.turn/forms]

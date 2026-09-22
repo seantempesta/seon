@@ -1,8 +1,36 @@
 (ns seon.render.call-test
   (:require [clojure.test :refer [deftest is]]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.render :as render]
             [seon.test-support :as support]))
+
+(deftest declared-producer-refusals-stop-context-rendering
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           failure (config/effective database "absent-render-config")
+           profile (render/request-profile
+                    {:seon.db/db failure
+                     :seon.schema/projection (db/carried-projection database)})
+           request {:seon.db/db database
+                    :seon.db/connection connection
+                    :seon.agent/id "absent-render-agent"
+                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
+                    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                    :seon.config/on-core-error :record
+                    :seon.render/profile (render/agent-render-profile config/defaults)}
+           opening (render/acquire-context!
+                    (assoc request :seon.turn/id "absent-render-turn"))
+           history (render/acquire-context! request)]
+       (is (= :seon.render/profile (:seon.render/refused-member profile)))
+       (is (= :seon.config/cluster (:seon.config/error-key profile)))
+       (is (= (:seon.error/message failure) (:seon.error/message profile)))
+       (is (= :seon.turn/opened-tx (:seon.render.web/refused-member opening)))
+       (is (true? (:seon.turn/missing-opening-datom opening)))
+       (is (= :seon.render.history/entries (:seon.render.web/refused-member history)))
+       (is (= "The history lookup does not name an agent." (:seon.error/message history)))))))
 
 (deftest retained-calls-accept-keyword-and-vector-identities
   (support/with-database

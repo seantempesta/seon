@@ -546,7 +546,7 @@
   decision; the run transaction refuses if the agent's assignment changed."
   {:malli/schema
    [:=> [:catn [:request :seon.agent/source-submission-request]]
-    [:or :seon.agent/source-submission-result :seon.error/value]]}
+    [:or :seon.agent/source-submission-result :seon.agent/source-submission-refused-error]]}
   [{handle :seon.turn.loop/cluster :as request}]
   ;; The submission thread otherwise pays the cold projection rebuild
   ;; (measured 728 → 147 ms per source turn); the handle carries its world.
@@ -558,8 +558,7 @@
 
 (defn- submit-source-in-projection
   {:malli/schema [:=> [:cat :seon.agent/source-submission-request]
-                  [:or :seon.agent/source-submission-result :seon.error/value
-                   :seon.db/error-result :seon.cluster.reply/no-forms-error]]}
+                  [:or :seon.agent/source-submission-result :seon.agent/source-submission-refused-error]]}
   [{handle :seon.turn.loop/cluster
     routing :seon.agent/routing
     agent-id :seon.agent/id
@@ -569,7 +568,10 @@
         database @connection
         namespace-name
         (if starting-ns
-          (:seon.ns/name (db/pull database [:seon.ns/name] starting-ns))
+          (let [namespace-row (db/pull database [:seon.ns/name] starting-ns)]
+            (if (:seon.db/invalid-read namespace-row)
+              namespace-row
+              (:seon.ns/name namespace-row)))
           (db/q '[:find ?namespace-name .
                 :in $ ?agent-id
                 :where
@@ -579,13 +581,15 @@
                 database agent-id))]
     (cond
       (or (:seon.db/invalid-read namespace-name)
-          (:seon.schema/expected-value namespace-name)) namespace-name
+          (:seon.schema/expected-value namespace-name))
+      (assoc namespace-name :seon.agent/refused-source-agent agent-id)
 
       (nil? namespace-name)
       (error/diagnostic
        {:seon.error/at (Date.)
         :seon.error/layer :seon.agent/source-submission
         :seon.error/operation `submit-source!
+        :seon.agent/refused-source-agent agent-id
         :seon.error/message
         "Source submission requires an agent with an assigned namespace."
         :seon.error/diagnostic-layer :seon.agent/source-submission
@@ -602,7 +606,7 @@
                             :seon.config.eval.result/max-source])
             sources (turn/planned-sources text namespace-name max-source)]
         (if (:seon.cluster.reply/no-forms sources)
-          sources
+          (assoc sources :seon.agent/refused-source-agent agent-id)
           (let [run-id (turn/next-id database (:seon.cluster/name handle) agent-id)
                 now (Date.)
                 staged-reply (turn/stage-reply! connection text)
@@ -616,9 +620,8 @@
                      database
                      (merge (dissoc staged-reply :seon.blob/staged-writes)
                             {:seon.agent/id agent-id :seon.turn/id run-id :seon.db.process/id (:seon.db.process/id handle) :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply-size (count (pr-str sources)) :seon.turn/sources sources}))}))]
-            (if (or (:seon.db.write.attempt/request-id outcome)
-                    (:seon.db/invalid-read outcome) (:seon.schema/expected-value outcome))
-              outcome
+            (if (:seon.db/transaction-refused outcome)
+              (assoc outcome :seon.agent/refused-source-agent agent-id)
               (let [channel
                     (or (:seon.cluster.wake/channel (armed routing agent-id))
                         (:seon.cluster.wake/channel handle))]
@@ -628,6 +631,7 @@
                    {:seon.error/at (Date.)
                     :seon.error/layer :seon.agent/source-submission
                     :seon.error/operation `submit-source!
+                    :seon.agent/refused-source-agent agent-id
                     :seon.error/message
                     "The source run committed, but its wake was not delivered."
                     :seon.error/diagnostic-layer :seon.agent/source-submission

@@ -1433,7 +1433,7 @@
        [:p {:class "seon-session-meta"}
         (str (format "%,d" (utf8-size prompt)) " bytes · ≈" (format "%,d" (tokens/estimate prompt))
              " tokens · " (count entries) " emissions · oldest → newest")])]
-     (if (or (:seon.db/invalid-read acquired) (:seon.schema/expected-value acquired) (:seon.config/error-key acquired) (:seon.render/refused-member acquired) (:seon.render/candidates acquired) (:seon.render/invalid-output acquired) (:seon.render.unknown/reason acquired) (:seon.render.transcript/refused-member acquired) (:seon.render.web/refused-member acquired) (:seon.render.web/function-unavailable acquired) (:seon.turn/rule acquired) (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired) (:seon.agent/no-such-agent acquired) (:seon.cluster.reply/no-forms acquired) (:seon.render.walk/missing-lookup acquired) (:seon.turn/generated-read-attributes acquired) (:seon.turn/compaction-agent-id acquired) (:seon.db.write.attempt/request-id acquired) (:seon.instrument/check acquired))
+     (if (:seon.render.web/refused-member acquired)
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value acquired))
         (value/render-html (assoc request :seon.render/value acquired))]
@@ -1615,16 +1615,22 @@
                     (:seon.db/db request) request)
                    (catch clojure.lang.ExceptionInfo failure
                      (let [refusal (ex-data failure)]
-                       (if (or (:seon.instrument/check refusal) (:seon.render/refused-member refusal) (:seon.render.web/refused-member refusal)) refusal (throw failure)))))]
+                       (if (or (:seon.instrument/check refusal) (:seon.render/refused-member refusal) (:seon.render.web/refused-member refusal))
+                         (assoc refusal :seon.cluster.prompt/error-agent-id (:seon.agent/id request)
+                       :seon.cluster.prompt/derivation-observation
+                       {:seon.error.evidence/attribute :seon.error/message
+                        :seon.error.evidence/value (:seon.error/message refusal)})
+                         (throw failure)))))
+        refusal (:seon.cluster.prompt/error-agent-id composed)]
     [:details {:class "seon-outline-everything" :data-preserve-attr "open"}
      [:summary
-      (if (or (:seon.db/invalid-read composed) (:seon.schema/expected-value composed) (:seon.config/error-key composed) (:seon.render/refused-member composed) (:seon.render/candidates composed) (:seon.render/invalid-output composed) (:seon.render.unknown/reason composed) (:seon.render.transcript/refused-member composed) (:seon.render.web/refused-member composed) (:seon.render.web/function-unavailable composed) (:seon.turn/rule composed) (:seon.turn/error-turn-id composed) (:seon.turn/missing-opening-datom composed) (:seon.agent/no-such-agent composed) (:seon.cluster.reply/no-forms composed) (:seon.render.walk/missing-lookup composed) (:seon.turn/generated-read-attributes composed) (:seon.turn/compaction-agent-id composed) (:seon.db.write.attempt/request-id composed) (:seon.instrument/check composed) (:seon.config/missing-effective composed) (:seon.cluster.prompt/missing-cluster composed) (:seon.cluster.prompt/missing-config composed))
+      (if refusal
         "Show everything · the composed prompt was refused"
         (let [text (:seon.cluster.prompt/text composed)]
           (str "Show everything · the composed prompt · "
                (format "%,d" (utf8-size text)) " bytes · ≈"
                (format "%,d" (tokens/estimate text)) " tokens")))]
-     (if (or (:seon.db/invalid-read composed) (:seon.schema/expected-value composed) (:seon.config/error-key composed) (:seon.render/refused-member composed) (:seon.render/candidates composed) (:seon.render/invalid-output composed) (:seon.render.unknown/reason composed) (:seon.render.transcript/refused-member composed) (:seon.render.web/refused-member composed) (:seon.render.web/function-unavailable composed) (:seon.turn/rule composed) (:seon.turn/error-turn-id composed) (:seon.turn/missing-opening-datom composed) (:seon.agent/no-such-agent composed) (:seon.cluster.reply/no-forms composed) (:seon.render.walk/missing-lookup composed) (:seon.turn/generated-read-attributes composed) (:seon.turn/compaction-agent-id composed) (:seon.db.write.attempt/request-id composed) (:seon.instrument/check composed) (:seon.config/missing-effective composed) (:seon.cluster.prompt/missing-cluster composed) (:seon.cluster.prompt/missing-config composed))
+     (if refusal
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value composed))]
        [:pre {:class "seon-session-raw"
@@ -1651,7 +1657,9 @@
                    (render/acquire-context! (dissoc request :seon.turn/id))
                    (catch clojure.lang.ExceptionInfo failure
                      (let [refusal (ex-data failure)]
-                       (if (or (:seon.instrument/check refusal) (:seon.render/refused-member refusal) (:seon.render.web/refused-member refusal)) refusal (throw failure)))))
+                       (if (or (:seon.instrument/check refusal) (:seon.render/refused-member refusal) (:seon.render.web/refused-member refusal))
+                         (assoc refusal :seon.render.web/refused-member :seon.render/context-request)
+                         (throw failure)))))
         entries (:seon.render.history/entries acquired)
         saved (mapv :seon.render/value entries)
         by-eid (into {} (map (juxt :db/id identity)) (if (vector? rows) rows []))
@@ -1674,7 +1682,7 @@
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value rows))]
 
-       (or (:seon.db/invalid-read acquired) (:seon.schema/expected-value acquired) (:seon.config/error-key acquired) (:seon.render/refused-member acquired) (:seon.render/candidates acquired) (:seon.render/invalid-output acquired) (:seon.render.unknown/reason acquired) (:seon.render.transcript/refused-member acquired) (:seon.render.web/refused-member acquired) (:seon.render.web/function-unavailable acquired) (:seon.turn/rule acquired) (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired) (:seon.agent/no-such-agent acquired) (:seon.cluster.reply/no-forms acquired) (:seon.render.walk/missing-lookup acquired) (:seon.turn/generated-read-attributes acquired) (:seon.turn/compaction-agent-id acquired) (:seon.db.write.attempt/request-id acquired) (:seon.instrument/check acquired))
+       (:seon.render.web/refused-member acquired)
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value acquired))]
 
@@ -1725,7 +1733,7 @@
 (defn- ledger-evaluations {:malli/schema [:=> [:cat :seon.render/context-request] [:or :nil [:map-of :int [:vector :map]] :seon.render.web/context-error]]}
   [request]
   (let [acquired (ledger-acquisition request)]
-    (if (or (:seon.db/invalid-read acquired) (:seon.schema/expected-value acquired) (:seon.config/error-key acquired) (:seon.render/refused-member acquired) (:seon.render/candidates acquired) (:seon.render/invalid-output acquired) (:seon.render.unknown/reason acquired) (:seon.render.transcript/refused-member acquired) (:seon.render.web/refused-member acquired) (:seon.render.web/function-unavailable acquired) (:seon.turn/rule acquired) (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired) (:seon.agent/no-such-agent acquired) (:seon.cluster.reply/no-forms acquired) (:seon.render.walk/missing-lookup acquired) (:seon.turn/generated-read-attributes acquired) (:seon.turn/compaction-agent-id acquired) (:seon.db.write.attempt/request-id acquired) (:seon.instrument/check acquired)) acquired
+    (if (:seon.render.web/refused-member acquired) acquired
         (get-in acquired [::ledger-data ::evaluations]))))
 
 (defn- ledger-url [agent-id turn-id query]
@@ -1959,7 +1967,7 @@
   [request]
   (let [acquired (ledger-acquisition request)
         {::keys [rows evaluations calibrations]} (::ledger-data acquired)]
-    (if (or (:seon.db/invalid-read acquired) (:seon.schema/expected-value acquired) (:seon.config/error-key acquired) (:seon.render/refused-member acquired) (:seon.render/candidates acquired) (:seon.render/invalid-output acquired) (:seon.render.unknown/reason acquired) (:seon.render.transcript/refused-member acquired) (:seon.render.web/refused-member acquired) (:seon.render.web/function-unavailable acquired) (:seon.turn/rule acquired) (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired) (:seon.agent/no-such-agent acquired) (:seon.cluster.reply/no-forms acquired) (:seon.render.walk/missing-lookup acquired) (:seon.turn/generated-read-attributes acquired) (:seon.turn/compaction-agent-id acquired) (:seon.db.write.attempt/request-id acquired) (:seon.instrument/check acquired))
+    (if (:seon.render.web/refused-member acquired)
       [:div {:id (ledger-body-id (:seon.turn/id request))} [:p (:seon.error/message acquired)]]
       (let [row (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)]
         (ledger-turn-body (assoc request ::calibrations calibrations) rows evaluations row)))))
@@ -2345,20 +2353,20 @@
   [request]
   (let [acquired (ledger-acquisition request)
         {::keys [rows evaluations calibrations]} (::ledger-data acquired)
-        evaluations (if (or (:seon.db/invalid-read acquired) (:seon.schema/expected-value acquired) (:seon.config/error-key acquired) (:seon.render/refused-member acquired) (:seon.render/candidates acquired) (:seon.render/invalid-output acquired) (:seon.render.unknown/reason acquired) (:seon.render.transcript/refused-member acquired) (:seon.render.web/refused-member acquired) (:seon.render.web/function-unavailable acquired) (:seon.turn/rule acquired) (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired) (:seon.agent/no-such-agent acquired) (:seon.cluster.reply/no-forms acquired) (:seon.render.walk/missing-lookup acquired) (:seon.turn/generated-read-attributes acquired) (:seon.turn/compaction-agent-id acquired) (:seon.db.write.attempt/request-id acquired) (:seon.instrument/check acquired)) acquired evaluations)
+        refusal (when (:seon.render.web/refused-member acquired) acquired)
         request (assoc request ::calibrations calibrations)
         selected (or (:seon.turn/id request) (:seon.turn/id (last rows)))
         expanded (conj (set (map :seon.turn/id (take-last 3 rows))) selected)
-        problems (when-not (or (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) (or (:seon.db/invalid-read evaluations) (:seon.schema/expected-value evaluations) (:seon.config/error-key evaluations) (:seon.render/refused-member evaluations) (:seon.render/candidates evaluations) (:seon.render/invalid-output evaluations) (:seon.render.unknown/reason evaluations) (:seon.render.transcript/refused-member evaluations) (:seon.render.web/refused-member evaluations) (:seon.render.web/function-unavailable evaluations) (:seon.turn/rule evaluations) (:seon.turn/error-turn-id evaluations) (:seon.turn/missing-opening-datom evaluations) (:seon.agent/no-such-agent evaluations) (:seon.cluster.reply/no-forms evaluations) (:seon.render.walk/missing-lookup evaluations) (:seon.turn/generated-read-attributes evaluations) (:seon.turn/compaction-agent-id evaluations) (:seon.db.write.attempt/request-id evaluations) (:seon.instrument/check evaluations)))
+        problems (when-not (or (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) refusal)
                    (session-problems request rows evaluations))]
     [:section {:id (session-id (:seon.agent/id request)) :class "seon-session seon-ledger" :data-author "seon"}
      [:div {:class "seon-session-sticky"} (session-header request rows)
       [:h2 "Turn ledger"]
       (when problems (problem-summary request problems))
-      (when-not (or (:seon.db/invalid-read evaluations) (:seon.schema/expected-value evaluations) (:seon.config/error-key evaluations) (:seon.render/refused-member evaluations) (:seon.render/candidates evaluations) (:seon.render/invalid-output evaluations) (:seon.render.unknown/reason evaluations) (:seon.render.transcript/refused-member evaluations) (:seon.render.web/refused-member evaluations) (:seon.render.web/function-unavailable evaluations) (:seon.turn/rule evaluations) (:seon.turn/error-turn-id evaluations) (:seon.turn/missing-opening-datom evaluations) (:seon.agent/no-such-agent evaluations) (:seon.cluster.reply/no-forms evaluations) (:seon.render.walk/missing-lookup evaluations) (:seon.turn/generated-read-attributes evaluations) (:seon.turn/compaction-agent-id evaluations) (:seon.db.write.attempt/request-id evaluations) (:seon.instrument/check evaluations)) (ledger-strip request rows evaluations selected problems))]
+      (when-not refusal (ledger-strip request rows evaluations selected problems))]
      (when problems (problems-html request problems))
      (cond
-       (or (:seon.db/invalid-read evaluations) (:seon.schema/expected-value evaluations) (:seon.config/error-key evaluations) (:seon.render/refused-member evaluations) (:seon.render/candidates evaluations) (:seon.render/invalid-output evaluations) (:seon.render.unknown/reason evaluations) (:seon.render.transcript/refused-member evaluations) (:seon.render.web/refused-member evaluations) (:seon.render.web/function-unavailable evaluations) (:seon.turn/rule evaluations) (:seon.turn/error-turn-id evaluations) (:seon.turn/missing-opening-datom evaluations) (:seon.agent/no-such-agent evaluations) (:seon.cluster.reply/no-forms evaluations) (:seon.render.walk/missing-lookup evaluations) (:seon.turn/generated-read-attributes evaluations) (:seon.turn/compaction-agent-id evaluations) (:seon.db.write.attempt/request-id evaluations) (:seon.instrument/check evaluations)) [:p (:seon.error/message evaluations)]
+       refusal [:p (:seon.error/message refusal)]
        (seq rows)
        (for [row rows
              :let [turn-id (:seon.turn/id row)

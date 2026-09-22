@@ -18,10 +18,10 @@
    [:function
     [:=> [:cat :seon.db/db :seon.agent/id]
      [:or [:vector [:and :seon.eval/entity
-                    [:map [:db/id :int] [:t :seon.db/basis-t]]]] :seon.error/value]]
+                    [:map [:db/id :int] [:t :seon.db/basis-t]]]] :seon.db/invalid-read-error :seon.agent/no-such-agent-error]]
     [:=> [:cat :seon.db/db :seon.agent/id :seon.db/pull-selector]
      [:or [:vector [:and :seon.eval/entity
-                    [:map [:db/id :int] [:t :seon.db/basis-t]]]] :seon.error/value]]]}
+                    [:map [:db/id :int] [:t :seon.db/basis-t]]]] :seon.db/invalid-read-error :seon.agent/no-such-agent-error]]]}
   ([database agent-id]
    (of-agent database agent-id
              '[* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
@@ -30,8 +30,7 @@
   (let [agent-row (db/pull database [:seon.agent/id]
                        [:seon.agent/id agent-id])]
     (cond
-      (or (:seon.db/invalid-read agent-row)
-          (:seon.schema/expected-value agent-row)) agent-row
+      (:seon.db/invalid-read agent-row) agent-row
       (nil? (:seon.agent/id agent-row))
       (error/diagnostic
        {:seon.error/at (java.util.Date.)
@@ -62,7 +61,7 @@
                   database agent-id (vec (distinct (into selector [:db/id :seon.cluster.eval/id
                                                                  :seon.cluster.eval/run
                                                                  :seon.cluster.eval/ordinal]))))]
-        (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
+        (if (:seon.db/invalid-read rows)
           rows
           (mapv #(assoc (nth % 4) :t (nth % 3))
                 (sort-by #(subvec % 0 3) rows))))))))

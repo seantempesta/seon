@@ -984,18 +984,31 @@
   admitted with its opening transaction. Generated system evaluations remain
   visible. Without a turn id, every stored evaluation participates."
   {:malli/schema [:=> [:cat :seon.render.walk/history-request]
-                  [:or [:vector :map] :seon.db/error-result :seon.render/error-result :seon.agent/no-such-agent-error]]}
+                  [:or [:vector :map] :seon.render/request-error]]}
   [{database :seon.db/db lookup :seon.render.walk/lookup :as request}]
-  (let [agent-id (:seon.agent/id
-                  (db/pull database [:seon.agent/id] lookup))
-        evaluations (if-let [selector (:seon.db/pull-selector request)]
-                      (evaluation/of-agent database agent-id selector)
-                      (evaluation/of-agent database agent-id))
+  (let [agent (db/pull database [:seon.agent/id] lookup)
+        agent-id (:seon.agent/id agent)
+        evaluations (cond
+                      (:seon.db/invalid-read agent) agent
+                      (nil? agent-id)
+                      {:seon.error/at (java.util.Date.)
+                       :seon.error/layer :seon.render.walk/history
+                       :seon.error/operation 'seon.render.walk/history
+                       :seon.error/message "The history lookup does not name an agent."
+                       :seon.render/refused-member :seon.render.walk/lookup}
+                      :else
+                      (if-let [selector (:seon.db/pull-selector request)]
+                        (evaluation/of-agent database agent-id selector)
+                        (evaluation/of-agent database agent-id)))
         selected (when-let [id (:seon.turn/id request)]
                    (db/pull database [:db/id :seon.turn.work/situation]
                             [:seon.turn/id id]))]
-    (if (or (:seon.db/invalid-read evaluations) (:seon.schema/expected-value evaluations) (:seon.agent/no-such-agent evaluations))
-      evaluations
+    (if-let [refusal (or (when (:seon.db/invalid-read selected) selected)
+                        (when (or (:seon.db/invalid-read evaluations)
+                                  (:seon.agent/no-such-agent evaluations)
+                                  (:seon.render/refused-member evaluations))
+                          evaluations))]
+      (assoc refusal :seon.render/refused-member :seon.render.history/entries)
       (reduce
        (fn [entries saved]
          (let [lookup [:seon.cluster.eval/id (:seon.cluster.eval/id saved)]
@@ -1003,8 +1016,8 @@
                          (assoc request :seon.render/value saved
                                         :seon.render/output :seon.render/ai
                                         :seon.render.call/id [lookup]))]
-           (if (or (:seon.render/refused-member rendered) (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered))
-             (reduced rendered)
+           (if (or (:seon.render/refused-member rendered) (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/candidates rendered))
+             (reduced (assoc rendered :seon.render/refused-member :seon.render.history/entries))
              (conj entries
                    {:seon.render.history/call-id [lookup]
                     :seon.render/value saved

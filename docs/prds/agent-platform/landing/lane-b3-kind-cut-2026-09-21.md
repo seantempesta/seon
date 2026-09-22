@@ -2253,3 +2253,61 @@ No dependency or extra cache was changed.
 Prescribed require after `edfca0bb8` exited 0, captured in
 `tmp/kind-review-head-edfca0bb8.log`. This remains a shared-tree load, not a
 canonical test run or default adoption.
+
+### Review follow-up: context and plan producer guarantees
+
+The context owners now accrete their declared refusal evidence on the same flat
+value; they do not wrap it or discard its original distinguishing content.
+`render.web/context-error` names its existing request-error schema, eliminating
+the copied union. Every return from context acquisition now supplies that member.
+Prompt acquisition uses its existing error schema and required agent/evidence
+members. Source submission and system generation declare the observed agent on
+their refusal schemas. Their callers read those guarantees, rather than subsets
+of upstream errors. Hook publication is paused, so source and resource changes
+are committed together but have not been adopted on default.
+
+Additional domain-decision rows (these supersede the earlier expanded lists):
+
+| Site | Declared member / decision |
+|---|---|
+| `render/agent-render-profile`, `request-profile` | Config `error-key`/`missing-effective`, DB `invalid-read`, schema `expected-value`; preserve the refusal before reading profile budgets. `request-profile` adds existing `render/refused-member :render/profile`. |
+| Render profile consumers (`render`, `render-ai`, `render-html`, `render-form-value`, `render-call`, target profile) | `render/refused-member`; only a profile proceeds to renderer selection. |
+| `eval/of-agent` and `render.walk/history` acquisition | DB `invalid-read`; history also reads its own `render/refused-member` and the declared `agent/no-such-agent`, before sorting/iterating evaluations. The selected-turn pull is checked too. |
+| `render.walk/history` rendered line | `render/refused-member`, `render.unknown/reason`, `render/invalid-output`, `render/candidates`: all four alternatives now declared by `render-call`, derived from its profile, selection and normalized output paths. History adds its own `render/refused-member :render.history/entries`. |
+| `turn/opening-db` | DB `invalid-read` before using the query result as an as-of basis. |
+| `render/acquire-context!` | DB `invalid-read` or `turn/missing-opening-datom`; adds web `refused-member :turn/opened-tx`. The ordinary derivation arm forwards directly. |
+| `render.web/change-context` | Per action: system `turn/refused-system-agent`, source `agent/refused-source-agent`, compaction `db/transaction-refused`; separately the resolver's `function-unavailable`. Adds web `refused-member :render/context-action`; post-action DB acquisition checks `invalid-read`. |
+| `render.web/derive-context!` | Render `refused-member` on profile/history before using either; emits web `refused-member`. |
+| `render.web/context-response` | Web `refused-member` selects HTTP 422. |
+| `render.transcript/render-ledger` and acquired-context projection | Web `refused-member`; one refusal binding feeds strip, problems and error text rather than five copies of the union. |
+| `render.transcript/outline-everything` | Prompt `error-agent-id`, bound once before composing outline text. Caught render failure carries the same declared prompt observation. |
+| `cluster.prompt/effective-ai-settings` | Config `error-key`/`missing-effective`, DB `invalid-read`, schema `expected-value` before passing settings or overlays to `ai/settings`. |
+| `cluster.prompt/acquire-context-report`, `prompt` | Render/web `refused-member` and all declared settings alternatives respectively; accrete existing prompt `error-agent-id` and `derivation-observation`. Capture mismatch receives the same evidence. |
+| `cluster.agent/submit-source-in-projection` | DB `invalid-read` on explicit namespace pull or namespace query; reply `no-forms`; writer `transaction-refused`. All refusal arms add `agent/refused-source-agent`, including missing namespace and undelivered wake. |
+| `turn/declared-sources` | The walk explicitly supplies `error/value`; bounded elision retains its existing three declared members. Other failures add `turn/refused-system-agent`. Parsed no-forms stops the outer accumulation as well as the inner one. |
+| `turn/system-turn` | `turn/refused-system-agent` on declared sources; reply `no-forms`, generated-read failure and writer refusal gain the same observed-agent member. |
+| `turn/open-turn`, post-close system refresh | `turn/refused-system-agent`; the write alternative reads `db/transaction-refused`. |
+| `turn/call-turn` prompt decision | Prompt `error-agent-id` or caught `turn.loop/phase-failed`. |
+| `plan/flat-refusal` | Producer guarantees: DB `invalid-read`/`transaction-refused`, schema `expected-value`, plan `refused-member`. All plan constructors declare the actual offending member once on `my.plan/request-error`. |
+| `plan/stale-issue-tests`, `run-issue-tests!` | Test `execution-refusal`; the separate provenance path declares `test.run/unavailable`. Plan retains the failure and adds `my.plan/refused-member :seon.issue/tests`. |
+| Plan text formatters | Successful shape's required `my.plan.item/id`, vector ready-items, or `my.plan/steps`; otherwise render the admitted error's text. Broad error inputs remain accepted, including errors outside the plan union. Empty successful vectors remain successful. |
+| `test/run`, `stale` database reads | DB `invalid-read` before consuming query/pull output; accrete existing `test/execution-refusal` naming the refused member. |
+| Test execution/result owners | Existing failure arms now guarantee `test/execution-refusal`; existing general guards at these old host boundaries remain, not copied into callers. B3 1–3 still own those polymorphic host unions. |
+
+Contract changes: `render/agent-render-profile` admits the DB/schema errors it
+already returned. Other changed outputs are narrowed to the producers' actual
+refusal schemas (`of-agent`, profile/context/prompt, source submission, system
+turn, compaction, planned-sources, test run/stale). No public input was narrowed.
+`turn/phase` now plainly declares its polymorphic callback result as unchecked
+here; the callback owns its contract and only caught failures gain phase evidence.
+The redundant any-containing union was removed. This does not prove arbitrary
+callback output validation. The seven original debt guards remain assigned to
+B3 1–3 as listed above.
+
+Added canonical context regression checks config refusal before profile budgets,
+missing opening before as-of, and missing agent before history rendering, with
+real SCI and an explicit profile. Plan assertions again distinguish missing-agent
+and DB read failures. These tests still require the confirmed fresh fixture base;
+no executed or green result is claimed here. Prescribed require after
+`a10774bdd` and `1b10844c4` exited 0 (their corresponding
+`tmp/kind-review-head-<commit>.log` files).

@@ -410,15 +410,15 @@
   "Run one declared test Var, commit its result facts, and return them.\n\n  The connection is ordinarily supplied by call preparation from the calling\n  agent's environment. The returned value is pulled from the transaction's\n  `:db-after`, so it cannot disagree with the facts that were committed.\n\n  A test whose program-graph reach includes a function declaring\n  `:seon.fn/destroys` is REFUSED, without executing, in a JVM whose declared operator root is the\n  development checkout it runs in; the refusal names the test, the owner, the\n  call path, and the cold invocation that may run it. `:seon.test/declared-root`\n  in the options is that declaration when the caller genuinely holds one;\n  absent, this JVM's own is read once here.\n\n  The test BODY runs under exactly the custody the options hand it:\n  `:seon.db/connection` present means the run is that cluster's own work and\n  the body's elided `seon.db` arities reach it; absent means none, which is\n  what a host REPL calling this is. `run-owned` is the agent's entry and\n  supplies its evaluation's connection. The `connection` argument is where\n  the RESULT FACTS are committed and never decides the body's custody."
   {:malli/schema
    [:function
-    [:=> [:cat :seon.test/var :seon.db/connection] :seon.test/host-result]
+    [:=> [:cat :seon.test/var :seon.db/connection] [:or :seon.test/result :seon.test/execution-error]]
     [:=>
      [:cat :seon.test/var :seon.db/connection :seon.test/run-options]
-     :seon.test/host-result]]}
+     [:or :seon.test/result :seon.test/execution-error]]]}
   ([test-var connection]
     (let [database (db/db connection)
           provenance (runner/provenance database)]
       (if (and (map? provenance) (contains? provenance :seon.error/at) (contains? provenance :seon.error/layer) (contains? provenance :seon.error/operation))
-        provenance
+        (assoc provenance :seon.test/execution-refusal :seon.test.run/provenance)
         (execute-admitted!
           test-var
           connection
@@ -428,7 +428,7 @@
   ([test-var connection options]
     (let [database (or (:seon.db/db options) (db/db connection))]
       (if (and (map? database) (contains? database :seon.error/at) (contains? database :seon.error/layer) (contains? database :seon.error/operation))
-        database
+        (assoc database :seon.test/execution-refusal :seon.db/db)
         (let [provenance (:seon.test.run/provenance options)
               declared (if-let [entry (find options :seon.test/declared-root)]
                          (val entry)
@@ -469,7 +469,7 @@
                                          "Live cluster schema registry changed and was restored: "
                                          (pr-str drifted)))))]
           (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation))
-            result
+            (assoc result :seon.test/execution-refusal :seon.test/var)
             (let [committed (runner/commit-results!
                               connection
                               {:seon.db/db database,
@@ -478,7 +478,9 @@
                                :seon.test/run-at (:seon.test.run/at provenance),
                                :seon.test.run/provenance provenance
                                :seon.test.run/terminated? (true? (:seon.test.run/terminated? result))})]
-              (if (and (map? committed) (contains? committed :seon.error/at) (contains? committed :seon.error/layer) (contains? committed :seon.error/operation)) committed (first committed)))))))))
+              (if (and (map? committed) (contains? committed :seon.error/at) (contains? committed :seon.error/layer) (contains? committed :seon.error/operation))
+                (assoc committed :seon.test/execution-refusal :seon.test.run/members)
+                (first committed)))))))))
 
 
 (declare prepare-tests! resolve-test selection-admission admit-run selection-refusal)
@@ -486,12 +488,14 @@
 (defn- recorded-host-result
   "Return this admitted member's recorded result, or name missing coverage."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id :qualified-symbol]
-                  [:or :seon.test/result :seon.test/execution-error :seon.test/unknown-error]]}
+                  [:or :seon.test/result :seon.test/execution-error]]}
   [database run-id test-symbol]
   (let [results (runner/run-results database run-id)]
-    (if (:seon.error/at results) results
+    (if (:seon.error/at results)
+      (assoc results :seon.test/execution-refusal :seon.test.run/members)
         (or (first (filter #(= test-symbol (:seon.test/sym %)) results))
-            (unknown test-symbol (str "Run " run-id " has no recorded coverage for " test-symbol "."))))))
+            (assoc (unknown test-symbol (str "Run " run-id " has no recorded coverage for " test-symbol "."))
+                   :seon.test/execution-refusal :seon.test.member/symbol)))))
 
 (defn- host-admission!
   "Admit one explicitly scoped host request through the shared selector and writer."
@@ -543,9 +547,9 @@
   Cluster custody is explicit in options or in the supplied SCI environment.
   The result connection never grants the test body's database custody."
   {:malli/schema [:function
-                  [:=> [:cat :seon.test/var :seon.db/connection] :seon.test/host-result]
+                  [:=> [:cat :seon.test/var :seon.db/connection] [:or :seon.test/result :seon.test/execution-error]]
                   [:=> [:cat :seon.test/var :seon.db/connection :seon.test/run-options]
-                   :seon.test/host-result]]}
+                   [:or :seon.test/result :seon.test/execution-error]]]}
   ([test-var connection]
    (run test-var connection {:seon.test.run/provenance (runner/provenance (db/db connection))
                             :seon.test/remaining-ms (event-backstop-ms)}))
@@ -554,7 +558,10 @@
          test-symbol (symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))
          prior (db/pull (db/db connection) [:seon.test.run/selection-tx]
                         [:seon.test.run/id run-id])]
-     (if (:seon.test.run/selection-tx prior)
+     (cond
+       (:seon.db/invalid-read prior)
+       (assoc prior :seon.test/execution-refusal :seon.test.run/selection-tx)
+       (:seon.test.run/selection-tx prior)
        (let [pending (db/q '[:find ?member . :in $ ?run-id ?symbol
                              :where [?run :seon.test.run/id ?run-id]
                                     [?run :seon.test.run/members ?member]
@@ -562,12 +569,15 @@
                                     (not [?member :seon.test.member/completed-tx])]
                            (db/db connection) run-id test-symbol)]
          (cond
-           (:seon.error/at pending) pending
+           (:seon.db/invalid-read pending)
+           (assoc pending :seon.test/execution-refusal :seon.test.member/completed-tx)
            pending (execute-admitted! test-var connection options)
            :else (recorded-host-result (db/db connection) run-id test-symbol)))
+       :else
        (let [admission (host-admission! connection test-symbol options)]
          (cond
-           (:seon.error/at admission) admission
+           (:seon.error/at admission)
+           (assoc admission :seon.test/execution-refusal :seon.test.run/selection-tx)
            (seq (:seon.test.run/members admission))
            (execute-admitted! test-var connection options)
            :else
@@ -1466,12 +1476,13 @@
 
 (defn- stale-in
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
-                  [:or [:vector :qualified-symbol] :seon.test/host-error]]}
+                  [:or [:vector :qualified-symbol] :seon.test/execution-error]]}
   [database test-symbols]
   (reduce (fn [result test-symbol]
             (let [verified (verified? database test-symbol)]
               (cond
-                (:seon.error/at verified) (reduced verified)
+                (:seon.error/at verified)
+                (reduced (assoc verified :seon.test/execution-refusal :seon.test/sym))
                 (true? verified) result
                 :else (conj result test-symbol))))
           [] test-symbols))
@@ -1484,13 +1495,14 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value]
-     [:or [:vector :seon.test/sym] :seon.test/host-error]]
+     [:or [:vector :seon.test/sym] :seon.test/execution-error]]
     [:=> [:cat :seon.db/database-value [:sequential :seon.test/sym]]
-     [:or [:vector :seon.test/sym] :seon.test/host-error]]]}
+     [:or [:vector :seon.test/sym] :seon.test/execution-error]]]}
   ([database]
    (let [symbols (db/q '[:find [?s ...] :where
                          [?t :seon.test/sym ?s] [?t :seon.test/source]] database)]
-     (if (and (map? symbols) (contains? symbols :seon.error/at) (contains? symbols :seon.error/layer) (contains? symbols :seon.error/operation)) symbols
+     (if (:seon.db/invalid-read symbols)
+       (assoc symbols :seon.test/execution-refusal :seon.test/sym)
          (stale-in database (vec (sort symbols))))))
   ([database test-symbols]
    (if (empty? test-symbols)

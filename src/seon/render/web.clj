@@ -2467,7 +2467,16 @@
         result (turn-function-result
                 function [(cond-> prepared
                             (= action :system-turn) (assoc :seon.turn/write? true))])]
-    (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.config/error-key result) (:seon.render/refused-member result) (:seon.render/candidates result) (:seon.render/invalid-output result) (:seon.render.unknown/reason result) (:seon.render.transcript/refused-member result) (:seon.render.web/refused-member result) (:seon.render.web/function-unavailable result) (:seon.turn/rule result) (:seon.turn/error-turn-id result) (:seon.turn/missing-opening-datom result) (:seon.agent/no-such-agent result) (:seon.cluster.reply/no-forms result) (:seon.render.walk/missing-lookup result) (:seon.turn/generated-read-attributes result) (:seon.turn/compaction-agent-id result) (:seon.db.write.attempt/request-id result) (:seon.instrument/check result)) result {:seon.db/db (db/db connection)})))
+    (if (or (:seon.render.web/function-unavailable result)
+            (case action
+              :system-turn (:seon.turn/refused-system-agent result)
+              :virtual-turn (:seon.agent/refused-source-agent result)
+              :compact (:seon.db/transaction-refused result)))
+      (assoc result :seon.render.web/refused-member :seon.render/context-action)
+      (let [database (db/db connection)]
+        (if (:seon.db/invalid-read database)
+          (assoc database :seon.render.web/refused-member :seon.db/db)
+          {:seon.db/db database})))))
 
 (defn derive-context!
   "Render the requesting agent's saved evaluations from its database value."
@@ -2480,66 +2489,69 @@
    (fn []
      (if (:seon.render/context-action request)
        (change-context request)
-       (let [request (assoc request :seon.render/profile (render/request-profile request))
-             cache (render/shared-cache (:seon.sci.eval/ctx request))
-             lookup [:seon.agent/id (:seon.agent/id request)]
-             key [lookup (:seon.turn/id request) (:seon.db/pull-selector request)]
-             retained (get-in @cache [::ai-calls key] {})
-             previous (get retained root-call)
-             evidence (render/call-cache-evidence
-                       (assoc request :seon.render.call/id root-call
-                              :seon.render/retained-calls retained
-                              :seon.render/value
-                              (dissoc request :seon.db/db :seon.db/connection :seon.sci.eval/ctx))
-                       'seon.render.walk/history)
-             reusable? (and previous
-                            (render/same-invocation-evidence? previous evidence)
-                            (every? #(render/retained-program-current? (:seon.sci.eval/ctx request) %)
-                                    (vals retained))
-                            (or (render/same-committed-database? (:seon.db/db request) (:seon.db/db previous))
-                                (every? #(db/read-evidence-current? (:seon.db/db request)
-                                          (:seon.render.call/read-evidence %))
-                                        (vals retained))))
-             calls (atom {})
-             reads (atom [])
-             entries (when-not reusable?
-                       (binding [db/*read-evidence-sink* reads]
-                         (render.walk/history
-                          (assoc request
-                                 :seon.render.walk/lookup lookup
-                                 :seon.render/retained-calls (dissoc retained root-call)
-                                 :seon.render/candidate-call-ids
-                                 (candidate-call-ids (dissoc retained root-call)
-                                                     (:seon.db/db request))
-                                 :seon.render/captured-calls calls))))]
-         (cond
-           reusable?
-           (let [database (:seon.db/db request)
-                 result (assoc (:seon.render.call/output previous) :seon.db/db database)]
-             (swap! cache assoc-in [::ai-calls key root-call]
-                    (assoc (merge previous evidence) :seon.render.call/output result))
-             result)
-           (or (:seon.db/invalid-read entries) (:seon.schema/expected-value entries) (:seon.config/error-key entries) (:seon.render/refused-member entries) (:seon.render/candidates entries) (:seon.render/invalid-output entries) (:seon.render.unknown/reason entries) (:seon.render.transcript/refused-member entries) (:seon.agent/no-such-agent entries))
-           entries
-           :else
-           (let [segments (history-segments entries)
-                 ledger-data (when (::transcript/ledger? request)
-                               (binding [db/*read-evidence-sink* reads]
-                                 (transcript/acquire-ledger-data request entries segments)))
-                 result (cond-> {:seon.cluster.prompt/text (apply str segments)
-                         :seon.render.history/entries entries
-                         :seon.render.history/segments segments
-                         :seon.db/db (:seon.db/db request)}
-                          ledger-data (assoc ::transcript/ledger-data ledger-data))]
-             (swap! cache assoc-in [::ai-calls key]
-                    (assoc @calls root-call
-                           (merge evidence
-                                  {:seon.render.call/static-evidence
-                                   {:seon.render.call/producer 'seon.render.walk/history}
-                                   :seon.render.call/read-evidence
-                                   (db/read-evidence @reads {:seon.db/retain-read-results? true})
-                                   :seon.render.call/output result})))
-             result)))))))
+       (let [profile (render/request-profile request)]
+         (if (:seon.render/refused-member profile)
+           (assoc profile :seon.render.web/refused-member :seon.render/profile)
+           (let [request (assoc request :seon.render/profile profile)
+                 cache (render/shared-cache (:seon.sci.eval/ctx request))
+                 lookup [:seon.agent/id (:seon.agent/id request)]
+                 key [lookup (:seon.turn/id request) (:seon.db/pull-selector request)]
+                 retained (get-in @cache [::ai-calls key] {})
+                 previous (get retained root-call)
+                 evidence (render/call-cache-evidence
+                           (assoc request :seon.render.call/id root-call
+                                  :seon.render/retained-calls retained
+                                  :seon.render/value
+                                  (dissoc request :seon.db/db :seon.db/connection :seon.sci.eval/ctx))
+                           'seon.render.walk/history)
+                 reusable? (and previous
+                                (render/same-invocation-evidence? previous evidence)
+                                (every? #(render/retained-program-current? (:seon.sci.eval/ctx request) %)
+                                        (vals retained))
+                                (or (render/same-committed-database? (:seon.db/db request) (:seon.db/db previous))
+                                    (every? #(db/read-evidence-current? (:seon.db/db request)
+                                              (:seon.render.call/read-evidence %))
+                                            (vals retained))))
+                 calls (atom {})
+                 reads (atom [])
+                 entries (when-not reusable?
+                           (binding [db/*read-evidence-sink* reads]
+                             (render.walk/history
+                              (assoc request
+                                     :seon.render.walk/lookup lookup
+                                     :seon.render/retained-calls (dissoc retained root-call)
+                                     :seon.render/candidate-call-ids
+                                     (candidate-call-ids (dissoc retained root-call)
+                                                         (:seon.db/db request))
+                                     :seon.render/captured-calls calls))))]
+             (cond
+               reusable?
+               (let [database (:seon.db/db request)
+                     result (assoc (:seon.render.call/output previous) :seon.db/db database)]
+                 (swap! cache assoc-in [::ai-calls key root-call]
+                        (assoc (merge previous evidence) :seon.render.call/output result))
+                 result)
+               (:seon.render/refused-member entries)
+               (assoc entries :seon.render.web/refused-member :seon.render.history/entries)
+               :else
+               (let [segments (history-segments entries)
+                     ledger-data (when (::transcript/ledger? request)
+                                   (binding [db/*read-evidence-sink* reads]
+                                     (transcript/acquire-ledger-data request entries segments)))
+                     result (cond-> {:seon.cluster.prompt/text (apply str segments)
+                             :seon.render.history/entries entries
+                             :seon.render.history/segments segments
+                             :seon.db/db (:seon.db/db request)}
+                              ledger-data (assoc ::transcript/ledger-data ledger-data))]
+                 (swap! cache assoc-in [::ai-calls key]
+                        (assoc @calls root-call
+                               (merge evidence
+                                      {:seon.render.call/static-evidence
+                                       {:seon.render.call/producer 'seon.render.walk/history}
+                                       :seon.render.call/read-evidence
+                                       (db/read-evidence @reads {:seon.db/retain-read-results? true})
+                                       :seon.render.call/output result})))
+                 result)))))))))
 
 (defn render-step
   "The render proc's transform, in Flow's four arities (F2 §1.1).
@@ -3386,7 +3398,7 @@
                         :seon.error/fix "Supply the expected member and repeat the requested operation."
                         :seon.render.web/refused-member :seon.render/context-action}]
                    (merge observation (error/diagnostic observation))))]
-    (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.config/error-key result) (:seon.render/refused-member result) (:seon.render/candidates result) (:seon.render/invalid-output result) (:seon.render.unknown/reason result) (:seon.render.transcript/refused-member result) (:seon.render.web/refused-member result) (:seon.render.web/function-unavailable result) (:seon.turn/rule result) (:seon.turn/error-turn-id result) (:seon.turn/missing-opening-datom result) (:seon.agent/no-such-agent result) (:seon.cluster.reply/no-forms result) (:seon.render.walk/missing-lookup result) (:seon.turn/generated-read-attributes result) (:seon.turn/compaction-agent-id result) (:seon.db.write.attempt/request-id result) (:seon.instrument/check result))
+    (if (:seon.render.web/refused-member result)
       {:status 422 :headers {"content-type" "text/plain; charset=utf-8"}
        :body (pr-str result)}
       {:status 204 :headers {} :body nil})))

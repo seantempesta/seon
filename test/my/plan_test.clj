@@ -81,7 +81,8 @@
               "a refusal reaching a projection is said, never handed on raw")
           (is (str/starts-with? line
                                 (str subject " unavailable for \"alice\"")))
-          (is (str/includes? line ":seon.db/invalid-read"))
+          (is (true? (:seon.db/invalid-read failure)))
+          (is (str/includes? line (str (:seon.error/operation failure))))
           (is (str/includes? line "uninstalled attribute")))))))
 
 (deftest a-refused-derivation-renders-a-typed-line-where-instructions-belong
@@ -91,8 +92,9 @@
                                 :seon.agent/id "nobody"})
             source (plan/render-plan-ai {:seon.db/db @connection
                                          :seon.agent/id "nobody"})]
-        (is (true? (:my.plan/agent-not-found refusal))
+        (is (= "nobody" (:my.plan/missing-agent-id refusal))
             "the derivation refuses as a flat value, never by throwing")
+        (is (= :seon.agent/id (:my.plan/refused-member refusal)))
         (is (str/includes? source "(seon.plan/format-plan-ai (seon.plan/plan {}))")
             "the refusal renders through this plan's own AI pair")
         (is (str/starts-with? (plan/format-plan-ai refusal)

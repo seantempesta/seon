@@ -177,4 +177,9 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.failure/entity}
  :seon.db/ref]
+ :seon.agent/refused-source-agent [:string {:min 1}]
+ :seon.agent/source-submission-refused-error
+ [:and :seon.error/base
+  [:map {:seon.db/attributes true}
+   [:seon.agent/refused-source-agent :seon.agent/refused-source-agent]]]
 }
