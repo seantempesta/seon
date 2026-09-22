@@ -1,6 +1,7 @@
 (ns seon.operator
   "Source-independent CLI client: argv data, one request, exact process identity."
-  (:require [clojure.edn :as edn]
+  (:require [babashka.fs :as fs]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.error.refusal :as refusal])
@@ -49,9 +50,14 @@
       (operator-silence-backstop-ms manifest))))
 
 (defn diagnostic
-  {:malli/schema [:=> [:cat :string :map :seon.operator/disposition] :seon.operator/operation-error]}
-  [message evidence cause]
-  {:seon.error/at (java.util.Date.)
+  "The client's operation error. A caught Throwable is handed whole to the one
+  error constructor (`seon.error.refusal/diagnostic`), never reduced to its message."
+  {:malli/schema [:function
+                  [:=> [:cat :string :map :seon.operator/disposition] :seon.operator/operation-error]
+                  [:=> [:cat :string :map :seon.operator/disposition :seon.error/throwable]
+                   :seon.operator/operation-error]]}
+  ([message evidence cause]
+   {:seon.error/at (java.util.Date.)
     :seon.error/layer :seon.operator/operation
     :seon.error/operation 'seon.operator/request!
     :seon.error/message message
@@ -60,6 +66,9 @@
     :seon.error/expected :completed-operation
     :seon.error/offending evidence
     :seon.error/data (merge evidence {:seon.error/layer :seon.operator/client})})
+  ([message evidence cause throwable]
+   (refusal/diagnostic
+    (assoc (diagnostic message evidence cause) :seon.error/throwable throwable))))
 
 (defn- fail! [message evidence]
   (throw (ex-info message (diagnostic message evidence :refused))))
@@ -159,7 +168,10 @@
                (if (:exception event)
                  (fail! "PREPL evaluation failed." event)
                  (try (edn/read-string (:val event))
-                      (catch Exception cause (fail! "Malformed PREPL result." event))))
+                      (catch Exception cause
+                        (throw (ex-info "Malformed PREPL result."
+                                        (diagnostic "Malformed PREPL result." event :refused cause)
+                                        cause)))))
                (recur)))))))))
 
 (defn- operator-reply!
@@ -223,16 +235,25 @@
 (defn down! [request identities]
   ;; Bind graceful requests to captured identities. A fresh endpoint may belong
   ;; to a replacement and must never become a newly selected signal target.
-  (when-not (:seon.operator/force? request)
-    (doseq [endpoint (advertisements (:seon.operator/managed-root request))
-            :let [identity (select-keys endpoint [:seon.boot/pid :seon.boot/start-instant])]
-            :when (contains? (set identities) identity)]
-      (try (prepl-value! endpoint
-                        (request-form (merge request identity {:seon.operator/command :down})))
-           (catch Exception _ nil))))
-  (doseq [identity identities] (terminate! identity (operator-silence-backstop-ms {})))
-  {:seon.operator/stopped-processes (vec identities)
-   :seon.operator/process-exit? (boolean (seq identities))})
+  ;; A graceful request that fails still ends in exact-identity termination;
+  ;; its failure is reported with the result, never discarded.
+  (let [graceful
+        (when-not (:seon.operator/force? request)
+          (into []
+                (keep (fn [endpoint]
+                        (let [identity (select-keys endpoint [:seon.boot/pid :seon.boot/start-instant])]
+                          (when (contains? (set identities) identity)
+                            (try (let [reply (prepl-value! endpoint
+                                                           (request-form (merge request identity {:seon.operator/command :down})))]
+                                   (when (:seon.error/message reply) reply))
+                                 (catch Exception cause
+                                   (diagnostic (ex-message cause) (or (ex-data cause) identity)
+                                               :client-failed cause)))))))
+                (advertisements (:seon.operator/managed-root request))))]
+    (doseq [identity identities] (terminate! identity (operator-silence-backstop-ms {})))
+    (cond-> {:seon.operator/stopped-processes (vec identities)
+             :seon.operator/process-exit? (boolean (seq identities))}
+      (seq graceful) (assoc :seon.operator/graceful-failures graceful))))
 
 (defn force-stop! [request]
   (let [endpoint (advertisement (:seon.operator/managed-root request)
@@ -297,7 +318,10 @@
               (System/exit 1))))
         @(promise)))))
 
-(defn launch! [request]
+(defn- launch-child!
+  "Launch one JVM whose program is the checkout at `source` and return its
+  terminal boot value with the coordinates it advertised."
+  [request source]
   (let [root (:seon.operator/managed-root request)
         name (:seon.boot/cluster-name request)
         log (io/file root "data/clusters" name "logs/seon.log")
@@ -305,10 +329,10 @@
     (io/make-parents log)
     (with-open [callback (ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))]
       (let [argv ["clojure" (str "-J-Dseon.operator.root=" root)
-                  (str "-J-Dseon.repository.root=" (repository-root))
+                  (str "-J-Dseon.repository.root=" source)
                   "-M:dev:test" "-e" (launch-form request (.getLocalPort callback))]
             builder (doto (ProcessBuilder. ^java.util.List argv)
-                      (.directory (io/file (repository-root)))
+                      (.directory (io/file source))
                       (.redirectErrorStream true)
                       (.redirectOutput (java.lang.ProcessBuilder$Redirect/appendTo log)))
             _ (.putAll (.environment builder) (child-environment root))
@@ -338,7 +362,150 @@
                               (= :seon.cluster.store/held-elsewhere (:seon.cluster.store/rule %)))
                         (tree-seq coll? seq value))
               (.get (.onExit child) bound TimeUnit/MILLISECONDS))
-            value))))))
+            {:seon.operator/value value :seon.boot/advertisement coordinates}))))))
+
+(defn launch! [request]
+  (:seon.operator/value (launch-child! request (repository-root))))
+
+;;; Nuclear rebuild (plan §7 "Schema change and reset", owner 2026-09-23):
+;;; delete the store and rebuild from COMMITTED inputs only, so no in-flight
+;;; working-tree hunk can break it. The program is a `git archive` of HEAD,
+;;; content-keyed by commit under <root>/data/source/<sha>; each gitlink is the
+;;; checked-out submodule when that checkout is clean at its pin, else an
+;;; archive of the pin. The replacement JVM is launched with that directory as
+;;; its classpath source. A failed attempt's JVM is terminated by exact identity,
+;;; so no JVM survives with a deleted store; one retry covers a transient loss
+;;; (a racing start winning the replacement gap); a second failure returns both
+;;; complete causes and leaves no JVM.
+
+(defn- command!
+  "Run one argv to exit within `bound` ms; a non-zero exit or expiry refuses."
+  [argv directory bound]
+  (let [out (java.io.File/createTempFile "seon-operator" ".out")
+        child (.start (doto (ProcessBuilder. ^java.util.List argv)
+                        (.directory (io/file directory))
+                        (.redirectErrorStream true)
+                        (.redirectOutput out)))]
+    (try
+      (when-not (.waitFor child bound TimeUnit/MILLISECONDS)
+        (.destroyForcibly child)
+        (fail! "Command did not exit within its bound." {:seon.operator/argv argv :seon.operator/timeout-ms bound}))
+      (let [text (slurp out)]
+        (when-not (zero? (.exitValue child))
+          (fail! "Command failed." {:seon.operator/argv argv :seon.operator/exit (.exitValue child)
+                                    :seon.operator/output text}))
+        text)
+      (finally (.delete out)))))
+
+(defn- gitlinks
+  "Every submodule path and pinned commit recorded in `sha`'s tree."
+  [repository sha]
+  (into []
+        (keep (fn [line]
+                (let [tab (str/index-of line "\t")]
+                  (when (and tab (str/starts-with? line "160000 commit "))
+                    {:path (subs line (inc tab)) :pin (subs line 14 tab)}))))
+        (str/split-lines (command! ["git" "ls-tree" "-r" sha] repository 30000))))
+
+(defn- extract-archive!
+  "Extract `git archive <commit>` of `repository` into `destination`."
+  [repository commit destination]
+  (let [tar (java.io.File/createTempFile "seon-nuke" ".tar")]
+    (try
+      (command! ["git" "archive" "--format=tar" "-o" (str tar) commit] repository 120000)
+      (.mkdirs (io/file destination))
+      (command! ["tar" "-xf" (str tar) "-C" (str destination)] repository 120000)
+      (finally (.delete tar)))))
+
+(defn committed-source!
+  "The HEAD program as a directory of committed bytes, built once per commit."
+  [root]
+  (let [repository (repository-root)
+        sha (str/trim (command! ["git" "rev-parse" "HEAD"] repository 30000))
+        parent (io/file root "data/source")
+        target (io/file parent sha)]
+    (if (.isDirectory target)
+      {:seon.source/git-sha sha :seon.operator/source-root (.getCanonicalPath target)
+       :seon.operator/source-built? false}
+      (let [staging (io/file parent (str sha ".staging-" (.pid (java.lang.ProcessHandle/current))))
+            _ (fs/delete-tree staging)
+            _ (extract-archive! repository sha staging)
+            submodules
+            (mapv (fn [{:keys [path pin]}]
+                    (let [checkout (io/file repository path)
+                          head (when (.isDirectory checkout)
+                                 (str/trim (command! ["git" "rev-parse" "HEAD"] checkout 30000)))
+                          clean? (and (= head pin)
+                                      (str/blank? (command! ["git" "status" "--porcelain"] checkout 30000)))
+                          placed (io/file staging path)]
+                      (fs/delete-tree placed)
+                      (if clean?
+                        (do (io/make-parents placed)
+                            (fs/create-sym-link placed (.getCanonicalFile checkout))
+                            {:path path :pin pin :placed :linked})
+                        (do (extract-archive! checkout pin placed)
+                            {:path path :pin pin :placed :archived :checkout-head head}))))
+                  (gitlinks repository sha))]
+        (fs/move staging target {:atomic-move true})
+        {:seon.source/git-sha sha :seon.operator/source-root (.getCanonicalPath target)
+         :seon.operator/source-built? true :seon.operator/submodules submodules}))))
+
+(defn- elapsed-ms [began] (quot (- (System/nanoTime) began) 1000000))
+
+(defn- nuke-attempt!
+  "One destroy-and-rebuild from `source`; any failure leaves no JVM of this root."
+  [request source]
+  (let [root (:seon.operator/managed-root request)
+        began (System/nanoTime)
+        stopped (down! request (selected-processes root))
+        down-ms (elapsed-ms began)
+        launched (System/nanoTime)
+        outcome (try
+                  (launch-child! (assoc request :seon.operator/command :start
+                                        :seon.boot/cluster-name "default" :seon.store/destroy? true)
+                                 source)
+                  (catch Exception cause
+                    {:seon.operator/value
+                     (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)}))
+        value (:seon.operator/value outcome)
+        missing (get-in value [:seon.boot/readiness :seon.boot/missing-layers])
+        ready? (and (not (:seon.error/message value)) (vector? missing) (empty? missing))
+        phases {:seon.operator/down-ms down-ms :seon.operator/launch-ms (elapsed-ms launched)
+                :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])}]
+    (if ready?
+      (assoc value :seon.operator/phases phases :seon.operator/stopped-processes (:seon.operator/stopped-processes stopped))
+      ;; Partial boot keeps its REPL for an ordinary start; a nuke never leaves
+      ;; a JVM beside a deleted store, so every process of this root ends.
+      (let [terminated (mapv #(terminate! % (operator-silence-backstop-ms {})) (selected-processes root))]
+        {:seon.operator/failed-attempt
+         {:seon.operator/value value :seon.operator/phases phases
+          :seon.boot/advertisement (:seon.boot/advertisement outcome)
+          :seon.operator/terminated terminated}}))))
+
+(defn nuke!
+  "Delete the store and rebuild `default` from committed HEAD. Never leaves a
+  JVM with a deleted store: readiness, or no JVM and every attempt's cause."
+  [request]
+  (let [began (System/nanoTime)
+        source (committed-source! (:seon.operator/managed-root request))
+        source-ms (elapsed-ms began)
+        attempts (loop [attempts []]
+                   (let [result (nuke-attempt! request (:seon.operator/source-root source))
+                         attempts (conj attempts result)]
+                     (if (and (:seon.operator/failed-attempt result) (< (count attempts) 2))
+                       (recur attempts)
+                       attempts)))
+        final (peek attempts)
+        failures (mapv :seon.operator/failed-attempt (filter :seon.operator/failed-attempt attempts))
+        report {:seon.operator/source source
+                :seon.operator/source-ms source-ms
+                :seon.operator/total-ms (elapsed-ms began)}]
+    (if (:seon.operator/failed-attempt final)
+      (assoc (diagnostic "Nuclear rebuild from committed HEAD failed twice; no JVM of this root remains."
+                         (merge report {:seon.operator/failed-attempts failures}) :client-failed)
+             :seon.operator/process-exit? true)
+      (cond-> (merge final report)
+        (seq failures) (assoc :seon.operator/failed-attempts failures)))))
 
 (defn request! [request]
   (try
@@ -347,17 +514,17 @@
                (connected! request) (launch! request))
       :stop (if (:seon.operator/force? request) (force-stop! request) (connected! request))
       :down (down! request (selected-processes (:seon.operator/managed-root request)))
-      :reset (do (when-not (:seon.operator/force? request) (fail! "Reset requires --force." request))
-                 (down! request (selected-processes (:seon.operator/managed-root request)))
-                 (launch! (assoc request :seon.operator/command :start
-                                 :seon.boot/cluster-name "default" :seon.store/destroy? true)))
+      ;; `reset` stays the nuke until the fresh-branch reset (plan §7) replaces it.
+      (:reset :nuke) (do (when-not (:seon.operator/force? request)
+                           (fail! "Nuclear rebuild requires --force." request))
+                         (nuke! request))
       :logs (let [path (io/file (:seon.operator/managed-root request) "data/clusters"
                                 (:seon.boot/cluster-name request) "logs/seon.log")]
               (when-not (.isFile path) (fail! "Requested log is unavailable." request))
               {:seon.boot/log-dir (str (.getParentFile path)) :seon.operator.log/path (str path)})
       (connected! request))
     (catch Exception cause
-      (diagnostic (ex-message cause) (or (ex-data cause) request) :client-failed))))
+      (diagnostic (ex-message cause) (or (ex-data cause) request) :client-failed cause))))
 
 (defn- valid-name [value]
   (when-not (and (string? value) (<= 1 (count value) 63)
@@ -405,10 +572,10 @@
             :export (if (= 1 (count positionals))
                       (assoc request :seon.operator/destination (.getCanonicalPath (io/file (first positionals))))
                       (fail! "Use export PATH." request))
-            (:status :down :reset)
+            (:status :down :reset :nuke)
             (do (when (seq positionals) (fail! "Command takes no cluster name." request))
-                (when (and (= :reset command) (not (:seon.operator/force? request)))
-                  (fail! "Reset requires --force." request)) request)
+                (when (and (#{:reset :nuke} command) (not (:seon.operator/force? request)))
+                  (fail! "Nuclear rebuild requires --force." request)) request)
             (:start :init :open :stop :logs)
             (do (when (< 1 (count positionals)) (fail! "Command takes at most one cluster name." request))
                 (cond-> request
@@ -420,7 +587,7 @@
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
-                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset --force | logs [NAME] | config apply [NAME] PATH | export PATH"}
+                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH"}
                    (request! request))]
       (cond
         (:seon.operator/help result) (println (:seon.operator/help result))
@@ -435,5 +602,5 @@
       (shutdown-agents)
       (System/exit (if (:seon.error/message result) 1 0)))
     (catch Exception cause
-      (binding [*out* *err*] (prn (diagnostic (ex-message cause) (or (ex-data cause) {}) :argv-failed)))
+      (binding [*out* *err*] (prn (diagnostic (ex-message cause) (or (ex-data cause) {}) :argv-failed cause)))
       (System/exit 1))))

@@ -188,16 +188,28 @@
 
 
 (defn diagnostic
-  "Preserve the underlying evidence at the operator boundary."
-  {:malli/schema [:=> [:cat :string :seon.schema/value :seon.cluster.boot/disposition] :seon.cluster.boot/operation-error]}
-  [message offending cause]
-  {:seon.error/at (java.util.Date.)
+  "Preserve the underlying evidence at the operator boundary.
+
+  A caught Throwable is handed whole to the one error constructor
+  (`seon.error.refusal/diagnostic`), which derives its class and frame (and the
+  cause chain) there; this boundary never reduces a failure to its message."
+  {:malli/schema
+   [:function
+    [:=> [:cat :string :seon.schema/value :seon.cluster.boot/disposition]
+     :seon.cluster.boot/operation-error]
+    [:=> [:cat :string :seon.schema/value :seon.cluster.boot/disposition :seon.error/throwable]
+     :seon.cluster.boot/operation-error]]}
+  ([message offending cause]
+   {:seon.error/at (java.util.Date.)
     :seon.error/layer :seon.operator/operation
     :seon.error/operation 'seon.cluster.boot/request!
     :seon.error/message message
     :seon.cluster.boot/disposition cause
     :seon.error/offending offending
     :seon.error/expected :completed-operation})
+  ([message offending cause throwable]
+   (refusal/diagnostic
+    (assoc (diagnostic message offending cause) :seon.error/throwable throwable))))
 
 (defn- refuse!
   {:malli/schema [:=> [:cat :string :map] :nil]}
@@ -260,7 +272,7 @@
           (server/stop-server (server-name name))
           (swap! running-instances dissoc name))
         (throw (ex-info (ex-message cause)
-                        (assoc (diagnostic (ex-message cause) (or (ex-data cause) {}) :boot-failed)
+                        (assoc (diagnostic (ex-message cause) (or (ex-data cause) {}) :boot-failed cause)
                                :seon.boot/instance @latest)
                         cause))))))
 
@@ -303,8 +315,9 @@
         (.close ^java.net.ServerSocket (:seon.boot/prepl-server instance))
         (let [file (io/file (:seon.boot/advertisement-file
                             (cluster/cluster-paths (get-in instance [:seon.boot/config :seon.boot/root]) name)))]
-          (when (= (:seon.boot/advertisement instance)
-                   (try (edn/read-string (slurp file)) (catch Exception _ nil)))
+          ;; An absent file is the declared case; an unreadable one surfaces.
+          (when (and (.isFile file)
+                     (= (:seon.boot/advertisement instance) (edn/read-string (slurp file))))
             (java.nio.file.Files/deleteIfExists (.toPath file))))
         (swap! running-instances dissoc name)
         (catch Throwable cause
@@ -352,7 +365,7 @@
       (diagnostic "Operator response contained non-EDN evidence."
                   {:seon.operator/response (pr-str response)
                    :seon.operator/reader-error (ex-message cause)}
-                  :non-edn-response))))
+                  :non-edn-response cause))))
 
 (defn request!
   "One data request. Verify root and process identity before connected effects."
@@ -443,7 +456,7 @@
     (catch Throwable cause
       (diagnostic (ex-message cause)
                   (dissoc (or (ex-data cause) request) :seon.boot/instance :seon.boot/prepl-server)
-                  :operation-failed)))))
+                  :operation-failed cause)))))
 
 (defn banner
   "Render observed readiness without treating missing layers as ready."
