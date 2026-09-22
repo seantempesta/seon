@@ -1876,7 +1876,10 @@
 
 (defn development-namespaces
   "Changed namespaces plus dependents of compiled or unknown declarations.
-  Both program values contribute: retirement must retain the old compiler fact."
+  Both program values contribute: retirement must retain the old compiler fact.
+  A namespace form that changed in place (docstring, requires) compiles nothing
+  into callers; a namespace created or retired between the values seeds its
+  dependents."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.fn.file/identities] [:set :seon.ns/name]]
@@ -1905,11 +1908,21 @@
                          (into {} (map (fn [[symbol head inline?]]
                                          [symbol (declaration-reload-rule head inline?)])) facts)))
                      databases)
+         namespace-names (into [] (keep (fn [[attribute value]]
+                                          (when (= :seon.ns/name attribute) value))) identities)
+         present (mapv (fn [database]
+                         (let [names (db/q '[:find [?name ...] :in $ [?name ...]
+                                             :where [_ :seon.ns/name ?name]]
+                                           database namespace-names)]
+                           (when (:seon.error/at names)
+                             (refused! "Changed namespace rows could not be read." names))
+                           (set names)))
+                       databases)
          dependent-seeds
          (into #{}
                (keep (fn [[attribute value]]
                        (case attribute
-                         :seon.ns/name value
+                         :seon.ns/name (when-not (every? #(contains? % value) present) value)
                          :seon.fn/sym
                          (when (some (fn [rules]
                                        (case (get rules value :seon.reload/unknown)

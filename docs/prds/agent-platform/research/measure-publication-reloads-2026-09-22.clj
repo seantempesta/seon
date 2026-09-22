@@ -18,14 +18,18 @@
       capture
       '(do
          (intern 'user 'publication-clock-reloads (atom []))
-         (add-watch @(ns-resolve 'seon.cluster 'source-refresh-holder)
-                    :publication-clock
-                    (fn [_ _ _ current]
-                      (let [phase (:seon.operator.lock/phase current)
-                            prefix "development reload "]
-                        (when (and phase (clojure.string/starts-with? phase prefix))
-                          (swap! @(ns-resolve 'user 'publication-clock-reloads)
-                                 conj (symbol (subs phase (count prefix))))))))
+         ;; The init request does not bind the progress hook, so its root
+         ;; observes that request's phases; report restores the saved root.
+         (intern 'user 'publication-clock-progress
+                 (deref (ns-resolve 'seon.cluster '*source-progress!*)))
+         (alter-var-root (ns-resolve 'seon.cluster '*source-progress!*)
+                         (fn [previous]
+                           (fn [phase]
+                             (let [prefix "development reload "]
+                               (when (and phase (clojure.string/starts-with? phase prefix))
+                                 (swap! @(ns-resolve 'user 'publication-clock-reloads)
+                                        conj (symbol (subs phase (count prefix))))))
+                             (previous phase))))
          (intern 'user 'publication-clock-roots
                (into {} (for [n (all-ns) v (vals (ns-interns n))
                               :when (and (bound? v) (:seon.instrument/var (meta @v)))]
@@ -41,11 +45,21 @@
          {:vars-rearmed (count changed) :symbols (vec (sort changed))
           :namespaces-reloaded
           (let [namespaces @@(ns-resolve 'user 'publication-clock-reloads)]
-            (remove-watch @(ns-resolve 'seon.cluster 'source-refresh-holder) :publication-clock)
+            (alter-var-root (ns-resolve 'seon.cluster '*source-progress!*)
+                            (constantly @(ns-resolve 'user 'publication-clock-progress)))
             namespaces)})
       compile-form
       '(let [database (seon.db/db (seon.cluster.boot/connection "head"))
-             namespaces (seon.cluster/development-namespaces database [[:seon.ns/name 'seon.id]])
+             ;; The stored reverse require closure of seon.id, as the compile
+             ;; cost of a caller-embedded change there.
+             namespaces (loop [found #{'seon.id} pending #{'seon.id}]
+                          (if (empty? pending)
+                            found
+                            (let [callers (set (seon.db/q '[:find [?name ...] :in $ [?required ...]
+                                                           :where [?ns :seon.ns/requires ?required]
+                                                           [?ns :seon.ns/name ?name]]
+                                                         database (vec pending)))]
+                              (recur (into found callers) (clojure.set/difference callers found)))))
              requires (#'seon.cluster/namespace-requires database namespaces)
              order (filterv
                     (fn [n]

@@ -108,3 +108,20 @@
                (cluster/development-namespaces before (db/db connection)
                                                [[:seon.fn/sym 'sample.reload.base/value]]))))
       nil)))
+
+(deftest ^{:seon.test/long "Canonical fixture cold acquisition and namespace analysis previously measured 12 seconds in publication-delta-test."
+           :seon.test/long-ms 20000}
+  namespace-form-edits-reload-only-their-namespace
+  (with-program
+    (fn [connection]
+      (let [database (db/db connection)
+            created (db/q '[:find ?tx . :where
+                            [?e :seon.ns/name sample.reload.base ?tx]] database)
+            before (db/as-of database (dec created))]
+        (is (= '#{sample.reload.base}
+               (cluster/development-namespaces database [[:seon.ns/name 'sample.reload.base]]))
+            "an in-place namespace form change compiles nothing into callers")
+        (is (= '#{sample.reload.base sample.reload.impl sample.reload.caller}
+               (cluster/development-namespaces before database [[:seon.ns/name 'sample.reload.base]]))
+            "a namespace absent from one value seeds its dependents"))
+      nil)))
