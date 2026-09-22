@@ -471,7 +471,9 @@
                             :seon.sci.admit/caps admission-caps
                             :seon.config/on-core-error :record})))))))
 
-(deftest agent-facing-object-faces-are-byte-stable-across-processes
+(deftest ^{:seon.test/long "Two sequential fresh JVMs prove process-independent object bytes. Measured 2026-09-22: 17754, 18512, 19419 ms including jcmd samples; each child was compiling seon.schema dependencies at five seconds. The 20000 ms bound rounds the largest observation to the next second."
+           :seon.test/long-ms 20000}
+  agent-facing-object-faces-are-byte-stable-across-processes
   (let [expression
         (str "(require '[sci.core :as sci] '[seon.print :as print] "
              "'[seon.sci.admit :as admit]) "

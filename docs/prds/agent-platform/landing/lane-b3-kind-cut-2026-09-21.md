@@ -2178,3 +2178,29 @@ the cluster branch. Corrected to supply result cluster identity without body
 custody, it recorded 0 pass / 0 fail / 1 error: the installed fixture base lacks
 `:seon.config.operator/export-bound-ms`. No fabricated base or cold gate was used.
 The effect hang is still unproved and unfixed; the fresh-base run must reach it.
+
+### Review follow-up: measured cross-process print duration
+
+The 5 s failure was a bound violation. Three sequential-pair measurements of
+fresh `clojure -M:test` children took **17.754402, 18.512190, 19.418747 s**.
+At five seconds each child was sampled with `jcmd <child-pid> Thread.print`:
+main was RUNNABLE compiling/loading `seon.schema` dependencies (Clojure compiler,
+`clojure.spec.alpha`, record generation), elapsed 5.40–5.46 s and approximately
+5.28 s CPU. It was not waiting for a missing effect event. Each pair returned
+identical `["#object[sci.lang.Namespace \"stable.ns\"]" "#object[clojure.lang.Atom]"]`.
+
+The diagnostic expression used `config/defaults` for the explicit render caps;
+it exercised the test's two independent processes, not canonical test admission.
+Only `agent-facing-object-faces-are-byte-stable-across-processes` now declares
+`:seon.test/long-ms 20000`, rounding the largest measured pair to the next second,
+with the operation and three measurements beside the declaration. Independent
+process compilation is inherent to this byte-stability proof, not work repeated
+per rendered value. The canonical rerun is still required; this is not a green
+namespace claim. Raw samples and measurement values are in
+`tmp/kind-review-print-threads-{0,1,2}-{0,1}.txt` and
+`tmp/kind-review-print-measure.json` while this cut is in progress.
+
+All owned measurement children exited. The scratch operator was stopped with
+`bin/seon --root tmp/kind-review-probe down` (exit 0), its held shell exited,
+and the root was deleted after checking the retained process identities had
+exited and that the path was not a symlink. No owned JVM remains from those probes.
