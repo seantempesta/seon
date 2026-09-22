@@ -172,6 +172,17 @@ bring the concrete scope/time tradeoff to the owner before extending it.
 this is the one order that satisfies all of them, so no lane waits on a lane that
 waits on it. Each step is one loadable slice with every caller converted.
 
+**Reprioritised 2026-09-22 (owner): the edit an agent just made is what it experiences, for
+Seon agents and for filesystem agents alike, with the reaching tests as instant feedback.**
+Two halves of one mechanism, file-disjoint, run in parallel from now:
+
+| wave | agent half (`sci/eval.clj`, the lifecycle, the runner) | file half (`cluster.clj`, `cluster/source.clj`, the hook) | both |
+|---|---|---|---|
+| A (now) | 1.3d commit 1: overridden rows and affected callers interpreted from the branch; one custody function | 1.2b: the publication envelope deleted (manifest, seal, snapshot, digest); reload = `require :reload` of changed namespaces + dependents from the stored graph; per-namespace compile cost measured | 1.3e schema-retirement refusal; the boot provenance repair |
+| B | 1.3d commit 2: candidate lifecycle (`branch!` → `open-branch!` → `fork-cluster-ctx` → `retire-branch!`), the agent branch attribute, a branch member on the eval tool | 1.5: the hook as one prepl request; hook publication re-enabled once A2's adoption rows are measured cheap | the program partition and host-bound facts in the indexer |
+| C | 1.3d commit 4: one test request on the lifecycle — reaching set, in process, on a branch, unlink; then commit 5 deletes B4's machinery | 1.3 wrappers narrowed to "arm only the changed identities"; 1.4 projection as a read (no longer blocked: projection by argument) | the save-time gate: index changed declarations into the candidate branch → reaching tests there → green advances default and reloads; red returns the failures |
+| D | a minimal merge (three-way diff over digests, intermediate branch, the gate, a named accept) | 1.4b, RESET batch 2 | cut 1 ends: platform tier, bulk tier once |
+
 | Step | Slice | Frees |
 |---|---|---|
 | 1.1 | B3's constructor and declared error contracts, additive (`seon.error.refusal/diagnostic` keeps its name; `at` supplied; no key retired yet) | A1's wrapper output check, A2's guard conversions, every later caller slice |
