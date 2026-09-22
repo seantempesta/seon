@@ -385,11 +385,24 @@ load, then the handful of sites the script could not express by hand. Reading a 
 to edit it is for the sites the rule does not cover. Tokens are a budget: fifty
 separate reads and edits for one rule is a defect in the lane, not diligence.
 
-Preserve unrelated edits. Own explicit paths; no `git add -A`, `reset --hard`, shared
-file restore or structural-edit worktree. Commit coherent path-limited slices. Native
-Codex collaboration or the documented CLI launcher handles lanes; do not nest delegation
-inside a bounded assignment. Lanes are bounded by disjoint file ownership alone — there is no lane count, no test-JVM slot and no prober cap (owner, 2026-09-23); a shared file is committed only by the lane whose hunks are alone in it. No lane
-overlaps its own test/probe JVMs. Check live holders before deleting disposable roots;
+**Lanes never cross streams (owner, 2026-09-23: "I'm tired of fighting them. Do a better
+job orchestrating so lanes don't cross streams").** ONE FILE, ONE LANE, at any moment — no
+"regions", no shared hunks, no hand-staged partial commits. The orchestrator keeps the
+ledger `tmp/orchestrator/file-ownership.md` (lane → the exact paths it may edit) and checks
+it before every launch and every follow-up: work that needs a held file goes to the lane
+holding it as a follow-up, or waits for that file's release — it never runs beside it.
+A lane edits only its ledger paths; needing another path, it stops that part and reports
+the path and the change, and never edits it. A lane releases its paths by committing them
+(`git commit --only -- <its paths>`) and naming them in its final report; the orchestrator
+then updates the ledger. The only limits on concurrency are these file holds and real
+dependencies — no lane count, no test-JVM slot, no prober cap (owner, 2026-09-23).
+**No git worktrees, ever (owner, 2026-09-23: "no more git worktrees").** A proof of HEAD
+plus a lane's diff runs from a `git archive` snapshot with the shared caches linked.
+
+Preserve unrelated edits. No `git add -A`, `reset --hard`, `stash` or shared file restore.
+Commit coherent path-limited slices. Native Codex collaboration, the documented CLI
+launcher or an Opus subagent handles lanes; do not nest delegation inside a bounded
+assignment. No lane overlaps its own test/probe JVMs. Check live holders before deleting disposable roots;
 recursive deletion never follows symlinks. Paid provider runs are deliberate.
 
 Verify before naming a cause. Search existing issues, record one note per defect class,
