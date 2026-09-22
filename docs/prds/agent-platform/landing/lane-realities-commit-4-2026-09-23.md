@@ -1,10 +1,12 @@
 ---
 type: landing
-status: landed (commit id below); proof on a scratch cluster; default not adopted
+status: landed 678009fcd; proof on a scratch cluster; default not adopted
 created: 2026-09-23
 ---
 
 # Realities commit 4: one test request on the agent lifecycle
+
+Commit: **`678009fcd`** (31 paths, +1,292 / −3,099).
 
 Track 1.3d commit 4 (`lane-realities-one-lifecycle.md` §2 rows 8–9, §3 item 4).
 `seon.test/run` is now a single request. Each member is an isolated agent for one
@@ -139,7 +141,7 @@ Environment:
 | d | overrun fails naming the bound; exit observed | `seon.test.duration-test` both tests green through `run` (`884966d5fee2`, 23 assertions, 2,992 ms). Unfinished class at the REPL: an agent test spinning past a 4,000 ms request bound (remainder 1,100 ms) returned `:seon.test/unfinished` with branch `agent-afb1196f285c` still listed. After the SCI arm stopped the body, a second read showed the branch unlisted and no longer held (watcher release) |
 | e | destructive member excluded with its command on a development root | `a-development-root-excludes-a-destructive-member-with-its-platform-command` green: excluded with `["bin/test" "--platform" "--" SYM]`, nothing excluded under another root |
 | f | leaf and core wall time | leaf `my.note/add!`: reach 4 tests (gate walk 33.0 ms); incremental request `69fcb7ad40a3` 5,686 ms (see below). Core `seon.id/id`: reach **1,595** tests, gate walk 1,088 ms; **not executed**, since the extrapolated minutes need owner authorization |
-| g | HEAD loads | after the commit: `git archive HEAD` + `clojure -M:test -e (require …)` (below) |
+| g | HEAD loads | `git archive 678009fcd` into `tmp/realities-c4-head` with linked `reference-code`, `clojure -M:test -e (require …)` of 21 namespaces (seon.test, runner, test-support, my.test, plan, issue, config, cluster.agent, cluster.source, cluster and every touched test ns) printed `:head-loads`, 17,586 ms JVM wall. `bin/test --platform` was not run: its workers cannot host `with-database` until commit 5 |
 | h | named request from the MCP eval tool | the exact form is in the skill. Run on the scratch cluster (`250346336f7b`, `884966d5fee2`). **Not on default**: default runs pre-commit-2 source and was down for another lane's store restore at 21:13Z |
 
 Leaf request `69fcb7ad40a3`:
