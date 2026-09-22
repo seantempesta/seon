@@ -280,3 +280,68 @@ Also removed: the now-dead `or` fallbacks after `carried-projection` in
 
 Every row over 10 s is a defect; boot rows are appended to
 [from-zero boot takes minutes](../../../seon/issues/from-zero-boot-takes-minutes.md).
+
+# Review follow-up (Astra review `docs/research/agent-platform/review-projection-writer-producer-2026-09-23.md`)
+
+Verified then fixed on HEAD `5b7e4436d`. Owned paths only: `src/seon/db.clj`,
+`src/seon/schema.clj`, `src/seon/turn.clj`, `test/seon/schema/projection_writer_test.clj`.
+
+* **P1 as-of reads the future — confirmed live.** Default (pid 43581, loaded code
+  = committed `9b8c5b405`, `seon.schema/projection-attributes` unresolved), read-only
+  MCP probe: key `:inst`, committed form `inst?`; `d/with` replacing it by `:string`,
+  then `(d/as-of next (:max-tx raw))` → committed accessor returned `string`
+  (198 ms). Fix: an `AsOfDB` derives from its own declaration datoms, unmemoized;
+  `read-declarations` passes the view, not its origin. Same live value through the new
+  branch's derivation `(seon.schema/load-projection view)` → `inst?`, 182.5 ms.
+  History and since keep the origin's current population (docstring states why).
+  Regression `an-as-of-view-before-a-declaration-change-reads-the-older-population`.
+* **P1 writer trusts a stamp — confirmed** (`transact-call` read metadata first).
+  Fix: the writer reads `(carried-projection database)` only. Regression
+  `the-writer-derives-from-its-database-never-a-stale-stamp` injects a stale
+  stamp through `resolve-database-value` after a committed declaration and asserts
+  `write-error` receives the value's derived projection. Remaining cold read: a value
+  with **no declaration rows** still takes its construction projection
+  (`construction-projection`, one private fn, named refusal when absent). Removing it
+  needs explicit arguments at the cold writers outside this lane's files — see below.
+* **P2 dependency set handwritten — fixed.** `schema/projection-ranges` drives
+  `load-projection`'s scans; `schema/projection-attributes` derives from it and keys
+  the memo. Probe (HEAD archive load): 6 attributes
+  `[:seon.schema.admission/source :seon.schema/key :seon.schema/form :seon.fn/sym
+  :seon.fn/spec :seon.fn/source]`. The key still mirrors Datahike's comparison members
+  (`query.cljc:2568`, `:2963`, private); a public fork seam would remove that copy.
+* **P2 contracts — fixed.** `load-projection` takes `:seon.db/database-value`; the
+  key declares connection-id `[:tuple :uuid :keyword]`, generation `:uuid`, optional
+  conservative revision, revisions `[:map-of :qualified-keyword :uuid]` (types probed on
+  default); `row-tx` gains `[:=> [:cat :seon.db/database-value :map :map]
+  :seon.store/transaction-data]` (row is admitted inside by `program/declaration-row`).
+* **P2 ordered writes pay whole-population work — not changed**; ruled unmemoized.
+  Measured on default now: one speculative derivation 196.6 ms. Existing issue
+  `docs/seon/issues/class-local-updates-recompute-global-projections.md`.
+
+## Required change outside this lane's files (reported, not made)
+
+Pass the cold candidate explicitly so `construction-projection` can be deleted:
+give `seon.db/transact!` a third arity `(transact! connection transaction projection)`
+used only by writes to a value with no declaration rows — `cluster/source.clj`
+scratch schema transaction, `cluster.clj` `accrete-schema-population!` (declarations,
+process rows, schema rows), `populate-source!` instruction rows, and `fn.clj`
+`commit-index-phase!`/`index!` population writes — each passing the projection it
+already holds locally. Until then, a complete publication onto an existing store
+validates index-population writes against the value's old rows rather than the
+candidate; a new encoded attribute written before its declaration row would refuse
+loudly, never store silently.
+
+## Proof and limits
+
+* HEAD-archive load with exactly the owned patch
+  (`tmp/projection-writer-producer/review-fix.patch`): exit 0, 19.6 s.
+* Armed runs `e901f56b808b`, `f30c07b62191` (5 tests): all 5 refuse in fixture
+  base construction, `:seon.config/entity` missing `:seon.program/partition`. Both
+  available bases predate the partition declarations (`d73e0a…` 94 commits old;
+  `d9c552…` exported by default's pre-reset JVM and left unready by bin/test's
+  `reference-code/datahike` input check — checkout `fbd1ad2` vs gitlink `41c79c1`).
+  Existing issue: `test-fast-runs-on-a-published-base-older-than-heads-schema-validator.md`.
+  **No armed pass and no reverse-mutation sensitivity run for these regressions.**
+* `bin/test --paths` (47 s): published-base preparation refused on the datahike
+  checkout drift.
+* No scratch boot. Default was never stopped, reset, reloaded or adopted by this lane.

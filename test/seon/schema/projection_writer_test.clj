@@ -98,3 +98,43 @@
             (is (= (:seon.schema.projection/forms left)
                    (:seon.schema.projection/forms right)))
             (is (= 2 @derivations))))))))
+
+(deftest an-as-of-view-before-a-declaration-change-reads-the-older-population
+  (support/with-database
+    (fn [connection]
+      (let [declared (:db-after (support/transacted!
+                                 connection
+                                 [(declaration-call ::dated :int)]))
+            replaced (:db-after (support/transacted!
+                                 connection
+                                 [(declaration-call ::dated :string)]))
+            forms (fn [database]
+                    (get (:seon.schema.projection/forms (db/carried-projection database))
+                         ::dated))]
+        (is (= :int (forms declared)))
+        (is (= :string (forms replaced)))
+        (is (= :int (forms (d/as-of replaced (:max-tx declared))))
+            "the as-of view derives from its own declaration datoms")
+        (is (= :string (forms (d/history replaced)))
+            "history decodes with its origin's current population")))))
+
+(deftest the-writer-derives-from-its-database-never-a-stale-stamp
+  (support/with-database
+    (fn [connection]
+      (let [stale (db/carried-projection (db/db connection))
+            _ (support/transacted! connection [(declaration-call ::fresh :int)])
+            resolve-value @#'seon.db/resolve-database-value
+            validate @#'seon.db/write-error
+            seen (atom [])]
+        (is (not (contains? (:seon.schema.projection/forms stale) ::fresh)))
+        (with-redefs [seon.db/resolve-database-value
+                      (fn [c] (vary-meta (resolve-value c) assoc :seon.schema/projection stale))
+                      seon.db/write-error
+                      (fn [database projection transaction]
+                        (swap! seen conj projection)
+                        (validate database projection transaction))]
+          (support/transacted! connection []))
+        (is (= 1 (count @seen)))
+        (is (not (identical? stale (first @seen))) "the stamp never selects the writer's world")
+        (is (contains? (:seon.schema.projection/forms (first @seen)) ::fresh))
+        (is (identical? (first @seen) (db/carried-projection (db/db connection))))))))

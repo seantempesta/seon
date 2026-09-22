@@ -2785,23 +2785,36 @@
     :seon.error/member :seon.schema/database-value
     :seon.error/data {:seon.schema/database-value db}})
 
+(def projection-ranges
+  "The declaration ranges `load-projection` reads, as [identity value identity-tx?].
+
+  One definition serves the loader and every consumer that must know what a
+  projection depends on (`seon.db`'s memo key), so a new range cannot be read
+  without also invalidating."
+  {:seon.schema/schema-rows [:seon.schema/key :seon.schema/form true]
+   :seon.schema/function-contract-rows [:seon.fn/sym :seon.fn/spec false]
+   :seon.schema/function-source-rows [:seon.fn/sym :seon.fn/source false]})
+
+(def projection-attributes
+  "Every attribute a projection derivation reads: its ranges plus admissions."
+  (into [:seon.schema.admission/source]
+        (comp (mapcat (fn [[identity value _]] [identity value])) (distinct))
+        (vals projection-ranges)))
+
 (defn load-projection
   "Derive the complete projection from this database value's declaration rows."
-  {:malli/schema [:=> [:catn [:seon.schema/database-value :map]] ::projection]}
+  {:malli/schema [:=> [:cat :seon.db/database-value] ::projection]}
   [db]
   (when-not (db-utils/db? db)
     (let [refusal (refuse-projection-source db)]
       (throw (ex-info (:seon.error/message refusal) refusal))))
   (projection-from-rows
-   {:seon.schema/database-value db
-    :seon.schema/schema-rows
-    (projection-rows db :seon.schema/key :seon.schema/form true)
-    :seon.schema/function-contract-rows
-    (projection-rows db :seon.fn/sym :seon.fn/spec false)
-    :seon.schema/function-source-rows
-    (projection-rows db :seon.fn/sym :seon.fn/source false)
-    :seon.schema/artifact-exports #{}
-    :seon.schema/pure-predicate-symbols #{}}))
+   (reduce-kv (fn [input member [identity value identity-tx?]]
+                (assoc input member (projection-rows db identity value identity-tx?)))
+              {:seon.schema/database-value db
+               :seon.schema/artifact-exports #{}
+               :seon.schema/pure-predicate-symbols #{}}
+              projection-ranges)))
 
 (defonce ^:private database-projection
   (delay (requiring-resolve 'seon.db/carried-projection)))

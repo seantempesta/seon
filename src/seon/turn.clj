@@ -1201,6 +1201,8 @@
 
 (defn- row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :map]
+                  :seon.store/transaction-data]}
   [db request row]
   (if-let [deleted-identities (:seon.program/delete-identities row)]
     (let [schema-keys

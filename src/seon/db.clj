@@ -1220,20 +1220,22 @@
 (defonce ^:private projection-cache
   (cache/lru-cache-factory {} :threshold (::projection-cache-size projection-cache-policy)))
 
-(def ^:private projection-attributes
-  "The attributes `schema/load-projection` reads from a database value."
-  [:seon.schema/key :seon.schema/form :seon.schema.admission/source
-   :seon.fn/sym :seon.fn/spec :seon.fn/source])
-
 (defn- projection-cache-key
   "The part of Datahike's cache-context a projection derivation depends on.
 
-  `datahike.query/advance-query-cache-context` (query.cljc:2568) advances one
-  attribute revision per changed attribute and the conservative revision on
-  schema or unknown change; `source-context-unchanged?` (query.cljc:2963)
-  compares exactly these members. A commit touching no declaration attribute
-  therefore keys the same population."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
+  `schema/projection-attributes` is the loader's own read set. Datahike
+  advances one attribute revision per changed attribute and the conservative
+  revision on a schema or unknown change (`datahike.query/
+  advance-query-cache-context`, query.cljc:2568); its query cache compares
+  exactly these members (`source-context-unchanged?`, query.cljc:2963). A
+  commit touching no declaration attribute therefore keys the same population."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value]
+    [:map
+     [:datahike.cache/connection-id [:tuple :uuid :keyword]]
+     [:datahike.cache/generation :uuid]
+     [:datahike.cache/conservative-revision {:optional true} :uuid]
+     [:datahike.cache/attribute-revisions [:map-of :qualified-keyword :uuid]]]]}
   [database]
   (let [context (:cache-context database)]
     (assoc (select-keys context [:datahike.cache/connection-id
@@ -1241,42 +1243,58 @@
                                  :datahike.cache/conservative-revision])
            :datahike.cache/attribute-revisions
            (select-keys (:datahike.cache/attribute-revisions context)
-                        projection-attributes))))
+                        schema/projection-attributes))))
 
 (defn- declares-program?
   "True when this value holds declaration rows its projection can derive from."
   {:malli/schema [:=> [:cat :seon.db/database-value] :boolean]}
   [database]
-  (boolean (and (get (:schema database) :seon.schema/key)
+  (boolean (and (get (dbi/-schema database) :seon.schema/key)
                 (first (d/datoms database :avet :seon.schema/key)))))
+
+(defn- construction-projection
+  "The projection a cold boundary supplied for a value with no declaration rows.
+
+  Genesis and first population write before any declaration row exists, so
+  their value cannot derive a projection. This is the one remaining read of
+  construction metadata; the projection-as-a-read sweep's cold-owner table
+  replaces it with explicit arguments. Absent, it refuses by name."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.schema/projection]}
+  [database]
+  (or (:seon.schema/projection (meta database))
+      (let [failure (projection-fallback 'seon.db/carried-projection)]
+        (throw (ex-info (:seon.error/message failure) failure)))))
 
 (defn carried-projection
   "Derive this database value's projection, memoizing attached committed values.
 
-  A temporal view reads its origin's declarations, as its installed schema
-  does. Datahike clears cache-context for speculative values. Those values
-  derive directly, so ordered declarations observe all earlier transaction
-  operations. A value holding no declaration rows yet (genesis, before its
-  first population) cannot derive one: it reads the construction projection
-  its cold boundary supplied, or refuses by name."
+  An as-of view derives from its own declaration datoms: a view older than a
+  declaration change sees the older population. History and since views read
+  their origin's current population, as their installed schema does; they
+  hold several versions or a suffix, never one older population. Datahike
+  clears cache-context for speculative values; those derive directly, so
+  ordered declarations observe every earlier transaction operation. A value
+  holding no declaration rows reads its cold boundary's construction
+  projection or refuses by name."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.schema/projection]}
   [database]
-  (let [origin (schema-database database)]
+  (let [as-of? (instance? AsOfDB database)
+        source (if as-of? database (schema-database database))]
     (cond
-      (not (declares-program? origin))
-      (or (:seon.schema/projection (meta database))
-          (:seon.schema/projection (meta origin))
-          (let [failure (projection-fallback 'seon.db/carried-projection)]
-            (throw (ex-info (:seon.error/message failure) failure))))
+      (not (declares-program? source))
+      (construction-projection database)
 
-      (datahike.db/committed-value-identity origin)
+      as-of?
+      (schema/load-projection source)
+
+      (datahike.db/committed-value-identity source)
       ;; Store the delay before forcing it: concurrent misses share the winning
       ;; cell even when core.cache's atom retries its insertion.
-      @(cache/lookup-or-miss projection-cache (projection-cache-key origin)
-                             (fn [_] (delay (schema/load-projection origin))))
+      @(cache/lookup-or-miss projection-cache (projection-cache-key source)
+                             (fn [_] (delay (schema/load-projection source))))
 
       :else
-      (schema/load-projection origin))))
+      (schema/load-projection source))))
 
 (defn- read-declarations
   "The declaration table for one read, or the flat refusal naming what is missing.
@@ -1293,7 +1311,7 @@
     (if (seq installed)
       {::installed-schema installed
        ::read-projection
-       (delay (carried-projection origin))}
+       (delay (carried-projection database))}
       (diagnostic
        {:seon.error/message (str operation " cannot decode a read: the supplied value carries no installed database schema.")
         :seon.db.read/unreadable-declarations operation
@@ -3760,10 +3778,7 @@
              (qualified-symbol? (:seon.error/operation connection)))
     connection
     (try
-      ;; A publication or genesis write supplies the candidate its own
-      ;; declarations will produce; every other write reads its value's own.
-      (let [projection (or (:seon.schema/projection (meta database))
-                           (carried-projection database))]
+      (let [projection (carried-projection database)]
         (or (write-error database projection transaction)
             (let [bound-attribute :seon.config.db/write-time-limit-ms
                   configured-bounds
