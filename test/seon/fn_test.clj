@@ -2540,7 +2540,6 @@
         first-party (#'seon.fn/first-party-function-symbols analysis)
         emitted (get (#'seon.fn/analysis-rows-by-file
                       analysis first-party contexts
-                      (set (keys (schema.edn/packaged-forms)))
                       (schema/handed-projection))
                      path)
         artifact (seon.fn/build-artifact
