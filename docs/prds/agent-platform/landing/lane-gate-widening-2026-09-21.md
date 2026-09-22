@@ -1,6 +1,6 @@
 ---
 type: landing
-status: verification in progress
+status: assigned regressions verified; namespace and platform limits recorded
 created: 2026-09-21
 tags: [test-selection, platform, gate-inputs]
 ---
@@ -13,7 +13,9 @@ orchestrator's uncommitted cache predicate edit. Owned production/test changes:
 `test/seon/test/selection_test.clj`. Evidence also adds this note and
 `measure-gate-widening-2026-09-21.clj`, and updates the existing issue
 `docs/seon/issues/the-publication-export-does-not-identify-the-exported-program.md`.
-No foreign dirty file or pre-existing untracked file was changed.
+Repair commit: `dbb1bc79b` (six paths, +233/-3, including this evidence).
+No foreign dirty file or pre-existing untracked file was changed; the later
+foreign `test/seon/cluster/turn_test.clj` edit was also preserved.
 
 ## Widening: cause and declared semantics
 
@@ -159,5 +161,44 @@ Babashka owner check: 5 tests, 59 assertions, zero failures/errors
 (`tmp/gate-widening-cache-final.log`). clj-kondo: zero errors, five existing
 warnings in untouched forms (`tmp/gate-widening-kondo.log`).
 
-Final quiet run and post-commit load check: pending. The orchestrator retains the platform
+Third run, HEAD `dbb1bc79b`: both assigned regressions executed and passed
+with only the test JVM (PID 66412) and idle default. At their completion the
+one-minute load was 3.89 (launch 3.49); no competing test JVM. Begin/end
+intervals: widening **11.047 ms**, named selection **5122.777 ms**. These
+intervals are the runner's progress timestamps, not its discarded internal
+nanosecond counters. Log: `tmp/gate-widening-fast-3.log`; launch process/load
+inventory: `tmp/gate-widening-fast-3-load.log`. Recorded run `da809c372335`:
+**15 executed, 0 reused, 243 assertions, 1 failure, 1 error**, process exit 1.
+The assigned tests contributed 23 and 7 passing assertions respectively.
+The remaining failure is fileless SCI duration (9219.785167 ms); the error
+is the same injected-refusal output-contract violation described above.
+This is green evidence for the two assigned regressions, not for the whole
+namespace or platform. The runner exited and removed its snapshot; the
+probe's canonical fixture shutdown left `tmp/fixture-bases` empty. No owned
+shell or JVM remains.
+
+After `dbb1bc79b`, the required fresh JVM check exited 0:
+`clojure -M -e "(require 'seon.test.cache 'seon.test)"`
+(`tmp/gate-widening-head-load-1.log`). A second read-only MCP JVM probe with
+the same four paths returned `[["src" false false] ["test" false false]
+["src/fixture.txt" false true] ["src/seon/db.clj" false false]]`, 26 ms.
+This positively observes changed loaded behavior after the editor hook;
+it does not establish source-commit convergence or browser paint. The orchestrator retains the platform
 checkpoint; this lane never invokes `bin/test --platform` or a full suite.
+
+
+Closeout preserves the subsequently dirty `src/seon/cluster/agent.clj`,
+`src/seon/cluster/reply.clj` and `src/seon/turn.clj`. Foreign commit
+`aba6d445e` arrived after the final test snapshot was captured; that snapshot
+still records `dbb1bc79b`. The post-closeout load command is the same required
+`clojure -M -e "(require 'seon.test.cache 'seon.test)"`, run in a clean Git
+archive of HEAD with the unchanged vendored dependency directory linked,
+so foreign uncommitted source cannot change the load subject. Its output is
+`tmp/gate-widening-head-load-2.log`; the owned archive is removed after exit.
+No worktree is created.
+
+Production/test line delta in `dbb1bc79b`: cache +2/-1, selection test +11/-2,
+cache test +8/-0. The larger commit total includes the 37-line measurement
+script, landing evidence and 12-line existing-issue update. This slice changes
+gate classification and a test bound; it does not alter publication machinery
+or assert a publication-path performance result.
