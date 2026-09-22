@@ -17,7 +17,9 @@ if [ ! -L "$WT/reference-code" ]; then
   rmdir "$WT/reference-code" 2>/dev/null || true
   ln -s "$REPO/reference-code" "$WT/reference-code"
 fi
-rm -rf "$ROOT"; mkdir -p "$ROOT"
+if [[ "${PUBLICATION_CLOCK_RESUME:-0}" != 1 ]]; then
+  rm -rf "$ROOT"; mkdir -p "$ROOT"
+fi
 cd "$WT"
 measure() {
   bb --config "$WT/bb.edn" --deps-root "$WT" \
@@ -43,9 +45,13 @@ run() {
 }
 zmodload zsh/datetime
 # Cold start, paid once: publish from zero, create the first cluster, start the JVM.
-run start bin/seon --root "$ROOT" start head --config config/development.edn
+if [[ "${PUBLICATION_CLOCK_RESUME:-0}" != 1 ]]; then
+  run start bin/seon --root "$ROOT" start head --config config/development.edn
+fi
 # Fork against the RUNNING cluster - a Datahike branch, target under 1 s.
-run fork      bin/seon --root "$ROOT" init head2
+if [[ "${PUBLICATION_CLOCK_RESUME:-0}" != 1 ]]; then
+  run fork bin/seon --root "$ROOT" init head2
+fi
 # Case A: the first adoption after the fork - nothing changed on disk, the cluster row has no adoption recorded yet.
 run adopt-first bin/seon --root "$ROOT" init --dev head --changed src/my/note.clj
 # Case A2: no change at all, cluster already at the published commit.
@@ -56,8 +62,8 @@ run adopt-noncore bin/seon --root "$ROOT" init --dev head --changed src/my/note.
 # Case C: docstring-only edit in a core namespace, inside the producer closure of seon.fn.
 perl -0pi -e 's/^  "/  "(measured edit) /m' src/seon/id.clj
 run adopt-core bin/seon --root "$ROOT" init --dev head --changed src/seon/id.clj
-measure sweep
-reload_clock compile > "$ROOT/seon-id-compile.edn"
+measure sweep > "$ROOT/sweep.log" 2>&1 || echo "sweep unavailable: see $ROOT/sweep.log"
+reload_clock compile > "$ROOT/seon-id-compile.edn" 2> "$ROOT/seon-id-compile-error.log" || echo "compile unavailable: see $ROOT/seon-id-compile-error.log"
 bin/seon --root "$ROOT" down
 git -C "$WT" checkout -- src/my/note.clj src/seon/id.clj
 echo "phases:"; grep -h "elapsed-ms" "$ROOT"/adopt-*.log | sed -E 's/.*completed-phase "([^"]*)".*elapsed-ms ([0-9]+).*/\2\t\1/' | sort -rn | head -20

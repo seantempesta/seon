@@ -3,7 +3,7 @@
 (let [[root phase] *command-line-args*
       advertisement (edn/read-string (slurp (str root "/data/clusters/head/prepl.edn")))
       form
-      `(let [instance# (get @seon.cluster.boot/running-instances "head")
+      `(let [instance# (get @seon.operator.runtime/running-instances "head")
              store# (:seon.store/store instance#)
              connection# (:seon.store/connection-object store#)
              began# (System/nanoTime)

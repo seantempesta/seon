@@ -987,27 +987,6 @@
              (set (keys artifacts))))
       (is (re-matches #"[0-9a-f]{64}"
                       (:seon.fn.manifest/digest manifest))))
-    (testing "pure manifest helpers find files and derive function context"
-      (is (= beta-artifact
-             (seon.fn/artifact-by-path manifest (.getCanonicalPath beta))))
-      (is (nil? (seon.fn/artifact-by-path manifest "/absent.clj")))
-      (is (= [(quote artifact.alpha/target) (quote artifact.beta/caller)]
-             (seon.fn/manifest-function-symbols manifest))))
-    (testing "artifact replacement recomputes one deterministic manifest"
-      (let [changed-beta (assoc beta-artifact :seon.fn.file/digest (id/digest 64 ["changed"]))
-            changed (seon.fn/replace-manifest-artifacts manifest [changed-beta])]
-        (is (= changed-beta
-               (seon.fn/artifact-by-path changed (.getCanonicalPath beta))))
-        (is (= (:seon.fn.manifest/relative-roots manifest)
-               (:seon.fn.manifest/relative-roots changed)))
-        (is (= (:seon.fn.manifest/identities manifest)
-               (:seon.fn.manifest/identities changed)))
-        (is (not= (:seon.fn.manifest/digest manifest)
-                  (:seon.fn.manifest/digest changed)))
-        (is (= (sort (map :seon.fn.file/relative-path
-                          (:seon.fn.manifest/artifacts changed)))
-               (map :seon.fn.file/relative-path
-                    (:seon.fn.manifest/artifacts changed))))))
     (testing "one-file analysis records every call target (ruling 42b)"
       (is (= #{(quote clojure.core/str) (quote artifact.alpha/target) (quote clojure.string/trim)}
              (:seon.fn/calls beta-caller)))
@@ -2669,9 +2648,7 @@
         (is (= ["src"] (:seon.fn.manifest/relative-roots before)))
         (is (= ["src/relocated/sample.clj"]
                (mapv :seon.fn.file/relative-path (:seon.fn.manifest/artifacts before))))
-        (is (= (seon.fn/artifact-by-path after "src/./relocated/sample.clj")
-               (seon.fn/artifact-by-path after
-                 (.getCanonicalPath (io/file b "src/relocated/sample.clj"))))))
+)
       (finally (test-support/delete-recursively! root)))))
 
 (deftest indexing-resolves-its-declaration-world-once-per-operation
@@ -2946,7 +2923,7 @@
                      {:seon.fn/root directory :seon.fn/roots ["src"]
                       :seon.fn/source-path (.getCanonicalPath implementation)
                       :seon.fn.file/first-party-functions
-                      (seon.fn/manifest-function-symbols manifest)})
+                      (into [] (keep :seon.fn/sym) (seon.fn/rows {:seon.fn/manifest manifest}))})
             target (quote sample.cross-implementation/target)]
         (test-support/with-database
           (fn [connection]

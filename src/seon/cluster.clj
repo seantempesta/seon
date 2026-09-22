@@ -1408,7 +1408,9 @@
                      :seon.db/connection]]]
     [:or :nil :seon.reconcile/result]]}
   [{connection :seon.db/connection
+    analyzed :seon.program/rows
     manifest :seon.fn/manifest
+    directory :seon.fn/root
     roots :seon.fn/roots
     previous :seon.fn/previous-manifest
     paths :seon.fn/changed-paths
@@ -1457,6 +1459,9 @@
                       :seon.schema/projection (schema/handed-projection)
                       :seon.db/process
                       [:seon.db.process/id boot-process-identity]}
+               analyzed (assoc :seon.program/rows analyzed)
+               directory (assoc :seon.fn/root directory)
+               roots (assoc :seon.fn/roots roots)
                manifest (assoc :seon.fn/manifest manifest)
                inputs (assoc :seon.source/relative-file-digests inputs)
                (or classes prior-database)
@@ -1819,43 +1824,20 @@
                                                     (test.cache/input-digests directory))}
             digest (:seon.source/digest snapshot)]
       (let [database (when published (source/database store (:seon.source/commit-id published)))
-            selected (when database changed)
-            previous (when database
-                       (seon.fn/database-manifest database (:seon.fn/root roots)
-                                                  (:seon.fn/roots roots) (vec selected)))
-            _ (report-source-progress! "published selected rows read")]
+            selected (when database changed)]
         (try
-          (let [_ (report-source-progress! "analysis started")
-                manifest (seon.fn/build-manifest
-                          (cond-> {:seon.fn/root (:seon.fn/root roots)
+          (let [paths selected
+                analyzed (seon.fn/analyze-rows
+                          (cond-> {:seon.fn/root directory
                                    :seon.fn/roots (:seon.fn/roots roots)
-                                   :seon.source/progress! report-source-progress!
-                                   :seon.source/relative-file-digests inputs
-                                   :seon.source/changed-paths (vec changed)}
-                            previous
-                            (assoc :seon.fn/previous-manifest previous
-                                   :seon.fn/changed-paths selected
-                                   :seon.source/previous-database database)))
-                _ (report-source-progress! "analysis complete")
-                prior-artifacts (into {} (map (juxt :seon.fn.file/relative-path identity))
-                                      (:seon.fn.manifest/artifacts previous))
-                paths (when previous
-                        (into changed
-                              (keep (fn [artifact]
-                                      (when (not= artifact (get prior-artifacts (:seon.fn.file/relative-path artifact)))
-                                        (:seon.fn.file/relative-path artifact))))
-                              (:seon.fn.manifest/artifacts manifest)))
-                findings (fn [value]
-                           (into []
-                                 (comp (filter #(or (nil? paths) (paths (:seon.fn.file/relative-path %))))
-                                       (mapcat :seon.fn.file/rows)
-                                       (filter :seon.lint/id))
-                                 (:seon.fn.manifest/artifacts value)))
+                                   :seon.source/relative-file-digests inputs}
+                            database (assoc :seon.fn/changed-paths selected
+                                            :seon.source/previous-database database)))
                 previous-findings (when database
                                     (seon.fn/file-rows database (vec paths) :seon.lint/file))
                 _ (when (:seon.error/at previous-findings)
                     (refused! "Published findings could not be read." previous-findings))
-                _ (report-analysis-warnings! previous-findings (findings manifest))
+                _ (report-analysis-warnings! previous-findings (filterv :seon.lint/id analyzed))
                 classes (when paths
                           (cond-> #{:program}
                             (some #(str/starts-with? % "resources/seon/schemas/") changed) (conj :schema-resource)
@@ -1867,7 +1849,7 @@
                               {:seon.cluster.source/phase :adoption
                                :seon.source/digest-before digest}))
                 _ (report-source-progress! (str "branch publication started: "
-                                                (if paths (count paths) (count (:seon.fn.manifest/artifacts manifest)))
+                                                (if paths (count paths) (count (filter :seon.fn.file/relative-path analyzed)))
                                                 " inputs"))
                 result (source/publish!
                         {:seon.store/store store :seon.fn/root (:seon.fn/root roots)
@@ -1877,11 +1859,11 @@
                          :seon.source/relative-file-digests inputs
                          :seon.source/progress! report-source-progress!
                          :seon.source/populate-request
-                         (cond-> {:seon.fn/manifest manifest :seon.fn/roots (:seon.fn/roots roots)
+                         (cond-> {:seon.program/rows analyzed :seon.fn/root directory
+                                  :seon.fn/roots (:seon.fn/roots roots)
                                   :seon.source/relative-file-digests inputs}
                            database (assoc :seon.source/previous-database database)
-                           paths (assoc :seon.fn/previous-manifest previous
-                                        :seon.fn/changed-paths paths
+                           paths (assoc :seon.fn/changed-paths paths
                                         :seon.source/change-classes classes))})]
             (report-source-progress! "branch publication complete")
             result)

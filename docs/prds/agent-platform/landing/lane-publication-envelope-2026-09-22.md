@@ -12,12 +12,17 @@ own JVMs and are not evidence of default adoption or browser paint.
 
 ## Scope and held seams
 
-- **Row 2 held:** `build-manifest`, `database-manifest`, `manifest-data`,
-  `artifact-by-path`, `manifest-function-symbols`, `replace-manifest-artifacts`
-  and `published-index-rows` are in `src/seon/fn.clj`, expressly excluded from
-  this assignment. That file has concurrent edits. Manifest retirement cannot
-  leave those readers behind. An ownership clarification was requested; no
-  additional permission is inferred from silence.
+- **Row 2 file path converted:** `full-source-refresh!` carries analyzed rows,
+  reads prior declarations directly by file, and reconciles removed identities
+  without reconstructing or comparing manifests. `artifact-by-path`,
+  `manifest-function-symbols`, and `replace-manifest-artifacts` are deleted.
+  `build-manifest` is now a B4 export adapter over the same analysis owner.
+  `database-manifest`, `manifest-data`, `published-index-rows`, the manifest
+  request/export keys and their schemas remain for B4: `src/seon/test/runner.clj`
+  `program-manifest`, `src/seon/test/cache.clj` `manifest`, and
+  `test/seon/test_support.clj` `source-manifest`. Their final retirement belongs
+  with B4 commit 4, as authorized by the follow-up. No schema resource changes
+  in this row; no stale schema removal is claimed.
 - **Row 6 aggregate retirement held:** `src/seon/test.clj` still finds its
   publication row by `:seon.source/digest` (884), pulls both aggregate members
   (890), and reads input digests (906, 1372, 2160). `test/runner.clj` reads the
@@ -253,3 +258,43 @@ reset/adopted by this lane, and hook publication remains paused.
 The remaining work is rows 2/7 and row 6 aggregate retirement after their held
 file seams are released, then the end-to-end adoption clock and a healthy cold
 boot. This landing does not satisfy the overall sub-second leaf-edit goal.
+
+## Released fn ownership: row 2 continuation
+
+The release at `39a337013` was used only in manifest readers and their index
+consumers. The reverse walk and declaration analyzer were not edited.
+The live scratch MCP probe returned `{:connection? true :manifest? true}` in
+2 ms before replacement. On the row-2 scratch JVM, resolving
+`seon.fn/analyze-rows` returned true in 2 ms. Boot and the measured file requests
+then exercised that owner, rather than merely loading edited source.
+
+The committed measurement script needed its storage observer updated from the
+removed `seon.cluster.boot/running-instances` reference to
+`seon.operator.runtime/running-instances`. Its optional retention sweep refuses
+because the unconfigured `head2` fork lacks snapshot-window-ms; this is recorded
+separately and no longer prevents clock completion or shutdown. Live compile
+under installed contracts also refuses; the earlier unarmed 90-namespace compile
+artifact remains the compile-cost evidence.
+
+| Row 2 clock | Before ms | After ms | Before Vars | After Vars |
+|---|---:|---:|---:|---:|
+| explicit no-change | 307.452 | 160.004 | 0 | 0 |
+| leaf docstring (`my.note`) | 4684.308 | 5285.171 | 3 | 1680 |
+| core docstring (`seon.id`) | 15855.848 | 17076.340 | 1552 | 1554 |
+
+Before and after used isolated HEAD snapshots, with only owned source overlaid
+after. Initial readiness: before 110319.719 ms; after 116265.214 ms. Both reached
+readiness and then logged the foreign root-turn `:malli.core/invalid-schema`
+panic, signature `3b0fee54475a2dcc98b2ffd5bcb195947072c329eb2fcf2662537b3b7c66866d`.
+Neither was chased in this lane. The first baseline clock overlapped focused-test
+startup; the table uses the repeated baseline, after that runner exited.
+These are observations, not a speedup claim. Broad arming and B4 aggregates remain.
+
+The focused scratch-root run `0db0f34a5d33` recorded 24 executed, 0 reused,
+43 assertions, 0 failures, 19 errors. Every error is the same foreign canonical
+fixture acquisition refusal: removed `seon.search/ping-map-fn?` in the 67-commit-old
+published base. Three-question triage: these tests exercise surviving behavior;
+this is neither an obsolete assertion to delete nor a failure in the changed
+publication owner. The new row-reconciliation regression therefore remains
+unproven by the installed test fixture. Real scratch boot and successful leaf/core
+adoption are separate positive evidence. No suite or cold gate was run.

@@ -20,7 +20,13 @@
                                             (not (identical? (get before v) @v)))]
                              (symbol (str (ns-name (:ns (meta v))))
                                      (str (:name (meta v))))))]
-         {:vars-rearmed (count changed) :symbols (vec (sort changed))})
+         {:vars-rearmed (count changed) :symbols (vec (sort changed))
+          :namespaces-reloaded
+          (vec (sort (into #{} (keep (fn [[v original]]
+                                      (when (and (bound? v)
+                                                 (not (identical? (malli.instrument/-f->original original)
+                                                                  (malli.instrument/-f->original @v))))
+                                        (ns-name (:ns (meta v)))))) before)))})
       compile-form
       '(let [database (seon.db/db (seon.cluster.boot/connection "head"))
              namespaces (seon.cluster/development-namespaces database [[:seon.ns/name 'seon.id]])

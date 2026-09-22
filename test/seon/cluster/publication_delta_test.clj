@@ -151,3 +151,38 @@
        (is (some? (:db/id (db/pull (db/db connection) [:db/id] [:seon.fn/sym sym]))))
        (is (contains? selected [:seon.fn/sym sym])
            "The function refers to the changed key through its published input schema.")))))
+
+(deftest ^{:seon.test/long "Two selected-file analyses and canonical reconciliation on a fixture branch."
+           :seon.test/long-ms 15000}
+  selected-rows-reconcile-without-a-manifest
+  (let [root (io/file "tmp" (str "publication-rows-" (id/id)))
+        file (io/file root "src/sample/rows.clj")
+        request {:seon.fn/root (.getCanonicalPath root) :seon.fn/roots ["src"]}
+        path "src/sample/rows.clj"]
+    (io/make-parents file)
+    (try
+      (spit file "(ns sample.rows)\n(defn retained [] 1)\n(defn removed [] 2)\n")
+      (support/with-database
+       (fn [connection]
+         (support/transacted! connection (seon.fn/analyze-rows request))
+         (let [before (db/db connection)
+               projection (db/carried-projection before)]
+           (is (= 'sample.rows/removed
+                  (:seon.fn/sym (db/pull before [:seon.fn/sym]
+                                        [:seon.fn/sym 'sample.rows/removed]))))
+           (spit file "(ns sample.rows)\n(defn retained [] 1)\n")
+           (let [selected (assoc request :seon.source/previous-database before
+                                         :seon.fn/changed-paths #{path})
+                 analyzed (seon.fn/analyze-rows selected)
+                 result (schema/call-with-projection
+                         projection
+                         #(seon.fn/index! (assoc selected :seon.db/connection connection
+                                                       :seon.schema/projection projection
+                                                       :seon.program/rows analyzed)))]
+             (is (nil? (:seon.error/at result)) (pr-str result))
+             (is (= 'sample.rows/retained
+                    (:seon.fn/sym (db/pull (db/db connection) [:seon.fn/sym]
+                                          [:seon.fn/sym 'sample.rows/retained]))))
+             (is (nil? (:seon.fn/sym (db/pull (db/db connection) [:seon.fn/sym]
+                                            [:seon.fn/sym 'sample.rows/removed]))))))))
+      (finally (support/delete-recursively! root)))))

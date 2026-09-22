@@ -188,29 +188,31 @@
                    (functions/build-artifact
                     {:seon.fn/source-path (.getCanonicalPath file)
                      :seon.fn.file/first-party-functions
-                     (functions/manifest-function-symbols manifest)}))]
+                     (into [] (keep :seon.fn/sym) (functions/rows {:seon.fn/manifest manifest}))}))]
     (.mkdirs root)
     (try
       (spit target-file "(ns reset.publication.target) (defn target [] true)")
       (spit caller-file "(ns reset.publication.caller (:require [reset.publication.target :as target])) (defn caller [] (target/target))")
       (let [before (artifact target-file)
             caller (artifact caller-file)
-            baseline (functions/replace-manifest-artifacts manifest [before caller])]
+            baseline (into (functions/rows {:seon.fn/manifest manifest})
+                           (concat (:seon.fn.file/rows before) (:seon.fn.file/rows caller)))]
         (#'source-test/with-store
          (fn [opened]
            (let [published (#'source-test/publish
                             opened (id/digest 64 [:baseline]) 'seon.cluster/populate-source!
-                            {:seon.fn/manifest baseline})
+                            {:seon.program/rows baseline})
                  _ (spit target-file "(ns reset.publication.target)")
                  after (artifact target-file)
                  plan (functions/plan-file-change (assoc {:seon.fn.change/status :modified
                         :seon.fn.change/current-artifact before
                         :seon.fn.change/desired-artifact after} :seon.schema/projection (seon.schema/handed-projection)))
-                 changed (functions/replace-manifest-artifacts baseline [after])
+                 changed (into (vec (remove (set (:seon.fn.file/rows before)) baseline))
+                               (:seon.fn.file/rows after))
                  refusal (support/refusal-data
                           #(#'source-test/publish
                             opened (id/digest 64 [:removed]) 'seon.cluster/populate-source!
-                            {:seon.fn/manifest changed}))]
+                            {:seon.program/rows changed}))]
              (is (= :full-rebuild (:seon.fn.change/action plan)))
              (is (= :seon.cluster.source/source-deletion-refused (:seon.cluster.source/rule refusal))
                  (pr-str refusal))
