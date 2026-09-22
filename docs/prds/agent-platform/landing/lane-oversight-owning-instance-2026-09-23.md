@@ -327,4 +327,6 @@ run.** The fixture blocker stated above still stands.
 | probe3 JVM, final run | 17.3 s | projection build 678 ms; direct calls well under 1 s; the rest is JVM start and load |
 | probe3 JVM, two failed runs (probe errors: `:simple-symbol` is no Malli type; a traversal bug) | 23.0 s, 18.8 s | JVM start and load before the failure |
 | tools.reader failure-type probe (bare `clojure -M`) | 1.7 s | JVM start |
-| HEAD load check | recorded below | |
+| HEAD `9c0ecae86` load check (`git archive`, fresh `clojure -M`) | 22.6 s | JVM start and load; printed `:loaded 17 seon.oversight` |
+
+Commit: `9c0ecae86`. HEAD `9c0ecae86` loads. RESET NEEDED: no.
