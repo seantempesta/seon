@@ -23,6 +23,28 @@
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]))
 
+(defn join-launcher-errors!
+  "Join the work launcher graph's error channel into the cluster fault channel.
+
+  The launcher starts before the cluster graph, so its `::flow/error` outputs
+  (a throwing background submission) wait in Flow's own sliding error channel
+  (`core.async flow/impl.clj:101-102`) until this join drains them into the one
+  committer inbox, exactly as every agent graph's join does. Untagged: a
+  launcher fault is no run's fault, and its `::flow/pid` names the launcher.
+  Returns the join's completion channel."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.flow/work-launcher
+                [:map [:seon.flow/started :seon.flow/started]]]
+               [:seon.flow/error-fanout
+                [:map [:seon.flow/fault-channel :seon.flow/channel]]]]]
+    :seon.flow/channel]}
+  [instance]
+  (flow/join-error-fanout!
+   {::flow/started (get-in instance [::flow/work-launcher ::flow/started])
+    ::flow/fault-channel (get-in instance [::flow/error-fanout ::flow/fault-channel])
+    ::flow/tag {}}))
+
 (defn- stand-cluster-runtime!
   {:malli/schema
    [:=> [:cat :seon.boot/instance [:=> [:cat :seon.boot/instance] :seon.boot/instance]
@@ -91,6 +113,7 @@
            instance (publish!
                      (merge instance
                             (cluster/arm-agents! instance connection cluster-name)))
+           _ (join-launcher-errors! instance)
            dials (config/effective (db/db connection) cluster-name)]
        (publish! (cluster/serve! instance dials))))))
 
