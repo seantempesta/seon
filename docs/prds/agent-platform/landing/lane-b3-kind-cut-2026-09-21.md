@@ -6,7 +6,7 @@ created: 2026-09-21
 
 # B3 kind/class cut — landing evidence
 
-**Kind/class and caller conversion complete; final namespace verification in progress.**
+**Kind/class caller conversion is committed; verification remains red.**
 The requested scan is empty. Seven earlier-contract debt boundaries are listed below.
 No final green or live default settlement claim is made.
 
@@ -505,8 +505,9 @@ prove a no-forms reply settles live. This lane does not stop or reset default.
 Fixture success does not prove the parked live graph recovered.
 
 Slices B/C now have zero kind/class scan results. Class metadata and its obsolete
-schema test are removed; seven remaining debt comments name earlier generic
-contracts explicitly. The final namespace matrix is being executed below.
+schema test are removed; seven requested-scan debt comments and 22 pre-existing
+comments with other spellings name earlier generic contracts explicitly.
+The completed namespace request matrix and its execution limits are below.
 Foreign documents and every pre-existing untracked file are preserved. Earlier
 foreign test-selection edits were excluded from the baseline snapshot and have
 since landed independently.
@@ -1172,7 +1173,7 @@ refusal has base attribution. Deadline scripts read the declared subprocess phas
 
 A complete-definition audit found two missed private source contracts,
 `db/dependency-error` and `schema.edn/schema-resource-paths`; both are now declared.
-All 36 changed test helpers now have complete contracts. Their polymorphic slots
+All 42 test helpers that gained contracts in this cut now have complete contracts. Their polymorphic slots
 are callback results, arbitrary evaluated values or candidate syntax, using the
 existing schema/value declaration; no new predicate or `:any` was introduced.
 The existing optional analyzed program-row position and core.async per-port output
@@ -1242,6 +1243,15 @@ publication measurement script, which this lane did not run.
 | `f111797c` | 8.107959 | SOURCE_BATCH | converged: {:seon.source/commit-id #uuid "6ab220e1-5614-526f-aa02-5542eb1e24d8", :seon.boot/cluster-name "default"} |
 | `dbf8f245` | 7.142301 | SOURCE_BATCH | converged: {:seon.source/commit-id #uuid "6ab22104-004a-5a53-aee4-d197f74e3e90", :seon.boot/cluster-name "default"} |
 | `ae3eb1c5` | 7.279059 | SOURCE_BATCH | converged: {:seon.source/commit-id #uuid "6ab221cb-b990-5c2c-9268-3560caa13ed7", :seon.boot/cluster-name "default"} |
+| `916b23c3` | 31.801917 | SOURCE_BATCH | >10 s finding; converged: {:seon.source/commit-id #uuid "6ab22300-1b3f-5b7f-9948-1b37cfdd3df0", :seon.boot/cluster-name "default"} |
+| `02b1c3c3` | 25.008774 | SOURCE_BATCH | >10 s finding; converged: {:seon.source/commit-id #uuid "6ab22412-aff8-5838-a568-90beacfa776e", :seon.boot/cluster-name "default"} |
+| `9b2afa52` | 20.694582 | SOURCE_BATCH | >10 s finding; converged: {:seon.source/commit-id #uuid "6ab2245e-4a0e-576b-a293-72ab16d6fb00", :seon.boot/cluster-name "default"} |
+| `7dff5173` | 9.044944 | SOURCE_BATCH | converged: {:seon.source/commit-id #uuid "6ab224ae-4d9a-5c14-b393-46517f4cc70f", :seon.boot/cluster-name "default"} |
+| `08d33b04` | 10.027706 | SOURCE_BATCH | >10 s finding; converged: {:seon.source/commit-id #uuid "6ab2258a-3319-599e-81fc-84f5f9e78dd7", :seon.boot/cluster-name "default"} |
+| `4fda130d` | 9.734499 | SOURCE_BATCH | converged: {:seon.source/commit-id #uuid "6ab226b7-75bb-57ad-b3e8-8e004961523a", :seon.boot/cluster-name "default"} |
+| `ea6f1262` | 11.032264 | SOURCE_BATCH | >10 s finding; converged: {:seon.source/commit-id #uuid "6ab22879-bd8d-5819-90a8-f19748a0a6d8", :seon.boot/cluster-name "default"} |
+| `c82c26ad` | 13.093882 | SOURCE_BATCH | >10 s finding; converged: {:seon.source/commit-id #uuid "6ab228cd-0de4-5305-9f8f-083fbf917363", :seon.boot/cluster-name "default"} |
+| `69467890` | 11.533799 | SOURCE_BATCH | >10 s finding; converged: {:seon.source/commit-id #uuid "6ab228e1-e486-55ab-b26b-f5119d838f3e", :seon.boot/cluster-name "default"} |
 
 ### Current retained member-condition inventory
 
@@ -1653,48 +1663,269 @@ No unconverted kind caller is hidden by limiting the inventory to a name pattern
 | `src/seon/turn.clj:3291` | `gate-function-install` | `:seon.fn/namespace-unresolvable` | `when` selects the producer’s declared refusal or its success continuation. |
 | `src/seon/turn.clj:3346` | `gate-function-install` | `:seon.test.accretion/install?` | `if` selects the producer’s declared refusal or its success continuation. |
 | `src/seon/turn.clj:3353` | `gate-function-install` | `:seon.fn/sym`, `:seon.program/row` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:3791` | `settle-batch-refusal!` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `when` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:3833` | `settle!` | `:seon.turn.loop/phase-failed` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:3850` | `settle!` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value`, `:seon.turn.loop/phase-failed` | `if-not` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:3860` | `settle!` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value`, `:seon.turn.loop/phase-failed` | `when` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:3925` | `attempt-evidence` | `:seon.ai/interrupted-text-count` | `when` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4122` | `record-attempt!` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4244` | `open-turn` | `:seon.cluster.reply/no-forms`, `:seon.config/error-key`, `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.walk/missing-lookup`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value`, `:seon.turn/generated-read-attributes`, `:seon.turn/rule` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4263` | `open-turn` | `:seon.cluster.reply/no-forms`, `:seon.config/error-key`, `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.walk/missing-lookup`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value`, `:seon.turn/generated-read-attributes`, `:seon.turn/rule` | `cond` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4357` | `call-turn` | `:seon.config.ai/no-provider` | `when-not` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4404` | `call-turn` | `:seon.config.ai/no-provider` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4436` | `call-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `cond` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4465` | `call-turn` | `:seon.config.ai/no-provider` | `when-not` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4480` | `call-turn` | `:seon.cluster.prompt/budget-exceeded`, `:seon.cluster.prompt/missing-cluster`, `:seon.cluster.prompt/missing-config`, `:seon.cluster.prompt/no-trigger`, `:seon.cluster.prompt/refused`, `:seon.config/error-key`, `:seon.config/missing-effective`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.web/function-unavailable`, `:seon.render.web/refused-member`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value`, `:seon.turn.loop/phase-failed`, `:seon.turn/missing-opening-datom` | `when` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4510` | `call-turn` | `:seon.config.ai/no-provider` | `when-not` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4518` | `call-turn` | `:seon.db/invalid-read`, `:seon.schema/expected-value`, `:seon.turn/missing-opening-datom` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4531` | `call-turn` | `:seon.config.ai/no-provider` | `cond` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4534` | `call-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `cond` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4564` | `call-turn` | `:seon.ai/exhausted-finish-reason`, `:seon.ai/extra-body-edn`, `:seon.ai/interrupted-text-count`, `:seon.ai/missing-credential-variable`, `:seon.ai/protected-keys`, `:seon.ai/provider-error`, `:seon.ai/timeout`, `:seon.ai/transport-failure`, `:seon.ai/unanswered-reasoning-count`, `:seon.ai/unreadable-response-member` | `when` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4603` | `call-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `cond` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4660` | `call-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4691` | `disposition-rule-error` | `:seon.sci.admit/value` | `when` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4782` | `evaluate-sources` | `:seon.turn/invalid-disposition-source` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4795` | `evaluate-sources` | `:seon.cluster.eval/author`, `:seon.turn.work/situation`, `:seon.turn/id` | `when` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4809` | `evaluate-sources` | `:my.turn/disposition`, `:seon.sci.admit/value` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4844` | `preview-sources` | `:seon.cluster.reply/no-forms` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4887` | `resume-turn` | `:seon.turn.loop/phase-failed` | `if-let` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4887` | `resume-turn` | `:seon.turn.loop/phase-failed` | `when` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4935` | `resume-turn` | `:seon.turn.loop/phase-failed` | `cond` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:4938` | `resume-turn` | `:seon.fn/namespace-unresolvable`, `:seon.turn.loop/phase-failed` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5018` | `resume-turn` | `:seon.turn.loop/settled`, `:seon.turn.loop/undisposed?` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5039` | `close-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5081` | `generate-turn` | `:seon.cluster.reply/no-forms`, `:seon.config/error-key`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.walk/missing-lookup`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5094` | `generate-turn` | `:seon.cluster.reply/no-forms`, `:seon.config/error-key`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.walk/missing-lookup`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value`, `:seon.turn.loop/phase-failed` | `cond` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5121` | `generate-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5155` | `generate-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5230` | `turn` | `:seon.agent/id`, `:seon.db/connection`, `:seon.issue/agent`, `:seon.turn.loop/outcome`, `:seon.turn.work/situation` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5238` | `turn` | `:seon.cluster.reply/no-forms`, `:seon.config/error-key`, `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.walk/missing-lookup`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value`, `:seon.turn/generated-read-attributes`, `:seon.turn/rule` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5254` | `turn` | `:seon.sci.eval/projection-state` | `if-let` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5550` | `step` | `::flow/stop` | `when` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5559` | `step` | `:seon.turn.loop/parked` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5585` | `step` | `:seon.turn/id` | `when-let` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5595` | `step` | `:seon.turn/id` | `when-let` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5612` | `step` | `:seon.cluster.wake/armer-channel`, `:seon.turn.loop/outcome` | `when` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5654` | `step` | `:seon.agent/ready` | `if` selects the producer’s declared refusal or its success continuation. |
-| `src/seon/turn.clj:5657` | `step` | `:seon.agent/turn-backstop-state` | `when-let` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:3794` | `settle-batch-refusal!` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `when` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:3836` | `settle!` | `:seon.turn.loop/phase-failed` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:3853` | `settle!` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value`, `:seon.turn.loop/phase-failed` | `if-not` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:3863` | `settle!` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value`, `:seon.turn.loop/phase-failed` | `when` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:3928` | `attempt-evidence` | `:seon.ai/interrupted-text-count` | `when` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4125` | `record-attempt!` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4247` | `open-turn` | `:seon.cluster.reply/no-forms`, `:seon.config/error-key`, `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.walk/missing-lookup`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value`, `:seon.turn/generated-read-attributes`, `:seon.turn/rule` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4266` | `open-turn` | `:seon.cluster.reply/no-forms`, `:seon.config/error-key`, `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.walk/missing-lookup`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value`, `:seon.turn/generated-read-attributes`, `:seon.turn/rule` | `cond` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4360` | `call-turn` | `:seon.config.ai/no-provider` | `when-not` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4407` | `call-turn` | `:seon.config.ai/no-provider` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4439` | `call-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `cond` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4468` | `call-turn` | `:seon.config.ai/no-provider` | `when-not` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4483` | `call-turn` | `:seon.cluster.prompt/budget-exceeded`, `:seon.cluster.prompt/missing-cluster`, `:seon.cluster.prompt/missing-config`, `:seon.cluster.prompt/no-trigger`, `:seon.cluster.prompt/refused`, `:seon.config/error-key`, `:seon.config/missing-effective`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.web/function-unavailable`, `:seon.render.web/refused-member`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value`, `:seon.turn.loop/phase-failed`, `:seon.turn/missing-opening-datom` | `when` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4513` | `call-turn` | `:seon.config.ai/no-provider` | `when-not` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4521` | `call-turn` | `:seon.db/invalid-read`, `:seon.schema/expected-value`, `:seon.turn/missing-opening-datom` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4534` | `call-turn` | `:seon.config.ai/no-provider` | `cond` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4537` | `call-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `cond` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4567` | `call-turn` | `:seon.ai/exhausted-finish-reason`, `:seon.ai/extra-body-edn`, `:seon.ai/interrupted-text-count`, `:seon.ai/missing-credential-variable`, `:seon.ai/protected-keys`, `:seon.ai/provider-error`, `:seon.ai/timeout`, `:seon.ai/transport-failure`, `:seon.ai/unanswered-reasoning-count`, `:seon.ai/unreadable-response-member` | `when` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4606` | `call-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `cond` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4663` | `call-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4694` | `disposition-rule-error` | `:seon.sci.admit/value` | `when` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4785` | `evaluate-sources` | `:seon.turn/invalid-disposition-source` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4798` | `evaluate-sources` | `:seon.cluster.eval/author`, `:seon.turn.work/situation`, `:seon.turn/id` | `when` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4812` | `evaluate-sources` | `:my.turn/disposition`, `:seon.sci.admit/value` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4847` | `preview-sources` | `:seon.cluster.reply/no-forms` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4890` | `resume-turn` | `:seon.turn.loop/phase-failed` | `if-let` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4890` | `resume-turn` | `:seon.turn.loop/phase-failed` | `when` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4938` | `resume-turn` | `:seon.turn.loop/phase-failed` | `cond` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:4941` | `resume-turn` | `:seon.fn/namespace-unresolvable`, `:seon.turn.loop/phase-failed` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5021` | `resume-turn` | `:seon.turn.loop/settled`, `:seon.turn.loop/undisposed?` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5042` | `close-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5084` | `generate-turn` | `:seon.cluster.reply/no-forms`, `:seon.config/error-key`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.walk/missing-lookup`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5097` | `generate-turn` | `:seon.cluster.reply/no-forms`, `:seon.config/error-key`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.walk/missing-lookup`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value`, `:seon.turn.loop/phase-failed` | `cond` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5124` | `generate-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5158` | `generate-turn` | `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5233` | `turn` | `:seon.agent/id`, `:seon.db/connection`, `:seon.issue/agent`, `:seon.turn.loop/outcome`, `:seon.turn.work/situation` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5241` | `turn` | `:seon.cluster.reply/no-forms`, `:seon.config/error-key`, `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.render.transcript/refused-member`, `:seon.render.unknown/reason`, `:seon.render.walk/missing-lookup`, `:seon.render/candidates`, `:seon.render/invalid-output`, `:seon.render/refused-member`, `:seon.schema/expected-value`, `:seon.turn/generated-read-attributes`, `:seon.turn/rule` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5257` | `turn` | `:seon.sci.eval/projection-state` | `if-let` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5553` | `step` | `::flow/stop` | `when` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5562` | `step` | `:seon.turn.loop/parked` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5588` | `step` | `:seon.turn/id` | `when-let` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5598` | `step` | `:seon.turn/id` | `when-let` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5615` | `step` | `:seon.cluster.wake/armer-channel`, `:seon.turn.loop/outcome` | `when` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5657` | `step` | `:seon.agent/ready` | `if` selects the producer’s declared refusal or its success continuation. |
+| `src/seon/turn.clj:5660` | `step` | `:seon.agent/turn-backstop-state` | `when-let` selects the producer’s declared refusal or its success continuation. |
+
+## Final namespace request matrix and proof limits
+
+All code changes are committed through `275c59ff3`. The exact requested kind/class
+scan printed nothing (no-match exit 1); the broader scan including resources also
+found no retired property. The requested debt scan reports seven lines in five
+files, all named above with their callees. The complete-definition audit found no
+touched function missing its Malli contract. The deleted class-schema mechanism
+test is absent. No default reset/restart, paid provider call, worktree, cold gate,
+or another lane's session was used.
+
+The last source-owner request selected 71 tests. `seon.context-test`,
+`seon.plan-test`, `seon.program-test`, `seon.test.runner-test`, and
+`seon.dev.issues-test` reached their namespace end events. The effect namespace
+completed 14 tests; `request-commits-before-io-dispatch-and-settles-once` began but
+did not end. The runner reached its no-progress bound and exited 124, with no
+final tally or recorded result. Later effect tests were not reached. Its exact
+writer logging failure is recorded in the existing
+[writer logging issue](../../../seon/issues/expected-refusal-logs-raw-datom-error-twice.md).
+The original write refusal is unknown: the logger threw before reporting it or
+delivering its callback. This dependency boundary was not modified.
+
+The table counts timestamped test events, excluding the liveness diagnostic's
+copy of the last progress message. Began/ended are event counts, not assertion
+counts; the request-level assertion tallies are recorded above. Nested intentional
+runner fixtures are observations inside their parent tests, not independently
+selected green tests. `yes` means the namespace ended, **not that it passed or
+its result was recorded**. A zero-failure namespace within a refused/aborted
+request does not supply recorded green evidence. Log names are historical request
+identifiers; the relevant observations are preserved here before owned scratch
+cleanup.
+
+| Namespace | Latest request log | Began / ended | Fail / error events | Namespace ended |
+|---|---|---:|---:|---|
+| `my.agent-test` | `tmp/b3-runtime.log` | 2 / 2 | 2 / 1 | yes |
+| `my.note-test` | `tmp/b3-values.log` | 4 / 4 | 18 / 0 | yes |
+| `my.plan-test` | `tmp/b3-c-render-correction.log` | 22 / 22 | 11 / 0 | yes |
+| `my.program-test` | `tmp/b3-debt-program.log` | 5 / 5 | 2 / 0 | yes |
+| `my.turn-test` | `tmp/b3-values-final.log` | 6 / 6 | 3 / 0 | yes |
+| `seon.adoption-diagnostic-test` | `tmp/b3-matrix-1.log` | 2 / 2 | 1 / 1 | yes |
+| `seon.adoption-margin-test` | `tmp/b3-matrix-1.log` | 1 / 1 | 0 / 0 | yes |
+| `seon.agent-call-edges-test` | `tmp/b3-matrix-1.log` | 1 / 1 | 1 / 1 | yes |
+| `seon.agent-situation-test` | `tmp/b3-matrix-1.log` | 2 / 2 | 0 / 1 | yes |
+| `seon.bounded-boundary-census-test` | `tmp/b3-matrix-1.log` | 4 / 4 | 1 / 0 | yes |
+| `seon.call-preparation-test` | `tmp/b3-debt-sci.log` | 17 / 17 | 1 / 4 | yes |
+| `seon.classification-test` | `tmp/b3-matrix-1.log` | 4 / 4 | 3 / 0 | yes |
+| `seon.cluster-test` | `tmp/b3-matrix-1.log` | 11 / 11 | 0 / 0 | yes |
+| `seon.cluster.agent-arming-test` | `tmp/b3-matrix-1.log` | 2 / 2 | 2 / 1 | yes |
+| `seon.cluster.agent-identity-test` | `tmp/b3-matrix-1.log` | 3 / 3 | 1 / 0 | yes |
+| `seon.cluster.agent-namespace-test` | `tmp/b3-matrix-1.log` | 4 / 4 | 0 / 0 | yes |
+| `seon.cluster.agent-test` | `tmp/b3-matrix-1.log` | 22 / 22 | 21 / 10 | yes |
+| `seon.cluster.armed-test` | `tmp/b3-matrix-1.log` | 6 / 6 | 14 / 3 | yes |
+| `seon.cluster.boot-test` | `tmp/b3-operations.log` | 8 / 8 | 0 / 0 | yes |
+| `seon.cluster.evaluate-sources-test` | `tmp/b3-matrix-1.log` | 2 / 2 | 0 / 2 | yes |
+| `seon.cluster.export-test` | `tmp/b3-matrix-1.log` | 6 / 5 | 0 / 0 | yes |
+| `seon.cluster.instruction-test` | `tmp/b3-matrix-1.log` | 4 / 4 | 1 / 0 | yes |
+| `seon.cluster.mcp-test` | `tmp/b3-matrix-2.log` | 12 / 12 | 6 / 1 | yes |
+| `seon.cluster.message-assignment-test` | `tmp/b3-matrix-2.log` | 4 / 4 | 0 / 0 | yes |
+| `seon.cluster.message-test` | `tmp/b3-matrix-core.log` | 20 / 20 | 6 / 1 | yes |
+| `seon.cluster.problem-routing-test` | `tmp/b3-matrix-2.log` | 4 / 4 | 0 / 0 | yes |
+| `seon.cluster.program-restart-test` | `tmp/b3-matrix-2.log` | 1 / 1 | 1 / 1 | yes |
+| `seon.cluster.prompt-test` | `tmp/b3-matrix-2.log` | 14 / 14 | 0 / 11 | yes |
+| `seon.cluster.registry-test` | `tmp/b3-matrix-2.log` | 12 / 12 | 0 / 0 | yes |
+| `seon.cluster.reply-test` | `tmp/b3-matrix-core.log` | 18 / 18 | 0 / 0 | yes |
+| `seon.cluster.resume-artifact-routing-test` | `tmp/b3-matrix-2.log` | 1 / 1 | 0 / 1 | yes |
+| `seon.cluster.source-test` | `tmp/b3-matrix-2.log` | 9 / 9 | 7 / 0 | yes |
+| `seon.cluster.status-test` | `tmp/b3-matrix-2.log` | 3 / 3 | 12 / 0 | yes |
+| `seon.cluster.store-test` | `tmp/b3-operations.log` | 18 / 18 | 0 / 0 | yes |
+| `seon.cluster.store-transact-test` | `tmp/b3-matrix-2.log` | 8 / 8 | 5 / 2 | yes |
+| `seon.cluster.turn-test` | `tmp/b3-matrix-8.log` | 60 / 60 | 33 / 56 | yes |
+| `seon.cluster.wake-test` | `tmp/b3-matrix-2.log` | 17 / 17 | 12 / 8 | yes |
+| `seon.concurrency-independence-test` | `tmp/b3-matrix-2.log` | 2 / 2 | 2 / 1 | yes |
+| `seon.concurrency-streams-test` | `tmp/b3-matrix-2.log` | 2 / 2 | 7 / 1 | yes |
+| `seon.concurrency-test` | `tmp/b3-matrix-2.log` | 2 / 2 | 45 / 1 | yes |
+| `seon.context-test` | `tmp/b3-matrix-7.log` | 1 / 1 | 0 / 1 | yes |
+| `seon.contracts-install-test` | `tmp/b3-matrix-2.log` | 1 / 1 | 11 / 0 | yes |
+| `seon.contracts-plan-test` | `tmp/b3-matrix-3.log` | 2 / 2 | 11 / 0 | yes |
+| `seon.custody-stability-test` | `tmp/b3-matrix-3.log` | 5 / 5 | 6 / 0 | yes |
+| `seon.data-shapes-test` | `tmp/b3-matrix-3.log` | 9 / 9 | 1 / 3 | yes |
+| `seon.db-test` | `tmp/b3-matrix-core.log` | 63 / 63 | 2 / 1 | yes |
+| `seon.db.declaration-population-test` | `tmp/b3-matrix-3.log` | 1 / 1 | 0 / 0 | yes |
+| `seon.dev.changed-test-test` | `tmp/b3-c-schema.log` | 6 / 6 | 8 / 0 | yes |
+| `seon.dev.dependency-cache-test` | `tmp/b3-c-schema.log` | 4 / 4 | 0 / 2 | yes |
+| `seon.dev.edit-feedback-test` | `tmp/b3-c-schema.log` | 15 / 15 | 0 / 16 | yes |
+| `seon.dev.issues-test` | `tmp/b3-matrix-7.log` | 1 / 1 | 0 / 0 | yes |
+| `seon.edit.jvm-test` | `tmp/b3-matrix-3.log` | 3 / 3 | 0 / 0 | yes |
+| `seon.effect-test` | `tmp/b3-matrix-7.log` | 15 / 14 | 4 / 1 | NO |
+| `seon.error-test` | `tmp/b3-c-schema.log` | 47 / 47 | 4 / 2 | yes |
+| `seon.eval-test` | `tmp/b3-runtime.log` | 1 / 1 | 0 / 0 | yes |
+| `seon.eval.drive-test` | `tmp/b3-runtime.log` | 2 / 2 | 0 / 0 | yes |
+| `seon.fn-test` | `tmp/b3-matrix-core.log` | 66 / 66 | 10 / 5 | yes |
+| `seon.fn.analyzer-test` | `tmp/b3-schema-group.log` | 8 / 8 | 0 / 0 | yes |
+| `seon.fn.publication-signature-test` | `tmp/b3-matrix-3.log` | 2 / 2 | 0 / 0 | yes |
+| `seon.fn.publication-test` | `tmp/b3-matrix-3.log` | 3 / 3 | 1 / 2 | yes |
+| `seon.fn.schema-shape-test` | `tmp/b3-schema-group.log` | 7 / 7 | 0 / 0 | yes |
+| `seon.fs-test` | `tmp/b3-values.log` | 3 / 3 | 0 / 0 | yes |
+| `seon.fs.jvm-test` | `tmp/b3-matrix-3.log` | 11 / 11 | 0 / 0 | yes |
+| `seon.help-test` | `tmp/b3-matrix-3.log` | 1 / 1 | 1 / 1 | yes |
+| `seon.help-trial-test` | `tmp/b3-matrix-3.log` | 2 / 2 | 5 / 1 | yes |
+| `seon.html-views-test` | `tmp/b3-matrix-3.log` | 11 / 11 | 10 / 3 | yes |
+| `seon.issue-test` | `tmp/b3-values.log` | 10 / 10 | 15 / 3 | yes |
+| `seon.issue.detect-test` | `tmp/b3-values-correction.log` | 5 / 5 | 18 / 5 | yes |
+| `seon.loop-proof-test` | `tmp/b3-matrix-3.log` | 4 / 4 | 2 / 2 | yes |
+| `seon.mcp-test` | `tmp/b3-matrix-3.log` | 1 / 1 | 3 / 0 | yes |
+| `seon.no-provider-test` | `tmp/b3-matrix-3.log` | 2 / 2 | 3 / 1 | yes |
+| `seon.owned-value-test` | `tmp/b3-matrix-3.log` | 5 / 5 | 0 / 0 | yes |
+| `seon.plan-test` | `tmp/b3-matrix-7.log` | 1 / 1 | 0 / 0 | yes |
+| `seon.print-test` | `tmp/b3-values.log` | 18 / 18 | 2 / 0 | yes |
+| `seon.program-test` | `tmp/b3-matrix-7.log` | 27 / 27 | 15 / 1 | yes |
+| `seon.public-contract-test` | `tmp/b3-matrix-4.log` | 6 / 6 | 1 / 0 | yes |
+| `seon.read-evidence-test` | `tmp/b3-matrix-4.log` | 3 / 3 | 3 / 0 | yes |
+| `seon.reconcile-test` | `tmp/b3-matrix-4.log` | 9 / 9 | 4 / 0 | yes |
+| `seon.refusal-grammar-test` | `tmp/b3-matrix-4.log` | 3 / 3 | 0 / 1 | yes |
+| `seon.registry-isolation-test` | `tmp/b3-matrix-4.log` | 1 / 1 | 5 / 1 | yes |
+| `seon.render-coverage-test` | `tmp/b3-matrix-4.log` | 7 / 7 | 41 / 9 | yes |
+| `seon.render-simplification-test` | `tmp/b3-matrix-4.log` | 22 / 22 | 19 / 7 | yes |
+| `seon.render-source-test` | `tmp/b3-matrix-4.log` | 5 / 5 | 4 / 3 | yes |
+| `seon.render.data-test` | `tmp/b3-c-render-correction.log` | 5 / 5 | 2 / 0 | yes |
+| `seon.render.hiccup-test` | `tmp/b3-matrix-4.log` | 19 / 19 | 0 / 0 | yes |
+| `seon.render.transcript-test` | `tmp/b3-c-render-correction.log` | 18 / 18 | 1 / 1 | yes |
+| `seon.render.walk-test` | `tmp/b3-c-render-correction.log` | 4 / 4 | 3 / 0 | yes |
+| `seon.render.web-test` | `tmp/b3-c-render-correction.log` | 59 / 59 | 40 / 14 | yes |
+| `seon.repl-grammar-test` | `tmp/b3-matrix-4.log` | 4 / 4 | 1 / 1 | yes |
+| `seon.repl-parity-test` | `tmp/b3-matrix-4.log` | 69 / 69 | 4 / 0 | yes |
+| `seon.repl-test` | `tmp/b3-matrix-4.log` | 16 / 16 | 0 / 0 | yes |
+| `seon.rereads-test` | `tmp/b3-matrix-4.log` | 2 / 2 | 1 / 2 | yes |
+| `seon.reset-edges-test` | `tmp/b3-matrix-4.log` | 16 / 16 | 4 / 1 | yes |
+| `seon.returned-error-test` | `tmp/b3-matrix-4.log` | 1 / 1 | 2 / 0 | yes |
+| `seon.run4-install-test` | `tmp/b3-matrix-5.log` | 1 / 1 | 9 / 1 | yes |
+| `seon.run4-reader-test` | `tmp/b3-matrix-5.log` | 1 / 1 | 3 / 0 | yes |
+| `seon.run6-stall-test` | `tmp/b3-matrix-5.log` | 1 / 1 | 7 / 2 | yes |
+| `seon.schema-test` | `tmp/b3-c-schema.log` | 39 / 39 | 8 / 0 | yes |
+| `seon.schema-usage-guard-test` | `tmp/b3-matrix-5.log` | 12 / 12 | 6 / 7 | yes |
+| `seon.schema.admission-test` | `tmp/b3-matrix-5.log` | 4 / 4 | 2 / 5 | yes |
+| `seon.schema.datahike-test` | `tmp/b3-final-settle.log` | 14 / 14 | 14 / 1 | yes |
+| `seon.schema.declaration-population-test` | `tmp/b3-matrix-5.log` | 3 / 3 | 1 / 0 | yes |
+| `seon.schema.edn-test` | `tmp/b3-matrix-core.log` | 18 / 18 | 4 / 0 | yes |
+| `seon.schema.program-test` | `tmp/b3-matrix-5.log` | 4 / 4 | 8 / 0 | yes |
+| `seon.sci.eval-test` | `tmp/b3-debt-sci.log` | 74 / 74 | 13 / 4 | yes |
+| `seon.sci.supplied-database-test` | `tmp/b3-matrix-5.log` | 1 / 1 | 0 / 0 | yes |
+| `seon.search-test` | `tmp/b3-operations.log` | 7 / 7 | 5 / 1 | yes |
+| `seon.source-reconciliation-test` | `tmp/b3-matrix-5.log` | 1 / 1 | 9 / 2 | yes |
+| `seon.supplied-documentation-test` | `tmp/b3-matrix-5.log` | 4 / 4 | 0 / 0 | yes |
+| `seon.test-failure-facts-test` | `tmp/b3-matrix-5.log` | 16 / 16 | 16 / 27 | yes |
+| `seon.test-preparation-test` | `tmp/b3-matrix-5.log` | 2 / 2 | 0 / 0 | yes |
+| `seon.test-provenance-test` | `tmp/b3-matrix-5.log` | 3 / 3 | 0 / 4 | yes |
+| `seon.test-reaching-test` | `tmp/b3-matrix-5.log` | 29 / 29 | 33 / 25 | yes |
+| `seon.test-runner-failure-fixture` | `tmp/b3-matrix-6.log` | 5 / 5 | 0 / 0 | yes |
+| `seon.test-runner-test` | `tmp/b3-matrix-6.log` | 33 / 33 | 4 / 1 | yes |
+| `seon.test-support-test` | `tmp/b3-c-schema.log` | 19 / 19 | 1 / 0 | yes |
+| `seon.test.accretion-test` | `tmp/b3-debt-sci.log` | 9 / 9 | 1 / 5 | yes |
+| `seon.test.runner-test` | `tmp/b3-matrix-7.log` | 25 / 25 | 4 / 1 | yes |
+| `seon.transact-feedback-test` | `tmp/b3-matrix-6.log` | 8 / 8 | 8 / 0 | yes |
+| `seon.transaction-result-test` | `tmp/b3-matrix-6.log` | 1 / 1 | 2 / 0 | yes |
+| `seon.turn-continue-test` | `tmp/b3-matrix-8.log` | 9 / 9 | 1 / 9 | yes |
+| `seon.turn-loop-test` | `tmp/b3-matrix-8.log` | 26 / 26 | 10 / 6 | yes |
+| `seon.turn-test` | `tmp/b3-matrix-8.log` | 34 / 34 | 17 / 16 | yes |
+| `seon.turn-work-test` | `tmp/b3-matrix-6.log` | 13 / 13 | 1 / 0 | yes |
+
+`seon.test-runner-integration-test` loaded successfully but its process drills
+were not run, under the explicit lane restrictions documented above. The removed
+`seon.error-class-schema-test` mechanism has no replacement gate. The intentional
+`seon.test-runner-failure-fixture` was exercised through `seon.test-runner-test`.
+
+The mandatory namespace matrix therefore is **not green**. Reply completed its
+18-test request without failure/error events. Turn, error, DB, message and function
+namespaces retain the red observations in the table. The required no-forms test
+failed before, passed at Slice A, and fails on the final cut against the older
+canonical projection. Its evaluation/transaction/proc assertions pass, but its
+required no-forms text assertion does not. A fresh canonical-fixture run is still
+required; the Slice A pass is not substituted for it. The prompt-refusal storage
+regression's Slice A pass likewise does not prove the final live Flow committer.
+
+**RESTART NEEDED:** the orchestrator must replace default, refresh the published
+fixture through its owned preparation, and prove a live no-forms settlement and
+the final regression. The lane has completed the caller conversion, not the
+requested green platform proof. B3 commits 1–3 still own the generic error unions
+identified in the debt tables; body-derived union verification is not claimed.
+
+## Commit/load audit and cleanup
+
+The implementation commits below were path-limited. Every prescribed ten-
+namespace load exited 0. Earlier loads ran in the shared tree with this lane's
+then-uncommitted paths, as noted in the slice evidence; the load after
+`275c59ff3` ran with all source, resources, tests, scripts and bin changes committed.
+The final documentation-only commit is visible in Git history and receives the
+same required load check. No foreign dirty document or pre-existing untracked
+file was staged.
+
+| Commit | Paths | Added lines | Removed lines | Prescribed load exit |
+|---|---:|---:|---:|---:|
+| `aba6d445e` | 1 | 53 | 0 | 0 |
+| `19827d2b0` | 9 | 643 | 93 | 0 |
+| `48b1d0f07` | 8 | 116 | 68 | 0 |
+| `2d066bc36` | 3 | 165 | 78 | 0 |
+| `2c08ae585` | 11 | 117 | 40 | 0 |
+| `07ebd785b` | 11 | 185 | 49 | 0 |
+| `f8861b66e` | 17 | 547 | 209 | 0 |
+| `99e7f802e` | 7 | 169 | 92 | 0 |
+| `683fc9c20` | 8 | 285 | 224 | 0 |
+| `f7f5c36ef` | 39 | 930 | 558 | 0 |
+| `b730705ef` | 8 | 35 | 23 | 0 |
+| `c5abba11d` | 18 | 171 | 119 | 0 |
+| `e7ebe4cfe` | 36 | 357 | 244 | 0 |
+| `a6f926864` | 15 | 64 | 70 | 0 |
+| `bf24eb0a2` | 16 | 153 | 78 | 0 |
+| `79cc46778` | 15 | 54 | 41 | 0 |
+| `3cf197add` | 7 | 38 | 39 | 0 |
+| `275c59ff3` | 2 | 39 | 29 | 0 |
+
+After the final test request exited, process inspection (`ps` with PID, parent,
+start time and executable only) found only the pre-existing default JVM, pid
+56288, started `2026-09-22T00:33:08.873Z`; no lane test/probe JVM remained.
+Every selected snapshot path observed in this lane's request logs was absent.
+The owned `tmp/b3-*` scratch artifacts are removed after their evidence is
+integrated into this note. Shared publication envelopes, shared caches, and all
+foreign/untracked paths are preserved.
+
+Documentation lint repeatedly reported seven stale dependency-gitlink citations
+in other documents/skills. No source publication is claimed for documentation
+edits, and this lane did not rewrite those foreign authorities to silence lint.

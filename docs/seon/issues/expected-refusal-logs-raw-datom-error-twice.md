@@ -111,10 +111,37 @@ Fork `006e634ae955c186619adb5f3868cca29d8c97fb`, pushed to
 `seantempesta/datahike/main`, removes writer invocation/argument serialization.
 `writer.cljc:85–103` preserves exception class/message/stack without exception
 data and retains branch/commit plus supplied cluster/test/run/error identities.
-The callback still carries the identical exception and actual objects. The
+When logging completes, the callback carries the identical exception and actual
+objects; the scalar-evidence observation below identifies a failure before that
+delivery. The
 retired discriminator and message truncation path are deleted. Maintained-fork
 regression: 13 assertions, zero failures/errors, 36.042 ms. This resolves the
 writer's projection dump; the earlier transaction `log/raise` sites remain a
 separate part of this open issue. The full six-test duration comparison is
 currently refused by the stale exported config contract, as recorded in the
 [test-system landing note](../../prds/steward-platform/research/test-system-fork-2026-09-23.md).
+
+## Scalar evidence interrupts writer error delivery — B3 probe, 2026-09-22
+
+At `2026-09-22T07:57:19.686617Z`, the kind-cut lane's selected
+`seon.effect-test/request-commits-before-io-dispatch-and-settles-once` began.
+The supervisor then reported `IllegalArgumentException: find not supported on
+type: java.lang.String`. Its stack identifies `clojure.core/select-keys`,
+`datahike.writer/write-error-log` at `writer.cljc:90`, and the writer catch at
+`:142`. The dependency remains pinned to
+`006e634ae955c186619adb5f3868cca29d8c97fb`.
+
+Source inspection verifies that `write-error-log` applies `select-keys` directly
+to nested `[:seon.error/data :seon.error/diagnostic-evidence]`. The catch invokes
+that logger before putting the original exception on the callback. Scalar
+evidence therefore throws in the error-reporting path before delivery. The
+captured trace does not expose the original transaction refusal; its cause is
+unknown, and this observation does not attribute it to the kind cut.
+
+The earlier selected request at `05:51:28.320381Z` also stopped progressing in
+this same effect test and exited at the runner's no-progress bound. The final
+request's completion and namespace observations are recorded in the
+[B3 landing note](../../prds/agent-platform/landing/lane-b3-kind-cut-2026-09-21.md).
+No dependency code or writer policy was changed by this lane. The logging
+owner's regression needs a scalar diagnostic-evidence case and positive callback
+delivery evidence, in addition to the existing bounded-output cases.
