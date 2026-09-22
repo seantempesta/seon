@@ -56,17 +56,17 @@
                {:min 1}
                [:or :my.message/message :my.message/declination]]],
  :my.message/no-recipient [:= true]
- :my.message/no-recipient-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message request with no recipient"} [:my.message/no-recipient :my.message/no-recipient] [:seon.error/message :seon.error/message]]
+ :my.message/no-recipient-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message request with no recipient"} [:my.message/no-recipient :my.message/no-recipient] [:seon.error/message :seon.error/message]]
  :my.message/no-content [:= true]
- :my.message/no-content-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message request with no content"} [:my.message/no-content :my.message/no-content] [:seon.error/message :seon.error/message]]
+ :my.message/no-content-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message request with no content"} [:my.message/no-content :my.message/no-content] [:seon.error/message :seon.error/message]]
  :my.message/no-about [:= true]
- :my.message/no-about-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message with an invalid subject token"} [:my.message/no-about :my.message/no-about] [:seon.error/message :seon.error/message]]
+ :my.message/no-about-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message with an invalid subject token"} [:my.message/no-about :my.message/no-about] [:seon.error/message :seon.error/message]]
  :my.message/no-assignment [:= true]
- :my.message/no-assignment-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no assignment identity"} [:my.message/no-assignment :my.message/no-assignment] [:seon.error/message :seon.error/message]]
+ :my.message/no-assignment-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no assignment identity"} [:my.message/no-assignment :my.message/no-assignment] [:seon.error/message :seon.error/message]]
  :my.message/no-reason [:= true]
- :my.message/no-reason-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no reason"} [:my.message/no-reason :my.message/no-reason] [:seon.error/message :seon.error/message]]
+ :my.message/no-reason-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no reason"} [:my.message/no-reason :my.message/no-reason] [:seon.error/message :seon.error/message]]
  :my.message/not-found :seon.message/id
- :my.message/not-found-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the message that does not exist"} [:my.message/not-found :my.message/not-found] [:seon.error/message :seon.error/message]]
+ :my.message/not-found-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the message that does not exist"} [:my.message/not-found :my.message/not-found] [:seon.error/message :seon.error/message]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :my.message/error

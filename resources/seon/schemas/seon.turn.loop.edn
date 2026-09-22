@@ -86,7 +86,7 @@
                  :completion :seon.flow/channel,
                  :phase-failed-error
                  [:map
-                  {,
+                  {
                    :seon.render/ai seon.error/render-ai,
                    :seon.render/html seon.error/render-html,
                    :error/message
@@ -140,7 +140,7 @@
                  [:vector :seon.turn.loop/evaluated-source],
                  :terminal-refusal-settlement-refused-error
                  [:map
-                  {,
+                  {
                    :seon.render/ai seon.error/render-ai,
                    :seon.render/html seon.error/render-html,
                    :error/message
@@ -154,7 +154,7 @@
                   :seon.turn.loop/settle-failure-request],
                  :prompt-failed-error
                  [:map
-                  {,
+                  {
                    :seon.render/ai seon.error/render-ai,
                    :seon.render/html seon.error/render-html,
                    :error/message
@@ -182,7 +182,7 @@
                  [:map [:db-after :seon.db/database-value]],
                  :lint-rejected-error
                  [:map
-                  {,
+                  {
                    :seon.render/ai seon.error/render-ai,
                    :seon.render/html seon.error/render-html,
                    :error/message

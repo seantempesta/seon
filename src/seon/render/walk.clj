@@ -1016,7 +1016,7 @@
                          (assoc request :seon.render/value saved
                                         :seon.render/output :seon.render/ai
                                         :seon.render.call/id [lookup]))]
-           (if (or (:seon.render/refused-member rendered) (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/candidates rendered))
+           (if (:seon.render/refused-member rendered)
              (reduced (assoc rendered :seon.render/refused-member :seon.render.history/entries))
              (conj entries
                    {:seon.render.history/call-id [lookup]

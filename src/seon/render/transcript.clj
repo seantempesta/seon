@@ -1594,7 +1594,7 @@
        [:span {:data-show (str "!$" signal)} "As the model saw it"]
        [:span {:data-show (str "$" signal)} "Rendered"]]
       [:div {:class "seon-outline-html" :data-show (str "!$" signal)}
-       (if (and (:seon.error/at html) (:seon.error/layer html) (:seon.error/operation html)) ;; debt: seon.render/render-call via seon.db/error-result declares :seon.error/value, directly or through its result union.
+       (if (:seon.render/refused-member html)
          [:div {:class "seon-emission-error"}
           (error/render-html (assoc request :seon.render/value html))]
          html)]

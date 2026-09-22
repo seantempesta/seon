@@ -111,8 +111,7 @@
         (throw
          (ex-info
           "The file-lock generator could not acquire its fresh lock."
-          {
-           :seon.cluster.store/file-lock-generator-failed (.getPath lock-file)
+          {:seon.cluster.store/file-lock-generator-failed (.getPath lock-file)
            :seon.error/message
            "The file-lock generator could not acquire its fresh lock."
            ::lock-file (.getPath lock-file)})))))

@@ -29,7 +29,7 @@
               :seon.turn.work/situation]],
             :missing-opening-datom-error
             [:map
-             {,
+             {
               :seon.render/ai seon.error/render-ai,
               :seon.render/html seon.error/render-html,
               :error/message

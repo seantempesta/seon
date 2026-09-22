@@ -737,8 +737,7 @@
             ;; node that names no class says so, in the same flat diagnostic
             ;; shape the unknown face uses.
             (literal
-             {
-              :seon.error/message "The object print node names no class."
+             {:seon.error/message "The object print node names no class."
               :seon.error/data
               {::face (::face node)
                ::node-keys (vec (sort-by str (keys node)))}}))))
@@ -784,8 +783,7 @@
   ;; it safe and diagnosable when an old artifact or host caller reaches it.
   (-token sink ::object
           (literal
-           {
-            :seon.error/message "The admitted value has no declared print face."
+           {:seon.error/message "The admitted value has no declared print face."
             :seon.error/data
             {::face (::face node)
              ::node-keys (vec (sort-by str (keys node)))} :seon.print/unknown-face (:?_current-ns_?/face node)})))
@@ -1035,8 +1033,7 @@
       (str "An elision must carry its requery coordinates: "
            ":seon.render.data/path " (literal path)
            " and :seon.render.data/next-offset " (literal next-offset) ".")
-      {
-       ::elision-without-requery-coordinates true
+      {::elision-without-requery-coordinates true
        :seon.render.data/path path
        :seon.render.data/next-offset next-offset
        ::elision-unit unit})))

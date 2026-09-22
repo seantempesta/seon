@@ -1120,8 +1120,7 @@
     (throw
      (ex-info
       "Schema declaration resolution requires the projection handed to the operation."
-      {
-       :seon.error/message
+      {:seon.error/message
        "No declaration projection was handed to this schema operation."
        :seon.error/data {:seon.schema/caller (fallback-caller)} :seon.schema/missing-projection true}))))
 
@@ -3696,8 +3695,7 @@
   (or (handed-projection)
       (throw
        (ex-info "Shape inspection requires the operation's schema projection."
-                {
-                 :seon.schema/missing-projection true}))))
+                {:seon.schema/missing-projection true}))))
 
 (defn- identity-only-descriptors-in
   {:malli/schema [:=> [:cat :seon.schema/projection] [:vector [:map [:seon.schema/key :keyword] [:seon.schema.identity-only/validator :seon.schema/compiled-validator] [:seon.schema/identity-projection [:fn clojure.core/var?]]]]]}

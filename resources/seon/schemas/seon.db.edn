@@ -327,10 +327,10 @@
             [:seon.db/transaction-refused :seon.db/transaction-refused]
             [:seon.db.write.attempt/request-id :seon.db.write.attempt/request-id]]]
           :transaction-outcome-unknown [:= true]
-          :transaction-outcome-unknown-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a database transaction whose outcome is unknown"} [:seon.db/transaction-outcome-unknown :seon.db/transaction-outcome-unknown] [:seon.error/message :seon.error/message]]
+          :transaction-outcome-unknown-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a database transaction whose outcome is unknown"} [:seon.db/transaction-outcome-unknown :seon.db/transaction-outcome-unknown] [:seon.error/message :seon.error/message]]
  :seon.db/refused-read-operation :qualified-symbol
  :seon.db/invalid-read [:= true]
- :seon.db/invalid-read-error [:and :seon.error/base [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/invalid-read distinguishing member"} [:seon.db/invalid-read :seon.db/invalid-read] [:seon.db/refused-read-operation :seon.db/refused-read-operation] [:seon.error/message :seon.error/message]]]
+ :seon.db/invalid-read-error [:and :seon.error/base [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/invalid-read distinguishing member"} [:seon.db/invalid-read :seon.db/invalid-read] [:seon.db/refused-read-operation :seon.db/refused-read-operation] [:seon.error/message :seon.error/message]]]
  :seon.db/invalid-request [:= true]
  :seon.db/missing-request-member :keyword
  :seon.db/invalid-request-error
@@ -341,4 +341,4 @@
    [:seon.db/invalid-request :seon.db/invalid-request]
    [:seon.db/missing-request-member :seon.db/missing-request-member]]]
  :seon.db/diff-refused [:= true]
- :seon.db/diff-refused-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/diff-refused distinguishing member"} [:seon.db/diff-refused :seon.db/diff-refused] [:seon.error/message :seon.error/message]]}
+ :seon.db/diff-refused-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/diff-refused distinguishing member"} [:seon.db/diff-refused :seon.db/diff-refused] [:seon.error/message :seon.error/message]]}

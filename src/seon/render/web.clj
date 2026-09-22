@@ -488,13 +488,13 @@
                    :seon.render.walk/path [::fleet-oversight]
                    :seon.render.walk/found-depth 0
                    :seon.render/distance 0}
-            (and (:seon.error/at fleet-output) (:seon.error/layer fleet-output) (:seon.error/operation fleet-output)) ;; debt: seon.render/render-call via seon.db/error-result declares :seon.error/value, directly or through its result union.
+            (:seon.render/refused-member fleet-output)
             (assoc :seon.error/value fleet-output
                    :seon.render/output
                    [:div {:class "seon-render-unavailable"}
                     "renderer unavailable"])
 
-            (not (and (:seon.error/at fleet-output) (:seon.error/layer fleet-output) (:seon.error/operation fleet-output))) ;; debt: seon.render/render-call via seon.db/error-result declares :seon.error/value, directly or through its result union.
+            (not (:seon.render/refused-member fleet-output))
             (assoc :seon.render/output fleet-output)))
         units (cond-> walked-units fleet-unit (conj fleet-unit))
         ranks (into {}
@@ -1031,7 +1031,7 @@
   [output rendered]
   [:div {:class "seon-debug-candidate-preview"}
    (cond
-     (and (:seon.error/at rendered) (:seon.error/layer rendered) (:seon.error/operation rendered)) (error/render-html rendered) ;; debt: seon.render/render-call via seon.db/error-result declares :seon.error/value, directly or through its result union.
+     (:seon.render/refused-member rendered) (error/render-html rendered)
      (= output :seon.render/html) rendered
      :else [:pre (str rendered)])])
 

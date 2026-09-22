@@ -1449,9 +1449,7 @@
   "Reuse one retained projection while its input, code, and reads are current."
   {:malli/schema [:=> [:cat :seon.render/call-request]
                   [:or :nil :string :seon.render/hiccup
-                   :seon.render/form :seon.render/request-error
-                   :seon.render/ambiguous-error :seon.render/invalid-output-error
-                   :seon.render/unknown]]}
+                   :seon.render/form :seon.render/request-error]]}
   [{database :seon.db/db
     output :seon.render/output
     call-id :seon.render.call/id
@@ -1518,7 +1516,7 @@
                       (merge observation (error/diagnostic observation))))
                   (:seon.render.selection/selected decision))]
             (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
-              selected
+              (assoc selected :seon.render/refused-member :seon.render.call/selected-producer)
               (let [static-evidence (call-static-evidence request decision
                                                           selected)
                     cache-evidence (call-cache-evidence request selected)
@@ -1565,6 +1563,11 @@
                                   :seon.render.call/selected-producer selected
                                   :seon.render.call/captured-reads captured)
                            output selected))
+                    raw (if (or (:seon.render/refused-member raw)
+                                (:seon.render.unknown/reason raw)
+                                (:seon.render/invalid-output raw))
+                          (assoc raw :seon.render/refused-member :seon.render/output)
+                          raw)
                     source-blocks (when source-output? (:seon.render/source-blocks raw))
                     raw (if source-blocks
                           (clojure.string/join "\n\n" (map :seon.render/source source-blocks)) raw)

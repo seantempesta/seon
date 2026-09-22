@@ -101,8 +101,7 @@
     (when (and database (nil? usage-test))
       (throw
        (ex-info "my.turn has no declared usage walkthrough."
-                {
-                 :my.turn/usage-walkthrough-absent true
+                {:my.turn/usage-walkthrough-absent true
                  :seon.error/message
                  "my.turn has no declared usage walkthrough."
                  :seon.ns/name 'my.turn})))

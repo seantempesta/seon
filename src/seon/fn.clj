@@ -194,12 +194,10 @@
         end-col (::analyzer/end-col entry)]
     (when-not text
       (throw (ex-info "Static declaration has no source file content."
-                      {
-                       ::analysis-entry entry :seon.fn/index-refused true})))
+                      {::analysis-entry entry :seon.fn/index-refused true})))
     (when-not (every? some? [row col end-row end-col])
       (throw (ex-info "Static declaration has no exact source span."
-                      {
-                       ::analysis-entry entry :seon.fn/index-refused true})))
+                      {::analysis-entry entry :seon.fn/index-refused true})))
     (let [start (character-offset contexts entry row col)
           end (character-offset contexts entry end-row end-col)]
       (when-not (<= start end)
@@ -605,8 +603,7 @@
       (throw
        (ex-info
         "A capability marker must name one qualified handler symbol."
-        {
-         :seon.fn/capability-rule :invalid-handler-symbol
+        {:seon.fn/capability-rule :invalid-handler-symbol
          :seon.fn/sym qualified
          :seon.effect/capability capability :seon.fn/index-refused true})))
     (cond
@@ -1103,8 +1100,7 @@
                                         (::analyzer/type finding) " "
                                         (::analyzer/message finding)))
                                  findings)))
-                      {
-                       ::findings findings
+                      {::findings findings
                        :seon.fn/index-refused true})))))
 
 (defn- analysis-rows-by-file
@@ -2101,8 +2097,7 @@
         file (rooted-file directory path)]
     (when-not (source-file? file)
       (throw (ex-info "A file artifact requires one existing Clojure file."
-                      {
-                       :seon.fn/source-path (.getCanonicalPath file) :seon.fn/index-refused true})))
+                      {:seon.fn/source-path (.getCanonicalPath file) :seon.fn/index-refused true})))
     (let [canonical-path (.getCanonicalPath file)
           contexts (source-contexts [file])
           analysis (analyzer/analyze
@@ -2188,8 +2183,7 @@
              (some (fn [[path n]] (when (> n 1) path))
                    (frequencies (map :seon.fn.file/relative-path desired-artifacts)))]
     (throw (ex-info "Manifest replacement carries a duplicate file path."
-                    {
-                     :seon.fn.file/relative-path duplicate-path :seon.fn/index-refused true})))
+                    {:seon.fn.file/relative-path duplicate-path :seon.fn/index-refused true})))
   (let [desired-by-path
         (into {} (map (juxt :seon.fn.file/relative-path identity)) desired-artifacts)
         retained
@@ -2546,8 +2540,7 @@
     (throw
      (ex-info
       "Source indexing refused a duplicate program identity."
-      {
-       ::identity duplicate :seon.fn/index-refused true}))))
+      {::identity duplicate :seon.fn/index-refused true}))))
 
 (defn- assert-populated!
   {:malli/schema [:=> [:cat :seon.program/rows] :nil]}
@@ -2558,8 +2551,7 @@
        (ex-info
         (str "Source indexing produced no " identity-attr
              " rows; refusing a partial program graph.")
-        {
-         ::missing-population identity-attr :seon.fn/index-refused true})))))
+        {::missing-population identity-attr :seon.fn/index-refused true})))))
 
 (defn- add-contract-facts
   ([rows progress!] (add-contract-facts rows progress! nil))
@@ -2816,8 +2808,7 @@
                      (schema/malli-form? (edn/read-string form-string)))
         (throw
          (ex-info "Source indexing refused a non-Malli schema declaration."
-                  {
-                   :seon.schema/key schema-key :seon.fn/index-refused true}))))
+                  {:seon.schema/key schema-key :seon.fn/index-refused true}))))
     (filterv
      #(desired-identities (program/row-identity %))
      (add-contract-facts
@@ -2861,8 +2852,7 @@
                              (throw
                               (ex-info
                                "Program indexing found multiple entity identities."
-                               {
-                                ::identity (vec identities)
+                               {::identity (vec identities)
                                 :seon.fn/index-refused true})))
                            identities))))
               (mapcat #(filter map? (tree-seq coll? seq %)) rows))]
@@ -2944,8 +2934,7 @@
                         (throw
                          (ex-info
                           "Program indexing found conflicting entity maps."
-                          {
-                           ::identity eid
+                          {::identity eid
                            :seon.fn/index-refused true}))))
                     (vswap! entities assoc eid entity)
                     eid)
@@ -3350,8 +3339,7 @@
                             [:seon.ns/name :seon.fn/sym :seon.test/sym])]
      (when (and existing (not previous-database))
        (throw (ex-info "Program indexing requires a fresh source scratch branch."
-                       {
-                        ::existing-program-entity existing :seon.fn/index-refused true})))
+                       {::existing-program-entity existing :seon.fn/index-refused true})))
      (if previous-database
        (let [previous-identities
              (if-let [identities (:seon.reconcile/adopt-identities request)]

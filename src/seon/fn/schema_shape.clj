@@ -215,8 +215,7 @@
     :else
     (throw
      (ex-info "Schema map entry has an unsupported non-EDN key."
-              {
-               :seon.schema.map-entry/key-edn (pr-str value) :seon.schema.shape/unsupported-map-key true}))))
+              {:seon.schema.map-entry/key-edn (pr-str value) :seon.schema.shape/unsupported-map-key true}))))
 
 (defn typed-key-facts
   "Typed database facts for one Malli map-entry key."
@@ -463,7 +462,6 @@
           :when (> (count forms) 1)]
     (throw
      (ex-info "A schema fingerprint identifies distinct normalized forms."
-              {
-               :seon.schema.shape/fingerprint shape-fingerprint
+              {:seon.schema.shape/fingerprint shape-fingerprint
                :seon.schema.shape/forms forms :seon.schema.shape/fingerprint-collision true})))
   rows)

@@ -20,7 +20,7 @@
                     {:optional true}
                     :seon.fn.binding/entries]]
  :seon.fn.binding/unsupported [:= true]
- :seon.fn.binding/unsupported-error [:map { :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn.binding/unsupported distinguishing member"} [:seon.fn.binding/unsupported :seon.fn.binding/unsupported] [:seon.error/message :seon.error/message]]
+ :seon.fn.binding/unsupported-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn.binding/unsupported distinguishing member"} [:seon.fn.binding/unsupported :seon.fn.binding/unsupported] [:seon.error/message :seon.error/message]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.fn.binding/binding-projection

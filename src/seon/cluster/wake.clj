@@ -387,8 +387,7 @@
     (when (= ::refused outcome)
       (async/offer! fault-channel
                     (ex-info "a wake route refused delivery"
-                             {
-                              :seon.cluster.wake/undeliverable-wake key
+                             {:seon.cluster.wake/undeliverable-wake key
                               :seon.error/message
                               "A wake route refused delivery."
                               ::key key

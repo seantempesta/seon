@@ -434,8 +434,7 @@
        (when-not commit-id
          (throw
           (ex-info "A roster branch has no readable head commit ID."
-                   {
-                    :seon.store/branch branch :seon.cluster.registry/branch-head-absent true})))
+                   {:seon.store/branch branch :seon.cluster.registry/branch-head-absent true})))
        {:seon.store/branch branch
         :seon.source/commit-id commit-id}))
    (sort-by str branches)))
@@ -503,8 +502,7 @@
     (when (seq missing)
       (throw
        (ex-info "A dry-run candidate has no physical FileStore file."
-                {
-                 :seon.cluster.registry/missing-candidate-files
+                {:seon.cluster.registry/missing-candidate-files
                  (vec missing) :seon.cluster.registry/candidate-file-absent true})))
     inventory))
 
@@ -549,8 +547,7 @@
                             (elapsed-ms started-ns)))
                    (throw
                     (ex-info "Dry-run candidate enumeration is complete."
-                             {
-                              :seon.cluster.registry/dry-run-token token :seon.cluster.registry/dry-run-complete true}))))))
+                             {:seon.cluster.registry/dry-run-token token :seon.cluster.registry/dry-run-complete true}))))))
           (catch Throwable failure
             failure))]
     (cond

@@ -192,8 +192,7 @@
                           (m/properties (m/schema declaration {:registry registry}))))]
         (throw (ex-info
                 "An error observation cannot carry an entity's upsert identity."
-                {
-                 :seon.schema/error :seon.schema/invalid-schema
+                {:seon.schema/error :seon.schema/invalid-schema
                  :seon.schema/identity schema-key
                  :seon.schema/member attribute})))))
 

@@ -2311,3 +2311,32 @@ and DB read failures. These tests still require the confirmed fresh fixture base
 no executed or green result is claimed here. Prescribed require after
 `a10774bdd` and `1b10844c4` exited 0 (their corresponding
 `tmp/kind-review-head-<commit>.log` files).
+
+### Render refusal guarantee and source hygiene
+
+After checking the actual selection and normalized-output arms, `render-call`
+now accretes its existing `:seon.render/refused-member` at those producer exits
+and declares only `:seon.render/request-error` as its refusal output. Its profile
+arm already guarantees that member. The history rendered-line decision above
+therefore now reads this one member. Four obsolete debt decisions also read it:
+web fleet error/output (two decisions), web `debug-preview-html`, and transcript
+`outline-unit`. No generic error predicate or per-caller list was added.
+
+The debt scan is now **3**: `call-preparation`'s supplied database/connection
+boundary, `render/invoked`'s SCI result, and `sci.kernel`'s refusal boundary.
+These still declare the generic values named in their comments and remain B3
+1–3 work. The preceding seven-count is a dated observation, not the final count.
+
+Finding 12: reflowed standalone map-open lines and `{ :`/`{,` remnants in the
+original cut's source/resource files (40 paths). The edit script asserted that
+all non-whitespace characters were identical, apart from optional EDN commas
+immediately following `{`. No declaration or expression was changed by that
+reflow.
+
+The first combined load/contract probe after `1df3cb832` required the prescribed
+production namespaces successfully, then failed in the additional probe because
+`seon.cluster.prompt` had not been explicitly required (it is a delayed dependency).
+The corrected command required it and compiled **534 authored Malli contracts**
+from the current packaged projection, exit 0, in
+`tmp/kind-review-contract-load.log`. This proves contract references resolve; it
+does not prove output behavior, arming against the fixture, or the namespace matrix.
