@@ -1,6 +1,6 @@
 ---
 type: landing
-status: resumed repair landing; implementation and final verification below
+status: assigned repairs landed; canonical fixture and publication proof limits recorded
 created: 2026-09-22
 ---
 
@@ -271,3 +271,34 @@ is `tmp/constructor-repair/f10-resume-probe.json`:
 The seven dead requires are absent. The protected test infrastructure files have
 zero diff from the resume baseline `19a11478e`. No canonical base was rebuilt,
 no cold/platform gate was run, and the running default program was not changed.
+
+## Final finding-to-commit record
+
+| Finding | Implementation / assertion commits |
+|---|---|
+| F1 | Declaration `434c01f4c`; body and restored cause/enum assertions `e2e3b7473` |
+| F2 | Declaration `434c01f4c`; body and restored unowned assertion `e2e3b7473` |
+| F6 | Body/declaration `434c01f4c`; both-cause assertions `320c73adc` |
+| F7 | Declared unknown-form check and temporal/schema-drift assertions `e2e3b7473` |
+| F8 | Both declared phase producers, consumer, enum, and retry/phase assertions `320c73adc` |
+| F9 | Operator/reply `59e9642b1`; boot body/declaration `434c01f4c`; boot assertions `320c73adc` |
+| F10 | Named output/union and distinguishing assertions `e2e3b7473`; actual query arity schema correction `a2aac9105` |
+| F11 | Future/promise expiry distinction `59e9642b1` |
+| F12 | Issue/turn `59e9642b1`; schema `434c01f4c`; render/test/config/sci.eval `252e6e5bd` |
+| F14 | Empty merge removed `252e6e5bd` |
+
+All assigned implementation work is landed; no ownership wait remains. The
+canonical fixture failure and completion-recording refusal are explicit limits,
+not a green test request. The selected armed in-process assertions and exact
+read-only REPL probes supply the bounded evidence requested by the owner.
+The current program remains unpublished on default; publication/adoption,
+publication-path clock, platform and cold proof remain the orchestrator's work.
+Unrelated edits and all protected test infrastructure files are preserved.
+
+`a2aac9105`'s archived HEAD require exited 0:
+`tmp/constructor-repair/head-a2aac9105-load.log`. Every resumed implementation
+commit has now passed the prescribed require from its own archive. Archive
+helpers await child exit, unlink the dependency symlink, then remove only their
+owned archive. All test, diagnostic, and implementation-load shells have exited.
+The final evidence-only commit receives the same archive check; its result and
+commit id are written to `tmp/orchestrator/constructor-repair-summary.txt`.
