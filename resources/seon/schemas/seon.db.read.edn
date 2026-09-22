@@ -40,7 +40,7 @@
   [:map {:seon.db/attributes true}
    [:seon.db.read/disagreeing-pull-schema :seon.db.read/disagreeing-pull-schema]]]
 
- :seon.db.read/invalid-pulled-result :seon.schema/key
+ :seon.db.read/invalid-pulled-result :qualified-keyword
  :seon.db.read/invalid-pulled-result-error
  [:and :seon.error/base :seon.db/invalid-read-error
   [:map {:seon.db/attributes true}

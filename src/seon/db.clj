@@ -1965,7 +1965,7 @@
                       (subvec arguments position)))))))))
 
 (defn- missing-query-error
-  {:malli/schema [:=> [:cat :seon.schema/value] [:or :nil :seon.error/base]]}
+  {:malli/schema [:=> [:cat :seon.schema/value] [:or :nil :seon.db/invalid-request-error]]}
   [query-input]
   (when (and (map? query-input)
              (contains? query-input :args)
@@ -1974,6 +1974,8 @@
      {
       :seon.error/message
       "seon.db/q argument maps require :query."
+      :seon.db/invalid-request true
+      :seon.db/missing-request-member :query
       :seon.error/diagnostic-layer :database-read
       :seon.error/diagnostic-operation 'seon.db/q
       :seon.error/diagnostic-member :query
@@ -4480,7 +4482,7 @@
               failure)))))))
 
 (defn- missing-transaction-data-error
-  {:malli/schema [:=> [:cat :seon.schema/value] [:or :nil :seon.error/base]]}
+  {:malli/schema [:=> [:cat :seon.schema/value] [:or :nil :seon.db/invalid-request-error]]}
   [transaction]
   (when (and (map? transaction)
              (not (contains? transaction :tx-data)))
@@ -4488,6 +4490,7 @@
      {
       :seon.error/message
       "seon.db/transact! argument maps require :tx-data."
+      :seon.db/missing-request-member :tx-data
       :seon.error/diagnostic-layer :database-write
       :seon.error/diagnostic-operation 'seon.db/transact!
       :seon.error/diagnostic-member :tx-data

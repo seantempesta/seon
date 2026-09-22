@@ -2225,3 +2225,31 @@ including this lane's uncommitted changes, and are not isolated HEAD snapshots.
 Hook publication remains explicitly paused by the orchestrator; no adoption
 clock is available. Canonical namespace requests remain pending fresh-base
 confirmation, which has not arrived as of the 09:28Z MCP observation.
+
+### Review follow-up: request distinctions and storage identity
+
+Finding 10: malformed query/transaction maps carry
+`:seon.db/missing-request-member` (`:query` or `:tx-data`) and the existing
+`:seon.db/invalid-request true`. Their constructors declare
+`:seon.db/invalid-request-error`; reads still carry the guaranteed invalid-read
+member. The malformed-query regression separately checks missing-request versus
+malformed-clause behavior, instead of accepting either indiscriminately.
+
+Storage probe exposed a second issue in the new diagnostic evidence:
+`:seon.db.read/invalid-pulled-result` must be a qualified keyword VALUE, not an
+alias of identity attribute `:seon.schema/key`. The bridge inherits properties
+through references. It now declares the primitive; the two agent-id observation
+members introduced below likewise declare strings, not identity aliases.
+`malli->datahike-attr-in` returned keyword/string cardinality-one attributes for
+all three, with **no `:db/unique`** (`tmp/kind-review-final-load.log`, exit 0).
+The inspected seam was `src/seon/schema/datahike.clj:80–179` (compiled reference
+properties), with Datahike pinned at
+`006e634ae955c186619adb5f3868cca29d8c97fb`,
+`reference-code/datahike/src/datahike/db/utils.cljc:189–220` and
+`db/transaction.cljc:641` onward. Inputs are the carried projection and declared
+attribute; bridge compilation follows that immutable projection, not each read.
+No dependency or extra cache was changed.
+
+Prescribed require after `edfca0bb8` exited 0, captured in
+`tmp/kind-review-head-edfca0bb8.log`. This remains a shared-tree load, not a
+canonical test run or default adoption.

@@ -1711,7 +1711,11 @@
              '[?entity :seon.agent/id "root"
                ?transaction true :extra]]]]
        (doseq [[result operation member] cases]
-         (is (or (:seon.db/invalid-read result) (:seon.schema/expected-value result)))
+         (is (true? (:seon.db/invalid-read result)))
+         (if (= :query member)
+           (do (is (true? (:seon.db/invalid-request result)))
+               (is (= :query (:seon.db/missing-request-member result))))
+           (is (nil? (:seon.db/missing-request-member result))))
          (is (= diagnostic-fields
                 (set (keys (:seon.error/data result)))))
          (is (= operation
