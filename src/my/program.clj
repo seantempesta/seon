@@ -412,7 +412,7 @@
         at (assoc :seon.db/tx at)))))
 
 (defn supplied-context
-  "Supply the executing SCI context, its cluster base and writer connection.
+  "Supply the executing SCI context and its held acquisition resources.
 
   Call preparation carries the executing context explicitly; no process or
   thread lookup is used. A host call without that context refuses."
@@ -420,10 +420,13 @@
                   [:or :my.program/context :seon.program/context-unavailable-error]]}
   [environment]
   (let [ctx (:my.program/executing-ctx environment)
-        base (:my.program/base-ctx ctx)
+        base (or (:seon.sci.eval/base-ctx ctx) (:my.program/base-ctx ctx))
         connection (:seon.db/connection environment)]
     (if (and ctx base connection)
-      {:seon.sci.eval/ctx ctx :my.program/base-ctx base :seon.db/connection connection}
+      (merge {:seon.sci.eval/ctx ctx :my.program/base-ctx base
+              :seon.db/connection connection
+              :seon.cluster/name (:seon.boot/cluster-name environment)}
+             (select-keys environment [:seon.store/store :seon.agent/context-state]))
       {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.program/write
         :seon.error/operation 'my.program/supplied-context

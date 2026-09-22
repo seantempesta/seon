@@ -750,7 +750,9 @@
          parent (:seon.db/connection handle)
          database (db/db parent)
          live-branch (registry/cluster-branch (:seon.cluster/name handle))
-         source-ctx (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))
+         source-ctx (or (:seon.sci.eval/base-ctx handle)
+                        (:my.program/base-ctx handle)
+                        (:seon.sci.eval/ctx handle))
          branch (or (:seon.agent/branch options)
                     (when (:seon.agent/isolate? options)
                       (keyword (str "agent-" (id/id))))
@@ -758,7 +760,8 @@
                       (:seon.agent/branch
                        (db/pull database '[:seon.agent/branch]
                                 [:seon.agent/id agent-id]))))
-         held-store (or (:seon.store/store options) (:seon.store/store handle))]
+         held-store (or (:seon.store/store options) (:seon.store/store handle)
+                        (:seon.store/store (env/of source-ctx)))]
      (when-not (and contexts branch)
        (throw (ex-info "Acquisition requires context state and an explicit agent branch."
                        {:seon.agent/id agent-id :seon.agent/branch branch})))
@@ -827,6 +830,10 @@
                  _ (when (seq refusals)
                      (throw (ex-info "Program acquisition refused."
                                      {:seon.test/acquisition-refusals refusals})))
+                 _ (env/replace-environment!
+                    (:seon.sci.eval/projection-state base)
+                    (cond-> (assoc (env/of base) :seon.agent/context-state contexts)
+                      held-store (assoc :seon.store/store held-store)))
                  ctx (if (nil? agent-id)
                        base
                        (:seon.sci.eval/ctx

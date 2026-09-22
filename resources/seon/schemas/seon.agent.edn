@@ -4,7 +4,10 @@
   [:seon.db/connection :seon.db/connection]
   [:seon.sci.eval/ctx :seon.sci.eval/ctx]
   [:seon.agent/context-state :seon.agent/context-state]
-  [:seon.cluster/name :seon.cluster/name]]
+  [:seon.cluster/name :seon.cluster/name]
+  [:seon.store/store {:optional true} :seon.store/store]
+  [:my.program/base-ctx {:optional true} :seon.sci.eval/ctx]
+  [:seon.sci.eval/base-ctx {:optional true} :seon.sci.eval/ctx]]
  :execution-handle [:map
   [:seon.cluster/name :seon.cluster/name]
   [:seon.agent/context-state :seon.agent/context-state]

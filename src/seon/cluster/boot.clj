@@ -62,6 +62,7 @@
            (env/refuse-incomplete-environment!
             (env/environment
              {:seon.boot/cluster-name cluster-name
+              :seon.store/store (:seon.store/store instance)
               :seon.db/connection connection
               :seon.schema/projection
               (:seon.schema/projection @projection-state)
