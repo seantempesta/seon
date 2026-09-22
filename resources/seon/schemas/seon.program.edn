@@ -1,13 +1,16 @@
 {:seon.program/definition-digest
  [:string {:min 64 :max 64
            :description "Canonical identity of one declaration's authored definition, resolver context and effective semantic metadata."}]
+ :seon.program/declaration-identity
+ [:tuple {:description "A compared declaration's identity: its identity attribute and that attribute's symbol or keyword value."}
+  :seon.program/identity-attribute [:or :symbol :keyword]]
  :seon.program/digest-or-absence
  [:or :seon.program/definition-digest [:= :seon.program/absent]]
  :seon.program/digest-map
- [:map-of :seon.program/identity :seon.program/definition-digest]
- :seon.program/identity-set [:set :seon.program/identity]
+ [:map-of :seon.program/declaration-identity :seon.program/definition-digest]
+ :seon.program/identity-set [:set :seon.program/declaration-identity]
  :seon.program/conflict-digests
- [:map-of :seon.program/identity
+ [:map-of :seon.program/declaration-identity
   [:map
    [:seon.program/base-digest :seon.program/digest-or-absence]
    [:seon.program/branch-digest :seon.program/digest-or-absence]
@@ -21,6 +24,38 @@
   [:seon.program/added :seon.program/identity-set]
   [:seon.program/retracted :seon.program/identity-set]
   [:seon.program/conflict-digests :seon.program/conflict-digests]]
+ :seon.program/recomputed
+ [:=
+  {:description
+   "Declared on a program entity map whose rows derive entirely from file bytes
+    and analysis, such as file and lint rows. Merge recomputes them in the
+    combined program instead of comparing them. A program identity family
+    declares either this or :seon.program/definition-digest; neither is refused."}
+  true]
+ :seon.program/family-set [:set :seon.program/identity-attribute]
+ :seon.program/compared-families :seon.program/family-set
+ :seon.program/recomputed-families :seon.program/family-set
+ :seon.program/unclassified-families :seon.program/family-set
+ :seon.program/declaration-families
+ [:map
+  [:seon.program/compared-families :seon.program/compared-families]
+  [:seon.program/recomputed-families :seon.program/recomputed-families]
+  [:seon.program/unclassified-families :seon.program/unclassified-families]]
+ :seon.program/max-datoms [:int {:min 1}]
+ :seon.program/missing-evidence
+ [:enum {:description "Which evidence a digest map could not establish."}
+  :seon.program/projection :seon.program/family-classification
+  :seon.program/read :seon.program/read-bound :seon.program/definition-digest]
+ :seon.program/undigested-declarations
+ [:set {:min 1} :seon.program/declaration-identity]
+ :seon.program/digest-map-refusal
+ [:and
+  :seon.error/base
+  [:map
+   [:seon.program/missing-evidence :seon.program/missing-evidence]
+   [:seon.program/unclassified-families {:optional true} :seon.program/unclassified-families]
+   [:seon.program/undigested-declarations {:optional true} :seon.program/undigested-declarations]
+   [:seon.program/max-datoms {:optional true} :seon.program/max-datoms]]]
  :seon.program/analyzed-source-digest
  [:string {:min 64 :max 64
            :description "Digest of the exact analyzed input, including resolver context. Its presence records completed analysis even when the computed relations have no members."}]

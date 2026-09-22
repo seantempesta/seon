@@ -82,11 +82,160 @@
          :seed 22092026)]
     (test-support/assert-check! result)))
 
+(defn- example-projection
+  "The handed program world plus one example family. `row-properties` and
+   `digest?` vary the family's comparison declaration."
+  [family row-properties digest?]
+  (let [identity-attribute (keyword family "id")
+        source-attribute (keyword family "source")
+        row-schema (keyword family "row")]
+    (reduce (fn [projection [schema-key definition]]
+              (schema/projection-with-schema
+               projection schema-key definition
+               {:seon.schema.admission/source :agent}))
+            (schema/handed-projection)
+            [[source-attribute :string]
+             [identity-attribute [:symbol {:seon.db/identity true
+                                           :seon.program/row-schema row-schema
+                                           :seon.program/source-attribute source-attribute}]]
+             [row-schema
+              (cond-> [:map (merge {:seon.db/attributes true
+                                    :seon.program/partition :seon.program}
+                                   row-properties)
+                       [identity-attribute identity-attribute]
+                       [source-attribute source-attribute]]
+                digest? (conj [:seon.program/definition-digest
+                               :seon.program/definition-digest]))]])))
+
+(defn- example-database
+  "An in-memory genesis value installing the compared families' and `rows`'
+   attributes and holding `rows`. A value without declaration rows reads the projection its
+   construction boundary supplied (`seon.db/carried-projection`)."
+  [projection rows]
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write :keep-history? false}
+        storable? (requiring-resolve 'seon.schema.datahike/storable-attribute-in?)
+        declarations (requiring-resolve 'seon.schema.datahike/malli->datahike-schema-in)]
+    (d/create-database configuration)
+    (let [connection (d/connect configuration)]
+      (try
+        (d/transact connection
+                    (declarations projection
+                                  (sort (filter #(storable? projection %)
+                                                (into (set (mapcat keys rows))
+                                                      (cons :seon.program/definition-digest
+                                                            (:seon.program/compared-families
+                                                             (program/declaration-families
+                                                              projection))))))))
+        (when (seq rows) (d/transact connection rows))
+        (vary-meta (d/db connection) assoc :seon.schema/projection projection)
+        (finally
+          (d/release connection)
+          (d/delete-database configuration))))))
+
+(deftest a-family-declaring-neither-digest-nor-recomputation-is-unknown
+  (let [projection (example-projection "undeclared.example" {} false)
+        database (example-database projection
+                                   [{:undeclared.example/id 'undeclared.example/f
+                                     :undeclared.example/source "(defn f [])"}])
+        result (program/digest-map database {:seon.program/max-datoms 100})]
+    (is (= #{:undeclared.example/id}
+           (:seon.program/unclassified-families
+            (program/declaration-families projection))))
+    (is (= :seon.program/family-classification (:seon.program/missing-evidence result)))
+    (is (= #{:undeclared.example/id} (:seon.program/unclassified-families result)))
+    (is (m/validate :seon.program/digest-map-refusal result
+                    {:registry (:seon.schema.projection/registry projection)}))))
+
+(deftest declaration-families-come-from-the-supplied-projection
+  (let [projection (example-projection "branch.example" {} true)
+        recomputed (example-projection "derived.example"
+                                       {:seon.program/recomputed true} false)]
+    (is (not (contains? program/identity-attributes :branch.example/id))
+        "The family exists only in the supplied projection, not the loaded files")
+    (is (= {:seon.program/compared-families
+            #{:branch.example/id :seon.fn/sym :seon.ns/name :seon.schema/key
+              :seon.test/sym}
+            :seon.program/recomputed-families
+            #{:seon.fn.file/relative-path :seon.lint/id}
+            :seon.program/unclassified-families #{}}
+           (program/declaration-families projection)))
+    (is (= #{:derived.example/id :seon.fn.file/relative-path :seon.lint/id}
+           (:seon.program/recomputed-families
+            (program/declaration-families recomputed))))))
+
+(deftest digest-map-is-exactly-the-stored-declarations-or-a-typed-refusal
+  (let [projection (example-projection "branch.example" {} true)
+        rows (mapv (fn [n]
+                     {:branch.example/id (symbol "branch.example" (str "f" n))
+                      :branch.example/source (str "(defn f" n " [])")
+                      :seon.program/definition-digest
+                      (apply str (repeat 64 (nth "abc" (mod n 3))))})
+                   (range 450))
+        expected (into {} (map (fn [row]
+                                 [[:branch.example/id (:branch.example/id row)]
+                                  (:seon.program/definition-digest row)]))
+                       rows)
+        complete (example-database projection rows)
+        undigested (example-database
+                    projection
+                    (conj rows {:branch.example/id 'branch.example/bare
+                                :branch.example/source "(defn bare [])"}))]
+    (testing "every stored declaration, across index pages"
+      (is (= expected (program/digest-map complete {:seon.program/max-datoms 900}))))
+    (testing "a compared declaration without its digest"
+      (let [result (program/digest-map undigested {:seon.program/max-datoms 1000})]
+        (is (= :seon.program/definition-digest (:seon.program/missing-evidence result)))
+        (is (= #{[:branch.example/id 'branch.example/bare]}
+               (:seon.program/undigested-declarations result)))
+        (is (m/validate :seon.program/digest-map-refusal result
+                    {:registry (:seon.schema.projection/registry projection)}))))
+    (testing "the datom bound refuses instead of answering part of the map"
+      (let [result (program/digest-map complete {:seon.program/max-datoms 899})]
+        (is (= :seon.program/read-bound (:seon.program/missing-evidence result)))
+        (is (m/validate :seon.program/digest-map-refusal result
+                    {:registry (:seon.schema.projection/registry projection)}))))))
+
+(deftest three-way-classifies-every-base-branch-head-state
+  (let [states [:seon.program/absent digest-a digest-b digest-c]
+        cases (for [base states branch states head states]
+                [[:seon.fn/sym (symbol "case" (apply str (map #(.indexOf ^java.util.List states %) [base branch head])))]
+                 base branch head])
+        digests (fn [position]
+                  (into {} (keep (fn [[identity & values]]
+                                   (let [value (nth values position)]
+                                     (when-not (= :seon.program/absent value)
+                                       [identity value]))))
+                        cases))
+        result (program/three-way (digests 0) (digests 1) (digests 2))
+        classes [:seon.program/unchanged :seon.program/changed-on-branch
+                 :seon.program/changed-on-head :seon.program/conflict
+                 :seon.program/added :seon.program/retracted]
+        class-of (fn [identity]
+                   (filterv #(contains? (get result %) identity) classes))]
+    (doseq [[identity base branch head] cases
+            :when (not= [:seon.program/absent] (distinct [base branch head]))]
+      (let [expected
+            (cond
+              (= branch head) :seon.program/unchanged
+              (= branch base) :seon.program/changed-on-head
+              (and (= head base) (= :seon.program/absent base)) :seon.program/added
+              (and (= head base) (= :seon.program/absent branch)) :seon.program/retracted
+              (= head base) :seon.program/changed-on-branch
+              :else :seon.program/conflict)]
+        (is (= [expected] (class-of identity)) (pr-str [base branch head]))
+        (is (= (= expected :seon.program/conflict)
+               (contains? (:seon.program/conflict-digests result) identity)))))
+    (is (not (contains? (reduce into #{} (map result classes))
+                        (ffirst (filter (fn [[_ & values]]
+                                          (every? #{:seon.program/absent} values))
+                                        cases)))))))
+
 (deftest digest-map-compares-two-fixture-branches-from-one-commit
   (test-support/with-database
     (fn [connection]
       (let [base-database (db/db connection)
-            base-map (program/digest-map base-database)
+            base-map (program/digest-map base-database {:seon.program/max-datoms 1000000})
             [branch-identity head-identity]
             (take 2 (sort-by pr-str (keys base-map)))
             configuration (:config base-database)
@@ -110,8 +259,8 @@
                 (test-support/transacted!
                  connection-b [{(first head-identity) (second head-identity)
                                 :seon.program/definition-digest digest-b}])
-                (let [branch-map (program/digest-map (db/db connection-a))
-                      head-map (program/digest-map (db/db connection-b))
+                (let [branch-map (program/digest-map (db/db connection-a) {:seon.program/max-datoms 1000000})
+                      head-map (program/digest-map (db/db connection-b) {:seon.program/max-datoms 1000000})
                       comparison (program/three-way base-map branch-map head-map)]
                   (is (= #{branch-identity}
                          (:seon.program/changed-on-branch comparison)))

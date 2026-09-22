@@ -389,58 +389,161 @@
      (id/digest 64 [(schema/canonical-data-string parts)]))))
 
 #?(:clj
-   (defn digest-map
-     "Read every digested program declaration and its stored definition digest.
+   (defn- digest-map-refusal
+     "The typed unknown `digest-map` answers when its evidence is incomplete."
+     {:malli/schema [:=> [:cat :seon.program/missing-evidence :string :map]
+                     :seon.program/digest-map-refusal]}
+     [missing message members]
+     (error/diagnostic
+      (merge {:seon.error/at (java.util.Date.)
+              :seon.error/layer :seon.program/comparison
+              :seon.error/operation 'seon.program/digest-map
+              :seon.error/message message
+              :seon.program/missing-evidence missing}
+             members))))
 
-  A declaration family is compared when its row schema declares
-  `:seon.program/definition-digest`; file and lint rows are derived from bytes
-  and analysis, carry no digest and are recomputed rather than compared."
-     {:malli/schema [:=> [:cat :seon.db/database-value]
-                     :seon.program/digest-map]}
-     [database]
-     (let [projection ((requiring-resolve 'seon.db/carried-projection) database)
-           declared-program-attributes (program-attributes projection)
-           registry (:seon.schema.projection/registry projection)
-           digested-identities
-           (filterv (fn [attribute]
-                      (let [row-schema (some-> (mr/schema registry attribute)
-                                               m/properties :seon.program/row-schema)
-                            definition (some->> row-schema (mr/schema registry))]
-                        (some #{:seon.program/definition-digest}
-                              (keep entry-attribute
-                                    (some-> definition internal/entity-entries)))))
-                    identity-attributes)
-           datoms (requiring-resolve 'seon.db/datoms)
-           read! (fn [attribute]
-                   (let [result (datoms database :aevt attribute)]
-                     (when (and (map? result) (:seon.error/at result))
-                       (throw (ex-info "The program digest map could not be read."
-                                       {:seon.error/operation 'seon.program/digest-map
-                                        :seon.error/data result})))
-                     result))]
-       (when-not (and (seq digested-identities)
-                      (every? declared-program-attributes digested-identities))
-         (throw (ex-info "The program partition omits a declaration identity."
-                         {:seon.error/operation 'seon.program/digest-map
-                          :seon.error/offending
-                          (remove declared-program-attributes digested-identities)
-                          :seon.error/expected :seon.program/identity-attribute})))
-       (let [digests (into {} (map (juxt :e :v))
-                           (read! :seon.program/definition-digest))
-             identities (into [] (mapcat read!) digested-identities)
-             result (into {} (keep (fn [datom]
-                                     (when-let [digest (get digests (:e datom))]
-                                       [[(:a datom) (:v datom)] digest])))
-                          identities)
-             missing (into #{} (comp (remove #(contains? digests (:e %)))
-                                     (map (juxt :a :v)))
-                           identities)]
-         (when (seq missing)
-           (throw (ex-info "Program declarations are missing their stored definition digest."
-                           {:seon.error/operation 'seon.program/digest-map
-                            :seon.error/offending missing
-                            :seon.error/expected :seon.program/definition-digest})))
-         result))))
+(defn declaration-families
+  "Classify every program identity family this projection declares.
+
+  A family is compared when its row schema declares
+  `:seon.program/definition-digest`, and recomputed when the row schema declares
+  `:seon.program/recomputed`. A family declaring neither, or whose row schema is
+  absent, is unclassified: its evidence is unknown, never an empty family."
+  {:malli/schema [:=> [:cat :seon.schema/projection]
+                  :seon.program/declaration-families]}
+  [projection]
+  (let [registry (:seon.schema.projection/registry projection)
+        classify
+        (fn [attribute]
+          (let [row-schema (some-> (mr/schema registry attribute)
+                                   m/properties :seon.program/row-schema)
+                definition (some->> row-schema (mr/schema registry))
+                entity? (and definition (internal/entity-schema? definition))
+                digested? (and entity?
+                               (some #{:seon.program/definition-digest}
+                                     (keep entry-attribute
+                                           (internal/entity-entries definition))))
+                recomputed? (and entity?
+                                 (true? (:seon.program/recomputed
+                                         (internal/entity-properties definition))))]
+            (cond
+              (and digested? (not recomputed?)) :seon.program/compared-families
+              (and recomputed? (not digested?)) :seon.program/recomputed-families
+              :else :seon.program/unclassified-families)))
+        families (filter #(some-> (mr/schema registry %)
+                                  m/properties :seon.program/row-schema)
+                         (keys (:seon.schema.projection/forms projection)))]
+    (reduce (fn [result attribute]
+              (update result (classify attribute) conj attribute))
+            {:seon.program/compared-families #{}
+             :seon.program/recomputed-families #{}
+             :seon.program/unclassified-families #{}}
+            families)))
+
+#?(:clj
+   (defn digest-map
+     "Read every compared program declaration and its stored definition digest.
+
+  The families come from `database`'s own carried projection, so a branch
+  compares the families its declarations define. Recomputed families (file
+  and lint rows, derived from bytes and analysis) are not compared. Incomplete
+  evidence answers a typed refusal, never a partial map: an unclassified
+  family, an unreadable index page, a compared declaration without its digest,
+  or more than `:seon.program/max-datoms` index datoms."
+     {:malli/schema
+      [:=> [:cat :seon.db/database-value
+            [:map [:seon.program/max-datoms :seon.program/max-datoms]]]
+       [:or :seon.program/digest-map :seon.program/digest-map-refusal]]}
+     [database {:seon.program/keys [max-datoms]}]
+     (let [projection (try ((requiring-resolve 'seon.db/carried-projection) database)
+                           (catch clojure.lang.ExceptionInfo failure
+                             (digest-map-refusal
+                              :seon.program/projection
+                              "The database value carries no declaration projection."
+                              {:seon.error/evidence-unavailable (ex-message failure)})))]
+       (if (:seon.error/at projection)
+         projection
+         (let [{compared :seon.program/compared-families
+                unclassified :seon.program/unclassified-families}
+               (declaration-families projection)
+               outside (remove (program-attributes projection) compared)
+               index-page (requiring-resolve 'seon.db/index-page)
+               ;; One attribute's complete AEVT range, paged through the index
+               ;; owner, or the refusal naming the exhausted bound or failed read.
+               read-range
+               (fn [attribute remaining]
+                 (loop [datoms [] cursor nil]
+                   (let [page (index-page database
+                                          (cond-> {:index :aevt
+                                                   :components [attribute]
+                                                   :direction :forward
+                                                   :limit 200
+                                                   :max-result-weight 10000000}
+                                            cursor (assoc :cursor cursor)))]
+                     (cond
+                       (:seon.error/at page)
+                       (digest-map-refusal
+                        :seon.program/read "A program index page could not be read."
+                        {:seon.error/member attribute
+                         :seon.error/cause page})
+
+                       :else
+                       (let [datoms (into datoms (:datahike.index-page/datoms page))]
+                         (cond
+                           (< remaining (count datoms))
+                           (digest-map-refusal
+                            :seon.program/read-bound
+                            "The program digest map exceeds its datom bound."
+                            {:seon.error/member attribute
+                             :seon.program/max-datoms max-datoms})
+
+                           (:datahike.index-page/complete? page) datoms
+                           :else (recur datoms (:datahike.index-page/cursor page))))))))]
+           (cond
+             (seq unclassified)
+             (digest-map-refusal
+              :seon.program/family-classification
+              "A program identity family declares neither a definition digest nor recomputation."
+              {:seon.error/expected-key :seon.program/definition-digest
+               :seon.program/unclassified-families (set unclassified)})
+
+             (or (empty? compared) (seq outside))
+             (digest-map-refusal
+              :seon.program/family-classification
+              "The compared families are empty or outside the program partition."
+              (cond-> {:seon.error/expected-key :seon.program/partition}
+                (seq outside)
+                (assoc :seon.program/unclassified-families (set outside))))
+
+             :else
+             (let [ranges
+                   (reduce (fn [result attribute]
+                             (let [range (read-range attribute
+                                                     (- max-datoms (:count result)))]
+                               (if (map? range)
+                                 (reduced range)
+                                 (-> result
+                                     (assoc-in [:ranges attribute] range)
+                                     (update :count + (count range))))))
+                           {:count 0 :ranges {}}
+                           (cons :seon.program/definition-digest (sort compared)))]
+               (if (:seon.error/at ranges)
+                 ranges
+                 (let [digests (into {} (map (juxt :e :v))
+                                     (get-in ranges [:ranges :seon.program/definition-digest]))
+                       identities (mapcat #(get-in ranges [:ranges %]) (sort compared))
+                       missing (into #{} (comp (remove #(contains? digests (:e %)))
+                                               (map (juxt :a :v)))
+                                     identities)]
+                   (if (seq missing)
+                     (digest-map-refusal
+                      :seon.program/definition-digest
+                      "Program declarations are missing their stored definition digest."
+                      {:seon.error/expected-key :seon.program/definition-digest
+                       :seon.program/undigested-declarations missing})
+                     (into {} (map (fn [datom]
+                                     [[(:a datom) (:v datom)] (get digests (:e datom))]))
+                           identities)))))))))))
 
 (defn three-way
   "Classify branch and head declaration identities relative to base.
