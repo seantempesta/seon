@@ -240,3 +240,74 @@ is excluded from the commit; the environment constructor is in `cluster/boot.clj
 No foreign hunks are staged. The bounded poll has ended. Implementation/source
 size is +30/−7 across six files, plus the 89-line regression. Evidence reflects
 the exact frozen HEADs named above, not later unrelated concurrent changes.
+
+## Post-landing live proof at committed HEAD (successor lane, 2026-09-22)
+
+Subject: committed bytes only. Frozen `git archive` of HEAD
+`a614fb898b43db2506ba00655f8ceb4975d2b2c4` (descendant of landing commit
+`7f6718507`; the seven owned paths are unchanged between them) into
+`tmp/es2-source`, `reference-code` symlinked; no working-tree hunk of any lane
+included. Fresh empty root `tmp/es2-root`.
+
+From-zero boot: `tmp/es2-source/bin/seon --root tmp/es2-root start supplier`,
+exit 0, wall 160.44 s; PID **8371**, start `2026-09-22T20:39:45.556Z`, readiness
+**145,701 ms**, `:seon.boot/missing-layers []`, problems `{}`, source commit
+`6ab2e81f-519f-5161-a508-0474d701783c`. The JVM remained alive after the launching
+shell exited. Log: `tmp/orchestrator/entrance-supplier-es2-boot.log`.
+
+Live probe (MCP `eval_clj`, JVM mode, root `tmp/es2-root`, cluster `supplier`):
+
+```clojure
+(let [instance (get @seon.operator.runtime/running-instances "supplier")
+      cluster (:seon.turn.loop/cluster instance)
+      connection (seon.cluster.boot/connection "supplier")
+      branch (seon.cluster.registry/cluster-branch "supplier")
+      execution (get @(:seon.agent/context-state cluster) [branch "root"])
+      ctx (:seon.sci.eval/ctx execution)
+      before (seon.db/db connection)
+      started (System/nanoTime)
+      context (sci.core/eval-string* ctx "(seon.cluster.entrance-supplier-test/caller-context)")
+      result (seon.cluster.entrance-supplier-test/supplied-acquisition-proof context)
+      elapsed (/ (- (System/nanoTime) started) 1e6)
+      after (seon.db/db connection)]
+  {:initial-acquisition-present? (some? execution)
+   :boot-environment-store? (identical? (:seon.store/store instance) (:seon.store/store (seon.env/of (:seon.sci.eval/ctx instance))))
+   :initial-acquisition-store? (identical? (:seon.store/store instance) (:seon.store/store execution))
+   :supplied-store? (identical? (:seon.store/store instance) (:seon.store/store context))
+   :supplied-context-state? (identical? (:seon.agent/context-state cluster) (:seon.agent/context-state context))
+   :supplied-connection? (identical? connection (:seon.db/connection context))
+   :commit-before (seon.db/commit-id before) :commit-after (seon.db/commit-id after)
+   :basis-before (seon.db/basis-t before) :basis-after (seon.db/basis-t after)
+   :changed-attributes (frequencies (map :a (seon.db/datoms (seon.db/since after (seon.db/basis-t before)) :eavt)))
+   :isolated-proof result
+   :elapsed-ms elapsed})
+```
+
+Returned (MCP 2,344 ms; span 2,143.097 ms): initial acquisition present, boot
+environment store, initial acquisition store, supplied store, supplied
+context-state and supplied connection all **true**; `:isolated-proof`
+`{:captured? true :carried? true :isolated? true :rostered? true :unlinked? true
+:value 42}`. No manual acquisition source was built: the booted root agent's own
+SCI ctx produced the supplied context, which alone acquired, evaluated and
+released the isolated branch.
+
+The live head advanced one transaction (basis 536870932 -> 536870933, commit
+`6ab2e841-...` -> `6ab2e842-...`): one `seon.cluster.eval` row. A read-only
+follow-up listing `:seon.cluster.eval/source` in that since-view returned the
+root agent's own run forms `(seon.agent/settings)` and its `seon.db/pull` of
+`:seon.message/_to`, not the probe's form; that write is the concurrent root
+loop's, and the probe wrote no program or live facts. (Unlike the earlier
+repeat, this attempt did not capture a quiescent live head.)
+
+Point-in-time RSS after the probe: 3,586,464 KiB (not a bound).
+Cleanup: `bin/seon --root tmp/es2-root down --force` exit 0,
+`:seon.operator/process-exit? true` for PID 8371 / exact start; PID absent;
+`lsof +D` empty for root and source; both removed without following symlinks.
+The predecessor's unrecorded committed-HEAD roots
+(`tmp/entrance-supplier-committed-{root,source}`, PID 99598 already down,
+empty holders) were also removed; their envelopes stay in
+`tmp/orchestrator/entrance-supplier-committed-*.json`.
+
+Boundary: one live scratch cluster at committed HEAD; no platform or integration
+tier ran; repository default (PID 51528) was not touched and has not adopted
+this slice. RESET NEEDED: not by this lane.
