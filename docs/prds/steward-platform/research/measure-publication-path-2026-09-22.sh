@@ -19,9 +19,22 @@ if [ ! -L "$WT/reference-code" ]; then
 fi
 rm -rf "$ROOT"; mkdir -p "$ROOT"
 cd "$WT"
-run() { local name=$1; shift; { time "$@"; } > "$ROOT/$name.log" 2>&1; echo "exit=$?" >> "$ROOT/$name.log"; grep -h "init phase=lifecycle elapsed-ms=\|start phase=lifecycle elapsed-ms=\|exit=" "$ROOT/$name.log" | sed "s/^/$name: /"; }
+measure() {
+  bb --config "$WT/bb.edn" --deps-root "$WT" \
+    "$REPO/docs/prds/steward-platform/research/measure-storage-retention-2026-09-22.clj" \
+    "$ROOT" "$1" >> "$ROOT/storage.edn"
+}
+run() {
+  local name=$1; shift
+  local began=$EPOCHREALTIME
+  { time "$@"; } > "$ROOT/$name.log" 2>&1
+  echo "exit=0 elapsed-ms=$(( (EPOCHREALTIME - began) * 1000 ))" >> "$ROOT/$name.log"
+  tail -1 "$ROOT/$name.log" | sed "s/^/$name: /"
+  measure "$name"
+}
+zmodload zsh/datetime
 # Cold start, paid once: publish from zero, create the first cluster, start the JVM.
-run start bin/seon --root "$ROOT" start head
+run start bin/seon --root "$ROOT" start head --config config/development.edn
 # Fork against the RUNNING cluster - a Datahike branch, target under 1 s.
 run fork      bin/seon --root "$ROOT" init head2
 # Case A: the first adoption after the fork - nothing changed on disk, the cluster row has no adoption recorded yet.
@@ -34,6 +47,7 @@ run adopt-noncore bin/seon --root "$ROOT" init --dev head --changed src/my/note.
 # Case C: docstring-only edit in a core namespace, inside the producer closure of seon.fn.
 perl -0pi -e 's/^  "/  "(measured edit) /m' src/seon/id.clj
 run adopt-core bin/seon --root "$ROOT" init --dev head --changed src/seon/id.clj
+measure sweep
 bin/seon --root "$ROOT" down
 git -C "$WT" checkout -- src/my/note.clj src/seon/id.clj
 echo "phases:"; grep -h "elapsed-ms" "$ROOT"/adopt-*.log | sed -E 's/.*completed-phase "([^"]*)".*elapsed-ms ([0-9]+).*/\2\t\1/' | sort -rn | head -20

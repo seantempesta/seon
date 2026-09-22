@@ -26,6 +26,7 @@
             [datahike.api :as d]
             [konserve.core :as k]
             [seon.db :as db]
+            [seon.config :as config]
             [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
@@ -153,12 +154,12 @@
                                     [[:db/retract entity-id :seon.registry.test/archive-blob digest]]))
           (finally
             (d/release connection)))
-        (registry/collect! opened)
+        (registry/collect! opened (java.util.Date. 0))
         (is (= content (blob/get (:seon.store/connection-object opened) digest))
             "a digest reachable only through a declared blob attribute's history extends the GC mark")
         (registry/retire-branch! {:seon.store/store opened
                                   :seon.store/branch branch})
-        (registry/collect! opened)
+        (registry/collect! opened (java.util.Date. 0))
         (is (nil? (blob/get (:seon.store/connection-object opened) digest))
             "retiring the last referencing branch makes the blob collectible")))))
 
@@ -177,7 +178,7 @@
                                     :seon.registry.test/payload-blob digest}])
           (finally
             (d/release connection)))
-        (registry/collect! opened)
+        (registry/collect! opened (java.util.Date. 0))
         (is (= content (blob/get (:seon.store/connection-object opened) digest))
             "current references remain live when historical datoms are absent")))))
 
@@ -401,8 +402,13 @@
       (let [connection (:seon.store/connection-object opened)]
         (is (= :seon.config/required-absent
                (:seon.config/rule (refusal #(registry/retention-cutoff opened)))))
-        (test-support/apply-config! connection "retention-probe"
-                                    {:seon.config.db/snapshot-window-ms 0})
+        ; The subject is the stored policy read, using the compiler's complete row.
+        (test-support/transacted!
+         connection
+         [(:seon.config/desired-row
+           (config/compile-manifest
+            {:seon.boot/cluster-name "retention-probe"
+             :seon.config/manifest {:seon.config.db/snapshot-window-ms 0}}))])
         (let [head (registry/branch-commit-id {:seon.store/store opened
                                               :seon.store/branch :db})
               record (k/get (:store @connection) head nil {:sync? true})]
@@ -515,7 +521,7 @@
           (is (nil? (registry/retire-branch! {:seon.store/store opened
                                               :seon.store/branch source-branch})))
           (is (not (contains? (registry/roster opened) source-branch)))
-          (is (pos? (registry/collect! opened)))
+          (is (pos? (registry/collect! opened (java.util.Date. 0))))
           (let [connection (store/open-branch!
                             opened (registry/cluster-branch "alice"))]
             (try

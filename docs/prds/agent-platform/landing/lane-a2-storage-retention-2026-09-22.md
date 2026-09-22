@@ -1,6 +1,6 @@
 ---
 type: landing
-status: in progress
+status: partial landing; comparator stop gate and publication proof pending
 created: 2026-09-22
 ---
 
@@ -149,3 +149,155 @@ test/seon/cluster/store_test.clj -- seon.cluster.store-test`, snapshot
 `tmp/test-runs/run.CCBrVO`, run `c6471a051c01`: 18 executed, zero reused,
 73 assertions, zero failures/errors. This includes the real file-store
 no-history reopen and explicit mismatch regression. All test processes exited.
+
+## Step 4 census and ownership boundary
+
+Exact forms and complete MCP envelopes: `tmp/a2-storage-retention/live-census.json`.
+Explicit root `/Users/sean/src/seon`, cluster `default`, mode JVM, read-only;
+custody `(seon.cluster.boot/connection "default")`. Grouping includes entity,
+value, transaction and added flag, avoiding the distinct-value aggregate error.
+At basis 536871142 the largest history/current differences are:
+
+| attribute | current | history |
+|---|---:|---:|
+| `:seon.cluster.eval/read-evidence` | 11,628 | 57,686 |
+| `:datahike.read/dependency-plan` | 11,628 | 57,686 |
+| `:datahike.read/revision` | 11,628 | 57,686 |
+| `:seon.db/source-argument-position` | 11,628 | 57,686 |
+| `:seon.db/read-result-digest` | 11,376 | 56,194 |
+| `:seon.db/read-request` | 11,376 | 56,194 |
+| `:seon.fn/call-arities` | 63,437 | 64,478 |
+| `:seon.fn/calls` | 62,152 | 63,089 |
+
+Whole-history aggregation took 2,151 ms; its work is proportional to the current
+and temporal datom population, not suitable for an adoption hot path. The first
+attempt counted distinct values and is superseded by this complete-tuple census.
+At basis 536871143, occurrence count/first-at/last-at/data-blob and instrument
+actual each have **0 current and 0 history datoms**, occurrence IDs `[]`, timestamp
+pairs `[]` (4 ms). The historical 22,537-occurrence incident was before this reset;
+no present timestamps can honestly be reported for it.
+
+The named fault churn declarations are in the protected error-schema family.
+A user clarification is pending; none was edited. Exact proposed reset change:
+`:count [:int {:min 1 :seon.db/no-history? true}]` and
+`:last-at [:inst {:seon.db/no-history? true}]` in
+`resources/seon/schemas/seon.error.occurrence.edn`. `first-at` is stable and does
+not churn. The current top rows belong to read-evidence/compaction and several
+are explicitly deleted in c1; this lane does not repair the retiring mechanism.
+**RESET NEEDED** when the fault attribute declarations land; not applied here.
+
+Ownership options (simplest first):
+1. **Recommended:** error-schema owner/orchestrator lands the two exact properties
+   in its slice. Guarantee: no overlapping file edits. Cost: coordinated reset;
+   gives up completing that schema slice in this lane.
+2. Release just these two declarations to this lane. Guarantee: same no-history
+   behavior and test; cost: explicit ownership coordination; gives up exclusive
+   error-schema ownership for those spans.
+3. Defer no-history until the error schema cut completes. Guarantee: old temporal
+   semantics retained; cost: continued temporal growth; gives up the churn target.
+
+## §6.2 comparator proof — STOP; f1 and c2 not landed
+
+c12 Seon commit: `907b231fe`. Exact form and complete results:
+`tmp/a2-storage-retention/comparator-probe.clj` and `.log`. A fresh file fixture
+uses `:datahike.index/persistent-set`, `:keep-history? true`, and
+`:schema-flexibility :read` to reach the native-value storage path without
+prematurely exposing `:db.type/any` in the schema language. This is a dependency
+storage diagnostic, not proof of public any-type schema admission.
+
+| exact operation | result | ms |
+|---|---|---:|
+| `(datom/compare-value {:a 1} {:a 2})` | `ClassCastException`, PersistentArrayMap is not Comparable | 0.119 |
+| `(datom/cmp-nil {:a 1} {:a 2})` | **0**, unequal maps equated | 0.228 |
+| `(d/transact c [[:db/add 1 :a2/value {:a 1}]])` | committed, tx 536870913 | 64.362 |
+| replace with `{:a 2}` | refused, ClassCastException in `cmp-temporal-datoms-eavt-quick:350` → persistent-set `temporal-upsert:164` | 2.088 |
+| one tx adds `{:a 3}`, then `{:a 4}` | same comparator refusal | 1.823 |
+| history for `(1, :a2/value)` | `[[{:a 1} true]]` | 0.562 |
+| as-of first committed tx | `{:a2/value {:a 1}}` | 3.034 |
+| exact `[:db/retract 1 :a2/value {:a 1}]` | committed, tx 536870914 | 52.059 |
+| release, reconnect, pull | nil (exact retraction survived) | 0.570 |
+| history after reconnect | `[[{:a 1} true] [{:a 1} false]]` | 0.292 |
+
+The current code has neither a total comparison for maps nor a safe fallback:
+class-name fallback collapses distinct same-class values. A map-only sort, hash
+order, or printed-order patch does not establish deterministic equality-consistent
+ordering for the unrestricted `any?` language (nested mixed collections,
+equality across concrete collection implementations, hash collisions, and
+non-Comparable host values). No small sound correction has been demonstrated;
+this is the explicitly required §6.2 design boundary. **The codec, in-writer decode,
+population plumbing and wake ref resolution are unchanged.** c2 RESET is not
+installed or needed by these commits; it remains a future reset item.
+
+Exactly three options, simplest first:
+1. **Retain the codec (recommended at this boundary).** Guarantee: current admitted
+   shapes and temporal behavior continue. Cost: existing encode/decode and
+   population work remain; gives up c2's deletion and A1-12's immediate prerequisite.
+2. Define and prove native-value ordering in the fork. Guarantee: native history,
+   retraction and reconnect only after equality/order/serialization properties
+   pass for an explicitly bounded value language. Cost: a separately scoped
+   comparator/admission design plus property and persistent-index tests; gives up
+   treating unrestricted `any?` as an already-supported storage guarantee.
+3. Redesign individually justified mixed declarations. Guarantee: each accepted
+   smaller language has existing native ordering. Cost: per-declaration producer,
+   consumer and schema changes/reset; gives up some currently admitted value shapes.
+
+The publication measurement script now records completed operation milliseconds,
+logical keys and directory bytes after every adoption and a final real sweep,
+using the declared development overlay. The helper calls the existing operator
+PREPL client on the scratch `head` advertisement. Shell syntax is checked;
+full execution remains unverified because HEAD still references the retired
+`error/properties` in a foreign test. Do not re-enable hook publication based on
+these partial measurements.
+
+## Final focused verification and cleanup
+
+After the definition-digest producer landed, registry tests reached their bodies.
+The first repeat (`e31636262bd0`, 13 executed / 68 assertions / 4 errors) exposed
+three retired implicit-epoch expectations and one unrelated config reconciliation
+writer still using the absent `:seon.db/process` attribute. Blob-retention tests
+now explicitly request epoch retention. The policy-read test obtains a complete
+row from `config/compile-manifest` and writes it with `transacted!`; it tests the
+stored policy consumer, not config reconciliation. No partial config invented.
+
+Final `bin/test-fast --paths src/seon/cluster/registry.clj
+resources/seon/schemas/seon.cluster.registry.edn resources/seon/schemas/seon.config.db.edn
+config/default.edn test/seon/cluster/registry_test.clj -- seon.cluster.registry-test`:
+run `f0e16a178b3c`, 13 executed / 0 reused / **71 assertions, zero failures/errors**.
+Both this run and c12 armed 1,690/1,690 registered contracts (1,684 program-armable).
+The dry-run zero→one behavior now has an armed Seon test pass, in addition to
+the earlier scratch diagnostic. No platform suite or cold gate run by this lane.
+
+A repeated synthetic sweep supplies the missing actual sweep clock
+(`tmp/a2-storage-retention/retention-repeat.log`). The reopened diagnostic store
+already has a retention declaration, so the form's `:absent` label in this repeat
+is not an absence test: it returns the existing cutoff. Additional schema/config
+transactions account for seven additional current datoms versus the first run.
+
+| phase | bytes | keys | current datoms | ms |
+|---|---:|---:|---:|---:|
+| before replacement series | 1,000,251 | 6 | 1,027 | — |
+| replacement 1 | 1,250,298 | 7 | 1,028 | 80.868 |
+| replacement 2 | 1,500,399 | 8 | 1,029 | 36.529 |
+| replacement 3 | 1,750,551 | 9 | 1,030 | 35.513 |
+| actual sweep, 5 keys | 501,131 | 4 | 1,030 | **43.903** |
+
+The 1,000 value datoms are all current; history also has exactly 1,000.
+First post-sweep bytes 500,313 → second post-sweep 501,131, a delta of 818 B
+with seven additional metadata/config/transaction datoms. This is synthetic
+storage proportionality evidence, not adoption evidence. Heap measurement is
+now included in the full publication helper; no heap result was observed for
+full adoption because publication is blocked before that path.
+
+Source size from pre-lane HEAD: registry 664 → 535 lines; store 593 → 572;
+combined 1,257 → 1,107 (**−150**). Fork and test additions are reported in
+individual commits. No edit to `db.clj`, schema codec, `wake.clj`, error owners,
+or either deliberately dirty foreign document.
+
+All owned runner/probe sessions exited. No test launcher remained at cleanup;
+`lsof +D` found no holders in the three owned probe stores. Exact scratch PID
+checks also found none. Owned probe roots and failed publication root were
+removed without following symlinks; the owned worktree was removed after saving
+its final diff. Publication logs were copied to
+`tmp/a2-storage-retention/publication-start.log` and `publication-init-zero.log`;
+forms/results and test logs remain in that evidence directory. `default` was
+never stopped, reset, restarted, signalled, hot-reloaded or adopted.
