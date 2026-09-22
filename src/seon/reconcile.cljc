@@ -321,8 +321,9 @@
 
 (defn- plan-transaction-data
   [projection db request]
-  (let [{::keys [desired process adopt-identities]} request
+  (let [{::keys [desired process adopt-identities retain-identities]} request
         adopt-identities (or adopt-identities #{})
+        retain-identities (or retain-identities #{})
         identity-attrs (identity-attributes projection)
         identities (desired-identities identity-attrs desired)
         installed-attrs
@@ -346,13 +347,15 @@
               (keep
                (fn [[eid entity-ids]]
                  (when
-                  (some
-                   (fn [identity]
-                     (or (contains? adopt-identities identity)
-                         (= process
-                            (get process-by-tx
-                                 (get first-tx [eid identity])))))
-                   entity-ids)
+                  (and
+                   (not-any? retain-identities entity-ids)
+                   (some
+                    (fn [identity]
+                      (or (contains? adopt-identities identity)
+                          (= process
+                             (get process-by-tx
+                                  (get first-tx [eid identity])))))
+                    entity-ids))
                    eid)))
               entity-identities)
         managed-by-identity

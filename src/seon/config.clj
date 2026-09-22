@@ -667,9 +667,20 @@
         desired
         (into [(:seon.config/desired-row compiled)]
               (:seon.config/initialization compiled))
-        ;; An inherited config row no cluster entity owns is reconciled away;
-        ;; a row another cluster's required `:seon.cluster/config` names is that
-        ;; cluster's, and retracting it would invalidate its referrer.
+        desired-identities (into #{} (keep #(row-identity projection %)) desired)
+        ;; A config row another cluster's required `:seon.cluster/config`
+        ;; names is that cluster's: retracting it would invalidate its
+        ;; referrer, so reconciliation never manages it, whichever process
+        ;; wrote it. An inherited row no cluster owns is reconciled away.
+        owned-config-identities
+        (into #{}
+              (comp (map (fn [cluster-name] [:seon.config/cluster cluster-name]))
+                    (remove desired-identities))
+              (db/q '[:find [?cluster-name ...]
+                      :where
+                      [?config :seon.config/cluster ?cluster-name]
+                      [_ :seon.cluster/config ?config]]
+                    database))
         inherited-config-identities
         (into #{}
               (map (fn [cluster-name]
@@ -679,13 +690,13 @@
                       [?config :seon.config/cluster ?cluster-name]
                       (not [_ :seon.cluster/config ?config])]
                     database))
-        identities (into inherited-config-identities
-                         (keep #(row-identity projection %))
-                         desired)
+        identities (into inherited-config-identities desired-identities)
         request
-        {::reconcile/desired desired
-         ::reconcile/process managing-process-identity
-         ::reconcile/adopt-identities identities}
+        (cond-> {::reconcile/desired desired
+                 ::reconcile/process managing-process-identity
+                 ::reconcile/adopt-identities identities}
+          (seq owned-config-identities)
+          (assoc ::reconcile/retain-identities owned-config-identities))
         ;; Both config dials and initialization rows are compared as facts.
         operations (count (reconcile/plan database request))
         result

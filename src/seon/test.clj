@@ -103,64 +103,89 @@
       (with-bindings {clojure.lang.Compiler/LOADER loader} (work))
       (finally (.setContextClassLoader thread previous))))))
 
+(defn- throwable-text
+  "A throwable's whole cause chain, outermost to root, with each link's class,
+  message and ex-data (`Throwable->map`, `clojure/core_print.clj:473`), and
+  the root cause's first frame."
+  {:malli/schema [:=> [:cat :seon.error/throwable] :string]}
+  [throwable]
+  (let [{links :via trace :trace} (Throwable->map throwable)]
+    (str/join "\n"
+              (concat
+               (for [{link-class :type :keys [message data]} links]
+                 (str link-class
+                      (when message (str ": " message))
+                      (when data (str " " (pr-str data)))))
+               (when-let [frame (first trace)] [(str "at " (pr-str frame))])))))
+
 (defn- bounded-result
   "Observe the body thread's exit under the request bound; cancellation is not exit.
-  `exited!` runs once the body thread has exited: at once when it exits inside
-  the bound, otherwise on a watcher that joins the live thread."
+
+  `release!` is called exactly once, with `true` when the body outlived the
+  bound (from a watcher that joins the live thread) and `false` otherwise:
+  at once when the body exits inside the bound, or before rethrowing when
+  the body thread never started. The caller hands all cleanup to it."
   {:malli/schema [:=> [:cat :seon.test/var [:int {:min 1}]
                        [:map [:seon.db/connection {:optional true} :seon.db/connection]
                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]]
-                       [:fn clojure.core/ifn?]]
+                       [:=> [:cat :boolean] :nil]]
                   :seon.test.runner/captured-result]}
-  [test-var timeout-ms custody exited!]
-  (let [test-symbol (symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))
-        markers (program/test-markers (meta test-var) (meta (:ns (meta test-var))))
-        ;; The SCI arm interrupts interpreted bodies at the declared per-test
-        ;; bound; `duration-failures` fails any body that completes over it.
-        body-bound (or (:seon.test/long-ms markers) 5000)
-        task (FutureTask.
-              (bound-fn []
-                (with-test-loader
-                  #(sci.eval/run-test
-                    (assoc custody :seon.test/var test-var
-                                   :seon.sci.eval/time-limit-ms body-bound)))))
-        thread (.unstarted (Thread/ofVirtual) task)
-        failed (fn [message exited?]
-                 {:seon.test/sym test-symbol
-                  :seon.test.member/began? false
-                  :seon.test.member/ended? false
-                  :seon.test.run/terminated? exited?
-                  :seon.test/pass-count 0 :seon.test/fail-count 0
-                  :seon.test/error-count 1 :seon.test/failure-message message})]
-    (.start thread)
-    (let [watch-exit! (fn []
-                        ;; A timeout is not termination: the watcher releases
-                        ;; resources only after it observes the body's exit.
-                        (.start (Thread/ofVirtual) ^Runnable (fn [] (.join thread) (exited!))))]
-      (try
-        (if (.join thread (java.time.Duration/ofMillis timeout-ms))
-          (do
-            (exited!)
-            (let [result (.get task)]
-              (if (:seon.test/not-runnable result)
-                (failed (:seon.error/message result) true)
-                (assoc result :seon.test.run/terminated? true))))
-          (do
+  [test-var timeout-ms custody release!]
+  (let [started? (volatile! false)]
+    (try
+      (let [test-symbol (symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))
+            markers (program/test-markers (meta test-var) (meta (:ns (meta test-var))))
+            ;; The SCI arm interrupts interpreted bodies at the declared per-test
+            ;; bound; `duration-failures` fails any body that completes over it.
+            body-bound (or (:seon.test/long-ms markers) 5000)
+            task (FutureTask.
+                  (bound-fn []
+                    (with-test-loader
+                      #(sci.eval/run-test
+                        (assoc custody :seon.test/var test-var
+                                       :seon.sci.eval/time-limit-ms body-bound)))))
+            thread (.unstarted (Thread/ofVirtual) task)
+            failed (fn [message exited?]
+                     {:seon.test/sym test-symbol
+                      :seon.test.member/began? false
+                      :seon.test.member/ended? false
+                      :seon.test.run/terminated? exited?
+                      :seon.test/pass-count 0 :seon.test/fail-count 0
+                      :seon.test/error-count 1 :seon.test/failure-message message})
+            ;; A timeout is not termination: the watcher releases resources
+            ;; only after it observes the body's exit.
+            watch-exit! (fn []
+                          (.start (Thread/ofVirtual)
+                                  ^Runnable (fn [] (.join thread) (release! true))))]
+        (.start thread)
+        (vreset! started? true)
+        (try
+          (if (.join thread (java.time.Duration/ofMillis timeout-ms))
+            (do
+              (release! false)
+              (let [result (.get task)]
+                (if (:seon.test/not-runnable result)
+                  (failed (:seon.error/message result) true)
+                  (assoc result :seon.test.run/terminated? true))))
+            (do
+              (watch-exit!)
+              (failed (str "Test " test-symbol " did not exit within "
+                           ":seon.test/check-time-limit-ms remainder " timeout-ms " ms; thread "
+                           (.threadId thread) " remains live and keeps its branch until it exits. "
+                           "No further body may start.")
+                      false)))
+          (catch InterruptedException _
+            (.interrupt (Thread/currentThread))
             (watch-exit!)
-            (failed (str "Test " test-symbol " did not exit within "
-                         ":seon.test/check-time-limit-ms remainder " timeout-ms " ms; thread "
-                         (.threadId thread) " remains live and keeps its branch until it exits. "
-                         "No further body may start.")
-                    false)))
-        (catch InterruptedException _
-          (.interrupt (Thread/currentThread))
-          (watch-exit!)
-          (failed (str "Interrupted while awaiting actual exit of " test-symbol
-                       "; thread " (.threadId thread) ".")
-                  false))
-        (catch java.util.concurrent.ExecutionException failure
-          (failed (str "Test execution failed: " (ex-message (ex-cause failure)))
-                  true))))))
+            (failed (str "Interrupted while awaiting actual exit of " test-symbol
+                         "; thread " (.threadId thread) ".")
+                    false))
+          (catch java.util.concurrent.ExecutionException failure
+            (failed (str "Test execution failed:\n" (throwable-text (or (ex-cause failure) failure)))
+                    true))))
+      (catch Throwable failure
+        (when-not @started? (release! false))
+        (throw failure)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Where a test may run: a destructive drill never runs on a development root
@@ -1062,6 +1087,21 @@
                                                                (:db/id %)))
                                                      :seon.test.member/completed-tx))))))))
                   (sort > runs))
+            ;; A body that has not been observed to exit still holds its member
+            ;; in every scope: nothing admits the same test while it may run.
+            unexited
+            (into {}
+                  (mapcat (fn [run-eid]
+                            (map (juxt :seon.test.member/symbol identity)
+                                 (filter #(let [row (selection-read!
+                                                     (db/pull database [:seon.test.member/completed-tx
+                                                                        :seon.test.member/terminated-tx]
+                                                              (:db/id %)))]
+                                            (and (:seon.test.member/completed-tx row)
+                                                 (not (:seon.test.member/terminated-tx row))))
+                                         (admission-members database run-eid)))))
+                  (sort > runs))
+            existing (merge unexited existing)
             covered (keep #(get existing (:seon.test.member/symbol %)) members)
             coverage (into (set (:seon.test.run/covered-by request)) (map :db/id) covered)
             reserved (remove #(get existing (:seon.test.member/symbol %)) members)]
@@ -1309,11 +1349,14 @@
   "Execute one admitted member on its own branch off the captured commit.
 
   The branch, its connection and its forked context come from the agent
-  entrance, exactly as an isolated agent's do. The body runs under that
-  branch's custody on its own thread; the branch is unlinked only after the
-  body's thread has been observed to exit. A body still live at the bound keeps
-  its branch, is named, and admits no further body."
-  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.test/sym [:int {:min 1}]]
+  entrance, exactly as an isolated agent's do. The body runs on its own thread;
+  the branch is released and unlinked only after that thread has been observed
+  to exit. Every cleanup is attempted even when setup or another cleanup
+  fails, and each failure's cause chain reaches the member's recorded result.
+  A body still live at the bound keeps its branch; `settle!` records its
+  termination (and any cleanup failure) once the watcher observes its exit."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.test/sym [:int {:min 1}]
+                       [:=> [:cat :seon.test.runner/captured-result] :nil]]
                   [:map [:seon.test/result :seon.test.runner/captured-result]
                    [:seon.test/timings
                     [:map [:seon.agent/branch :seon.agent/branch]
@@ -1321,67 +1364,104 @@
                      [:seon.test.timing/resolve-ms :seon.test.timing/resolve-ms]
                      [:seon.test.timing/run-ms :seon.test.timing/run-ms]
                      [:seon.test.timing/release-ms :seon.test.timing/release-ms]]]]]}
-  [request-handle test-symbol remaining-ms]
+  [request-handle test-symbol remaining-ms settle!]
   (let [elapsed (fn [started] (/ (- (System/nanoTime) started) 1000000.0))
         started (System/nanoTime)
         child (@acquire-context! request-handle nil
                                  {:seon.agent/isolate? true
                                   :seon.cluster.registry/from (:seon.source/commit-id request-handle)})
         acquired (elapsed started)
-        ctx (:seon.sci.eval/ctx child)
+        release-ms (volatile! 0.0)
+        cleanup-failure (volatile! nil)
         failed (fn [message]
                  {:seon.test/sym test-symbol
                   :seon.test.member/began? false :seon.test.member/ended? false
                   :seon.test.run/terminated? true
                   :seon.test/pass-count 0 :seon.test/fail-count 0 :seon.test/error-count 1
                   :seon.test/failure-message message})
-        started (System/nanoTime)
-        test-var (resolve-test
-                  {:seon.db/db (:seon.db/db child)
-                   :seon.db/connection (:seon.db/connection child)
-                   :seon.test/identity test-symbol
-                   :seon.sci.eval/ctx ctx
-                   :seon.schema/projection (:seon.schema/projection child)
-                   :seon.test/class-loader (or (:seon.test/class-loader (sci.eval/acquired-program ctx))
-                                               (clojure.lang.RT/baseLoader))})
-        resolved (elapsed started)
-        started (System/nanoTime)
-        registry-before (runner/live-cluster-schema-states)
-        result (if (:seon.error/at test-var)
-                 (failed (:seon.error/message test-var))
-                 (schema/call-with-projection
-                  (:seon.schema/projection child)
-                  ;; An agent (SCI) test is the member branch's own work, so
-                  ;; its elided `seon.db` arities reach that branch. A host
-                  ;; test body inherits no custody; its fixtures find the
-                  ;; member through the SCI arm governing its thread.
-                  #(bounded-result test-var remaining-ms
-                                   (cond-> {:seon.sci.eval/ctx ctx}
-                                     (not (var? test-var))
-                                     (assoc :seon.db/connection (:seon.db/connection child)))
-                                   (fn [] (@release-context! child) nil))))
-        executed (elapsed started)
-        drifted (runner/schema-restore-drift
-                 (runner/restore-live-cluster-schema! registry-before))
-        result (if (empty? drifted)
-                 result
-                 (-> result
-                     (update :seon.test/error-count (fnil inc 0))
-                     (update :seon.test/failure-message
-                             #(str (when % (str % "\n"))
-                                   "Live cluster schema registry changed and was restored: "
-                                   (pr-str drifted)))))
-        started (System/nanoTime)]
-    (when (:seon.error/at test-var)
-      (@release-context! child))
-    {:seon.test/result (cond-> result
-                         (not (:seon.test.run/terminated? result))
-                         (assoc :seon.agent/branch (:seon.agent/branch child)))
-     :seon.test/timings {:seon.agent/branch (:seon.agent/branch child)
-                         :seon.test.timing/acquire-ms acquired
-                         :seon.test.timing/resolve-ms resolved
-                         :seon.test.timing/run-ms executed
-                         :seon.test.timing/release-ms (elapsed started)}}))
+        with-cleanup-failure
+        (fn [result]
+          (if-let [failure @cleanup-failure]
+            (-> result
+                (update :seon.test/error-count (fnil inc 0))
+                (update :seon.test/failure-message
+                        #(str (when % (str % "\n"))
+                              "Member cleanup failed; its branch "
+                              (:seon.agent/branch child) " may remain:\n"
+                              (throwable-text failure))))
+            result))
+        ;; Owned by this function until `bounded-result` takes it.
+        release! (fn [_watched?]
+                   (let [started (System/nanoTime)]
+                     (try (@release-context! child)
+                          (catch Throwable failure (vreset! cleanup-failure failure)))
+                     (vreset! release-ms (elapsed started)))
+                   nil)
+        handed? (volatile! false)
+        timing (fn [resolved executed]
+                 {:seon.agent/branch (:seon.agent/branch child)
+                  :seon.test.timing/acquire-ms acquired
+                  :seon.test.timing/resolve-ms resolved
+                  :seon.test.timing/run-ms executed
+                  :seon.test.timing/release-ms @release-ms})]
+    (try
+      (let [started (System/nanoTime)
+            ctx (:seon.sci.eval/ctx child)
+            test-var (resolve-test
+                      {:seon.db/db (:seon.db/db child)
+                       :seon.db/connection (:seon.db/connection child)
+                       :seon.test/identity test-symbol
+                       :seon.sci.eval/ctx ctx
+                       :seon.schema/projection (:seon.schema/projection child)
+                       :seon.test/class-loader (or (:seon.test/class-loader (sci.eval/acquired-program ctx))
+                                                   (clojure.lang.RT/baseLoader))})
+            resolved (elapsed started)
+            started (System/nanoTime)
+            registry-before (runner/live-cluster-schema-states)
+            result (if (:seon.error/at test-var)
+                     (failed (:seon.error/message test-var))
+                     (do
+                       (vreset! handed? true)
+                       (schema/call-with-projection
+                        (:seon.schema/projection child)
+                        ;; An agent (SCI) test is the member branch's own work,
+                        ;; so its elided `seon.db` arities reach that branch. A
+                        ;; host test body inherits no custody, as a JVM test body
+                        ;; always has; its fixtures find the member through the
+                        ;; SCI arm governing its thread.
+                        #(bounded-result
+                          test-var remaining-ms
+                          (cond-> {:seon.sci.eval/ctx ctx}
+                            (not (var? test-var))
+                            (assoc :seon.db/connection (:seon.db/connection child)))
+                          (fn [watched?]
+                            (release! watched?)
+                            (when watched?
+                              (settle! (with-cleanup-failure
+                                        (assoc (failed (str "Test " test-symbol
+                                                            " exited after its request bound."))
+                                               :seon.test.run/terminated? true))))
+                            nil)))))
+            executed (elapsed started)
+            drifted (runner/schema-restore-drift
+                     (runner/restore-live-cluster-schema! registry-before))
+            result (if (empty? drifted)
+                     result
+                     (-> result
+                         (update :seon.test/error-count (fnil inc 0))
+                         (update :seon.test/failure-message
+                                 #(str (when % (str % "\n"))
+                                       "Live cluster schema registry changed and was restored: "
+                                       (pr-str drifted)))))]
+        (when-not @handed? (vreset! handed? true) (release! false))
+        {:seon.test/result (cond-> (with-cleanup-failure result)
+                             (not (:seon.test.run/terminated? result))
+                             (assoc :seon.agent/branch (:seon.agent/branch child)))
+         :seon.test/timings (timing resolved executed)})
+      (catch Throwable failure
+        (when-not @handed? (release! false))
+        (when-let [cleanup @cleanup-failure] (.addSuppressed failure cleanup))
+        (throw failure)))))
 
 (defn- green?
   {:malli/schema [:=> [:cat :seon.test/result] :boolean]}
@@ -1482,7 +1562,31 @@
           (:seon.error/at exclusions) exclusions
           (:seon.error/at admitted) admitted
           :else
-          (let [platform? (fn [test-symbol]
+          (let [;; Execute only what THIS request's writer reserved: a member
+                ;; another admitted run still holds (unfinished, or not yet
+                ;; exited) is covered there, never run twice at once.
+                reserved (if (seq runnable)
+                           (set (db/q '[:find [?symbol ...] :in $ ?run-id
+                                        :where [?run :seon.test.run/id ?run-id]
+                                               [?run :seon.test.run/members ?member]
+                                               [?member :seon.test.member/symbol ?symbol]]
+                                      (:db-after admitted) (:seon.test.run/id provenance)))
+                           #{})
+                held-elsewhere (vec (remove reserved runnable))
+                runnable (filterv reserved runnable)
+                settle! (fn [result]
+                          ;; A later observation of termination adds its
+                          ;; transaction without changing the recorded outcome.
+                          (runner/commit-results!
+                           recording
+                           {:seon.db/db database
+                            :seon.test.runner/results [result]
+                            :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
+                            :seon.test/run-at (:seon.test.run/at provenance)
+                            :seon.test.run/provenance provenance
+                            :seon.test.run/terminated? true})
+                          nil)
+                platform? (fn [test-symbol]
                             (some #(and (= test-symbol (:seon.test.member/symbol %))
                                         ((:seon.test.member/reasons %) :platform))
                                   (:seon.test.run/members selection)))
@@ -1502,7 +1606,7 @@
                         (if-not (pos? remaining-ms)
                           (assoc outcome :seon.test/pending (vec remaining))
                           (let [{result :seon.test/result timings :seon.test/timings}
-                                (member-result request-handle test-symbol remaining-ms)
+                                (member-result request-handle test-symbol remaining-ms settle!)
                                 committed (runner/commit-results!
                                            recording
                                            {:seon.db/db database
@@ -1532,10 +1636,38 @@
                       outcome))
                   (finally
                     (when request-handle (@release-context! request-handle))))
+                ;; A reserved member this request never started is released as
+                ;; an unfulfilled obligation, never left to cover later requests.
+                not-started (:seon.test/pending outcome)
+                released (when (seq not-started)
+                           (runner/commit-results!
+                            recording
+                            {:seon.db/db database
+                             :seon.test.runner/results
+                             (mapv (fn [test-symbol]
+                                     {:seon.test/sym test-symbol
+                                      :seon.test.member/began? false :seon.test.member/ended? false
+                                      :seon.test/pass-count 0 :seon.test/fail-count 0
+                                      :seon.test/error-count 1
+                                      :seon.test/failure-message
+                                      (str "Not started: request " (:seon.test.run/id provenance)
+                                           " stopped before this member.")})
+                                   not-started)
+                             :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
+                             :seon.test/run-at (:seon.test.run/at provenance)
+                             :seon.test.run/provenance provenance
+                             :seon.test.run/terminated? true}))
+                outcome (cond-> outcome
+                          (:seon.error/at released)
+                          (update :seon.test/recording-refusal #(or % released)))
                 reused (vec (:seon.test.selection/unchanged selection))
                 results (into (vec (:seon.test/results outcome)) reused)
+                ;; Every exclusion is an unfulfilled obligation, a declared
+                ;; long test included: it never reads as green.
                 excluded (concat (:seon.test/destructive-excluded exclusions)
-                                 (:seon.test/deferred exclusions))]
+                                 (:seon.test/deferred exclusions)
+                                 (:seon.test/long-excluded selection))
+                pending (into held-elsewhere (:seon.test/pending outcome))]
             (cond-> {:seon.test.run/id (:seon.test.run/id provenance)
                      :seon.test.run/policy policy
                      :seon.test.run/basis-t (:seon.test.run/basis-t provenance)
@@ -1549,7 +1681,7 @@
                      (boolean (and (every? green? results)
                                    (seq results)
                                    (empty? excluded)
-                                   (empty? (:seon.test/pending outcome))
+                                   (empty? pending)
                                    (empty? (:seon.test/unfinished outcome))
                                    (nil? (:seon.test/recording-refusal outcome))))
                      :seon.test/elapsed-ms (elapsed)}
@@ -1559,8 +1691,8 @@
               (assoc :seon.test/deferred (:seon.test/deferred exclusions))
               (seq (:seon.test/long-excluded selection))
               (assoc :seon.test/long-excluded (:seon.test/long-excluded selection))
-              (seq (:seon.test/pending outcome))
-              (assoc :seon.test/pending (:seon.test/pending outcome))
+              (seq pending)
+              (assoc :seon.test/pending pending)
               (seq (:seon.test/unfinished outcome))
               (assoc :seon.test/unfinished (:seon.test/unfinished outcome))
               (:seon.test/recording-refusal outcome)
