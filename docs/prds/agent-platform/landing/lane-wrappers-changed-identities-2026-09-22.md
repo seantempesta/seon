@@ -358,3 +358,8 @@ per-context copied-root installation and contract-difference caller closure, the
 the full two-context probe, scan deletion and ≤2× call-cost proof. The four existing
 fixture/context errors and orchestrator-owned integration/platform proof also
 remain. This landing does not claim those requirements complete.
+
+Implementation commit: **`e0577a6fb` — Arm only changed function identities during
+adoption**. It contains exactly the three owned source/test paths and this landing
+note. The subsequent documentation-only commit records that immutable identity;
+no additional runtime change or publication follows.
