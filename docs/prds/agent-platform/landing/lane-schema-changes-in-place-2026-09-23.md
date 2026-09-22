@@ -79,3 +79,33 @@ Converged cost before this change was two full derivations per reopen: `require-
 - **`:seon.reconcile/dropped-datoms`**: the count is not on the reconcile result, because declaring the key needs `resources/seon/schemas/seon.reconcile.edn` (unheld; not this lane's path). `dropped-summary` returns it as `:seon.db/datom-count`.
 - **turn.clj `schema-attribute-change-tx`** (the agent schema path) still refuses while current data exists (`assert-schema-data-unused!`). That is a parallel mechanism to `attribute-retraction`, held by projection-writer.
 - No from-zero boot and no default mutation. RESET NEEDED: no.
+
+## Follow-up (2026-09-23, commit `f11e00e76`)
+
+The lane now holds cluster.clj, turn.clj, cluster_test.clj and seon.reconcile.edn.
+
+- **One mechanism.** `seon.cluster/attribute-change-tx` is now public and is the only schema-change path. `declaration-changes` calls it, and so does `seon.turn/row-tx`, through `schema-attribute-change-tx` (resolved at the call, because `seon.cluster` requires `seon.turn`).
+  - The turn's refusal while data exists is deleted: `assert-schema-data-unused!` and `current-schema-data-attributes`.
+  - When a new projection is handed in, a kept attribute also drops the current values its new form refuses (`invalid-value-retraction`). Example: `[:string]` → `[:string {:min 3}]` drops "h" and keeps "hello".
+  - A constraint that exists only on an entity member (`[child [:int {:min 1}]]` inside an entity map) is NOT checked by value. The attribute's own form is unchanged, so a violating value survives until its entity is next written.
+- **Purge narrowed.** `attribute-retraction` purges only when the reinstalled declaration changes the stored type (`:db/valueType`/tuple properties). A retirement, or a replacement that keeps the type, retracts current datoms, and history keeps what existed. This keeps `retracted-data-allows-removal-and-historical-rows-restore-validation` true.
+- **Dropped count.** `:seon.reconcile/dropped-datoms` (`[:int {:min 1}]`, not an attribute) is an optional member of `:seon.reconcile/result`. `populate-source!` sets it when data was dropped.
+  - Incremental proof on a store populated with the OLD forms: `declaration-changes` against the new projection returns `[]` (118–169 ms, mostly the new projection's memo miss). Adoption took 13.9–16.9 ms and the basis did not move. A result carrying the member validates, and 0 is refused.
+- **Tests.**
+  - `cluster_test.clj`: the conversion patch is applied.
+  - `schema_usage_guard_test.clj` (unheld; converted as instructed): `nonidentical-change-drops-direct-and-transitive-current-data`, `entity-schema-change-adopts-in-place-with-child-data`, and the first block of `one-decision-path-answers-every-schema-form-change`.
+  - `seon.schema-in-place-test` gained `a-tightened-form-drops-only-the-values-it-refuses`.
+
+### Verification boundary
+
+- **Recorded run `80bbf84c5fb6`: 9/9 green.** Command: `bin/test --fast` (a HEAD copy run from scratch, because the working tree has deleted `bin/test-fast` and `bin/_test-slot`, and its `seon.test.cache` no longer has `source-inputs`).
+- **Final state: 10 tests (9 regressions + probe), 34 assertions, green, but UNRECORDED.** The recording authority had gone away ("The live process has no held operator store"; default has no clusters). The run used a disposable HEAD+owned snapshot `tmp/sip-snap` and `clojure -M:test -m tmp.sip-runner`, which arms contracts through `seon.test.arm/initialize-contracts!` (12.5 s) and runs clojure.test. Wall 70 s. The snapshot was removed afterwards.
+- **`seon.cluster-test` and `seon.schema-usage-guard-test` did not execute.** At HEAD, every canonical-fixture test refuses outside `seon.test/run`: "The canonical fixture needs an executing test handle" (run `-16.log`). The turn routing therefore has no executed proof.
+- **File re-derivation is still unproven. BLOCKED.** It needs a store whose program rows are file-derived AND whose schema rows exist:
+  - a population-only memory store has no carried projection (`seon.fn/analyzed-files` refuses "requires a carried schema projection");
+  - writing its schema rows refuses, because the render functions are absent;
+  - the only published base is 78 commits old and fails the partition validator;
+  - default's store is flock-held.
+
+  The unblocking step is the orchestrator's `bin/test --prepare-head-base`. After it, a canonical-fixture branch runs `tmp/schema_in_place_reapply_probe.clj` unchanged.
+- **Observed defect.** Calling `seon.fn/index!` with a nil progress argument produces a contract refusal, and rendering that refusal throws "A durable Malli definition contains an unnamed callable" instead of naming the member (probe run `b41bf6a019a5`). This is the same class as the `[:fn clojure.core/volatile?]` rendering failure. Its owner is `seon.schema/canonical-definition` (projection-writer lane).
