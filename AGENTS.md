@@ -68,6 +68,18 @@ Datahike owns transactions and branches, Malli owns compiled schemas, SCI owns i
 contexts, core.async owns graph execution. Improve the maintained fork when that
 removes a parallel Seon mechanism. The best change deletes a mechanism.
 
+**No stamps (owner, 2026-09-23: "get rid of bullshit stamps; so much of what we are
+doing is already available in Datahike").** A value derived from a database value is a
+FUNCTION of that value, memoized with Clojure's tools (`clojure.core.cache`, keyed by
+Datahike's own `:cache-context` or commit id), never `vary-meta` stamped onto the value by
+a writer, never threaded through a transaction as a candidate, never kept in an atom
+beside the connection. Identity comes from Datahike (commit id, `:cache-context`,
+attribute revisions) or the definition digest; lineage from `versioning.cljc`; time from
+`history`/`as-of`; notification from `d/listen`; serialization from the writer. Before
+adding any of these, name the seam in `reference-code/` with `file:line`; the audit
+`docs/research/agent-platform/dependency-already-does-it-audit-2026-09-23.md` lists the
+ones already built by hand and their deletions.
+
 **Seconds, not minutes.** Work longer than ten seconds requires explicit owner
 authorization, including boot and initial indexing. Investigate costs above a couple
 of seconds: name work proportional to the whole program that should follow a change.
