@@ -3099,7 +3099,9 @@
    Every changed arity-bearing root's identity attributes are added to
    `changed-identity-attributes`, the arity gate's input."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report
-                       [:map-of :keyword :map] [:set :qualified-keyword]
+                       ;; Datahike's `:schema` also maps each attribute's entity
+                       ;; id to its ident, so the plans carry integer keys too.
+                       [:map-of [:or :keyword :int] :map] [:set :qualified-keyword]
                        [:fn clojure.core/volatile?]]
                   [:or :nil :seon.db/error-result]]}
   [projection report attribute-plans identity-attrs changed-identity-attributes]
@@ -3393,7 +3395,9 @@
         :seon.error/offending missing}))))
 
 (defn- removed-definition-error
-  "Check surviving names against the identities removed by an admitted change."
+  "Check surviving names against the identities removed by an admitted change.
+   A removed schema row or a retracted Datahike attribute (`:db/ident`) refuses
+   while a program row still writes it (plan 1.3e)."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :map] [:set :qualified-keyword]] [:or :nil :seon.program/deletion-refused-error]]}
   [database removed identity-attrs]
   (let [breaks
@@ -3403,6 +3407,9 @@
                  (let [function-symbol (:seon.fn/sym identities)
                        namespace-symbol (:seon.ns/name identities)
                        schema-key (:seon.schema/key identities)
+                       ;; A retracted Datahike attribute entity is identified by
+                       ;; `:db/ident`; a surviving writer still names it.
+                       attribute (:db/ident identities)
                        obligations (concat
                                     (when function-symbol
                                       (map #(vector % function-symbol)
@@ -3414,7 +3421,9 @@
                                       (map #(vector % schema-key)
                                            [:seon.fn/writes :seon.schema/references
                                             :seon.fn.arity/input-refs :seon.fn.arity/output-refs
-                                            :seon.fn.arity/guard-refs])))]
+                                            :seon.fn.arity/guard-refs]))
+                                    (when (qualified-keyword? attribute)
+                                      [[:seon.fn/writes attribute]]))]
                    (for [[attribute target] obligations
                          datom (d/datoms database :avet attribute target)
                          :when (or (not= :seon.effect/capability attribute)
