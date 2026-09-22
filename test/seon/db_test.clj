@@ -21,6 +21,7 @@
             [seon.id :as id]
             [seon.instrument :as instrument]
             [seon.program :as program]
+            [seon.render :as render]
             [seon.render.value :as render.value]
             [seon.schedule :as schedule]
             [seon.sci.admit :as admit]
@@ -48,13 +49,8 @@
    (schema/register! ::component-child
                      [:and {:seon.db/component true :seon.db/component-schema ::component-row} :seon.db/ref])
    (schema/register! ::component-row
-                     [:map {:seon.db/attributes true} [::component-value ::component-value]])
-   (schema/register! ::wide-id [:string {:seon.db/identity true}])
-   (schema/register! ::wide-member-tag [:string {:seon.db/identity true}])
-   (schema/register! ::wide-members
-                     [:vector :keyword])
-   (schema/register! ::wide-refs
-                     [:vector :seon.db/ref])))
+                     [:map {:seon.db/attributes true} [::component-value ::component-value]])))
+
 
 (def ^:private fixture-projection
   (schema/build-projection
@@ -973,13 +969,7 @@
                     result))
              (is (= 3 (count result))))))
        (is (= 1 (count @calls)))
-       ;; The selector that reaches the dependency is the TOTALIZED one:
-       ;; `seon.db` gives every attribute a caller names Datahike's own
-       ;; `:limit nil`, because pull's default cuts a cardinality-many
-       ;; attribute at 1 000 members and says nothing. Input alignment and
-       ;; the one shared plan are what this test owns.
-       (is (= [[database (#'db/total-pull-selector schema-pattern) entity-ids]]
-              @calls))
+       (is (= [[database schema-pattern entity-ids]] @calls))
        (is (= 1 (count @entries)))
        (is (= (:datahike.read/dependency-plan
                (pull-many-with-evidence database schema-pattern entity-ids))
@@ -1932,68 +1922,6 @@
        (is (nil? (:db/id (db/pull (db/db connection) [:db/id]
                                  [:seon.fn/sym renderer]))))))))
 
-(def ^:private wide-attribute-count 1001)
-
-(deftest a-pull-reads-every-member-of-a-cardinality-many-attribute
-  (with-codec-database
-   {:seon.test-support/extra-schema
-    (schema.datahike/malli->datahike-schema-in
-     fixture-projection
-     [::wide-id ::wide-member-tag ::wide-members ::wide-refs])}
-   (fn [connection]
-     (let [members (mapv #(keyword "seon.db-test.member" (str "m" %))
-                         (range wide-attribute-count))
-           targets (mapv #(hash-map ::wide-member-tag (str "target-" %))
-                         (range wide-attribute-count))]
-       (is (contains? (db/transact! connection targets) :db-after))
-       (is (contains?
-            (db/transact!
-             connection
-             [{::wide-id "wide"
-               ::wide-members members
-               ::wide-refs (mapv (fn [row] [::wide-member-tag
-                                            (::wide-member-tag row)])
-                                 targets)}])
-            :db-after))
-       (let [database @connection
-             eid (:db/id (db/pull database [:db/id] [::wide-id "wide"]))]
-         (testing "the dependency's own default truncates without a signal"
-           (is (= 1000
-                  (count (::wide-members
-                          (d/pull database [::wide-members] eid))))
-               "this is the cut seon.db/pull exists to remove; if Datahike's
-                default ever changes, the totalization below is still the
-                contract"))
-         (testing "a named scalar-valued attribute reads every member"
-           (is (= wide-attribute-count
-                  (count (::wide-members
-                          (db/pull database [::wide-members] eid))))))
-         (testing "a named ref attribute under a subpattern reads every member"
-           (is (= wide-attribute-count
-                  (count (::wide-refs
-                          (db/pull database
-                                   [{::wide-refs [:db/id ::wide-member-tag]}]
-                                   eid))))))
-         (testing "an unexpanded ref attribute reads every member"
-           (is (= wide-attribute-count
-                  (count (::wide-refs (db/pull database [::wide-refs] eid))))))
-         (testing "pull-many reads every member of every entity"
-           (is (= [wide-attribute-count]
-                  (mapv #(count (::wide-members %))
-                        (db/pull-many database [::wide-members] [eid])))))
-         (testing "a Datalog read over the attribute agrees"
-           (is (= wide-attribute-count
-                  (count (db/q '[:find [?member ...]
-                                 :in $ ?entity
-                                 :where [?entity ::wide-members ?member]]
-                               database eid)))))
-         (testing "a caller that spells its own limit keeps it"
-           (is (= 10
-                  (count (::wide-members
-                          (db/pull database
-                                   [[::wide-members :limit 10]]
-                                   eid)))))))))))
-
 (deftest query-symbol-values-use-the-declared-codec-in-every-binding-shape
   (with-codec-database
    {:seon.test-support/extra-schema
@@ -2100,7 +2028,11 @@
 (deftest pull-checks-only-the-caller-named-schema
   (test-support/with-database
    (fn [connection]
-     (test-support/transacted! connection [{:seon.agent/id "a2-pull-agent"}])
+     (test-support/transacted!
+      connection
+      (agent/creation-tx {:seon.agent/id "a2-pull-agent"
+                          :seon.ns/name 'my.agents.a2-pull-agent
+                          :seon.cluster/name "default"}))
      (let [database (db/db connection)
            selector [:seon.ns/name]
            schema-key :seon.ns/ns
@@ -2222,3 +2154,31 @@
        (finally
          (doseq [channel-key [:seon.cluster.wake/channel :seon.render/context-channel :seon.turn.loop/completion]]
            (async/close! (get handle channel-key)))))))))
+
+(deftest pull-budget-refusal-is-an-explicit-named-error
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           request {:selector [:seon.schema/key] :eid schema-ref :max-work 1}
+           dependency (try (d/pull database request)
+                           (catch clojure.lang.ExceptionInfo cause (ex-data cause)))
+           result (db/pull database request)]
+       (is (= {:seon.schema/key (second schema-ref)}
+              (db/pull database (dissoc request :max-work))))
+       (is (true? (:datahike/budget-exceeded dependency)))
+       (is ((schema/projection-validator (schema/handed-projection)
+                                          :seon.db/pull-budget-error) result))
+       (is (= (select-keys dependency [:datahike.budget/name
+                                       :datahike.budget/observed :datahike.budget/allowed])
+              (select-keys result [:datahike.budget/name
+                                   :datahike.budget/observed :datahike.budget/allowed])))
+       (is (= 'seon.db/pull (:seon.error/operation result)))
+       (is (not-any? #(contains? result %)
+                     [:seon.schema/key :seon.print/elision :seon.print/omitted-count]))
+       (let [text (render.value/render-ai
+                   {:seon.render/value result :seon.render.block/name :a2/budget
+                    :seon.db/db database :seon.schema/projection (schema/handed-projection)
+                    :seon.render/profile (render/agent-render-profile config/defaults)})]
+         (doseq [member [":datahike.budget/name" ":datahike.budget/observed"
+                         ":datahike.budget/allowed" "seon.db/pull"]]
+           (is (str/includes? text member))))))))

@@ -1,0 +1,4 @@
+#:datahike.budget
+{:name [:enum :query-work :query-results :result-weight]
+ :observed :int
+ :allowed :int}

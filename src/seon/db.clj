@@ -2032,76 +2032,6 @@
     (:eid (first arguments))
     (second arguments)))
 
-(def ^:private pull-limit-operators #{'limit :limit "limit"})
-
-(defn- limit-bearing-expression?
-  [expression]
-  (and (sequential? expression)
-       (or (contains? pull-limit-operators (first expression))
-           (boolean (some pull-limit-operators (take-nth 2 (rest expression)))))))
-
-(declare total-pull-selector)
-
-(defn- total-attribute-expression
-  "One pull attribute expression carrying Datahike's own no-limit spelling.
-
-  A wildcard names no attribute and a `:db/id` clause reads no datoms, so
-  neither is widened; a caller that spelled its own `:limit` keeps it."
-  [expression]
-  (cond
-    (#{'* "*" :db/id} expression) expression
-    (keyword? expression) [expression :limit nil]
-    (limit-bearing-expression? expression) expression
-    (sequential? expression) (conj (vec expression) :limit nil)
-    :else expression))
-
-(defn- total-pull-selector
-  "The selector with every attribute the caller named read in full.
-
-  Datahike's pull cuts a cardinality-many attribute at 1 000 members and
-  reports nothing about the cut: the limit defaults to `+default-limit+`
-  and the surplus datoms are simply dropped
-  (`reference-code/datahike/src/datahike/pull_api.cljc:16`, `:315`, `:323`).
-  A read that reports a short answer as a complete one is this project's
-  named failure class, so every named attribute is read with the
-  dependency's no-limit spelling (`:limit nil`) unless the caller asked for
-  a limit itself. A wildcard clause names no attribute and cannot be
-  widened here — a wildcard pull of a row with more than 1 000 members in
-  one attribute is still cut."
-  [selector]
-  (if-not (vector? selector)
-    selector
-    (mapv (fn [clause]
-            (if (map? clause)
-              (into (empty clause)
-                    (map (fn [[attribute nested]]
-                           [(total-attribute-expression attribute)
-                            (if (or (sequential? nested) (set? nested))
-                              (total-pull-selector (vec nested))
-                              nested)]))
-                    clause)
-              (total-attribute-expression clause)))
-          selector)))
-
-(defn- total-pull-arguments
-  "Pull arguments whose selector reads every named attribute in full.
-
-  A VECTOR, always: `append-pull-evidence!` replays these arguments with
-  `(assoc arguments 0 selector)`, which throws on a seq — and the throw is
-  inside `pull-call`'s `catch`, so every positional pull would have returned
-  a flat dependency error and its caller would have read that as absence."
-  [arguments]
-  (let [head (first arguments)]
-    (cond
-      (and (map? head) (not (contains? head :datahike.pull/plan))
-           (vector? (:selector head)))
-      (assoc (vec arguments) 0 (update head :selector total-pull-selector))
-
-      (vector? head)
-      (assoc (vec arguments) 0 (total-pull-selector head))
-
-      :else arguments)))
-
 (defn- validate-pulled-value
   "Validate one pulled map against the form derived for (schema-key, selector).
 
@@ -2165,8 +2095,21 @@
          (if (vector? value) value [value]))
         value)))
 
+(defn- pull-budget-error
+  "Preserve Datahike's resource refusal without claiming a partial result."
+  {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable]
+                  :seon.db/pull-budget-error]}
+  [operation cause]
+  (merge {:seon.error/at (java.util.Date.)
+          :seon.error/layer :seon.db/database-read
+          :seon.error/operation operation
+          :seon.error/message (ex-message cause)}
+         (select-keys (ex-data cause)
+                      [:datahike.budget/name :datahike.budget/observed
+                       :datahike.budget/allowed])))
+
 (defn- pull-call
-  {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.db/error-result] [:sequential :seon.schema/value] [:function [:=> [:cat :seon.db/database-value :map] :map] [:=> [:cat :seon.db/database-value :seon.db/pull-selector :seon.schema/value] :map]] :keyword :qualified-keyword :qualified-symbol] [:or :nil :seon.db/pulled-entity [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result]]}
+  {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.db/error-result] [:sequential :seon.schema/value] [:function [:=> [:cat :seon.db/database-value :map] :map] [:=> [:cat :seon.db/database-value :seon.db/pull-selector :seon.schema/value] :map]] :keyword :qualified-keyword :qualified-symbol] [:or :nil :seon.db/pulled-entity [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result :seon.db/pull-budget-error]]}
   [database arguments operation operation-key result-key public-operation]
   (if (and (map? database) (inst? (:seon.error/at database))
              (qualified-keyword? (:seon.error/layer database))
@@ -2203,9 +2146,8 @@
           (let [projection @(::read-projection declarations)
                 options (when (map? (first arguments)) (first arguments))
                 declared-key (:schema-key options)
-                arguments (cond-> arguments
+                arguments (cond-> (vec arguments)
                             options (update 0 dissoc :schema-key))
-                arguments (total-pull-arguments arguments)
                 selector (if (map? (first arguments))
                            (:selector (first arguments))
                            (first arguments))
@@ -2222,7 +2164,9 @@
             checked)))
       (catch Throwable cause
         (append-database-evidence! database :all)
-        (dependency-error public-operation cause))))))
+        (if (:datahike/budget-exceeded (ex-data cause))
+          (pull-budget-error public-operation cause)
+          (dependency-error public-operation cause)))))))
 
 (defn- pull-call-valid?
   [[arguments _result]]
@@ -2242,19 +2186,19 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/pull-options]
-     [:or :nil :seon.db/pulled-entity :seon.db/invalid-read-error]
+     [:or :nil :seon.db/pulled-entity :seon.db/invalid-read-error :seon.db/pull-budget-error]
      [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]
     [:=> [:cat
           [:or :seon.db/database-value :seon.error/value
            :seon.db/pull-selector]
           [:or :seon.db/pull-options :seon.db/entity-id]]
-     [:or :nil :seon.db/pulled-entity :seon.db/invalid-read-error]
+     [:or :nil :seon.db/pulled-entity :seon.db/invalid-read-error :seon.db/pull-budget-error]
      [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat [:or :seon.db/database-value :seon.error/value]
       :seon.db/pull-selector
       :seon.db/entity-id]
-     [:or :nil :seon.db/pulled-entity :seon.db/invalid-read-error]
+     [:or :nil :seon.db/pulled-entity :seon.db/invalid-read-error :seon.db/pull-budget-error]
      [:fn {:error/message "Use (seon.db/pull selector eid), (seon.db/pull database selector eid), or one {:selector selector :eid eid} argument map."} seon.db/pull-call-valid?]]]}
   ([options]
    (pull-call (current-database-value)
@@ -2293,7 +2237,7 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/pull-many-options]
-     [:or [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/invalid-read-error]
+     [:or [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/invalid-read-error :seon.db/pull-budget-error]
      [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat
@@ -2301,13 +2245,13 @@
        :seon.db/pull-selector]
       [:or :seon.db/pull-many-options
        [:sequential :seon.db/entity-id]]]
-     [:or [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/invalid-read-error]
+     [:or [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/invalid-read-error :seon.db/pull-budget-error]
      [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]
     [:=>
      [:cat [:or :seon.db/database-value :seon.error/value]
       :seon.db/pull-selector
       [:sequential :seon.db/entity-id]]
-     [:or [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/invalid-read-error]
+     [:or [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/invalid-read-error :seon.db/pull-budget-error]
      [:fn {:error/message "Use (seon.db/pull-many selector eids), (seon.db/pull-many database selector eids), or one {:selector selector :eids eids} argument map."} seon.db/pull-call-valid?]]]}
   ([options]
    (pull-call (current-database-value)
@@ -2357,10 +2301,10 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/entity-id]
-     [:or :nil :seon.db/pulled-entity :seon.db/error-result]]
+     [:or :nil :seon.db/pulled-entity :seon.db/error-result :seon.db/pull-budget-error]]
     [:=> [:cat [:or :seon.db/database-value :seon.error/value]
           :seon.db/entity-id]
-     [:or :nil :seon.db/pulled-entity :seon.db/error-result]]]}
+     [:or :nil :seon.db/pulled-entity :seon.db/error-result :seon.db/pull-budget-error]]]}
   ([entity-id]
    (entity-call (current-database-value) entity-id))
   ([database entity-id]

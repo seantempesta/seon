@@ -1,6 +1,6 @@
 ---
 type: evidence
-status: c3-c5-f2-landed; c13-typed-row-deleted; c4-attribute-resource-scope-pending
+status: c3-c4-c5-f2-landed; c13-probe-driven-deletion-landed
 created: 2026-09-23
 tags: [agent-platform, a2, datahike]
 ---
@@ -391,7 +391,7 @@ this run is red and unrecorded, never claimed green.
 | c3 | `f1e55a824` | −378 | planned −330 | committed load; from-zero boot; armed changed-read system turn |
 | c5 | `4fe00e120` | −117 | planned −120 | armed agent/named-schema probes; canonical fixture correction included in c4 candidate |
 | c13 | **`b6fe3ffa1`** | −18 | conditional −450/+10 not justified by table | typed missing-query row delegated; other seven kept |
-| c4 | **validated, not committed**; `tmp/a2-c4-ready.patch` | −56 | −82/+26 versus planned −70/+10 | raw-selector probe F; typed budget refusal; from-zero boot; five focused regressions |
+| c4 | **landed by this commit**, `Remove pull selector totalization with named budget refusals (A2 c4)` | −56 | −82/+26 versus planned −70/+10 | raw-selector probe F; typed budget refusal; from-zero boot; five focused regressions |
 
 During c13's commit, a concurrent edit inserted foreign projection-cache and
 writer hunks into the shared `db.clj`. The initial commit's isolated load
@@ -403,7 +403,7 @@ patch, then inspected: source **+2/−20**, tests **+6/−8**. Superseded
 HEAD load is recorded separately in `tmp/a2-c13-final-head-load.log`.
 No foreign session, source file or process was operated.
 
-### c4 proposed resource, tested before the scope decision
+### c4 resource proof before the scope ruling (historical)
 
 The named error remains in `seon.db.edn`. The minimal scope addition is
 `resources/seon/schemas/datahike.budget.edn`, four lines declaring the three
@@ -414,7 +414,7 @@ The proposed file exists only in the retained patch, not the shared tree.
 The question offers exactly three choices: add this resource (recommended),
 rename the members into `:seon.db/*` (changes the requested interface), or
 expand schema-placement/admission ownership (broader rule change).
-**No answer has been received; no scope grant is inferred from elapsed time.**
+The owner subsequently selected option 1 and assigned this resource; the final landing below supersedes this pending boundary.
 
 The proposed four-file c4 patch was applied only to an isolated snapshot of
 `b6fe3ffa1`. From-zero command:
@@ -466,3 +466,33 @@ Final clean committed `b6fe3ffa1` namespace load exited **0**; its shell
 exited and its detached checkout was removed. All owned shell sessions have
 terminated. Retained fast-run evidence belongs to the runner; no shared
 cache or another lane's root was swept.
+
+
+## c4 final landing — owner selected option 1
+
+Applied the exact validated `tmp/a2-c4-ready.patch`, including
+`resources/seon/schemas/datahike.budget.edn` (four lines). Datahike keeps
+its member names; the schema follows the repository's namespace placement
+rule (`06f4ebc4b`). The named pull refusal is over `:seon.error/base` and is
+an explicit output alternative of the pull entry points. No elision or
+omitted count is manufactured. No render/print owner changed.
+
+The from-zero boot **152951 ms** and **5 tests / 46 assertions / zero
+failures or errors** above exercised this exact candidate's production
+bytes and final test bodies. These are retained proof, not a claim that
+unchanged default adopted the source. Per README §6, no cold gate or repeat
+suite was run just to land the already-proven candidate.
+
+Final §8 row: **−82/+26 = −56 source**, versus budgeted **−70/+10 = −60**;
+**+6** db-schema lines, **+4** namespace-owned budget attribute lines;
+**−77/+37 = −40 test lines**. The obsolete totalization family/fixture leave;
+the canonical c5 fixture correction and budget/render regression survive.
+
+The shared `db.clj` still contains the other lane's projection-cache/writer
+hunks. To avoid including them, this commit was built from HEAD plus only
+the exact c4 patch in an isolated checkout and committed with `--only` for
+its five paths. The shared file's foreign bytes are preserved. The final
+commit id and namespace-load result are recorded in
+`tmp/orchestrator/a2-db-deletions-summary.txt`; final load output is
+`tmp/a2-c4-final-head-load.log`. The authorized scratch-root boot is the
+completed and cleaned proof above, not another default reset.
