@@ -3372,10 +3372,10 @@
   (if (nil? *receipt*)
     transaction
     (if (map? transaction)
-      (update transaction :tx-meta
-              #(assoc (or % {}) ::receipt *receipt*))
-      {:tx-data transaction
-       :tx-meta {::receipt *receipt*}})))
+      (update transaction :tx-data
+              #(conj (vec %) [:db/add "datomic.tx" ::receipt *receipt*]))
+      {:tx-data (conj (vec transaction)
+                      [:db/add "datomic.tx" ::receipt *receipt*])})))
 
 (defn- write-entity-schemas
   "Identity attribute -> every entity schema requiring that attribute."
