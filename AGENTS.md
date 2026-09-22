@@ -135,6 +135,62 @@ shown text survives restart. Every function in the cluster's program is callable
 prompt visibility never grants or denies execution. Consumer-specific domains belong
 downstream. See [architecture](docs/seon/architecture/architecture.md).
 
+## One JVM, many realities — the branch system
+
+Ruled by the owner on 2026-09-22; the [architecture page](docs/seon/architecture/clusters-branches-contexts.md)
+explains it, the [vocabulary](docs/seon/architecture/vocabulary.md) grounds the words.
+Installed pieces are named; a **[TARGET]** is ruled but not yet built — design toward
+it, never claim it.
+
+**A cluster is one Datahike branch plus the agents working on it.** The branch is a
+pointer (`d/branch!`), never a copy and never an environment to start. The cluster row
+holds the pointer we advance. Many clusters and branches live in one JVM.
+
+**The program is rows on the branch; the JVM is derived.** Functions, tests, schemas,
+namespaces, render pairs, contracts and their analysis facts are the program — the
+shared thing that survives. Turns, evaluations, messages, errors, tasks and results are
+data: disposable, droppable for a fresh cluster, never merged. **[TARGET]** the
+partition is one declared fact on each entity schema, so "program rows on a branch" is
+one query, never a hand list.
+
+**Default is the files; everything else interprets its differences.** The default
+cluster's program rows (the indexer's output) and its loaded namespaces (`require`'s
+output) both derive from the files on disk and are recomputed when a file changes. A
+JVM holds one set of compiled Vars, so default alone runs compiled; a branch whose
+program rows differ interprets those rows and their affected callers in its own SCI
+context and binds the compiled Var for everything else (**[TARGET]** B2 §2a). A
+declaration SCI cannot interpret is **host-bound**, a computed per-declaration fact
+(**[TARGET]**); it changes only through the files and an override of it refuses by name.
+
+**An agent's mode is which branch its custody points at.** Live: the cluster's own
+branch — every evaluation reads the current head, and a `defn` it transacts is there
+for every agent at their next evaluation. Isolated: a branch off the cluster head —
+nothing moves under it until it merges. Custody hands the agent that branch's
+connection (`seon.db/call-with-custody`); the agent never names a branch. The task
+sets the mode at start; an agent may branch and request a merge itself (**[TARGET]**
+the agent branch attribute and the `my.*` functions).
+
+**Stability comes from the branch, not from a captured value.** No reload runs under
+an evaluation. The loaded namespaces advance only at a boundary between evaluations,
+by `require :reload` of the changed namespaces and their dependents. A context is
+reacquired from its branch head at turn start and cached by commit id.
+
+**A test is an isolated agent that lives for one body.** Branch off a captured commit
+(`registry/branch!`, `store/open-branch!`), fork the context onto it
+(`sci.eval/fork-cluster-ctx`), run under custody, unlink the branch
+(`registry/retire-branch!`) and let the retention sweep collect it. The runner calls
+the same functions an agent's evaluation calls; a test-side copy of any of them is a
+defect. Only the platform tier — declared destructive owners and host-bound changes —
+keeps a fresh JVM.
+
+**Merge carries program rows only, git-like, through the gate.** Non-conflicting rows
+land on an intermediate branch; conflicts stay there for the agent to fix, so the
+problem shrinks; the combined program is tested in a context forked from that branch;
+green reaching tests plus contracts is the gate; a named accept by root or the owner
+advances the cluster pointer (**[TARGET]** D1). Write-back to the files is the same
+gate. Filesystem lanes (Codex, Claude) index into one shared candidate branch of
+default and are live agents there; Seon agents doing every update is the goal.
+
 ## Five design laws
 
 ### Values carry their world
