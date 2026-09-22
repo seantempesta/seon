@@ -163,3 +163,93 @@ not a constructed one; the racing-start retry is unexercised. F0's chain appears
 the operator's own diagnostics (`bin/seon status` on an empty root printed
 `:seon.error/chain`); the boot-side chain through `request!` is covered by the same
 constructor but was not observed on a failing JVM boot after F0.
+
+## 6. Round 2 (orchestrator ruling B; owner: nuke wipes every cache, reset = fresh branch)
+
+Commits `76b42f90f`, `9744c970d` (paths: `src/seon/cluster/boot.clj`,
+`script/seon/operator.clj`, `script/seon/dev/dependency_digest.clj`,
+`script/seon/operator_nuke_test.clj`).
+
+**Nuke.** Candidates are resolved from the operator's OWN checkout before anything
+stops; a checkout that is not a Git top level (a frozen archive under another
+repository) refuses by name first (verified: a copy of `operator.clj` under
+`tmp/nuke-nogit` refused "The operator's checkout is not a Git top level ...";
+nothing stopped). Then: down, wipe, and boot HEAD twice, then up to four older
+distinct programs (first-parent commits whose trees differ outside `docs/`),
+HEAD's failure first; ready on a fallback exits 3 (CLI; the drill ran through
+`nuke!` directly). A nuke launches without the dependency class cache.
+
+Derived paths wiped, enumerated from the code (`nuke-derived-paths`):
+`data/source` (this operator's archives); `target/dev-dependency-classes`,
+`.next`, `-cache-result.edn`, `-cache-current.edn`, `-cache-processes`,
+`-cache.lock`, `-cache-references.lock` (`dev_cache.clj:13-19`);
+`target/test-published-bases`, `target/test-classpaths` (retired gate launcher;
+no current producer); `.clj-kondo/.cache` (`seon.fn.analyzer` `cache-directory`,
+`seon.fn` analysis cache-root `fn.clj:2506,3622`, `bin/seon-hook:236`,
+`script/seon/dev/clj_kondo.clj:36`); `.cpcache`; every
+`data/clusters/*/prepl.edn`. The store is deleted by the replacement JVM under its
+flock (`:seon.store/destroy?`). Scope: all paths are relative to the nuked root;
+a path reached through a linked component (a scratch root's `target ->` the
+repository's) is kept, link and target, and reported as `:kept-shared`
+(regression `script/seon/operator_nuke_test.clj`, 1 test, 7 assertions, green
+under bb). Per-file analysis lives in the store and goes with it.
+
+Note on the orchestrator's defect report: the repository `target/` was emptied by
+this lane's nuke of the REPOSITORY root (`default`, 21:47Z), which the ruling
+wipes; the code before `9744c970d` would also have followed a scratch root's
+`target` link, now fixed. The class cache is empty; fill with
+`clojure -T:dev-cache ensure-cache` (lane resume-in-seconds measured 47.9 s).
+
+**Reset** (`bin/seon reset [NAME] --force`): the running JVM holds the store,
+stops the instance, unlinks `:cluster-<name>` (`registry/retire-branch!`) and
+starts it again, which forks a fresh branch from the published program rows;
+every cache kept.
+
+**Resume** (from lane resume-in-seconds (c)): boot compares discovered inputs
+with the published program and publishes exactly the changed paths; a refused
+boot-time publication refuses the boot. Probe on pid 70720: archive directory,
+714 inputs, `[]` changed, 1,037 ms; repository directory, 717 inputs, 58 changed
+(incl. `deps.edn`), 588 ms. The dependency class cache on the start classpath
+(their `operator.patch`, `dependency_digest.patch`) applied cleanly; selection
+probe on the wiped repository: `:miss :no-matching-cache`, 62 ms, fill command
+named.
+
+**Ugly output.** The operator diagnostic no longer copies the evidence into
+`:seon.error/data`; a chain link whose `ex-data` equals the evidence omits it
+(both boundaries). Observed on the `stop` refusal at 21:42Z: one offending copy,
+chain link without data.
+
+**Rejoin of default: blocked.** `bin/seon stop` of pid 43581 hung 30 s in
+`seon.cluster.agent/await-turn-completion!` (`agent.clj:990`, via `disarm!`;
+jstack `tmp/orchestrator/nuke-is-total-stop-hang-jstack.txt`; class of
+[warm-restart hang](../../../seon/issues/warm-restart-hangs-in-agent-arm-waiting-on-an-atom-monitor.md));
+`down --force` ended it. `bin/seon start` from the repository: pid 64314, ready
+51,138 ms, but it resumed the old publication, and `init --dev default` refused
+[RESTART NEEDED](../../../seon/issues/restart-needed-refuses-the-publication-a-restart-should-make.md)
+for `deps.edn`. A from-zero boot of the working tree (pid 67203) refused on a
+foreign working-tree hunk: "Predicate (fn* [p1] (instance? Throwable p1)) has no
+admitted callable in the corpus projection" (`seon.schema/compilable-form`).
+Owner: "just nuke it": `bin/seon nuke --force` → pid **70720**, HEAD `76b42f90f`
+first attempt, ready **106,787 ms**, missing `[]`, source commit
+`6ab2f7cd-656b-58c7-90da-811f780cd2e7`, MCP `runtime_status` alive. It runs from
+`data/source/76b42f90f…`, so hook paths still relativize until RESTART NEEDED
+admits a boot-time dependency publication.
+
+| Drill / operation | Result | Wall | Phases |
+|---|---|---|---|
+| `bin/seon nuke --force`, repository root | ready on HEAD `76b42f90f` | 147.44 s | down 0.7 s, **wipe 14.3 s**, source 4.9 s, launch 127.2 s, ready 106.8 s |
+| B drill: `nuke!` from `0476bdde4` (HEAD `9744c970d` + a committed broken `boot.clj`, `git commit-tree`, on no branch), scratch root with `target ->` repository | HEAD failed twice (launch 16.3 s, 15.3 s: the drill's throw), fallback `9744c970d` ready 91,367 ms; `:kept-shared ["target"]`, marker class intact | 147.78 s | fallback launch 108.8 s |
+| `bin/seon reset rtest --force` in pid 70720 | ready 8,500 ms, missing `[]` | 14.77 s | stop 6.2 s, unlink 9 ms, start 8.5 s |
+| `bin/seon start rtest` (fresh fork) | ready 13,501 ms | 13.79 s | — |
+| `bin/seon stop` pid 43581 | hung, bound fired | 30.06 s | `await-turn-completion!` |
+| `bin/seon start` (resume, repository) | ready 51,138 ms | 75.86 s | — |
+| from-zero working tree | refused (foreign hunk) | 81.91 s | — |
+
+Over 10 s and defects: the wipe (14.3 s, deleting `target/dev-dependency-classes`
+and the kondo cache), reset 14.8 s against the ~4 s target (stop waits on turn
+completion 6.2 s; start 8.5 s), and every boot — rows added to
+[from-zero-boot-takes-minutes](../../../seon/issues/from-zero-boot-takes-minutes.md).
+Reset of `default` itself was not run (the stop hang above would wedge it).
+Leftover: the `:cluster-rtest` branch stays in the store's roster (stopped).
+`reference-code/babashka-process` `src/babashka/process.cljc` (+5/−1,
+uncommitted) is not this lane's; untouched.
