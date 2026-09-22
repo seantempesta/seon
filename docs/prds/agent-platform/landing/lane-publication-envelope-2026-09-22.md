@@ -220,3 +220,14 @@ change the new regression's expectation. Raw log:
 The additional transitive-schema regression is authored; its recorded-fixture
 execution is pending that repair, with its producer exercised by the armed
 scratch probe above. No suite or cold gate was run.
+
+
+## Commit ledger
+
+- `60b94954a` — independent row 6 scalar-upsert retirement, schema keys and
+  callers together; measurement scripts and raw compile table. Exact committed
+  HEAD load passed with exit 0 in the isolated checkout:
+  `clojure -M -e "(require 'seon.cluster 'seon.cluster.source 'seon.fn)"`.
+  Evidence: `tmp/publication-envelope-evidence/row6-head-load.log`.
+- Row 8 is the following path-limited code commit; its id and exact committed
+  HEAD load are recorded after creation below.

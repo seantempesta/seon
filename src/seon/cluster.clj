@@ -675,40 +675,6 @@
                    (when (map? offense)
                      (select-keys offense [:seon.cluster.source/phase]))))))
 
-(defn- source-change-phase
-  "Read the producer's declared source-change phase."
-  {:malli/schema [:=> [:cat :seon.error/throwable] [:maybe :seon.cluster.source/phase]]}
-  [failure]
-  (:seon.cluster.source/phase (ex-data failure)))
-
-(defn- retrying-source-change
-  "Run one publication attempt, retrying ONCE when the source changed under it.
-
-  A file edited between the analysis snapshot and the span read, and a file
-  edited between publication and the adoption compare, are one event: the next
-  read converges. A refusal that survives the retry names which phase changed,
-  so the operator reports the seam instead of a bare kind."
-  [attempt]
-  (loop [retry? true]
-    (let [outcome
-          (try
-            {::published (attempt)}
-            (catch clojure.lang.ExceptionInfo failure
-              (if-let [phase (source-change-phase failure)]
-                (if retry?
-                  {::retry-phase phase}
-                  (refused! (str "Source changed during " (name phase)
-                                 " through the one retry; the next edit must converge it.")
-                            (assoc (or (:seon.boot/offense (ex-data failure))
-                                       (ex-data failure))
-                                   :seon.cluster.source/phase phase)))
-                (throw failure))))]
-      (if-let [phase (::retry-phase outcome)]
-        (do (report-source-progress!
-             (str "source changed during " (name phase) "; retrying publication once"))
-            (recur false))
-        (::published outcome)))))
-
 (defn- require-candidate-value
   [projection schema-key value message]
   (if (schema/valid-candidate-value? projection schema-key value)
@@ -1928,8 +1894,8 @@
   `requires` maps a namespace name to the set of namespace names it requires.
   Only members of `namespaces` are ordered; edges leaving that set are
   ignored. Ties break by name, so the order is stable across boots. Clojure
-  namespaces cannot require each other cyclically; the name order is the total
-  fallback if the facts ever disagree."
+  namespaces cannot require each other cyclically; inconsistent stored edges
+  refuse before any namespace is reloaded."
   {:malli/schema
    [:=> [:cat [:set :seon.ns/name] [:map-of :seon.ns/name [:set :seon.ns/name]]]
     [:vector :seon.ns/name]]}
@@ -1938,13 +1904,15 @@
          ordered []]
     (if (empty? remaining)
       ordered
-      (let [ready (or (some (fn [namespace-name]
-                              (when (empty? (set/intersection
-                                             (get requires namespace-name #{})
-                                             (disj remaining namespace-name)))
-                                namespace-name))
-                            remaining)
-                      (first remaining))]
+      (let [ready (some (fn [namespace-name]
+                          (when (empty? (set/intersection
+                                         (get requires namespace-name #{})
+                                         remaining))
+                            namespace-name))
+                        remaining)]
+        (when-not ready
+          (refused! "Development reload requires contain a cycle."
+                    {:seon.ns/requires (set remaining)}))
         (recur (disj remaining ready) (conj ordered ready))))))
 
 (defn- namespace-requires
@@ -2004,30 +1972,95 @@
   (into [] (filter (comp adoption-identity-attribute? first)) identities))
 
 (defn development-namespaces
-  "Changed declaration namespaces and their transitive declared dependents."
+  "Changed declaration namespaces and their dependents in either program value."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.fn.file/identities] [:set :seon.ns/name]]}
-  [database identities]
-  (let [selected (into #{}
-                       (keep (fn [[attribute value]]
-                               (case attribute
-                                 :seon.ns/name value
-                                 (:seon.fn/sym :seon.test/sym) (symbol (namespace value))
-                                 nil))) identities)]
-    ;; Namespace reload can change compile-time values as well as callable
-    ;; roots. Keep all declared dependents until narrower facts prove safety.
-    (loop [selected selected pending selected visited #{}]
-      (if (empty? pending)
-        selected
-        (let [callers (db/q '[:find [?name ...] :in $ [?required ...]
-                         :where [?ns :seon.ns/requires ?required]
-                         [?ns :seon.ns/name ?name]]
-                       database (vec pending))
-          _ (when (:seon.error/at callers)
-              (refused! "Development namespace dependents could not be read." callers))
-          visited (into visited pending)
-          added (set/difference (set callers) visited)]
-          (recur (into selected added) added visited))))))
+   [:function
+    [:=> [:cat :seon.db/database-value :seon.fn.file/identities] [:set :seon.ns/name]]
+    [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.fn.file/identities]
+     [:set :seon.ns/name]]]}
+  ([database identities] (development-namespaces database database identities))
+  ([previous database identities]
+   (let [selected (into #{}
+                        (keep (fn [[attribute value]]
+                                (case attribute
+                                  :seon.ns/name value
+                                  (:seon.fn/sym :seon.test/sym) (symbol (namespace value))
+                                  nil))) identities)
+         databases (if (identical? previous database) [database] [previous database])]
+     (loop [selected selected pending selected]
+       (if (empty? pending)
+         selected
+         (let [callers (into #{}
+                             (mapcat
+                              (fn [value]
+                                (let [result (db/q '[:find [?name ...] :in $ [?required ...]
+                                                    :where [?ns :seon.ns/requires ?required]
+                                                    [?ns :seon.ns/name ?name]]
+                                                  value (vec pending))]
+                                  (when (:seon.error/at result)
+                                    (refused! "Development namespace dependents could not be read." result))
+                                  result)))
+                             databases)
+               added (set/difference callers selected)]
+           (recur (into selected added) added)))))))
+
+(defn- verify-development-sources!
+  "Refuse adoption when a reloaded namespace no longer has its published bytes."
+  {:malli/schema [:=> [:cat :seon.db/database-value :string [:set :symbol]] :nil]}
+  [database directory namespaces]
+  (let [paths (db/q '[:find [?path ...] :in $ [?name ...]
+                     :where [?ns :seon.ns/name ?name]
+                            [?ns :seon.fn/file ?file]
+                            [?file :seon.fn.file/relative-path ?path]]
+                   database (vec namespaces))
+        _ (when (:seon.error/at paths)
+            (refused! "Reloaded namespace files could not be read." paths))
+        expected (source/stored-path-digests database (vec paths))
+        observed (source/path-digests directory (vec paths))
+        changed (filterv #(or (nil? (get expected %))
+                             (not= (get expected %) (get observed %))) paths)]
+    (when (seq changed)
+      (refused! "Source changed during development adoption."
+                {:seon.cluster.source/phase :adoption
+                 :seon.source/changed-paths changed})))
+  nil)
+
+(defn- development-arming-identities
+  "Reloaded Vars and functions whose contracts refer to changed schemas."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :symbol] :seon.fn.file/identities]
+                  :seon.reconcile/adopt-identities]}
+  [database namespaces identities]
+  (let [schemas (into [] (keep (fn [[attribute value]]
+                                (when (= :seon.schema/key attribute) value))) identities)
+        referring (if (seq schemas)
+                    (db/q '[:find [?sym ...]
+                            :in $ % [?changed ...] [?attribute ...]
+                            :where (affected ?key ?changed)
+                                   [?arity ?attribute ?key]
+                                   [?function :seon.fn/arities ?arity]
+                                   [?function :seon.fn/sym ?sym]]
+                          database
+                          '[[(affected ?key ?changed)
+                             [?schema :seon.schema/key ?changed]
+                             [(identity ?changed) ?key]]
+                            [(affected ?key ?changed)
+                             [?schema :seon.schema/key ?key]
+                             [?schema :seon.schema/references ?ref]
+                             (affected ?ref ?changed)]]
+                          schemas
+                          [:seon.fn.arity/input-refs :seon.fn.arity/output-refs
+                           :seon.fn.arity/guard-refs])
+                    [])]
+    (when (:seon.error/at referring)
+      (refused! "Development contract referrers could not be read." referring))
+    (into #{}
+          (map #(vector :seon.fn/sym %))
+          (into (set referring)
+                (mapcat (fn [namespace-name]
+                          (when-let [loaded (find-ns namespace-name)]
+                            (map #(symbol (str namespace-name) (str %))
+                                 (keys (ns-interns loaded))))))
+                namespaces))))
 
 (defn- development-source-refresh!
   {:malli/schema
@@ -2088,8 +2121,7 @@
         projection (schema/projection-from-database database)
         changed-identities (adoption-identities program-identities)
         deleted-identities (filterv #(empty? (db/pull published-database '[*] %)) changed-identities)
-        namespaces (set/union (development-namespaces previous-database changed-identities)
-                              (development-namespaces database changed-identities))]
+        namespaces (development-namespaces previous-database database changed-identities)]
     (report-source-progress! "development loaded definitions")
     ;; Clojure reload leaves removed interns behind. Remove only definitions
     ;; whose identity is absent from the published database.
@@ -2103,6 +2135,8 @@
     ;; A changed caller reloaded before its changed callee fails on the
     ;; callee's new Var, so the order follows the declared requires facts.
     (load-development-definitions! namespaces (namespace-requires database namespaces))
+    (verify-development-sources! published-database (fs/source-directory)
+                                 (into #{} (filter reloadable-namespace?) namespaces))
     (env/advance-projection! (get ctx env/state-carrier)
                              (db/basis-t database) projection)
     (report-source-progress! "development JVM instrumentation")
@@ -2122,7 +2156,9 @@
                       :seon.sci.admit/caps (config/result-caps effective)
                       :seon.config.error/max-evidence-bytes
                       (:seon.config.error/max-evidence-bytes effective)
-                      :seon.schema/projection projection})]
+                      :seon.schema/projection projection
+                      :seon.instrument/changed-identities
+                      (development-arming-identities database namespaces changed-identities)})]
          (when (or (:seon.instrument/registration-observation result)
                    (and (= :panic (:seon.config/on-core-error effective))
                         (not (pos? (or (:seon.instrument/instrumented result) 0)))))
@@ -2173,8 +2209,8 @@
   Content digests select changed inputs and declaration edges select affected
   files. Every entry point reuses the published manifest and the current
   database history. Complete analysis is only needed without a prior manifest.
-  A final source-change refusal retries publication/adoption once immediately;
-  the last adopted source database remains the reconciliation basis."
+  A post-reload source-change refusal leaves the adoption record unchanged;
+  the next request reconciles from the last adopted source database."
   {:malli/schema
    [:function
     [:=> [:cat :seon.boot/root] :seon.source/published]
@@ -2210,16 +2246,14 @@
                         :seon.source/changed-paths
                         (mapv #(fs/relative-path directory %) changed-paths))]
        (try
-         (retrying-source-change
+         (report-source-progress! "source build")
+         (schema/call-with-projection
+          (schema/declaration-projection (schema.edn/packaged-forms))
           (fn []
-            (report-source-progress! "source build")
-            (schema/call-with-projection
-             (schema/declaration-projection (schema.edn/packaged-forms))
-             (fn []
-               (let [published (full-source-refresh! root held-store roots)]
-                 (when instance
-                   (development-source-refresh! held-store instance published changed-paths roots))
-                 published)))))
+            (let [published (full-source-refresh! root held-store roots)]
+              (when instance
+                (development-source-refresh! held-store instance published changed-paths roots))
+              published)))
          (finally
            (release-root-store! store-dir))))))))
 

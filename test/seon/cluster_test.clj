@@ -319,88 +319,17 @@
         (is (not (str/includes? (:seon.error/message refusal) "predates"))
             "so the reader is never told a whole-map inequality")))))
 
-(defn- analysis-source-change-failure
-  "The refusal `seon.fn`'s span read raises when the file grew under it.
-
-  Captured once from the real file, sliced against a span the analyzer could
-  only have produced from the LARGER text: exactly the publication failure in
-  `docs/seon/issues/source-analysis-throws-when-a-file-changes-between-snapshot-and-span-read.md`."
-  []
-  (let [file (java.io.File/createTempFile "cluster-span-change" ".clj")]
-    (try
-      (spit file "(ns probe.span)\n(defn a [] 1)\n")
-      (let [contexts ((ns-resolve 'seon.fn 'source-contexts) [file])
-            path (.getCanonicalPath file)]
-        (spit file "(ns probe.span)\n(defn a [] 1)\n(defn b [] 2)\n")
-        (try
-          ((ns-resolve 'seon.fn 'exact-source)
-           contexts
-           {:seon.fn.analyzer/filename path
-            :seon.fn.analyzer/row 3 :seon.fn.analyzer/col 1
-            :seon.fn.analyzer/end-row 3 :seon.fn.analyzer/end-col 13})
-          nil
-          (catch clojure.lang.ExceptionInfo failure failure)))
-      (finally (.delete file)))))
-
-(deftest a-source-change-during-analysis-takes-the-one-publication-retry
-  ;; The analysis-time refusal and the adoption-time digest compare are the
-  ;; same event at two seams; both take the single retry, and neither is a
-  ;; rebuild reason (`docs/prds/steward-platform/research/
-  ;; adoption-retry-on-analysis-refusal-2026-09-17.md`).
-  (let [retrying (ns-resolve 'seon.cluster 'retrying-source-change)
-        phase-of (ns-resolve 'seon.cluster 'source-change-phase)
-        progress (ns-resolve 'seon.cluster '*source-progress!*)
-        analysis-failure (analysis-source-change-failure)
-        adoption-failure (try
-                           (#'cluster/refused! "Source changed during development adoption."
-                                              {:seon.cluster.source/phase :adoption
-                                               :seon.source/digest-before "c0"})
-                           (catch clojure.lang.ExceptionInfo failure failure))
-        reported (atom [])
-        attempts (atom 0)
-        converging (fn [failure]
-                     (fn []
-                       (if (= 1 (swap! attempts inc))
-                         (throw failure)
-                         {:seon.source/commit-id "converged"})))]
-    (is (some? analysis-failure)
-        "the captured span read genuinely refuses instead of returning source")
-    (is (true? (:seon.fn/index-refused (ex-data analysis-failure))))
-    (is (vector? (:seon.fn/analysis-span (ex-data analysis-failure))))
-    (is (= :analysis (:seon.cluster.source/phase (ex-data analysis-failure))))
-    (is (= :adoption (:seon.cluster.source/phase (ex-data adoption-failure))))
-    (is (nil? (get-in (ex-data adoption-failure) [:seon.boot/offense :seon.cluster.source/phase])))
-    (is (nil? (phase-of (ex-info "Digest alone is not a declared phase."
-                                 {:seon.boot/offense {:seon.source/digest-before "c0"}}))))
-    (is (not ((schema/projection-validator (schema/handed-projection) :seon.cluster.source/phase)
-              :unrecognized)))
-    (is (= [:analysis :adoption nil]
-           [(phase-of analysis-failure)
-            (phase-of adoption-failure)
-            (phase-of (ex-info "unrelated" {}))])
-        "one predicate names the phase for both seams and refuses to widen")
-    (with-bindings {progress (fn [phase] (swap! reported conj phase))}
-      (is (= {:seon.source/commit-id "converged"}
-             (retrying (converging analysis-failure)))
-          "an analysis refusal retries and converges on the stable second read")
-      (is (= 2 @attempts) "exactly once, never twice")
-      (is (= ["source changed during analysis; retrying publication once"]
-             @reported)
-          "and the operator is told which phase changed")
-      (reset! attempts 0)
-      (is (= {:seon.source/commit-id "converged"}
-             (retrying (converging adoption-failure)))
-          "the adoption compare keeps its own single retry")
-      (is (= 2 @attempts) "a digest-change refusal retries exactly once")
-      (let [surviving (test-support/refusal-data
-                       #(retrying (fn [] (throw analysis-failure))))]
-        (is (true? (:seon.boot/refused surviving))
-            "a second change refuses rather than rebuilding")
-        (is (= :analysis (:seon.cluster.source/phase surviving))
-            "naming the phase that changed under the retry")
-        (is (= (:seon.fn/analysis-span (ex-data analysis-failure))
-               (get-in surviving [:seon.boot/offense :seon.fn/analysis-span]))
-            "retaining the captured span")))))
+(deftest development-reload-refuses-an-unsatisfiable-order
+  (is (= '[sample.leaf sample.caller]
+         (cluster/reload-order '#{sample.caller sample.leaf}
+                               '{sample.caller #{sample.leaf}})))
+  (doseq [requires ['{sample.a #{sample.b} sample.b #{sample.a}}
+                    '{sample.a #{sample.a}}]]
+    (let [refusal (test-support/refusal-data
+                   #(cluster/reload-order (set (keys requires)) requires))]
+      (is (true? (:seon.boot/refused refusal)))
+      (is (= (set (keys requires))
+             (get-in refusal [:seon.boot/offense :seon.ns/requires]))))))
 
 (deftest initialization-readiness-surfaces-a-refused-read-instead-of-absence
   ;; The readiness probe answers three states, not two. Before this, a

@@ -71,6 +71,30 @@
                   selected)
                "Ordinary edits retain conservative compile-time dependent reload.")
            (is (empty? (cluster/development-namespaces (db/db connection) []))))
+         (let [before (db/db connection)
+               _ (support/transacted!
+                  connection [[:db/retract [:seon.ns/name 'sample.reload.caller]
+                               :seon.ns/requires 'sample.reload.leaf]])
+               after (db/db connection)]
+           (is (= #{'sample.reload.leaf}
+                  (cluster/development-namespaces after [[:seon.fn/sym 'sample.reload.leaf/value]])))
+           (is (= #{'sample.reload.leaf 'sample.reload.caller 'sample.reload.outer}
+                  (cluster/development-namespaces before after
+                                                  [[:seon.fn/sym 'sample.reload.leaf/value]])))
+           (support/transacted!
+            connection [[:db/add [:seon.ns/name 'sample.reload.caller]
+                         :seon.ns/requires 'sample.reload.leaf]]))
+         (let [database (db/db connection)
+               verify (ns-resolve 'seon.cluster 'verify-development-sources!)
+               namespaces #{'sample.reload.leaf}]
+           (is (nil? (verify database (.getCanonicalPath root) namespaces)))
+           (spit (io/file root "src" "leaf.clj") "(ns sample.reload.leaf)\n(defn value [] 2)\n")
+           (let [refusal (support/refusal-data
+                          #(verify database (.getCanonicalPath root) namespaces))]
+             (is (true? (:seon.boot/refused refusal)))
+             (is (= :adoption (:seon.cluster.source/phase refusal)))
+             (is (= ["src/leaf.clj"]
+                    (get-in refusal [:seon.boot/offense :seon.source/changed-paths])))))
          (let [selected (cluster/development-namespaces
                          (db/db connection) [[:seon.fn/sym 'sample.reload.leaf/expanded]])]
            (is (= #{'sample.reload.leaf 'sample.reload.caller 'sample.reload.outer} selected))
@@ -111,3 +135,19 @@
             (is (seq expected))
             (is (= expected rearmed)))
           (is (identical? unrelated @#'cluster/reload-order))))))))
+
+(deftest schema-referrers-are-selected-for-arming-without-a-namespace-reload
+  (support/with-database
+   (fn [connection]
+     (let [sym (symbol "my.note" (str "arming-probe-" (id/id)))
+           row (support/program-fn-row
+                (db/db connection) sym
+                (pr-str (list 'defn (symbol (name sym))
+                              {:malli/schema [:=> [:cat :seon.source/published] :boolean]}
+                              '[value] '(boolean value))))
+           _ (support/transacted! connection [row])
+           selected (#'cluster/development-arming-identities
+                     (db/db connection) #{} [[:seon.schema/key :seon.source/commit-id]])]
+       (is (some? (:db/id (db/pull (db/db connection) [:db/id] [:seon.fn/sym sym]))))
+       (is (contains? selected [:seon.fn/sym sym])
+           "The function refers to the changed key through its published input schema.")))))
