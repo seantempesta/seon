@@ -1406,7 +1406,7 @@
   ;; compiles the resource BEFORE its adoption reloads the owner — so the
   ;; predicate resolves to nothing and EVERY publication and adoption in that
   ;; process is refused, including the one that would have fixed it. Measured
-  ;; 2026-09-16 on `default` for `seon.search/handle?`, which wedged every
+  ;; 2026-09-16 on `default` for a newly declared core predicate, which wedged every
   ;; agent (`logs/current-source-failure.log`); filed as
   ;; `docs/seon/issues/a-new-core-predicate-and-its-schema-cannot-be-adopted-in-place.md`.
   ;;

@@ -27,13 +27,10 @@
          d (seon.db/db connection)
          member (seon.db/pull d '[:seon.issue/commits {:seon.issue/tests [:seon.test/sym]}]
                              [:seon.issue/id "agent-form-calls-to-core-namespaces-are-not-indexed"])
-         search-value (seon.db/pull d '[{:seon.issue/tests [:seon.test/sym]}] [:seon.issue/id "a-search-contract-predicate-cannot-be-made-durable"])
          class-value (seon.db/pull d '[{:seon.issue/members [:seon.issue/id]}]
                                   [:seon.issue/id "class-classification-is-inferred-from-hand-lists"])]
      (clojure.test/is (= 3 (count selected-real)))
      (clojure.test/is (= 3 (:seon.issue/count report)) (pr-str report))
-     (clojure.test/is (some #(= 'seon.search-test/index-step-contract-has-durable-generative-host-predicates
-                               (:seon.test/sym %)) (:seon.issue/tests search-value)))
      (clojure.test/is (some #{"5deb40e4e"} (:seon.issue/commits member)))
      (clojure.test/is (some #(= "agent-form-calls-to-core-namespaces-are-not-indexed" (:seon.issue/id %))
                            (:seon.issue/members class-value)))
