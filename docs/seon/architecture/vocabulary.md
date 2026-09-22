@@ -33,21 +33,20 @@ reader. The law, in order of preference:
 3. only when a concept is genuinely ours, coin once, record it here with
    sources on BOTH sides of the boundary, and use it everywhere.
 
-## Ruled 2026-09-22 — one JVM, many realities (owner)
+## Ruled 2026-09-22 — one JVM, many realities (owner; written progressively, only what is grounded)
 
-| term | is | source of the name | never |
+| term | is | grounded in | never |
 |---|---|---|---|
-| **cluster** | a Datahike branch plus the agents working on it; the cluster row holds the pointer we advance | Seon, recorded once ([architecture](clusters-branches-contexts.md)) | an "environment" to start |
-| **branch** | `datahike.api/branch!`: a roster pointer to a commit; no copy | `reference-code/datahike/src/datahike/versioning.cljc` `branch!` | "worktree", "fork of the database" |
-| **context** | the SCI world acquired from a database value's program rows; `sci/fork` for a child | `reference-code/sci/src/sci/core.cljc` `fork` | "environment", "refork" |
-| **program rows** | the declared program partition on a branch: functions, tests, schemas, namespaces, render pairs, contracts, analysis facts | Seon ([program rows data pack](../../research/agent-platform/program-rows-data-pack-2026-09-22.md)) | a hand list; a stamped kind |
-| **data** | every other row: turns, evaluations, messages, errors, tasks, results — disposable, never merged | Seon | "state" |
-| **loaded namespaces** | `require`'s output: the JVM's compiled Vars, derived from the files exactly as the program rows are by the indexer | Clojure (`clojure.core/require`, `loaded-libs`) | "compiled cache", "the runtime" |
-| **reload** | `(require ns :reload)` of the changed namespaces and their dependents, in dependency order from `:seon.ns/requires` | Clojure | a system to restart |
-| **host-bound row** | a declaration SCI cannot interpret (refused form head or an unresolvable host reference in its own body), a computed per-declaration fact | SCI (`sci.impl.analyzer`), [host-bound data pack](../../research/agent-platform/host-bound-rows-data-pack-2026-09-22.md) | a namespace roster |
-| **live** / **isolated** | an agent's mode = which branch its custody points at: the cluster's branch, or a branch off its head | Seon | "sandbox" |
-| **merge** | program rows from a branch onto a cluster head via an intermediate branch, the gate (reaching tests + contracts), then a named accept; Datahike's `merge!` records the lineage | `versioning.cljc` `merge!` | "sync", "promote" |
-| **unlink** | `registry/retire-branch!`: the branch leaves the roster; the retention sweep (`collect!`) reclaims it later | Seon over Datahike's roster and GC | a per-branch cleanup |
+| **branch** | `datahike.api/branch!`: a roster pointer to a commit; no copy, no environment | `reference-code/datahike/src/datahike/versioning.cljc:212` (`branch!`), `:279` (`delete-branch!`); Seon callers `src/seon/cluster/registry.clj:178` (`branch!`), `src/seon/cluster/store.clj:534` (`open-branch!`) | "worktree", "fork of the database" |
+| **cluster** | one Datahike branch plus the agents working on it; the cluster row holds the pointer we advance | `resources/seon/schemas/seon.cluster.edn`; `src/seon/cluster/registry.clj` (the `cluster-default` branch) | an "environment" to start |
+| **context** | the SCI world a cluster or agent evaluates in; a child is `sci/fork` | `reference-code/sci/src/sci/core.cljc:345` (`fork`); `src/seon/sci/eval.clj:2293` (`fork-cluster-ctx`, forks onto another connection) | "environment", "refork" |
+| **loaded namespaces** | `require`'s output: the JVM's compiled Vars, derived from the files | Clojure `clojure.core/require`, `*loaded-libs*`; Seon's reload site `src/seon/cluster.clj:1983` | "compiled cache", "the runtime" |
+| **reload** | `(require ns :reload)` of changed namespaces and their dependents, nothing more | Clojure; `src/seon/cluster.clj:1983` inside `refresh-source!` (`:2170`) | a system to restart |
+| **unlink** | `registry/retire-branch!`: the branch leaves the roster; the retention sweep collects its data later | `src/seon/cluster/registry.clj:327` (`retire-branch!`), `:503` (`collect!`) | a per-branch cleanup |
+| **[TARGET] program rows** | the declared program partition on a branch (functions, tests, schemas, namespaces, render pairs, contracts, analysis facts); everything else is data | no partition fact exists yet — [program rows data pack](../../research/agent-platform/program-rows-data-pack-2026-09-22.md) §3 proposes `:seon.program/partition` on entity schemas | a hand list; a stamped kind |
+| **[TARGET] host-bound row** | a declaration SCI cannot interpret, a computed per-declaration fact | `:seon.fn/defined-by` exists (`resources/seon/schemas/seon.fn.edn`); the body-reference half is discarded today — [host-bound data pack](../../research/agent-platform/host-bound-rows-data-pack-2026-09-22.md) §3 | a namespace roster |
+| **[TARGET] live / isolated** | an agent's mode = which branch its custody points at | no agent branch attribute exists yet; custody seam `src/seon/db.clj:370` (`call-with-custody`) | "sandbox" |
+| **[TARGET] merge** | program rows from a branch onto a cluster head via an intermediate branch, the gate, then a named accept; Datahike records the lineage | `versioning.cljc:734` (`merge!`, lineage only, caller supplies tx-data) — [merge data pack](../../research/agent-platform/merge-and-write-back-data-pack-2026-09-22.md) | "sync", "promote" |
 
 Never assume you understand a row from its name alone: follow its links and
 read that slice of code before building against it — that is how we avoid

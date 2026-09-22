@@ -300,17 +300,15 @@ and report exact evidence and limits. Keep the plan clean: integrate decisions i
 their owning sections; audits and dated evidence stay outside the plan directory.
 Use Clojure/dependency vocabulary: cluster vs environment, JVM REPL vs SCI evaluation,
 turn vs evaluation, live result vs shown text. Legacy source identifiers may be cited,
-not repurposed as new terminology. **The agreed terms (owner, 2026-09-22;
-[architecture](docs/seon/architecture/clusters-branches-contexts.md), [vocabulary](docs/seon/architecture/vocabulary.md)):**
-a **cluster** is a Datahike branch plus its agents, with a pointer we advance; a
-**branch** is `d/branch!`, a pointer, no copy, no environment; a **context** is the SCI
-world acquired from a database value's program rows; **program rows** are the declared
-program partition (functions, tests, schemas, namespaces, render pairs, contracts,
-analysis facts), everything else is data; the **loaded namespaces** are `require`'s
-output, the compiled Vars, derived from the files like the program rows are; a
-**reload** is `require :reload` of changed namespaces and their dependents, nothing
-more; a **merge** carries program rows onto a cluster head through the gate; **unlink**
-retires a branch from the roster and the retention sweep collects it. Retired words:
+not repurposed as new terminology. **The agreed terms (owner, 2026-09-22; grounded rows and targets in the
+[vocabulary reference](docs/seon/architecture/vocabulary.md)):** a **branch** is
+`d/branch!`, a pointer, no copy; a **cluster** is one branch plus its agents; a
+**context** is the SCI world an agent evaluates in, `sci/fork` for a child; the
+**loaded namespaces** are `require`'s output, the compiled Vars, derived from the files;
+a **reload** is `require :reload` of changed namespaces and their dependents, nothing
+more; **unlink** retires a branch from the roster and the retention sweep collects it.
+Program rows, host-bound rows, live/isolated and merge are ruled targets, not installed
+facts; use those words for the target and cite the data pack. Retired words:
 "environment" as a thing to start, "refork", "worktree", "compiled cache", "facet". No restrictions for hypothetical risk.
 
 ## Operation and delegation
