@@ -28,9 +28,12 @@ supply the facts each operation reads.
 
 ## The model
 
-1. **The default cluster's program is the files.** Its head is reindexed from the
-   files on disk; its data can be dropped for a fresh default. It is the one reality
-   whose program runs COMPILED: a JVM holds one set of Vars.
+1. **The default cluster's program is the files.** Two things derive from the files
+   and are recomputed when a file changes: the PROGRAM ROWS (the indexer's output — the
+   database is the index and cache of the files, and every query, gate, merge and context
+   acquisition reads it) and the LOADED NAMESPACES (`require`'s output — the compiled
+   functions that execute). Default's data can be dropped for a fresh default. It is the
+   one reality that runs compiled: a JVM holds one set of Vars.
 2. **Every other reality interprets its differences.** A branch whose program rows
    differ from the compiled head interprets the overridden rows and their affected
    callers in its own context (B2 §2a); everything else binds the compiled Var.
@@ -46,7 +49,7 @@ supply the facts each operation reads.
    that branch's connection; the agent never names a branch. The task sets the mode at
    start; the agent can also branch and request a merge itself through `my.*`.
 5. **Stability comes from the branch, not from a captured value.** No reload runs
-   under an admitted evaluation; the compiled cache advances only at a boundary
+   under an admitted evaluation; the loaded namespaces advance only at a boundary
    between evaluations; a context is reacquired from its branch head at turn start and
    cached by commit id.
 6. **A test is an isolated agent that lives for one body**: branch off a captured
@@ -62,7 +65,7 @@ supply the facts each operation reads.
 8. **Filesystem lanes (Codex, Claude) are live agents on one candidate branch of
    default.** The hook indexes every session's edits into that branch; the reaching
    tests run there; when green, default advances, the files are already the truth, and
-   the changed namespaces plus dependents reload sub-second at the next boundary.
+   the changed namespaces plus dependents reload sub-second (`require :reload`) at the next boundary.
    Isolation between filesystem lanes remains file ownership. Seon agents doing all
    updates is the goal; the filesystem path is bootstrap.
 9. **Retirement is unlink, then GC.** A finished branch leaves the roster; its data is
