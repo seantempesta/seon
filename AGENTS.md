@@ -86,12 +86,16 @@ of seconds: name work proportional to the whole program that should follow a cha
 A branch pointer is cheap; constructing a full context is a separate operation.
 Source observation hashes its admitted inputs; unchanged adoption compares commit ids.
 Use the dependency's cache; do not place a second cache beside it. Measure memory too.
-**No slow operation escapes unnoticed (owner, 2026-09-23: "by design most ops should be
-sub second").** Every lane times every operation it runs — boot, publication, test run,
-probe, reload — and reports each over one second with its phase breakdown. Over ten
-seconds is a defect: name it in the report, file or extend its issue note in the same
-beat. "Known cost", "expected for a scratch boot" and "priming" are not explanations;
-the orchestrator rejects a report that carries a slow operation without its number.
+**Everything that is not sub-second must be justified (owner, 2026-09-23: "by design most
+ops should be sub second"; "I want us to always be aware how long things are taking with
+clear instructions that everything that's not sub second must be justified").** Timings are
+always visible: the armed wrapper profiles every contracted call (C1), and every lane times
+every operation it runs — boot, publication, test run, probe, reload, transaction. Any
+operation over ONE second carries a written justification beside its number: what the work
+is proportional to and why it cannot be sub-second. An unjustified one is a defect. Over ten
+seconds is a defect even when justified: file or extend its issue note in the same beat.
+"Known cost", "expected", "priming" and "cold" are not justifications; the orchestrator
+rejects a report that carries a slow operation without its number and its reason.
 
 **Never redo valid cached work (owner, 2026-09-23: "we should never redo work that we
 have cached if the cache is still valid"; "link the caches so this doesn't happen").**
