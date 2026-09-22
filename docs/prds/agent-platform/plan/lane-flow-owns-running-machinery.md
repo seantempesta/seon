@@ -1,6 +1,6 @@
 ---
 type: plan
-status: design 2026-09-23 (Fable, from the Opus fact pack, the flow audit and the Astra error-route design); astra review requested; no src/test/resources edits by this lane
+status: revised 2026-09-23 after the Astra review (review-flow-prd-2026-09-23.md): five P0s and the P1 shrink applied; decisions A and B RULED by the owner (README §7 "Wake routing through Flow; launcher kept"); no src/test/resources edits by this lane
 created: 2026-09-23
 tags: [agent-platform, flow, core-async-flow, errors, datahike, listeners, lifecycle]
 owner: the flow half of README §4 cut 3/4; composes B2 (execution), B3 (errors), A2 (Datahike seams), B1b (boot)
@@ -16,30 +16,43 @@ this happens later." **Ruled the same day (README §7 "Priority to namespace age
 the flow restructure follows, except its MUST-NOW pieces below; the 1.4 projection
 sweep runs after cut 3's first namespace agents.
 
+**Review (Astra, `docs/research/agent-platform/review-flow-prd-2026-09-23.md`):**
+retain the direction; correct the terminal and error paths before MUST-NOW is approved.
+Its five P0s and its P1 are applied in §2 and marked **[R1]**–**[R6]**; its placement
+and acceptance corrections are applied in §3 and §5. **Decisions A and B were then
+ruled by the owner (README §7 "Wake routing through Flow; launcher kept"; §4):** the
+router is a Flow proc fed by one offer-only listener, waking each affected agent on its
+mailbox wake port, a failed hand-off throwing into Datahike through the fork's failure
+callback; the launcher stays the admission owner, and B2 commit 7 retires it only on an
+admission proof.
+
 Inputs, read end to end: AGENTS.md; README §2–§7; the
 [fact pack and triage](../../../research/agent-platform/flow-fact-pack-and-triage-2026-09-23.md)
 (F1–F13, L1–L5, D1–D10, M1–M13, S1–S9); the
 [flow usage audit](../../../research/agent-platform/flow-usage-audit-2026-09-23.md)
 (47 sites, three options); the
 [error-route final design](../../../research/agent-platform/error-route-final-design-2026-09-23.md)
-(Astra, option 2: a Flow-native failure hook plus one acknowledged batching committer)
-and its [draft](../../../research/agent-platform/one-error-route-design-2026-09-23.md);
-the [flow skill](../../../../.agents/skills/seon-flow-architecture/SKILL.md) (stale
-claims listed in the audit §7, schedule row 27); core.async `flow/impl.clj` at gitlink
-`dc35f3e0`; Datahike `writer.cljc` and `committed_report.cljc` at gitlink `fbd1ad2d`.
-Below, **Flow** = `reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj`,
-**DH** = `reference-code/datahike/src/datahike/`. Seon line numbers are the working tree
-of 2026-09-23 22:00Z (HEAD `d4d4e1369` plus running lanes' hunks); a hunk not yet
-committed is marked *(wt)*.
+(Astra, option 2) and its [draft](../../../research/agent-platform/one-error-route-design-2026-09-23.md);
+the [review](../../../research/agent-platform/review-flow-prd-2026-09-23.md); the
+[flow skill](../../../../.agents/skills/seon-flow-architecture/SKILL.md) (stale claims:
+audit §7, schedule row 27); core.async `flow/impl.clj` at gitlink `dc35f3e0`; Datahike
+`writer.cljc` and `committed_report.cljc` at gitlink `fbd1ad2d`. Below, **Flow** =
+`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj`, **DH** =
+`reference-code/datahike/src/datahike/`. Seon line numbers are the working tree of
+2026-09-23 22:00Z (HEAD `d4d4e1369` plus running lanes' hunks); *(wt)* marks an
+uncommitted hunk.
 
 Source facts this design never contradicts: a proc runs one transform at a time and
 reads control only between transforms (Flow:288-300); a `:compute` `.get` timeout
 reports a late result and stops nothing (Flow:258-260); `error-chan` is sliding-100
 (Flow:102) and `stop` closes it before any proc exits (Flow:174-183) — stop is a
-command, not a join; Datahike listeners run concurrently on core.async's `:mixed` pool
-with no ordering and, under batching, a shared `:db-after` (DH `writer.cljc:390-406`;
-fact pack L2); a throwing listener is caught and logged per listener (DH
-`writer.cljc:379-387`).
+command, not a join; control is a fixed-10 channel behind a mult with fixed-10 taps
+(Flow:99-100, 153-154), and a mult delivers to every tap synchronously
+(`core.async.clj:797-804`), so a full tap blocks every sender; Datahike listeners run
+concurrently on core.async's `:mixed` pool with no ordering and, under batching, a
+shared `:db-after` (DH `writer.cljc:390-406`; fact pack L2); a throwing listener is
+caught and logged per listener (DH `writer.cljc:379-387`); a launcher task failure is
+emitted as DATA, an output to `::flow/error`, and no catch fires (`flow.clj:569-578`).
 
 ## 0. For the owner: what is dumb, and the simpler way
 
@@ -63,349 +76,511 @@ faults (`wake.clj:517-547`). Stop waits on those threads are unbounded
 honestly includes a model call (D6).
 
 **Why that shape was wrong.** Each piece is a copy of a guarantee the dependency already
-holds — Flow's catch, Datahike's ordered commit stream, core.async's executors — plus
-machinery to move the copy somewhere else, plus a guard where the copy lost something.
-Every hop is a place the fault can be dropped, and AGENTS.md's error policy forbids
-exactly that ("never dropped by an overload channel").
+holds — Flow's catch, Datahike's settled-then-notify order, core.async's executors —
+plus machinery to move the copy somewhere else, plus a guard where the copy lost
+something. Every hop is a place the fault can be dropped, and AGENTS.md's error policy
+forbids exactly that ("never dropped by an overload channel").
 
 **The simpler way, as data flow.** The failure is recorded **where Flow already catches
-it, on the proc's thread, before the proc continues**: the maintained fork's catches
-call one optional handler with the failure map; the handler is `seon.fault/fault!`
-(B3/Astra), which stores the chain, wakes the responsible agent and applies the one
-dial; under `:panic` the handler's answer is terminal and the proc exits, Flow stops its
-siblings through its own control channel, and the recorded occurrence is what status,
-MCP and the page show as `:failed`. `error-chan` becomes an observation of already
-recorded failures and may slide. Everything the cluster runs is either a proc under
-`flow/stop` with a bounded, named completion wait, or a launcher submission admitted
-under a declared bound whose completion returns as a message. The wake router becomes a
-proc fed by Datahike's own commit-ordered report source, so no Seon work runs on the
-writer's thread and no listener catch exists to swallow anything. Nothing new is
-scheduled, dispatched or cached; the pieces are the dependency's.
+it, on the proc's thread, before the proc continues**: the maintained fork's three
+catches call one optional handler with the failure map; the handler is
+`seon.fault/fault!` (B3/Astra), which stores the chain, wakes the responsible agent and
+applies the one dial synchronously; under `:panic` the handler's answer is terminal, the
+proc runs its own `::flow/stop` transition, exits, and its exit is a delivered fact the
+supervisor joins under a bound; siblings are stopped through Flow's control channel
+under bounded admission; the recorded occurrence is what status, MCP and the page show as
+`:failed`. `error-chan` becomes an observation of already recorded failures and may
+slide. A failure that Flow never catches because it was emitted as data (the launcher's
+terminal) is recorded by its producer through the same function. Everything the cluster
+runs is either a proc under `flow/stop` with a bounded, named exit wait, or a launcher
+submission admitted under a declared bound whose completion returns as a message. The
+wake listener does no work: it offers one look and the router proc reads its own
+connection. Nothing new is scheduled, dispatched, batched or cached.
 
 ## 1. The end state and why
 
 | principle | end state | why |
 |---|---|---|
-| **Flow owns every cluster thread's lifecycle** | Every thread a cluster starts is a Flow proc (built through `var-process`, `flow.clj:132`; stopped by `flow/stop`; joined at its `::flow/stop` transition under a declared bound) or a launcher task (admitted by the refusing buffer, `flow.clj:304-345`; settled exactly once at the `::completion` in-port, `flow.clj:525-580`; drained at stop). The SSE writer per tab is the one exception the audit keeps (row 19): Flow topology is static and tabs are dynamic; it is registered and joined at `web/stop!` under the feed bound. | AGENTS "Bounded, event-driven execution": every surface has a declared bound at admission and awaits the exact terminal event; a thread nobody joins is an unobserved exit (D8). |
-| **Long or blocking work goes through the bounded launcher; completion is a message** | The launcher proc (`flow.clj:510-580`) already has the shape: `::compute-submission`/`::io-submission` in, `::completion` back in, one terminal per submission. A model call (S8), an SCI evaluation (S7) and a capability handler (audit row 9) become submissions whose completion re-enters the owning proc as a message on a declared in-port. The owning proc therefore never blocks inside a transform, so it answers ping and takes stop between messages (F5, D10). | A proc is deaf during a transform (Flow:288-300); the only way to stay observable across a 51 s model call (audit P2) is to not be inside the transform for it. |
-| **One error route, composed with Flow** | `fault!` is the one required function (final design). The fork hook calls it from Flow's catches; every out-of-proc boundary (boot request, MCP eval, http-kit `:error-logger`, subprocess checks) calls it directly; the process uncaught handler is the backstop. `fault!` decides synchronous commit (first/new identity) versus the acknowledged batching committer (repeats) and applies `policy(mode, committed?)`. The committer is a cluster-graph proc whose own failures take the emergency path (stderr diagnostic, fail waiters, stop the committer, never re-enqueue). The counted-dropping route, the fault graph, both fan-out joins and `emit-core-fault!` are deleted. | AGENTS error policy: stored with its chain at the owning boundary, delivered through the wake route, loud under `:panic`, panic in both modes when the database is down. |
-| **A failed graph is positively visible** | Under `:panic` the proc exits and Flow stops the graph; the stored occurrence carries the graph/agent identity and `:seon.error.occurrence/panic-mode`; `seon.problems/open-panics` (final design; `problems.clj:109-128` today holds `error-signatures`) joins it to the agent, and oversight (`oversight.clj:186 flow-status`) reports `:failed <error id>` for that graph instead of `:unknown`. `runtime_status`, `bin/seon status`, every MCP response and the namespace page read the same derivation. | "A failed graph is positively visible" (AGENTS); "derive state, do not remember it" — the fact is the occurrence, not an in-memory flag. |
-| **No Seon work on the writer's thread** | One committed-report reader proc per cluster (§4 decision A, recommended) or one offer-only listener (option B). No matcher rebuild, no `snapshot` derivation, no per-agent listener on the notification path (D3, D4). | A listener runs concurrently and unordered on the `:mixed` pool with batch-shared `:db-after` (L2); a router that rebuilds matchers from that db can act on a stale value. |
-| **Interrupt is a request; exit is a fact** | `Thread.interrupt` on proc threads stays the stop accelerator until S8 lands (`agent.clj:1024-1039` *(wt)*). An interrupt that lands in a Datahike `transact!` deref leaves that write outcome-unknown to the caller; the turn records the evaluation as interrupted (AGENTS "Interrupted execution never resumes") and recovery reads the facts, never the promise. No wait after interrupt is unbounded. | AGENTS "A timeout is not termination"; README §3 "Timeout includes exit". |
+| **Flow owns every cluster thread's lifecycle** | Every thread a cluster starts is a Flow proc (built through `var-process`, `flow.clj:132`; stopped by `flow/stop` under bounded command admission; joined at its delivered exit fact under a declared bound) or a launcher task (admitted by the refusing buffer, `flow.clj:304-345`; settled exactly once at the `::completion` in-port, `flow.clj:525-580`; drained at stop). The SSE writer per tab is the one exception the audit keeps (row 19): Flow topology is static and tabs are dynamic; it is registered and joined at `web/stop!` under the feed bound. | AGENTS "Bounded, event-driven execution": every surface has a declared bound at admission and awaits the exact terminal event; a thread nobody joins is an unobserved exit (D8). |
+| **Long or blocking work goes through the bounded launcher; completion is a message** | The launcher proc already has the shape: `::compute-submission`/`::io-submission` in, `::completion` back in, one terminal per submission. A model call (S8), an SCI evaluation (S7) and a capability handler (audit row 9) become submissions whose completion re-enters the owning proc as a message on a declared in-port, so the proc never blocks inside a transform and answers ping and stop between messages (F5, D10). Which of these land, and when, is B2's single execution design (§3, §4 B). | A proc is deaf during a transform (Flow:288-300); the only way to stay observable across a 51 s model call (audit P2) is to not be inside the transform for it. |
+| **One error route, composed with Flow, synchronous** | `fault!` is the one required function (final design). The fork hook calls it from Flow's catches; the launcher's terminal calls it for failures it emits as data; every out-of-proc boundary (boot request, MCP eval, http-kit `:error-logger`, subprocess checks) calls it directly; the listener failure handler and the process uncaught handler are the backstops. In the pre-agent slice `fault!` commits synchronously on the caller's thread (triage M4: "minimal"; B2 defers batching); the acknowledged batching committer of the final design is revisited after the first agents with measured repeat load **[R6]**. The counted-dropping route, the fault graph, both fan-out joins and `emit-core-fault!` are deleted with M4. | AGENTS error policy: stored with its chain at the owning boundary, delivered through the wake route, loud under `:panic`, panic in both modes when the database is down. No committer means no stop-order cycle (a stopping proc awaiting a committer stopped in the same graph). |
+| **A failed graph is positively visible; exit is a delivered fact** | Under `:panic` the failing proc runs its stop transition and exits; the fork delivers `{pid outcome cleanup-ex}` on a per-proc exit promise-chan; the supervisor joins it under the bound. The stored occurrence carries the graph/agent identity and the observed panic mode as a historical observation (not a mutable flag); `seon.problems/open-panics` (final design; `problems.clj:109-128` today) joins it to the agent, and oversight (`oversight.clj:186 flow-status`) reports `:failed <error id>` for that graph. | "A failed graph is positively visible"; "derive state, do not remember it" — the fact is the occurrence; the exit is the run boundary's delivery, not an inference from a returned loop. |
+| **No Seon work on the writer's thread; agents are woken on their own Flow ports** | **Ruled (§4 A).** One offer-only sliding-1 listener per cluster puts a payload-free wake on the router proc's in-port; the router proc reads its own connection at one captured value per look, wakes each affected agent on its mailbox proc's `:seon.agent/wake` port (every agent is a Flow graph whose `:seon.agent/mailbox` proc reads that port, `agent.clj:481`, `:519-540`) and advances its basis only after successful delivery. A failed hand-off throws into Datahike through the fork's failure callback (N3). No matcher rebuild, no `snapshot` derivation, no per-agent listener on the notification path (D3, D4). | Owner: "Flow processes for datahike listening is a great idea especially since agents are also flow processes … so we can wake them on their channels." A listener runs concurrently and unordered on the `:mixed` pool with batch-shared `:db-after` (L2); a router that acts on the callback's report can act on a stale value; a router that reads its own connection cannot. |
+| **Interrupt is a request; exit is a fact** | `Thread.interrupt` on proc threads stays the stop accelerator (`agent.clj:1024-1039` *(wt)*) until B2's single execution design rules otherwise; async model calls alone do not justify deleting interrupts that evaluations and other host work still need. An interrupt that lands in a Datahike `transact!` deref leaves that write outcome-unknown to the caller; the turn records the evaluation as interrupted (AGENTS "Interrupted execution never resumes") and recovery reads the facts, never the promise. No wait after interrupt is unbounded; expiry retains custody and denies restart or overlapping work until the exit fact arrives. | AGENTS "A timeout is not termination"; README §3 "Timeout includes exit". |
 
 What this design does NOT add: a scheduler, a dispatcher, a second error channel, a
-replay store, a retry loop, a thread registry beyond Flow's procs and the launcher's
-admitted set, or a namespace roster for who may call `fault!`.
+replay store, a retry loop, a batching committer in the pre-agent slice, a temporary
+backstop proc B2 would delete, a thread registry beyond Flow's procs and the launcher's
+admitted set, a readiness dispatcher for the router, or a namespace roster for who may
+call `fault!`.
 
 ## 2. MUST-NOW — the flow pieces before namespace agents
 
-These are the four "minimal flow pieces needed now" the triage names (B4 end), each one
-a bounded slice. They land inside M4's window (after M3's fault-cost fix, `error.clj`
-P4: 1,099.9 ms in-transaction vs 26.1 ms outside) except N2, which depends on nothing.
-Ownership per the ledger `tmp/orchestrator/file-ownership.md` at 22:00Z: `flow.clj`,
+Shrunk per the review **[R6]**: the dependency hook plus channel-`:xform` refusal
+(N1), bounded stop and exit (N2), the listener failure lifecycle (N3) and a minimal,
+evidence-attributed uncaught handler (N4). No Seon step wrapper, no committer, no
+batching. They land inside M4's window (after M3's fault-cost fix, `error.clj` P4:
+1,099.9 ms in-transaction vs 26.1 ms outside) except N2, which depends on nothing.
+Estimates are revised design estimates including the terminal, custody and recursion
+proofs the review named; they are not measurements.
+
+Ownership per `tmp/orchestrator/file-ownership.md` at 22:00Z: `flow.clj`,
 `cluster/boot.clj`, `cluster/wake.clj`, `schedule.clj`, `reference-code/core.async`,
 `reference-code/datahike`, `.gitmodules` are free; `cluster.clj` is held by
 runtime-status-crash (M7), `cluster/agent.clj` by mcp-and-stop (M5), `sci/eval.clj` by
-sci-program-revisions (M1), `render/web.clj` by page-key. A slice needing a held file
-goes to its holder as a follow-up or waits; it never runs beside it.
+sci-program-revisions (M1), `render/web.clj` by page-key, `db.clj` by writer-cost. A
+slice needing a held file goes to its holder as a follow-up or waits; it never runs
+beside it.
 
-### N1. The fork error hook, and channel `:xform` refused at admission (S1)
+### N1. The fork error hook, terminal protocol, bounded control admission, and `:xform` refused
 
 **Fact first: there is no Seon fork of core.async.** `.gitmodules:17-19` points at
 `https://github.com/clojure/core.async.git`; Datahike is already the personal fork
 (`git@github.com:seantempesta/datahike.git`). Step one is a fork under the same account,
 the gitlink repointed, pushed without asking (owner rule: personal forks push when a fix
-lands, never a PR upstream).
+lands, never a PR upstream). The fork keeps upstream's tests green: every addition is
+opt-in.
 
-**The change in the fork** (Flow, four catch sites, one construction option):
+**N1a — the hook, one handler at three catches [R6].** Flow has exactly three `catch`
+clauses — `start-proc` (Flow:163), the step catch (Flow:312, which also covers
+`send-outputs` and the `:compute` `.get` timeout, Flow:259, since both run inside that
+`try`) and the outer catch (Flow:317, transition and control) — plus the channel
+exception callback (Flow:107). The fork adds one optional handler, supplied per proc
+through `proc`'s options (Flow:245) with a graph-wide default in `create-flow`'s config
+(Flow:52); absent = today's behaviour. Each catch calls
+`(on-error failure-map)` on the proc thread before its existing `>!!` to `error-chan`,
+with Flow's existing map plus `::flow/op` where it is missing (`:start`, `:transition`,
+`:control`). The handler answers `::flow/continue` or `::flow/exit`. The channel
+callback is **not** hooked: it runs under the channel mutex during buffer mutation
+(`impl/channels.clj:78-94`); Seon refuses `:xform` before any channel is created
+(N1d). Graph construction and `describe` failures (`prep-proc`/`create-flow`,
+Flow:38-68; `proc`'s `(step)` at Flow:246) throw to the constructing caller; Seon's
+`start-graph!` (`flow.clj:71-94`) is that outer construction boundary and calls `fault!`
+there before rethrowing.
 
-| site | today | with the hook |
+**A handler that throws is not caught by Flow.** The fork wraps the handler call once:
+on a handler throw it retains the terminal disposition (`::flow/exit`), preserves the
+handler's throwable beside the original in the exit fact (N1b) and on stderr as the
+emergency diagnostic, and never calls the handler again for that failure. The proc's
+`run` is a `FutureTask` (Flow:29-36) that captures throwables, so the process uncaught
+handler (N4) never sees this; the exit fact is the only truthful channel for it.
+
+The Seon adapter, supplied by the cluster owner at graph construction so `create-flow`
+definitions stay data (`var-process`, `flow.clj:132`, gains a required `::on-error`
+option and passes it through; no wrapper of the step Var exists):
+`(fn [failure] (case (fault/fault! world failure ctx) :seon.fault/recorded ::flow/continue …))`
+where `world` is the environment the proc's args already carry
+(`env/refuse-absent-environment!`, `flow.clj:167`), `ctx` is
+`{:seon.error/layer :seon.flow/proc :seon.error/operation <step Var symbol> ::flow/pid pid :seon.agent/id (when carried)}`,
+and `::flow/ex` is extracted before `prepare` (draft P3: the chain is lost there today).
+Under `:panic` `fault!` throws the panic receipt; the adapter recognizes exactly that
+receipt (record-once, "once per propagation", final design) and answers `::flow/exit`;
+any other throw leaves the adapter and takes the fork's handler-throw path above, which
+records nothing again. Under `:record` the proc continues with its pre-step state
+(Flow:316) as today.
+
+**N1b — the terminal protocol: exit runs the stop transition, and exit is delivered
+[R2].** `::flow/exit` does not bypass `handle-transition`. The fork's loop, on that
+answer, sets `nstatus :exit` and runs `(handle-transition step status :exit state)`
+(Flow:209-217) inside its own `try`: this is the proc's `::flow/stop` transition, where
+Seon delivers `proc-stopped` and releases resources today (`flow.clj:526-528`,
+`schedule.clj:809-813`, `turn.clj:5487`, `web.clj:2647`). If the transition throws, the
+handler is called once more with `{op :transition ex}` and **the terminal disposition is
+retained regardless of the answer**: a proc asked to exit exits. The same rule fixes
+D2's sibling under `:record`: a stop-transition throw today restores the old status
+(Flow:285, 299, 317-320) and the proc keeps running; with the fork, a failure inside the
+transition to `:exit` never un-exits.
+
+Exact terminal observation lives at Flow's run boundary: `start` creates one
+promise-chan per proc, exposed as `:exit-chans {pid chan}` in `start`'s return map and in
+`(datafy graph)`; the fork's `run` delivers `#::flow{:pid :outcome (:exited | :failed)
+:cleanup-ex <transition throwable or absent> :handler-ex <absent or the throwable>}` in a
+`finally` around the loop. A promise-chan cannot lose it, and a supervisor joins it under
+its bound (N2). The loop returning is never claimed as "resources released": the outcome
+carries the actual cleanup result, and `:failed` with a `:cleanup-ex` is what the
+supervisor reports. Partial startup (Flow:149-171): `start-proc`'s catch already sends
+stop to all; the fork additionally returns the exit-chans of the procs it did start
+inside the rethrown `ex-info`'s data, so `start-graph!` joins them under its bound before
+rethrowing — no proc is left running behind a construction failure.
+
+The Seon `proc-stopped` promises (`flow.clj:526-528`, `agent.clj` `turn-stopped`) become
+readers of the exit-chans in the same slice or are deleted where the exit fact replaces
+them; a hand-rolled completion beside the fork's exit fact is a second mechanism.
+
+**N1c — bounded control admission [R3].** Three changes at the dependency owner:
+
+1. An exiting proc untaps its control tap at the run boundary (`async/untap
+   control-mult control-tap`, Flow:153-154) before delivering its exit fact, so an exited
+   proc never holds the mult (`core.async.clj:797-804`: a mult waits for every tap).
+2. `send-command` (Flow:71-75) takes a bound: `(alts!! [[control cmap] (timeout ms)])`;
+   a timeout returns `#::flow{:admission :timeout :command … :to …}` instead of blocking.
+   `stop`, `pause`, `resume`, `ping` and the failing proc's sibling-stop all use it.
+   Public `stop` takes an optional `timeout-ms` (default: the lib's `ping` default,
+   1,000 ms) and returns the admission result; it still holds its lock across the bounded
+   send (Flow:174-183), which is now bounded, so the lock is too. A timed-out stop is a
+   typed failure the caller sees, never `true`.
+3. A failing proc under `::flow/exit` sends stop to its siblings through the bounded
+   send; on admission timeout the exit fact carries `:sibling-stop :timeout` and the proc
+   still exits. Stopping the siblings is then the supervisor's job, which retries `stop`
+   under its own bound and reports the missing event; nothing moves the blocking send
+   into an unobserved Future.
+
+A busy proc (inside a transform, Flow:288-300) does not drain its tap; with taps of 10 the
+mult blocks on the eleventh queued command. Bounded admission makes that a reported
+failure at the sender; the supervisor's bound (N2) makes it a named missing event. It is
+not termination: expiry retains custody and denies restart or overlapping work until the
+exit fact arrives.
+
+**N1d — `:xform` refused before channels exist.** `start-graph!` (`flow.clj:71`) walks
+the graph definition's `:chan-opts` (`:xform`, `:in-opts`, `:out-opts`) and refuses
+naming pid and cid **before** `flow/create-flow` and `flow/start` create any channel.
+The source search found none under `src/seon`; admission enforces it, not the search.
+Nothing transacts, waits or stops under a channel mutex.
+
+**N1e — failures emitted as data, recorded by their producer [R1].** Flow's catches
+never see these; N1a alone would make them silently losable once the launcher join
+(`c2140df4e`) leaves. Three sites in the launcher, all converted in N1's slice, none
+adding a channel reader:
+
+| site | today | with N1e |
 |---|---|---|
-| step catch Flow:312-316 | `>!!` the map `{pid status state count cid msg op :step ex}` to `error-chan`, continue with pre-step state | call `(on-error failure-map)` first, on the proc thread; if it returns `::flow/continue`, put the map on `error-chan` (observation) and continue exactly as today; if `::flow/exit`, put the map, send `::flow/stop ::flow/all` on control (the shape `start-proc` already uses at Flow:164), and return `[:exit state …]` so this proc's loop falls out (Flow:321) |
-| outer catch Flow:317-320 (transition, control, `send-outputs`) | same put, continue | same protocol; a failure in the `::flow/stop` transition is handed to the hook BEFORE the closed-channel put, which closes D2 |
-| `start-proc` catch Flow:163-165 | send stop to all, rethrow | call the hook with `{pid ex op :start}`, then the existing stop + rethrow (the graph owner sees the throw; the fact is already recorded) |
-| `:compute` timeout Flow:258-260 | `TimeoutException` into the step catch while the Future runs | unchanged mechanically; the hook receives it like any step failure. README §3 "Timeout includes exit" is Seon's obligation: no Seon proc declares `:compute` with substantive work until S7 gives it the SCI arm (audit §1) |
-| channel `:xform` ex-handler Flow:103-111 | `put!` to `error-chan` under the channel mutex (`impl/channels.clj:78-94`) | **not hooked**: the handler runs during buffer mutation under the mutex; nothing may transact, wait or stop there (final design). Seon refuses `:xform` at admission instead (below) |
-| construction `create-flow` Flow:52 / `proc` Flow:245 | no handler | `:on-error` accepted per proc in `proc`'s options map (so `var-process` passes it per proc) and as a graph-wide default in `create-flow`'s config; absent = today's behaviour, so upstream tests still pass |
+| `::completion` transform (`flow.clj:559-580`): a task's `::throwable` becomes a `::flow/error` output | the map goes to the launcher graph's `error-chan` → the join → the fault channel | the launcher proc, in the same transform and after `release-admission!` (`:563`), calls `(fault/fault! (env/of work) throwable {:seon.error/layer :seon.flow/submission :seon.error/operation <work-fn symbol> ::submission-id …})` with the submission's carried world; the `::flow/error` output is kept as an observation. Exactly-once settlement is unchanged: the submitter's terminal already ran on the task thread (`io-terminal!`, `:425-445`); the fault is recorded once, by the proc, after admission release. Under `:panic` the adapter's disposition applies to the launcher graph as for any proc (N1b) |
+| `io-terminal!`'s `complete!` callback (`flow.clj:425-445`, `try`/`finally`, no catch) | a throwing `complete!` propagates to the task thread; the `FutureTask` captures it; lost | a `catch Throwable` around the `kernel/adopt-arm` call records through `fault!` with `(env/of work)` and puts the callback failure into the completion message (`::callback-throwable`) so the launcher proc applies the disposition; the `finally` still releases the submission and offers the completion |
+| `execute-io-work!`'s `.execute` rejection (`flow.clj:474-486`) and the compute twin (`execute-work!`) | terminal settled with the rejection | the same: recorded once through `fault!` with the submission's world at the settling site, then settled |
 
-Handler contract, in the fork's own vocabulary: `(fn [failure-map]) → ::flow/continue | ::flow/exit`.
-The map is Flow's existing map plus `::flow/op` for the two catches that lack it. A
-handler that throws is not caught by Flow: the throw leaves the proc loop and reaches the
-executor's uncaught path (the proc's `run` is a `FutureTask`, Flow:29-36 — a Future
-captures the throwable, so **N4's uncaught handler does not see it**; the fork therefore
-wraps the handler call once: on a handler throw it prints the emergency diagnostic
-`(pr-str (Throwable->map t))` to stderr with the failure map's pid, sends stop to all and
-exits the proc. Print-only is not the outcome: the handler's own failure is `fault!`'s
-"database down" case, which already stops the graph and panics in both modes.)
+The launcher's `error-chan` therefore needs no reader; `boot/join-launcher-errors!`
+leaves, and schedule row 29's stop-order gap closes because nothing crosses a channel
+between graphs any more.
 
-**The change in Seon** (`flow.clj`):
+**N1f — what leaves with M4 (M4's slice, listed here so the dependency is explicit):**
+`counted-dropping-buffer` (`flow.clj:999`), the fault graph and the committer as the
+route (`:1005-1090`), `join-fault-committer-errors!` and `report-committer-loss!`
+(`:1165-1180`), `start-error-fanout!`'s mult/dropping stage (`:1191-1263`),
+`join-error-fanout!` (`:1266`), `stop-error-fanout!` (`:1294`), `boot/join-launcher-errors!`
+(`c2140df4e`), `emit-core-fault!` (`cluster.clj:3042-3066`), and the six `offer!`+`println`
+sites, which become `fault!` calls (`turn.clj:5366`, `:5389`, `agent.clj:1072`, `web.clj`
+×3 — each in its holder's follow-up). `error-chan` and `report-chan` stay unread except
+by monitor taps; they slide.
 
-- `var-process` (`:132`) takes `::on-error` as a required member of `options` — the
-  cluster owner supplies it once at graph construction, so `create-flow` definitions stay
-  data. It passes it to `flow/process` as `:on-error`. The Seon adapter is
-  `(fn [failure] (case (::disposition (fault/fault! world failure ctx)) :record ::flow/continue :panic ::flow/exit))`
-  where `world` is the environment the proc's args already carry
-  (`env/refuse-absent-environment!` at `:167` guarantees it), `ctx` is
-  `{:seon.error/layer :seon.flow/proc :seon.error/operation <step Var symbol> ::flow/pid pid :seon.agent/id (when carried)}`,
-  and the `::flow/ex` is extracted before `prepare` (draft P3: today the chain is lost
-  there). Under `:panic`, `fault!` throws to an ordinary caller; the Flow adapter
-  catches only the panic receipt it recognizes (record-once: "once per propagation",
-  final design) and returns `::flow/exit` — it never recatches anything else.
-- `start-graph!` (`:71`) refuses any proc whose `:chan-opts` names `:xform` (also
-  `:in-opts`/`:out-opts`), naming the pid and cid. The source search found none under
-  `src/seon`; admission enforces it, not the search.
-- **Deleted in the same slice as M4:** `counted-dropping-buffer` (`:999`), the fault
-  graph and `fault-committer-step` as the *route* (`:1005-1090`; the committer proc
-  survives only as `fault!`'s batching worker, fed by a fixed-buffer channel with an ack
-  promise, final design "Burst accounting"), `join-fault-committer-errors!` and
-  `report-committer-loss!` (`:1165-1180`), `start-error-fanout!`'s mult/dropping stage
-  (`:1191-1263`), `join-error-fanout!` (`:1266`), `stop-error-fanout!` (`:1294`),
-  `boot/join-launcher-errors!` (`c2140df4e`, whose completion is never awaited and whose
-  stop-order gap is schedule row 29), `emit-core-fault!` (`cluster.clj:3042-3066`), and
-  the six `offer!`+`println` sites, which become `fault!` calls (`turn.clj:5366`,
-  `:5389`, `agent.clj:1072`, `web.clj` ×3 — each in its holder's follow-up).
-- `error-chan` and `report-chan` stay unread except by monitor taps; they slide. Loss
-  there is loss of an observation of an already recorded failure.
+**Why the hook and not the audit's `var-process` wrapper (audit §3.1) [R6].** The
+wrapper sees only the transform and transition arities; Flow's outer catch, the compute
+timeout inside the inner `try` and `start-proc` are outside it, and the wrapper cannot
+make the proc exit — a rethrow inside the step is swallowed by Flow's catch (Flow:312).
+The fork hook is one seam at the three catches with Flow's full context; a Seon wrapper
+beside it would be a second catch adapter.
 
-**Why the hook and not the audit's `var-process` wrapper (audit §3.1).** The wrapper
-sees only the transform and transition arities; Flow's outer catch (control,
-`send-outputs`, the compute timeout) and `start-proc` are outside it, and the wrapper
-cannot make the proc exit — a rethrow inside the step is swallowed by Flow's catch
-(Flow:312). The fork hook is one seam covering every catch with Flow's full context, and
-it is the change Astra's design recommends.
+**Dependency seams:** Flow:29-36, 38-68, 52, 71-75, 99-100, 107, 149-171, 153-154,
+163-165, 174-183, 209-217, 245-246, 258-260, 288-300, 312-323; `impl/channels.clj:78-94`;
+`core.async.clj:797-804`; `flow.clj:71-94`, `:132-181`, `:425-445`, `:474-486`,
+`:526-528`, `:559-580`, `:760`, `:999-1320`.
 
-**Dependency seams:** Flow:52, 103-111, 163-165, 245, 258-260, 288-300, 312-320, 321;
-`impl/channels.clj:78-94`; `flow.clj:71-94`, `:132-181`, `:999-1320`.
+**Proof:** §5 gates 1–2. **Cost:** fork ≈ 1.5 days (hook, terminal protocol, exit
+facts, bounded admission, untap, fork regressions incl. upstream-compatible defaults);
+Seon ≈ 1.5 days (`var-process` option, `start-graph!` refusal and construction
+boundary, launcher producer sites, `proc-stopped` replaced by exit facts); ≈ 3 days
+total. Risk medium: every proc's catch and exit path changes; every proof in §5 gate 2 is
+owed before N1 is called landed.
 
-**Proof (regressions on the canonical branch fixture, real SCI, armed contracts):**
-(a) a step throw, a `::flow/stop`-transition throw, a `send-outputs` throw to an
-unresolvable port, a `:compute` timeout and a `start-proc` throw each produce one stored
-occurrence with a ≥2-link chain BEFORE the proc's next input is read (assert on the
-branch inside the step's next call); (b) more than 100 distinct concurrent failures
-across one graph preserve every identity (the channel slid; the store did not);
-(c) under `:panic` the failing graph's procs exit (their `proc-stopped` completions
-deliver within the bound), a sibling graph answers ping, the REPL evaluates, and
-`flow-status` reports `:failed <id>`; (d) a graph definition with `:xform` on any channel
-refuses at `start-graph!` naming pid and cid; (e) a handler throw (a refusing writer) exits
-the proc, stops the graph and leaves the emergency diagnostic on stderr with both causes.
-Live: one deliberate `(throw …)` in a scratch proc on `default` after adoption →
-`runtime_status` shows the occurrence and the graph `:failed`; `bin/seon status` shows the
-open panic.
+### N2. Bound every stop: the whole request/stop/join sequence [R3]
 
-**Cost:** fork + gitlink ≈ 0.5 day; Seon side ≈ 1 day with regressions (fact pack S1);
-the M4 deletions above are M4's own slice. Risk medium: every proc's catch path changes;
-the hook runs on the proc thread and must never park on a committer that is itself a
-proc — `fault!`'s synchronous path parks on Datahike's writer (allowed: it is not a
-proc), and its batching path parks on the committer's ack (allowed for every proc except
-the committer, whose adapter is the emergency handler).
+The exact per-site change is in the quick-wins landing note (Step 5, rows 26-27) and is
+amended here in one respect: the bound covers the **entire** sequence — request
+(the armer `>!!`), the stop command's admission (N1c's bounded `stop`), and the exit
+joins (N1b's exit-chans) — not only the `<!!` calls after a stop already sent.
 
-### N2. Bound every stop wait (S3, D7, M5's remainder)
-
-The exact change is already written in the quick-wins landing note (Step 5, rows 26-27)
-and is not repeated here beyond its shape:
-
-- `cluster.clj` `disarm-agents!` (`:3385-3417`): the armer `>!!`+`<!! quiesced` and both
-  completion `<!!` go through `seon.await/await!` (`await.clj:110`) under
-  `:seon.config.agent/turn-completion-backstop-ms` carried on the loop handle; a
+- `cluster.clj` `disarm-agents!` (`:3385-3417`): the armer `>!!`+`<!! quiesced` and the
+  cluster-loop and render joins go through `seon.await/await!` (`await.clj:110-122`, the
+  right request/reply mechanism) under `:seon.config.agent/turn-completion-backstop-ms`
+  carried on the loop handle; one deadline across put and take; a
   `:seon.await/timeout-error` or `closed-error` throws `(ex-info message diagnostic)`
-  naming the missing event (`::armer-quiesced`, `::cluster-loop-completion`,
-  `::render-completion`).
-- `flow.clj` `stop-error-fanout!` (`:1294-1317`): the same bound — but this function is
-  deleted by N1/M4, so the honest order is: if M4 lands first, row 27 has nothing left;
-  if N2 lands first, bound it as the landing note says and delete it with M4.
-- `agent.clj` row 25 is in mcp-and-stop's *(wt)* hunk (`await-turn-completion!` always
-  has the backstop in its `alts!!` ports).
+  naming the missing event (`::armer-quiesced`, `::cluster-loop-exit`, `::render-exit`).
+- `flow.clj` `stop-work-launcher!` (`:752-770`) calls `flow/stop` **between** two bounded
+  awaits today; with N1c it calls the bounded `stop` and treats an admission timeout as
+  the missing event; its `proc-stopped` deref becomes the exit-chan join.
+- `flow.clj` `stop-error-fanout!` (`:1294-1317`) is deleted by M4; if N2 lands first it
+  is bounded as the landing note says and deleted with M4.
+- `agent.clj` row 25 is in mcp-and-stop's *(wt)* hunk; its `flow/stop` at `:1191` takes
+  the bounded form when N1c lands (a follow-up to that holder).
+- Expiry semantics, stated once: a fired bound names the missing event and fails; the
+  supervisor retains custody of the graph and its resources, denies restart of that agent
+  and any overlapping work until the exit fact arrives, and reports the live thread. No
+  retry, no second wait beyond the declared one.
 
-**Seam:** `await.clj:110-150`; Flow:174-183 (why a join is needed at all).
-**Proof:** a proc that never publishes its completion (a step that parks on a promise)
-makes `disarm-agents!` throw within the bound naming the event; the JVM and REPL stay up;
-no `<!!` without a bound remains in `cluster.clj`/`flow.clj` (`rg '<!!' src/seon/cluster.clj src/seon/flow.clj`
-lists only sites inside `await!`). **Cost:** < 0.5 day; risk low. Waits on
-`cluster.clj`'s release by M7's lane; `flow.clj` is free.
+**Seams:** `await.clj:110-150`; Flow:174-183; N1b/N1c. **Proof:** §5 gate 2 (stop
+part). **Cost:** < 0.5 day after N1c; risk low. Waits on `cluster.clj`'s release by M7's
+lane; `flow.clj` is free.
 
-### N3. The listener failure path — how the fork makes "throw into Datahike" loud
+### N3. The listener failure path — loud, and non-recursive [R4]
 
 The ruling: a failed listener hand-off throws into Datahike. Today that ends in
 `log/error :datahike/listener-error` (DH `writer.cljc:379-387`) — the transaction is
-already delivered (`:398` delivers before `notify-listeners!` at `:406`), the writer is
-not stranded (the 2026-09-18 fork fix), and the fault is swallowed by AGENTS' definition.
+already delivered (`:398` delivers before `notify-listeners!` at `:406`; the 2026-09-18
+fork fix), so a failure callback cannot retroactively fail that transaction and does not
+try to; the fault is swallowed by AGENTS' definition.
 
 **The change in the Datahike fork** (one seam, upstream-compatible default):
 
-- `notify-listeners!` reads an optional failure handler from the connection's meta,
-  beside `:listeners` (`(:listener-failure (meta connection))`, an atom holding one
-  fn or nil, installed by Seon at connection open through the same `alter-meta!`
-  path `d/listen` uses). Per listener: `(callback tx-report)`; on Throwable, when the
-  handler is present call `(handler {:listener-key k :exception e :tx-report report})`
-  on the same thread, after the promise was delivered, never inside the commit loop;
-  when absent, log as today. The handler's return is ignored.
-- A handler that itself throws is **not caught** by the fork: the throw leaves the
-  `transact!` go block. core.async's go machinery hands it to `dispatch/ex-handler`
-  (`impl/dispatch.clj:63-69`), which conveys it to the current thread's uncaught handler
-  — that is N4's process handler. So "handler failure" = "`fault!` could not record or
-  panicked" reaches the one backstop with both causes, and nothing is recatched.
-- Regression in the fork (extends `writer-error-test`): a throwing listener with a
-  handler installed → the handler receives key, exception and report; the transaction
-  promise was delivered first; a later listener still runs; a subsequent transaction
-  commits. A handler that throws → the throw reaches a test-installed uncaught handler on
-  that thread.
+1. `notify-listeners!` reads an optional failure handler from the connection's meta,
+   beside `:listeners` (`(:listener-failure (meta connection))`, installed by Seon at
+   connection open through the same `alter-meta!` path `d/listen` uses).
+2. On a listener Throwable, **the failed listener is retired first**: its key is
+   removed from the connection's listener registry (`swap! listeners dissoc key`) before
+   the handler runs. Then `(handler {:listener-key k :exception e :tx-report report})` is
+   called on the same thread, after the promise was delivered, never inside the commit
+   loop (DH `writer.cljc:256-261`). When no handler is installed, the fork logs as today
+   and does not retire (upstream behaviour).
+3. The handler's return is ignored; the `doseq` continues to the remaining listeners.
+   A handler that throws aborts the remaining `doseq` (the fork catches nothing around
+   it), so the Seon handler's contract is to return; its own failure takes the emergency
+   path below and returns.
 
-**The change in Seon:** one handler per connection, installed where the connection is
-opened for a cluster (`store/open-branch!` / `boot.clj`, free), calling
-`(fault/fault! world failure {:seon.error/layer :seon.db/listener :seon.error/operation <listener-key>})`
-with the cluster's environment. Under `:record` it returns and notification continues;
-under `:panic` `fault!` throws the panic receipt → uncaught handler → the cluster is
-marked failed by the recorded occurrence (no graph owns a listener; the recipient is the
-namespace owner then `escalate-to`, never nobody). The router's own catch
-(`wake.clj:546-547`) is deleted (call-site rule 3: not exist), as are the `offer!` result
-drops at `:388`. This is the "listener backstop half of A9"; the other half — the router
-becomes a proc — is §3/§4 and removes the router listener entirely, leaving N3 for the
-listeners that remain (`::program-identity`, `sci/eval.clj:2366` *(wt)*, until S4
-replaces it too).
+**Why this terminates.** Recording the listener's fault is itself a transaction on the
+same connection, which notifies the listeners again. Because the failed listener was
+retired before the handler ran, the fault transaction cannot re-invoke it, so there is no
+feedback. Callbacks of that listener already in flight on other `:mixed` threads (L1/L2:
+notification is concurrent) may fail once more each; retirement is idempotent and each
+such failure is one more `fault!` call whose occurrence dedupes by D13 identity in the
+writer (a count increment, not a new fact). The bound is therefore the number of
+in-flight notifications at retirement, never unbounded.
 
-**Blocking on the notification thread, stated:** the handler's `fault!` parks the
-`:mixed` dispatch thread on Datahike's writer promise for one commit. That pool is
-unbounded and cached (`dispatch.clj:106-111`); the writer's own loops run on other
-threads of it, so this is a parked thread, not a deadlock. It is bounded by the write
-bound `db.clj` already applies to system writes only if that bound exists (audit row 29
-leaves system writes unbounded — a separate `db.clj` question for its owner); the PRD
-does not claim it is bounded until it is. "Never await a same-writer transaction from
-its transaction function" (final design) is about tx-fns and is respected: the listener
-runs after the commit.
+**The Seon handler**, installed where the connection is opened for a cluster
+(`store/open-branch!` / `boot.clj`, free), with that cluster's environment captured at
+install — the exact world, not a lookup:
+`(fault/fault! world failure {:seon.error/layer :seon.db/listener :seon.error/operation <listener-key> :seon.db/listener-retired true})`.
+Under `:record` it returns and notification continues for the remaining listeners. Under
+`:panic` `fault!` throws the panic receipt; the handler recognizes it, exposes it through
+the process failure observation (N4's seam) and returns — no graph owns a listener, so
+there is nothing to stop, and the cluster is marked failed by the recorded occurrence.
+If recording itself fails (database down), the handler takes the terminal emergency path:
+the original and the recording failure together on stderr and in the process failure
+observation, no second `fault!` attempt, return.
 
-**Seams:** DH `writer.cljc:379-387`, `:390-406`, `:256-261` (commit loop, where
-listeners do NOT run); `dispatch.clj:63-69`. **Proof:** on the canonical branch under
-`:record`, a listener that throws produces one occurrence naming the listener key with the
-original as cause, the transaction's caller got its report first, and a later
-transaction commits; under `:panic` the same throw produces the occurrence and the
-process uncaught handler receives the panic receipt (test-installed handler asserts it).
-**Cost:** fork ≈ 0.5 day (change + regression), Seon ≈ 0.5 day; risk low. Files:
-`reference-code/datahike` (free), `boot.clj` or `store.clj` (free), `wake.clj` (free).
+**Failed delivery is visible pending work.** The retired key is in the occurrence's
+context, and the owning lifecycle re-arms it: the router's owner re-registers at the
+next arm (`cluster.clj`'s cluster loop / `wake.clj:495`), the schedule proc at its next
+transition, the program-identity observer at the next context acquisition. Until then
+`runtime_status` reports the cluster's wake route as retired with the occurrence id,
+never as healthy absence.
 
-### N4. The process-wide uncaught handler (S9's backstop, audit row 30)
+The router's own catch (`wake.clj:546-547`) is deleted (call-site rule 3: not exist), as
+is the `offer!` result drop at `:388`. Once L1 makes the router a proc, N3 covers the
+listeners that remain (`::program-identity`, `sci/eval.clj:2366` *(wt)*; the schedule
+and call-preparation listeners until L1 deletes them).
 
-`Thread/setDefaultUncaughtExceptionHandler` is set **once** at process root, in
-`seon.operator.runtime` beside `root-executor-pair` (`resources/seon/operator/runtime.clj:17-22`),
-because that namespace is process custody outside every cluster program. It calls
-`fault!` with the process world. What "the process world" is, ruled here rather than
-left open: the handler reads `running-instances` (`runtime.clj:11`, existing custody,
-not a new registry) and records against the development cluster's connection
-(`"default"` when running, else the first booted instance) with
-`:seon.error/layer :seon.process/uncaught`, `:seon.error/operation` the thread name, the
-agent unknown. When no instance is running, or recording fails, it takes `fault!`'s
-"database down" path: emergency diagnostic to stderr with the whole `Throwable->map`,
-and — since no graph owns the thread — nothing to stop; the JVM stays up. Futures capture
-their throwables, so this handler is the backstop for go blocks (Datahike's writer,
-`dispatch.clj:63-69`), virtual-thread tasks started with `Thread/startVirtualThread`,
-and N3's handler throws; it is not universal and the PRD does not claim it is.
+**The blocking, bounded now [R6].** The handler's `fault!` parks the `:mixed`
+notification thread on Datahike's writer promise for one commit. That pool is unbounded
+and cached (`dispatch.clj:106-111`), and the writer's own loops run on other threads of
+it, so this is a parked thread, not a deadlock. The pre-agent slice supplies the
+**system-write bound** the audit's row 29 left open: `db.clj:3872-3886`'s bounded deref
+applies to every write, system writes included, with the existing
+`:seon.db/write-bound-exceeded` as the outcome-unknown result; `fault!` reports outcome
+unknown without retry and without an overlapping replacement write. This is `db.clj`
+(held by writer-cost): a follow-up to that holder, required before N3 is landed.
 
-The same slice wires the two foreign callback seams that are free today: http-kit's
-`:error-logger` (audit row 20) → `fault!`; the SSE feed catch (`web.clj:2882`, held by
-page-key — a follow-up to that lane).
+**Seams:** DH `writer.cljc:256-261`, `:379-387`, `:390-406`; `dispatch.clj:63-69`,
+`:106-111`; `db.clj:3872-3886`. **Proof:** §5 gate 3. **Cost:** fork ≈ 0.75 day
+(retire-then-handle, in-flight regression), Seon ≈ 0.75 day (handler, emergency path,
+re-arm at the three owners, write bound); ≈ 1.5 days; risk low-medium.
 
-**Seams:** `dispatch.clj:63-69`; `runtime.clj:11-22`. **Proof:** a `go` block that throws
-on `default` (a scratch form) produces one occurrence with layer `:seon.process/uncaught`
-and the thread name; the same with every instance stopped prints the emergency diagnostic
-and returns; installing the handler twice is refused (chainsafe: the existing handler is
-wrapped once, never replaced). **Cost:** ≈ 0.25 day; risk low. Files: `runtime.clj`
-(free), `boot.clj` (free), `web.clj` (follow-up to its holder).
+### N4. The process uncaught handler — attribute from evidence, or report unknown [R5]
 
-### The dependency between N1 and the error route
+`Thread/setDefaultUncaughtExceptionHandler` is installed **once**, chainsafe (the
+existing handler is wrapped, never replaced; a second install refuses), at process root
+in `seon.operator.runtime` beside `root-executor-pair`
+(`resources/seon/operator/runtime.clj:17-22`), because that namespace is process custody
+outside every cluster program. It is the backstop for go blocks (Datahike's writer,
+`dispatch.clj:63-69`) and virtual-thread tasks; Futures capture their throwables
+(Flow:29-36), so it is not universal and is not claimed to be.
 
-N1/N3/N4 call `fault!`, which is M4's function (final design §"One required namespace").
-Until M4 lands, the fork hook and the listener handler have no callee. The order inside
-M4's window is therefore: M3 (fault cost) → `seon.fault/fault!` (M4 step 0, B3's file)
-→ N1's fork + `var-process` option + N3's fork + N4 → M4's deletions and the site
-conversions. N2 is independent and lands when `cluster.clj` frees. A10.2's question
-("which does the fork hook call?") is answered above: always `fault!`; `fault!` alone
-decides synchronous versus batched; the committer proc's own adapter is the emergency
-handler, so a committer failure never enqueues itself.
+**Custody comes from the throwable, never from `running-instances`.** The handler
+attributes only from evidence carried by the failure:
+
+| what the throwable carries | action |
+|---|---|
+| a panic receipt already recorded by `fault!` (final design: "once per propagation") | propagate: no count, no write; expose the receipt in the process failure observation |
+| an `ex-data` world — `:seon.env/environment` or a `:seon.db/connection` — placed there by the boundary that started the work (N3's handler keeps its captured world; a Seon-started virtual task carries its environment in its `ex-info` wrapper) | `fault!` on that world, layer `:seon.process/uncaught`, operation the thread name |
+| neither | **explicit process failure**: no database write is chosen (default-or-first was map iteration, rejected); the failure is retained with its whole `Throwable->map` in the process failure observation and printed once to stderr; status reports it as unattributed |
+
+The **process failure observation** is the existing process/graph observation seam
+extended, not a sink: `seon.operator.runtime` retains the last N uncaught failures as
+live objects (like `*e`: disposable, process-local, never a database write), and
+`boot/readiness` → `runtime_status` / `bin/seon status` report them as
+`:seon.process/failures` with count, classes, thread names and the exact REPL form to
+inspect one. A durable process-error sink exists only if the process owner supplies it
+deliberately as a bootstrap setting (`boot.clj`'s tiny bootstrap settings, AGENTS "The
+system"), naming the cluster; absent that setting, unattributed failures stay process
+observations. A recording failure inside the handler takes the terminal emergency path
+(both causes retained, stderr, return) and never writes into another cluster.
+
+The same slice wires http-kit's `:error-logger` (audit row 20; the request carries its
+world) → `fault!`; the SSE feed catch (`web.clj:2882`, held by page-key) is a follow-up
+to that holder.
+
+**Seams:** `dispatch.clj:63-69`; `runtime.clj:11-22`; final design E:40, 82-84.
+**Proof:** §5 gate 3 (process part). **Cost:** ≈ 0.5 day; risk low. Files:
+`runtime.clj`, `boot.clj` (free), `web.clj` (follow-up).
+
+### The dependency between N1–N4 and the error route
+
+N1, N3 and N4 call `fault!`, which is M4's function (final design §"One required
+namespace") in its synchronous form. The order inside M4's window: M3 (fault cost) →
+`seon.fault/fault!` synchronous (M4 step 0, B3's file) → N1 (fork + `var-process` +
+`start-graph!` + launcher producers) → N3 (fork + handler + write bound) → N4 → N1f's
+deletions and the site conversions. N2 is independent and lands when `cluster.clj`
+frees. The batching committer, its ack protocol and the stop-order question it raises
+are revisited after the first agents with measured repeat load (§3 L8).
 
 ## 3. LATER — the flow restructure, ordered and placed against README §4
 
 Everything below waits for cut 3's first namespace agents unless a measurement promotes
-it (triage B2: "promote to MUST if a probe shows …"). Order is by dependency, then value.
+it (triage B2: "promote to MUST if a probe shows …"). Placement follows the review.
 
 | # | slice | files | seam | depends on | cut | cost / risk |
 |---|---|---|---|---|---|---|
-| L1 | **Router proc** (S4, D3/D4): `:seon.cluster.wake/router` `:io` in the cluster graph (`cluster.clj:3181-3190`); source per §4 decision A (recommended: the fork's `datahike.committed-report`, opened per connection generation, `open!` DH `committed_report.cljc:67`, `poll-batch!` `:175`, `poll-ready!` `:259`, `close!` `:295`; the commit loop offers in order at `writer.cljc:260`) or B (offer-only listener + `d/since` from the proc's basis `t`). The proc keeps its last-handled basis `t` as proc state, rebuilds matchers only when a schema/wake datom is in the batch, delivers wakes exactly as `route!` does today; on a `:gapped` source it reads `d/since` from its basis once and continues. Deletes the per-agent schedule listener (`schedule.clj:799`, the router derives schedule interest), the call-preparation watch (`call_preparation.clj:564-583`, "an optimization only"), and the `::program-identity` listener (`sci/eval.clj:2366` *(wt)*, which becomes a router-delivered wake to the context owner). The wake regression suite passes unchanged. | `wake.clj`, `cluster.clj`, `schedule.clj`, `call_preparation.clj`, `sci/eval.clj` | as cited | M4 (the proc's failures take the hook); §4 decision | 3 (after the first agents) | 1–2 days / medium: the suite must pass; L2's out-of-order batch-shared reports are what the current router already receives |
-| L2 | **Armer owns arm/disarm** (S5, D6): arm and disarm become messages to `:seon.agent/armer` (it already speaks `quiesce`, `cluster.clj:3360-3374`); `submit-source!` and every direct installer inject `{:seon.agent/arm id :reply ch}` and await the reply under the backstop bound; both monitors (`agent.clj:784`, `:1190`) deleted. M1/M6 remove the seconds of work under the lock first, so this slice changes serialization ownership, not cost. | `agent.clj`, `cluster.clj`, the installers | `cluster.clj:3360-3374`; `agent.clj:917`, `:1190` | M1, M6 landed | 3 | ≈ 1 day / medium: all installers convert in one slice |
-| L3 | **SSE join and http-kit executor shutdown** (S9 remainder, D8c/d): exact change in the quick-wins landing "Step 14" (feeds registered, `.join` under the feed bound; `workers` shut down and awaited; a live thread after the bound throws naming the count). | `render/web.clj`, `seon.render.web.edn` | `web.clj:2882`, `:3693`; http-kit `server.clj:321` drain | none | any (page-key's follow-up) | 0.5 day / low |
-| L4 | **Evaluations and capability dispatch through the launcher** (S7, audit rows 8–9): `submit-evaluation!!` (`turn.clj:3315`, no caller today) called from the turn; `effect/dispatch` (`effect.clj:492-529`) through a new `:io` arm of `submit!!` (today it admits compute only, `flow.clj:903-914`), gaining the io admission bound and one settled-once terminal. The compute-placement question (A10.3): compute submissions run on the root `:io` executor today (`flow.clj:687`), so the bound is the admission count, not CPU; **measure agent count × evaluation load first** and move to the bounded platform executor (`runtime.clj:17-21`) only with the SCI arm carried and a measured need. Conflicts with B2 commit 7 (launcher retired) — §4 decision B. | `turn.clj:3315` (one call, the plumbing-first rule allows a one-line caller; the turn function itself is untouched), `flow.clj`, `effect.clj` | as cited | §4 decision B; M4 | 3 late / 4 | 2–3 days / medium |
-| L5 | **Backstop proc** (S6, D8a): `:seon.agent/backstop` `:io` in the agent graph, in-ports `parts`/`cancel` plus an `async/timeout` kick (the shape `25de4dc81` gave the schedule timer); when it fires the transform throws the diagnostic so the fault takes the hook; the executor loop (`turn.clj:5396-5450`) and its `offer!` go. B2 §6's "the completion observer IS the transform's own wait" may dissolve this proc again; the ruling is B2's. | `turn.clj`, `agent.clj` | `turn.clj:5396-5450`; Flow:289-294 (`::flow/input-filter`) | N1 | 4 | 0.5 day / low, but it edits `turn.clj` |
-| L6 | **Model call as a launcher submission** (S8, D10): `ai/complete` (`turn.clj:4520`) becomes `flow/submit!` `:io`; completion re-enters the turn proc as a message on a new in-port (call/resume split); the retry `Thread/sleep` (`:4605`) becomes a delayed resubmission through `async/timeout`; the turn proc answers ping and takes stop during a call; `interrupt-graph!` loses its reason. | `turn.clj`, `agent.clj` | `flow.clj:525-580` (the completion in-port pattern); `turn.clj:4520`, `:4605` | L4, B2 commit 4 (one turn function) | 4 | 2–3 days / high: a turn restructure |
-| L7 | **Ping during a model call** | falls out of L6; until then oversight's `:unknown` for an open turn is honest and stays | — | — | L6 | 4 | 0 |
-| L8 | Report-channel readers (D9), Flow casts (F13), the `render/coalesce-ms` sleep (audit row 21), the `acquire!` lock → commit-id `delay` (row 18; already gone *(wt)* in sci-program-revisions) | per row | — | — | when convenient | small |
-| L9 | **Flow-native committing with a real `:compute` tier** (audit option 3) | `flow.clj`, `fault.clj` | Flow:258-260 | L4's SCI arm on `:compute` | after cut 4, if measured | 2 days |
+| L1 | **Router proc** (S4, D3/D4; **ruled**, §4 A): `:seon.cluster.wake/router` `:io` in the cluster graph (`cluster.clj:3181-3190`). The listener only `offer!`s `::look` (sliding-1) into the proc's in-port; the proc wakes each affected agent on its mailbox proc's `:seon.agent/wake` port (the channel `route!` delivers to today, `wake.clj:536-542`, becomes the proc's out-port); the proc registers the listener **before** deriving initial work, captures one `db/db` per look, derives wakes through that value's basis, compares Datahike dependency revisions before rebuilding matchers (proportional to relevant declaration changes, not every commit), and advances its basis only after successful delivery; a late callback causes a redundant look, never a backward cursor. Its recovery contract is the probe in §5 gate 4 (a bare `d/since` is a temporal predicate with nonhistorical collapse, DH `db.cljc:154-192`, `:678-680`, not the `[e a v tx added]` event stream `wake.clj:524-542` consumes). Deletes the per-agent schedule listener (`schedule.clj:799`), the call-preparation watch (`call_preparation.clj:564-583`) and the `::program-identity` listener (`sci/eval.clj:2366` *(wt)*), each becoming a router-delivered wake; context adoption semantics stay with B2. The wake regression suite passes unchanged. | `wake.clj`, `cluster.clj`, `schedule.clj`, `call_preparation.clj`, `sci/eval.clj` | as cited | M4; gate 4's probe | 3, after the first agents | ≈ 1 day after the probe (unmeasured until then) / medium |
+| L2 | **Armer owns arm/disarm** (S5, D6): arm and disarm become messages to `:seon.agent/armer` (it already speaks `quiesce`, `cluster.clj:3360-3374`); `submit-source!` and every direct installer inject `{:seon.agent/arm id :reply ch}` and await under the backstop bound; both monitors (`agent.clj:784`, `:1190`) deleted. Limited to lifecycle plumbing; M1/M6 remove the seconds of work under the lock first. | `agent.clj`, `cluster.clj`, the installers | as cited | M1, M6 | 3, after the first agents | ≈ 1 day / medium |
+| L3 | **SSE join and http-kit executor shutdown** (S9, D8c/d): exact change in the quick-wins landing "Step 14". | `render/web.clj`, `seon.render.web.edn` | `web.clj:2882`, `:3693`; http-kit `server.clj:321` | none | after the first agents, unless a measured leak blocks operation | 0.5 day / low |
+| L4 | **Capability dispatch and evaluations through the launcher** (S7; the launcher stays the admission owner, **ruled**, §4 B): capability plumbing (`effect.clj:492-529` → a new `:io` arm of `submit!!`, `flow.clj:903-914` admits compute only today) may precede cut 4; **wiring turn evaluation** (`submit-evaluation!!`, `turn.clj:3315`, no caller) changes execution semantics regardless of being one call and is cut 4 unless measured starvation earns an explicit MUST promotion. Compute placement (A10.3): compute submissions run on the root `:io` executor today (`flow.clj:687`); measure agent count × evaluation load first. | `effect.clj`, `flow.clj`; `turn.clj:3315` | as cited | §4 B; M4 | plumbing 3; turn wiring 4 | 2–3 days / medium |
+| L5 | ~~Backstop proc~~ **dropped**: B2 §6 deletes the observer in favour of the transform's own two bounds; a disposable proc ahead of that is a second mechanism. The existing bound (`turn.clj:5396-5450`) stays until B2's replacement proves it; its `offer!` becomes `fault!` in N1f. | — | — | — | — | 0 |
+| L6 | **Model call as a launcher submission** (S8, D10): `ai/complete` (`turn.clj:4520`) as `flow/submit!` `:io` with completion re-entering the turn proc as a message; the retry `Thread/sleep` (`:4605`) as a delayed resubmission. Decided with B2's single execution design, never as a competing plan. | `turn.clj`, `agent.clj` | `flow.clj:525-580`; `turn.clj:4520`, `:4605` | B2 commit 4 | 4 | 2–3 days / high |
+| L7 | **Ping during a model call** falls out of L6; until then oversight's `:unknown` is honest. Interrupts stay (§1). | — | — | L6 | 4 | 0 |
+| L8 | Report-channel readers and Flow casts: **dropped** (unneeded readers). Render scheduling (`web.clj:2681` coalesce sleep): measured first, valid attribute/declaration-keyed caches preserved. The `acquire!` lock is already gone *(wt)*. **Batching committer** (final design "Burst accounting"): revisited here with measured repeat load after the first agents. | per row | — | — | when measured | small |
+| L9 | ~~Flow-native committing with a `:compute` tier~~ **removed from the four-cut deliverable**: a future measured compute optimization, separate follow-up. Generic host computation gains no termination from an SCI arm (README §3:110-112). | — | — | — | — | — |
 
-Placement rule, restated from README §4 and the 2026-09-23 ruling: L1–L3 are cut-3
-work after the first namespace agents start (they touch no turn code); L4 straddles
-(its `turn.clj` edit is one call site); L5–L7 are cut 4, the last cut, with B2. The
-skill's stale claims (schedule row 27) are corrected by the skill's owner when N1 lands,
-since N1 changes the mechanism the skill describes.
+The skill's stale claims (schedule row 27) are corrected by the skill's owner when N1
+lands, since N1 changes the mechanism the skill describes.
 
-## 4. Open decisions for the owner
+## 4. Decisions — RULED by the owner (README §7 "Wake routing through Flow; launcher kept")
 
-The 1.4 projection-sweep question is closed by `a2e9253fe` (after cut 3's first
-namespace agents) and is not reopened here. Two remain, each with three priced options;
-the recommendation is marked.
+The 1.4 projection-sweep question is closed by `a2e9253fe`. Both decisions below were
+ruled after the review; the option tables stay as the record of what was priced and why
+the ruled option won.
 
-### A. The router's source
+### A. The router's source — RULED: option 1
 
-| option | guarantee | cost | gives up |
-|---|---|---|---|
-| **1 (simplest viable): offer-only listener + `d/since` from the proc's basis `t`** (the audit's row 1 shape). The listener does `(async/offer! look ::look)` on a sliding-1 channel and nothing else; the router proc reads `(d/since db basis-t)` on each wake, rebuilds matchers when the range holds a schema/wake datom, and advances `basis-t`. | loss-free (work derives from facts); one listener remains, with N3 as its failure path; no fork API beyond N3 | ≈ 1 day; one `since` read per wake (the merge pack measured a `since` floor of ≈ 130 ms on retained history — the proc must read the tx range, not scan history, or this is the wrong cost) | commit ordering under batching is reconstructed from the range, not given; the listener still runs on the notification thread (an `offer!`, microseconds) |
-| **2 (RECOMMENDED): the fork's `datahike.committed-report` source.** The router proc opens one source per connection generation (`open!`, DH `committed_report.cljc:67`), and its transform is driven by `poll-ready!`/`poll-batch!` (`:259`, `:175`) through an in-port the proc feeds itself (an `async/thread` is not allowed — the proc reads the source with `poll-batch!` inside its `:io` transform under a declared bound, returning to `alts!!` between batches so control is heard). Reports arrive in commit order with their commit db; overflow marks the source `:gapped` with counters (`:17-25 public-evidence`), and the proc then reads `d/since` from its basis once and continues. | commit-ordered, bounded, gap-signalled, **zero listeners for routing** (N3 survives only for the remaining listeners until they go); no Seon code on the writer's path at all (`offer-committed!` at `writer.cljc:260` is the fork's own non-blocking offer) | ≈ 1.5 days; the source's readiness capacity is structural (4,096 active sources, `:8`); one per cluster is far under it. Seon used this seam before (`2b584a6f2`, `2750c158d`); it left in `f25e34594`, the tree split that made the fresh tree the project, not for a defect in the seam — the old router is evidence to quarry, not baggage | a fork-only API (upstream Datahike has no committed-report); the proc must poll between control reads rather than block on one channel, so its loop shape differs from every other proc |
-| **3: fixed-buffer blocking hand-off** — the listener `>!!`s the full report into a fixed buffer the router proc reads. | ordered per listener, no since read | ≈ 0.5 day | blocks Datahike's notification thread under load (L1: listeners run in the transact! go block) — the exact "work on the writer path" the audit forbids; rejected unless the owner wants backpressure into the writer |
-
-Recommendation: 2, because it is the only option with no listener on the routing path,
-and the fact pack's L2 measurement (six concurrent callbacks, batch-shared `:db-after`)
-means option 1's router would still be handed unordered, batch-collapsed reports. If the
-`f25e34594` reason turns out to be a defect in the seam, fall back to 1.
-
-### B. Evaluations: the launcher stays as the admission owner, or B2 commit 7 retires it
-
-B2 §5 commit 7 retires `flow.clj:192-944` and futurizes evaluations directly, admitting
-"neither `:compute` nor `futurize` supplies a bounded pool by itself" and gating the
-retirement on "that existing admission owner preserves its guarantee". The audit's row 8
-and this PRD's L4 route evaluations THROUGH the launcher. These contradict; one must be
-ruled.
+**Owner:** "Flow processes for datahike listening is a great idea especially since
+agents are also flow processes … so we can wake them on their channels." Verified: each
+agent is a Flow graph whose `:seon.agent/mailbox` proc reads a `:seon.agent/wake` port
+(`agent.clj:481`, `:519-540`). **The design:** one offer-only listener per cluster puts a
+payload-free wake on a sliding-1 in-port of a router proc; the router reads its own
+connection and wakes each affected agent on its mailbox wake port; a failed hand-off
+throws into Datahike through the fork's failure callback (N3). Its recovery contract is
+§5 gate 4, run before L1's cost is quoted.
 
 | option | guarantee | cost | gives up |
 |---|---|---|---|
-| **1 (RECOMMENDED, simplest viable): the launcher stays as THE admission owner; B2 commit 7 is amended to route `submit-evaluation!!` through it and keep `flow.clj:192-944`.** | a declared, refusing cross-agent bound (`:seon.config.flow/concurrency`) with a flat refusal value to the submitter, one settled-once terminal, wedged work holding its slot until actual exit — the "timeout includes exit" shape already installed | ≈ 1 day (L4's turn call site + the `:io` arm) | B2's −800 lines from commit 7; the capacity observer proc survives |
-| **2: B2 as written** — futurize on the carried compute executor, one evaluation per agent, the completion observer as the bound. | serial per agent; bound by agent count | 0 beyond B2 | the cross-agent CPU bound: N agents × 1 evaluation each queue on a fixed pool with no refusal and no admission fact; a 3,145-uncontracted-function campaign is exactly the load that needs it |
-| **3: shrink the launcher to admission only** — keep the refusing buffer and the `::completion` in-port, delete the capacity observer and the compute/io split's duplicated bookkeeping; then B2 commit 7 deletes the rest. | option 1's guarantee at roughly half the code | ≈ 2 days | nothing in guarantee; schedule risk on `flow.clj` during M4 |
+| **1: offer-only sliding-1 listener into the Flow in-port; the proc reads its own connection** (Astra's option 1 with a recovery contract). The listener does `(async/offer! look ::look)` and nothing else. The proc registers before deriving initial work, captures one database value per look, processes through that value's basis, compares dependency revisions before rebuilding matchers, advances only after successful delivery. Recovery after restart and across gaps is a **history-preserving bounded query for the declared interests** (retraction, assert-and-retract in one interval, no-history attributes, schema-plus-wake changes), proven by §5 gate 4 before the ~1 day is quoted. | loss-free: durable work re-derives from facts; the callback's unordered, batch-collapsed report is never read, so L2's objection does not apply; one listener, covered by N3; no fork API | ≈ 1 day **after** gate 4's probe; the range read's cost is unmeasured here | a listener remains on the notification path (an `offer!`, microseconds) |
+| **2: the fork's `datahike.committed-report` source.** Ordered per-transaction payloads and bounded overflow evidence (DH `committed_report.cljc:67` `open!`, `:140` `offer-committed!`, `:17-25`). **As first written it cannot work:** `poll-batch!` is explicitly non-blocking (`:175-180`), `poll-ready!` consumes a process-global queue (`:7-11`, `:259-275`), `take-ready!` blocks without a timeout (`:278-284`) — per-cluster polling steals another cluster's readiness, busy-spins or stops waking when empty; `:gapped` rejects every later offer (`:115-117`, `:129-134`), so "since once and continue" never reopens; ordered reports still share batch `:db-after` (`writer.cljc:256-261`). Viable only by extending the dependency's per-source readiness into an event-driven Flow port with close/reopen-before-catch-up, overlap dedup, generation fencing and bounded drain. | zero routing listeners; commit order; typed overflow | well beyond the 1.5 days first quoted: fork lifecycle proofs, close/reopen races, concurrent clusters | a fork-only API; a readiness dispatcher unless the readiness becomes per-source and event-driven |
+| **3: fixed-buffer blocking hand-off from the listener** | none beyond option 1 | ≈ 0.5 day | blocks the notification thread; not ordered per listener either (notifications stay concurrent, `writer.cljc:390-413`); rejected |
 
-Recommendation: 1 now, 3 as the cut-4 refinement when B2 opens `turn.clj`.
+Astra recommended option 1 with the recovery contract. This lane recommended option 2
+in its first draft and withdrew it on the review's source facts (non-blocking poll,
+global unbounded take, gapped never reopens): option 2 is a fork extension, not a reuse,
+and the `d/since` concern that motivated it is answered by reading one captured value
+per look. The owner ruled option 1. Option 2 remains only as a possible later extension
+of the dependency's own seam if router wake latency or listener cost is ever measured
+to matter; nothing schedules it.
 
-## 5. Acceptance proofs
+### B. Evaluations — RULED: the launcher stays the admission owner; B2 commit 7 retires it only on an admission proof
+
+B2 §5 commit 7 retires `flow.clj:192-944` and futurizes evaluations directly, and
+B2:166-172 already gates that on another existing owner proving bounded admission —
+"neither `:compute` nor `futurize` supplies a bounded pool by itself". The audit's row 8
+and L4 route evaluations through the launcher. The two are reconciled by the gate, not by
+choosing one plan over the other.
+
+| option | guarantee | cost | gives up |
+|---|---|---|---|
+| **1: keep the launcher as the admission owner until B2's gate passes; route through it where L4 lands.** The refusing buffer (`:seon.config.flow/concurrency`, a flat refusal to the submitter), one settled-once terminal, wedged work holding its slot until actual exit — the "timeout includes exit" shape installed today. B2 commit 7 is neither decreed permanent nor pre-approved. | the declared cross-agent bound survives; no second admission owner | 0 additional prerequisite work now; L4's plumbing ≈ 1 day when it lands | nothing now; B2's −800 lines wait for the gate |
+| **2: B2 as written now** — futurize on the carried compute executor; one evaluation per agent bounds by agent count. `newFixedThreadPool` (`flow.clj:186-190`) bounds workers, not admission: N agents × 1 evaluation queue with no refusal and no admission fact. | serial per agent | 0 beyond B2 | the cross-agent admission bound — exactly what a 3,145-function campaign loads; this misreads B2's gate as permission for an unbounded queue |
+| **3: shrink the launcher in place in cut 4** — keep the refusing buffer, the `::completion` in-port, queued cancellation, arm transfer and retained ownership until actual body exit; delete the capacity observer and the duplicated compute/io bookkeeping; then B2 commit 7 removes the rest if a smaller dependency seam supplies the same four properties. | option 1's guarantee at roughly half the code | ≈ 2 days (design estimate) | schedule risk on `flow.clj` during cut 4 |
+
+Astra and this lane both recommended option 1 now, with option 3's reduction in place
+preferred in cut 4 if no smaller dependency seam supplies refusal, queued cancellation,
+arm transfer and retained ownership until actual body exit, and L6 decided inside B2's
+single execution design. **The owner ruled it:** the launcher is kept as the admission
+owner; B2 commit 7's retirement happens only on an admission proof. Option 3 is the
+cut-4 shape that proof would most likely take; it is not scheduled by this ruling.
+
+## 5. Acceptance — behavioural classes and measurable gates
 
 One regression per behaviour class, on the canonical branch fixture with real SCI and
-armed contracts, run through the installed `seon.test/run` request; never a lane suite.
-Live proofs run on `default` after adoption and are recorded in the landing note with
-their forms, values and timings (every operation over 1 s with its phase breakdown).
+armed contracts, run through the installed `seon.test/run` request per slice, never a
+lane suite; platform and affected integration at the orchestrator boundary. Destructive
+stop and handler tests use **owned isolated custody** (a scratch root and cluster of the
+lane's own), never `default` (AGENTS: lanes never stop `default`). Live observations on
+`default` are read-only. Every landing note records the exact forms, values and timings,
+the fork commit ids and gitlink advances, which path the evidence exercised (hot reload,
+new fork, in-place adoption) and the verification boundary; a passing regression proves
+the behaviour, not adoption, browser paint or a deletion's safety.
 
-| class | regression | live proof |
-|---|---|---|
-| **recorded before continuing** (N1) | step / transition / output / compute-timeout / start failures each yield one occurrence with the chain before the next input is read | a scratch proc's throw on `default` → occurrence visible in `runtime_status` within one commit |
-| **nothing dropped** (N1, M4) | >100 distinct concurrent failures in one graph preserve every identity; no `CountedDroppingBuffer`, `join-error-fanout!` or `offer!`-onto-a-fault-channel remains (`rg` = 0) | — |
-| **panic stops only its graph, visibly** (N1) | the failing graph's completions deliver within the bound; sibling graph pings; REPL evaluates; `flow-status` reports `:failed <id>`; `bin/seon status` lists the open panic | the same on `default` with a deliberate throw in a scratch agent graph |
-| **`:xform` refused** (N1) | `start-graph!` refuses naming pid and cid | — |
-| **handler failure is loud** (N1, N3, N4) | a refusing writer under both modes: the proc exits, the graph stops, stderr carries both causes, the test-installed uncaught handler receives the panic receipt for the listener case | — |
-| **every stop wait is bounded** (N2) | a parked proc makes `disarm-agents!` throw within the bound naming the missing event; `rg '<!!'` in `cluster.clj`/`flow.clj` finds only sites inside `await!` | `bin/seon stop` on `default` with a deliberately parked scratch proc returns within the bound with the named event; timing recorded |
-| **listener failure recorded, transaction delivered** (N3) | a throwing listener: the caller's report first, one occurrence naming the key, a later listener runs, a later transaction commits | — |
-| **uncaught is recorded, once** (N4) | a throwing `go` block on the fixture → one occurrence, layer `:seon.process/uncaught`; a second install refused | a throwing `go` on `default` → occurrence; with every instance stopped → stderr diagnostic |
-| **router off the writer path** (L1) | the wake regression suite unchanged; the connection's listener count is 0 for routing (or 1 under option 1) and the notification thread executes no Seon query (assert with a listener that records its thread and elapsed) | `(keys @(:listeners (meta (boot/connection "default"))))` = `[]` (option 2); a `defn` transaction wakes root within one commit |
-| **no lock only for a race** (L2) | two concurrent arms and one disarm through the armer complete in order without a monitor; `rg 'locking' src/seon/cluster/agent.clj` = 0 | — |
-| **threads joined** (L3) | after `web/stop!` with one open tab, the feed thread is not alive and `workers` is terminated | — |
-| **observable turn** (L4–L7) | ping answers during an in-flight model call; stop takes effect between messages; one fault, no overlap, no late settlement (B2 F4) | `flow/ping-proc :seon.agent/turn` during an open turn on `default` replies (today: nil after 3,009 ms, audit P2) |
+**Gate 1 — every failure entry is recorded before continuation (N1).** Exercise: a step
+throw; a `send-outputs` throw to an unresolvable port; a `:compute` timeout whose body
+stays alive; a `start-proc` throw with one proc already started; a construction failure
+(`prep-proc` shared ids, Flow:44-47); a stop-transition throw in both modes; the
+launcher's direct `::flow/error` output; a throwing `complete!` callback; an executor
+rejection. Each yields exactly one durable occurrence and one wake on the correct branch
+before acknowledged continuation, with a two-link chain where two links were thrown (the
+fixture forces two). Under `:panic` there is no "next input": the assertion observes from
+the supervisor via the exit fact. More than 100 distinct concurrent failures in one graph
+preserve every identity (the channel slid; the store did not). `:xform` anywhere in a
+definition refuses at `start-graph!` before any channel exists, naming pid and cid.
 
-The landing note for every slice states which path the evidence exercised (hot reload,
-new fork, in-place adoption), the fork commit ids and gitlink advances, `wc -l` per
-touched file, and the exact verification boundary. A passing regression proves the
-behaviour, not adoption on `default`, browser paint, or a deletion's safety; those are
-named separately.
+**Gate 2 — terminal, cleanup and admission are truthful (N1b, N1c, N2).** Saturate the
+control channel and every tap before a panic; throw during stop in both modes; fail the
+recorder while stopping; time out a compute Future whose body remains alive. Prove:
+bounded command admission (a typed admission timeout, never a blocked sender); the stop
+transition ran and its outcome (`:exited` / `:failed` + `:cleanup-ex`) is in the
+delivered exit fact; a handler throw retains the exit disposition and both throwables;
+an exited proc no longer holds the mult (untapped); no self-join; no resource reuse or
+replacement work before the exit fact; expiry retains custody and denies restart; the
+whole `disarm-agents!` sequence fails within its one bound naming the missing event; an
+independent graph pings and the REPL evaluates throughout; `rg '<!!' src/seon/cluster.clj src/seon/flow.clj`
+finds only sites inside `await!`. A proc-completion promise alone does not prove its child
+computation exited: the compute-timeout case asserts the body's own exit signal
+separately.
+
+**Gate 3 — listener and process failures terminate and attribute honestly (N3, N4).**
+Fail a listener on every transaction, including its own fault transaction: prove the
+listener was retired before recording, fault writes are bounded by the in-flight count
+(assert the exact count with a latch-held concurrent notification), no recursive
+recording, remaining listeners behave under each mode (`:record` continues; `:panic`
+exposes the receipt and returns), the writer stays usable afterwards, and the retired
+route is reported as pending repair then re-armed by its owner. Inject faults on two
+branches plus an unattributed process thread: no cross-branch recording, no receipt
+recount, the unattributed failure appears in `:seon.process/failures` with its
+`Throwable->map` and an explicit database-unavailable status when the store is down.
+Verify recipient wake delivery separately from transaction-promise delivery. Installing
+the handler twice refuses.
+
+**Gate 4 — the router's recovery contract (L1, before its cost is quoted).** Registration
+races (a transaction between listener registration and the first derivation), reordered
+callbacks, batch boundaries, retraction, assert-and-retract within one look, no-history
+attributes, schema-plus-wake changes in one transaction, restart with pending durable
+work, and the query-work bound. Matcher recomputation happens only on relevant
+declaration changes (assert the revision comparison, not the commit). "Listener count
+zero" is not asserted while other listeners remain; the assertion is "no Seon query on
+the notification thread" (a recording listener captures thread and elapsed).
+
+**Gate 5 — cost, measured against the immediate parent.** The measurement script is
+committed beside `docs/prds/steward-platform/research/measure-publication-path-2026-09-22.sh`
+and its raw samples land in the landing note: wall, CPU, allocation, p50/p95, retained
+memory, queue depth and phase breakdown for a no-fault Flow step, an ordinary data-only
+write, the first fault, a repeated fault, concurrent faults, a router wake and a stop —
+candidate versus its immediate parent with identical admitted workload, fixture basis,
+dependency pins and linked valid caches; absolute and delta timings with sample counts.
+P4's 1,099.9 ms is prior evidence, never presented as new. A fault transaction causes
+zero program/schema/context reconstruction (cache-miss counters at the owners read 0);
+a relevant declaration change recomputes only its closure. Hot operations are
+sub-second; every operation over 1 s carries its phases; over 10 s is a defect needing
+authorization, never an excused benchmark.
+
+**Gate 6 — schema and fork adoption.** Any new occurrence/context member is proven by
+incremental declaration adoption on a branch of a live store with warm-cache reuse,
+retirement refusal and affected re-derivation (README §7 "Schema change and reset");
+no reset, nuke or from-zero reindex as proof. The modified forks are pinned and adopted,
+and loaded behaviour is proven separately from source (a form on the running JVM that
+exercises the new handler), with the forks' own compatibility tests retained and green.
 
 ## 6. Out-of-scope findings recorded while designing (no edits by this lane)
 
@@ -413,13 +588,15 @@ named separately.
   high-priority defect and must be corrected with N1, since N1 changes the described
   mechanism. Owner: the skill's owner; not this lane.
 - Datahike `replikativ.logging/raise` throws without a cause (schedule row 24h); N3's
-  handler will record such failures with a one-link chain until that fork fix lands.
+  handler records such failures with a one-link chain until that fork fix lands.
 - A Flow fault's evidence measures the whole environment carried in `::flow/msg`
   (201 ms, 8.4 MB; schedule row 30). N1 hands `fault!` the same map Flow builds today;
   the cost belongs to `error/prepare`'s owner and gates nothing here once M3 lands.
+- The system-write bound (audit row 29) is now a prerequisite of N3, in `db.clj`
+  (held by writer-cost); recorded here for the ledger, not filed as a new issue.
 
 ## PROPOSAL — one row for README §4 (the orchestrator integrates it after review)
 
 | Step | Slice | Frees |
 |---|---|---|
-| 3.f | **Flow owns running machinery** ([spec](lane-flow-owns-running-machinery.md); ruled order `a2e9253fe`): MUST-NOW inside M4's window — the core.async fork gains an optional per-proc error handler called from every Flow catch on the proc's thread (`seon.fault/fault!` is the handler; `:panic` exits the proc and stops the graph through Flow control; channel `:xform` refused at `start-graph!`), the Datahike fork's `notify-listeners!` gains a per-connection failure handler (default: today's log) whose own throw reaches the process uncaught handler installed once in `seon.operator.runtime`, and every stop wait in `cluster.clj`/`flow.clj` goes through `await!` under the turn backstop bound; the counted-dropping route, fault graph, fan-out joins, `emit-core-fault!` and the six `offer!`+`println` sites leave with M4. LATER, after the first namespace agents: the router as a cluster-graph proc fed by the fork's committed-report source (owner decision A) deleting the per-agent, call-preparation and program-identity listeners; the armer owning arm/disarm (both monitors deleted); SSE join and http-kit shutdown; evaluations and capability dispatch through the launcher (owner decision B amends B2 commit 7); the backstop proc, the model call as a submission and ping during a call with B2 in cut 4 | every cluster thread under Flow or the launcher; no fault crosses a dropping channel; no Seon work on the writer's thread; stop is bounded; the turn proc observable during a model call (cut 4) |
+| 3.f | **Flow owns running machinery** ([spec](lane-flow-owns-running-machinery.md); reviewed 2026-09-23; ruled order `a2e9253fe`): MUST-NOW inside M4's window, synchronous `fault!` only — the core.async fork gains one optional per-proc error handler called at its three catches on the proc thread (`::flow/exit` runs the proc's own stop transition and retains the disposition even when cleanup throws; every proc's exit is a delivered fact on a per-proc promise-chan; an exiting proc untaps control; command admission is bounded and typed; `:xform` refused before channels exist), the launcher records the failures it emits as data through the same function at their producers (no channel reader), the Datahike fork's `notify-listeners!` retires a failing listener before calling a per-connection failure handler (default: today's log) so recording cannot recurse, the process uncaught handler attributes only from evidence the throwable carries and otherwise reports an explicit process failure, and every stop sequence in `cluster.clj`/`flow.clj` — request, bounded stop, exit join — runs under one `await!` bound with expiry retaining custody; the counted-dropping route, fault graph, fan-out joins, `emit-core-fault!` and the six `offer!`+`println` sites leave with M4. Ruled (README §7 "Wake routing through Flow; launcher kept"): the router is a Flow proc fed by one offer-only sliding-1 listener, reading its own connection and waking each affected agent on its mailbox wake port, a failed hand-off throwing into Datahike through the fork's failure callback; the launcher stays the admission owner and B2 commit 7 retires it only on an admission proof. LATER, after the first namespace agents: the router proc deleting the per-agent, call-preparation and program-identity listeners; the armer owning arm/disarm; SSE join and http-kit shutdown; capability dispatch through the launcher; with B2 in cut 4: turn evaluation wiring, the model call as a submission, ping during a call; batching revisited on measured repeat load | every cluster thread under Flow or the launcher with a delivered exit; no fault crosses a dropping channel; no Seon work on the writer's thread; stop is bounded end to end; the turn proc observable during a model call (cut 4) |
