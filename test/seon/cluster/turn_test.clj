@@ -2012,25 +2012,19 @@
 
 (defn- failure
   "One model failure value carrying the evidence the leaf would record."
-  {:malli/schema [:=> [:cat :qualified-keyword :map] :seon.ai/completion]}
-  [kind evidence]
-  (merge
-   {:seon.error/at now
-    :seon.error/layer :seon.ai/request
-    :seon.error/operation 'seon.ai/complete
-    :seon.error/message (str "probe failure: " (name kind))
-    :seon.error/data evidence}
-   (case kind
-     :seon.ai/no-credential {:seon.ai/missing-credential-variable "SEON_TEST_PROVIDER_KEY"}
-     :seon.ai/transport-failure {:seon.ai/transport-failure "https://provider.invalid"}
-     :seon.ai/timeout {:seon.ai/timeout 1000}
-     :seon.ai/provider-error {:seon.ai/provider-error (:seon.ai/http-status evidence)}
-     :seon.ai/unparseable-body {:seon.ai/unreadable-response-member "body"})))
+  {:malli/schema [:=> [:cat :map :map] :seon.ai/completion]}
+  [members evidence]
+  (merge {:seon.error/at now
+          :seon.error/layer :seon.ai/request
+          :seon.error/operation 'seon.ai/complete
+          :seon.error/message "probe provider refusal"
+          :seon.error/data evidence}
+         members))
 
 (def ^:private unpaid
   "A connection the JDK PROVED never left this machine — the one case
   the no-retry ruling leaves open."
-  (failure :seon.ai/transport-failure
+  (failure {:seon.ai/transport-failure "https://provider.invalid"}
            {:seon.ai/error-class :transport-before-send
             :seon.ai/request-transmitted? false
             :seon.ai/response-started? false
@@ -2385,25 +2379,25 @@
                             @connection)))))))))
 
 (def ^:private turn-evidence-partitions
-  [{::error-class :credential ::kind :seon.ai/no-credential
+  [{::error-class :credential :seon.error/value {:seon.ai/missing-credential-variable "SEON_TEST_PROVIDER_KEY"}
     ::transmitted? false}
-   {::error-class :transport-before-send ::kind :seon.ai/transport-failure
+   {::error-class :transport-before-send :seon.error/value {:seon.ai/transport-failure "https://provider.invalid"}
     ::transmitted? false}
-   {::error-class :transport-unknown ::kind :seon.ai/transport-failure
+   {::error-class :transport-unknown :seon.error/value {:seon.ai/transport-failure "https://provider.invalid"}
     ::transmitted? true}
-   {::error-class :timeout ::kind :seon.ai/timeout ::transmitted? true}
-   {::error-class :rate-limit ::kind :seon.ai/provider-error
+   {::error-class :timeout :seon.error/value {:seon.ai/timeout 1000} ::transmitted? true}
+   {::error-class :rate-limit :seon.error/value {:seon.ai/provider-error 503}
     ::transmitted? true}
-   {::error-class :server ::kind :seon.ai/provider-error ::transmitted? true}
-   {::error-class :authentication ::kind :seon.ai/provider-error
+   {::error-class :server :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
+   {::error-class :authentication :seon.error/value {:seon.ai/provider-error 503}
     ::transmitted? true}
-   {::error-class :authorization ::kind :seon.ai/provider-error
+   {::error-class :authorization :seon.error/value {:seon.ai/provider-error 503}
     ::transmitted? true}
-   {::error-class :model ::kind :seon.ai/provider-error ::transmitted? true}
-   {::error-class :request ::kind :seon.ai/provider-error ::transmitted? true}
-   {::error-class :response ::kind :seon.ai/unparseable-body
+   {::error-class :model :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
+   {::error-class :request :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
+   {::error-class :response :seon.error/value {:seon.ai/unreadable-response-member "body"}
     ::transmitted? true}
-   {::error-class :response ::kind :seon.ai/unparseable-body
+   {::error-class :response :seon.error/value {:seon.ai/unreadable-response-member "body"}
     ::transmitted? true ::output? true}])
 
 (def ^:private turn-outcome-generator
@@ -2421,8 +2415,14 @@
      ::maximum-retries maximum-retries}))
 
 (defn- turn-failure-value
-  [{::keys [error-class kind transmitted? output?]}]
-  (failure kind
+  {:malli/schema [:=> [:cat [:map [:seon.error/value :map]
+                            [::error-class :keyword]
+                            [::transmitted? :boolean]
+                            [::output? {:optional true} :boolean]]]
+                  :seon.ai/completion]}
+  [{::keys [error-class transmitted? output?]
+    members :seon.error/value}]
+  (failure members
            (cond-> {:seon.ai/error-class error-class
                     :seon.ai/request-transmitted? transmitted?
                     :seon.ai/response-started?

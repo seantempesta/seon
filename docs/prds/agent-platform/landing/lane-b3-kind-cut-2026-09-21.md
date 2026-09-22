@@ -19,6 +19,16 @@ No final green or live default settlement claim is made.
 
 ### Final settlement verification, 2026-09-22 07:00 UTC
 
+The final-source turn request completed **129 tests / 536 assertions /
+61 failures / 87 errors**; result recording was refused. All four namespaces
+ended: cluster turn 60 tests / 33 failure events / 56 error events; turn
+34 / 17 / 16; turn-loop 26 / 10 / 6; turn-continue 9 / 1 / 9. Unlike the earlier
+request, the continuation namespace reached its terminal namespace event.
+The no-forms regression ended at `2026-09-22T07:48:03.090714Z`, with only its
+error-text assertion failing: actual text was `:malli.core/invalid-schema`.
+The evaluation existence, declared transaction attributes, and unparked-proc
+assertions passed. This still is **not** the required final no-forms pass.
+
 Runner/transaction/turn-work run `a64dc228cada` completed and recorded
 **55 tests / 367 assertions / 15 failures / 1 error**. Its deliberate failure
 fixture executed inside the runner tests; those nested fixture executions are
