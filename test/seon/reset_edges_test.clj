@@ -177,7 +177,9 @@
        (is (seq (get-in refusal [:seon.error/data :seon.program/referrers])))
        (is (= (db/basis-t database) (db/basis-t (db/db connection))))))))
 
-(deftest source-publication-refuses-an-outside-caller-and-keeps-its-head
+(deftest ^{:seon.test/fixture-observation
+           "A database branch cannot isolate fixture files and the physical-store head retained after a refused second publication."}
+  source-publication-refuses-an-outside-caller-and-keeps-its-head
   (let [root (io/file "tmp/reset-publication" (id/id))
         target-file (io/file root "target.clj")
         caller-file (io/file root "caller.clj")

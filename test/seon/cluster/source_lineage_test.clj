@@ -17,7 +17,8 @@
  (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 (deftest
- ^#:seon.test{:long "Three marker publications and branch-history assertions on a private canonical store.", :long-ms 10000} publication-advances-one-branch-and-retires-scratch
+ ^#:seon.test{:fixture-observation "A database branch cannot isolate three physical-store publication heads and scratch-branch retirement."
+              :long "Three marker publications and branch-history assertions on a private canonical store.", :long-ms 10000} publication-advances-one-branch-and-retires-scratch
  ((deref #'source-test/with-store)
   (fn
    [opened]
@@ -104,6 +105,7 @@
        "complete population repairs stale rows under an equal digest")))))))
 
 (deftest
+ ^#:seon.test{:fixture-observation "A database branch cannot isolate the physical-store head against an upsert based on an older publication."}
  stale-incremental-upsert-preserves-the-newer-publication
  ((deref #'source-test/with-store)
   (fn
@@ -146,7 +148,8 @@
     (is (empty? ((deref #'source-test/scratch-branches) opened)))))))
 
 (deftest
- ^#:seon.test{:long "Three marker publications, one held on an explicit latch, exercise the stale branch-head decision.", :long-ms 10000} failed-and-stale-builds-preserve-the-published-head
+ ^#:seon.test{:fixture-observation "A database branch cannot isolate competing physical-store publications held across a latch."
+              :long "Three marker publications, one held on an explicit latch, exercise the stale branch-head decision.", :long-ms 10000} failed-and-stale-builds-preserve-the-published-head
  ((deref #'source-test/with-store)
   (fn
    [opened]
@@ -220,6 +223,7 @@
         (empty? ((deref #'source-test/scratch-branches) opened))))))))))
 
 (deftest
+ ^#:seon.test{:fixture-observation "A database branch cannot isolate two cluster branch heads pinned across a second physical-store publication."}
  existing-clusters-remain-on-their-chosen-source-commit
  ((deref #'source-test/with-store)
   (fn

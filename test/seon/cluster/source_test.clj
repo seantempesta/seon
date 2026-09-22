@@ -251,7 +251,9 @@
 
 
 
-(deftest flat-scratch-write-refusal-retires-the-candidate
+(deftest ^{:seon.test/fixture-observation
+           "A database branch cannot isolate the physical-store scratch branch whose refused publication must be retired."}
+  flat-scratch-write-refusal-retires-the-candidate
   (with-store
     (fn [opened]
       (let [result
@@ -268,7 +270,9 @@
         (is (= #{:db :current-src} (set (registry/roster opened))))
         (is (empty? (scratch-branches opened)))))))
 
-(deftest incremental-upsert-records-source-identity-on-the-expected-commit
+(deftest ^{:seon.test/fixture-observation
+           "A database branch cannot isolate the physical-store publication head and its second incremental publication."}
+  incremental-upsert-records-source-identity-on-the-expected-commit
   (with-store
     (fn [opened]
       (let [a (publish opened digest-a)
@@ -299,7 +303,9 @@
         (is (= #{commit-a} (d/parent-commit-ids current-db)))
         (is (empty? (scratch-branches opened)))))))
 
-(deftest ^{:seon.test/long "Analyze two versions of two fixture files, validate scalar writes, publish and upsert on an isolated store."
+(deftest ^{:seon.test/fixture-observation
+           "A database branch cannot isolate the fixture files and physical-store heads across a full publication and incremental publication."
+           :seon.test/long "Analyze two versions of two fixture files, validate scalar writes, publish and upsert on an isolated store."
            :seon.test/long-ms 10000}
   incremental-first-party-publication-retains-complete-scalar-rows
   (let [root (io/file "tmp/publication-provenance" (str (random-uuid)))
@@ -410,7 +416,9 @@
       (finally
         (test-support/delete-recursively! root)))))
 
-(deftest incremental-upsert-derives-scalar-safety-from-the-installed-schema
+(deftest ^{:seon.test/fixture-observation
+           "A database branch cannot isolate the physical-store publication head whose installed schema governs a later incremental publication."}
+  incremental-upsert-derives-scalar-safety-from-the-installed-schema
   (with-store
     (fn [opened]
       (let [published (publish opened digest-a)
@@ -440,7 +448,9 @@
           (is (= (:seon.source/commit-id published)
                  (:seon.source/commit-id (source/current opened)))))))))
 
-(deftest incremental-publication-does-not-change-an-existing-cluster
+(deftest ^{:seon.test/fixture-observation
+           "A database branch cannot isolate cluster branch heads retained across a second physical-store publication."}
+  incremental-publication-does-not-change-an-existing-cluster
   (with-store
     (fn [opened]
       (let [a (publish opened digest-a)]

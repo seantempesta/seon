@@ -9,7 +9,9 @@
             [seon.test-support :as support])
   (:import [java.util.concurrent CountDownLatch]))
 
-(deftest ^{:seon.test/long "Publish two fixture files, record completions and serialize concurrent result recording with source publication."
+(deftest ^{:seon.test/fixture-observation
+           "A database branch cannot isolate evidence retained across a physical-store rebuild and a concurrent publication."
+           :seon.test/long "Publish two fixture files, record completions and serialize concurrent result recording with source publication."
            :seon.test/long-ms 10000}
   latest-test-evidence-survives-rebuilding-from-an-older-base
   (#'source-fixture/with-store

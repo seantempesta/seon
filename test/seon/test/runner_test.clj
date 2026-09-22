@@ -500,7 +500,9 @@
            (remove-ns namespace-name)
            (test-support/delete-recursively! root)))))
 
-(deftest the-canonical-platform-tier-preserves-file-local-uncertainty
+(deftest ^{:seon.test/fixture-observation
+           "A database branch cannot isolate the loaded Vars and whole analyzed manifest used to classify file-local destructive reach."}
+  the-canonical-platform-tier-preserves-file-local-uncertainty
   (test-support/with-database
     (fn [connection]
       (let [manifest @test-support/source-manifest
