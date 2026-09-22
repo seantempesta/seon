@@ -272,9 +272,24 @@ class, message, `ex-data`, the cause chain and the Seon frames. Returning nil, a
 message, a default value, or a diagnostic that drops the throwable is a defect — the
 2026-09-23 nuke refused as "Keyword cannot be cast to Number" with no frame because
 `boot.clj`'s request catch kept only `ex-message`.
-Agent mistakes are flat values. Core errors follow the configured panic/record policy;
-a failed graph is positively visible. Database failure is handled at the reachable
-REPL, never through another durable replay store.
+**The error policy (owner, 2026-09-23: "all the unhandled errors are loud panics so we
+can't ignore them in DEV mode … and they are stored as errors in the database so we can
+deliver them to root or whatever agent needs to see the errors in production"; "make sure
+the policy is clear").** Two kinds, nothing in between:
+- An **agent mistake** is a declared, flat `:seon.error` value returned to the agent that
+  made it. It is not a fault.
+- Every other failure is an **unhandled error (core fault)**. In BOTH modes it is
+  (1) stored as a declared error fact in the database, with its whole cause
+  (`:seon.error/chain`), committed at the owning boundary and never dropped by an overload
+  channel; and (2) delivered: the fact wakes the agent responsible for it (root by default,
+  or the namespace's owning agent) through the ordinary wake route.
+- The one dial `:seon.config/on-core-error` decides only how loud it is. `:panic`
+  (development; `default`) fails loudly: the operation throws to its caller, the failing
+  graph stops and shows as failed in status, the page and the REPL, and nothing continues
+  past it. The JVM and REPL stay up. `:record` (production) keeps the rest of the system
+  running once the fact is stored and delivered.
+- A swallowed error, a print-only panic, or a fault that is recorded but delivered to
+  nobody is a defect.
 
 Rendering is total for ordinary values. AI render functions and the value renderer
 alone apply presentation limits, once; save the exact shown text. HTML never clips.
