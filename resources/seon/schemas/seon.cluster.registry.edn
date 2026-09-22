@@ -27,27 +27,15 @@
                          [:seon.store/branch :seon.store/branch]],
                         :roster [:set :keyword],
                         :swept [:int {:min 0}],
-                        :retained-files [:int {:min 0}],
-                        :candidate-files [:int {:min 0}],
-                        :candidate-bytes [:int {:min 0}],
-                        :file-bytes [:int {:min 0}],
+                        :key-count [:int {:min 0}],
+                        :candidates [:set [:or :keyword :uuid :string]],
                         :mark-duration-ms [:int {:min 0}],
-                        :missing-candidate-files [:vector :string],
                         :inventory
                         [:map
-                         [:seon.cluster.registry/retained-files
-                          :seon.cluster.registry/retained-files]
-                         [:seon.cluster.registry/candidate-files
-                          :seon.cluster.registry/candidate-files]
-                         [:seon.cluster.registry/candidate-bytes
-                          :seon.cluster.registry/candidate-bytes]
-                         [:seon.cluster.registry/file-bytes
-                          :seon.cluster.registry/file-bytes]
-                         [:seon.cluster.registry/mark-duration-ms
-                          :seon.cluster.registry/mark-duration-ms]
-                         [:seon.cluster.registry/swept
-                          {:optional true}
-                          :seon.cluster.registry/swept]],
+                         [:seon.cluster.registry/key-count :seon.cluster.registry/key-count]
+                         [:seon.cluster.registry/candidates :seon.cluster.registry/candidates]
+                         [:seon.cluster.registry/mark-duration-ms :seon.cluster.registry/mark-duration-ms]
+                         [:seon.cluster.registry/swept :seon.cluster.registry/swept]],
                         :rule :keyword,
                         :cannot-retire-main :seon.cluster/name
                         :cannot-retire-main-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the main cluster that cannot be retired"} [:seon.cluster.registry/cannot-retire-main :seon.cluster.registry/cannot-retire-main] [:seon.error/message :seon.error/message]]

@@ -376,48 +376,24 @@
 (deftest dry-run-enumerates-candidates-without-deleting
   (with-source-store
     (fn [opened]
-      (registry/ensure-cluster! (cluster-request opened "dry-run-doomed"))
-      (let [doomed (registry/cluster-branch "dry-run-doomed")
-            connection (store/open-branch! opened doomed)]
-        (try
-          (doseq [batch (partition-all 100 (range 500))]
-            (test-support/transacted!
-                         connection
-                         {:tx-data
-                          (mapv (fn [n]
-                                  {:seon.registry.test/marker
-                                   (str "dry-run-" n " "
-                                        (apply str (repeat 200 \x)))})
-                                batch)}))
-          (finally
-            (d/release connection)))
-        (registry/retire-branch! {:seon.store/store opened
-                                  :seon.store/branch doomed})
-        (let [konserve (:store @(:seon.store/connection-object opened))
-              keys-before (into #{} (map :key)
-                                (k/keys konserve {:sync? true}))
+      (let [konserve (:store @(:seon.store/connection-object opened))
+            cutoff (java.util.Date. 0)
+            opts {:seon.operator.collect/dry-run? true}]
+        (registry/collect! opened cutoff {})
+        (is (empty? (:seon.cluster.registry/candidates
+                     (registry/collect! opened cutoff opts))))
+        (k/assoc konserve :seon.registry.test/orphan :present {:sync? true})
+        (let [before (set (map :key (k/keys konserve {:sync? true})))
               bytes-before (store-bytes (:seon.store/dir opened))
-              result (registry/collect!
-                      opened
-                      (java.util.Date.)
-                      {:seon.operator.collect/dry-run? true})
-              keys-after (into #{} (map :key)
-                               (k/keys konserve {:sync? true}))]
-          (is (= keys-before keys-after))
+              result (registry/collect! opened cutoff opts)]
+          (is (= #{:seon.registry.test/orphan}
+                 (:seon.cluster.registry/candidates result)))
+          (is (= (count before) (:seon.cluster.registry/key-count result)))
+          (is (zero? (:seon.cluster.registry/swept result)))
+          (is (= before (set (map :key (k/keys konserve {:sync? true})))))
           (is (= bytes-before (store-bytes (:seon.store/dir opened))))
-          (is (pos? (:seon.cluster.registry/candidate-files result)))
-          (is (pos? (:seon.cluster.registry/candidate-bytes result)))
-          (is (= (count keys-before)
-                 (+ (:seon.cluster.registry/retained-files result)
-                    (:seon.cluster.registry/candidate-files result))))
           (is (= (sort-by str (registry/roster opened))
-                 (mapv :seon.store/branch
-                       (:seon.cluster.registry/branches result))))
-          (is (every? uuid?
-                      (map :seon.source/commit-id
-                           (:seon.cluster.registry/branches result))))
-          (is (not (neg?
-                    (:seon.cluster.registry/mark-duration-ms result)))))))))
+                 (mapv :seon.store/branch (:seon.cluster.registry/branches result)))))))))
 
 (deftest retiring-one-cluster-reclaims-only-its-own-tail
   (with-source-store
@@ -450,19 +426,10 @@
               swept (:seon.cluster.registry/swept collected)]
           (is (pos? swept) "the doomed tail was reclaimed")
           (is (< (store-bytes dir) grown) "and the bytes actually shrank")
-          (testing "the real path answers the dry run's own inventory"
-            ;; The denominator the reclaimed bytes are measured against, taken
-            ;; from inside this same sweep rather than discarded.
-            (is (<= (:seon.cluster.registry/candidate-files collected) swept)
-                "every condemned file was one of the swept objects")
-            (is (pos? (:seon.cluster.registry/candidate-files collected)))
-            (is (pos? (:seon.cluster.registry/candidate-bytes collected)))
-            (is (pos? (:seon.cluster.registry/retained-files collected)))
-            (is (> (:seon.cluster.registry/file-bytes collected)
-                   (store-bytes dir))
-                "the inventory walked the directory BEFORE the delete")
-            (is (not (neg? (:seon.cluster.registry/mark-duration-ms
-                            collected))))))
+          (testing "the report names logical keys selected by the sweep"
+            (is (= swept (count (:seon.cluster.registry/candidates collected))))
+            (is (> (:seon.cluster.registry/key-count collected) swept))
+            (is (not (neg? (:seon.cluster.registry/mark-duration-ms collected))))))
         (testing "the survivor and the source branch are whole"
           (let [connection (store/open-branch!
                             opened (registry/cluster-branch "keep"))]
@@ -480,14 +447,10 @@
         (testing "collection is idempotent on a quiet store"
           (is (zero? (registry/collect! opened))))
         (testing "a sweep with no candidates still answers its inventory"
-          ;; No candidates means konserve issues NO batch, which is not an
-          ;; absent inventory: it is the directory with nothing condemned.
           (let [collected (registry/collect! opened (java.util.Date. 0) {})]
             (is (zero? (:seon.cluster.registry/swept collected)))
-            (is (zero? (:seon.cluster.registry/candidate-files collected)))
-            (is (zero? (:seon.cluster.registry/candidate-bytes collected)))
-            (is (pos? (:seon.cluster.registry/retained-files collected)))
-            (is (pos? (:seon.cluster.registry/file-bytes collected)))))
+            (is (empty? (:seon.cluster.registry/candidates collected)))
+            (is (pos? (:seon.cluster.registry/key-count collected)))))
         (testing "retiring an absent branch is already done, never an error"
           (is (nil? (registry/retire-branch! {:seon.store/store opened
                                               :seon.store/branch doomed}))))))))
