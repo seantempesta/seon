@@ -30,39 +30,48 @@ composition. Every function named below exists at the cited line unless marked
 One acquire, one evaluate, one release. The callers differ only in which commit they
 start from and what they do with the result.
 
-## 2. The functions — composed, refactored, new
+## 2. The functions — corrected by the [astra review](../../../research/agent-platform/one-lifecycle-astra-review-2026-09-22.md) (2026-09-22)
 
-| step | function | status | what changes |
-|---|---|---|---|
-| custody | `seon.db/call-with-custody` (`db.clj:370`) | **refactor** (P1) | the ONE binding scope; `seon.sci.eval/evaluate` (`eval.clj:2826`) calls it instead of open-coding the bindings; the runner already does (`runner.clj:687`) |
-| branch | `seon.cluster.registry/branch!` (`:178`) → `seon.cluster.store/open-branch!` (`:534`) | compose | off a captured commit (test, merge) or the cluster head (isolated agent); no new wrapper |
-| context | `seon.sci.eval/fork-cluster-ctx` (`eval.clj:2293`) | **refactor** (P2) | becomes the ONE production fork onto another connection (today only the fixture calls it); the fixture's base-lease wrapper deleted; environment derivation passed in |
-| acquisition | `install-row!` (`:894`), `acquire-program!` (`:1709`) | **refactor** (M1–M3, commit 1) | overridden = digest ≠ the JVM's loaded commit; affected = `seon.fn/gate-sets` (`fn.clj:1505`) over the overridden seed; both interpreted through `install-function-from-database!` (`:709`); `:jvm-fallback` (`:909`) → named refusal; host-bound (by `:seon.fn/defined-by`) refuses an override by name |
-| entrance | `seon.cluster.agent/acquire-context!` | **new** (commit 2) | the one composition: (parent handle, commit, request) → branch! → open-branch! → fork-cluster-ctx → acquisition; returns the handle D1 §2a already requires; used by isolated agents, tests, the gate and merge; NOT by live turns (they hold the cluster connection) |
-| mode | `:seon.agent/branch` | **new attribute** (commit 2) | the agent's custody target; live = the cluster branch; task start sets it; `my.*` branch/merge functions write it |
-| evaluate | `seon.sci.eval/evaluate` (`:2700`), `run-test` (`:3208`) → `test.runner/run-vars!` (`:656`) | compose | unchanged bodies; `bounded-result` (`test.clj:141`) already dispatches to `run-test` when a ctx is handed |
-| select | `seon.test/select` (`test.clj:840`), `seon.fn/gate-sets` | compose | the reaching set from the changed identities; unchanged |
-| request | `seon.test/run` (`test.clj:537`) | **refactor** (P4, commit 4) | `[execution-value recording-connection selection bound]`; internally `acquire-context!` + select + `run-test` + record; `run-owned`/`check*`/workers/slots deleted (B4 c2/c3) |
-| index | `seon.fn/index!` (`fn.clj:3305`) | compose | already takes any connection; the gate indexes the changed declarations of a saved file into the candidate branch |
-| publish | `seon.cluster.source/publish!` (`source.clj:354`) | **refactor** (M5, 1.2b) | destination branch a request member (today `current-branch` hard-coded, `:29`); the envelope (manifest, seal, snapshot) deleted |
-| reload | `seon.cluster/refresh-source!` reload span (`cluster.clj:1980-1984`, `reload-order` `:1925`, `development-namespaces` `:2006`) | **refactor** (M6, 1.2b) | the reload is its own request after a green gate, never implied by publication; `instrument/apply!` receives the changed identities (1.3) |
-| diff | `seon.program/definition-digest` (`program.cljc`), `source/changed-identities`, `test/changed-since-green` (`test.clj:61-99`) | **new** one pure function (merge pack §8) | `(three-way base a b) → {unchanged changed-a changed-b conflict added retracted}` over three `{identity → digest}` maps; everything else composes |
-| merge | `source/publish!`'s scratch-branch → reconcile → validate → `force-branch!` `:expected-current-commit` (`source.clj:461-479`) | compose | the same guarded advance, fed by the three-way result; Datahike `merge!` (`versioning.cljc:734`) records lineage |
-| accept | the cluster pointer advance | **new** one function | named accepter (root or owner) recorded in tx provenance; green is necessary, not sufficient |
-| release | `registry/retire-branch!` (`:327`) | compose | unlink; `collect!` (`:503`) reclaims under the declared window |
-| partition | `:seon.program/partition` on entity schemas | **new fact** (program pack §3) | `program-attributes` derived from the compiled registry; merge, GC and the gate read the same query |
-| host-bound | `:seon.fn/host-bound?` | **new fact** (host-bound pack §3) | indexer-derived: refused form head ∨ unresolvable host reference in the row's own body |
+The review's verdict: the owners are mostly right; the first draft's composition was not
+executable. Corrections taken in full: `seon.cluster.agent/acquire-context!` already
+EXISTS and is refactored, never re-created; `gate-sets` stays the test projection of a
+reverse walk that now also exposes the executable closure (one walk, one more member);
+`force-branch!` cannot advance an open live connection, so acceptance goes through the
+prepared database writer with a destination-basis guard; the save-time gate is NOT
+installed today (the hook adopts first, checks after, both switches off); the three-way
+comparison is the one genuinely missing piece. Contracts below are proposed, not installed.
 
-Nothing else. No runner engine, no candidate cluster, no second fixture, no cache.
+| # | owner / operation | smallest contract serving §1 |
+|---|---|---|
+| 1 | `program` / indexer schema facts | program ownership derived from declared shapes (`:seon.program/partition`); canonical digest and host-bound evidence produced in canonical analysis; other writers respected |
+| 2 | `registry/branch!`, `store/open-branch!` | allocate ONLY on an isolation request, from the exact retained commit, fresh owned name; otherwise borrow the held live/staging/intermediate connection |
+| 3 | existing `agent/acquire-context!` | **refactor**: consumes/produces D1's execution handle (store/branch ownership, connection, captured db/commit/projection, ctx/environment, owned resource scopes) while its live callers convert; no inherited graph start; task start selects custody |
+| 4 | `fork-cluster-ctx`, `fork-for-turn` | repoint receiving custody/environment once; retain the per-agent private ctx at later boundaries; never substitute a db value for a connection |
+| 5 | `sci.eval/acquire!` and the installers | acquire matching selected/loaded program identities; interpret the override/affected closure; re-arm changed contracts; refuse unsupported rows (commit 1) |
+| 6 | existing `fn` reverse walk | expose the full declared executable closure for acquisition; `gate-sets` remains its conservative test projection (commit 1) |
+| 7 | `db/call-with-custody`, evaluator/kernel | one explicit connection/read-basis scope and admitted bound for form and test invocation; actual completion/exit evidence returned |
+| 8 | `test/select` | execution program and recording evidence read separately; conservative obligations, per-member reuse, host classification, named missing coverage |
+| 9 | `test/run`, SCI test invocation, recorder | one request; member children from the captured commit; canonical fixture semantics; durable completion/tally; the exceptional platform host retained |
+| 10 | `fn/index!` + `source/publish!` preparation | target a held candidate; exact admitted inputs and prior db; canonical analysis/reconciliation before visibility; preparation reusable without an early live advance |
+| 11 | `program` three-way comparison | **new**: complete typed digest maps at base/branch/head → take/keep/conflict including absence; canonical readers; bounded retained-basis reads (the merge pack's ~130 ms `since` floor); the combined derived closure recomputed |
+| 12 | D1 accept over the prepared writer | named request + tested branch/head/run; atomically validate/install the program delta and settlement on the destination connection; the merge writer adapted for guarded lineage |
+| 13 | existing reload + operator/hook | shared evaluation boundary; exact tested bytes; ordered dependent reload/unmap/re-arm; a terminal red/degraded/accepted result reaches the caller |
+| 14 | existing lifecycle/store/registry | after actual exit and durable evidence: stop owned resources, release the owned connection, unlink when repair/retention no longer needs it; borrowed branches persist; GC separate |
+
+Guarantees named by the review, at their existing owners: one world per evaluation;
+fresh isolation and complete release; tested-head acceptance without lost data; save
+feedback before mutation; change-proportional work (a raw SCI fork is one env atom, not
+the cost of acquisition — measure closure, analysis, retained-history reads, heap and
+compile time separately).
 
 ## 3. Commits, mapped to the waves in README §4
 
-1. acquisition correctness (M1–M3, P1, host-bound by form head) — **running**
-2. `acquire-context!` + `:seon.agent/branch` + a branch member on the MCP eval tool; `fork-cluster-ctx` as the production fork (P2); `my.*` branch/merge requests
-3. publish to a branch, reload as its own request (1.2b, **running**); the hook as one prepl request (1.5)
-4. `seon.test/run` on the entrance (P3/P4/M8); B4 machinery deleted
-5. the two facts in the indexer (partition, host-bound body half)
-6. three-way diff + merge + accept; write-back as a separate spec (spans, not regeneration)
+1. acquisition correctness (rows 5, 6, 7) — **running**
+2. **acquisition only** (review option 1, taken 2026-09-22): live/isolated handle acquisition through the refactored `acquire-context!` (row 3), branch custody (row 2), `:seon.agent/branch`, a branch member on the MCP eval tool; working branches available; NO merge-facing `my.*` request yet — its proof is isolation and visibility, not merge
+3. publish to a held candidate, reload as its own request (1.2b, **running**); the hook as one prepl request returning the terminal result (1.5, row 13)
+4. `seon.test/run` on the handle (rows 8, 9); B4 machinery deleted only where platform hosting and actual-exit have replacements
+5. the two facts in the indexer (row 1)
+6. three-way comparison (row 11), accept over the prepared writer (row 12), `my.*` merge request, release (row 14); write-back as a separate spec
 
 ## 4. Proofs that decide it
 
