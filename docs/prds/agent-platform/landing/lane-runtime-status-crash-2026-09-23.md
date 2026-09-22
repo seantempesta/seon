@@ -70,3 +70,6 @@ clj-kondo on both files: 0 errors (26 pre-existing warnings in cluster.clj).
   bound; not measured or changed here.
 
 RESET NEEDED: no.
+
+Commit: 24c42427a (cluster.clj, mcp_test.clj, this note, three issue notes).
+HEAD load: the edited defn compiled in `seon.cluster` on default; a whole-namespace load of HEAD was not run separately.
