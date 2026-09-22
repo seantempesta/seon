@@ -62,3 +62,6 @@ the launching shell's; load is `uptime`'s one-minute average at start.
 | 2026-09-22 | `2bd568c08` worktree (committed publication-clock script cold start, before the no-from-zero ruling reached the lane) | from-zero | 165,327 | 185.13 | ~11 | [lane-reload-per-declaration](../../prds/agent-platform/landing/lane-reload-per-declaration-2026-09-23.md) |
 | 2026-09-22 | same root at `2bd568c08`, `start` | warm restart | 10,298 | — | ~11 | same |
 | 2026-09-22 | same root, `c1d2e6d7f` `git archive`, `start` | warm restart, **hung** | none: main BLOCKED at `seon.cluster.agent/arm!` (`agent.clj:876`) after 300 s; stopped | 301.96 | — | same |
+| 2026-09-23 | `bc8a1fa68` `git archive` (reference-code linked), `bin/seon --root <repo> reset --force` restoring `default` | nuke (from-zero) | 97,588 | 116.59 | — | [lane-nuke-is-total](../../prds/agent-platform/landing/lane-nuke-is-total-2026-09-23.md) |
+| 2026-09-23 | `f40378571` (HEAD `cd95c73f5` + hashed gitlink pins, not on a branch) via `seon.operator/nuke!` on a scratch root, broken uncommitted `boot.clj` hunk in the tree | nuke (from-zero) | 74,544 | 95.48 (source 3.6 s, launch 91.8 s) | — | same |
+| 2026-09-23 | `535ce45cf` via `bin/seon --root <scratch> nuke --force`: both attempts refused by the gitlink-pin digest defect | nuke, refused twice | — | 120.67 (attempts 58.9 s + 50.3 s) | — | same |
