@@ -406,3 +406,12 @@ fix the expectation or hand a wrapper defect to the error-schema lane by name.
   1.3c is A2's storage retention (c10 GC sweep, c12 keep-history key, the epoch-cutoff
   retention decision, `:db/noHistory` on churn attributes), then §6.2 → f1 → c2 for 1.4.
   README §4 row corrected. The 1.2 digest lane is launched (sol low).
+
+## 2026-09-22 11:40 — constructor follow-up landed; A2 retention launched; error-schema lane re-briefed
+
+- `constructor-slice` follow-up landed: `2add67c85` (four retired nested-operation assertions → flat), evidence `fd0fdb7bc`; env tests 5/73/0. Slot freed.
+- Opus review of 1.1 (`e20346415`): keep with fixes. F1/F2/F6/F9 dropped non-duplicate causes (dead `cause` params); F3 overloads `:seon.error/source`; F4 nests canonical members under `:seon.error/data` with an overwriting merge; F5 deleted the only coverage of fourteen surviving render functions. Ruled as an application of "errors are explicit named schemas" (README §7 new row): F3–F5 to the error-schema lane; F1/F2/F6–F14 to a constructor-repair lane after the rename commit lands.
+- `error-facets` stopped itself on the recorded-identity question; ruled option 2 (the one declared schema name in the signature; no migration). Resumed (astra medium) with: rename commit FIRST because its hunks share `seon.program.edn`/`program.cljc`/`seon.ns.edn`/`schema.clj` with the digest lane.
+- `definition-digest` stopped and resumed (sol low) with the shared-file rule: never commit a file carrying the other lane's hunks; wait for the rename commit.
+- Launched `a2-storage-retention` (astra medium): f4 dry-run sweep → c10 → declared retention cutoff (proposal to §7) → `:db/noHistory` on churn attributes (RESET) → f8/c12 → §6.2 comparator proof → f1 → c2. Goal: an adoption grows the store by its datoms; hook publication re-enabled when measured cheap.
+- Lesson: I resumed a lane with `&` and a redirect; stopped and relaunched bare (panel rule).
