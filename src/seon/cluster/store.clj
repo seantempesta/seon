@@ -158,9 +158,8 @@
   the settled default policy, and
   write-time schema flexibility. Fusion and index settings are
   creation-only; reopen configurations omit them so Datahike adopts the
-  stored values. `keep-history?` is also creation-fixed, but Datahike does
-  not auto-adopt it on reconnect, so the store owner reads the persisted
-  branch setting before connecting."
+  stored values, including `keep-history?`. Explicit reopen requests are
+  checked by Datahike against its stored record."
   {:malli/schema
    [:function
     [:=> [:cat :seon.store/dir] [:map]]
@@ -193,7 +192,7 @@
 (defn- open-configuration
   "A configuration that adopts the store's creation-time settings."
   [creation-configuration]
-  (dissoc creation-configuration :fuse-index-roots? :index-config))
+  (dissoc creation-configuration :keep-history? :fuse-index-roots? :commit-graph? :index-config))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle
@@ -365,13 +364,6 @@
   (let [konserve (filestore/connect-fs-store store-dir :opts {:sync? true})]
     (some? (k/get konserve :branches nil {:sync? true}))))
 
-(defn- stored-main-keep-history?
-  "The creation-fixed history setting persisted in the main branch record."
-  [store-dir]
-  (let [konserve (filestore/connect-fs-store store-dir :opts {:sync? true})
-        stored-db (k/get konserve :db nil {:sync? true})]
-    (get-in stored-db [:config :keep-history?])))
-
 (defn- complete-store?
   "True when `store-dir` holds a store whose `:branches` roster is written."
   [store-dir]
@@ -484,21 +476,8 @@
             complete? (and exists? (genesis-complete? dir))
             requested? (contains? request :seon.config.db/keep-history?)
             requested (:seon.config.db/keep-history? request)
-            stored (when complete? (stored-main-keep-history? dir))
-            _ (when (and complete? requested? (not= requested stored))
-                (refuse!
-                 ::keep-history-mismatch
-                 (str "the store at " dir
-                      " was created with :keep-history? " stored
-                      " and cannot reopen with " requested)
-                 {::dir dir
-                  ::requested-keep-history? requested
-                  ::stored-keep-history? stored}))
-            keep-history? (if complete?
-                            stored
-                            (if requested? requested true))
             creation-configuration
-            (datahike-configuration dir keep-history?)
+            (datahike-configuration dir (if requested? requested true))
             created? (cond
                        (not exists?)
                        (do (create-store! dir creation-configuration) true)
@@ -513,8 +492,8 @@
                        (do (create-store! dir creation-configuration) true))
             connection (d/connect (if created?
                                     creation-configuration
-                                    (open-configuration
-                                     creation-configuration)))]
+                                    (cond-> (open-configuration creation-configuration)
+                                      requested? (assoc :keep-history? requested))))]
         ; readiness is a COMPLETE connection over a COMPLETE store: the
         ; main branch must be readable before this value escapes
         (try

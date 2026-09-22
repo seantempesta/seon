@@ -231,15 +231,15 @@
                                 [:config :keep-history?])))
             (finally
               (store/release-store! reopened)))))
-      (testing "an explicit conflicting request refuses before connect"
+      (testing "an explicit conflicting request is refused by Datahike"
         (let [refusal
               (test-support/refusal-data
                #(store/open-store!
                  {:seon.store/dir dir
                   :seon.config.db/keep-history? true}))]
-          (is (= ::store/keep-history-mismatch (::store/rule refusal)))
-          (is (= false (::store/stored-keep-history? refusal)))
-          (is (= true (::store/requested-keep-history? refusal)))))
+          (is (= :create-time-fixed-index-config-mismatch (:type refusal)))
+          (is (= {:given true :stored false}
+                 (get-in refusal [:conflicts :keep-history?])))))
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 

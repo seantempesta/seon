@@ -112,3 +112,40 @@ both 1,000. Missing policy positively refused with
 :seon.config/rule :seon.config/required-absent}`. Probe process exited zero.
 The full adoption clock remains blocked at the foreign static-analysis boundary
 above, so no proportional-live-datoms publication claim is made.
+
+## f8 / c12
+
+Retention proposal landed `289c9b587`; CLI status afterward still observes
+the unchanged default JVM. Datahike f8 is
+`cc2b2bc7dbe774ea1bcc7487e8225a0d420d0e17`, pushed to personal `origin/main`.
+Simply extending `store-fixed-record-keys` failed for an omitted setting on a
+no-history store: `load-config` had already inserted true. Connect now preserves
+that omission; shared/opening connections validate explicit fixed-key requests
+against the acquired value and release their acquired reference on refusal.
+
+Focused fork task:
+`clojure -M:test -m kaocha.runner --focus datahike.test.storage-retention-test
+--skip clj-hht --skip specs --skip norm --skip integration --skip kabel`:
+2 tests, 22 assertions, zero failures/errors, persistent-set binding.
+Initial red (2 tests, 11 assertions, 1 error) exposed the normalization defect;
+the owner was corrected. Both true/false stores cover omitted, matching and
+conflicting requests, including a live shared connection.
+
+§6.3 proof **fails its waiting premise**: two holders are identical; after one
+release the other reads; once shutdown is held behind an explicit channel,
+connect returns `:connection-is-being-released`. Releasing the channel completes
+the drain within the 2,000 ms bound and reconnect reads successfully. Exact
+probe and regression are the committed fork test
+`test/datahike/test/storage_retention_test.clj`. Therefore Seon's
+`contains?` pre-check and one-owner contract remain. No wait/retry added.
+
+c12 removes `stored-main-keep-history?`, its second konserve open and the
+Seon mismatch decision. Reopen omits creation settings; an explicitly requested
+history setting is handed to Datahike, whose typed refusal retains `:conflicts`.
+The physical store flock and genesis-completion check remain unchanged.
+
+Seon scoped verification: `bin/test-fast --paths src/seon/cluster/store.clj
+test/seon/cluster/store_test.clj -- seon.cluster.store-test`, snapshot
+`tmp/test-runs/run.CCBrVO`, run `c6471a051c01`: 18 executed, zero reused,
+73 assertions, zero failures/errors. This includes the real file-store
+no-history reopen and explicit mismatch regression. All test processes exited.
