@@ -1,6 +1,6 @@
 ---
 type: evidence
-status: in-progress
+status: c5-and-f2-landed; c13-probed; scope-decisions-pending
 created: 2026-09-23
 tags: [agent-platform, a2, datahike]
 ---
@@ -251,3 +251,36 @@ checks and unions; (2) delete only the missing-query check using existing
 dependency-data, revising the requested cause representation; (3) coordinate
 an owned error-schema change first, preserving the requested cause semantics
 at broader scope and cost.
+
+## Landing boundary and cleanup
+
+- **f2:** fork `41c79c1a`, pushed; Seon pin `59e86fd8b`.
+- **c5:** `4fe00e120`; source −117, schema comments −19, tests −43 net.
+  A clean detached checkout of committed **`4fe00e120`**, linked only to the
+  pinned dependency checkout, ran
+  `clojure -M -e "(require 'seon.db 'seon.render 'seon.turn)"` and exited **0**.
+  Log: `tmp/a2-c5-head-load.log`. The armed scratch probe above is the changed
+  behavior proof; the namespace test run remains red/unrecorded.
+- **c13:** probe complete, **zero production lines deleted**. Seven classes
+  fail the typed-error prerequisite; the one typed candidate reaches the
+  unsettled cause representation. This is the explicit conditional outcome,
+  not an asserted 450-line saving. All three public error unions remain.
+- **c3/c4:** no Seon deletion; the explicit scope/contract decisions above
+  are still pending. No system-turn changed-read probe is claimed for c3.
+  Probe F on unchanged default returned `{:eid 6272 :pulled 29 :datoms 29}`
+  in 218 ms; this remains the totalized baseline, not c4 proof. f2's 1,001-row
+  test is the raw dependency completeness proof.
+
+The scratch operator reported exact pid/start identity 83640 /
+2026-09-22T19:46:52.450Z stopped with `:process-exit? true`. Its held shell
+then exited 0. Verified no scratch JVM holders before deleting
+`tmp/a2-db-root`; retained the runtime log outside it as
+`tmp/a2-c5-runtime.log`. The dependency symlink was unlinked before removing
+each owned detached checkout, so recursive cleanup could not follow it.
+All owned test and probe shell sessions have exited.
+
+Final original-root `bin/seon status` and MCP status: pid **51528** still
+alive, no missing readiness layers, same 14 errored receipts. No default
+publication/reload/stop/reset was performed. Final status evidence:
+`tmp/a2-final-default-status.edn`. Owner summary:
+`tmp/orchestrator/a2-db-deletions-summary.txt`.
