@@ -248,3 +248,27 @@
                 :seon.fn/changed-paths #{"src/schema/in_place.clj"}}
                (@#'seon.cluster/dropped-summary database dropped))
             "every dropped datom is counted and only the carrying file is re-derived")))))
+
+(deftest a-tightened-form-drops-only-the-values-it-refuses
+  ;; `[:string]` to `[:string {:min 3}]` changes no Datahike declaration, so
+  ;; the attribute is kept; the current values the new form refuses are the
+  ;; problematic data, and only they are dropped.
+  (with-population
+    (fn [connection]
+      (adopt! connection)
+      (support/transacted! connection [{:schema.in-place/id "a" :schema.in-place/history "h"}
+                                       {:schema.in-place/id "b" :schema.in-place/history "hello"}])
+      (let [tightened (schema/declaration-projection
+                       (assoc (merge (schema.edn/packaged-forms) fixture-forms)
+                              :schema.in-place/history [:string {:min 3}]))
+            database (db/db connection)
+            declarations (into {} (map (juxt :db/ident identity))
+                               (@#'seon.cluster/declared-attributes tightened))
+            tx-data (seon.cluster/attribute-change-tx
+                     database [:schema.in-place/history] declarations tightened)]
+        (is (= [[:db/retract (:db/id (db/pull database [:db/id] [:schema.in-place/id "a"]))
+                 :schema.in-place/history "h"]]
+               tx-data))
+        (schema/call-with-projection
+         tightened #(support/transacted! connection tx-data))
+        (is (= #{"hello"} (values connection :schema.in-place/history)))))))

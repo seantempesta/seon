@@ -1020,7 +1020,7 @@
           (sort (into #{} (concat (keys installed) (keys declaration)))))))
 
 (defn- attribute-retraction
-  "Transaction data removing one installed attribute and every datom of it.
+  "Transaction data removing one installed attribute and every current datom of it.
 
   Datahike refuses to retract an attribute that still carries current datoms
   (`reject-schema-removal-with-current-data`,
@@ -1028,22 +1028,22 @@
   only the current AEVT index), and applies the operations of one transaction
   in order, so the data goes first and the attribute entity last.
 
-  On a temporal store the data is PURGED per entity with
+  Ordinarily each current datom is retracted by its native `[e a v]`, and a
+  component value as an entity; history keeps what existed. `purge?` is true
+  only when the attribute is reinstalled with a DIFFERENT value type: a
+  retained history datom of the old type would be compared against the new
+  type's values in Datahike's temporal index and throw on the first write to
+  the same entity (`ClassCastException` in `datahike.datom/compare-value`), so
+  on a temporal store every entity the history names is purged with
   `:db.purge/attribute` (`reference-code/datahike/src/datahike/db/transaction.cljc:1095`),
-  which removes that attribute's current AND historical datoms and its
-  component values: a retained history datom of the old value type would
-  otherwise be compared against the new type's values in the temporal index
-  and throw on the first write to the same entity. Every entity the history
-  names is purged, not only those with a current datom. A store without
-  history retracts each current datom by its native `[e a v]`, and a component
-  value as an entity. Neither ever retracts the entity carrying the datom,
-  which would delete its other attributes. Work is one AEVT range read of this
-  attribute's datoms."
-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword]
+  current and historical datoms and component values. Neither ever retracts
+  the entity carrying the datom, which would delete its other attributes.
+  Work is one AEVT range read of this attribute's datoms."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :boolean]
                   :seon.store/transaction-data]}
-  [database attribute]
+  [database attribute purge?]
   (conj
-   (if (:keep-history? (:config database))
+   (if (and purge? (:keep-history? (:config database)))
      (into []
            (comp (map :e) (distinct) (map #(vector :db.purge/attribute % attribute)))
            (d/datoms (d/history database) :aevt attribute))
@@ -1137,58 +1137,131 @@
                 (declared-attributes projection))
           (retired-attributes database projection))))
 
+(def ^:private storage-type-properties
+  "The declaration properties that fix the stored value type."
+  [:db/valueType :db/tupleType :db/tupleTypes :db/tupleAttrs])
+
+(declare invalid-value-retraction)
+
+(defn attribute-change-tx
+  "Transaction data bringing each named installed attribute to its declaration IN PLACE.
+
+  THE one schema-change mechanism: the packaged population
+  (`declaration-changes`) and an agent's schema declaration
+  (`seon.turn/row-tx`) both call it. For each attribute, in the order given,
+  `declarations` holds its new Datahike declaration or no entry when it is
+  removed. `attribute-adoption` chooses the path:
+
+  - `:install` — the declaration is transacted;
+  - `:converged` — nothing;
+  - `:accrete` — a dropped always-updatable property is retracted from the
+    attribute entity, then the declaration is transacted; data kept;
+  - `:replace` — `attribute-retraction` drops the data and the attribute,
+    then the declaration is reinstalled after it in the same transaction;
+  - no declaration but installed — `attribute-retraction` drops it.
+
+  With `projection` (the declarations' new Malli world) every kept attribute
+  — converged or accreted — also drops the current values its new form
+  refuses (`invalid-value-retraction`), before its declaration. What must
+  survive is enforced by the one transaction owner: a surviving writer of a
+  removed attribute refuses the transaction by name
+  (`seon.db/removed-definition-error`, plan 1.3e), and an entity left
+  without a required value or ref refuses through final owning-value
+  validation."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value [:sequential :qualified-keyword]
+          [:map-of :qualified-keyword :map]]
+     :seon.store/transaction-data]
+    [:=> [:cat :seon.db/database-value [:sequential :qualified-keyword]
+          [:map-of :qualified-keyword :map] [:or :nil :seon.schema/projection]]
+     :seon.store/transaction-data]]}
+  ([database attributes declarations]
+   (attribute-change-tx database attributes declarations nil))
+  ([database attributes declarations projection]
+   (let [installed-schema (:schema database)
+         invalid (fn [attribute]
+                   (if projection
+                     (invalid-value-retraction database projection attribute)
+                     []))]
+     (into []
+           (mapcat
+            (fn [attribute]
+              (let [installed (get installed-schema attribute)
+                    declaration (get declarations attribute)]
+                (cond
+                  (and (nil? declaration) (nil? installed)) []
+                  (nil? declaration) (attribute-retraction database attribute false)
+                  :else
+                  (case (attribute-adoption installed declaration)
+                    :install [declaration]
+                    :converged (invalid attribute)
+                    ;; a dropped property is retracted; an upsert cannot drop it
+                    :accrete (-> (invalid attribute)
+                                 (into (comp
+                                        (remove #(contains? declaration %))
+                                        (map #(vector :db/retract attribute % (get installed %))))
+                                       (declaration-property-changes installed declaration))
+                                 (conj declaration))
+                    :replace (conj (attribute-retraction
+                                    database attribute
+                                    (not= (select-keys installed storage-type-properties)
+                                          (select-keys declaration storage-type-properties)))
+                                   declaration))))))
+           attributes))))
+
+(defn invalid-value-retraction
+  "Transaction data retracting the current values of `attribute` its new form refuses.
+
+  A form change that keeps the storage declaration (`[:int]` to `[:int {:min 1}]`)
+  changes no Datahike attribute, yet current data may no longer satisfy it.
+  Under the owner's schema-change ruling the problematic data is dropped:
+  every current value is read in its logical form (EDN-encoded attributes are
+  decoded against `projection`) and validated with the projection's own
+  validator; a cardinality-many attribute validates each entity's whole value
+  set. Refused values are retracted by their native `[e a v]`. Work is one
+  AEVT range read of the attribute."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :qualified-keyword]
+                  :seon.store/transaction-data]}
+  [database projection attribute]
+  (if-not (contains? (:schema database) attribute)
+    []
+    (let [valid? (schema/projection-validator projection attribute)
+          decode #(schema.datahike/decode-attribute-value-in projection attribute %)
+          many? (= :db.cardinality/many (get-in (:schema database) [attribute :db/cardinality]))
+          datoms (d/datoms database :aevt attribute)]
+      (if many?
+        (into []
+              (mapcat (fn [[_ entity-datoms]]
+                        (when-not (valid? (into #{} (map (comp decode :v)) entity-datoms))
+                          (map #(vector :db/retract (:e %) attribute (:v %)) entity-datoms))))
+              (group-by :e datoms))
+        (into []
+              (keep #(when-not (valid? (decode (:v %)))
+                       [:db/retract (:e %) attribute (:v %)]))
+              datoms)))))
+
 (defn- declaration-changes
-  "Transaction data adopting every declaration difference IN PLACE on this branch.
+  "Transaction data adopting every packaged declaration difference IN PLACE on this branch.
 
   Owner rulings 2026-09-23 (README §7 \"Schema change and reset\"): \"A schema
-  change should not require a from scratch boot. Period.\" One path per
-  attribute, chosen by `attribute-adoption`:
-
-  - `:install`: its declaration is transacted;
-  - `:converged`: nothing;
-  - `:accrete`: a dropped always-updatable property is retracted from the
-    attribute entity and the declaration is transacted, keeping the data —
-    which is how adding `:db/index` reaches Datahike's atomic AVET backfill;
-  - `:replace` (`:db/valueType`, `:db/tupleType`, a dropped `:db/unique`…): its
-    current datoms and its attribute entity are retracted
-    (`attribute-retraction`) and the new declaration is transacted after them
-    in the same transaction;
-  - retired (`retired-attributes`): its current datoms and attribute entity
-    are retracted.
-
-  The data behind a replaced or retired attribute is dropped by design;
-  `dropped-summary` counts it and names the source files that re-derive the
-  program rows among it. What must survive is enforced by the one transaction
-  owner, not here: a program row that still writes a retired attribute refuses
-  the transaction naming the writer (`seon.db/removed-definition-error`, plan
-  1.3e), and an entity left without a required value or ref refuses through
-  final owning-value validation. A converged reopen compares each installed
-  attribute map with its memoized declaration; the work of a change is
-  proportional to the changed attributes' datoms."
+  change should not require a from scratch boot. Period.\" Every declared
+  attribute, then every retired one (`retired-attributes`), goes through the
+  one mechanism, `attribute-change-tx`. The data behind a replaced or retired
+  attribute is dropped by design; `dropped-summary` counts it and names the
+  source files that re-derive the program rows among it. A converged reopen
+  compares each installed attribute map with its memoized declaration; the
+  work of a change is proportional to the changed attributes' datoms."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
                   :seon.store/transaction-data]}
   [database projection]
-  (let [installed-schema (:schema database)
-        changed
-        (into []
-              (mapcat
-               (fn [{attribute :db/ident :as declaration}]
-                 (let [installed (get installed-schema attribute)]
-                   (case (attribute-adoption installed declaration)
-                     :install [declaration]
-                     :converged []
-                     ;; a dropped property is retracted; an upsert cannot drop it
-                     :accrete (conj (into []
-                                          (comp
-                                           (remove #(contains? declaration %))
-                                           (map #(vector :db/retract attribute % (get installed %))))
-                                          (declaration-property-changes installed declaration))
-                                    declaration)
-                     :replace (conj (attribute-retraction database attribute) declaration)))))
-              (declared-attributes projection))]
-    (into changed
-          (mapcat #(attribute-retraction database %))
-          (retired-attributes database projection))))
+  (let [declarations (declared-attributes projection)]
+    (attribute-change-tx
+     database
+     (into (mapv :db/ident declarations) (retired-attributes database projection))
+     (schema/projection-cache-value
+      projection [::declarations-by-attribute]
+      #(into {} (map (juxt :db/ident identity)) declarations)))))
 
 (defn- dropped-summary
   "The current datoms a declaration change drops, and the files that re-derive them.
@@ -1624,7 +1697,17 @@
                 result (if (and result reapplied)
                          (update result :seon.reconcile/adopt-identities (fnil into #{})
                                  (:seon.reconcile/adopt-identities reapplied))
-                         (or result reapplied))]
+                         (or result reapplied))
+                dropped-datoms (:seon.db/datom-count dropped 0)
+                ;; The count rides the adoption result so the agent whose data
+                ;; was dropped can see it and reapply.
+                result (cond
+                         (zero? dropped-datoms) result
+                         (:seon.error/at result) result
+                         result (assoc result :seon.reconcile/dropped-datoms dropped-datoms)
+                         :else {:seon.reconcile/converged? false
+                                :seon.reconcile/operations 0
+                                :seon.reconcile/dropped-datoms dropped-datoms})]
           ;; Initialization rows come LAST because they may name a program row
           ;; by lookup ref — the call-preparation suppliers do — and program
           ;; rows are asserted by `index!` immediately above. Nothing earlier in

@@ -1,7 +1,11 @@
 #:seon.reconcile{:adopt-identities [:set [:tuple :qualified-keyword :seon.schema/value]],
+                 :retain-identities [:set {:description "Identities the reconciliation never manages, whatever process first wrote them: the caller derives them from facts (another cluster's required reference to them)."} [:tuple :qualified-keyword :seon.schema/value]],
                  :converged? :boolean,
                  :desired [:vector [:map]],
                  :operations [:int {:min 0}],
+                 :dropped-datoms
+                 [:int {:min 1
+                        :description "Current datoms a schema change dropped with the replaced or retired attributes that carried them; absent when nothing was dropped."}],
                  :process [:string {:min 1}],
                  :request
                  [:map
@@ -9,14 +13,19 @@
                   [:seon.reconcile/process :seon.reconcile/process]
                   [:seon.reconcile/adopt-identities
                    {:optional true}
-                   :seon.reconcile/adopt-identities]],
+                   :seon.reconcile/adopt-identities]
+                  [:seon.reconcile/retain-identities
+                   {:optional true}
+                   :seon.reconcile/retain-identities]],
                  :result
                  [:or
                   [:map
                    [:seon.reconcile/converged?
                     :seon.reconcile/converged?]
                    [:seon.reconcile/operations
-                    :seon.reconcile/operations]]
+                    :seon.reconcile/operations]
+                   [:seon.reconcile/dropped-datoms {:optional true}
+                    :seon.reconcile/dropped-datoms]]
                   :seon.error/value],
                  :rule :keyword,
                  :refused :seon.reconcile/rule

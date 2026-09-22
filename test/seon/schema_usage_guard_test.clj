@@ -237,36 +237,41 @@
             (is (some? (db/pull @connection [:db/id]
                                [:seon.schema/key base-key])))))))))
 
-(deftest nonidentical-change-refuses-direct-and-transitive-current-data
+(deftest nonidentical-change-drops-direct-and-transitive-current-data
+  ;; Owner ruling 2026-09-23 (README §7 "Schema change and reset"): a schema
+  ;; change adopts in place and drops the data behind it; the agent reapplies.
   (doseq [used-key [direct-key transitive-key]]
     (testing (str "current data at " used-key)
       (with-database
         (fn [connection]
           (install-forms! connection forms)
           (test-support/transacted! connection [{used-key 7}])
-          (let [before @connection
-                result
+          (let [result
                 (transact-result
                  connection
                  (row-tx
                   (schema-row base-key
                               [:string {:seon.db/index true}])))]
-            (is (= :seon.schema/current-data-blocks-change
-                   (get-in result [:error :seon.schema/error])))
-            (is (= [used-key]
-                   (get-in result [:error
-                                   :seon.schema/data-attributes])))
-            (is (= (:max-tx before) (:max-tx @connection))
-                "refusal aborts the complete transaction")
-            (is (= (pr-str (get forms base-key))
+            (is (nil? (:error result)) (pr-str (:error result)))
+            (is (= (pr-str [:string {:seon.db/index true}])
                    (:seon.schema/form
                     (db/pull @connection [:seon.schema/form]
                             [:seon.schema/key base-key]))))
-            (is (= 7
+            (is (= :db.type/string
+                   (get-in (:schema @connection) [used-key :db/valueType]))
+                "the dependent attribute is replaced with the new type")
+            (is (nil? (db/q '[:find ?value .
+                             :in $ ?attribute
+                             :where [_ ?attribute ?value]]
+                           @connection used-key))
+                "and the old-type data behind it is dropped")
+            (test-support/transacted! connection [{used-key "seven"}])
+            (is (= "seven"
                    (db/q '[:find ?value .
                           :in $ ?attribute
                           :where [_ ?attribute ?value]]
-                        @connection used-key)))))))))
+                        @connection used-key))
+                "so the agent can reapply it in the new type")))))))
 
 (deftest identical-registration-is-idempotent-with-current-data
   (with-database
@@ -325,11 +330,10 @@
 
 (deftest one-decision-path-answers-every-schema-form-change
   ;; The class: two rules claiming one decision. `c55879b73` added an
-  ;; unconditional immutability refusal ahead of the usage guard, so the
-  ;; guard's typed answer never reached the caller and a change the guard
-  ;; allows was refused anyway. There is now ONE decision path, and this
-  ;; regression walks all three of its answers against one run so the coarse
-  ;; rule cannot be reintroduced without failing here.
+  ;; unconditional immutability refusal ahead of the usage guard, so a change
+  ;; the guard allowed was refused anyway. There is ONE decision path: a form
+  ;; change adopts in place (dropping the data behind it), and only divergence
+  ;; from the run's opening basis refuses.
   (with-database
     (fn [connection]
       (let [run-id "schema-usage-guard-run"
@@ -347,34 +351,20 @@
         (test-support/transacted!
                      connection
                      (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
-        (testing "current data answers with the guard's typed refusal"
-          (let [refusal
-                (transact-result
-                 connection
-                 (row-tx request
-                         (schema-row base-key [:string {:seon.db/index true}])))]
-            (is (= :seon.schema/current-data-blocks-change
-                   (get-in refusal [:error :seon.schema/error]))
-                "the finer instrument's answer reaches the caller")
-            (is (= [base-key]
-                   (get-in refusal [:error :seon.schema/data-attributes]))
-                "and it names the attributes that blocked the change")))
-        (testing "retraction clears the block and the same change succeeds"
-          (let [entity (db/q '[:find ?entity .
-                               :in $ ?attribute
-                               :where [?entity ?attribute _]]
-                             @connection base-key)]
-            (test-support/transacted! connection [[:db/retract entity base-key]])
-            (is (nil? (:error
-                       (transact-result
-                        connection
-                        (row-tx request
-                                (schema-row base-key
-                                            [:string {:seon.db/index true}])))))))
+        (testing "current data is dropped and the change lands in place"
+          (is (nil? (:error
+                     (transact-result
+                      connection
+                      (row-tx request
+                              (schema-row base-key [:string {:seon.db/index true}]))))))
           (is (= (pr-str [:string {:seon.db/index true}])
                  (:seon.schema/form
                   (db/pull @connection [:seon.schema/form]
-                           [:seon.schema/key base-key])))))
+                           [:seon.schema/key base-key]))))
+          (is (nil? (db/q '[:find ?value .
+                            :in $ ?attribute
+                            :where [_ ?attribute ?value]]
+                          @connection base-key))))
         (testing "a form another writer changed since the run opened refuses"
           (test-support/transacted! connection
                                     [(schema-row unrelated-key
@@ -395,7 +385,7 @@
                     (db/pull @connection [:seon.schema/form]
                              [:seon.schema/key unrelated-key]))))))))))
 
-(deftest entity-child-data-blocks-entity-schema-change
+(deftest entity-schema-change-adopts-in-place-with-child-data
   (with-database
     (fn [connection]
       (let [entity-form
@@ -415,40 +405,24 @@
                      connection
                      [(schema-row unrelated-key [:string {:seon.db/index true}])])
         (test-support/transacted! connection [{entity-child-key 7}])
-        (let [before @connection
-              refusal
+        (let [result
               (transact-result
                connection
                (row-tx (schema-row entity-key replacement-form)))]
-          (is (= :seon.schema/current-data-blocks-change
-                 (get-in refusal [:error :seon.schema/error])))
-          (is (= [entity-child-key]
-                 (get-in refusal [:error :seon.schema/data-attributes])))
-          (is (= (:max-tx before) (:max-tx @connection)))
-          (is (= (pr-str entity-form)
+          (is (nil? (:error result)) (pr-str (:error result)))
+          (is (= (pr-str replacement-form)
                  (:seon.schema/form
                   (db/pull @connection [:seon.schema/form]
-                          [:seon.schema/key entity-key])))))
-        (let [entity
-              (db/q '[:find ?entity .
-                     :in $ ?attribute
-                     :where [?entity ?attribute _]]
-                   @connection entity-child-key)]
-          (test-support/transacted! connection [[:db/retract entity entity-child-key]])
-          (let [result
-                (transact-result
-                 connection
-                 (row-tx
-                  (schema-row entity-key replacement-form)))]
-            (is (nil? (:error result)))
-            (is (= (pr-str replacement-form)
-                   (:seon.schema/form
-                    (db/pull @connection [:seon.schema/form]
-                            [:seon.schema/key entity-key]))))
-            (is (contains? (:schema @connection) entity-child-key))
-            (is (contains? (:schema @connection) entity-id-key))
-            (is (not (contains? (:schema @connection) unrelated-key))
-                "entity replacement leaves unrelated attributes absent")))))))
+                          [:seon.schema/key entity-key]))))
+          (is (= 7 (db/q '[:find ?value .
+                           :in $ ?attribute
+                           :where [_ ?attribute ?value]]
+                         @connection entity-child-key))
+              "a value the new form still admits is kept")
+          (is (contains? (:schema @connection) entity-child-key))
+          (is (contains? (:schema @connection) entity-id-key))
+          (is (not (contains? (:schema @connection) unrelated-key))
+              "entity replacement leaves unrelated attributes absent"))))))
 
 (deftest entity-lifecycle-preserves-surviving-global-leaf-attributes
   (with-database

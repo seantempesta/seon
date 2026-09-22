@@ -988,41 +988,27 @@
 
 (defn- affected-schema-attributes
   "Database attributes derived by the affected schema forms."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:set :keyword]]
+                  [:set :qualified-keyword]]}
   [projection affected]
   (set
    (schema.datahike/database-attributes-core-in
     (update projection :seon.schema.projection/forms select-keys affected))))
 
-(defn- current-schema-data-attributes
-  "Installed affected database attributes carrying current datoms in `db`."
-  [db projection schema-keys]
-  (let [affected
-        (schema/dependent-schema-keys projection schema-keys)]
-    (into []
-          (comp
-           (filter #(contains? (:schema db) %))
-           (filter #(seq (db/datoms db :aevt %))))
-          (sort (affected-schema-attributes projection affected)))))
-
-(defn- assert-schema-data-unused!
-  "Refuse schema change while affected attributes carry current data."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
-                       [:seqable :qualified-keyword]] :nil]}
-  [db projection schema-keys]
-  (let [attributes
-        (current-schema-data-attributes db projection schema-keys)]
-    (when (seq attributes)
-      (throw
-       (ex-info
-        (str "Schema change refused: current data uses " attributes ".")
-    {:seon.schema/error :seon.schema/current-data-blocks-change
-     :seon.schema/current-data-blocks-change true
-     :seon.schema/keys schema-keys
-         :seon.schema/data-attributes attributes})))))
-
 (defn- schema-attribute-change-tx
-  "Deterministic Datahike diff between complete schema projections."
-  [db current-projection candidate-projection]
+  "Transaction data adopting an agent's schema change IN PLACE.
+
+  The candidate projection's declarations are compared with the current
+  ones, and every attribute whose storage declaration changed or whose form
+  (directly or through a dependent schema) changed goes through THE one
+  mechanism, `seon.cluster/attribute-change-tx`: the data behind a replaced
+  or removed attribute is dropped, and a kept attribute drops the current
+  values its new form refuses. `seon.cluster` requires this namespace, so the
+  mechanism is resolved at the call."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
+                       [:or :nil :seon.schema/projection] [:set :keyword]]
+                  :seon.store/transaction-data]}
+  [db current-projection candidate-projection schema-keys]
   (let [declarations-in
         (fn [projection]
           (if projection
@@ -1034,23 +1020,23 @@
             {}))
         current-declarations (declarations-in current-projection)
         candidate-declarations (declarations-in candidate-projection)
-        changed-attributes
+        changed
         (into #{}
               (filter #(not= (get current-declarations %)
                              (get candidate-declarations %)))
               (into (set (keys current-declarations))
                     (keys candidate-declarations)))
-        retracted
-        (into []
-              (comp
-               (filter #(contains? current-declarations %))
-               (filter #(contains? (:schema db) %))
-               (map (fn [attribute]
-                      [:db.fn/retractEntity attribute])))
-              (sort changed-attributes))]
-    (into retracted
-          (keep candidate-declarations)
-          (sort changed-attributes))))
+        affected
+        (into #{}
+              (filter #(contains? candidate-declarations %))
+              (affected-schema-attributes
+               current-projection
+               (schema/dependent-schema-keys current-projection schema-keys)))]
+    ((requiring-resolve 'seon.cluster/attribute-change-tx)
+     db
+     (sort (into changed affected))
+     candidate-declarations
+     candidate-projection)))
 
 (defn- cardinality-many?
   [db attribute]
@@ -1218,13 +1204,10 @@
           (reduce schema/projection-without-schema
                   current-projection
                   (sort schema-keys))
-          _ (when (seq schema-keys)
-              (assert-schema-data-unused!
-               db current-projection schema-keys))
           schema-tx
           (if (seq schema-keys)
             (schema-attribute-change-tx
-             db current-projection candidate-projection)
+             db current-projection candidate-projection schema-keys)
             [])
           declarations
           (into []
@@ -1265,8 +1248,8 @@
             ;; concurrency question — did the installed row diverge from the
             ;; basis this run opened on — is measured identically for every
             ;; declaration family. What differs is only what a legal change
-            ;; then costs, and for a schema key that cost is answered by the
-            ;; usage guard, which names the attributes current data blocks on.
+            ;; then costs, and for a schema key that cost is the data the
+            ;; in-place change drops (`schema-attribute-change-tx`).
             concurrent-declaration?
             (and (#{:seon.fn/sym :seon.schema/key} identity)
                  existing
@@ -1277,9 +1260,6 @@
             _ (when concurrent-declaration?
                 (refuse! `receipt-settle-call
                          ::program-row-changed-after-open request))
-            _ (when schema-redefinition?
-                (assert-schema-data-unused!
-                 db current-projection #{identity-value}))
             candidate-projection
             (case identity
               :seon.schema/key
@@ -1300,7 +1280,7 @@
             (if (= identity :seon.schema/key)
               (if schema-redefinition?
                 (schema-attribute-change-tx
-                 db current-projection candidate-projection)
+                 db current-projection candidate-projection #{identity-value})
                 (let [current-attributes
                       (schema.datahike/database-attributes-in
                        current-projection)

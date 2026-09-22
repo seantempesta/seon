@@ -178,7 +178,7 @@
         (is (empty? (committed-fault-ids @connection))
             "and the refused call committed nothing")))))
 
-(deftest a-dropped-storage-property-refuses-reopening-the-branch-in-place
+(deftest a-dropped-storage-property-replaces-the-attribute-in-place
   ;; The canonical population is the installed declaration set, so the
   ;; converged case asserts what production reopening does: no declaration
   ;; change at all. Dropping a property the branch still carries is the class
@@ -186,36 +186,36 @@
   ;; read that absence as health and kept the stale uniqueness installed
   ;; (2026-09-16 blocker: every publication then refused with "multiple
   ;; entity identities" instead of naming the incompatible declaration).
+  ;; Since 2026-09-23 the difference adopts in place: the attribute is
+  ;; retracted with its current data and the declaration reinstalled.
   (test-support/with-database
     (fn [connection]
       (let [database @connection
             forms (schema.edn/packaged-forms)
             changes (ns-resolve 'seon.cluster 'declaration-changes)
             attribute :seon.test/reach-digest
-            installed (get (:schema database) attribute)]
+            installed (get (:schema database) attribute)
+            declaration (dissoc installed :db/id)]
         (is (some? installed)
             "the canonical population installs the subject attribute")
         (is (not (contains? installed :db/unique))
             "which the bridge derives WITHOUT uniqueness")
         (is (= [] (schema/call-with-forms
                    forms
-                   #(changes database (schema/handed-projection) "converged-fixture")))
+                   #(changes database (schema/handed-projection))))
             "a converged branch reopens with no declaration change")
         (let [stale (assoc-in database [:schema attribute :db/unique]
                               :db.unique/identity)
-              refusal (test-support/refusal-data
-                       #(schema/call-with-forms
-                         forms
-                         (fn [] (changes stale (schema/handed-projection) "stale-fixture"))))]
-          (is (true? (:seon.boot/refused refusal))
-              "a property the current declaration no longer carries refuses")
-          (is (= attribute (:seon.boot/attribute (:seon.boot/offense refusal))))
-          (is (= :db.unique/identity
-                 (:db/unique (:seon.boot/installed (:seon.boot/offense refusal))))
-              "and the refusal carries the installed property as evidence")
-          (is (str/includes? (:seon.error/message refusal)
-                             "bin/seon init stale-fixture --force")
-              "naming the refork that resolves it"))))))
+              tx-data (schema/call-with-forms
+                       forms
+                       (fn [] (changes stale (schema/handed-projection))))]
+          (is (= [:db/retractEntity attribute] (last (butlast tx-data)))
+              "a property the current declaration no longer carries retracts the attribute")
+          (is (= declaration (last tx-data))
+              "and reinstalls the current declaration after it")
+          (is (every? #(= [:db/retract attribute] [(first %) (nth % 2)])
+                      (drop-last 2 tx-data))
+              "every datom of it is retracted by its own [e a v], never its entity"))))))
 
 (def ^:private indexable-marker ::indexable)
 (def ^:private indexable-row-id ::indexable-row-id)
@@ -245,9 +245,11 @@
         (is (true? (:db/index installed))
             "the canonical population declares the subject attribute indexed")
         (let [older (update-in @connection [:schema attribute] dissoc :db/index)
-              declarations (schema/call-with-forms
-                            forms
-                            #(changes older (schema/handed-projection) "older-fixture"))]
+              declarations (filterv
+                            map?
+                            (schema/call-with-forms
+                             forms
+                             #(changes older (schema/handed-projection))))]
           (is (= [attribute] (mapv :db/ident declarations))
               "a branch forked before the index addition adopts exactly that
                declaration in place instead of refusing to reopen")
@@ -285,10 +287,13 @@
                                 @connection)))
               "so the AVET index answers a value-bound query afterwards"))))))
 
-(deftest an-incompatible-declaration-refuses-naming-the-changed-property
-  ;; "predates the incompatible schema change" named neither the property nor
-  ;; its values, so a reader could not tell an accretive index addition from a
-  ;; genuine value-type change.
+(deftest a-value-type-change-replaces-the-attribute-in-place
+  ;; Owner ruling 2026-09-23: "A schema change should not require a from
+  ;; scratch boot. Period." Datahike refuses an in-place `:db/valueType`
+  ;; update, and refuses retracting an attribute that still carries current
+  ;; datoms (`reference-code/datahike/src/datahike/db/transaction.cljc:137`),
+  ;; so the change is expressed as data retraction, attribute retraction and
+  ;; reinstallation in that order.
   (test-support/with-database
     (fn [connection]
       (let [database @connection
@@ -298,26 +303,14 @@
             declared (:db/valueType (get (:schema database) attribute))
             stale (assoc-in database [:schema attribute :db/valueType]
                             :db.type/long)
-            refusal (test-support/refusal-data
-                     #(schema/call-with-forms
-                       forms
-                       (fn [] (changes stale (schema/handed-projection) "stale-fixture"))))
-            offense (:seon.boot/offense refusal)]
+            tx-data (schema/call-with-forms
+                     forms
+                     (fn [] (changes stale (schema/handed-projection))))]
         (is (= :db.type/string declared)
             "the bridge derives the subject attribute as a string")
-        (is (true? (:seon.boot/refused refusal))
-            "a value-type change still refuses to reopen the branch")
-        (is (= :db/valueType (:seon.boot/property offense))
-            "naming the property Datahike will not apply")
-        (is (= [:db.type/long declared]
-               [(:seon.boot/installed-value offense)
-                (:seon.boot/declared-value offense)])
-            "and carrying both of its values as evidence")
-        (is (str/includes? (:seon.error/message refusal)
-                           ":db/valueType from :db.type/long to :db.type/string")
-            "the message states the change rather than `predates`")
-        (is (not (str/includes? (:seon.error/message refusal) "predates"))
-            "so the reader is never told a whole-map inequality")))))
+        (is (= [:db/retractEntity attribute] (last (butlast tx-data))))
+        (is (= declared (:db/valueType (last tx-data)))
+            "the reinstalled declaration carries the declared type")))))
 
 (deftest development-reload-refuses-an-unsatisfiable-order
   (is (= '[sample.leaf sample.caller]
