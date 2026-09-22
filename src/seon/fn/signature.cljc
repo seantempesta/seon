@@ -60,9 +60,11 @@
              (last declarations)))))
 
 (defn- declaration-parts
+  {:malli/schema [:=> [:cat :seon.schema/value] :map]}
   [form]
   (when-not (and (seq? form)
-                 (core-defn? (first form))
+                 (or (core-defn? (first form))
+                     (contains? #{'defmulti 'clojure.core/defmulti} (first form)))
                  (symbol? (second form)))
     (refused! :unsupported-declaration
               {:seon.fn.signature/form (pr-str form)}))
@@ -70,6 +72,16 @@
         after-doc (if (string? (first after-name)) (next after-name) after-name)
         attributes (if (map? (first after-doc)) (first after-doc) {})
         declarations (if (map? (first after-doc)) (next after-doc) after-doc)
+        declarations
+        (if (contains? #{'defmulti 'clojure.core/defmulti} (first form))
+          (let [dispatch (first declarations)]
+            (when-not (and (seq? dispatch)
+                           (contains? #{'fn 'clojure.core/fn} (first dispatch)))
+              (refused! :unsupported-declaration
+                        {:seon.fn.signature/form (pr-str form)}))
+            (let [tail (rest dispatch)]
+              (if (symbol? (first tail)) (next tail) tail)))
+          declarations)
         arglists
         (cond
           (vector? (first declarations)) [(first declarations)]

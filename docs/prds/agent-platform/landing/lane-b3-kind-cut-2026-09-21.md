@@ -546,3 +546,60 @@ Search correction `9c4610ec-6381-4a32-a449-978f5aa58fbf`:
 05:17:40.631815–05:17:54.267877Z, **13.636062 s**, SOURCE_BATCH,
 adopted `6ab20f7b-f403-590d-ab76-3a98251dc5bb`. Both exceed ten seconds;
 the hook exposes the batch phase, not an internal phase breakdown.
+
+## Note, filesystem, editing and rendered values group
+
+The note owner's private general error predicate and every caller are removed.
+Filesystem and edit constructors drop the retired key and supply the required
+base fields. Print diagnostics retain their text/evidence without the stamp.
+Run disposition and absent-issue values carry the base contract.
+
+| Owner / retained decision | Declared member | Why the branch remains |
+| --- | --- | --- |
+| `note/render-notes-html`, `add-note!` pull, `notes` | `db/invalid-read`, `schema/expected-value` | Render or normalize successful note rows. |
+| `note/add-note!`, `forget!` writer | `db.write.attempt/request-id`, `db/invalid-read`, `schema/expected-value` | Read the accepted transaction's before/after database. |
+| `fs.jvm/error-value` | Filesystem members `path-refused`, `not-found`, `not-directory`, `read-limit`, `read-failed`, `not-regular-file`, `changed-during-read`, `invalid-utf8-window`, `write-limit`, `write-failed`, `blob-unavailable`, `already-exists`, `stale-digest`, `atomic-write-unsupported`, `glob-failed`, `invalid-glob` | Preserve a filesystem refusal caught by its owner; otherwise construct the operation's fallback refusal. |
+| `edit.jvm/filesystem-refusal` | Same filesystem members except glob-only members | Preserve the actual filesystem refusal; retain the existing throw boundary for unrelated host faults. |
+| `edit.jvm/edit-error` | `my.fs/stale-digest`, `my.fs/invalid-utf8-window` | Translate the two filesystem observations into the edit operation's corresponding refusal. |
+| `edit.jvm/edit*`, read | `my.fs/path-refused`, `not-found`, `read-limit`, `read-failed`, `not-regular-file`, `changed-during-read`, `invalid-utf8-window` | Only transform complete readable source. |
+| `edit.jvm/edit*`, transform | `my.edit/parse-byte-count`, `unverified-char-span`, `no-match`, `ambiguous-match` | Only write a verified edit candidate. |
+| `edit.jvm/edit*`, write | Read members except UTF-8, plus `my.fs/write-limit`, `write-failed`, `blob-unavailable`, `already-exists`, `stale-digest`, `atomic-write-unsupported` | Construct the edit result only after the fenced write succeeds. |
+| `issue.detect/public-without-reaching-test`, input reads and gate sets | `db/invalid-read`, `schema/expected-value` | Derive missing-test subjects only from successful declaration and dependency observations. |
+
+Note output contracts accrete `db/error-result`. Private helpers now have complete
+contracts. Filesystem marker subjects and diagnostic evidence are intentionally
+polymorphic data; the owning members constrain the resulting failure schemas.
+Print `emit` has its five-argument contract; sink operations can return arbitrary
+sink values. The existing source-signature parser now reads inline `defmulti`
+dispatch function arities, including named `fn`, so publication can join that
+contract. Clojure 1.12.5 `core.clj:1739–1805` supplies the dispatch function to
+MultiFn; no second signature parser was added. The regression asserts the five
+bindings for both qualified and unqualified declaration forms.
+
+Focused initial run `cafdc4b70941` selected these ten changed paths and
+`my.note-test seon.fs-test seon.fs.jvm-test seon.edit.jvm-test seon.print-test
+seon.fn.publication-signature-test my.turn-test seon.issue.detect-test
+seon.issue-test`: **62 tests, 425 assertions, 56 failures, 24 errors**, recorded,
+exit 1 (`tmp/b3-values.log`). The new layer fields initially used unqualified
+keywords, violating `error/layer`; corrected before commit. Other evidence:
+note fixtures omit required message members; issue fixtures store symbols as
+strings or use symbols where issue ids require strings. Retired-kind assertions
+are still present until Slice C. Print and both signature regressions passed.
+
+Publication `0f37a62e-0350-416b-a719-e330ade5c83f` took **29.028834 s**;
+`fb0c4ba6-6268-4d29-b598-7e683bc1f4d3` took **14.620119 s**;
+`9f86cf95-d7f7-4de8-8cc3-7d248df79007` took **26.916352 s**.
+All converged and all exceeded ten seconds in SOURCE_BATCH. Latest of these
+adopted `6ab210b9-59bb-5a4c-bb24-6e373ee96cee`.
+
+Correction run `aae70663847f`: 25 tests, 184 assertions, 21 failures, 20 errors
+(`tmp/b3-values-correction.log`). It exposed the new generic factory contracts'
+missing base-error admission; their output is now `error/base`, and the
+stale-source constructor names `my.edit/stale-source-error`. This is the existing
+polymorphic diagnostic-constructor boundary, not a general error discriminator.
+Final focused rerun of `seon.fs.jvm-test seon.edit.jvm-test my.turn-test`, with
+the three respective source paths: run `6dfa3bbb4eb4`, **20 tests, 162 assertions,
+18 failures, zero errors**, recorded, exit 1 (`tmp/b3-values-final.log`). The
+remaining assertions still expect retired kind values; Slice C converts them.
+Publication `5991b53b-b0ab-4268-85de-25194af175b6` converged at
+`6ab2113a-2ef7-50f2-b1a0-4bdb0650f0c1`.

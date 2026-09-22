@@ -33,9 +33,12 @@
   (Object.))
 
 (defn- flat-error
+  {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value :string :map] :seon.error/base]}
   [marker subject message data]
   {marker subject
-   :seon.error/kind marker
+   :seon.error/at (java.util.Date.)
+   :seon.error/layer :my.fs/read
+   :seon.error/operation 'seon.fs.jvm/flat-error
    :seon.error/message message
    :seon.error/data data})
 
@@ -46,10 +49,26 @@
             (flat-error marker subject message data))))
 
 (defn- error-value
+  {:malli/schema [:=> [:cat :seon.error/throwable :qualified-keyword :seon.schema/value :string :map] :seon.error/base]}
   [error fallback-marker fallback-subject fallback-message data]
   (let [classified (ex-data error)]
-    (if (and (keyword? (:seon.error/kind classified))
-             (string? (:seon.error/message classified)))
+    (if (or
+         (:my.fs/path-refused classified)
+         (:my.fs/not-found classified)
+         (:my.fs/not-directory classified)
+         (:my.fs/read-limit classified)
+         (:my.fs/read-failed classified)
+         (:my.fs/not-regular-file classified)
+         (:my.fs/changed-during-read classified)
+         (:my.fs/invalid-utf8-window classified)
+         (:my.fs/write-limit classified)
+         (:my.fs/write-failed classified)
+         (:my.fs/blob-unavailable classified)
+         (:my.fs/already-exists classified)
+         (:my.fs/stale-digest classified)
+         (:my.fs/atomic-write-unsupported classified)
+         (:my.fs/glob-failed classified)
+         (:my.fs/invalid-glob classified))
       classified
       (flat-error fallback-marker fallback-subject fallback-message data))))
 

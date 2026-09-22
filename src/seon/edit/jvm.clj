@@ -5,13 +5,19 @@
             [seon.fs.jvm :as fs.jvm]))
 
 (defn- flat-error
+  {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value :string :map]
+                  :seon.error/base]}
   [marker subject message data]
   {marker subject
-   :seon.error/kind marker
+   :seon.error/at (java.util.Date.)
+   :seon.error/layer :my.edit/edit
+   :seon.error/operation 'seon.edit.jvm/flat-error
    :seon.error/message message
    :seon.error/data data})
 
 (defn- stale-source
+  {:malli/schema [:=> [:cat :seon.edit/request :my.fs/digest]
+                  :my.edit/stale-source-error]}
   [request actual-digest]
   (flat-error :my.edit/stale-source (:my.edit/path request)
               "The source file no longer has the expected digest."
@@ -20,19 +26,26 @@
                :my.fs/digest actual-digest}))
 
 (defn- edit-error
+  {:malli/schema [:=> [:cat :seon.error/base
+                       :seon.edit/request [:or :nil :my.fs/digest]]
+                  :seon.error/base]}
   [result request actual-digest]
-  (case (:seon.error/kind result)
-    :my.fs/stale-digest (stale-source request
+  (cond
+    (:my.fs/stale-digest result) (stale-source request
                                      (get-in result
                                              [:seon.error/data :my.fs/digest]))
-    :my.fs/invalid-utf8-window
+    (:my.fs/invalid-utf8-window result)
     (flat-error :my.edit/not-utf8 (:my.edit/path request)
                 "Structural source editing requires strict UTF-8."
                 {:my.edit/path (:my.edit/path request)
                  :my.fs/digest actual-digest})
-    result))
+    :else result))
 
 (defn- transform
+  {:malli/schema [:=> [:cat :string :seon.edit/request [:int {:min 1}]]
+                  [:or :seon.edit/candidate :my.edit/parse-refused-error
+                   :my.edit/lossless-check-failed-error :my.edit/no-match-error
+                   :my.edit/ambiguous-match-error]]}
   [source request context-byte-limit]
   (cond
     (contains? request :my.edit/form)
@@ -45,7 +58,7 @@
     (edit/lines source request context-byte-limit)
 
     :else
-    (flat-error :my.edit/parse-refused true
+    (flat-error :my.edit/parse-byte-count (alength (.getBytes source "UTF-8"))
                 "The edit request does not declare one operation shape."
                 {})))
 
@@ -85,20 +98,32 @@
   agent as `:seon.effect/handler-failed`, whose whole evidence is the owner
   symbol. Anything that is NOT a classified refusal is a genuine fault and
   is rethrown to the effect boundary unchanged."
+  {:malli/schema [:=> [:cat :seon.error/throwable]
+                  :seon.error/base]}
   [throwable]
   (let [classified (ex-data throwable)]
-    (if (and (keyword? (:seon.error/kind classified))
-             (string? (:seon.error/message classified)))
+    (if (or (:my.fs/path-refused classified) (:my.fs/not-found classified)
+            (:my.fs/not-directory classified) (:my.fs/read-limit classified)
+            (:my.fs/read-failed classified) (:my.fs/not-regular-file classified)
+            (:my.fs/changed-during-read classified) (:my.fs/invalid-utf8-window classified)
+            (:my.fs/write-limit classified) (:my.fs/write-failed classified)
+            (:my.fs/blob-unavailable classified) (:my.fs/already-exists classified)
+            (:my.fs/stale-digest classified) (:my.fs/atomic-write-unsupported classified))
       classified
       (throw throwable))))
 
 (defn- edit*
+  {:malli/schema [:=> [:cat :seon.edit/request :seon.config/effective]
+                  [:or :my.edit/result :seon.error/base]]}
   [request effective]
   (let [path (:my.edit/path request)
         before (#'fs.jvm/read-complete
                 {:my.fs/path path :my.fs/encoding :utf-8}
                 effective)]
-    (if (:seon.error/kind before)
+    (if (or (:my.fs/path-refused before) (:my.fs/not-found before)
+            (:my.fs/read-limit before) (:my.fs/read-failed before)
+            (:my.fs/not-regular-file before) (:my.fs/changed-during-read before)
+            (:my.fs/invalid-utf8-window before))
       (edit-error before request (:my.fs/digest before))
       (let [actual-digest (:my.fs/digest before)]
         (if (not= (:my.edit/expected-digest request) actual-digest)
@@ -106,7 +131,9 @@
           (let [transformed
                 (transform (:my.fs/text before) request
                            (:seon.config.fs/max-inline-bytes effective))]
-            (if (:seon.error/kind transformed)
+            (if (or (:my.edit/parse-byte-count transformed)
+                    (:my.edit/unverified-char-span transformed)
+                    (:my.edit/no-match transformed) (:my.edit/ambiguous-match transformed))
               (update transformed :seon.error/data
                       #(assoc (or % {}) :my.fs/digest actual-digest))
               (let [written
@@ -117,7 +144,12 @@
                       :my.fs/precondition
                       {:my.fs/expected-digest actual-digest}}
                      effective)]
-                (if (:seon.error/kind written)
+                (if (or (:my.fs/path-refused written) (:my.fs/not-found written)
+                        (:my.fs/read-limit written) (:my.fs/read-failed written)
+                        (:my.fs/not-regular-file written) (:my.fs/changed-during-read written)
+                        (:my.fs/write-limit written) (:my.fs/write-failed written)
+                        (:my.fs/blob-unavailable written) (:my.fs/already-exists written)
+                        (:my.fs/stale-digest written) (:my.fs/atomic-write-unsupported written))
                   (edit-error written request actual-digest)
                   (result request before transformed written))))))))))
 

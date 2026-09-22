@@ -101,7 +101,7 @@
     (when (and database (nil? usage-test))
       (throw
        (ex-info "my.turn has no declared usage walkthrough."
-                {:seon.error/kind :my.turn/usage-walkthrough-absent
+                {
                  :my.turn/usage-walkthrough-absent true
                  :seon.error/message
                  "my.turn has no declared usage walkthrough."
@@ -122,7 +122,9 @@
                   [:or :my.turn/wait :seon.error/value]]}
   [note]
   (if (or (not (string? note)) (str/blank? note))
-    {:seon.error/kind :my.turn/blank-note
+    {:seon.error/at (java.util.Date.)
+     :seon.error/layer :my.turn/disposition
+     :seon.error/operation 'seon.run/wait
      :my.turn/blank-note true
      :seon.error/message
      "wait needs a note saying what you are waiting for, as a string."}
@@ -141,7 +143,9 @@
   ; agent-facing: a wrong TYPE is an agent mistake too — the error
   ; value answers, str/blank? on a non-string would throw
   (if (or (not (string? result)) (str/blank? result))
-    {:seon.error/kind :my.turn/blank-result
+    {:seon.error/at (java.util.Date.)
+     :seon.error/layer :my.turn/disposition
+     :seon.error/operation 'seon.run/complete
      :my.turn/blank-result true
      :seon.error/message
      "complete needs the reply text you want delivered, as a string."}

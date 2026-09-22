@@ -27,10 +27,6 @@
     {:my.note/agent [:db/id]}
     {:my.note/about [:db/id]}])
 
-(defn- error-value?
-  [value]
-  (and (map? value) (keyword? (:seon.error/kind value))))
-
 (defn- note-value
   [value]
   (cond
@@ -117,7 +113,7 @@
 (defn render-notes-html
   "Render the bounded current note collection as Hiccup."
   {:malli/schema [:=> [:cat [:or :my.note/notes :seon.render/unit]]
-                  [:or :seon.render/hiccup :seon.error/value]]}
+                  [:or :seon.render/hiccup :seon.db/error-result]]}
   [notes]
   (let [database (when (map? notes) (:seon.db/db notes))
         pulled (when (map? notes)
@@ -125,7 +121,7 @@
                           '[{:my.note/_agent [*]}]
                           [:seon.agent/id (:seon.agent/id notes)]))
         notes (if (map? notes) (get pulled :my.note/_agent []) notes)]
-    (if (:seon.error/kind pulled)
+    (if (or (:seon.db/invalid-read pulled) (:seon.schema/expected-value pulled))
       pulled
       (into [:section {:class "seon-family-entry my-notes"}
          [:h3 (str "Current notes (" (count notes) ")")]]
@@ -151,10 +147,10 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- refuse!
+  {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value :string :map] :nil]}
   [marker subject message data]
   (throw (ex-info message
                   {marker subject
-                   :seon.error/kind marker
                    :seon.error/message message
                    :seon.error/data data})))
 
@@ -241,6 +237,7 @@
     :tx-meta {:seon.db/user [:seon.agent/id agent-id]}}))
 
 (defn- add-note!
+  {:malli/schema [:=> [:cat :my.note/id :my.note/content :boolean [:or :nil :my.note/about] :seon.db/connection :seon.agent/id] [:or :my.note/note :seon.db/error-result]]}
   [id content about? about connection agent-id]
   (let [request
         (cond-> {:my.note/id id
@@ -251,11 +248,11 @@
         (transact-note!
          connection agent-id
          [[:db.fn/call #'add-note-call request]])]
-    (if (error-value? result)
+    (if (or (:seon.db.write.attempt/request-id result) (:seon.db/invalid-read result) (:seon.schema/expected-value result))
       result
       (let [note (db/pull (:db-after result) note-selector
                           [:my.note/id id])]
-        (if (error-value? note) note (note-row note))))))
+        (if (or (:seon.db/invalid-read note) (:seon.schema/expected-value note)) note (note-row note))))))
 
 (defn add!
   "Add or update one note owned by the calling agent."
@@ -263,10 +260,10 @@
    [:function
     [:=> [:cat :my.note/id :my.note/content
           :seon.db/connection :seon.agent/id]
-     [:or :my.note/note :seon.error/value]]
+     [:or :my.note/note :seon.db/error-result]]
     [:=> [:cat :my.note/id :my.note/content :my.note/about
           :seon.db/connection :seon.agent/id]
-     [:or :my.note/note :seon.error/value]]]}
+     [:or :my.note/note :seon.db/error-result]]]}
   ([id content connection agent-id]
    (add-note! id content false nil connection agent-id))
   ([id content about connection agent-id]
@@ -278,14 +275,14 @@
   Read the removed note from the transaction's database-before."
   {:malli/schema
    [:=> [:cat :my.note/id :seon.db/connection :seon.agent/id]
-    [:or :my.note/note :seon.error/value]]}
+    [:or :my.note/note :seon.db/error-result]]}
   [id connection agent-id]
   (let [result
         (transact-note!
          connection agent-id
          [[:db.fn/call #'forget-note-call
            {:my.note/id id :seon.agent/id agent-id}]])]
-    (if (error-value? result)
+    (if (or (:seon.db.write.attempt/request-id result) (:seon.db/invalid-read result) (:seon.schema/expected-value result))
       result
       (note-row (db/pull (:db-before result) note-selector [:my.note/id id])))))
 
@@ -293,7 +290,7 @@
   "List this agent's bounded current notes in identity order."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.agent/id]
-    [:or :my.note/notes :seon.error/value]]}
+    [:or :my.note/notes :seon.db/error-result]]}
   [database agent-id]
   (let [rows
         (db/q '[:find ?id ?note
@@ -303,7 +300,7 @@
                 [?note :my.note/agent ?agent]
                 [?note :my.note/id ?id]]
               database agent-id)]
-    (if (error-value? rows)
+    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
       rows
       (->> rows
            (sort-by first)

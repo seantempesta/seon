@@ -68,10 +68,11 @@
 (defn- destructive-canonical-path [path]
   (.getCanonicalPath (io/file path)))
 
-(defn- refuse-deletion! [rule message data]
+(defn- refuse-deletion!
+  {:malli/schema [:=> [:cat :keyword :string :map] :nil]}
+  [rule message data]
   (throw (ex-info message
-                  (assoc data :seon.error/kind :seon.cluster.store/refused
-                         :seon.cluster.store/refused rule
+                  (assoc data :seon.cluster.store/refused rule
                          :seon.cluster.store/rule rule))))
 
 (defn- path-string

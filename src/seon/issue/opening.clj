@@ -203,7 +203,9 @@
          "The system checks the detector after each turn and reports whether the issue is still open."]))
      (render-candidate (if (seq (:seon.test/syms link-row))
                          (candidate database issue-id) :bare) link-row))
-    {:seon.error/kind :seon.issue/not-found
+    {:seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.issue/opening
+     :seon.error/operation 'seon.issue.opening/source
      :seon.error/message (str "No current issue " issue-id)}))
 
 ;;; ---------------------------------------------------------------------------
@@ -228,5 +230,7 @@
      :seon.issue/tests
      (mapv #(test/recorded-result database %)
            (:seon.test/syms link-row))}
-    {:seon.error/kind :seon.issue/not-found
+    {:seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.issue/opening
+     :seon.error/operation 'seon.issue.opening/context
      :seon.error/message (str "No current issue " issue-id)}))

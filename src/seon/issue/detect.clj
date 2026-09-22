@@ -315,15 +315,12 @@
    (let [subjects (declarations database (:seon.fn.file/relative-root request))
          shared (shared-form-symbols database)
          basis-t (db/basis-t database)]
-     (or (some #(when (and (map? %) (:seon.error/at %)
-                      (:seon.error/layer %) (:seon.error/operation %)) ; debt: seon.db/q and basis-t declare generic errors.
- %) [subjects shared basis-t])
+     (or (some #(when (or (:seon.db/invalid-read %)
+                         (:seon.schema/expected-value %)) %)
+               [subjects shared basis-t])
          (let [candidates (remove (fn [[sym _]] (shared sym)) subjects)
                gates (fn/gate-sets database (map first candidates))]
-           ;; PRD §6: held seon.fn/gate-sets declares two marker-only facets.
-           ;; Their substantive required member sets are identical. The owner
-           ;; must correct that contract before this consumer can select a facet.
-           (if (:seon.error/kind gates)
+           (if (or (:seon.db/invalid-read gates) (:seon.schema/expected-value gates))
              gates
              (into []
                    (keep (fn [[sym _ :as row]]

@@ -647,7 +647,8 @@
         (-token sink ::elision "..."))
       (-close sink descriptor))))
 
-(defmulti ^:private emit
+(defmulti ^{:private true
+            :malli/schema [:=> [:cat :map :seon.print/sink :seon.print/options :int :seon.render.data/path] :seon.schema/value]} emit
   (fn [node _sink _options _depth _path]
     (::face node)))
 
@@ -737,7 +738,7 @@
             ;; node that names no class says so, in the same flat diagnostic
             ;; shape the unknown face uses.
             (literal
-             {:seon.error/kind ::object-without-class
+             {
               :seon.error/message "The object print node names no class."
               :seon.error/data
               {::face (::face node)
@@ -784,7 +785,7 @@
   ;; it safe and diagnosable when an old artifact or host caller reaches it.
   (-token sink ::object
           (literal
-           {:seon.error/kind ::unknown-face
+           {
             :seon.error/message "The admitted value has no declared print face."
             :seon.error/data
             {::face (::face node)
@@ -1027,6 +1028,7 @@
   ;; CALLER, so this refuses instead of quietly producing a coordinate-less
   ;; elision. Every call site in this namespace supplies both, so the
   ;; refusal is unreachable from ordinary rendering by construction.
+  {:malli/schema [:=> [:cat :map :seon.render.data/path :int :int [:or :nil :int] :seon.print/elision-unit [:or :nil :string]] :seon.print/node]}
   [profile path next-offset omitted total unit prefix]
   (when-not (and (vector? path) (int? next-offset))
     (throw
@@ -1034,7 +1036,7 @@
       (str "An elision must carry its requery coordinates: "
            ":seon.render.data/path " (literal path)
            " and :seon.render.data/next-offset " (literal next-offset) ".")
-      {:seon.error/kind ::elision-without-requery-coordinates
+      {
        ::elision-without-requery-coordinates true
        :seon.render.data/path path
        :seon.render.data/next-offset next-offset
