@@ -196,3 +196,9 @@ sole instance ends the process and a following `start` launches cold. Recovery u
   `#'var` (or similar reader-tagged value) that `edn/read-string` cannot read
   (`script/seon/operator.clj:113`); the reply must be data. (2) `stop` of the sole
   instance leaves a zombie JVM (recorded 00:05). Both go to one lane once a slot frees.
+- Addendum 03:00: the pause is now actually in effect (`a76867fe1` recorded it before
+  the edit applied). `bin/seon status` at pid 21908 throws inside the JVM
+  (`count not supported on this type: Keyword` in `seon.cluster.boot/request!`
+  `:status`, `src/seon/cluster/boot.clj:369-374`): with lane edits to `db.clj`,
+  `config.clj`, `fn.clj` half-adopted, no conclusion about the code at HEAD; re-check
+  at the coordinated restart.

@@ -38,9 +38,13 @@
  ;; the main operator root, cluster `default`. Every admitted edit publishes
  ;; to current-src and `default` adopts it in place. No side root, no
  ;; special name; fixtures (Juniper) are data seeded into it.
- ;; Publication resumes after the operator rewrite and explicit default adoption.
+ ;; 2026-09-22 02:55 (orchestrator, rule 15): PAUSED while three lanes edit src
+ ;; concurrently (kind-cut, turn-parks-on-boot, base-export-timeout): a lane's
+ ;; half-landed config key was adopted into default before its schema and refused
+ ;; the config apply; `bin/seon status` then threw inside the JVM. Re-enable at the
+ ;; coordinated restart after these lanes land, and record the resume here.
  :current-source
- {:enabled true
+ {:enabled false
   :root "."
   :cluster "default"
   ;; 2026-09-20 (owner): the post-adoption test check is OFF until the new
