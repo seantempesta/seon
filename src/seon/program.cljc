@@ -60,7 +60,7 @@
      [database]
      ; seon.db requires this declaration owner; resolve its read functions late.
      (let [history ((requiring-resolve 'seon.db/history) database)]
-       (if (and (map? history) (contains? history :seon.error/at) (contains? history :seon.error/layer) (contains? history :seon.error/operation)) ;; debt: seon.db/history declares :seon.error/value through its output union.
+       (if (or (:seon.db/invalid-read history) (:seon.schema/expected-value history))
          history
          (let [result
                ((requiring-resolve 'seon.db/q)
@@ -76,7 +76,7 @@
                   [$history ?member :seon.fn/file ?file]
                   [$ ?file :seon.fn.file/relative-root "src"]]
                 database history)]
-           (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value through its output union.
+           (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
              result
              (vec (sort result))))))))
 

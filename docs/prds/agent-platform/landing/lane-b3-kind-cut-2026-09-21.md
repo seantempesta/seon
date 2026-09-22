@@ -616,7 +616,7 @@ The remaining runtime source kind references are removed. Retained decisions:
 | cluster.agent status/planned sources/plan | cluster.status/unavailable-observation, cluster.reply/no-forms, my.plan/missing-agent-id | status text, source submission and plan use |
 | cluster.message references, inbox, read and send | DB read/write members; the producer's my.message recipient/subject/text refusal members | resolve references, order inbox and transact delivery |
 | cluster.prompt settings/calibration/context | cluster.prompt/missing-cluster and missing-config; config/error-key; DB read members; render/refused-member, candidates, invalid-output; render.web/refused-member and function-unavailable; render.unknown/reason; render.transcript/refused-member; turn/error-turn-id and missing-opening-datom | calibrate tokens and construct the prompt |
-| turn declared/planned sources | cluster.reply/no-forms; render.walk/missing-entity; declared render/config/DB refusal members | compile and evaluate generated sources |
+| turn declared/planned sources | cluster.reply/no-forms; render.walk/missing-lookup; declared render/config/DB refusal members | compile and evaluate generated sources |
 | turn generated reads | turn/generated-read-attributes | refuse context regeneration that depends on turn activity |
 | turn dispositions | turn/invalid-disposition-source | execute a valid disposition |
 | turn compaction | turn/compaction-agent-id | preserve the affected agent identity |
@@ -658,3 +658,45 @@ Publication observations: `96ea94a1` 24.928730 s; `e0ced6cb` converged at
 `6ab21363`; explicit factory alternatives `a53c4827` converged at `6ab21341`;
 regression cleanup `e4424da9` converged at `6ab21656`. The timed publication exceeded
 10 seconds in SOURCE_BATCH. **RESTART NEEDED remains in force** for the live settle proof.
+
+### Program and SCI debt guards
+
+`my.program`'s 27 retained decisions now read `db/invalid-read` and
+`schema/expected-value`; its two transaction decisions also read
+`db.write.attempt/request-id`. Each success arm performs a query projection,
+retraction, or source installation. Existing exception-to-flat-value ownership
+is preserved; no new propagation mechanism was introduced.
+`program/overrides` uses the two DB read members before history/query processing.
+`effect/request*` uses the writer request member before dispatch or settlement.
+`call-preparation` uses DB read members before building supplier indexes, adopting
+snapshots and preparing arguments. Its two concatenated-query paths now retain each
+refusal before concatenation. `sci.eval` uses DB read members for installation
+coverage and documentation, and the writer request member for acquisition recording.
+`test.accretion/observation` no longer tests the invocation envelope as an error:
+the declared invocation result always carries its evaluation record and optional value.
+
+Private contracts were added for the changed functions in these owners. The
+call-preparation hook's callable argument retains its polymorphic callable boundary
+using the existing schema/value declaration. `prepared-symbols` now explicitly admits
+the DB refusal its acquisition can produce. The one supplier-error-fingerprint debt
+comment still names `supplied-database-value` and `supplied-connection`, whose generic
+base-error declarations require B3 commits 1–3.
+
+Focused program/effect/SCI selection: 122 tests selected; exit 124 at
+`seon.effect-test/request-commits-before-io-dispatch-and-settles-once` after the
+runner's 320-second no-progress bound. No final tally or green record exists.
+`my.program-test` completed with two duration failures (6.668 s and 8.511 s over
+five seconds), no reported assertion/exception failure. Before interruption, effect
+failures included required config missing from a fixture, a diagnostic-text assertion,
+the canonical-facet inventory comparison, and duration bounds.
+
+Focused remaining selection `seon.call-preparation-test seon.sci.eval-test
+seon.test.accretion-test`: run **edc124c7a7d2**, **100 tests, 509 assertions,
+15 failures, 13 errors**, recorded exit 1 (`tmp/b3-debt-sci.log`). Errors name a nil
+Malli registry, unresolved fixture SCI symbols, loaded-contract compilation,
+source/contract arity mismatch, auto-check fixture admission and a string where
+the declared function symbol is required. This is not passing evidence.
+
+Publication `393080e2` converged at `6ab216d5`; the coordinated program/effect/
+call-preparation/SCI/accretion batch `708727db` converged at `6ab216ee`.
+The prescribed runtime-commit load for `f8861b66e` exited zero.

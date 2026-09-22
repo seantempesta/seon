@@ -237,7 +237,7 @@
    environment-fingerprint error-fingerprints]
   (let [shapes (db/q database supplier-shape-query supplier)]
     (cond
-      (and (map? shapes) (contains? shapes :seon.error/at) (contains? shapes :seon.error/layer) (contains? shapes :seon.error/operation)) ;; debt: seon.db/q passes seon.db generic :seon.error/value
+      (or (:seon.db/invalid-read shapes) (:seon.schema/expected-value shapes))
  shapes
 
       (empty? shapes)
@@ -300,6 +300,7 @@
   Derived, never a stored counter. The history view is what makes a
   RETRACTION move this basis; a store kept without history answers from
   its current value, which still moves on every assertion."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-keyword]] :seon.db/basis-t]}
   [database attributes]
   ;; This basis keeps the process-local snapshot cache coherent. It is not a
   ;; semantic read performed by the prepared call: the surrounding snapshot
@@ -310,7 +311,7 @@
   ;; the evaluated form that preparation had merely admitted.
   (binding [db/*read-evidence-sink* nil]
     (let [history (db/history database)
-          historical (when-not (and (map? history) (contains? history :seon.error/at) (contains? history :seon.error/layer) (contains? history :seon.error/operation)) ;; debt: seon.db/history passes seon.db generic :seon.error/value
+          historical (when-not (or (:seon.db/invalid-read history) (:seon.schema/expected-value history))
 
                        (db/q history historical-row-transaction-query
                              attributes))
@@ -404,22 +405,27 @@
   shape matches while its keyword does not is admitted here and rejected
   by the plan's own two-part join. Over-including costs one cached empty
   plan; under-including would silently skip preparation."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.schema.shape/supplied-map-entries]
+                  [:or :seon.call-preparation/prepared-symbols :seon.db/error-result]]}
   [database index named-entries]
   (let [fingerprints (vec (keys index))]
     (if (empty? fingerprints)
       #{}
       (let [positional (db/q database prepared-positional-query fingerprints)
-            entries (concat (db/q database prepared-entry-query fingerprints)
-                            (db/q database prepared-named-entry-query named-entries))]
-        (into (if (and (map? positional) (contains? positional :seon.error/at) (contains? positional :seon.error/layer) (contains? positional :seon.error/operation)) ;; debt: seon.db/q passes seon.db generic :seon.error/value
- #{} (set positional))
-              (comp (filter (fn [[_ entry-key fingerprint]]
-                              (= entry-key
-                                 (:seon.call-preparation/key
-                                  (get index fingerprint)))))
-                    (map first))
-              (when-not (and (map? entries) (contains? entries :seon.error/at) (contains? entries :seon.error/layer) (contains? entries :seon.error/operation)) ;; debt: seon.db/q passes seon.db generic :seon.error/value
- entries))))))
+            entries (db/q database prepared-entry-query fingerprints)
+            named (db/q database prepared-named-entry-query named-entries)]
+        (cond
+          (or (:seon.db/invalid-read positional) (:seon.schema/expected-value positional)) positional
+          (or (:seon.db/invalid-read entries) (:seon.schema/expected-value entries)) entries
+          (or (:seon.db/invalid-read named) (:seon.schema/expected-value named)) named
+          :else
+          (into (set positional)
+                (comp (filter (fn [[_ entry-key fingerprint]]
+                                (= entry-key
+                                   (:seon.call-preparation/key
+                                    (get index fingerprint)))))
+                      (map first))
+                (concat entries named)))))))
 
 (defn snapshot
   "Derive the complete supplied-default snapshot from one database value.
@@ -435,7 +441,7 @@
     [:or :seon.call-preparation/snapshot :seon.db/error-result]]}
   [database projection]
   (let [rows (db/q database row-query)]
-    (if (and (map? rows) (contains? rows :seon.error/at) (contains? rows :seon.error/layer) (contains? rows :seon.error/operation)) ;; debt: seon.db/q passes seon.db generic :seon.error/value
+    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
 
       rows
       (let [environment-fingerprint
@@ -496,13 +502,15 @@
                   (map (fn [[_ candidate]]
                          [(:seon.call-preparation/shape candidate) candidate]))
                   admitted)
-            named-facts (named-entry-facts database fingerprint-index)]
-        (merge named-facts
+            named-facts (named-entry-facts database fingerprint-index)
+            prepared (prepared-symbols database fingerprint-index
+                                       (:seon.schema.shape/supplied-map-entries named-facts))]
+        (if (or (:seon.db/invalid-read prepared) (:seon.schema/expected-value prepared))
+          prepared
+          (merge named-facts
         {:seon.schema/projection projection
          :seon.call-preparation/supplied-defaults admitted
-         :seon.call-preparation/prepared-symbols
-         (prepared-symbols database fingerprint-index
-                           (:seon.schema.shape/supplied-map-entries named-facts))
+         :seon.call-preparation/prepared-symbols prepared
          :seon.call-preparation/validators
          (into {}
                (comp (remove second)
@@ -512,7 +520,7 @@
          :seon.call-preparation/refusals (into [] (keep second) compiled)
          :seon.call-preparation/basis-t
          (newest-row-transaction database (row-attributes))
-         :seon.call-preparation/checked-through-t (db/basis-t database)})))))
+         :seon.call-preparation/checked-through-t (db/basis-t database)}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Basis comparison — the correctness boundary; the listener is the optimizer
@@ -554,7 +562,7 @@
                 (long basis))
           held
           (let [derived (snapshot database projection)]
-            (if (and (map? derived) (contains? derived :seon.error/at) (contains? derived :seon.error/layer) (contains? derived :seon.error/operation)) ;; debt: seon.call-preparation/snapshot passes seon.db generic :seon.error/value
+            (if (or (:seon.db/invalid-read derived) (:seon.schema/expected-value derived))
 
               derived
               (:seon.call-preparation/snapshot
@@ -580,7 +588,7 @@
      (fn [report]
        (when (some (comp attributes :a) (:tx-data report))
          (let [derived (snapshot (:db-after report) projection)]
-           (when-not (and (map? derived) (contains? derived :seon.error/at) (contains? derived :seon.error/layer) (contains? derived :seon.error/operation)) ;; debt: seon.call-preparation/snapshot passes seon.db generic :seon.error/value
+           (when-not (or (:seon.db/invalid-read derived) (:seon.schema/expected-value derived))
 
              (swap! call-state adopt derived))))))))
 
@@ -722,7 +730,7 @@
     [:or [:vector [:tuple :int :int :qualified-keyword]] :seon.db/error-result]]}
   [database sym]
   (let [rows (db/q database row-query)]
-    (if (and (map? rows) (contains? rows :seon.error/at) (contains? rows :seon.error/layer) (contains? rows :seon.error/operation)) ;; debt: seon.db/q passes seon.db generic :seon.error/value
+    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
 
       rows
       (let [declared (into #{} (map (fn [[entry-key _ fingerprint _]] [entry-key fingerprint])) rows)
@@ -734,13 +742,15 @@
                                                 :seon.call-preparation/supplier-symbol supplier}])) rows)
             facts (named-entry-facts database index)
             entries (if (seq fingerprints)
-                      (concat (db/q database map-entry-query sym fingerprints)
-                              (db/q database named-map-entry-query sym
-                                    (:seon.schema.shape/supplied-map-entries facts))) [])]
-        (if (and (map? entries) (contains? entries :seon.error/at) (contains? entries :seon.error/layer) (contains? entries :seon.error/operation)) ;; debt: seon.db/q passes seon.db generic :seon.error/value
-
-          entries
-          (->> entries
+                      (db/q database map-entry-query sym fingerprints) [])
+            named (if (seq fingerprints)
+                    (db/q database named-map-entry-query sym
+                          (:seon.schema.shape/supplied-map-entries facts)) [])]
+        (cond
+          (or (:seon.db/invalid-read entries) (:seon.schema/expected-value entries)) entries
+          (or (:seon.db/invalid-read named) (:seon.schema/expected-value named)) named
+          :else
+          (->> (concat entries named)
                (filter (fn [[_ _ entry-key fingerprint]] (contains? declared [entry-key fingerprint])))
                (map #(subvec (vec %) 0 3))
                sort
@@ -1389,7 +1399,7 @@
   one basis comparison, one string, one set lookup — no plan lookup, no
   Datalog, no supplier, no argument copy."
   {:malli/schema
-   [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "SCI's call-preparation hook receives arbitrary host or interpreted callable objects and forwards arguments to that callable's own contract.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.schema/arguments] :seon.schema/value]}
+   [:=> [:cat :map :seon.schema/value :seon.schema/arguments] :seon.schema/value]}
   [ctx callee arguments]
   (let [call-state (get ctx carrier)
         environment (env/of ctx)
@@ -1397,11 +1407,11 @@
         connection (when (and call-state environment projection)
                      (:seon.db/connection environment))
         database (when connection (db/db connection))]
-    (if-not (and database (not (and (map? database) (contains? database :seon.error/at) (contains? database :seon.error/layer) (contains? database :seon.error/operation)) ;; debt: seon.db/db passes seon.db generic :seon.error/value
+    (if-not (and database (not (or (:seon.db/invalid-read database) (:seon.schema/expected-value database))
 ))
       arguments
       (let [current (current-snapshot call-state database projection)]
-        (if (and (map? current) (contains? current :seon.error/at) (contains? current :seon.error/layer) (contains? current :seon.error/operation)) ;; debt: seon.call-preparation/current-snapshot passes seon.db generic :seon.error/value
+        (if (or (:seon.db/invalid-read current) (:seon.schema/expected-value current))
 
           arguments
           (let [sym (callee-identity callee)]

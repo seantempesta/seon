@@ -1050,6 +1050,7 @@
            (vec (get-in snapshot [::acquisition ::acquisition-refusals])))))
 
 (defn- installation-covers-program-change?
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:sequential [:map [:seon.program/row :seon.program/row]]] :seon.schema/projection] [:or :nil :boolean]]}
   [before after installations projection]
   (let [identities (set (map (comp program/row-identity :seon.program/row)
                              installations))
@@ -1061,7 +1062,7 @@
                                  (when (:db/isComponent properties) attribute)))
                          (:schema (db/schema-database after)))
         touched (db/q '[:find [?entity ...] :where [?entity]] changed-database)
-        parents (when-not (and (map? touched) (contains? touched :seon.error/at) (contains? touched :seon.error/layer) (contains? touched :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value through its output union.
+        parents (when-not (or (:seon.db/invalid-read touched) (:seon.schema/expected-value touched))
                   (loop [frontier touched seen #{}]
                     (if (empty? frontier)
                       seen
@@ -1069,7 +1070,7 @@
                                              :in $ [?child ...] [?attribute ...]
                                              :where [?parent ?attribute ?child]]
                                            history frontier components)]
-                        (when-not (and (map? incoming) (contains? incoming :seon.error/at) (contains? incoming :seon.error/layer) (contains? incoming :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value through its output union.
+                        (when-not (or (:seon.db/invalid-read incoming) (:seon.schema/expected-value incoming))
                           (recur (vec (remove seen incoming)) (into seen incoming)))))))
         entities (db/q '[:find [?entity ...]
                          :in $ [?attribute ...]
@@ -1081,11 +1082,11 @@
                         :where [$changed ?entity] [?entity ?attribute]]
                       after (db/since (db/history after) (db/basis-t before))
                       program/identity-attributes)]
-    (when (and parents (not (and (map? entities) (contains? entities :seon.error/at) (contains? entities :seon.error/layer) (contains? entities :seon.error/operation))) (not (and (map? changed) (contains? changed :seon.error/at) (contains? changed :seon.error/layer) (contains? changed :seon.error/operation)))) ;; debt: seon.db/q declares :seon.error/value through its output union.
+    (when (and parents (not (or (:seon.db/invalid-read entities) (:seon.schema/expected-value entities))) (not (or (:seon.db/invalid-read changed) (:seon.schema/expected-value changed))))
       (let [eids (vec (set (concat entities changed parents)))
             old (db/pull-many before '[*] eids)
             current (db/pull-many after '[*] eids)]
-        (and (not (and (map? old) (contains? old :seon.error/at) (contains? old :seon.error/layer) (contains? old :seon.error/operation))) (not (and (map? current) (contains? current :seon.error/at) (contains? current :seon.error/layer) (contains? current :seon.error/operation))) ;; debt: seon.db/pull-many declares :seon.error/value through its output union.
+        (and (not (or (:seon.db/invalid-read old) (:seon.schema/expected-value old))) (not (or (:seon.db/invalid-read current) (:seon.schema/expected-value current)))
              (every?
               (fn [[eid old-row current-row]]
                 (let [identity (or (program/row-identity current-row)
@@ -1477,6 +1478,7 @@
                 (str/trim (str/join "\n" (subvec lines (inc example-index)))) "")}))
 
 (defn- documentation-schemas
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] [:map-of :qualified-keyword :seon.schema/definition]]}
   [database row]
   (let [keys (into #{} (mapcat #(concat (:seon.fn.arity/input-refs %)
                                        (:seon.fn.arity/output-refs %)))
@@ -1484,7 +1486,7 @@
         definitions (db/q '[:find ?key ?form :in $ [?key ...]
                             :where [?schema :seon.schema/key ?key]
                                    [?schema :seon.schema/form ?form]] database keys)]
-    (when (and (map? definitions) (contains? definitions :seon.error/at) (contains? definitions :seon.error/layer) (contains? definitions :seon.error/operation)) ;; debt: seon.db/q declares :seon.error/value through its output union.
+    (when (or (:seon.db/invalid-read definitions) (:seon.schema/expected-value definitions))
       (throw (ex-info "Documentation schema references unavailable." definitions)))
     (into (sorted-map) (map (fn [[key form]] [key (edn/read-string form)])) definitions)))
 
@@ -1518,7 +1520,7 @@
         spec (:seon.fn/spec row)
         arities (if (and spec (= :function (first (edn/read-string spec))))
                   (:in expanded) [(:in expanded)])]
-    (if (and (map? entries) (contains? entries :seon.error/at) (contains? entries :seon.error/layer) (contains? entries :seon.error/operation)) ;; debt: seon.call-preparation/supplied-map-entries declares :seon.error/value through its output union.
+    (if (or (:seon.db/invalid-read entries) (:seon.schema/expected-value entries))
       entries
       (let [inputs
             (mapv (fn [order input]
@@ -1546,7 +1548,7 @@
   ([database row]
    (let [overrides (when (= :agent (:seon.schema.admission/source row))
                      (program/overrides database))]
-     (if (and (map? overrides) (contains? overrides :seon.error/at) (contains? overrides :seon.error/layer) (contains? overrides :seon.error/operation)) ;; debt: seon.program/overrides declares :seon.error/value through its output union.
+     (if (or (:seon.db/invalid-read overrides) (:seon.schema/expected-value overrides))
        overrides
        (function-doc-map database row
                          (boolean (some #{(:seon.fn/sym row)} overrides))))))
@@ -1572,8 +1574,8 @@
                              [:seon.ns/name namespace-name])
         functions (program-documentation database namespace-name)]
     (cond
-      (and (map? namespace-row) (contains? namespace-row :seon.error/at) (contains? namespace-row :seon.error/layer) (contains? namespace-row :seon.error/operation)) namespace-row ;; debt: seon.db/pull declares :seon.error/value through its output union.
-      (and (map? functions) (contains? functions :seon.error/at) (contains? functions :seon.error/layer) (contains? functions :seon.error/operation)) functions ;; debt: seon.db/q declares :seon.error/value through its output union.
+      (or (:seon.db/invalid-read namespace-row) (:seon.schema/expected-value namespace-row)) namespace-row
+      (or (:seon.db/invalid-read functions) (:seon.schema/expected-value functions)) functions
       (or (:seon.ns/name namespace-row) present? (seq functions))
       (let [functions (sort-by (juxt #(get % :seon.fn/doc-order Long/MAX_VALUE)
                                     :seon.fn/sym) functions)]
@@ -1606,15 +1608,15 @@
                       (program/overrides database))
           overridden? (boolean (some #{qualified} overrides))]
       (cond
-        (and (map? row) (contains? row :seon.error/at) (contains? row :seon.error/layer) (contains? row :seon.error/operation)) row ;; debt: seon.db/pull declares :seon.error/value through its output union.
-        (and (map? overrides) (contains? overrides :seon.error/at) (contains? overrides :seon.error/layer) (contains? overrides :seon.error/operation)) overrides ;; debt: seon.program/overrides declares :seon.error/value through its output union.
+        (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
+        (or (:seon.db/invalid-read overrides) (:seon.schema/expected-value overrides)) overrides
         (and (:seon.fn/sym row)
              (or (false? (:seon.fn/private? row)) overridden?))
         (function-doc-map database row overridden?)
         :else (documentation-unavailable requested)))
     (let [row (db/pull database [:seon.ns/doc] [:seon.ns/name requested])]
       (cond
-        (and (map? row) (contains? row :seon.error/at) (contains? row :seon.error/layer) (contains? row :seon.error/operation)) row ;; debt: seon.db/pull declares :seon.error/value through its output union.
+        (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
         (:seon.ns/doc row) (merge (docstring-parts (:seon.ns/doc row)) {:in [] :out []})
         :else (documentation-unavailable requested)))))
 
@@ -1719,6 +1721,7 @@
 
 (defn- record-acquisition-refusals!
   "Record contained row refusals through the one durable error owner."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map [:or :nil :seon.flow/commit-fault!]] :map]}
   [ctx db state commit-fault!]
   (let [refusals (::acquisition-refusals state)]
     (if-not (seq refusals)
@@ -1763,7 +1766,7 @@
                refusals))
               outcome (db/transact! connection tx-data)]
           (cond-> (assoc state ::acquisition-refusals-recorded? true)
-            (and (map? outcome) (contains? outcome :seon.error/at) (contains? outcome :seon.error/layer) (contains? outcome :seon.error/operation)) ;; debt: seon.db/transact! declares :seon.error/value through its output union.
+            (or (:seon.db.write.attempt/request-id outcome) (:seon.db/invalid-read outcome) (:seon.schema/expected-value outcome))
             (assoc ::acquisition-refusals-recorded? false
                    ::acquisition-recording-error outcome)))
         (assoc state ::acquisition-refusals-recorded? false))))))

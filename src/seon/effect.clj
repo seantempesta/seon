@@ -969,13 +969,13 @@
                           (map? (:seon.sci.admit/value projected-request))
                           (assoc :seon.effect/arguments
                                  (:seon.sci.admit/value projected-request)))]])]
-                 (if (and (:seon.error/at opened) (:seon.error/layer opened) (:seon.error/operation opened)) ;; debt: db/transact! declares :seon.error/value through seon.db/error-result.
+                 (if (or (:seon.db.write.attempt/request-id opened) (:seon.db/invalid-read opened) (:seon.schema/expected-value opened))
 
                    opened
                    (letfn [(settled [outcome]
                              (if (let [transaction (:seon.effect/transaction outcome)]
-                                   ;; debt: db/transact! declares :seon.error/value through seon.db/error-result.
-                                   (and (:seon.error/at transaction) (:seon.error/layer transaction) (:seon.error/operation transaction)))
+
+                                   (or (:seon.db.write.attempt/request-id transaction) (:seon.db/invalid-read transaction) (:seon.schema/expected-value transaction)))
                                (:seon.effect/transaction outcome)
                                (:seon.effect/value outcome)))]
                      (if background?

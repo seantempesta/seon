@@ -102,6 +102,17 @@
     (conj (:seon.fn/sym row))))
 
 (defn- observation
+  {:malli/schema [:=> [:cat [:map [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                              [:seon.db/db :seon.db/database-value]
+                              [:seon.fn/sym :seon.fn/sym]
+                              [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+                              [:seon.sci.admit/caps :seon.sci.admit/caps]
+                              [:seon.config/on-core-error :seon.config/on-core-error]] [:fn malli.core/schema?] :seon.schema/arguments]
+                  [:map [:seon.test.accretion/arguments :seon.schema/arguments]
+                   [:seon.test.accretion/actual :seon.schema/value]
+                   [:seon.test.accretion/expected :string]
+                   [:seon.test.accretion/explanation [:or :nil :string]]
+                   [:seon.test.accretion/pass? :boolean]]]}
   [request output-schema arguments]
   (let [invocation
         (kernel/invoke
@@ -114,11 +125,6 @@
           :seon.sci.admit/caps (:seon.sci.admit/caps request)
           :seon.config/on-core-error
           (:seon.config/on-core-error request)})
-        ;; debt: seon.sci.kernel/invoke still declares a broad invocation-result.
-        _ (when (and (:seon.error/at invocation)
-                     (:seon.error/layer invocation)
-                     (:seon.error/operation invocation))
-            (throw (ex-info (:seon.error/message invocation) invocation)))
         returned (:seon.sci.admit/value invocation)
         actual (or (:seon.error/diagnostic-offending returned) returned)
         explanation (m/explain output-schema actual)]
