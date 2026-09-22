@@ -24,7 +24,14 @@ launcher's wall time sees.
 
 The phase breakdown and the ranked options are in
 [from-zero-boot-cost-2026-09-23](../../research/agent-platform/from-zero-boot-cost-2026-09-23.md)
-(in progress).
+(2026-09-23). Measured on frozen HEAD `bfe3445f8`: about 125 s of the 170 s is Seon's
+report validator on the one 441,788-datom program transaction. `write-owned-values-error`
+rescans the whole `:tx-data` once per owning root (`src/seon/db.clj:3163-3172`), which
+is quadratic. The JVM compiles every dependency from source on every start (17–19 s,
+not counted in ready-ms), while the class cache `bin/test` already uses would cut that
+to 7.9 s. Reset deletes the program rows it then rebuilds, whereas a fresh cluster
+forked from `current-src` took 4.3 s. A schema-resource add or writerless retire
+adopts incrementally in about 7 s (retire keeps the Datahike ident; plan 1.3e).
 
 ## Timing rows
 
@@ -43,3 +50,6 @@ the launching shell's; load is `uptime`'s one-minute average at start.
 | 2026-09-22 | `a102a8403` frozen archive (`git archive`), before the 2026-09-23 no-from-zero ruling reached the lane | from-zero | 176,798 | 201.64 | — | [lane-publication-lock-deletion](../../prds/agent-platform/landing/lane-publication-lock-deletion-2026-09-23.md) |
 | 2026-09-22 | `87c4228f7` frozen archive: `cluster/publication-base!` over an empty root (full index + export, no boot) | publication from empty | — | 166.04 | — | same |
 | 2026-09-22 | `a102a8403` archive: `cluster/publication-base!` over the booted root (unchanged source, export only) | publication export | — | 39.10 (JVM start + require included) | — | same |
+| 2026-09-22 | `bfe3445f8` frozen archive, JFR attached | from-zero | 170,338 | 191.21 | 11.30 | [from-zero-boot-cost](../../research/agent-platform/from-zero-boot-cost-2026-09-23.md) |
+| 2026-09-22 | same root, `down` then `start` | warm restart | 11,092 | 28.73 | 9.98 | same |
+| 2026-09-22 | same live JVM, second cluster `fzb2` forked from `current-src` | new cluster | 4,256 | 4.42 | 8.54 | same |
