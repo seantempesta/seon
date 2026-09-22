@@ -69,6 +69,8 @@ only the requesting side.
 
 ## Landed behavior
 
+Implementation commit: `42ecbacf3959c7ed7adcd32e1e20173270b672d1`.
+
 - `seon.test.cache` owns selection and hashing of external input evidence.
 - Full and partial publication seal the complete declared input inventory.
   Program indexing remains filtered; no gate input was added or removed.
@@ -132,5 +134,5 @@ This cut changes the identity carried through the existing publication path; it
 does not add another publication pass or cache. The committed measurement script
 was not run because the owner reserved cold publication and platform proof. The
 final focused armed run began at `10:41:43Z` and ended at `10:43:21Z` (98 seconds,
-including the unrelated 80-second selection regression). The implementation and
-regressions were 248 insertions and 13 deletions before this note.
+including the unrelated 80-second selection regression). The eight implementation,
+schema and regression paths were 252 insertions and 13 deletions.
