@@ -59,3 +59,6 @@ the launching shell's; load is `uptime`'s one-minute average at start.
 | 2026-09-22 | same: program-rows transaction, `:db/txInstant` of that transaction to the next | program write | **29,865 ms** (was ~125,500) | — | — | same |
 | 2026-09-22 | same root, `down` then `start` | warm restart | 14,469 | 30.12 | ~11 | same |
 | 2026-09-22 | `9d029820d` + lane hunks archive: `cluster/publication-base!` over an empty root | publication from empty | — | 93.31 | — | [lane-publication-lock-deletion](../../prds/agent-platform/landing/lane-publication-lock-deletion-2026-09-23.md) |
+| 2026-09-22 | `2bd568c08` worktree (committed publication-clock script cold start, before the no-from-zero ruling reached the lane) | from-zero | 165,327 | 185.13 | ~11 | [lane-reload-per-declaration](../../prds/agent-platform/landing/lane-reload-per-declaration-2026-09-23.md) |
+| 2026-09-22 | same root at `2bd568c08`, `start` | warm restart | 10,298 | — | ~11 | same |
+| 2026-09-22 | same root, `c1d2e6d7f` `git archive`, `start` | warm restart, **hung** | none: main BLOCKED at `seon.cluster.agent/arm!` (`agent.clj:876`) after 300 s; stopped | 301.96 | — | same |

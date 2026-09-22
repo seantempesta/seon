@@ -63,3 +63,100 @@ Focused canonical regression: `bin/test-fast --paths src/seon/cluster.clj test/s
 Leaf progress breakdown from hook A: source build (capture/classify/analyze combined) 1716.805 ms; first program reconciliation transaction 226.943 ms; development row adoption 203.456 ms; reload plus source verification/projection advance 10.484 ms; re-arm 27.179 ms; adoption record 27.401 ms. Full phase vector is in hook-a.edn. Capture/classify subdivision remains for B's measurement; these aggregate labels do not claim that split.
 
 Concurrent lock-removal edits appeared elsewhere in shared cluster.clj during this work. They are excluded from A's staged patch and from A's proof snapshot. No other lane's sessions or files were edited. The earlier main-checkout test attempts used the canonical recording authority; default was never published, stopped, or reset by this lane.
+
+
+## Commits B, C, D (Opus 5.5 continuation, 2026-09-22)
+
+Commits: `2bd568c08` (B), `da703089b` (C), `af5eea72f` (D).
+
+- **B** — the analyzer marks plain `def`s whose initializer is literal data
+  (`literal-value?`, sharing the existing kondo node parse, converting only
+  def-headed lists); the indexer stores them as declarations with
+  `:seon.fn/constant? true`, and stores `:seon.fn/inline?` true/false on every
+  `defn`/`defn-`. `declaration-reload-rule` returns `:seon.reload/var-indirection`
+  for a defn with `inline? false`; a missing fact stays unknown and widens. The
+  contract/reach/doc detectors exclude constants by fact
+  (`seon.issue.detect/declarations`).
+- **C** — a `:seon.ns/name` identity present in both values reloads only its own
+  namespace (an ns form compiles nothing into callers); created/retired seeds
+  dependents. The committed reload clock
+  (`docs/prds/agent-platform/research/measure-publication-reloads-2026-09-22.clj`)
+  observed reloads through the source-refresh holder that `a102a8403` deleted
+  (capture failed: NPE deref of an unresolved var); it now wraps the progress hook
+  root for the init request and restores it at report.
+- **D** — a `:seon.fn/sym` whose `:seon.program/definition-digest` is equal in both
+  values seeds no dependents. Cause found live: the `seon.id/valid?` body edit
+  delivered every later declaration of `seon.id` as a changed identity (span
+  moved), including the constant `seon.id/default-length`, so C still reloaded
+  378 namespaces.
+
+Paths: `src/seon/fn.clj`, `src/seon/fn/analyzer.clj`,
+`resources/seon/schemas/seon.fn.edn`, `src/seon/issue/detect.clj`,
+`src/seon/cluster.clj` (reload selector hunks only; edited before the file-ownership
+ledger assigned cluster.clj elsewhere), `test/seon/cluster/reload_per_declaration_test.clj`,
+`test/seon/cluster/publication_delta_test.clj`, `test/seon/cluster/reload_measure.clj`,
+`test/seon/issue/detect_test.clj`, the reload clock above.
+
+### Clocks
+
+Committed script, `PUBLICATION_CLOCK_RESUME=1` after its own cold start, at B
+(`tmp/reload-per-declaration-evidence/legacy-b/`): first 385, no-change **337**, leaf **6,240**, core
+**25,449** ms; reloads 0/0/1/103, rearmed vars 0/0/3/1,688. The script's "docstring"
+perl edit changes the **namespace** docstring of both files, so its core row
+measured the ns-row widening C removes, not a defn edit.
+
+Hook harness (`test/seon/cluster/reload_measure.clj`, one request per case,
+`tmp/reload-per-declaration-evidence/hook-c.edn`) at C: no-change **126**, leaf
+(`my.note/notes` docstring) **2,886**, core (`seon.id/valid?` body) **18,885** ms,
+reloading 378 namespaces (the harness's `RELOAD_EXPECT_NARROW` assertion failed;
+that failure is how D's cause was found). **D's core number is not measured live**:
+the scratch adoption to D failed (see limits).
+
+Leaf phases at C (2,886 ms; progress-line deltas, nested spans in brackets):
+source build 1,733 [analyze 908, index 520, capture 0.3, classify 0.1];
+development reconciliation transactions 313 + 263 [transact 579 total];
+branch publication complete 142; branch publication started 79; publication source
+identity 74; publication branch head 45; contract projection 44; adoption record 66;
+bootstrap configuration 36; JVM instrumentation 25 [re-arm 24]; reload `my.note`
+6 [3]. Reload is 0.2 % of the leaf; publication (analysis + two reconciliation
+transactions + branch publication) is the cost.
+
+### Tests
+
+In the scratch JVM (armed, `seon.test.published-base` = a directory whose
+`data/store` links the scratch root's store; plain `clojure.test`, no recording):
+`seon.cluster.reload-per-declaration-test` + `seon.cluster.publication-delta-test`,
+13 tests, 45 pass, 0 fail, 3 errors, 21,142 ms. The errors are outside this lane:
+two are `fixture-namespace-rows-lack-the-required-definition-digest` (test_support
+program-row), one is `selected-rows-reconcile-without-a-manifest` refusing
+"Program deletion leaves surviving referrers" for its own test row in a full-population
+base. `seon.issue.detect-test` fails at its seed on HEAD's required program digests
+(same fixture class, unconverted here). Detector exclusion proven on the published
+population instead: 60 public constants under `src`, 0 among 12 contract subjects
+and 0 among 119 reach subjects (26,377 ms). `bin/test-fast` could not run: its newest
+published base is older than HEAD's partition validator
+(`test-fast-runs-on-a-published-base-older-than-heads-schema-validator.md`) and
+`bin/test --prepare-head-base` refused on a surviving `seon.render/invoke-selected`
+→ `seon.db/render-diff-ai` edge (filed by another lane as
+`incremental-publication-refuses-a-deletion-whose-unchanged-caller-edge-survives.md`).
+
+### Schema change proof and limits
+
+The new attributes were installed by the committed script's cold start (from-zero,
+readiness 165,327 ms, wall 185,126 ms, before the owner's no-from-zero ruling
+reached the lane); 4,406 `inline?` facts and 366 constants were queried on it. **The
+incremental proof the ruling asks for is not done.** Incremental adoption of other
+edits on that live store: B→C delta (17 files) 31,060 ms; C cluster.clj+test 16,275 ms;
+C→D delta refused after 228,300 ms
+(`incremental-adoption-refuses-owned-values-plans-under-a-stale-contract.md`), retry
+exceeded the 300 s prepl bound; a warm restart from a `c1d2e6d7f` archive then hung in
+`seon.cluster.agent/arm!` (`warm-restart-hangs-in-agent-arm-waiting-on-an-atom-monitor.md`).
+All over-10-second operations above are defects by the 2026-09-23 rule.
+
+Hook publication: the leaf is still ~2.9 s (hook) / 6.2 s (script, ns docstring) and
+the core defn edit unmeasured after D; reload itself is sub-10 ms for a leaf. The
+evidence does not show sub-second publication; the orchestrator decides.
+
+No RESET NEEDED: default (pid 51528) was only read. Scratch roots and snapshots of
+this lane were stopped and removed; the `reload-b-wt` worktree was removed by
+`git worktree remove` after saving its diff (reference-code link changes only).
