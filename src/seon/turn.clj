@@ -179,8 +179,6 @@
       (:seon.program/row evaluation)
       (assoc :seon.program/row
              (:seon.program/row evaluation))
-      (::form-facts evaluation)
-      (assoc ::form-facts (::form-facts evaluation))
       value (assoc :my.turn/value value))))
 
 (defn settlement-projection
@@ -920,19 +918,27 @@
       (update form :seon.cluster.eval/ns :db/id))))
 
 (defn- analyze-settlement
+  "Analyze a settling declaration's source at the writer's database.
+
+  Only a declaration is analyzed. An ordinary form's static call edges are
+  not evidence that a call executed and are never program rows, so its
+  settlement runs no analysis and asserts no `:seon.fn/calls`: a receipt then
+  advances no program attribute's revision."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.eval/settle-request]
+                  :seon.cluster.eval/settle-request]}
   [database request]
-  (if-let [form (settlement-form database request)]
-    (let [[form-facts program-row]
-          (seon.fn/analyze-form
-           database
-           (:seon.cluster.eval/source form)
-           (:seon.cluster.eval/ns form)
-           (:seon.program/row request))
-]
-      (cond-> (assoc request ::form-facts
-                     (assoc form-facts :db/id (:db/id form)))
-        program-row (assoc :seon.program/row program-row)))
-    request))
+  (let [program-row (:seon.program/row request)
+        form (when program-row (settlement-form database request))]
+    (if form
+      (let [analysis (seon.fn/analyze-form
+                      database
+                      (:seon.cluster.eval/source form)
+                      (:seon.cluster.eval/ns form)
+                      program-row)]
+        (if (:seon.fn/namespace-unresolvable analysis)
+          (throw (ex-info (:seon.error/message analysis) analysis))
+          (assoc request :seon.program/row (second analysis))))
+      request)))
 
 (defn- receipt-settle-tx*
   "Build evaluation settlement transaction data at its writer authority."
@@ -1174,16 +1180,6 @@
                 (throw (ex-info (:seon.error/message written?) written?))
                 (not written?)))))))
     false))
-
-(defn- relation-assertions
-  [entity row]
-  (into []
-        (concat
-         (for [attribute [:seon.fn/calls :seon.fn/references :seon.fn/keywords]
-               target (get row attribute)]
-           [:db/add entity attribute target])
-         (when-let [subject (:seon.test/subject row)]
-           [[:db/add entity :seon.test/subject subject]]))))
 
 (defn- row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
@@ -1638,8 +1634,6 @@
     (let [program-row (:seon.program/row request)]
       (into [] cat
             [(if program-row (row-tx db request program-row) [])
-             (relation-assertions (:db/id (::form-facts request))
-                                  (::form-facts request))
              (receipt-read-evidence-tx receipt request)
              (receipt-gate-test-assertions receipt request)
              (receipt-terminal-assertions receipt request)]))))
@@ -3061,15 +3055,22 @@
   parinferish 0.8.0's source exposes exactly `(parse source {:mode :indent})`
   followed by `(flatten parsed)`. Indent mode needs neither cursor nor other
   options. A candidate is accepted only when it changed and the same SCI
-  reader finds no remaining error event."
+  reader finds no remaining error event.
+
+  Unparseable input is data, not an exception: `parse` records the failure,
+  drops indent mode and returns it as `:error?` metadata (parinferish 0.8.0
+  `core.cljc:350,356`). Its one declared throw is smart mode without a cursor
+  (`core.cljc:326-328`), which indent mode never reaches. Anything else
+  thrown here is a defect and propagates."
+  {:malli/schema [:=> [:cat :string :seon.ns/name :seon.config.eval.result/max-source]
+                  [:or :nil :string]]}
   [source namespace-name max-source]
-  (try
-    (let [parsed (parinferish/parse source {:mode :indent})
-          candidate (parinferish/flatten parsed)]
-      (when (and (not= source candidate)
-                 (clean-source? candidate namespace-name max-source))
-        candidate))
-    (catch Exception _ nil)))
+  (let [parsed (parinferish/parse source {:mode :indent})
+        candidate (parinferish/flatten parsed)]
+    (when (and (not (:error? (meta parsed)))
+               (not= source candidate)
+               (clean-source? candidate namespace-name max-source))
+      candidate)))
 
 (defn- repair-source
   "Repair each reader-isolated delimiter failure at most once.
@@ -3218,7 +3219,7 @@
                                      :seon.program/row (:seon.program/row evaluation))])
           _ (when (:seon.fn/namespace-unresolvable analysis)
               (throw (ex-info (:seon.error/message analysis) analysis)))
-          [form-facts analyzed-row] (first analysis)
+          [_ analyzed-row] (first analysis)
           test-symbols (seon.fn/gate-set database function-symbol)
           seed (accretion/seed-for receipt-id)
           candidate
@@ -3268,9 +3269,7 @@
            :seon.test.accretion/report-edn (pr-str report)}
           evaluation (merge (dissoc evaluation :seon.test.accretion/candidate-ctx)
                             evidence
-                            {:seon.program/row analyzed-row
-                             :seon.turn/form-facts
-                             (assoc form-facts :db/id [:seon.cluster.eval/id receipt-id])})]
+                            {:seon.program/row analyzed-row})]
       (if (:seon.test.accretion/install? report)
         (append-output (sci.eval/accept-candidate!
                         {:seon.sci.eval/ctx base-ctx :seon.db/db database
@@ -3749,7 +3748,7 @@
                ;; durable def values. Re-projecting raw in-memory defs here
                ;; discarded those values and made a refused definition
                ;; unrestorable on the next turn.
-               (dissoc :seon.program/row :seon.turn/form-facts)
+               (dissoc :seon.program/row)
                (assoc :seon.eval/shown serialized
                       :seon.cluster.eval/error (:seon.error/message value))))
          prepared)
@@ -4884,16 +4883,17 @@
                                      reader-event
                                      (assoc :seon.sci.eval/event reader-event)))))
                       evaluations)}))
+            ;; Only declarations are analyzed: an ordinary form's static
+            ;; call edges are not program rows, and its receipt asserts none.
             submitted
             (into []
-                  (map-indexed
+                  (keep-indexed
                    (fn [index {form :seon.turn.loop/admitted-form evaluation :seon.sci.eval/evaluation}]
-                     [index
-                      (cond->
-                       {:seon.cluster.eval/source (:seon.cluster.eval/source form)
-                        :seon.cluster.eval/ns (:seon.cluster.eval/ns form)}
-                        (:seon.program/row evaluation)
-                        (assoc :seon.program/row (:seon.program/row evaluation)))]))
+                     (when-let [row (:seon.program/row evaluation)]
+                       [index
+                        {:seon.cluster.eval/source (:seon.cluster.eval/source form)
+                         :seon.cluster.eval/ns (:seon.cluster.eval/ns form)
+                         :seon.program/row row}])))
                   evaluated)
             analyzed
             (cond
@@ -4921,16 +4921,9 @@
             (report :error (count evaluated)))
           (let [evaluated
                 (reduce
-                 (fn [all [[index _] [form-facts row]]]
+                 (fn [all [[index _] [_ row]]]
                    (cond-> all
-                       row (assoc-in [index :seon.sci.eval/evaluation :seon.program/row] row)
-                       true (assoc-in
-                        [index :seon.sci.eval/evaluation :seon.turn/form-facts]
-                        (assoc form-facts
-                               :db/id
-                               [:seon.cluster.eval/id
-                                (receipt-identity
-                                 run-id (:seon.cluster.eval/ordinal (nth all index)))]))))
+                     row (assoc-in [index :seon.sci.eval/evaluation :seon.program/row] row)))
                  evaluated
                  (map vector submitted analyzed))
                 gated evaluated

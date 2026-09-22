@@ -1010,8 +1010,11 @@
 (defn analyze-forms
   "Analyze submitted forms in one kondo batch, returning form-local facts.
 
-  A declaration row owns its edges. Without a declaration, the evaluation
-  owns the edges in the first tuple member; no synthetic function is minted."
+  A declaration row owns its edges. Without a declaration, the first tuple
+  member carries the form's static call targets as analysis only: nothing
+  persists them, because static form analysis is not evidence that a call
+  executed and a receipt asserts no program attribute (`seon.turn`
+  settlement analyzes declarations alone). No synthetic function is minted."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
          [:vector [:map
@@ -3591,8 +3594,7 @@
                             (let [tx-data
                                   (schema/call-with-projection
                                    projection
-                                   #(reconcile-tx-in row-shapes
-                                                     (vary-meta database assoc :seon.schema/projection projection)
+                                   #(reconcile-tx-in row-shapes database
                                                      rows previous-identities))]
                               (if (and (map? tx-data)
                                        (contains? tx-data :seon.error/at)

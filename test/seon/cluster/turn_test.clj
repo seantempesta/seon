@@ -20,6 +20,7 @@
             [seon.render.web :as web]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.registry :as registry]
             [seon.turn :as turn]
             [seon.error :as error]
             [seon.cluster.message :as message]
@@ -30,6 +31,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn :as seon.fn]
+            [seon.program :as program]
             [seon.render.transcript :as transcript]
             [sci.core :as sci.core]
             [seon.sci.admit :as admit]
@@ -112,12 +114,22 @@
 ;;; deadline dial, the error disposition, and the cluster's ONE live ctx.
 ;;; This is the real evaluator, injected exactly as production injects it.
 
+(defn- namespace-row
+  "A namespace row absent from the fixture branch, carrying the required
+  definition digest its owner derives (`seon.program/definition-digest`)."
+  {:malli/schema [:=> [:cat :seon.ns/name] :map]}
+  [namespace-name]
+  (let [row {:seon.ns/name namespace-name}]
+    (assoc row :seon.program/definition-digest (program/definition-digest row))))
+
 (defn- agent-row
-  "One agent; prompt membership is derived by the namespace walk."
+  "One agent on the fixture cluster's branch; prompt membership is derived by
+  the namespace walk. The branch is the required member production's
+  `seon.cluster.agent/creation-tx` supplies."
   [agent-id]
   {:seon.agent/id agent-id
-   :seon.agent/namespace
-   {:seon.ns/name (symbol (str "my.agents." agent-id))}})
+   :seon.agent/branch (registry/cluster-branch "turn-test")
+   :seon.agent/namespace (namespace-row (symbol (str "my.agents." agent-id)))})
 
 (defn- with-render-context-proc
   [_connection cluster-handle body]
@@ -217,8 +229,8 @@
           (throw (ex-info "Turn fixture cluster was refused." result))))
       (let [result
             (db/transact! connection
-                  [{:seon.ns/name 'clojure.set}
-                   {:seon.ns/name 'clojure.test}
+                  [(namespace-row 'clojure.set)
+                   (namespace-row 'clojure.test)
                    {:seon.ns/name 'seon.schema}
                    (agent-row "agent-a")
                    {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets"}])]
@@ -477,6 +489,53 @@
                              (nil? (:seon.cluster.eval/interrupted-at %))) evaluations))
             (is (nil? (turn/next-agent-work database (request connection))))))))))
 
+;;; A receipt is an execution observation, never a program row. Settling an
+;;; ordinary form used to assert its static `:seon.fn/calls` on the receipt,
+;;; advancing a program attribute's Datahike revision
+;;; (`reference-code/datahike/src/datahike/query.cljc:2568-2589`) and so
+;;; invalidating every program-keyed derivation on each agent form.
+(deftest an-ordinary-turn-advances-no-program-attribute-revision
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            program-attributes
+            (program/program-attributes (db/carried-projection @connection))
+            revisions (fn [database]
+                        (let [context (:cache-context database)]
+                          {:datahike.cache/conservative-revision
+                           (:datahike.cache/conservative-revision context)
+                           :datahike.cache/attribute-revisions
+                           (select-keys (:datahike.cache/attribute-revisions context)
+                                        program-attributes)}))
+            before @connection]
+        (is (contains? program-attributes :seon.fn/calls)
+            "the call edge is a program attribute, or this regression is vacuous")
+        (with-redefs [ai/complete
+                      (fn [_projection _]
+                        {:seon.ai/text
+                         (str "(seon.db/q '[:find [?id ...] :where [_ :seon.agent/id ?id]])\n"
+                              "(seon.run/complete \"read\")")})]
+          (drive-agent! cluster "agent-a" 2))
+        (let [after @connection
+              ;; The fixture branches a live cluster; read only this agent's forms.
+              evaluations (db/q '[:find [(pull ?evaluation [*]) ...]
+                                  :where
+                                  [?agent :seon.agent/id "agent-a"]
+                                  [?turn :seon.turn/agent ?agent]
+                                  [?evaluation :seon.cluster.eval/run ?turn]
+                                  [?evaluation :seon.cluster.eval/author :agent]]
+                                after)]
+          (is (= 2 (count evaluations)))
+          (is (every? #(and (nil? (:seon.cluster.eval/error %))
+                            (nil? (:seon.cluster.eval/interrupted-at %)))
+                      evaluations)
+              (pr-str evaluations))
+          (is (< (:max-tx before) (:max-tx after)) "the turn committed")
+          (is (not-any? :seon.fn/calls evaluations)
+              "a settled receipt carries no static call edge")
+          (is (= (revisions before) (revisions after))
+              "no program attribute's revision moved across the ordinary turn"))))))
+
 (deftest agent-code-with-defn-and-println-folds-green-without-in-ns
   (with-cluster
     (fn [cluster]
@@ -504,7 +563,7 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
         (test-support/transacted! connection
-                                [{:seon.ns/name 'my.agents.agent-a}
+                                [(namespace-row 'my.agents.agent-a)
                                  {:seon.agent/id "agent-a"
                                   :seon.agent/namespace
                                   [:seon.ns/name 'my.agents.agent-a]}])
@@ -1426,7 +1485,7 @@
           (drive-agent! cluster "agent-a" 2)
           (test-support/transacted!
                        connection
-                       [{:seon.ns/name 'my.agents.agent-b}
+                       [(namespace-row 'my.agents.agent-b)
                         (assoc (agent-row "agent-b")
                                :seon.agent/namespace
                                [:seon.ns/name 'my.agents.agent-b])
@@ -1676,8 +1735,8 @@
             unbound-source "(inc \"x\")"]
         (test-support/transacted!
                      connection
-                     [{:seon.ns/name 'my.gen.planner}
-                      {:seon.ns/name 'my.gen.alpha}
+                     [(namespace-row 'my.gen.planner)
+                      (namespace-row 'my.gen.alpha)
                       {:seon.agent/id "agent-b"
                        :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
                       {:seon.agent/id "agent-a"
@@ -2921,12 +2980,10 @@
                            @connection (:seon.turn/id call-work)))
                   "raw intent provenance remains the original reply")
               (is (str/includes? rendered "repaired [x]\n  (+ x 1))"))
-              (is (= #{"my.agents.agent-a/repaired"}
-                     (set (db/q '[:find [?symbol ...] :in $ ?evaluation
-                                  :where [?evaluation :seon.fn/calls ?function]
-                                  [?function :seon.fn/sym ?symbol]]
-                                (db/db connection) (:db/id (nth evaluations 2)))))
-                  "a later evaluation retains its edge to the definition in this turn")
+              (is (empty? (:seon.fn/calls
+                           (db/pull (db/db connection) [:seon.fn/calls]
+                                    (:db/id (nth evaluations 2)))))
+                  "a receipt asserts no program call edge; the definition row owns its edges")
               (is (pos? @install-nanos) "the definition install was observed")
               (is (>= @write-count 2) "intent and settlement writes were observed")
               (is (< install-ms 300.0)
