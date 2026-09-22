@@ -1,5 +1,4 @@
-(ns ^{:seon.test/platform "Moving part: source publication evidence and branch-head races."}
-    seon.cluster.source-evidence-test
+(ns seon.cluster.source-evidence-test
   "Publication evidence and races, using the source suite's canonical store helpers."
   (:require [clojure.test :refer [deftest is]]
             [seon.cluster.source-test :as source-fixture]

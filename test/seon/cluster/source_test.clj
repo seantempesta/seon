@@ -1,6 +1,4 @@
-(ns ^{:seon.test/platform
-       "Moving part: source publication and its commit identity."}
-    seon.cluster.source-test
+(ns seon.cluster.source-test
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]

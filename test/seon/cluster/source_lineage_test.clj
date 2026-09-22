@@ -1,7 +1,7 @@
-^{:line 7, :column 15}
-(ns
- ^#:seon.test{:platform "Moving part: publication preserves history and the expected branch head."} seon.cluster.source-lineage-test
- ^{:line 9, :column 17}
+(ns seon.cluster.source-lineage-test
+  "Publication preserves history and the expected branch head. Bulk tier: every
+  test reaches the destructive published-root fixture, so it is not admissible
+  in the platform tier (runner guard, 2026-09-21)."
  (:require
   [clojure.test :refer [deftest is testing]]
   [datahike.api :as d]
