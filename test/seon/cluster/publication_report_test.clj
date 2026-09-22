@@ -3,16 +3,20 @@
             [datahike.api :as d]
             [seon.db :as db]
             [seon.fn :as fn]
+            [seon.program :as program]
             [seon.test-support :as support]))
 
 (deftest writer-reports-and-their-composed-datoms-name-the-same-changes
   (support/with-database
     (fn [connection]
-      (let [a 'publication.report/a
+      (let [digested (fn [row] (assoc row :seon.program/definition-digest
+                                      (program/definition-digest row)))
+            a 'publication.report/a
             b 'publication.report/b
-            created (support/transacted! connection [{:seon.ns/name a} {:seon.ns/name b}])
+            created (support/transacted! connection [(digested {:seon.ns/name a})
+                                                     (digested {:seon.ns/name b})])
             before (:db-after created)
-            changed (support/transacted! connection [{:seon.ns/name a :seon.ns/doc "changed"}])
+            changed (support/transacted! connection [(digested {:seon.ns/name a :seon.ns/doc "changed"})])
             removed (support/transacted! connection [[:db/retractEntity [:seon.ns/name b]]])
             reports [changed removed]
             after (:db-after removed)
