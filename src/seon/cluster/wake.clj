@@ -1,30 +1,18 @@
 (ns seon.cluster.wake
   "The wake: a commit says LOOK, and the woken pass derives from facts.
 
-  This contract layer is fully implemented and live-proven.
-
   EVENT-DRIVEN, NOT POLLED. Datahike's own `listen!` fires on every
   commit, so nothing ever asks \"is there work?\" on a timer. The wake
   carries NO information — work is derived from facts, so a wake that
   lost its payload lost nothing, and one wake standing for three
   commits is correct rather than lossy.
 
-  THE HANDLER CONTRACT IS FOUR LINES AND TWO ABSOLUTE PROHIBITIONS,
-  because both were measured, not feared:
-
-  1. IT MUST NEVER THROW. Datahike fires listeners INSIDE the
-     transaction's go block and BEFORE `(deliver p tx-report)`
-     (`reference-code/datahike/src/datahike/writer.cljc:384-386`).
-     Probe A reproduced the consequence: the listener's exception
-     escaped onto `async-mixed-6`, the deliver never happened, and the
-     committing caller waited forever — the probe JVM had to be killed.
-     A handler that throws does not lose a wake; it hangs the writer.
-  2. IT MUST NEVER PARK. The handler runs on the committing caller's
-     critical path: probe B's 800 ms listener made the triggering
-     `transact` take 804 ms. So delivery is `offer!` — never `>!!`,
-     never `put!` with a callback that could block — and a saturated
-     channel DROPS rather than parks. Dropping is safe by construction:
-     the channel is `(sliding-buffer 1)` and a wake means only \"look\".
+  Datahike settles the transaction promise BEFORE listener dispatch and
+  catches each callback's exception independently
+  (`reference-code/datahike/src/datahike/writer.cljc:376-408`). A returned
+  transaction report therefore does not prove mailbox delivery. This owner
+  reports callback failures to the fault channel and never parks: delivery
+  uses `offer!`, with `(sliding-buffer 1)` coalescing payload-free wakes.
 
   Ordinary commits only match and deliver. Declaration changes rederive
   the matcher from the report's database before dispatch; no callback
@@ -60,7 +48,7 @@
     the wake's transaction `:t` forward and re-open a paid turn.
 
   A REFUSED TRANSACTION DOES NOT WAKE: dispatch is gated on
-  `(map? tx-report)` (`writer.cljc:372`), so a refusal cannot storm a
+  `(map? tx-report)` (`writer.cljc:396`), so a refusal cannot storm a
   mailbox.
 
   BOOT IS ONE INJECTED WAKE, not a special path. A listener only fires
@@ -391,7 +379,7 @@
   `fenced?` is a zero-arg derived check invoked only after a closed
   offer. Faults on `::refused` — one delivery decision and its refusal.
   Returns the delivery."
-  {:malli/schema [:=> [:cat :seon.flow/channel :seon.agent/id :seon.schema/value :seon.flow/channel [:=> [:cat] :boolean]] :seon.cluster.wake/delivery]}
+  {:malli/schema [:=> [:cat :seon.flow/channel :seon.cluster.wake/key :seon.schema/value :seon.flow/channel [:=> [:cat] :boolean]] :seon.cluster.wake/delivery]}
   [fault-channel key route channel fenced?]
   (let [offered (async/offer! channel ::wake)
         outcome (delivery offered

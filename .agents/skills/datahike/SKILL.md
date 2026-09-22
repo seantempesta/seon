@@ -397,8 +397,7 @@ impersonate production.
 connection's `:listeners` atom (`reference-code/datahike/src/datahike/core.cljc:200-211`);
 `unlisten!` removes it (`:213-218`). After a successful `transact` the writer
 calls every registered callback with the WHOLE transaction report
-(`reference-code/datahike/src/datahike/writer.cljc:414-415`), and `merge!`
-does the same (`:441-442`). Consequences:
+(`reference-code/datahike/src/datahike/writer.cljc:391-408`). Consequences:
 
 - **it is `(when (map? tx-report) …)`** — a failed transaction notifies
   nobody, so a listener that never fires is not evidence of no write;
@@ -410,8 +409,10 @@ does the same (`:441-442`). Consequences:
   batch's committed database into each report's `:db-after`; per-transaction
   `:tx-data` stays separate. Do not use that report's after-value as if it
   were the final-validator's exact transaction boundary, or assume one commit
-  id per transaction. The callback loop precedes promise delivery and has no
-  local exception catch (`:410-417`); listener code must not throw or block.
+  id per transaction. Promise delivery precedes the callback loop (`:395`,
+  `:408`); each callback has an independent exception catch (`:376-384`).
+  Await the listener's event to prove delivery; a returned transaction report
+  alone does not establish it. Seon's callback reports failures and never parks.
 
 The report is the matchable surface: `:db-before`, `:db-after`, `:tx-data`
 (every effective datom as `[e a v tx added]`, accumulated at

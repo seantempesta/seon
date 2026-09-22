@@ -610,8 +610,8 @@
             (is (map? (test-support/await-event!
                        committed "saturated-route transaction")))
             (let [fault (test-support/await-event! faults "route fault")]
-              (is (string? (:seon.cluster.wake/undeliverable-wake (ex-data fault)))
-                  "one classifier, one kind — no second fault path")
+              (is (= key (:seon.cluster.wake/undeliverable-wake (ex-data fault)))
+                  "the refusal identifies the registered listener")
               (is (= :seon.cluster.wake/mailbox
                      (:seon.cluster.wake/route (ex-data fault)))
                   "and it names WHICH route, so the fault is actionable")))
@@ -634,7 +634,7 @@
                        committed "closed-render transaction"))
                 "the writer still returned")
             (let [fault (test-support/await-event! faults "render fault")]
-              (is (string? (:seon.cluster.wake/undeliverable-wake (ex-data fault))))
+              (is (= key (:seon.cluster.wake/undeliverable-wake (ex-data fault))))
               (is (= :seon.cluster.wake/render
                      (:seon.cluster.wake/route (ex-data fault))))))
           (finally

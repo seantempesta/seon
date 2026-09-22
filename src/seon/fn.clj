@@ -974,7 +974,7 @@
                  :seon.error/layer :seon.fn/analysis
                  :seon.error/operation 'seon.fn/analyze-forms
                  ::namespace-unresolvable true
-                 :seon.cluster.eval/source source
+                 :seon.fn/source source
                  :seon.error/message
                  (str "Cannot analyze the form because its namespace reference "
                       (pr-str namespace-ref)
