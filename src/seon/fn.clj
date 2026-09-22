@@ -1164,18 +1164,24 @@
                       {::findings findings
                        :seon.fn/index-refused true})))))
 
+(defn- invocations-by-definition
+  "Explicit `:seon.fn/invokes` attributes of each analyzed definition."
+  {:malli/schema [:=> [:cat :map] [:map-of :qualified-symbol :seon.fn/invokes]]}
+  [analysis]
+  (into {}
+        (keep (fn [entry]
+                (when-let [attributes (seq (invocation-attributes (or (::analyzer/meta entry) {})))]
+                  [(symbol (str (::analyzer/ns entry)) (str (::analyzer/name entry)))
+                   (set attributes)])))
+        (::analyzer/var-definitions analysis)))
+
 (defn- analysis-rows-by-file
   "Rows by file, with source-observed writes independent of schema membership."
   [analysis first-party-functions contexts projection]
   (let [forms (:seon.schema.projection/forms projection)
         used-keywords (keywords-by-holder analysis)
         host-bound (host-bound-callers analysis)
-        invocations (into {}
-                          (keep (fn [entry]
-                                  (when-let [attributes (seq (invocation-attributes (or (::analyzer/meta entry) {})))]
-                                    [(symbol (str (::analyzer/ns entry)) (str (::analyzer/name entry)))
-                                     (set attributes)])))
-                          (::analyzer/var-definitions analysis))
+        invocations (invocations-by-definition analysis)
         invoked-attributes (into #{} (mapcat val) invocations)
         schema-targets (declared-function-targets
                         invoked-attributes (vals forms)
@@ -2247,7 +2253,13 @@
                                (:children (kondo.utils/parse-string-all (:text %))))
                          (vals contexts))
           schema-values (keep forms (into #{} (mapcat val) (keywords-by-holder analysis)))
-          mentioned (into #{} (filter qualified-symbol?)
+          ;; An invoker's declared targets live in the WHOLE declaration
+          ;; population, not in its own file: ask the database for them too,
+          ;; or a partial analysis keeps only the targets its batch defines.
+          declared-targets (mapcat val (declared-function-targets
+                                        (into #{} (mapcat val) (invocations-by-definition analysis))
+                                        (vals forms) qualified-symbol?))
+          mentioned (into (set declared-targets) (filter qualified-symbol?)
                           (mapcat #(tree-seq coll? seq %) (concat values schema-values)))
           known (when database
                   (db/q '[:find [?symbol ...] :in $ [?symbol ...]
@@ -2318,6 +2330,33 @@
 
 (declare file-rows)
 
+(defn- removed-definition-caller-paths
+  "Files outside `selected` holding a stored edge to a `removed` definition.
+
+  One reverse-index read over the analyzer's edges, proportional to the
+  removed definitions' callers."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :qualified-symbol] [:set :string]]
+                  [:vector :string]]}
+  [database removed selected]
+  (let [edges (for [attribute [:seon.fn/calls :seon.fn/references]
+                    symbol removed]
+                (db/datoms database :avet attribute symbol))
+        refusal (some #(when (map? %) %) edges)
+        _ (when refusal
+            (throw (ex-info "Publication could not read the removed definitions' callers." refusal)))
+        ;; Direct index reads: a Datalog clause with both attribute and value
+        ;; bound from input collections measured 550 ms on default where the
+        ;; two AVET reads take under 1 ms.
+        paths (db/q '[:find [?path ...]
+                      :in $ [?caller ...]
+                      :where
+                      [?caller :seon.fn/file ?file]
+                      [?file :seon.fn.file/relative-path ?path]]
+                    database (into [] (comp cat (map :e) (distinct)) edges))]
+    (when (map? paths)
+      (throw (ex-info "Publication could not read the removed definitions' callers." paths)))
+    (vec (sort (remove selected paths)))))
+
 (defn- analyzed-files
   "Analyze selected files; the database supplies invalidation and removed declarations."
   {:malli/schema [:=> [:cat :seon.fn/index-request] [:vector :seon.fn.file/artifact]]}
@@ -2352,8 +2391,21 @@
         artifacts (analyzed-artifacts projection roots directory
                      (mapv #(.getCanonicalPath ^java.io.File %) files) database cache-root captured)
         removed (set/difference (into #{} (keep :seon.fn/sym) previous)
-                               (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) artifacts))]
-    (assert-capability-contracts! artifacts database removed)))
+                               (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) artifacts))
+        ;; A removed definition's edges live on its CALLERS, and a caller's
+        ;; edges derive from more than its own file (an invoker's declared
+        ;; targets come from the whole declaration population). Recompute the
+        ;; stored callers outside the selection so the deletion guard judges
+        ;; their current edges: a caller whose source still names the removed
+        ;; definition keeps the edge and the guard refuses by name.
+        callers (if (and database selected (seq removed))
+                  (removed-definition-caller-paths database removed (set selected))
+                  [])]
+    (assert-capability-contracts!
+     (into artifacts
+           (analyzed-artifacts projection roots directory
+                               (mapv #(fs/absolute-path directory %) callers) database cache-root nil))
+     database removed)))
 
 (defn analyze-rows
   "Canonical rows from selected source analysis, without a manifest."
@@ -3282,6 +3334,16 @@
     (assoc (manifest-data directory (mapv (partial fs/relative-path directory) roots) artifacts)
            :seon.fn.manifest/declaration-digests schema-digests)))
 
+(defn- reconciled-paths
+  "Selected paths plus every file whose rows the request supplies.
+
+  Analysis may add unselected files (the callers of a removed definition);
+  a file whose rows are supplied is reconciled exactly like a selected one."
+  {:malli/schema [:=> [:cat :seon.fn/index-request] [:or :nil [:set :string]]]}
+  [request]
+  (when-let [paths (:seon.fn/changed-paths request)]
+    (into (set paths) (keep :seon.fn.file/relative-path) (:seon.program/rows request))))
+
 (defn index!
   "Populate one fresh source scratch branch from static analysis.
 
@@ -3347,7 +3409,7 @@
        (let [previous-identities
              (if-let [identities (:seon.reconcile/adopt-identities request)]
                (vec identities)
-               (if-let [paths (:seon.fn/changed-paths request)]
+               (if-let [paths (reconciled-paths request)]
                (let [surviving (into #{} (map program/row-identity) (:seon.program/rows request))]
                  (into (vec (map #(vector :seon.schema/key %) (changed-schema-keys request)))
                        (remove surviving)
@@ -3400,7 +3462,7 @@
              changed-identities (require-committed! (report-identities report)
                                                      :seon.fn/population)
              caller-paths (when (and (not source-database) (:seon.fn/changed-paths request))
-                            (set/difference (caller-files report) (:seon.fn/changed-paths request)))
+                            (set/difference (caller-files report) (reconciled-paths request)))
              findings-report
              (when (seq caller-paths)
                (report-index-progress! progress! (str "analysis callers: " (count caller-paths) " files"))
