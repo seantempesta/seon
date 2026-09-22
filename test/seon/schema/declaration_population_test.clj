@@ -91,7 +91,8 @@
           "the population-taking arities must not re-resolve"))))
 
 (deftest an-unhanded-declaration-projection-refuses-without-reading-resources
-  (let [reads (atom 0)
+  (let [projection (schema/build-projection (schema.edn/packaged-forms))
+        reads (atom 0)
         read-one @#'schema.edn/read-schema-resource
         failure
         (with-redefs [schema.edn/read-schema-resource
@@ -102,7 +103,13 @@
               nil
               (catch clojure.lang.ExceptionInfo exception exception))))]
     (is (some? failure))
-    (is (some? (:seon.schema/expected-value (ex-data failure))))
+    (is ((schema/projection-validator projection
+                                      :seon.schema/validation-refusal)
+         (ex-data failure))
+        (pr-str (ex-data failure)))
+    (is (= :seon.schema/projection
+           (:seon.schema/expected-value (ex-data failure))))
+    (is (nil? (:seon.schema/refused-value (ex-data failure))))
     (is (str/includes?
          (get-in (ex-data failure) [:seon.error/data :seon.schema/caller])
          "seon.schema.declaration-population-test"))
