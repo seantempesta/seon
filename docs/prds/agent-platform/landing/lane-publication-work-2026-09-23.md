@@ -129,4 +129,11 @@ the working tree's `bin/test-fast` is deleted by realities-commit-5.
 - `publication-input-digest!` (whole checkout) remains for `publish!` callers that supply no
   test-input digest: only the packaged install in `src/seon/artifact.clj`.
 
+## Commits
+
+- `ea9a4e3e9` — the five paths above. HEAD proof: `git archive ea9a4e3e9` snapshot
+  (reference-code and `.clj-kondo/.cache` linked), armed run of the 7 tests: 30 assertions,
+  0 failures, 0 errors, 738 ms test time, 21.5 s JVM wall; `seon.cluster`, `seon.cluster.source`
+  and `seon.fn.analyzer` load.
+
 RESET NEEDED: no.
