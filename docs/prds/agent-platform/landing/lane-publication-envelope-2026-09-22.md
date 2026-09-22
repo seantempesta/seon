@@ -437,3 +437,25 @@ reported **762,877,088 bytes**. These are point-in-time heap observations, not
 allocation deltas or comparable retained-memory measurements. Earlier live compile
 attempts refused under the old installed contracts; only this successful sample
 supplies the later compile observation.
+
+## Final commit and cleanup record
+
+- Row 2: `cfa76f4dd`; archived HEAD load exit 0.
+- Row 7: `975af0a60`; archived HEAD load exit 0 using exactly
+  `clojure -M -e "(require 'seon.cluster 'seon.cluster.source 'seon.fn)"`.
+- Prior independent slices: row 6 `60b94954a`, row 8 `dcc15e5b3`.
+- Row-7 production files: publication span of `cluster.clj`, input capture in
+  `cluster/source.clj`, the input adapter in `fn.clj`, and the three optional
+  index-request members in `resources/seon/schemas/seon.fn.edn`. No reverse-walk,
+  declaration-analyzer, boot, flow, SCI, instrument or B4 source files were edited.
+- All owned launch/load/test shells returned terminal exit codes. Scratch JVM
+  shutdowns observed exact-process exit. An `lsof` scan of live Java/Babashka
+  processes found no holder before removing four owned roots, three source
+  snapshots, and two archives. Symlink targets were not traversed. Logs, probes,
+  patches and cleanup evidence remain under `tmp/publication-envelope-evidence/`;
+  `cleanup-current.json` names every removed root. No shared test snapshot remains
+  from the initial failed recording attempt.
+
+Hook publication remains paused. Nothing in these commits is live on repository
+`default`. The remaining B4 file ownership and performance limitations above are
+still open; this note does not claim completion of README 1.2b's latency gate.
